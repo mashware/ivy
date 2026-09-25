@@ -19,6 +19,7 @@
 
 use std::io::{BufRead, Read, Write};
 
+use panel_contract::{Attention, Mark, Style};
 use panel_control::{Answered, MAX_REQUEST, Producer, Side};
 
 /// The version answered when the client does not ask for one.
@@ -199,18 +200,40 @@ fn initialized(message: &serde_json::Value) -> serde_json::Value {
     })
 }
 
+/// `a, b or c`: a closed vocabulary as the description names it.
+///
+/// **Written from the vocabulary's own list** rather than typed into the description, because the
+/// description is the only copy of the contract some producers ever read, and a word added to the
+/// contract and not to it is exactly the vocabulary-from-nowhere this description exists to end.
+fn listed(words: &[&str]) -> String {
+    match words.split_last() {
+        Some((last, [])) => (*last).to_owned(),
+        Some((last, init)) => format!("{} or {last}", init.join(", ")),
+        None => String::new(),
+    }
+}
+
 /// The seven tools this build serves, with the shape of what each takes.
 fn tools() -> serde_json::Value {
     serde_json::json!({
         "tools": [
             {
                 "name": "panel_set",
-                "description": "Publish this pane's status panel. The document is the panel document: \
-                                a required \"lines\" array, and optionally \"phase\", \"attention\" \
-                                (wait, block or done), \"actions\" and the rest of the contract. \
-                                Publishing claims this pane under the given source until this process \
-                                exits; while it is claimed, the pane's panel.json is not read and \
-                                another source is refused.",
+                "description": format!(
+                    "Publish this pane's status panel. The document is the panel document: a \
+                     required \"lines\" array, and optionally \"phase\", \"attention\", \
+                     \"actions\" and the rest of the contract. A line is a string, or an object \
+                     with \"text\" and optionally \"mark\", \"style\", \"indent\", \"key\", \
+                     \"ref\" and \"link\". Three fields take a closed vocabulary: \"attention\" \
+                     is {}; a line's \"mark\" is {}; its \"style\" is {}. Any other non-null \
+                     value is dropped, the panel still paints, and the reply names what fell away. \
+                     Publishing claims this pane under the given source until this process exits; \
+                     while it is claimed, the pane's panel.json is not read and another source is \
+                     refused.",
+                    listed(&Attention::ALL.map(Attention::name)),
+                    listed(&Mark::ALL.map(Mark::name)),
+                    listed(&Style::ALL.map(Style::name)),
+                ),
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -254,7 +277,9 @@ fn tools() -> serde_json::Value {
                                 whole list applies or none of it does: a key that names no line, or \
                                 two, refuses the patch and leaves the panel exactly as it was. It \
                                 needs this pane claimed with panel_set first, and buttons are not \
-                                patchable.",
+                                patchable. A line an op carries is read like a line of panel_set's \
+                                document: a mark or style outside its vocabulary is dropped and named \
+                                in the reply.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -510,27 +535,39 @@ fn called(
     };
 
     match answer {
-        // **Three verbs answer with the same empty `ok`**, so the word comes from what was asked and
-        // never from the shape of the reply.
-        Ok(Answered::Ok) => succeeded(id, text(did)),
-        Ok(Answered::Retired { closed, preserved }) => {
-            succeeded(id, text(&retirement_result(closed, preserved)))
-        }
-        // **The handle is the whole answer to an open**, and a null one is not an error: the console
-        // exists and is usable, it is only this channel that cannot address it.
-        Ok(Answered::Opened(Some(handle))) => succeeded(id, text(&handle)),
-        Ok(Answered::Opened(None)) => succeeded(id, text("opened, with no addressable identity")),
-        Ok(Answered::Text(what)) => succeeded(id, text(&what)),
-        // **The document goes back as the JSON it is**, not wrapped in a sentence about it: what the
-        // caller wants is something it can read, edit and publish again.
-        Ok(Answered::Document(document)) => succeeded(id, text(&document)),
-        Ok(Answered::Failed(why)) => succeeded(id, refusal(&why)),
+        Ok(answered) => succeeded(id, result_of(did, answered)),
         Err(failure) => {
             // The channel is gone; the next call opens a fresh one rather than reusing a dead
             // connection — and opening a fresh one is also what claims the pane again.
             *pane = None;
             succeeded(id, refusal(&failure.to_string()))
         }
+    }
+}
+
+/// What the pane answered, as the tool result an agent reads.
+///
+/// **Out of [`called`] so a test reaches it without a pane**, for the reason [`what_it_did`] gives:
+/// every arm here is only walked once a channel exists, which is how a verb once shipped answering
+/// the wrong word.
+fn result_of(did: &str, answered: Answered) -> serde_json::Value {
+    match answered {
+        // **Three verbs answer with the same empty `ok`**, so the word comes from what was asked and
+        // never from the shape of the reply.
+        Answered::Ok => text(did),
+        // **Still the verb's word, and then what fell away**: it was applied, so an agent reading only
+        // the start of the answer is not misled, and one reading the rest learns what to correct.
+        Answered::Lossy(dropped) => text(&format!("{did}; {dropped}")),
+        Answered::Retired { closed, preserved } => text(&retirement_result(closed, preserved)),
+        // **The handle is the whole answer to an open**, and a null one is not an error: the console
+        // exists and is usable, it is only this channel that cannot address it.
+        Answered::Opened(Some(handle)) => text(&handle),
+        Answered::Opened(None) => text("opened, with no addressable identity"),
+        Answered::Text(what) => text(&what),
+        // **The document goes back as the JSON it is**, not wrapped in a sentence about it: what the
+        // caller wants is something it can read, edit and publish again.
+        Answered::Document(document) => text(&document),
+        Answered::Failed(why) => refusal(&why),
     }
 }
 
@@ -762,6 +799,73 @@ mod tests {
         assert_eq!(
             retire["inputSchema"],
             serde_json::json!({"type": "object", "properties": {}})
+        );
+    }
+
+    /// **The verb's word first, then what fell away**, for both verbs that can lose a word — and a
+    /// clean answer is the bare word, so the two can never be confused.
+    #[test]
+    fn a_lossy_answer_is_the_verbs_word_and_then_what_fell_away() {
+        let said = |did, answered| result_of(did, answered)["content"][0]["text"].clone();
+
+        assert_eq!(
+            said(
+                "published",
+                Answered::Lossy(r#"4 lines carry an unknown mark "doing""#.to_owned())
+            ),
+            r#"published; 4 lines carry an unknown mark "doing""#
+        );
+        assert_eq!(
+            said(
+                "patched",
+                Answered::Lossy("1 line carries an unknown mark 42".to_owned())
+            ),
+            "patched; 1 line carries an unknown mark 42"
+        );
+        assert_eq!(said("published", Answered::Ok), "published");
+        assert!(
+            result_of(
+                "published",
+                Answered::Lossy("1 line carries an unknown mark 42".to_owned())
+            )
+            .get("isError")
+            .is_none(),
+            "a lossy publication is still a success"
+        );
+    }
+
+    /// **The description names each vocabulary under its own field**, asserted clause by clause:
+    /// three of the words belong to two vocabularies, so a check word by word over the whole text
+    /// passes with any of them missing from one list.
+    #[test]
+    fn the_publishing_description_names_each_vocabulary_under_its_own_field() {
+        let answered = ask("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}");
+        let described = |tool: &str| -> String {
+            answered["result"]["tools"]
+                .as_array()
+                .expect("there is a list of tools")
+                .iter()
+                .find(|described| described["name"] == tool)
+                .and_then(|described| described["description"].as_str())
+                .expect("the tool is described")
+                .to_owned()
+        };
+        let publishing = described("panel_set");
+
+        for clause in [
+            "\"attention\" is wait, block or done;",
+            "a line's \"mark\" is done, current, pending, wait, block or info;",
+            "its \"style\" is normal, dim, title, accent, ok, warn or error.",
+            "Any other non-null value is dropped",
+        ] {
+            assert!(
+                publishing.contains(clause),
+                "panel_set's description does not say {clause:?}: {publishing}"
+            );
+        }
+        assert!(
+            described("panel_patch").contains("named in the reply"),
+            "panel_patch's description does not say a dropped word is named"
         );
     }
 

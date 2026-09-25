@@ -7,6 +7,8 @@ use std::io::Read;
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
+use crate::dropped::{Dropped, Vocabulary};
+
 /// The most that is read from a file.
 ///
 /// It is not prudence: it bounds **what a file from outside can make get reserved when it is
@@ -292,6 +294,20 @@ pub enum Mark {
     Info,
 }
 
+impl Mark {
+    /// The six, and **the list the reader reads them from**: a word is a mark when some entry of this
+    /// list is called that, and the channel's description is written from this same list. So reading
+    /// and describing cannot disagree; a variant left out of it is neither read nor described.
+    pub const ALL: [Self; 6] = [
+        Self::Done,
+        Self::Current,
+        Self::Pending,
+        Self::Wait,
+        Self::Block,
+        Self::Info,
+    ];
+}
+
 /// What a split is calling for, when it is calling for something.
 ///
 /// **It is ordered by the priority the contract declares**, not by the place where the variants are
@@ -318,7 +334,8 @@ pub enum Attention {
 }
 
 impl Attention {
-    /// The three, for whoever has to iterate over them — a color table, a symbol one, a test.
+    /// The three, for whoever has to iterate over them — a color table, a symbol one, a test — and the
+    /// list the reader reads the word from, as [`Mark::ALL`] is.
     ///
     /// **It lives here, right next to `priority`, and not in every place that iterates over them.** A
     /// literal list repeated around admits a fourth variant **silently**, which is exactly what the
@@ -358,6 +375,19 @@ pub enum Style {
     Ok,
     Warn,
     Error,
+}
+
+impl Style {
+    /// The seven, read and described from this list for the reason [`Mark::ALL`] gives.
+    pub const ALL: [Self; 7] = [
+        Self::Normal,
+        Self::Dim,
+        Self::Title,
+        Self::Accent,
+        Self::Ok,
+        Self::Warn,
+        Self::Error,
+    ];
 }
 
 /// Why a panel could not be read.
@@ -537,6 +567,17 @@ pub fn parse_document(text: &str) -> Result<Panel, Problem> {
     parse(text)
 }
 
+/// The same reading as [`parse_document`], and **also what it let fall**.
+///
+/// The panel it returns is the one [`parse_document`] returns for the same text, always: what changes
+/// is only that the losses are kept instead of forgotten. It is the channel's door, because a channel
+/// has somebody to tell (**D58**); [`parse_document`] stays as it is for every reader that does not.
+pub fn parse_document_noting(text: &str) -> Result<(Panel, Dropped), Problem> {
+    let mut dropped = Dropped::default();
+    let panel = parse_noting(text, Some(&mut dropped))?;
+    Ok((panel, dropped))
+}
+
 /// Turns the text into a panel, tolerating per field.
 ///
 /// **Tolerance is per field and not per document**, and that decides how it is read: a single field
@@ -556,6 +597,15 @@ pub fn parse_document(text: &str) -> Result<Panel, Problem> {
 /// cap that cuts a multi-byte character would otherwise be reported as "not UTF-8" instead of "over
 /// the ceiling".
 fn parse(text: &str) -> Result<Panel, Problem> {
+    parse_noting(text, None)
+}
+
+/// [`parse`], recording in `dropped`, when there is one, every vocabulary value it read as nothing.
+///
+/// **`None` is every reader but the channel's — the file's among them — and it records nothing at
+/// all**: the file's reader runs inside the frame, where rendering a value nobody will read is work the
+/// frame's cost would publish as the framework's (**D13**).
+fn parse_noting(text: &str, mut dropped: Option<&mut Dropped>) -> Result<Panel, Problem> {
     if text.len() as u64 > MAX_BYTES {
         return Err(Problem::TooBig);
     }
@@ -579,7 +629,13 @@ fn parse(text: &str) -> Result<Panel, Problem> {
             .get("stale_after_minutes")
             .and_then(serde_json::Value::as_u64)
             .map_or(STALE_AFTER, expiry_of),
-        attention: string_ref(&raw, "attention").and_then(attention_named),
+        attention: vocabulary(
+            &raw,
+            "attention",
+            attention_named,
+            Vocabulary::Attention,
+            dropped.as_deref_mut(),
+        ),
         actions: raw
             .get("actions")
             .and_then(serde_json::Value::as_array)
@@ -591,7 +647,10 @@ fn parse(text: &str) -> Result<Panel, Problem> {
                     .collect()
             })
             .unwrap_or_default(),
-        lines: lines.iter().filter_map(read_line).collect(),
+        lines: lines
+            .iter()
+            .filter_map(|line| read_line_noting(line, dropped.as_deref_mut()))
+            .collect(),
         written_at: None,
     })
 }
@@ -620,7 +679,12 @@ fn action(raw: &serde_json::Value) -> Option<Action> {
 ///
 /// An element that is neither a string nor an object —a number, a null— is not a line of anything:
 /// painting it as a blank line would be inventing content out of garbage.
-pub(crate) fn read_line(raw: &serde_json::Value) -> Option<Line> {
+///
+/// It records in `dropped`, when there is one, the mark or the style it read as nothing.
+pub(crate) fn read_line_noting(
+    raw: &serde_json::Value,
+    mut dropped: Option<&mut Dropped>,
+) -> Option<Line> {
     // A loose string is a normal line, and the empty string is a gap: the two cases are the same
     // here, and it is whoever paints that knows an empty text leaves a space.
     if let Some(text) = raw.as_str() {
@@ -635,9 +699,9 @@ pub(crate) fn read_line(raw: &serde_json::Value) -> Option<Line> {
 
     Some(Line {
         text: string(raw, "text").unwrap_or_default(),
-        mark: string_ref(raw, "mark").and_then(mark),
+        mark: vocabulary(raw, "mark", mark, Vocabulary::Mark, dropped.as_deref_mut()),
         reference: string(raw, "ref"),
-        style: string_ref(raw, "style").and_then(style),
+        style: vocabulary(raw, "style", style, Vocabulary::Style, dropped),
         // Bounded **here**, which is the boundary with what comes from outside: whoever paints is
         // going to repeat that number of spaces, and an absurd value would be a panic from reserving
         // memory. The ceiling also prevents the conversion from silently truncating where the
@@ -848,56 +912,62 @@ fn string(raw: &serde_json::Value, field: &str) -> Option<String> {
 /// The same, **without copying**: for the fields whose value is translated to an own type and thrown
 /// away.
 ///
-/// **It exists because this crate measures what it reserves.** The three closed vocabularies —the
-/// mark, the style and the call— turn the string into an `enum` that fits in a byte and drop the text
-/// one call later; asking for memory for that is three reservations per line that nobody ever uses, in
-/// a crate with a whole module dedicated to counting reservations and a table of peaks in its
-/// documentation.
+/// **It exists because this crate measures what it reserves.** A button's two strings are checked
+/// before anything is kept, and copying them first would be reservations nobody uses, in a crate with
+/// a whole module dedicated to counting reservations and a table of peaks in its documentation.
+/// [`vocabulary`] reads the three closed vocabularies without copying for the same reason.
 fn string_ref<'a>(raw: &'a serde_json::Value, field: &str) -> Option<&'a str> {
     raw.get(field).and_then(serde_json::Value::as_str)
 }
 
-pub(crate) fn attention_named(name: &str) -> Option<Attention> {
-    match name {
-        "wait" => Some(Attention::Wait),
-        "block" => Some(Attention::Block),
-        "done" => Some(Attention::Done),
-        _ => None,
+/// One of the three closed vocabularies read from `field`, and **the loss noted when it reads as
+/// nothing**.
+///
+/// The value it returns is exactly `string_ref(raw, field).and_then(known)`: absent, null, a
+/// non-string and an unknown word are all `None`. Only the last two are noted, and only when there is
+/// somewhere to note them — an absent field and a null are what the producer said, not something that
+/// fell away. It copies nothing on a value it could read, and renders one it could not only when a
+/// record is there to keep it.
+fn vocabulary<T>(
+    raw: &serde_json::Value,
+    field: &str,
+    known: fn(&str) -> Option<T>,
+    which: Vocabulary,
+    dropped: Option<&mut Dropped>,
+) -> Option<T> {
+    let value = raw.get(field).filter(|value| !value.is_null())?;
+    let read = value.as_str().and_then(known);
+    if let (None, Some(dropped)) = (&read, dropped) {
+        dropped.note(which, value);
     }
+    read
+}
+
+pub(crate) fn attention_named(name: &str) -> Option<Attention> {
+    Attention::ALL
+        .into_iter()
+        .find(|known| known.name() == name)
 }
 
 fn mark(name: &str) -> Option<Mark> {
-    match name {
-        "done" => Some(Mark::Done),
-        "current" => Some(Mark::Current),
-        "pending" => Some(Mark::Pending),
-        "wait" => Some(Mark::Wait),
-        "block" => Some(Mark::Block),
-        "info" => Some(Mark::Info),
-        _ => None,
-    }
+    Mark::ALL.into_iter().find(|known| known.name() == name)
 }
 
 fn style(name: &str) -> Option<Style> {
-    match name {
-        "normal" => Some(Style::Normal),
-        "dim" => Some(Style::Dim),
-        "title" => Some(Style::Title),
-        "accent" => Some(Style::Accent),
-        "ok" => Some(Style::Ok),
-        "warn" => Some(Style::Warn),
-        "error" => Some(Style::Error),
-        _ => None,
-    }
+    Style::ALL.into_iter().find(|known| known.name() == name)
 }
 
-// **The three vocabularies written back out, beside the three that read them in.** They live here and
-// not with their types because the pair is the thing that has to stay true: a word spelled one way
-// going in and another coming out is a round trip that fails on a value nobody named, and the only
-// cheap defence is that a reader changing one of these sees the other three lines above.
+// **The three vocabularies written back out, and read back in through the same words.** The readers
+// above look each word up here, so a word cannot be spelled one way going in and another coming out:
+// the round trip holds by construction, and each `match` below is exhaustive, so a new variant does
+// not compile until it has a word. What no compiler and no test checks is that the variant is also
+// in its `ALL`: a variant missing there is read as an unknown word — the panel paints without it and
+// the channel's reply names it — and the tool's description leaves it out.
 
 impl Attention {
-    fn name(self) -> &'static str {
+    /// The word the contract spells it with.
+    #[must_use]
+    pub fn name(self) -> &'static str {
         match self {
             Self::Wait => "wait",
             Self::Block => "block",
@@ -907,7 +977,9 @@ impl Attention {
 }
 
 impl Mark {
-    fn name(self) -> &'static str {
+    /// The word the contract spells it with.
+    #[must_use]
+    pub fn name(self) -> &'static str {
         match self {
             Self::Done => "done",
             Self::Current => "current",
@@ -920,7 +992,9 @@ impl Mark {
 }
 
 impl Style {
-    fn name(self) -> &'static str {
+    /// The word the contract spells it with.
+    #[must_use]
+    pub fn name(self) -> &'static str {
         match self {
             Self::Normal => "normal",
             Self::Dim => "dim",
@@ -1496,6 +1570,40 @@ mod tests {
         }
     }
 
+    /// **The silent readers record nothing**, and a record kept and thrown away reads back exactly the
+    /// same panel, so the only place that shows is the allocator. Two documents of the same size, one
+    /// whose marks the reader knows and one whose marks it drops, have to cost the same — both the most
+    /// they ever hold at once and the number of reservations they make, because a value rendered and
+    /// freed at once raises the second and not the first. That is the file's reader, inside the frame,
+    /// paying nothing for a note nobody reads (**D13**).
+    #[test]
+    fn the_silent_readers_reserve_nothing_for_what_they_drop() {
+        let lines = |mark: &str| vec![format!(r#"{{"text":"x","mark":"{mark}"}}"#); 500].join(",");
+        let known = format!(r#"{{"lines":[{}]}}"#, lines("block"));
+        let dropped = format!(r#"{{"lines":[{}]}}"#, lines("doing"));
+        let ops = |mark: &str| -> serde_json::Value {
+            serde_json::from_str(&format!(
+                r#"[{{"op":"last","line":{{"text":"x","mark":"{mark}"}}}}]"#
+            ))
+            .expect("ops")
+        };
+        let (known_ops, dropped_ops) = (ops("block"), ops("doing"));
+
+        let reading_known = while_counting(|| parse_document(&known).expect("a panel"));
+        let reading_dropped = while_counting(|| parse_document(&dropped).expect("a panel"));
+        let patching_known = while_counting(|| crate::parse_ops(&known_ops).expect("a patch"));
+        let patching_dropped = while_counting(|| crate::parse_ops(&dropped_ops).expect("a patch"));
+
+        assert_eq!(
+            reading_dropped, reading_known,
+            "the silent document reader kept a record: (peak, reservations)"
+        );
+        assert_eq!(
+            patching_dropped, patching_known,
+            "the silent patch reader kept a record: (peak, reservations)"
+        );
+    }
+
     /// **The same property as the one below, but over the real path.**
     ///
     /// The one below calls [`read_capped`] directly, so it only ties down the helper: replacing that
@@ -2000,6 +2108,7 @@ mod tests {
         thread_local! {
             pub static LIVE: Cell<usize> = const { Cell::new(0) };
             pub static PEAK: Cell<usize> = const { Cell::new(0) };
+            pub static RESERVATIONS: Cell<usize> = const { Cell::new(0) };
         }
     }
 
@@ -2022,6 +2131,7 @@ mod tests {
             let pointer = unsafe { std::alloc::System.alloc(layout) };
             if !pointer.is_null() {
                 record(layout.size() as isize);
+                let _ = counting::RESERVATIONS.try_with(|made| made.set(made.get() + 1));
             }
             pointer
         }
@@ -2047,6 +2157,16 @@ mod tests {
 
     #[global_allocator]
     static ALLOCATOR: Counter = Counter;
+
+    /// Runs the work and returns the most extra it ever had live and **how many reservations it made**
+    /// — dropping what it produced first, so neither number depends on the result outliving the call.
+    fn while_counting<T>(work: impl FnOnce() -> T) -> (usize, usize) {
+        let made = counting::RESERVATIONS.get();
+        let (produced, peak) = while_measuring(work);
+        let reservations = counting::RESERVATIONS.get() - made;
+        drop(produced);
+        (peak, reservations)
+    }
 
     /// Runs the work and returns, besides what it produced, **how much extra it ever had live**.
     fn while_measuring<T>(work: impl FnOnce() -> T) -> (T, usize) {

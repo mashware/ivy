@@ -137,7 +137,7 @@ impl Producer {
     /// compacted, for the same two reasons a document is: a list that is not JSON at all is refused
     /// to its author instead of travelling to the window, and a compact line cannot carry the newline
     /// the framing rests on. **What each op says is decided at the other end** — by
-    /// `panel_contract::parse_ops`, on the connection's thread inside the application — so an op
+    /// `panel_contract::parse_ops_noting`, on the connection's thread inside the application — so an op
     /// nobody serves or a field that is not patchable travels and comes back as a refusal.
     pub fn patch(&mut self, ops: &str) -> io::Result<Answered> {
         let ops: serde_json::Value = serde_json::from_str(ops).map_err(|failure| {
@@ -226,9 +226,18 @@ impl Producer {
                 // thrown away, and silently.
                 None => match raw.document {
                     Some(document) => Ok(Answered::Document(document.get().to_owned())),
-                    None => match text_of(raw.text) {
-                        Some(text) => Ok(Answered::Text(text)),
-                        None => Ok(Answered::Ok),
+                    // Before the fallback for the reason the arm above gives: landing on `Ok` is a
+                    // lossy publication answered as a perfect one, which is the silence this field
+                    // exists to break. A note that is not text still says something fell, so it is
+                    // handed over as the JSON it arrived as rather than dropped into a plain success.
+                    None => match raw.dropped {
+                        Some(dropped) => Ok(Answered::Lossy(
+                            text_of(Some(dropped)).unwrap_or_else(|| dropped.get().to_owned()),
+                        )),
+                        None => match text_of(raw.text) {
+                            Some(text) => Ok(Answered::Text(text)),
+                            None => Ok(Answered::Ok),
+                        },
                     },
                 },
             },
@@ -258,6 +267,8 @@ struct Reply<'a> {
     #[serde(default, borrow)]
     document: Option<&'a serde_json::value::RawValue>,
     #[serde(default, borrow)]
+    dropped: Option<&'a serde_json::value::RawValue>,
+    #[serde(default, borrow)]
     error: Option<&'a serde_json::value::RawValue>,
 }
 
@@ -266,6 +277,9 @@ struct Reply<'a> {
 pub enum Answered {
     /// It was applied, and the reply carried nothing else.
     Ok,
+    /// It was applied, and **part of what was sent fell away on the way in**: the sentence naming
+    /// what, in the contract's words.
+    Lossy(String),
     /// A session was retired, with its auxiliary-console outcome.
     Retired {
         closed: usize,
@@ -345,6 +359,39 @@ mod tests {
             answered,
             Answered::Failed("held by \"flow\", 2 line(s)".to_owned())
         );
+    }
+
+    /// **A lossy publication reads as lossy, and a clean one as plain success**, both over a real
+    /// listener. The assertion is on the variant and its sentence and never on «it is ok»: the decode
+    /// falls through to `Answered::Ok` when it recognises no field, which is exactly what reading the
+    /// new field too late would do.
+    #[test]
+    fn a_producer_is_told_what_fell_away_and_nothing_when_nothing_did() {
+        let (dir, _channel, inbox) = a_pane();
+        let mut producer = Producer::of(dir.path(), dir.id()).expect("open the channel");
+
+        let window = std::thread::spawn(move || {
+            for _ in 0..2 {
+                let delivery = inbox
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("the window is handed the document");
+                let _ = delivery.answer.send(Answer::Taken);
+            }
+        });
+
+        let lossy = producer
+            .publish("flow", r#"{"attention":"waiting","lines":["one"]}"#)
+            .expect("publish");
+        let clean = producer
+            .publish("flow", r#"{"attention":"wait","lines":["one"]}"#)
+            .expect("publish");
+
+        window.join().expect("the window thread finished");
+        assert_eq!(
+            lossy,
+            Answered::Lossy(r#"the document carries an unknown attention "waiting""#.to_owned())
+        );
+        assert_eq!(clean, Answered::Ok);
     }
 
     /// **What comes back is the bytes the pane sent, not a re-serialisation of them.**

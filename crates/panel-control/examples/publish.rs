@@ -139,7 +139,10 @@ fn main() {
             Ok(Answered::Document(_)) if matches!(after, Then::Read) => {}
             // **Said and not fatal.** A refusal is a real answer — another source holds the pane —
             // and the run's own report is what decides whether the batch is valid, not this process.
-            Ok(Answered::Failed(why)) => eprintln!("publish: refused ({why})"),
+            Ok(Answered::Failed(why)) => eprintln!("{}: refused ({why})", verb_of(&after)),
+            // Taken all the same, and said: the load this process sends is meant to be read whole, so
+            // a word the reader dropped is this example's mistake and the log is where it shows.
+            Ok(Answered::Lossy(what)) => eprintln!("{}: taken, but {what}", verb_of(&after)),
             // **The three `split_*` verbs are the other half of the channel and this example never
             // asks for them.** A payload here would mean the pane answered the wrong request, which
             // is worth a line and not a panic: this process's job is the load, and the batch's own
@@ -150,7 +153,7 @@ fn main() {
                 | Answered::Text(_)
                 | Answered::Document(_),
             ) => {
-                eprintln!("publish: the pane answered something else to a publication");
+                eprintln!("{}: the pane answered something else", verb_of(&after));
             }
             // **An argument this process got wrong is not the channel dying**, and saying so
             // matters: the run is about to end either way, and the line left on screen is the only
@@ -165,6 +168,16 @@ fn main() {
             }
         }
         std::thread::sleep(every);
+    }
+}
+
+/// Which verb produced the answer inspected in the loop, so a refusal, a dropped word or an answer of
+/// the wrong kind points at the request that has to be corrected.
+fn verb_of(after: &Then) -> &'static str {
+    match after {
+        Then::Patch(_) => "patch",
+        Then::Read => "read",
+        Then::Nothing => "publish",
     }
 }
 
@@ -188,6 +201,7 @@ fn report(verb: &str, answered: std::io::Result<Answered>) {
     match answered {
         Ok(Answered::Ok) => {}
         Ok(Answered::Failed(why)) => eprintln!("{verb}: refused ({why})"),
+        Ok(Answered::Lossy(what)) => eprintln!("{verb}: taken, but {what}"),
         Ok(_) => eprintln!("{verb}: the pane answered something else"),
         Err(failure) => eprintln!("{verb}: the channel is gone ({failure})"),
     }

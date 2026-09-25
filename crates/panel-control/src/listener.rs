@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use interprocess::TryClone;
 use interprocess::local_socket::{Listener, Stream, prelude::*};
-use panel_contract::{Panel, Patch};
+use panel_contract::{Dropped, Panel, Patch};
 
 use crate::endpoint;
 use crate::wire::{Framing, Incoming, Reply, Request, Side, write_reply};
@@ -532,9 +532,12 @@ fn answer(
 ) -> (Reply, bool) {
     match incoming {
         Incoming::Request(Request::PanelSet { source, document }) => {
-            match panel_contract::parse_document(&document) {
-                Ok(panel) => (
-                    publish(panel, source, connection, to_the_window, wake),
+            match panel_contract::parse_document_noting(&document) {
+                Ok((panel, dropped)) => (
+                    with_what_fell(
+                        publish(panel, source, connection, to_the_window, wake),
+                        &dropped,
+                    ),
                     false,
                 ),
                 Err(problem) => (Reply::Failed(problem.to_string()), false),
@@ -595,13 +598,16 @@ fn answer(
         ),
         // **And so is the patch**, for the same reason and one more: it needs the hold, which lives
         // on the panel state this pane holds and nowhere else.
-        Incoming::Request(Request::PanelPatch { ops }) => (
-            ask_the_window(
-                Wants::Taken,
-                What::Patch { ops },
-                connection,
-                to_the_window,
-                wake,
+        Incoming::Request(Request::PanelPatch { ops, dropped }) => (
+            with_what_fell(
+                ask_the_window(
+                    Wants::Taken,
+                    What::Patch { ops },
+                    connection,
+                    to_the_window,
+                    wake,
+                ),
+                &dropped,
             ),
             false,
         ),
@@ -621,6 +627,19 @@ fn answer(
         ),
         Incoming::Malformed(why) => (Reply::Failed(why), false),
         Incoming::Unrecoverable(why) => (Reply::Failed(why), true),
+    }
+}
+
+/// A taken publication or patch, **told what fell away on the way in** when something did.
+///
+/// **Only a success carries it.** A refused request was not applied, so what its document would have
+/// lost is not news — the refusal is the whole answer. And the window never sees the note: it was
+/// read on this thread, where the parse happened, and it is only ever the producer's to read
+/// (**D58**).
+fn with_what_fell(reply: Reply, dropped: &Dropped) -> Reply {
+    match reply {
+        Reply::Ok => dropped.sentence().map_or(Reply::Ok, Reply::Lossy),
+        other => other,
     }
 }
 
@@ -981,6 +1000,81 @@ mod tests {
         assert_eq!(
             read_reply(&mut client),
             "{\"ok\":false,\"error\":\"held by \\\"flow\\\"\"}"
+        );
+    }
+
+    /// **What fell away reaches the producer on a taken reply and on no other**, and the window is
+    /// handed the same panel it always was. Through the socket, because the note is read on the
+    /// connection's thread and attached after the window answers — a test of the helper alone would
+    /// pass with nothing calling it.
+    #[test]
+    fn a_taken_publication_names_what_it_dropped_and_a_refused_one_does_not() {
+        let pane = a_pane();
+        let mut client = pane.connect();
+        let lossy = r#"{"lines":[{"text":"one","mark":"doing"},"two"]}"#;
+
+        client
+            .write_all(publication("flow", lossy).as_bytes())
+            .expect("publish");
+        let delivery = pane.next_delivery();
+        let What::Publish { panel, .. } = &delivery.what else {
+            panic!("the window was handed something else");
+        };
+        assert_eq!(
+            panel,
+            &panel_contract::parse_document(lossy).expect("a panel")
+        );
+        delivery.answer.send(Answer::Taken).expect("answer");
+        assert_eq!(
+            read_reply(&mut client),
+            r#"{"ok":true,"dropped":"1 line carries an unknown mark \"doing\""}"#
+        );
+
+        client
+            .write_all(publication("ci", lossy).as_bytes())
+            .expect("publish again");
+        pane.next_delivery()
+            .answer
+            .send(Answer::Refused("held by \"flow\"".to_owned()))
+            .expect("answer");
+        assert_eq!(
+            read_reply(&mut client),
+            "{\"ok\":false,\"error\":\"held by \\\"flow\\\"\"}"
+        );
+    }
+
+    #[test]
+    fn a_taken_patch_names_what_its_lines_dropped_and_a_refused_one_does_not() {
+        let pane = a_pane();
+        let mut client = pane.connect();
+
+        client
+            .write_all(
+                b"{\"tool\":\"panel_patch\",\"ops\":[{\"op\":\"last\",\"line\":{\"text\":\"x\",\"style\":\"bold\"}}]}\n",
+            )
+            .expect("patch");
+        let delivery = pane.next_delivery();
+        assert!(matches!(delivery.what, What::Patch { .. }));
+        delivery.answer.send(Answer::Taken).expect("answer");
+
+        assert_eq!(
+            read_reply(&mut client),
+            r#"{"ok":true,"dropped":"1 line carries an unknown style \"bold\""}"#
+        );
+
+        client
+            .write_all(
+                b"{\"tool\":\"panel_patch\",\"ops\":[{\"op\":\"last\",\"line\":{\"text\":\"y\",\"mark\":\"wip\"}}]}\n",
+            )
+            .expect("patch again");
+        pane.next_delivery()
+            .answer
+            .send(Answer::Refused("held by \"flow\"".to_owned()))
+            .expect("answer");
+        assert_eq!(
+            read_reply(&mut client),
+            "{\"ok\":false,\"error\":\"held by \\\"flow\\\"\"}",
+            "a refused patch said what its lines would have lost"
         );
     }
 

@@ -28,6 +28,7 @@
 
 use std::time::Duration;
 
+use super::dropped::Dropped;
 use super::panel::{self, Attention, Line, Panel, Problem, STALE_AFTER};
 
 /// The most ops one request may carry.
@@ -115,6 +116,22 @@ pub enum Scalar {
 /// request is an instruction, and an instruction nobody can read has no sensible reading at all. **The
 /// document did not change; what can be said about it diverges.**
 pub fn parse_ops(raw: &serde_json::Value) -> Result<Patch, Problem> {
+    read_ops(raw, None)
+}
+
+/// The same reading as [`parse_ops`], and **also what the lines the ops carry let fall** — a mark or
+/// a style read as nothing, which a document line tolerates and the channel's reply names (**D58**).
+///
+/// The patch it returns is the one [`parse_ops`] returns for the same ops, always. A refused request
+/// reports nothing about its lines: the refusal is the whole answer.
+pub fn parse_ops_noting(raw: &serde_json::Value) -> Result<(Patch, Dropped), Problem> {
+    let mut dropped = Dropped::default();
+    let patch = read_ops(raw, Some(&mut dropped))?;
+    Ok((patch, dropped))
+}
+
+/// The one reader behind both doors, recording in `dropped` when there is somewhere to record.
+fn read_ops(raw: &serde_json::Value, mut dropped: Option<&mut Dropped>) -> Result<Patch, Problem> {
     let asked = raw
         .as_array()
         .ok_or_else(|| refused("\"ops\" is not a list"))?;
@@ -132,7 +149,11 @@ pub fn parse_ops(raw: &serde_json::Value) -> Result<Patch, Problem> {
         )));
     }
 
-    Ok(Patch(asked.iter().map(one_op).collect::<Result<_, _>>()?))
+    let ops = asked
+        .iter()
+        .map(|op| one_op(op, dropped.as_deref_mut()))
+        .collect::<Result<_, _>>()?;
+    Ok(Patch(ops))
 }
 
 /// A list of ops **that is already under [`MAX_OPS`]**.
@@ -143,7 +164,8 @@ pub fn parse_ops(raw: &serde_json::Value) -> Result<Patch, Problem> {
 /// crate's public boundary. The second transport **D17** promises would have walked in past it,
 /// which is exactly the worst case the number was reasoned against.
 ///
-/// There is no constructor but [`parse_ops`], and that is the whole of the type.
+/// There is no constructor but [`parse_ops`] and [`parse_ops_noting`], which is the same reader, and
+/// that is the whole of the type.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Patch(Vec<Op>);
 
@@ -169,7 +191,7 @@ impl Patch {
 }
 
 /// One element of the list, or the reason it is not an op.
-fn one_op(raw: &serde_json::Value) -> Result<Op, Problem> {
+fn one_op(raw: &serde_json::Value, dropped: Option<&mut Dropped>) -> Result<Op, Problem> {
     let name = raw
         .get("op")
         .and_then(serde_json::Value::as_str)
@@ -178,21 +200,21 @@ fn one_op(raw: &serde_json::Value) -> Result<Op, Problem> {
     match name {
         "replace" => Ok(Op::Replace {
             key: key_of(raw, name)?,
-            line: line_of(raw, name)?,
+            line: line_of(raw, name, dropped)?,
         }),
         "before" => Ok(Op::Before {
             key: key_of(raw, name)?,
-            line: line_of(raw, name)?,
+            line: line_of(raw, name, dropped)?,
         }),
         "after" => Ok(Op::After {
             key: key_of(raw, name)?,
-            line: line_of(raw, name)?,
+            line: line_of(raw, name, dropped)?,
         }),
         "first" => Ok(Op::First {
-            line: line_of(raw, name)?,
+            line: line_of(raw, name, dropped)?,
         }),
         "last" => Ok(Op::Last {
-            line: line_of(raw, name)?,
+            line: line_of(raw, name, dropped)?,
         }),
         "delete" => Ok(Op::Delete {
             key: key_of(raw, name)?,
@@ -277,13 +299,17 @@ fn key_of(raw: &serde_json::Value, op: &str) -> Result<String, Problem> {
 }
 
 /// The line an op carries, read by **the document's own reader** and nothing else.
-fn line_of(raw: &serde_json::Value, op: &str) -> Result<Line, Problem> {
+fn line_of(
+    raw: &serde_json::Value,
+    op: &str,
+    dropped: Option<&mut Dropped>,
+) -> Result<Line, Problem> {
     let carried = raw
         .get("line")
         .ok_or_else(|| refused(&format!("a \"{op}\" carries no \"line\"")))?;
     // A value that is neither a string nor an object is not a line of anything — the same refusal
     // the document's own reader makes, reached through the same function so the two cannot drift.
-    panel::read_line(carried)
+    panel::read_line_noting(carried, dropped)
         .ok_or_else(|| refused(&format!("a \"{op}\" carries something that is not a line")))
 }
 

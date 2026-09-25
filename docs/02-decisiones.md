@@ -7314,3 +7314,52 @@ only when its system call returns. On Windows, and on the Unix path with no pid 
 unreachable), a refused kill is not seen and that wait lasts as long as the program lives. Its
 declaration states each case and points at
 [#273](https://github.com/mashware/agent-terminal/issues/273), which is the Windows one.
+
+## D58 — A publication over the channel that lost a word is still taken, and its reply says which
+
+**Decided on 26 September 2026** ([#255](https://github.com/mashware/agent-terminal/issues/255)).
+When `panel_set` or `panel_patch` carries a value none of the three closed vocabularies knows —an
+`attention`, a line's `mark`, a line's `style`— or a value there that is not even a word, the
+document is read exactly as before: the value is dropped, the line stands, the panel paints. What
+changes is the reply. A taken request that lost something answers
+`{"ok":true,"dropped":"<sentence>"}` instead of `{"ok":true}`, and the bridge an agent speaks to
+answers `published; 4 lines carry an unknown mark "doing"` instead of `published`. The tool's own
+description names the three vocabularies word by word. The literal sentences are in
+[the contract](04-contrato-panel.md#what-fell-away-is-said).
+
+**Why.** A session driving a pane published five lines with `"mark":"doing"` on four of them and was
+answered `published` — the same word a perfect document gets. Four lines lost their symbol, colour
+and column, and nobody noticed until a person compared two panes. The producer had the document's
+shape from the tool's schema and its vocabulary from nowhere: the description spelled out
+`attention`'s three words and called the six marks and seven styles «the rest of the contract». D17's
+own table already said the channel *warns the producer that its document is broken* and the file
+does not; for a document that was tolerated rather than refused, it never did.
+
+**The tolerance is not what changed**, and that is deliberate: a panel that paints four fifths of its
+lines beats a refusal, which is what D6 and the per-field reading have always said. `panel_patch`
+already refuses an unknown word in a `set`, and that stays too — an instruction nobody can read has
+no sensible reading, a summary with one bad word does.
+
+**Three bounds on the sentence, all for the same ceiling.** The count is of lines; at most three
+distinct values are named, the rest become «and others»; each value is shown up to 32 characters.
+Every value is escaped once into the sentence and again into the reply line, and the client refuses a
+reply past the document's ceiling plus one kibibyte — which drops the pane's hold with it. A document
+of garbage marks, legal going in, would otherwise break the connection it was published on.
+
+| Discarded | Why |
+|---|---|
+| **Refusing the unknown word**, the way a patch's `set` does | Loses the whole panel over one field; D6 and the issue both keep the tolerance |
+| **A structured list on the wire** (`[{field, value, lines}]`) | The only consumer turns it into text for an agent, and the contract already fixes words rather than shapes for what a producer reads (`Problem::Refused`). A structure would be a second contract to keep in step with the sentence |
+| **Reusing the reply's `text` field** | `text` is a console's screen (`Reply::Text`); a second meaning is how a reply gets misread |
+| **Changing `parse_document`'s return type** | Some sixty call sites, nearly all of them tests, and none of them has anybody to tell. A second entry point, `parse_document_noting`, reads with the same function and keeps the note; the file's reader, inside the frame, records nothing at all, so the frame pays nothing for a record nobody reads (**D13**) |
+| **Letting the window build the reply** | The parse already happens on the connection's thread, where the note is in scope; the window has no use for it, and `crates/app/src/control.rs` sits at its line ceiling |
+| **Documenting `panel_get` as the way to check** | It works — it returns the document as the application understood it — and no producer does it. The reply reaching the producer unasked is the point |
+| **Reporting every other silent drop** (unknown fields, a clipped indent, a refused button, a line that is neither text nor an object) | Out of the ticket. Those are not a vocabulary a producer guessed from nowhere |
+
+**What it does not do, declared.** The file transport stays silent: a `panel.json` on disk has nobody
+to answer. A null is not reported, because it reads exactly like the field left out. Only the three
+vocabularies are reported: any other known field of the wrong type, an unknown field, a clipped
+indent or a refused button still fall silently, so a bare `ok` promises that no vocabulary value was lost and
+nothing more. Two values that agree up to the 32-character cut are named as one, though each of their lines is counted. And a
+publication the window takes after its five-second answer deadline has already been answered *the
+window did not answer in time*, so what it lost is never said.

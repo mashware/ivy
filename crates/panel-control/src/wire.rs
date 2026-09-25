@@ -14,7 +14,7 @@
 use std::io::{self, Write};
 use std::time::Duration;
 
-use panel_contract::Patch;
+use panel_contract::{Dropped, Patch};
 use serde_json::value::RawValue;
 
 /// The most a source name may take **on the wire**.
@@ -123,14 +123,18 @@ pub enum Request {
     /// **The ops arrive read**, which is the whole shape of this verb: everything decidable without
     /// the document — an op nobody serves, a field that is not patchable, a value of the wrong kind,
     /// more ops than the ceiling allows — is decided on the connection's own thread by
-    /// [`panel_contract::parse_ops`], and never in a frame. What travels is the one question that
+    /// [`panel_contract::parse_ops_noting`], and never in a frame. What travels is the one question that
     /// needs the panel: does this key name a line there.
     ///
     /// **It carries no `source`**, unlike a publication. The hold already names its holder and a
     /// patch cannot exist without a hold, so a name here would either reach nothing — which is what
     /// `split_open`'s absent `env` is on record for refusing — or rename a holder mid-hold, which
     /// nobody asked for.
-    PanelPatch { ops: Patch },
+    ///
+    /// **What the carried lines let fall travels beside the ops and never reaches the window**: it is
+    /// read here, where the ops are, and the listener puts it on the reply once the window has taken
+    /// the patch (**D58**).
+    PanelPatch { ops: Patch, dropped: Dropped },
     /// Open a pane beside the caller's own, optionally running a program of the caller's choosing.
     ///
     /// **There is no environment here, and there cannot be one**: a pane's environment is exactly
@@ -379,8 +383,8 @@ fn panel_patch(envelope: &Envelope<'_>) -> Incoming {
     // **Read here and not at the pane**, which is what keeps this verb's work inside the frame down
     // to the one question the document answers. The sentence is the contract's own, so a producer
     // reads the same words whichever transport ever carries these ops.
-    match panel_contract::parse_ops(&ops) {
-        Ok(ops) => Incoming::Request(Request::PanelPatch { ops }),
+    match panel_contract::parse_ops_noting(&ops) {
+        Ok((ops, dropped)) => Incoming::Request(Request::PanelPatch { ops, dropped }),
         Err(problem) => Incoming::Malformed(problem.to_string()),
     }
 }
@@ -482,6 +486,10 @@ fn split_close(envelope: &Envelope<'_>) -> Incoming {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Reply {
     Ok,
+    /// Taken, **and some of what was sent fell away on the way in**: the sentence naming it, as the
+    /// contract's reader wrote it. Still a success — nothing was refused and the panel paints — which
+    /// is why it is an `ok` with one more field and not a failure (**D58**).
+    Lossy(String),
     /// A session was retired; auxiliary consoles were either detached or preserved after takeover.
     Retired {
         closed: usize,
@@ -518,6 +526,10 @@ impl Reply {
     pub fn line(&self) -> String {
         match self {
             Self::Ok => "{\"ok\":true}\n".to_owned(),
+            Self::Lossy(dropped) => {
+                let escaped = serde_json::Value::String(dropped.clone());
+                format!("{{\"ok\":true,\"dropped\":{escaped}}}\n")
+            }
             Self::Retired { closed, preserved } => {
                 format!("{{\"ok\":true,\"closed\":{closed},\"preserved\":{preserved}}}\n")
             }
@@ -616,6 +628,15 @@ mod tests {
             }
             .line(),
             "{\"ok\":true,\"closed\":2,\"preserved\":1}\n"
+        );
+    }
+
+    /// The sentence carries quotes, so an unescaped interpolation would end the string early.
+    #[test]
+    fn a_lossy_reply_is_an_ok_that_carries_what_fell_away_escaped() {
+        assert_eq!(
+            Reply::Lossy("1 line carries an unknown mark \"doing\"".to_owned()).line(),
+            "{\"ok\":true,\"dropped\":\"1 line carries an unknown mark \\\"doing\\\"\"}\n"
         );
     }
 
@@ -821,7 +842,7 @@ mod tests {
         assert!(why.contains("over 256 KiB"), "{why}");
 
         // And a patch the wire has nothing against becomes a request, with its ops already read.
-        let Incoming::Request(Request::PanelPatch { ops }) =
+        let Incoming::Request(Request::PanelPatch { ops, .. }) =
             one("{\"tool\":\"panel_patch\",\"ops\":[{\"op\":\"delete\",\"key\":\"one\"}]}\n")
         else {
             panic!("a patch the wire serves becomes a request");

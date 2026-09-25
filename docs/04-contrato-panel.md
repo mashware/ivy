@@ -321,7 +321,9 @@ The prototype discovers the file by convention; the app does it by pane identity
 
 **For the producer that already has a process inside the pane and would rather not own a file.** It
 publishes the **same document**, through the same parser, with the same ceiling and the same
-per-field tolerance: everything above this line is unchanged and this section adds nothing to it.
+per-field tolerance: everything above this line is unchanged, and the one thing this section adds
+is that **a channel has somebody to tell** what that tolerance dropped — see
+[*What fell away is said*](#what-fell-away-is-said) below.
 
 | Who reads | Where it listens |
 |---|---|
@@ -332,10 +334,12 @@ per-field tolerance: everything above this line is unchanged and this section ad
 ```
 → {"tool":"panel_set","source":"flow","document":{ ...the panel document... }}
 ← {"ok":true}
+← {"ok":true,"dropped":"4 lines carry an unknown mark \"doing\""}
 → {"tool":"panel_get"}
 ← {"ok":true,"document":{ ...the panel document... }}
 → {"tool":"panel_patch","ops":[ ...the edits... ]}
 ← {"ok":true}
+← {"ok":true,"dropped":"1 line carries an unknown style \"bold\""}
 → {"tool":"panel_retire"}
 ← {"ok":true,"closed":2,"preserved":1}
 → {"tool":"split_open","side":"right","program":"cargo","args":["test"]}
@@ -346,6 +350,42 @@ per-field tolerance: everything above this line is unchanged and this section ad
 ← {"ok":true}
 ← {"ok":false,"error":"..."}
 ```
+
+### What fell away is said
+
+**A publication or a patch that lost part of what it carried on the way in is still taken, and its
+`ok` says what was lost.** The reading does not change — a value none of the three closed vocabularies
+knows is dropped, the line stands, the panel paints — but over the channel there is somebody on the
+other end, so the reply carries one more field, `dropped`, with a sentence naming it (**D58**):
+
+```
+← {"ok":true,"dropped":"the document carries an unknown attention \"waiting\"; 1 line carries an unknown mark \"doing\"; 2 lines carry unknown styles \"bold\" and \"red\""}
+```
+
+- **Three fields are reported, and only three**: `attention`, a line's `mark` and a line's `style`.
+  Always in that order, joined by `; `. A field that lost nothing is not mentioned; a document that lost
+  nothing gets the plain `{"ok":true}` it always got.
+- **A value that is not a word counts as well** — `"mark": 42` is reported as `42`, without quotes, so
+  a word and a number can be told apart. **`null` is not a loss**: it reads exactly like leaving the
+  field out.
+- **The count is of lines; the values are distinct and at most three**, in the order they arrived —
+  `5 lines carry unknown marks "a", "b", "c" and others`. A value is shown up to 32 characters and cut
+  with `…` after that; two values that agree up to the cut are named as one, and each of their
+  lines still counts. Both bounds keep the
+  reply under the client's own ceiling: every value is escaped twice on its way back, and a document
+  of garbage at the ceiling would otherwise produce a reply the client has to refuse.
+- **Only a taken request says it.** A refused publication or patch was not applied, so the refusal is
+  the whole answer and carries no `dropped`. One refusal is not quite that: *the window did not answer
+  in time* means the window may still take the document afterwards, and if it does, what that document
+  lost is never said. Reading it back with `panel_get` shows what was understood.
+- **The file says nothing**, as it never did: a `panel.json` on disk has nobody to answer, which is
+  exactly the difference the two transports have always had (**D17**).
+
+**Nothing else is reported.** Everything else the reader drops or clips goes on falling silently, over
+this transport as over the file: an unknown field, any other known field whose value has the wrong
+type (a `text` that is a number paints an empty line), an indentation past 64, a button it will not send, an
+element of `lines` that is neither text nor an object. A bare `{"ok":true}` means none of the three
+vocabularies lost a value — not that every byte was understood.
 
 ### `panel_get` — reading the document back
 
@@ -523,7 +563,9 @@ which is the exact failure this verb exists to remove.
 op says* is not tolerated the way *what an op carries* is.
 
 - A `line` an op carries **is a document line** and is read with the document's own tolerance: a
-  `mark` nobody knows is dropped, an `indent` past 64 is clipped, and the line stands.
+  `mark` nobody knows is dropped, an `indent` past 64 is clipped, and the line stands — and the patch's
+  `ok` names the dropped mark or style exactly as a publication's does
+  ([*What fell away is said*](#what-fell-away-is-said)).
 - A field named by a `set` **is part of the instruction** and is not tolerated:
   `{"op":"set","field":"attention","value":"waiting"}` refuses the whole patch, where the same word
   inside a published document is dropped and the panel still paints.
@@ -631,7 +673,8 @@ itself.
 - **It knows who writes**, which is the whole of why the hold can exist at all.
 - **It answers.** A document that is not a panel comes back as an error to whoever sent it, instead
   of being discovered by the person looking at the panel — which is the thing that made writing a new
-  producer expensive.
+  producer expensive. And a document that is taken but lost a mark, a style or an attention value says
+  which ([*What fell away is said*](#what-fell-away-is-said)).
 - **It writes nothing to disk**, so a producer that has no business owning a file does not have to.
 - **It edits.** A document of six hundred lines whose third one changed is six hundred lines over the
   file transport and one op over this one — and the file has no word for saying *this line*, because
