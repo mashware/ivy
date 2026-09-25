@@ -34,6 +34,7 @@ const DECLARED: &[(&str, &str)] = &[
     ("HEADER", "header"),
     ("READS", "documents"),
     ("PATCHES", "documents"),
+    ("LARGE", "documents"),
     ("LINKS", "links"),
 ];
 
@@ -343,9 +344,30 @@ fn every_declared_knob_is_asked_for_by_some_batch() {
 /// The launch is replaced by the exit status it would have left; nothing above that function is
 /// needed by what follows it.
 fn run_the_guards(name: &str, report: &str, status: u8) -> (String, bool) {
+    run_the_guards_as(name, &[], report, status)
+}
+
+/// [`run_the_guards`], with the knobs a batch's row sets set the way the batch table would have set
+/// them — and **nothing else from this process's environment**, so a knob whoever runs the suite
+/// happens to have exported cannot change which guard a fixture reaches.
+fn run_the_guards_as(name: &str, knobs: &[&str], report: &str, status: u8) -> (String, bool) {
     let guards = &MEASURE[MEASURE
         .find("\ninvalidate() {")
         .expect("the script no longer defines invalidate()")..];
+    // **The floor is defined above the function that invalidates a run**, where the seeding reads it too, so the slice
+    // would reach the large pair's guards with it unset and die under `set -u` before they speak.
+    let floor = MEASURE
+        .lines()
+        .find(|line| line.starts_with("LARGE_FLOOR="))
+        .expect("the script declares no floor for the large document");
+    // **Only a knob the table can set**, so a typo stands for no batch rather than for a different one.
+    for knob in knobs {
+        assert!(
+            DECLARED.iter().any(|(declared, _)| declared == knob),
+            "«{knob}» is not a knob any batch declares"
+        );
+    }
+    let set: String = knobs.iter().map(|knob| format!("{knob}=1\n")).collect();
     let dir = std::env::temp_dir().join(format!("batches-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -354,16 +376,10 @@ fn run_the_guards(name: &str, report: &str, status: u8) -> (String, bool) {
 
     let output = std::process::Command::new("sh")
         .arg("-c")
-        .arg(format!("set -eu\nSTATUS={status}\n{guards}"))
+        .arg(format!("set -eu\nSTATUS={status}\n{floor}\n{set}{guards}"))
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
         .env("REPORT", &path)
-        .env_remove("ACTIONS")
-        .env_remove("CONTROL")
-        .env_remove("LINKS")
-        .env_remove("CJK")
-        .env_remove("EMOJI")
-        .env_remove("READS")
-        .env_remove("PATCHES")
-        .env_remove("HEADER")
         .output()
         .expect("sh could not be run");
     let invalid = dir.join("report.txt.INVALID").exists();
@@ -413,4 +429,302 @@ fn a_report_missing_the_line_a_guard_reads_is_invalidated_by_that_guard() {
             "a report with no «{lost}:» line was not invalidated for it; it said: «{said}»"
         );
     }
+}
+
+/// The assignments of one batch's row in the table, without the comment that follows them.
+fn row_of(batch: char) -> Vec<&'static str> {
+    let row = MEASURE
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with(&format!("{batch})       TABS=")))
+        .unwrap_or_else(|| panic!("batch {batch} is not in the table"));
+    let (_, assignments) = row.split_once(')').expect("a case arm");
+    let (assignments, _) = assignments.split_once(";;").expect("an arm that closes");
+    assignments
+        .split(';')
+        .map(str::trim)
+        .filter(|a| !a.is_empty())
+        .collect()
+}
+
+/// **`X` feeds no written-out size of its own**, so nothing the report says can prove the control is
+/// as large as the batch it is compared with: only reads and patches feed that number. A row of the
+/// table losing `LARGE=1` would leave `X` publishing seven lines, `Y − X` would be the large document
+/// rather than the patch, and every guard would stay quiet. So the table is what is held: the two of
+/// them carry the knob, nothing else does, and `Y` is `X` plus the one verb.
+#[test]
+fn the_large_pair_differs_in_the_patch_and_in_nothing_else() {
+    let control = row_of('X');
+    let patching = row_of('Y');
+    assert!(
+        control.contains(&"LARGE=1") && patching.contains(&"LARGE=1"),
+        "the large pair does not both publish the large document: X {control:?}, Y {patching:?}"
+    );
+    let mut control_plus_the_verb = control.clone();
+    control_plus_the_verb.push("PATCHES=1");
+    control_plus_the_verb.sort_unstable();
+    let mut patching_sorted = patching.clone();
+    patching_sorted.sort_unstable();
+    assert_eq!(
+        control_plus_the_verb, patching_sorted,
+        "Y is not X plus the patch, so Y − X is not what a patch costs"
+    );
+    let carriers: Vec<&str> = MEASURE
+        .lines()
+        .map(str::trim)
+        .filter(|line| {
+            line.strip_prefix(char::is_alphabetic)
+                .is_some_and(|rest| rest.starts_with(")       TABS="))
+        })
+        .filter(|line| {
+            line.split("#")
+                .next()
+                .is_some_and(|code| code.contains("LARGE=1"))
+        })
+        .collect();
+    assert_eq!(
+        carriers.len(),
+        2,
+        "the large document is published by batches other than X and Y: {carriers:?}"
+    );
+}
+
+/// **Every declared knob is cleared before the batch table sets it**, because the seeding and the
+/// guards read them from the script's own shell: one exported by whoever measures reaches every batch
+/// and is judged by the guards as the batch's own load — a `PATCHES=1` runs X as Y under X's name.
+#[test]
+fn no_knob_comes_from_the_callers_environment() {
+    let table = MEASURE
+        .find("case \"$BATCH\" in")
+        .expect("the batch table is not in the script");
+    let cleared: Vec<&str> = MEASURE[..table]
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('#'))
+        .flat_map(str::split_whitespace)
+        .filter_map(|word| word.strip_suffix('='))
+        .collect();
+    for (knob, _) in DECLARED {
+        assert!(
+            cleared.contains(knob),
+            "«{knob}» is not cleared before the batch table: exported by whoever measures, it \
+             reaches every batch and the guards judge it as the batch's own load"
+        );
+    }
+}
+
+/// **The floor is a literal in shell and a fraction of a constant in Rust**, and it is the second that
+/// means something: «near the ceiling» is 7/8 of `MAX_BYTES`. A ceiling that moved would leave the
+/// script calling a medium panel large, or refusing every run.
+#[test]
+fn the_large_floor_is_seven_eighths_of_the_contracts_ceiling() {
+    let floor: u64 = MEASURE
+        .lines()
+        .find_map(|line| line.strip_prefix("LARGE_FLOOR="))
+        .expect("the script declares no floor for the large document")
+        .trim()
+        .parse()
+        .expect("the floor is a number");
+    assert_eq!(floor, panel_contract::MAX_BYTES / 8 * 7);
+}
+
+/// **The large pair's own directions**: the check before publishing that is the only proof of `X`'s size, and
+/// the report guard that proves `Y`'s patch applied at that size as the pane wrote it out. The pair
+/// loop above only proves that *some* condition on `LARGE=1` invalidates.
+#[test]
+fn the_large_pair_proves_its_size_before_and_after_the_run() {
+    let lines: Vec<&str> = MEASURE.lines().collect();
+    let before = lines
+        .iter()
+        .position(|line| line.contains("[ \"$compact\" -lt \"$LARGE_FLOOR\" ]"))
+        .expect("nothing checks the large document's size before it is published");
+    // The bound the check reads is the one `the_large_document_lands_between_the_floor_and_the_ceiling`
+    // proves sits under the compact size; any other arithmetic here is a bound nobody proved.
+    assert!(
+        MEASURE.contains("compact=$((bytes - 3 * lines))"),
+        "the check before publishing no longer reads the bound the suite proves"
+    );
+    assert!(
+        lines[before + 1..]
+            .iter()
+            .take_while(|line| line.trim() != "fi")
+            .any(|line| line.trim() == "return 1"),
+        "a large document under the floor is noticed and published anyway"
+    );
+    assert!(
+        invalidates_on("[ \"$LARGEST_SERIALIZED\" -lt \"$LARGE_FLOOR\" ]"),
+        "nothing invalidates a large patching run whose patch was written out under the floor"
+    );
+    assert!(
+        invalidates_on("[ \"$LARGEST_SERIALIZED\" -ge \"$LARGE_FLOOR\" ]"),
+        "nothing invalidates a batch that is not large and wrote out a large document"
+    );
+}
+
+/// The report lines every guard above the documents block reads, all of them satisfied for a batch
+/// that publishes over the channel and declares nothing else, so the guard that speaks is the
+/// documents block's and not an earlier one.
+fn a_channel_report_with(documents: &str) -> String {
+    format!(
+        "buttons:      0 drawn whole, 0 pressed\n\
+         links: 0 sources found · 0 plain · 0 OSC 8 · 0 panel activations\n\
+         control:      120 applied, 0 refused, 0 released\n\
+         {documents}\n"
+    )
+}
+
+/// **The large pair's size guards, run and not read.** The test above holds their text; this one
+/// holds what they do at the edge, which is where a guard's conjunction or its comparison can be
+/// wrong while its text still matches: `Y` one byte under the floor is thrown away and at the floor
+/// is not thrown away by its size guard, `X` — large and not patching — is not either, `U` at the
+/// floor is thrown away as a leak, and a documents line that stopped carrying the size is thrown away
+/// instead of being read as a zero, for the large pair and for the batches that feed the size alike.
+///
+/// **A case that must pass the documents block proves it by the guard AFTER it speaking**: the
+/// fixture has no strip line, so the next guard invalidates for that, and its sentence is the proof
+/// the size guards ran and stayed quiet rather than the script dying before them.
+#[test]
+fn the_large_pair_is_judged_on_the_size_the_pane_wrote_out() {
+    let floor: u64 = panel_contract::MAX_BYTES / 8 * 7;
+    let documents = |size: u64| {
+        format!(
+            "documents:    0 read back, 0 refused, 60 patched, 0 patches refused, {size} bytes the \
+             largest written out"
+        )
+    };
+    let large_patching = ["CONTROL", "LARGE", "PATCHES"];
+
+    let (said, invalid) = run_the_guards_as(
+        "y-under",
+        &large_patching,
+        &a_channel_report_with(&documents(floor - 1)),
+        0,
+    );
+    assert!(
+        invalid && said.contains("under the floor"),
+        "Y wrote its patch out one byte under the floor and kept its good name: «{said}»"
+    );
+
+    let (said, _) = run_the_guards_as(
+        "y-at",
+        &large_patching,
+        &a_channel_report_with(&documents(floor)),
+        0,
+    );
+    let past_the_documents = |said: &str| said.contains("whether a strip was painted");
+    assert!(
+        past_the_documents(&said),
+        "Y at the floor did not get past the documents block: «{said}»"
+    );
+
+    let (said, _) = run_the_guards_as(
+        "x",
+        &["CONTROL", "LARGE"],
+        &a_channel_report_with(
+            "documents:    0 read back, 0 refused, 0 patched, 0 patches refused, 0 bytes the \
+             largest written out",
+        ),
+        0,
+    );
+    assert!(
+        past_the_documents(&said),
+        "X, which publishes the large document and patches nothing, was stopped: «{said}»"
+    );
+
+    let (said, invalid) = run_the_guards_as(
+        "u-at",
+        &["CONTROL", "PATCHES"],
+        &a_channel_report_with(&documents(floor)),
+        0,
+    );
+    assert!(
+        invalid && said.contains("leaked"),
+        "U wrote out a document at the floor and kept its good name: «{said}»"
+    );
+
+    let (said, invalid) = run_the_guards_as(
+        "y-no-size",
+        &large_patching,
+        &a_channel_report_with(
+            "documents:    0 read back, 0 refused, 60 patched, 0 patches refused, and nothing else",
+        ),
+        0,
+    );
+    assert!(
+        invalid && said.contains("written-out size"),
+        "a documents line with no size was read as a zero instead of being thrown away: «{said}»"
+    );
+
+    let (said, invalid) = run_the_guards_as(
+        "u-no-size",
+        &["CONTROL", "PATCHES"],
+        &a_channel_report_with(
+            "documents:    0 read back, 0 refused, 60 patched, 0 patches refused, and nothing else",
+        ),
+        0,
+    );
+    assert!(
+        invalid && said.contains("written-out size"),
+        "U's documents line with no size was read as a zero, which silences its leak guard: «{said}»"
+    );
+}
+
+/// **The large document the script builds, weighed by what the producer will send.** The check
+/// before publishing is a lower bound — the bytes minus three per newline — and only running the
+/// script's own functions can say whether the document it builds lands between the floor and the
+/// ceiling once compacted, and whether the bound it checks really sits under that compact size.
+#[test]
+fn the_large_document_lands_between_the_floor_and_the_ceiling() {
+    let from = |start: &str, end: &str| {
+        let at = MEASURE
+            .find(start)
+            .unwrap_or_else(|| panic!("no «{start}» in the script"));
+        let len = MEASURE[at..]
+            .find(end)
+            .unwrap_or_else(|| panic!("«{start}» never reaches «{end}»"));
+        &MEASURE[at..at + len]
+    };
+    let bodies = from("\ndocument_body() {", "\npublish() {");
+    let document_of = from("\ndocument_of() {", "\n}\n");
+    let build = |large: &str| {
+        let output = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!(
+                "set -eu\nBATCH=Y\nMIB=44\nLARGE={large}\n{bodies}\n{document_of}\n}}\ndocument_of 1"
+            ))
+            .env_clear()
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .output()
+            .expect("sh could not be run");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).expect("the document is text")
+    };
+    let floor = (panel_contract::MAX_BYTES / 8 * 7) as usize;
+
+    let large = build("1");
+    let compact = serde_json::to_string(
+        &serde_json::from_str::<serde_json::Value>(&large).expect("the large document is JSON"),
+    )
+    .unwrap()
+    .len();
+    let bound = large.len() - 3 * large.matches('\n').count();
+    assert!(
+        (floor..=panel_contract::MAX_BYTES as usize).contains(&compact),
+        "the large document compacts to {compact} bytes, outside [{floor}, ceiling]"
+    );
+    assert!(
+        bound <= compact && bound >= floor,
+        "the check before publishing reads {bound} bytes for a document that compacts to {compact}: \
+         it is not a lower bound that clears the floor"
+    );
+
+    let ordinary = build("");
+    assert!(
+        ordinary.len() < floor / 100,
+        "a batch that is not large builds a {} byte document",
+        ordinary.len()
+    );
 }

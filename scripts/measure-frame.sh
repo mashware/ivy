@@ -59,6 +59,21 @@
 #                    is why its report declares the largest document it wrote and why the guard below
 #                    throws the run away in both directions.
 #
+#                X = S with a document NEAR THE CONTRACT'S CEILING: the same seven lines plus
+#                    enough keyed filler lines to weigh at least 7/8 of the 256 KiB, published once a
+#                    second over the channel. It patches nothing: it is the control of Y, and it
+#                    exists because S publishes seven lines, so Y − S would be the large document
+#                    and not the patch.
+#                Y = X, and then PATCHING ONE LINE of that document with U's ops, every turn. It
+#                    is Y − X that says what a patch costs on a long panel, where U − S says it on
+#                    seven lines: the clone, the key index over every keyed line and the write-out
+#                    that weighs the result land in the CHANNEL's span, and the whole-panel
+#                    re-layout the patch forces lands in the PANEL's. Its report must declare a
+#                    written-out size at or over the floor, and a check before anything is published
+#                    withholds the witness — so the run is invalidated — when a lower bound of the
+#                    document's compact form does not reach it. X feeds no size of its own, so that check is the only
+#                    proof of X's.
+#
 #              There is NO drag batch with FOUR panes, and that is not an oversight: the gesture's
 #              cycle only returns the layout to where it started **with two**. With more, inserting
 #              splits the destination's weight and removing spreads it among those left, so weight
@@ -382,6 +397,12 @@ rm -f "$WITNESS"
 # come from, not how many: `TABS` and `PANES` still describe the batch's layout, and they are the
 # ones seeded into the file and the ones the report is checked against.
 RESTORES=0
+# **Every knob a row of the table can set is cleared here and not left to the caller**, because the
+# seeding and the guards read them from this shell: a knob exported by whoever measures reaches every
+# batch, and the guards read the same variable, so they judge the leaked load as the batch's own. A
+# `PATCHES=1` in the environment runs X as Y and publishes it under X's name; a `LARGE=1` pads S and
+# the file batches to the ceiling, and hides U and V from the leak guard that only fires without it.
+ACTIONS= CONTROL= HEADER= READS= PATCHES= LINKS= LARGE= CJK= EMOJI=
 case "$BATCH" in
     A|B|C|D) TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console ;;
     F)       TABS=2; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console ;;   # the background one, still: none of them dumps
@@ -401,8 +422,10 @@ case "$BATCH" in
     T)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; HEADER=1 ;;        # two, and the only one that PAINTS THE STRIP over each console: its control is C
     U)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; CONTROL=1; PATCHES=1 ;; # two, and the only one that PATCHES the document over the channel: its control is S (and S, U and V publish one field the file batches do not — see `document_of`)
     V)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; CONTROL=1; READS=1 ;;  # two, and the only one that PROVES THE OFF-FRAME READ PATH RAN: its control is S, but their frame delta is not read latency
+    X)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; CONTROL=1; LARGE=1 ;;            # S, with a document near the ceiling: the control of Y
+    Y)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; CONTROL=1; LARGE=1; PATCHES=1 ;; # X, and patching it with U's ops: its control is X
     W)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=100000; GESTURE=link; LINKS=1 ;; # two, and OPENING links of all three sources with the desktop hand-off suppressed: its nearest is C, but its consoles also rewrite two link rows and its panel paints a link label, so W − C is not the gesture alone
-    *) echo "unknown batch «$BATCH»: use A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V or W" >&2; exit 2 ;;
+    *) echo "unknown batch «$BATCH»: use A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X or Y" >&2; exit 2 ;;
 esac
 # **Why the dragging batch asks for a hundred thousand gestures**: the number is deliberately above
 # what fits, because what is needed is for the gesture to last **from start to finish**. A batch that
@@ -610,6 +633,14 @@ document_body() {  # document_body <which of the consoles> <turn> [the key on th
     if [ "${LINKS:-}" = 1 ]; then
         panel_link=',"link":"https://example.test/panel"'
     fi
+    # **Only X and Y carry the filler**, read from the batch's own shell like $ACTIONS. It goes
+    # **after** the seven lines so the rows on screen are the ones every other channel batch paints,
+    # and it is many lines of a working panel's length and never one long one: a single line near the
+    # ceiling measures the painter's layout (65.8 ms the first time) instead of the patch.
+    filler=''
+    if [ "${LARGE:-}" = 1 ]; then
+        filler=$(large_filler)
+    fi
     cat <<JSON
 {"v":1,"stale_after_minutes":600,"attention":"$attention",$actions"lines":[
   {"text":"Batch $BATCH · publication $2","style":"title"},
@@ -618,9 +649,25 @@ document_body() {  # document_body <which of the consoles> <turn> [the key on th
   {"ref":"panel","text":"regime $BATCH — this is what is being measured","mark":"info"},
   {$note_key"ref":"note","text":"the layout is redone on every good re-read","mark":"info"},
   "",
-  {"text":"six lines and a warning: the size of a real working panel","mark":"done"$panel_link}
+  {"text":"six lines and a warning: the size of a real working panel","mark":"done"$panel_link}$filler
 ]}
 JSON
+}
+
+# **How many filler lines, and the floor they have to reach.** The floor is 7/8 of the contract's
+# `MAX_BYTES` (262 144), written here as a literal because this is shell, and held against the
+# constant by `crates/app/tests/batches.rs` so a ceiling that moves cannot silently move «near» with
+# it. The count is sized so the compact document lands between the floor and the ceiling with room
+# for the patch's write-out, which is the pane's own `serialize` and not these bytes.
+LARGE_LINES=1590
+LARGE_FLOOR=229376
+large_filler() {  # every line keyed, so the index a patch builds is at its widest
+    fill_n=1
+    while [ "$fill_n" -le "$LARGE_LINES" ]; do
+        printf ',\n  {"key":"fill-%d","ref":"%d","text":"%s","mark":"done"}' "$fill_n" "$fill_n" \
+            "a step of a long plan, of the length a working panel writes one: what it did, where, and what is next"
+        fill_n=$((fill_n + 1))
+    done
 }
 
 publish() {  # publish <directory> <n> <which of the consoles>
@@ -699,11 +746,38 @@ publish_over_the_channel() {  # publish_over_the_channel <directories>
     verb=publish
     [ "${READS:-}" = 1 ] && verb=read
     [ "${PATCHES:-}" = 1 ] && verb=patch
+    # **Every document is weighed before any is published**, so a failure leaves no publisher holding
+    # a pane for the hour it was launched for. The floor is checked on a lower bound of the compact
+    # form the producer actually sends: the bytes minus three per newline, because each newline of
+    # this body is followed by at most two spaces of indentation and the wire carries neither.
+    # Stripping every space instead would also strip the ones inside the texts — about an eighth of
+    # the document, enough to fall under the floor. X feeds no written-out size of its own — only
+    # reads and patches do — so this is the only proof that the control is as large as Y. A failure
+    # returns before the witness is written, which is what invalidates the run.
+    if [ "${LARGE:-}" = 1 ]; then
+        for d in $1; do
+            which=$((which + 1))
+            document=$(document_of "$which")
+            bytes=$(printf '%s' "$document" | wc -c)
+            lines=$(printf '%s' "$document" | wc -l)
+            compact=$((bytes - 3 * lines))
+            if [ "$compact" -lt "$LARGE_FLOOR" ]; then
+                echo "the large document weighs at least $compact bytes on the wire, under the floor \
+of $LARGE_FLOOR: this batch would publish a medium panel under the ceiling's name" >&2
+                return 1
+            fi
+        done
+        which=0
+    fi
     for d in $1; do
         which=$((which + 1))
-        "$PUBLISHER" \
+        # **On standard input and not as an argument**: Linux refuses a single argument longer than
+        # `MAX_ARG_STRLEN` (32 pages, 128 KiB with 4 KiB pages), and X's document is about twice that.
+        # A here-document reaches `cat` on its standard input, and a pipe carries it on, so the
+        # document is never an argument of anything and that limit never applies.
+        document_of "$which" | "$PUBLISHER" \
             "$d" "${d##*agent-terminal-}" "bench" \
-            3600 1000 "$(document_of "$which")" "$verb" "$OPS" >&2 &
+            3600 1000 "$verb" "$OPS" >&2 &
         publishers="$publishers $!"
     done
 
@@ -790,7 +864,7 @@ seed() {
 case "$BATCH" in
     A) : ;;                       # no panel: nobody publishes anything
     B) seed quiet & ;;
-    C|D|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W) seed talkative & ;;
+    C|D|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y) seed talkative & ;;
 esac
 
 echo "batch $BATCH · $TABS tab(s) of $PANES · $DUMPING of $DIRECTORIES consoles dumping $MIB MiB · window $WINDOW_SIZE · do not touch the machine until it closes" >&2
@@ -1053,6 +1127,7 @@ else
     LARGEST_SERIALIZED=$(printf '%s' "$DOCUMENTS_LINE" | sed -n 's/.*, \([0-9]*\) bytes the largest written out$/\1/p')
     READ_BACK=${READ_BACK:-0}
     READ_REFUSED=${READ_REFUSED:-0}
+    LARGEST_CAPTURED=$LARGEST_SERIALIZED
     LARGEST_SERIALIZED=${LARGEST_SERIALIZED:-0}
     if [ "${READS:-}" = 1 ] && [ "$READ_BACK" = 0 ]; then
         invalidate "this batch reads the document back over the control channel and the window \
@@ -1106,6 +1181,29 @@ what it claims to measure"
         invalidate "this batch had $PATCHES_REFUSED of its patches refused: a refusal skips the \
 write-out and the install, so what the run would publish as the cost of patching is the cost of \
 stopping half way through one"
+    fi
+
+    # **The large document, read in both directions on the size the pane itself wrote out.** Only a
+    # read or a patch feeds that size, so the batch that proves it is Y — the patch that applied was
+    # at that size, as the pane serialized it — and the batches that can betray a leak are U and V.
+    # S, X and the file batches feed nothing, which is why the batch table is held by the suite
+    # instead. **An empty capture is invalidated here rather than read as the zero it defaults to**:
+    # zero would pass the mirror and fail Y, so a rewording would look like Y being small.
+    if [ "${LARGE:-}" = 1 ] || [ "${PATCHES:-}" = 1 ] || [ "${READS:-}" = 1 ]; then
+        if [ -z "$LARGEST_CAPTURED" ]; then
+            invalidate "the «documents:» line does not carry the written-out size where this script \
+reads it: «$DOCUMENTS_LINE». Without it the large batch cannot prove its size and a leak into U or V \
+cannot be seen"
+        fi
+    fi
+    if [ "${LARGE:-}" = 1 ] && [ "${PATCHES:-}" = 1 ] && [ "$LARGEST_SERIALIZED" -lt "$LARGE_FLOOR" ]; then
+        invalidate "this batch patches a document near the ceiling and the largest it wrote out was \
+$LARGEST_SERIALIZED bytes, under the floor of $LARGE_FLOOR: what it would publish as the cost of a \
+patch at the ceiling is the cost of one on a smaller panel"
+    fi
+    if [ "${LARGE:-}" != 1 ] && [ "$LARGEST_SERIALIZED" -ge "$LARGE_FLOOR" ]; then
+        invalidate "this batch publishes no large document and yet wrote one out of \
+$LARGEST_SERIALIZED bytes: the large load leaked into it, so its spans are not the ones it claims"
     fi
 fi
 

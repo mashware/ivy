@@ -4,10 +4,15 @@
 //! batch publishes: what that batch measures is the path that does *not* touch the disk, so
 //! something has to hold a connection open and publish down it while the window is being measured.
 //!
-//! **The document comes in as an argument rather than being written here**, and that is the same
+//! **The document comes in on standard input rather than being written here**, and that is the same
 //! rule the script states for its own batch table: a batch is defined in one place. What this adds
 //! is the turn number, substituted into the literal `{n}`, so a run's publications are told apart on
 //! screen exactly as the file-seeded ones are.
+//!
+//! **Standard input and not an argument**, because Linux refuses any single argument longer than
+//! `MAX_ARG_STRLEN` — 32 pages, 128 KiB with 4 KiB pages — with `E2BIG`, and the large pair
+//! publishes a panel near the contract's 256 KiB ceiling, about twice that. Every channel batch
+//! takes this one path, so the large pair and its neighbours load their document the same way.
 //!
 //! **And it reads the document back, or patches it, where the batch asks it to**, which is the other
 //! half of the same argument: those batches measure what answering each of those verbs costs, and
@@ -22,13 +27,13 @@
 //! the same document on the same cadence and then asking makes each of them its control **plus one
 //! verb**, which is the only shape whose difference is the thing being measured.
 //!
-//! **The patching batch's ops come in as an argument, like its document**, and for the same reason:
+//! **The patching batch's ops come in as an argument**, and for the reason the document is handed in:
 //! a load written here is a load the batch table does not declare, and the table is where somebody
 //! reads what a run did.
 //!
 //! ```text
-//! publish <directory> <identifier> <source> <how many> <every so many ms> <document>
-//!         [publish|read|patch] [the ops, when the verb is patch]
+//! publish <directory> <identifier> <source> <how many> <every so many ms>
+//!         [publish|read|patch] [the ops, when the verb is patch]   < document
 //! ```
 
 use std::time::Duration;
@@ -36,7 +41,7 @@ use std::time::Duration;
 use panel_control::{Answered, Producer};
 
 const USAGE: &str = "publish <directory> <identifier> <source> <how many> <every so many ms> \
-                     <document> [publish|read|patch] [the ops, when the verb is patch]";
+                     [publish|read|patch] [the ops, when the verb is patch] < document";
 
 /// What this process does to the pane after it has published, every turn.
 enum Then {
@@ -47,19 +52,15 @@ enum Then {
 
 fn main() {
     let asked: Vec<String> = std::env::args().skip(1).collect();
-    let ([dir, id, source, how_many, every_ms, document], verb, ops) = match &asked[..] {
-        [dir, id, source, how_many, every_ms, document] => (
-            [dir, id, source, how_many, every_ms, document],
-            "publish",
-            None,
-        ),
-        [dir, id, source, how_many, every_ms, document, verb] => (
-            [dir, id, source, how_many, every_ms, document],
-            verb.as_str(),
-            None,
-        ),
-        [dir, id, source, how_many, every_ms, document, verb, ops] => (
-            [dir, id, source, how_many, every_ms, document],
+    let ([dir, id, source, how_many, every_ms], verb, ops) = match &asked[..] {
+        [dir, id, source, how_many, every_ms] => {
+            ([dir, id, source, how_many, every_ms], "publish", None)
+        }
+        [dir, id, source, how_many, every_ms, verb] => {
+            ([dir, id, source, how_many, every_ms], verb.as_str(), None)
+        }
+        [dir, id, source, how_many, every_ms, verb, ops] => (
+            [dir, id, source, how_many, every_ms],
             verb.as_str(),
             Some(ops.clone()),
         ),
@@ -88,6 +89,18 @@ fn main() {
             std::process::exit(2);
         }
     };
+    let mut document = String::new();
+    if let Err(failure) = std::io::Read::read_to_string(&mut std::io::stdin(), &mut document) {
+        eprintln!("publish: the document could not be read from standard input ({failure})");
+        std::process::exit(2);
+    }
+    // **An empty document ends the process here**, as empty ops do above, and with the usage in the
+    // message: a caller that forgot the pipe would otherwise reach the first publication, fail to
+    // build it, and end with a line about the request instead of about the missing input.
+    if document.trim().is_empty() {
+        eprintln!("publish: nothing arrived on standard input to publish\n{USAGE}");
+        std::process::exit(2);
+    }
     let how_many: usize = how_many.parse().expect("how many is a number");
     let every = Duration::from_millis(every_ms.parse().expect("the interval is a number"));
 

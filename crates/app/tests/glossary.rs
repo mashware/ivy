@@ -1163,9 +1163,12 @@ const NOT_OURS: &[&str] = &[
     // **The kernel's own names for what a command line may cost.** `execve` is where a request's
     // `program` and `args` end up, and `E2BIG` is what it answers when the argument list is past what
     // the system takes — cited where the wire bounds them, and `ARG_MAX` where that bound is sized.
+    // `MAX_ARG_STRLEN` is the ceiling on ONE argument, cited where the bench publisher explains why
+    // its document arrives on standard input.
     "execve",
     "E2BIG",
     "ARG_MAX",
+    "MAX_ARG_STRLEN",
     // The batch letter the publisher example is written for. A measurement batch is named in
     // `measure-frame.sh`, never in Rust.
     "S",

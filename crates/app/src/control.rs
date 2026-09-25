@@ -1187,6 +1187,76 @@ mod tests {
         std::hint::black_box(ceiling_state);
     }
 
+    /// Manual release-mode measurement for D47: what one patch costs on the panel the bench's `U`
+    /// patches and on the one its `Y` patches.
+    ///
+    /// **It exists because the bench cannot say it per patch.** The channel's series is recorded only
+    /// in frames that carried console output, so a patch applied in a frame without any is paid and
+    /// never averaged, and `Y − X` per frame is all the report can give. This times the verb itself —
+    /// the clone, the key index, the write-out that weighs the result and the install — with the
+    /// documents and the ops the two batches send. It also drops the replaced panel inside the timed
+    /// loop, which in the window may happen later, on whoever held the last reference. **The re-layout the patch forces is not in here**: it is painting,
+    /// and it lands in the panel's span on the next pass. Ignored for the reason its sibling gives.
+    #[test]
+    #[ignore = "manual release-mode latency measurement"]
+    fn measure_a_patch_at_the_ceiling() {
+        const OPS: &str = r#"[{"op":"replace","key":"note","line":{"key":"note","ref":"note","text":"the layout is redone on every good re-read","mark":"info"}},
+            {"op":"set","field":"stale_after_minutes","value":600}]"#;
+        let text = "a step of a long plan, of the length a working panel writes one: what it did, \
+                    where, and what is next";
+        let body = |filler: usize| {
+            let mut lines = vec![
+                r#"{"text":"Batch Y · publication 1","style":"title"}"#.to_owned(),
+                r#""""#.to_owned(),
+                r#"{"ref":"load","text":"44 MiB per console, TUI-style dump","mark":"current"}"#
+                    .to_owned(),
+                r#"{"ref":"panel","text":"regime Y — this is what is being measured","mark":"info"}"#
+                    .to_owned(),
+                r#"{"key":"note","ref":"note","text":"the layout is redone on every good re-read","mark":"info"}"#
+                    .to_owned(),
+                r#""""#.to_owned(),
+                r#"{"text":"six lines and a warning: the size of a real working panel","mark":"done"}"#
+                    .to_owned(),
+            ];
+            lines.extend((1..=filler).map(|n| {
+                format!(r#"{{"key":"fill-{n}","ref":"{n}","text":"{text}","mark":"done"}}"#)
+            }));
+            format!(
+                r#"{{"v":1,"stale_after_minutes":600,"attention":"wait","lines":[{}]}}"#,
+                lines.join(",")
+            )
+        };
+        let ops = panel_contract::parse_ops(&serde_json::from_str(OPS).expect("the ops are JSON"))
+            .expect("the bench's ops parse");
+
+        for (name, filler, rounds) in [("U's", 0, 20_000), ("Y's", 1_590, 500)] {
+            let mut state = PanelState::default();
+            let panel =
+                panel_contract::parse_document(&body(filler)).expect("the measured panel parses");
+            state
+                .deliver(1, "measurement", panel, SystemTime::now())
+                .expect("install the measured panel");
+            let started = Instant::now();
+            let mut written = 0;
+            for _ in 0..rounds {
+                written = std::hint::black_box(
+                    state
+                        .patch(1, &ops, SystemTime::now())
+                        .expect("the measured patch applies"),
+                );
+            }
+            let each = started.elapsed() / rounds;
+            // The numbers are only worth printing for the document class they claim.
+            if filler > 0 {
+                assert!(
+                    written as u64 >= panel_contract::MAX_BYTES / 8 * 7,
+                    "Y's panel was written out at {written} bytes, under the bench's floor"
+                );
+            }
+            println!("{name} panel: {written} bytes written out, {each:?} per patch");
+        }
+    }
+
     /// Waits for a document without running the interface-owned apply point at all.
     fn answered_without_a_pass(asking: &Asking) -> Answered {
         asking
@@ -1916,6 +1986,60 @@ mod tests {
             driven.document_as_a_producer_reads_it(&session),
             before,
             "a document over the ceiling was installed anyway"
+        );
+    }
+
+    /// **The ceiling's other side**: a patch whose result is near the ceiling and under it applies.
+    ///
+    /// Until this, the ceiling was only ever reached through the refusal above, so the path that
+    /// clones, indexes and writes out a document of that size had never run. **Every line is keyed**,
+    /// which is the widest index a patch can build, and the document is held to at least 7/8 of the
+    /// ceiling by assertion rather than by arithmetic, so a shape that serialized smaller would fail
+    /// here instead of quietly testing a medium panel. The floor is the one the bench's large pair
+    /// uses.
+    #[test]
+    fn a_patch_near_the_ceiling_applies_and_is_counted_at_that_size() {
+        let floor = (panel_contract::MAX_BYTES / 8 * 7) as usize;
+        let text = "a step of a long plan, of the length a working panel writes one: what it did, \
+                    where, and what is next";
+        let lines: Vec<String> = (1..=1850)
+            .map(|n| format!(r#"{{"key":"fill-{n}","text":"{text}"}}"#))
+            .collect();
+        let mut driven = a_driven_pane();
+        let session =
+            driven.session_holding("flow", &format!(r#"{{"lines":[{}]}}"#, lines.join(",")));
+
+        let patched = driven.ask(
+            &session,
+            Verb::Patch(
+                r#"[{"op":"replace","key":"fill-925","line":{"key":"fill-925","text":"patched at the ceiling"}}]"#
+                    .to_owned(),
+            ),
+        );
+
+        assert!(
+            matches!(patched, Answered::Ok),
+            "a patch under the ceiling was not applied: {patched:?}"
+        );
+        // **Counted before anything is read back**, because a read feeds the same largest size: read
+        // first, and the number below would be the read's and prove nothing about the patch.
+        let counted = driven.control.did();
+        assert_eq!(counted.patched, 1);
+        assert_eq!(counted.patches_refused, 0);
+        let read_back = driven.document_as_a_producer_reads_it(&session);
+        assert!(
+            read_back.contains("patched at the ceiling"),
+            "the pane answered ok and kept the line the patch replaced"
+        );
+        assert!(
+            (floor..=panel_contract::MAX_BYTES as usize).contains(&read_back.len()),
+            "the document is not near the ceiling: {} bytes",
+            read_back.len()
+        );
+        assert_eq!(
+            counted.largest_serialized,
+            read_back.len(),
+            "the size the patch wrote out is not the document it left behind"
         );
     }
 

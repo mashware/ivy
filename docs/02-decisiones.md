@@ -6497,6 +6497,45 @@ numbers it reads are pulled out of the report by the words beside them**, so an 
 invalidated rather than read as a zero, and a second guard holds those words against what the report
 writes.
 
+**Measured at the ceiling, 25 September 2026** (#248). Until then the ceiling had only been reached
+through a refusal and the largest document the bench ever patched was 457 bytes, so «it scales with
+the document» was a sentence with no number behind it. Two figures now stand, taken on the same
+machine the same day, and they are two because the bench can only give one of them.
+
+- **Per patch — the verb itself.** `measure_a_patch_at_the_ceiling`, an ignored release-mode test in
+  `crates/app/src/control.rs`, times `PanelState::patch` with the ops `U` sends over the two
+  documents the bench publishes. Three runs: **4.13–4.68 µs** on `U`'s panel (456 bytes written out)
+  and **1.823–1.835 ms** on `Y`'s (249 462 bytes, 1 597 lines and 1 591 of them keyed) — about
+  **four hundred times** more for about five hundred and fifty times the bytes, so the cost follows
+  the document and not the patch, as the section above said. At 60 Hz that is **eleven per cent of
+  a frame** for one patch, before the re-layout it forces, which is painting and is not in this
+  figure. It does include dropping the panel the patch replaced, which in the window can happen
+  later, on whoever held the last reference to it.
+- **Per frame — what the bench can see.** Batches `X` (a document of 249 464 compact bytes published
+  over the channel once a second) and `Y` (`X`, then `U`'s ops every turn), two runs of each, which
+  `compare` says can be averaged. The channel's span goes from **4.51–5.62 µs** in `X` to
+  **25.0–35.6 µs** in `Y`, and the panel's from **63–98 µs** to **101–124 µs**; the second is where the
+  whole-panel re-layout a patch forces lands, and the ranges do not overlap. Against eight lines the
+  same verb cost +347–385 ns in the channel's span (`U − S`), so the ceiling moves it by fifty to
+  ninety times per frame too.
+
+**Why the per-frame figure cannot be turned into a per-patch one**, which is what the design of #248
+first planned: the channel's series is recorded **only in frames that carried console output**, and a
+publication or a patch can land in a frame that carried none — `Y` ran about 510 frames for 358 with
+output. What those frames spent is subtracted from the rest of the frame and averaged nowhere, so
+`(mean × frames) ÷ patches` undercounts by an amount the report does not state. **And the two
+batches did not publish the same number of times**: `X`'s runs applied 28 and 44 documents, `Y`'s 56
+each, so its per-frame means carry more publications as well as the patches. Both are why the per
+patch figure comes from the release-mode test and the bench is quoted per frame only — the same split
+**D49** made for the read.
+
+**Two things the large pair needs that nothing else in the bench did.** The document travels to the
+publisher on standard input, because Linux refuses a single argument longer than `MAX_ARG_STRLEN` —
+128 KiB with 4 KiB pages — and every channel batch takes that path so the pair and its neighbours load
+their document the same way. And `X` feeds no written-out size of its own — only reads and patches
+do — so its size is checked before anything is published, on a lower bound of the compact form, and
+the suite holds the batch table so that `X` is `Y` minus the patch and nobody else carries the filler.
+
 **What was discarded, and why.**
 
 | Discarded | Why |
@@ -6520,6 +6559,10 @@ writes.
 | Letting an insert carry a key the document already has | It makes that key name two lines, so every later op addressing it is refused for the life of the hold and the only way out is republishing the whole document — the cost this verb exists to remove. Reached by an ordinary copy-paste, and by retrying a patch whose answer timed out |
 | One sentence for «nothing published» and «the file rules this panel» | **The design's premise was refuted by its own sibling verb.** It argued the two cannot be told apart from outside, and a read of the same pane tells them apart, answering *nothing has been published on this console yet*. A producer that had just read its document back would have been told, one request later, that the document was the file's |
 | Leaving the ops unbounded on the wire | `MAX_REQUEST` is the document's ceiling plus an envelope sized for fixed keys and a name. A patch rewriting sixty keyed lines of a near-ceiling document exceeds it — and that is `Unrecoverable`, so the connection ends and the hold with it, and the panel falls back to its file. The bound is on the encoded bytes, the same shape `source` already has, and the refusal leaves the connection alive |
+| Deriving the per-patch cost from `Y − X`'s per-frame means | The channel's series only counts frames with console output, and a patch can land in one without; the undercount is not in the report. The per-patch figure is timed on the verb itself, in release, with the bench's own documents and ops |
+| Measuring the large patch against `S` | `S` publishes seven lines, so `Y − S` would be the large document and not the patch. `X` publishes the same document as `Y` and nothing else changes between them, which the suite holds on the batch table |
+| One long line to reach the ceiling | It measures the painter's layout — 65.8 ms the first time for a line that size — instead of the patch. The large document is 1 590 lines of a working panel's length, every one keyed so the index a patch builds is at its widest |
+| Passing the large document as an argument | Linux refuses it with `E2BIG`: one argument may not exceed `MAX_ARG_STRLEN`, and the document is about twice that |
 
 ---
 
