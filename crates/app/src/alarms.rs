@@ -174,7 +174,7 @@ impl Window {
         // **And this changes how many frames a measurement run has**, so it goes declared in the
         // annex: a window that wakes up twice a second while it is being dragged does not have the
         // same number of frames as one that only responds to input.
-        if let Some(due) = self.save_due {
+        if let Some(due) = self.persistence.save_due {
             ctx.request_repaint_after(due.saturating_duration_since(Instant::now()));
         }
 

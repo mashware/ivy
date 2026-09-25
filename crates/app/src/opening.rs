@@ -309,8 +309,6 @@ impl Window {
             reading_settings: measure::ReadingSettings::default(),
             chosen_font: measure::ChoosingTheFont::default(),
             last_seen: None,
-            last_written: None,
-            save_due: None,
             mirror_this_frame: std::time::Duration::ZERO,
             saving: measure::Saving::default(),
             // **No input at all, and whoever measures is the one who puts it there.** It used to be

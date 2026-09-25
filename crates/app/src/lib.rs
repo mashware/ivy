@@ -1153,16 +1153,6 @@ struct Window {
     /// non-writable directory would leave the difference in place and **the window would never go
     /// to sleep**.
     last_seen: Option<session::StoredDocument>,
-    /// The last thing that reached the disk **for real**. It is what decides whether there is
-    /// anything to write, so a failure **is retried with the next change** without saving the error
-    /// or inventing any wait.
-    last_written: Option<session::StoredDocument>,
-    /// When the deadline falls due, counted from the **first** unwritten change.
-    ///
-    /// **A cap and not a postponement**, and the difference is what makes the milestone work:
-    /// rearming on every change, a ten-second drag would not write **even once** —every frame would
-    /// push the deadline along—, and what the ticket promises is to lose half a second at most.
-    save_due: Option<Instant>,
     /// What it has cost to compare the mirror in this frame, **adding up its passes**.
     ///
     /// egui repeats the UI pass, so recording per pass would make the mean describe «per pass»
@@ -6160,8 +6150,6 @@ mod tests {
             // gets; the batch that goes without says so by building it the other way.
             headers: header::Headers::PAINTED,
             last_seen: None,
-            last_written: None,
-            save_due: None,
             mirror_this_frame: std::time::Duration::ZERO,
             saving: measure::Saving::default(),
             // A test window injects no gestures: its own are sent by the test through the test
@@ -21310,7 +21298,7 @@ mod tests {
         // changes the layout, so it arms that deadline — on purpose, and declared in D16. This test
         // is about the panel's warning: without removing it, it would measure two things and would
         // not tell which of the two did the waking.
-        window.save_due = None;
+        window.persistence.save_due = None;
 
         // The context is left at rest and only the half that arms the alarm is run.
         let clean = egui::Context::default();
@@ -22562,13 +22550,16 @@ mod tests {
 
         window.active_mut().move_divider(0, 0.3);
         window.check_whether_the_layout_moved();
-        let first = window.save_due.expect("the first change arms the deadline");
+        let first = window
+            .persistence
+            .save_due
+            .expect("the first change arms the deadline");
 
         window.active_mut().move_divider(0, 0.6);
         window.check_whether_the_layout_moved();
 
         assert_eq!(
-            window.save_due,
+            window.persistence.save_due,
             Some(first),
             "the second change postponed the deadline instead of leaving it"
         );
@@ -22582,7 +22573,7 @@ mod tests {
 
         window.check_whether_the_layout_moved();
 
-        assert_eq!(window.save_due, None);
+        assert_eq!(window.persistence.save_due, None);
     }
 
     #[test]
@@ -22593,7 +22584,7 @@ mod tests {
         window.check_whether_the_layout_moved();
         // The deadline is set in the past instead of really waiting half a second: what is being
         // tested is what happens **on expiry**, not the clock.
-        window.save_due = Some(Instant::now() - SAVE_DELAY);
+        window.persistence.save_due = Some(Instant::now() - SAVE_DELAY);
         window.save_if_due();
 
         let read_back = session::read(&path).expect("what was saved is read back");
@@ -22604,7 +22595,7 @@ mod tests {
         );
         assert_eq!(window.saving.writes(), 1);
         // And the deadline is consumed: if it stayed set, it would write on every frame.
-        assert_eq!(window.save_due, None);
+        assert_eq!(window.persistence.save_due, None);
 
         let _ = std::fs::remove_dir_all(&base);
     }
@@ -22618,11 +22609,11 @@ mod tests {
 
         window.active_mut().move_divider(0, 0.25);
         window.check_whether_the_layout_moved();
-        window.save_due = Some(Instant::now() - SAVE_DELAY);
+        window.persistence.save_due = Some(Instant::now() - SAVE_DELAY);
         window.save_if_due();
 
         // Another expired deadline with no change in between.
-        window.save_due = Some(Instant::now() - SAVE_DELAY);
+        window.persistence.save_due = Some(Instant::now() - SAVE_DELAY);
         window.save_if_due();
 
         assert_eq!(
@@ -22657,7 +22648,7 @@ mod tests {
 
         window.active_mut().move_divider(0, 0.25);
         window.check_whether_the_layout_moved();
-        window.save_due = Some(Instant::now() - SAVE_DELAY);
+        window.persistence.save_due = Some(Instant::now() - SAVE_DELAY);
         window.save_if_due();
 
         assert_eq!(
@@ -22666,14 +22657,14 @@ mod tests {
             "something that never reached the disk was counted as a write"
         );
         assert!(
-            window.last_written.is_none(),
+            window.persistence.last_written.is_none(),
             "what failed was taken as written, so the next change would not retry it"
         );
 
         // And the next change tries again.
         window.active_mut().move_divider(0, 0.6);
         window.check_whether_the_layout_moved();
-        window.save_due = Some(Instant::now() - SAVE_DELAY);
+        window.persistence.save_due = Some(Instant::now() - SAVE_DELAY);
         window.save_if_due();
         assert_eq!(
             window.saving.attempts(),
@@ -22705,7 +22696,7 @@ mod tests {
             .forbid_overwrite("the layout that was saved could not be opened");
         window.active_mut().move_divider(0, 0.25);
         window.check_whether_the_layout_moved();
-        window.save_due = Some(Instant::now() - SAVE_DELAY);
+        window.persistence.save_due = Some(Instant::now() - SAVE_DELAY);
         window.save_if_due();
 
         assert_eq!(
@@ -22725,16 +22716,16 @@ mod tests {
         for ratio in [0.25, 0.6, 0.4] {
             window.active_mut().move_divider(0, ratio);
             window.check_whether_the_layout_moved();
-            if window.save_due.is_some() {
-                window.save_due = Some(Instant::now() - SAVE_DELAY);
+            if window.persistence.save_due.is_some() {
+                window.persistence.save_due = Some(Instant::now() - SAVE_DELAY);
             }
             window.save_if_due();
         }
-        let after_the_refusal = window.save_due;
+        let after_the_refusal = window.persistence.save_due;
         window.active_mut().move_divider(0, 0.7);
         window.check_whether_the_layout_moved();
         assert_eq!(
-            (after_the_refusal, window.save_due),
+            (after_the_refusal, window.persistence.save_due),
             (None, None),
             "a session that can no longer write still armed a deadline, which wakes the window for \
              an attempt that cannot succeed"
@@ -22803,7 +22794,7 @@ mod tests {
                 },
             }],
         });
-        window.save_due = Some(Instant::now() - SAVE_DELAY);
+        window.persistence.save_due = Some(Instant::now() - SAVE_DELAY);
         window.save_if_due();
 
         assert!(
@@ -22857,7 +22848,7 @@ mod tests {
         );
         assert!(!path.exists(), "the file appeared ahead of time");
         assert!(
-            window.save_due.is_some(),
+            window.persistence.save_due.is_some(),
             "the deadline was consumed without having expired, so it will not try again"
         );
 
@@ -22921,7 +22912,7 @@ mod tests {
         window.check_whether_the_layout_moved();
 
         assert_eq!(
-            window.save_due, None,
+            window.persistence.save_due, None,
             "a freshly opened window arms a deadline without anybody having touched anything"
         );
     }
@@ -22936,7 +22927,7 @@ mod tests {
         let (mut window, base, _) = a_window_that_saves("descuento");
         window.active_mut().move_divider(0, 0.25);
         window.check_whether_the_layout_moved();
-        window.save_due = Some(Instant::now() - SAVE_DELAY);
+        window.persistence.save_due = Some(Instant::now() - SAVE_DELAY);
 
         window.save_if_due();
 
@@ -22982,11 +22973,11 @@ mod tests {
         let (mut window, base, _) = a_window_that_saves("nothing-new");
         window.active_mut().move_divider(0, 0.25);
         window.check_whether_the_layout_moved();
-        window.save_due = Some(Instant::now() - SAVE_DELAY);
+        window.persistence.save_due = Some(Instant::now() - SAVE_DELAY);
         window.save_if_due();
         // It is already written; the deadline expires again without anything having changed.
         window.mirror_this_frame = std::time::Duration::ZERO;
-        window.save_due = Some(Instant::now() - SAVE_DELAY);
+        window.persistence.save_due = Some(Instant::now() - SAVE_DELAY);
 
         window.save_if_due();
 

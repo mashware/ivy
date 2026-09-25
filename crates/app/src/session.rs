@@ -702,14 +702,15 @@ pub(crate) const SAVE_DELAY: Duration = Duration::from_millis(500);
 ///
 /// **It is not a file and that is why it is not named one.** It has no descriptor, opens nothing and
 /// survives every read and write; what it holds is what lasts **until the application closes**: the veto
-/// of a newer version, the reasons already warned about, and the count of attempts. With that data in
+/// of a newer version, the reasons already warned about, the count of attempts, the deadline of the
+/// change still pending and the last document that reached the disk. With that data in
 /// the parameters of a free function, the caller would have to carry it —and that is exactly the kind of
 /// invariant this module refuses to leave in the memory of whoever writes.
 ///
 /// **And hence the rule for whoever uses it: the one that loads at startup and the one that saves
 /// afterwards have to be THE SAME.** Creating a second one mid-session **loses the veto**, and losing
 /// the veto means overwriting the layout of a newer version, which is the exact damage the format
-/// version exists to avoid.
+/// version exists to avoid. It also drops the change still waiting for its deadline.
 pub struct Persistence {
     path: Option<PathBuf>,
     /// The version found on disk that prevents overwriting it.
@@ -752,6 +753,19 @@ pub struct Persistence {
     /// them would skip the first attempt too — and that attempt is the one that says the line, and
     /// the one the measurement script demands to see in a batch, where writing is always forbidden.
     refused_for_good: bool,
+    /// The last thing that reached the disk **for real**. It is what decides whether there is
+    /// anything to write, so a failure **is retried with the next change** without saving the error
+    /// or inventing any wait.
+    pub(crate) last_written: Option<StoredDocument>,
+    /// When the deadline falls due, counted from the **first** unwritten change.
+    ///
+    /// **A cap and not a postponement**, and the difference is what makes the milestone work:
+    /// rearming on every change, a ten-second drag would not write **even once** —every frame would
+    /// push the deadline along—, and what the ticket promises is to lose half a second at most.
+    ///
+    /// **`pub(crate)` for the alarm that wakes the window** (`alarms.rs`) **and for the saving
+    /// tests**, which expire it by hand instead of waiting half a second.
+    pub(crate) save_due: Option<Instant>,
 }
 
 impl Persistence {
@@ -770,6 +784,8 @@ impl Persistence {
             attempts: 0,
             load_time: None,
             refused_for_good: false,
+            last_written: None,
+            save_due: None,
         }
     }
 
@@ -1054,8 +1070,8 @@ impl crate::Window {
             // be written. **And never for a session that can no longer write**: a deadline it arms
             // wakes the window for an attempt that cannot succeed, and the copy, comparison and
             // validation that attempt pays.
-            if self.save_due.is_none() && !self.persistence.will_never_write() {
-                self.save_due = Some(Instant::now() + SAVE_DELAY);
+            if self.persistence.save_due.is_none() && !self.persistence.will_never_write() {
+                self.persistence.save_due = Some(Instant::now() + SAVE_DELAY);
             }
         }
 
@@ -1069,7 +1085,7 @@ impl crate::Window {
     /// closing empties what the window timed separately, so writing before would charge its cost to
     /// the previous frame — which is exactly the kind of error this instrument is after.
     pub(crate) fn save_if_due(&mut self) {
-        let Some(due) = self.save_due else {
+        let Some(due) = self.persistence.save_due else {
             return;
         };
         if Instant::now() < due {
@@ -1085,10 +1101,10 @@ impl crate::Window {
     /// is the only ending in which the loss can be avoided, and avoiding it costs nothing because
     /// by then there is no frame left to measure.
     pub(crate) fn save_now(&mut self) {
-        if self.save_due.is_none() {
+        if self.persistence.save_due.is_none() {
             return;
         }
-        self.save_due = None;
+        self.persistence.save_due = None;
 
         // **The clock starts here, before copying and comparing.** Copying the whole document and
         // comparing it thoroughly costs something, happens on every deadline that falls due —twice
@@ -1103,7 +1119,7 @@ impl crate::Window {
             self.mirror_this_frame += started.elapsed();
             return;
         };
-        if self.last_written.as_ref() == Some(&document) {
+        if self.persistence.last_written.as_ref() == Some(&document) {
             // **It goes to the mirror's span and not to the write's, because it is what it is**:
             // comparing two mirrors. Counting it as a write would put into that average some
             // samples that wrote nothing.
@@ -1135,7 +1151,7 @@ impl crate::Window {
         self.saving.record_write(how_much, written);
 
         if written {
-            self.last_written = Some(document);
+            self.persistence.last_written = Some(document);
         }
     }
 }
