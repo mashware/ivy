@@ -7085,7 +7085,7 @@ instruction.
 | **A blocking wait with a deadline** instead of looking every millisecond | Unix offers none for a child: `waitpid` either blocks without a bound or does not block, and a timer signal or a `pidfd` would be more machinery than a loop that costs two hundred non-blocking calls in the worst case |
 | **Looking less often as the grace goes on** (1, 2, 4, 8… ms), which a review argued for against D32's own objection to a poll inside the interface pass | D32 objected to *waking a hundred times where a blocking wait existed*: `recv_timeout` wakes on the event. Here none exists, the window is frozen for the program's dying either way, and every step of backoff after the first is added straight onto the common case — a shell dying at 1.3 ms would be reaped at 3. The worst case is two hundred non-blocking calls, in a close that is already paying 200 ms |
 
-**One hole it does not close, and did not open.** If the system refuses the SIGHUP, nothing
+**One hole it does not close, and did not open.** ~~If the system refuses the SIGHUP, nothing
 further is sent and the `wait` that follows is unbounded — exactly as behind the library's `kill`,
 which returned at the same refusal. **Reasoned from the source, not observed, and no fix
 attempted.** The kernel lets a process signal another when their user identities match on the real
@@ -7096,9 +7096,60 @@ measured**, because `sudo` asks for a password on the machine this was written o
 plausible subject, and it is tracked as work of its own rather than as a curiosity. The bounded
 alternative a review proposed — look with `try_wait` up to a deadline and then abandon the child, as
 D32 abandons the reader — belongs to that work, because abandoning a live child is a trade D32 only
-accepted with its survivor measured.
+accepted with its survivor measured.~~ **Closed by D56**, and the candidate was the wrong one:
+measured, both sudos accept the hang-up and die of it in about 3 ms, and what refuses it is
+`exec pkexec`. Nor was the deadline taken: nothing sent can end such a program, so the child is left
+at once and waited for on a thread of its own.
 
 **Still paid, and declared.** A program that ignores the hang-up — or a stopped one — still costs the
 whole 200 ms, and a survivor holding the pseudoterminal still costs D32's 100 ms on top of the dying.
 Both are paid on the interface pass and both are already declared into the frame's separately-timed
 work (**D13**). No batch closes a console by hand, so no published frame figure moves.
+
+## D56 — A program the system will not let us signal is left running, waited for off the interface pass, and said once
+
+**Decided on 25 September 2026** ([#271](https://github.com/mashware/agent-terminal/issues/271)).
+When closing a console, the hang-up (D55) is **refused** by the system — any failure of `kill` but
+«no such process» — `Drop for Pty` no longer waits for the child inline. It hands the child to a
+thread that does nothing but `wait` for it, writes **one line to standard error** naming its pid and
+the operating system's refusal, and carries on with the rest of the close: the reader's deadline
+(D32), the panel directory. Nothing else changes: a program that accepts the signals is waited for
+where it always was, with the same grace.
+
+**Why.** Measured on 25 September 2026, on this machine: a console whose shell was replaced by
+`exec pkexec sleep 60` became a program with every user identity root, `kill(pid, 0)` from the
+terminal answered `EPERM`, and closing that console froze the real window until the desktop offered
+to force-quit it. The cause is the wait, not the signal: a parent can always reap its own child
+whatever its uid — only signalling is gated by identity — so `waitpid` blocked for the program's whole
+life on the interface pass, and nothing this process can send shortens it. The kernel's own hang-up
+would not rescue it either: it needs every descriptor of the master closed, and the reader thread
+still holds a clone at that point.
+
+**Who meets it, and who does not** (D54). **`sudo` does not**, which is the opposite of what D55 and
+the issue said. Both sudo-rs 0.2.13 (Ubuntu's `/usr/bin/sudo`) and classic sudo 1.9.17p2 leave the
+parent that is the console's child with the **invoker's real uid**; the kernel allows the signal, sudo
+catches it and relays it, and the whole chain was gone in 2.65 and 3.55 ms. What «sudo refuses a kill
+from its invoker» describes is signalling *the command* sudo runs. **`pkexec` does**: it executes the
+command itself as full root, with no parent left. A console runs `$SHELL`, so `pkexec cmd` typed at
+the prompt is a grandchild and harmless; the path is `exec pkexec cmd`, or a shell set to such a
+program. Uncommon, and a window that never comes back when it happens.
+
+**The line is the channel D41 already uses** for a console that stops receiving: whoever ran the
+binary from a shell learns that a root program was left running, with nothing to find it by
+otherwise — the console that would have shown it is gone. Decided by the user at the fix's gate.
+
+| Discarded | Why |
+|---|---|
+| **Waiting with a deadline, then abandoning** — the option the issue carried over from D32 | A deadline is for something that may still end: here nothing sent can end it, so any deadline is time the window is frozen for no possible gain. Abandoned at once is the same outcome, without the wait |
+| **Dropping the child without waiting** | It leaves the program a zombie for the life of this process once it ends. The thread is the smallest thing that reaps it |
+| **Saying nothing**, as D32 does for an abandoned reader | That abandonment leaves nothing behind that anybody could act on. This one leaves a live program running as root with no console, and the person who closed it is the only one who could know |
+| **Moving every close off the interface pass**, which would take this special case and D55's inline grace with it | D55 discarded it and its reasons still stand: nothing joins at process exit, so a program being closed as the window goes could outlive the app, and `Pane` drops its `Pty` before its panel directory, so the directory would go with the program alive. Here the program is left running only because nothing can end it — the one case where both costs are already paid |
+| **Closing the master before waiting**, so the kernel hangs the terminal up with its own authority | The reader's clone keeps the master open, and the last close only sends SIGHUP to the session leader and the foreground group — a root program that ignores it survives anyway. Unmeasured, and not needed: the fix does not rest on the kernel |
+
+**What it costs, declared.** One thread per such console, parked in `wait` for as long as its program
+lives, the same shape of leak as the writer's and the reader's. If that thread cannot be created, the
+child is dropped unwaited and becomes the zombie above: the price of not freezing. The regression test
+forges the refusal — an unprivileged test cannot create a child it may not signal — and runs the rest
+against a real program. The real window was checked by hand on the same day, with the build before
+and the build after: the one before froze until the program's minute ran out, the one after closed
+the console at once, kept answering, and printed the line.

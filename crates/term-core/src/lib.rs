@@ -129,7 +129,9 @@ impl Default for Size {
 /// UTF-8 —an escape sequence may arrive split across two messages—, because interpreting them is the
 /// job of another layer.
 pub struct Pty {
-    child: Box<dyn Child + Send + Sync>,
+    /// Always there until closing takes it: a child that refused the hang-up is handed to a thread
+    /// of its own to be waited for (**D56**), so closing has to be able to give it away.
+    child: Option<Box<dyn Child + Send + Sync>>,
     master: Box<dyn MasterPty + Send>,
     /// What is waiting to be written, on its way to the writer thread.
     ///
@@ -171,6 +173,13 @@ pub struct Pty {
     /// waits for a slot that would only appear if someone drained it, and the `join` below waits for
     /// the thread.
     stop: Arc<AtomicBool>,
+    /// How closing signals the child: `kill(2)`, except in the tests that forge a refusal.
+    ///
+    /// **A test cannot make a child it may not signal**: that takes a setuid program switching every
+    /// user identity, and an authenticated one. So the refusal is what is forged, and everything
+    /// after it — the wait, the thread, the line — runs for real against a real program.
+    #[cfg(unix)]
+    send_signal: fn(libc::pid_t, libc::c_int) -> std::io::Result<()>,
 }
 
 /// What has been handed over for the program to read, and how much of it has not gone in yet.
@@ -481,7 +490,7 @@ impl Pty {
 
         Ok((
             Self {
-                child,
+                child: Some(child),
                 // The master is kept so it can be resized.
                 //
                 // **And the sentence that used to be here was false, which is what let a hang live
@@ -499,6 +508,8 @@ impl Pty {
                 reader_ended,
                 ending,
                 stop,
+                #[cfg(unix)]
+                send_signal,
             },
             output,
         ))
@@ -751,42 +762,84 @@ fn deliver(
 ///
 /// **Signalling by pid is safe only while the child is unreaped**, which is why every signal here
 /// follows a `try_wait` that said so: a reaped pid can be handed to somebody else's process.
+///
+/// `send` is `kill(2)` everywhere but in the tests that forge a refusal.
 #[cfg(unix)]
-fn hang_up(child: &mut (dyn Child + Send + Sync)) {
+fn hang_up(
+    child: &mut (dyn Child + Send + Sync),
+    send: fn(libc::pid_t, libc::c_int) -> std::io::Result<()>,
+) -> HangUp {
     // **Only a positive pid is signalled.** Zero would reach this application's own process group
     // and a negative one somebody's group. Without such a pid closing does what it did before this
-    // crate signalled by itself — the library's `kill`, grid and all.
+    // crate signalled by itself — the library's `kill`, grid and all, and its refusal unseen: the
+    // library does not tell a refused signal from any other failure. Reasoned unreachable here, where
+    // a spawned child always has a pid and a pid always fits.
     let Some(pid) = child
         .process_id()
         .and_then(|pid| libc::pid_t::try_from(pid).ok())
         .filter(|pid| *pid > 0)
     else {
         let _ = child.kill();
-        return;
+        return HangUp::Waitable;
     };
-    // SAFETY: `kill` takes plain integers and touches no memory of this process.
-    let signal = |number| unsafe { libc::kill(pid, number) == 0 };
+    // **A refusal is any failure but «no such process»**: that one means the child died between the
+    // look and the signal, and it is waitable at once. Anything else leaves a live program this
+    // process cannot end — see D56.
+    let signal = |number| match send(pid, number) {
+        Err(refused) if refused.raw_os_error() != Some(libc::ESRCH) => Err(refused),
+        _ => Ok(()),
+    };
     // An error from `try_wait` counts as gone: `waitpid` failing means there is no child of ours to
     // wait for, so the `wait` that follows fails at once instead of blocking — and signalling a pid
-    // that is not known to be ours is the one thing this must never do. A SIGHUP refused for a
-    // child that *is* ours ends it here too, as the library's `kill` did: see D55.
-    if !matches!(child.try_wait(), Ok(None)) || !signal(libc::SIGHUP) {
-        return;
+    // that is not known to be ours is the one thing this must never do.
+    if !matches!(child.try_wait(), Ok(None)) {
+        return HangUp::Waitable;
+    }
+    if let Err(refused) = signal(libc::SIGHUP) {
+        return HangUp::Refused(refused);
     }
     let deadline = Instant::now() + HANGUP_GRACE;
     while Instant::now() < deadline {
         thread::sleep(HANGUP_CHECK_EVERY);
         if !matches!(child.try_wait(), Ok(None)) {
-            return;
+            return HangUp::Waitable;
         }
     }
-    signal(libc::SIGKILL);
+    match signal(libc::SIGKILL) {
+        Ok(()) => HangUp::Waitable,
+        Err(refused) => HangUp::Refused(refused),
+    }
+}
+
+/// `kill(2)`, with its failure as the operating system's error.
+#[cfg(unix)]
+fn send_signal(pid: libc::pid_t, number: libc::c_int) -> std::io::Result<()> {
+    // SAFETY: `kill` takes plain integers and touches no memory of this process.
+    if unsafe { libc::kill(pid, number) } == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
 }
 
 /// Elsewhere the library's `kill` has no grid to pay: on Windows it is `TerminateProcess`, at once.
+/// Whether it can be refused there — an elevated program — and what that leaves is not known yet:
+/// its failure is not looked at, so a refusal would be waited for as Unix's was before D56.
 #[cfg(not(unix))]
-fn hang_up(child: &mut (dyn Child + Send + Sync)) {
+fn hang_up(child: &mut (dyn Child + Send + Sync)) -> HangUp {
     let _ = child.kill();
+    HangUp::Waitable
+}
+
+/// What hanging a program up left behind.
+enum HangUp {
+    /// Gone, sure to go at once, or a refusal this crate cannot see (the library's `kill`, and
+    /// Windows): waiting for it is bounded as far as this knows.
+    Waitable,
+    /// The system refused the signal and the program is still running. Nothing this process can
+    /// send will end it, so waiting for it is waiting for as long as it chooses to live.
+    #[cfg_attr(not(unix), allow(dead_code))]
+    Refused(std::io::Error),
 }
 
 impl Drop for Pty {
@@ -820,15 +873,48 @@ impl Drop for Pty {
         // And then the usual order: killing the child is what closes its end of the
         // pseudoterminal and triggers the end of file in the reader thread. Waiting for the thread
         // before that would hang it, because it would still be blocked inside `read`.
-        hang_up(self.child.as_mut());
-        // Bounded when the signals are delivered: after its grace the hang-up falls through to a real
-        // `SIGKILL`, which nobody holds — not even a stopped process, the shape that would otherwise
-        // never be reaped. When `try_wait` failed instead, there is no child of ours left to wait
-        // for and this fails at once. **Not bounded if the system refuses the signals**, and this
-        // then waits for the program to leave on its own — the same hole the library's `kill` left.
-        // D55 records it: reasoned from the source, not observed here, with `sudo` as the candidate
-        // nobody could measure.
-        let _ = self.child.wait();
+        if let Some(mut child) = self.child.take() {
+            #[cfg(unix)]
+            let left = hang_up(child.as_mut(), self.send_signal);
+            #[cfg(not(unix))]
+            let left = hang_up(child.as_mut());
+            match left {
+                // Bounded: after its grace the hang-up falls through to a real `SIGKILL`, which
+                // nobody holds — not even a stopped process, the shape that would otherwise never be
+                // reaped. When `try_wait` failed instead, there is no child of ours left to wait for
+                // and this fails at once.
+                HangUp::Waitable => {
+                    let _ = child.wait();
+                }
+                // **Left running, and waited for somewhere that paints nothing** (D56). Measured:
+                // waiting here froze the window for the program's whole life, and nothing this
+                // process can send shortens it. Somebody still has to wait, or the program stays a
+                // zombie once it ends; a thread parked in `wait` costs one thread per such console,
+                // for as long as its program lives. If the thread cannot even be created the child
+                // is dropped unwaited, and that zombie is the price of not freezing.
+                HangUp::Refused(refused) => {
+                    use std::io::Write;
+
+                    let pid = child.process_id();
+                    // Named so a leak audit can tell these apart; `wait` needs no stack to speak of.
+                    let _ = thread::Builder::new()
+                        .name("left-running".to_owned())
+                        .stack_size(64 * 1024)
+                        .spawn(move || {
+                            let _ = child.wait();
+                        });
+                    // **Not `eprintln!`**, which panics when standard error is a closed pipe
+                    // (`agent-terminal | head`) — and a panic here is inside the interface pass,
+                    // or an abort if this drop runs while unwinding.
+                    let _ = writeln!(
+                        std::io::stderr().lock(),
+                        "a console was closed with its program still running (pid {}): the system \
+                         refused the signal to end it ({refused}), so it is left to end on its own",
+                        pid.map_or_else(|| "unknown".to_owned(), |pid| pid.to_string())
+                    );
+                }
+            }
+        }
         // **The reader is waited for with a deadline, and abandoned if it does not come.** Killing
         // the child closes *the child's* end of the pseudoterminal and nothing else: anything the
         // program launched that outlived it —a `sleep &`, a development server— inherited those same
@@ -2095,6 +2181,123 @@ mod tests {
             finished,
             "a program that needed 100 ms after the hang-up to save its state was killed before it \
              finished: the grace it is owed is shorter than the library's 200 ms"
+        );
+    }
+
+    /// What closing a console whose program refuses some signal left: how long the close took,
+    /// whether the program was still alive right after it, and whether it was reaped once the test
+    /// ended it for real. `refusing` stands in for `kill(2)`.
+    ///
+    /// **Why each of the three can fail on its own defect.** The program lives thirty seconds, so a
+    /// close that waited for it cannot come back under a second; a close that got there by some
+    /// other signal leaves nothing alive; and a child nobody waits for stays a zombie for the life
+    /// of this process — `kill(pid, 0)` answers for a zombie exactly as for a live program.
+    #[cfg(unix)]
+    fn close_one_that_refuses(
+        script: &str,
+        marker: &str,
+        refusing: fn(libc::pid_t, libc::c_int) -> std::io::Result<()>,
+    ) -> (Duration, bool, bool) {
+        let (mut pty, output) =
+            Pty::spawn("sh", &["-c", script], Size::default()).expect("launch sh");
+        pty.send_signal = refusing;
+        let pid = pty
+            .child
+            .as_ref()
+            .and_then(|child| child.process_id())
+            .and_then(|pid| libc::pid_t::try_from(pid).ok())
+            .expect("the child has a pid");
+        // SAFETY: `kill` takes plain integers and touches no memory of this process.
+        let exists = || unsafe { libc::kill(pid, 0) } == 0;
+
+        let took = time_the_close(pty, output, marker);
+        let alive_after_closing = exists();
+        // Ended by the test, the way it would end on its own: the refusal was forged, this signal is
+        // real.
+        // SAFETY: as above.
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        (took, alive_after_closing, !exists())
+    }
+
+    #[cfg(unix)]
+    fn refuse_every_signal(_: libc::pid_t, _: libc::c_int) -> std::io::Result<()> {
+        Err(std::io::Error::from_raw_os_error(libc::EPERM))
+    }
+
+    #[cfg(unix)]
+    fn refuse_only_the_kill(pid: libc::pid_t, number: libc::c_int) -> std::io::Result<()> {
+        if number == libc::SIGKILL {
+            refuse_every_signal(pid, number)
+        } else {
+            send_signal(pid, number)
+        }
+    }
+
+    /// **A program the system will not let this process signal is left running, not waited for.**
+    /// Reached with `exec pkexec <cmd>` in a shell: the console's own child becomes a program with
+    /// every user identity root, the hang-up is refused, and closing used to wait for it to leave on
+    /// its own — inside the interface pass, measured as a window the desktop offered to force-quit.
+    /// A second is ten times the most this close can cost — the reader's deadline, which a program
+    /// still holding the pseudoterminal may make it pay.
+    #[cfg(unix)]
+    #[test]
+    fn a_program_that_refuses_the_hang_up_is_left_running_and_reaped_when_it_ends() {
+        const MARKER: &str = "root";
+
+        let (took, alive, reaped) = close_one_that_refuses(
+            &format!("printf {MARKER} && exec sleep 30"),
+            MARKER,
+            refuse_every_signal,
+        );
+
+        assert!(
+            took < Duration::from_secs(1),
+            "closing a console whose program refused the hang-up took {took:?}: it waited for the \
+             program instead of leaving it"
+        );
+        assert!(
+            alive,
+            "the program was gone right after the close, so the close ended it some other way than \
+             the refused signals — this test no longer exercises a refusal"
+        );
+        assert!(
+            reaped,
+            "the program left behind ended and stayed a zombie: nobody is waiting for it"
+        );
+    }
+
+    /// **The same when only the kill at the end of the grace is refused.** The hang-up is accepted
+    /// and ignored — `trap '' HUP`, which survives `exec` — so the close sits out its grace and then
+    /// meets the refusal on the one signal left. A second is three times what that costs: the grace
+    /// plus the reader's deadline.
+    #[cfg(unix)]
+    #[test]
+    fn a_program_whose_kill_is_refused_after_its_grace_is_left_running_and_reaped() {
+        const MARKER: &str = "deaf";
+
+        let (took, alive, reaped) = close_one_that_refuses(
+            &format!("trap '' HUP && printf {MARKER} && exec sleep 30"),
+            MARKER,
+            refuse_only_the_kill,
+        );
+
+        assert!(
+            took < Duration::from_secs(1),
+            "closing a console whose program's kill was refused took {took:?}: it waited for the \
+             program instead of leaving it"
+        );
+        assert!(
+            alive,
+            "the program was gone right after the close although its hang-up is ignored and its kill \
+             refused — this test no longer exercises a refusal"
+        );
+        assert!(
+            reaped,
+            "the program left behind ended and stayed a zombie: nobody is waiting for it"
         );
     }
 }

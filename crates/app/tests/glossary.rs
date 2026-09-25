@@ -1237,7 +1237,7 @@ const NOT_OURS: &[&str] = &[
     "waitpid",
     "TerminateProcess",
     "trap",
-    // The program that may refuse it: `sudo`, once authenticated, is the unmeasured candidate D55 names.
+    // The programs D56 measured against it: `sudo` accepts the hang-up, `pkexec` makes it refused.
     "sudo",
     // The kernel constants and tools this tree names but does not own. `MAX_CANON` is here to be
     // *contradicted*: it is 255, and the 4 096 that bounds a canonical line is `N_TTY_BUF_SIZE`,
