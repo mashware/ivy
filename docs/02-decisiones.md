@@ -4890,7 +4890,8 @@ instruction was not merely absent: it was wrong, and it was on screen.
 - **The notice says how to answer it only where it can be answered**, and where the keyboard does not
   reach it says what does. **It does not go quiet there**: a paste held in silence is the failure this
   whole decision exists to stop, so «paint nothing on an unfocused pane» was refused.
-- **A click discards and never sends.** Sending a line the program will cut in half is the
+- **A click discards and never sends** — *a click on the question's box; sending by a box of its own
+  came in with the next amendment*. Sending a line the program will cut in half is the
   irreversible half of the question and keeps costing a deliberate chord; dismissing a question
   nobody asked for is the safe half, and it is the one a hand on the mouse wants. It is also what the
   report asked for in those words.
@@ -4908,7 +4909,7 @@ instruction was not merely absent: it was wrong, and it was on screen.
 |---|---|
 | **Routing the keys to an unfocused pane** — «make the instruction true instead of changing it» | Two standing questions would fight over the same `Escape`, and `Escape` has other owners in this window. The notice stops claiming what it cannot deliver instead |
 | **Painting no notice on an unfocused pane** | Cheaper and cleaner on screen, and it restores the exact failure this decision exists to prevent: a paste held where nobody can see it |
-| **Sending by click as well as discarding** | It needs a second target inside the notice and the compose-at-send-time rule applied to it — the rule this feature already broke once. Left open |
+| **Sending by click as well as discarding** | It needs a second target inside the notice and the compose-at-send-time rule applied to it — the rule this feature already broke once. Left open here; **taken by the amendment below**, with a target of its own under the notice rather than inside it |
 | **Keeping the notice's rectangle on the held paste**, written by the painter and hit-tested a frame later (what shipped first) | Four separate defects, all found in review: a stale rectangle, a painter that mutates its subject, a box whose size moved with the focus, and state that could disagree with itself. Replaced by the pure function |
 | **A guard requiring the press to resolve to a cell of the console** | Written for the frame a panel is first published and **read the same unrefreshed state**, so it would have said yes in exactly that case. Removed rather than kept: a guard whose comment promises more than it does is worse than none |
 | **Judging the press at the pointer's latest position** (what shipped first) | It is not where the button went down. A batch carrying the press and then a move — a flicked click, or any frame that batches — let the real press through to the program and could answer a question nobody aimed at |
@@ -4923,7 +4924,66 @@ instruction was not merely absent: it was wrong, and it was on screen.
   a target of its own inside it.
 - **A click on the notice of an unfocused console also focuses it and clears its selection**, because
   the pass below does that for any click on a pane. Kept: you pressed on that console.
-- **Sending by click**, per the table above.
+- **Sending by click**, per the table above. **Closed by the amendment below.**
+
+### Amended again: a box of its own under the notice sends the paste
+
+**The question can now be answered «yes» with the mouse, and it still never shares a target with
+«no».** A second box, «Send it anyway», sits directly under the question; a bare press on it sends
+the held paste, and a bare press on the question still discards it. #199.
+
+- **Under the question, never inside it.** Inside, «a click discards it» would stop being literally
+  true of the box it is written in and both sentences would have to change; outside, the question,
+  its wording and what a click on it does are exactly what the amendment above shipped.
+- **Composed at the click**, through the same `HeldPaste::send_anyway` the chord uses, against the mode
+  the program is in at that moment. The paste gate keeps its three callers.
+- **It is the person's own paste**, so it takes the console back from an agent that held it (**D44**),
+  exactly as `Ctrl+Enter` does — unlike a panel's button, which is the application writing on the
+  person's behalf. It is not timed as a keystroke, for the reason a paste never is.
+- **Only a completely bare press sends**, by the same filter that decides a press answers at all.
+- **A question at its ceiling makes room for the button.** With several consoles the question
+  usually reaches the half-console ceiling (**D39**), and a button placed under it would never fit;
+  so the question is laid out leaving the button's height free, which clips the tail of the
+  explanation and never the way out — the keys are first in the galley. **The button is the one that
+  gives way**: where even that shortened question would not show its whole instruction, or the
+  button would run past the console's right edge, there is no button and the question is exactly
+  what it was, so no console loses the notice to make room.
+- **Where the button goes depends neither on the reading's ending nor on whether «stopped receiving»
+  (**D41**) was dismissed** — two things that can change between a paint and a press: that sentence goes
+  **under** the button's place, so dismissing it moves nothing above it. A first review round found
+  the version that hid the button while the sentence stood — dismissing it made the button appear
+  exactly under the dismissing click, so a double click, or egui running the same press through a
+  second pass, sent the paste.
+- **It is not offered on a console whose writer gave up** (**D29**), where the write would go
+  nowhere. Its place stays empty there, and a press on it answers whatever is drawn there — the
+  sentence about that console when it stands, the grid otherwise.
+- **The price is paid by «stopped receiving», and it is named here rather than left to be found.**
+  With the button standing, that sentence goes under it, so at the heights where it fitted under the
+  question alone and does not fit under the button it is no longer drawn — and **D39**'s
+  whole-or-nothing rule then leaves nothing. It is the only order that keeps the button still under a
+  dismissal; both notices at once is rare, and where several consoles share a window the question
+  already reaches its ceiling and the sentence never had room. On a console whose writer gave up
+  there is no button, and the sentence goes back under the question.
+- **A write that fails keeps the paste held** and its notice standing, so a click never makes a
+  paste disappear without having sent it.
+
+#### What was discarded, and why
+
+| | |
+|---|---|
+| **A button inside the question's box** | Both sentences would have to be rewritten — «a click discards it» is false of the box that holds the button — and the hit target of the dismissal would have a hole in it |
+| **Two explicit buttons, «Discard» and «Send», with the box itself inert** | It undoes what the amendment above delivered: the dismissal a hand on the mouse wants would shrink from the whole box to a button |
+| **No notice at all unless the button fits too** — the strict reading of **D39** | Consoles short enough to show the question and not the button would lose the question, which is the failure this whole decision exists against; `Ctrl+Enter` still sends there |
+| **Omitting the button whenever the question is at its ceiling** | That is the ordinary case with four consoles, so the button would almost never appear where there are several panes |
+| **Placing the button and making the silence notice yield to it, or the other way round** | Needed only because both competed for the same place; with the silence under the button's place they never do |
+| **No button while the silence stands** (what shipped first, inside this delivery) | The button then appeared under the very click that dismissed the silence, and the geometry depended on a reading's ending that can change between a paint and a press — an aimed press on «Send» could land on a grown question and discard |
+
+#### What it leaves open
+
+- **The sentence on an unfocused console still says «focus this console to send it anyway»** with a
+  button right under it. True, and roundabout; kept so that neither sentence changes.
+- **The pasted text is not shown**: the button sends what the person pasted moments ago, which
+  `Ctrl+Enter` already sends the same way.
 
 ### The sentence D6 needs, and why it is here
 
@@ -6112,8 +6172,10 @@ own identity — **no environment travels in the request**, and there is no fiel
 
 **3. The person's own input ends the access, at the doors the user's input already has.**
 
-A keystroke or a paste (the keyboard's single door), a wheel turn, or a mouse report: the three
-places the application writes what a person produced into a pseudoterminal. From that byte on, the
+A keystroke or a paste (the keyboard's single door), a wheel turn, a mouse report, or a held paste
+sent from its notice's button (**D31**, amended again): the places the application writes what a
+person produced into a pseudoterminal. The fourth is the same bytes `Ctrl+Enter` sends through the
+keyboard's door, reached by the mouse instead. From that byte on, the
 handle answers **with the reason** and not with a bare error, and the console's own row — the
 application's, which `header: false` cannot suppress — says the same sentence to the person. **A press
 on a panel's button does not revoke it**: that door is the application writing on the person's behalf,

@@ -833,9 +833,9 @@ impl Window {
     /// with the walk over, for the reason written at that call site: the rectangles of this pass
     /// describe a tiling that closing immediately makes false.
     ///
-    /// **And it does not take the press out of the queue, unlike the three doors below it.** The two
-    /// notices have to: their boxes are drawn **inside the console**, where the routing would go on
-    /// to report the press to a program that asked for the mouse. This one lands on the strip, where
+    /// **And it does not take the press out of the queue, unlike the doors below it.** The notices
+    /// and the button under the question have to: their boxes are drawn **inside the console**,
+    /// where the routing would go on to report the press to a program that asked for the mouse. This one lands on the strip, where
     /// the routing already declines it — `from_the_press` answers `MovePane` for anything on the
     /// strip, so the press is never the program's and the latch is set to «not the program's» by the
     /// routing itself. (The panel's buttons take theirs out for a different reason again: the press
@@ -990,38 +990,35 @@ impl Window {
             // yes in the very case it was written for — a guard whose comment promised more than it
             // did.
             let console = pane.console_within(*rect, metrics, now, headers);
-            // **Both boxes in one pass**, because the second is measured against where the first
+            // **Every box in one pass**, because each is measured against where the one above it
             // ends and asking for them separately lays the question's text out twice per quiet pane
             // — work this pass would not be declaring (**D13**).
             let boxes = crate::painter::notices::the_boxes(painter, pane, &theme, metrics, console);
-            if boxes
-                .question
-                .is_some_and(|box_of_it| box_of_it.contains(bare.at))
-            {
+            let on = |target: Option<egui::Rect>| target.is_some_and(|it| it.contains(bare.at));
+            // **The button under the question sends it**, composed against the mode the program is
+            // in now (**D31**). Its place is decided by nothing that dismissing «stopped receiving»
+            // changes, which is what keeps a second press on that sentence from landing on it.
+            if on(boxes.send) {
+                pane.send_the_held_paste();
+            } else if on(boxes.question) {
                 pane.held = None;
-                let mut rest = queue;
-                rest.remove(which);
-                // **And that press is recorded as not having gone to a program.** The latch this
-                // field feeds decides, one frame later, what the drag beginning at this press means;
-                // leaving the previous press's answer there made it decide by a gesture that is
-                // over.
-                self.the_press_went_to_the_program = false;
-                return rest;
-            }
             // **The second notice, and a press on it discards nothing.** It takes the sentence off
             // the glass; how the reading ended is what the pseudoterminal recorded and stays
             // readable, and the console's last output goes back to being markable, which is what
             // somebody clicking there most likely wanted.
-            if boxes
-                .silence
-                .is_some_and(|box_of_it| box_of_it.contains(bare.at))
-            {
+            } else if on(boxes.silence) {
                 pane.pty_output.dismiss_the_silence(pane.pty.ending());
-                let mut rest = queue;
-                rest.remove(which);
-                self.the_press_went_to_the_program = false;
-                return rest;
+            } else {
+                continue;
             }
+            let mut rest = queue;
+            rest.remove(which);
+            // **And that press is recorded as not having gone to a program as a mouse gesture** — the
+            // button's paste did go, but as the person's input, not as a report. The latch this field
+            // feeds decides, one frame later, what the drag beginning at this press means; leaving
+            // the previous press's answer there made it decide by a gesture that is over.
+            self.the_press_went_to_the_program = false;
+            return rest;
         }
         queue
     }

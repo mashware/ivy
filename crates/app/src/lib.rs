@@ -2674,7 +2674,8 @@ mod tests {
     }
 
     /// Where that console's notice goes, asked of **the same function the painter and the mouse pass
-    /// both call**. Nothing is stored between frames any more, so this is the only way to know.
+    /// both call** — so where a button fits under it, this is the shortened question that ships, and
+    /// a press at its centre can never be one that lands on the button instead.
     fn the_notice_box(
         pane: &Pane,
         theme: &theme::Theme,
@@ -2686,7 +2687,7 @@ mod tests {
             .drop_without_applying_deltas();
         let mut found = None;
         ctx.run_ui(egui::RawInput::default(), |ui| {
-            found = painter::notices::the_question_box(ui.painter(), pane, theme, metrics, rect);
+            found = painter::notices::the_boxes(ui.painter(), pane, theme, metrics, rect).question;
         })
         .drop_without_applying_deltas();
         found.expect("that console has a question with a box worth pressing")
@@ -2851,6 +2852,490 @@ mod tests {
         );
     }
 
+    /// Where the three things over that console go — the question, the button that sends it and the
+    /// silence — asked of **the one function the painter and the mouse pass both call**.
+    fn the_notices_on(
+        pane: &Pane,
+        theme: &theme::Theme,
+        metrics: &CellMetrics,
+        rect: egui::Rect,
+    ) -> (Option<egui::Rect>, Option<egui::Rect>, Option<egui::Rect>) {
+        let ctx = egui::Context::default();
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        let mut found = (None, None, None);
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            let boxes = painter::notices::the_boxes(ui.painter(), pane, theme, metrics, rect);
+            found = (boxes.question, boxes.send, boxes.silence);
+        })
+        .drop_without_applying_deltas();
+        found
+    }
+
+    /// The question as it is laid out **with no button in mind**, which is what a console gets when
+    /// the button has no room.
+    fn the_question_alone(
+        pane: &Pane,
+        theme: &theme::Theme,
+        metrics: &CellMetrics,
+        rect: egui::Rect,
+    ) -> Option<egui::Rect> {
+        let ctx = egui::Context::default();
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        let mut found = None;
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            found = painter::notices::the_question_box_with_no_button(
+                ui.painter(),
+                pane,
+                theme,
+                metrics,
+                rect,
+            );
+        })
+        .drop_without_applying_deltas();
+        found
+    }
+
+    /// **The button sends the paste, and it goes out composed for the mode the program is in at the
+    /// click** — not the one the question was asked in, which is the rule this feature broke once.
+    ///
+    /// **The evidence is a file the program writes**, for the reason the panel button's test gives:
+    /// with the line discipline echoing, the grid would be satisfied by the kernel. And the console is
+    /// put in **raw mode** first, because a canonical one keeps only about four kilobytes of a line and
+    /// this paste is held precisely for being longer than that — the file would hold nothing, or a
+    /// truncated line, whichever way the composition went.
+    ///
+    /// **Two runs, because one direction cannot tell the rule from a constant.** A paste is only ever
+    /// held with bracketed paste off (a wrapped one is never held), so the mode can move only one
+    /// way: in the first run the program turns it on before the click and the markers must be there;
+    /// in the second it stays off and they must not. A composition that ignored the mode, either
+    /// way round, fails one of the two.
+    ///
+    /// The console is not the focused one, so the keyboard's `Ctrl+Enter` could not have been what
+    /// sent it. It is marked as not taken over first, and the person's own paste must take it back,
+    /// as `Ctrl+Enter` would. And the view is scrolled back first: the paste must bring it to where the
+    /// program writes, as a keystroke does.
+    #[test]
+    fn the_send_button_sends_the_paste_composed_for_the_mode_at_the_click() {
+        for turned_on_before_the_click in [true, false] {
+            let ctx = egui::Context::default();
+            let rects = two_wide_panes();
+            let metrics = with_metrics(|metrics| metrics.clone());
+            let stem = std::env::temp_dir().join(format!(
+                "agent-terminal-send-held-{}-{turned_on_before_the_click}",
+                std::process::id()
+            ));
+            let received = stem.with_extension("received");
+            let ready = stem.with_extension("ready");
+            let _ = std::fs::remove_file(&received);
+            let _ = std::fs::remove_file(&ready);
+            let mut window = window_with(
+                &format!(
+                    "stty raw -echo; touch {}; exec cat > {}",
+                    ready.display(),
+                    received.display()
+                ),
+                "sleep 30",
+            );
+            focus_on(window.active_mut(), 1);
+            if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
+                return;
+            }
+            let held_bytes =
+                keyboard::the_longest_line_a_reader_keeps().expect("a paste was held") + 1;
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !ready.exists() {
+                assert!(
+                    Instant::now() < deadline,
+                    "the console never got to raw mode"
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let headers = window.headers;
+            let pane = &mut window.active_mut().panes_mut()[0];
+            pane.taken_over = None;
+            if turned_on_before_the_click {
+                pane.screen.advance(b"\x1b[?2004h");
+            }
+            assert_eq!(
+                pane.screen.bracketed_paste(),
+                turned_on_before_the_click,
+                "the premise failed: the program's paste mode is not the one this run needs"
+            );
+            // Something to scroll back over, written into the grid the painter reads.
+            pane.screen.advance("line\r\n".repeat(200).as_bytes());
+            pane.screen.scroll_by(Scroll::Lines(20));
+            assert!(
+                pane.screen.view().scroll() > 0,
+                "the premise failed: the view never left the bottom"
+            );
+            let console = pane.console_within(rects[0], &metrics, SystemTime::now(), headers);
+            let theme = window.theme;
+            let (_, send, _) =
+                the_notices_on(window.active().panes()[0], &theme, &metrics, console);
+            let send = send.expect("a console this size has room for the button");
+
+            deliver_to_the_mouse(&mut window, &ctx, &rects, &metrics, click_at(send.center()));
+
+            let mut expected = Vec::new();
+            if turned_on_before_the_click {
+                expected.extend_from_slice(b"\x1b[200~");
+            }
+            expected.extend(std::iter::repeat_n(b'x', held_bytes));
+            if turned_on_before_the_click {
+                expected.extend_from_slice(b"\x1b[201~");
+            }
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut got = Vec::new();
+            while Instant::now() < deadline {
+                got = std::fs::read(&received).unwrap_or_default();
+                if got.len() >= expected.len() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let _ = std::fs::remove_file(&received);
+            let _ = std::fs::remove_file(&ready);
+
+            assert!(
+                got == expected,
+                "with bracketed paste {} at the click the program received {} bytes starting {:?} \
+                 and ending {:?}; the paste composed for that mode is {} bytes",
+                if turned_on_before_the_click {
+                    "on"
+                } else {
+                    "off"
+                },
+                got.len(),
+                String::from_utf8_lossy(&got[..got.len().min(8)]),
+                String::from_utf8_lossy(&got[got.len().saturating_sub(8)..]),
+                expected.len()
+            );
+            let pane = &window.active().panes()[0];
+            assert!(pane.held.is_none(), "the paste was sent and is still held");
+            assert!(
+                pane.taken_over.is_some(),
+                "the person's own paste did not hand the console back"
+            );
+            assert_eq!(
+                pane.screen.view().scroll(),
+                0,
+                "the paste went out and the view stayed scrolled back, so it landed off screen"
+            );
+        }
+    }
+
+    /// **A click on the question discards the paste and the program receives none of it.** The
+    /// discard test above runs over `sleep 30` and asserts only that nothing is held any more — which
+    /// a press that landed on the send button would satisfy just as well, so it could not tell a
+    /// discard from a send.
+    ///
+    /// **The absence is clocked by an arrival, never by a timer**: waiting a fixed time and finding
+    /// the file empty proves only that the wait was short. So a second, different paste is held and
+    /// sent through the button, and once it has arrived whole the file must hold it and nothing else —
+    /// the program reads in order, so a first paste that had gone out would be in front of it. The
+    /// console is in raw mode for the reason the send test gives.
+    #[test]
+    fn a_click_on_the_question_discards_the_paste_and_the_program_receives_none_of_it() {
+        let ctx = egui::Context::default();
+        let rects = two_wide_panes();
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let stem = std::env::temp_dir().join(format!(
+            "agent-terminal-discard-held-{}",
+            std::process::id()
+        ));
+        let received = stem.with_extension("received");
+        let ready = stem.with_extension("ready");
+        let _ = std::fs::remove_file(&received);
+        let _ = std::fs::remove_file(&ready);
+        let mut window = window_with(
+            &format!(
+                "stty raw -echo; touch {}; exec cat > {}",
+                ready.display(),
+                received.display()
+            ),
+            "sleep 30",
+        );
+        focus_on(window.active_mut(), 1);
+        if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
+            return;
+        }
+        let boundary = keyboard::the_longest_line_a_reader_keeps().expect("a paste was held");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !ready.exists() {
+            assert!(
+                Instant::now() < deadline,
+                "the console never got to raw mode"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let headers = window.headers;
+        let theme = window.theme;
+        let console = window.active().panes()[0].console_within(
+            rects[0],
+            &metrics,
+            SystemTime::now(),
+            headers,
+        );
+        let (question, send, _) =
+            the_notices_on(window.active().panes()[0], &theme, &metrics, console);
+        let question = question.expect("a held paste puts its question over the console");
+        let send = send.expect("a console this size has room for the button");
+        assert!(
+            !send.contains(question.center()),
+            "the premise failed: the centre of the question lies on the send button"
+        );
+
+        deliver_to_the_mouse(
+            &mut window,
+            &ctx,
+            &rects,
+            &metrics,
+            click_at(question.center()),
+        );
+
+        assert!(
+            window.active().panes()[0].held.is_none(),
+            "the question says a click discards it, and the click did not"
+        );
+
+        let pane = &mut window.active_mut().panes_mut()[0];
+        keyboard::paste_or_hold(
+            &"y".repeat(boundary + 1),
+            false,
+            &mut Vec::new(),
+            &mut pane.held,
+        );
+        assert!(
+            pane.held.is_some(),
+            "the premise failed: the second paste was not held"
+        );
+        let console = pane.console_within(rects[0], &metrics, SystemTime::now(), headers);
+        let (_, send, _) = the_notices_on(window.active().panes()[0], &theme, &metrics, console);
+        let send = send.expect("a console this size has room for the button");
+
+        deliver_to_the_mouse(&mut window, &ctx, &rects, &metrics, click_at(send.center()));
+
+        let expected = vec![b'y'; boundary + 1];
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut got = Vec::new();
+        while Instant::now() < deadline {
+            got = std::fs::read(&received).unwrap_or_default();
+            if got.len() >= expected.len() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let _ = std::fs::remove_file(&received);
+        let _ = std::fs::remove_file(&ready);
+
+        let xs = got.iter().filter(|&&byte| byte == b'x').count();
+        assert!(
+            got == expected,
+            "the program received {} bytes, {xs} of them from the discarded paste; the second \
+             paste alone is {} bytes",
+            got.len(),
+            expected.len()
+        );
+    }
+
+    /// **A press on the button carrying a chord sends nothing**, for the reason a chorded press on
+    /// the question discards nothing: `Ctrl+Shift` moves the console, and Shift on its own is the
+    /// escape hatch that takes the selection back.
+    #[test]
+    fn a_chorded_press_on_the_send_button_does_not_send_the_paste() {
+        let ctx = egui::Context::default();
+        let rects = two_wide_panes();
+        let metrics = with_metrics(|metrics| metrics.clone());
+
+        for chord in [MOVE_CHORD, egui::Modifiers::SHIFT] {
+            let mut window = window_with("sleep 30", "sleep 30");
+            if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
+                return;
+            }
+            let headers = window.headers;
+            let theme = window.theme;
+            let console = window.active_mut().panes_mut()[0].console_within(
+                rects[0],
+                &metrics,
+                SystemTime::now(),
+                headers,
+            );
+            let (_, send, _) =
+                the_notices_on(window.active().panes()[0], &theme, &metrics, console);
+            let at = send
+                .expect("a console this size has room for the button")
+                .center();
+
+            deliver_to_the_mouse(
+                &mut window,
+                &ctx,
+                &rects,
+                &metrics,
+                vec![
+                    egui::Event::PointerMoved(at),
+                    egui::Event::PointerButton {
+                        pos: at,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: chord,
+                    },
+                ],
+            );
+
+            assert!(
+                window.active().panes()[0].held.is_some(),
+                "a press with {chord:?} on the send button answered the question"
+            );
+        }
+    }
+
+    /// **Where the button goes, over every height a console can have at the narrowest width.**
+    ///
+    /// Four things, and the sweep is what makes each of them mean something: the button is under the
+    /// question and inside the top half wherever it is drawn; a question at its ceiling is shortened
+    /// to make room for it rather than losing it; and where it has no room the question is exactly
+    /// what it was before the button existed. **Both kinds of console are asserted to occur**, so a
+    /// button that never appears, or always does, cannot pass by leaving one branch unwalked.
+    #[test]
+    fn the_send_button_sits_under_the_question_inside_the_top_half_or_not_at_all() {
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let theme = theme::Theme::default();
+        let mut pane = pane_with("sleep 30", 0);
+        if !hold_a_paste_on(&mut pane) {
+            return;
+        }
+        let mut with_a_button = 0;
+        let mut shortened = 0;
+        let mut without_one = 0;
+
+        for rows in 1..=60 {
+            let console = egui::Rect::from_min_size(
+                egui::pos2(41.0, metrics.height() * 1.5),
+                egui::vec2(metrics.width() * 20.0, metrics.height() * rows as f32),
+            );
+            let alone = the_question_alone(&pane, &theme, &metrics, console);
+            let (question, send, _) = the_notices_on(&pane, &theme, &metrics, console);
+            // Half written out rather than read from the painter's constant, with the slack this
+            // file uses for a bound re-derived from a sum.
+            let the_middle = console.top() + console.height() * 0.5;
+
+            match send {
+                Some(send) => {
+                    with_a_button += 1;
+                    let question = question.expect("a button with no question over it");
+                    // **A margin under the question, exactly**, and not merely somewhere below it: a
+                    // reservation of the wrong size still leaves the button under the question and
+                    // inside the half, while dropping it from consoles where it fits.
+                    assert!(
+                        (send.top() - (question.bottom() + metrics.width())).abs() <= 0.5
+                            && send.bottom() <= the_middle + 1.0,
+                        "at {rows} rows the button is {send:?}, the question {question:?} and the \
+                         middle at {the_middle:?}: it is not a margin under the question inside the \
+                         top half"
+                    );
+                    let alone = alone.expect("a question with a button but none on its own");
+                    if question.height() + 1.0 < alone.height() {
+                        shortened += 1;
+                        // A shortened question gave up exactly the button's room, so the pair ends at
+                        // the middle and not short of it.
+                        assert!(
+                            (send.bottom() - the_middle).abs() <= 1.0,
+                            "at {rows} rows the question was shortened and the button ends at {:?}, \
+                             not at the middle {the_middle:?}: it gave up more room than the button \
+                             takes",
+                            send.bottom()
+                        );
+                    }
+                }
+                None => {
+                    without_one += 1;
+                    assert_eq!(
+                        question, alone,
+                        "at {rows} rows there is no button, and the question is not the one it \
+                         was before the button existed"
+                    );
+                }
+            }
+        }
+
+        assert!(
+            with_a_button > 0 && without_one > 0 && shortened > 0,
+            "the sweep walked {with_a_button} consoles with a button, {shortened} of them with a \
+             shortened question, and {without_one} without one: a branch went unwalked"
+        );
+        // And a console that shows the question without the button exists — the console the
+        // decision was about, which must not lose the notice to make room.
+        let question_but_no_button = (1..=60).any(|rows| {
+            let console = egui::Rect::from_min_size(
+                egui::pos2(41.0, metrics.height() * 1.5),
+                egui::vec2(metrics.width() * 20.0, metrics.height() * rows as f32),
+            );
+            let (question, send, _) = the_notices_on(&pane, &theme, &metrics, console);
+            question.is_some() && send.is_none()
+        });
+        assert!(
+            question_but_no_button,
+            "no height shows the question without the button, so the console too short for the \
+             button was never measured"
+        );
+        // **And a console too narrow for the button** — tall enough for everything, but the button,
+        // placed a margin in, would run past its right edge. The question stays; the button does not.
+        let narrow = egui::Rect::from_min_size(
+            egui::pos2(41.0, metrics.height() * 1.5),
+            egui::vec2(metrics.width() * 16.0, metrics.height() * 60.0),
+        );
+        let (question, send, _) = the_notices_on(&pane, &theme, &metrics, narrow);
+        assert!(
+            question.is_some() && send.is_none(),
+            "a console sixteen cells wide got question {question:?} and button {send:?}: the button \
+             is drawn past the console's edge, or the question was lost with it"
+        );
+    }
+
+    /// **The console saying it went quiet moves nothing above it.** The sentence goes under the
+    /// button's place, so the question and the button are where they are with it standing and after
+    /// it is dismissed — which is what keeps a second press on a sentence just dismissed from landing
+    /// on a button that was not under it a moment before.
+    #[test]
+    fn the_console_saying_it_went_quiet_moves_neither_the_question_nor_its_button() {
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let theme = theme::Theme::default();
+        // A program that writes, because a listener that is gone is only noticed on a delivery.
+        let mut pane = pane_with("yes", 0);
+        if !hold_a_paste_on(&mut pane) {
+            return;
+        }
+        make_it_go_quiet(&mut pane);
+        let tall = egui::Rect::from_min_size(
+            egui::pos2(41.0, metrics.height() * 1.5),
+            egui::vec2(metrics.width() * 80.0, metrics.height() * 40.0),
+        );
+
+        let (question, send, silence) = the_notices_on(&pane, &theme, &metrics, tall);
+        let silence =
+            silence.expect("the premise failed: the console says nothing about going quiet");
+        let send = send.expect("a console this size has room for the button");
+        assert!(
+            silence.top() >= send.bottom(),
+            "the sentence is at {silence:?} and the button at {send:?}: it is not under the button"
+        );
+
+        pane.pty_output.dismiss_the_silence(pane.pty.ending());
+        let (question_after, send_after, silence_after) =
+            the_notices_on(&pane, &theme, &metrics, tall);
+        assert!(
+            silence_after.is_none(),
+            "the premise failed: the dismissal did nothing"
+        );
+        assert_eq!(
+            (question, Some(send)),
+            (question_after, send_after),
+            "dismissing the sentence moved the question or the button"
+        );
+    }
+
     /// **The box fits whichever sentence is shown**, and without that the two passes can judge
     /// different rectangles on the frame the focus moves — the mouse pass hit-testing one box while
     /// the painter draws another.
@@ -2922,7 +3407,7 @@ mod tests {
     /// The painting *was* being walked — `text_painted` goes through `painter::paint_a_console`,
     /// which paints the question — but every test that walked it read `Shape::Text` and nothing
     /// else, while the ones that reason about the box's size enter through
-    /// `painter::notices::the_question_box`, which measures it and hands the rectangle back without drawing
+    /// `painter::notices::the_question_box_with_no_button`, which measures it and hands the rectangle back without drawing
     /// anything. So the border had no assertion of any kind on it, and it fails the way the cursor's
     /// outline did: `Stroke::new(0.0, …)` is queued, carries the right colour and covers the right
     /// rectangle, and cannot be seen. A console holding a paste would show the question floating
@@ -2993,7 +3478,7 @@ mod tests {
             "the notice's box is filled after it is stroked, so the fill covers its own border"
         );
 
-        // **Where it fell is asserted against the tiling, not against `the_question_box`.** Asking
+        // **Where it fell is asserted against the tiling, not against `the_question_box_with_no_button`.** Asking
         // that function what to expect would put the same call on both sides of the comparison —
         // the painter reaches the rectangle through it — so the assertion would hold however the
         // measuring changed.
@@ -3014,6 +3499,46 @@ mod tests {
             !tiling.parts[1].intersects(box_of_it),
             "the box reaches into the console that is holding nothing, which is a question asked of \
              the wrong program"
+        );
+
+        // **And the button under it is a box too**, for the same three reasons: stroked one point
+        // wide, filled, and filled first. Found by its label, which is what a person reads.
+        let label = where_the_send_label_is(&shapes).expect("the send button's label was painted");
+        let button: Vec<_> = shapes
+            .iter()
+            .enumerate()
+            .filter_map(|(at, clipped)| match &clipped.shape {
+                egui::Shape::Rect(shape) if shape.rect.contains(label) => Some((at, shape)),
+                _ => None,
+            })
+            .collect();
+        // **Rounded, and it has to say so**: the square highlight around the focused console is
+        // stroked in the same colour and also contains the label, so without the corner the lookup
+        // lands on it the moment the button's own border is gone.
+        let stroked = button
+            .iter()
+            .find(|(_, shape)| {
+                shape.stroke.color == outline
+                    && shape.stroke.width == 1.0
+                    && shape.corner_radius != egui::CornerRadius::ZERO
+            })
+            .map(|(at, _)| *at)
+            .expect("the send button is not stroked one point wide in the focus colour");
+        let filled = button
+            .iter()
+            .find(|(_, shape)| shape.fill == THE_PANEL_BACKGROUND && shape.rect != box_of_it)
+            .map(|(at, _)| *at)
+            .expect(
+                "the send button is not filled, so its label is painted over the program's text",
+            );
+        assert!(
+            filled < stroked,
+            "the send button is filled after it is stroked, so the fill covers its own border"
+        );
+        assert!(
+            tiling.parts[0].contains(label) && label.y > box_of_it.bottom(),
+            "the send button's label is at {label:?}, not under the question {box_of_it:?} inside \
+             the console holding the paste"
         );
     }
 
@@ -3039,8 +3564,13 @@ mod tests {
             .drop_without_applying_deltas();
         let mut found = None;
         ctx.run_ui(egui::RawInput::default(), |ui| {
-            found =
-                painter::notices::the_question_box(ui.painter(), &pane, &theme, &metrics, sliver);
+            found = painter::notices::the_question_box_with_no_button(
+                ui.painter(),
+                &pane,
+                &theme,
+                &metrics,
+                sliver,
+            );
         })
         .drop_without_applying_deltas();
 
@@ -3084,7 +3614,7 @@ mod tests {
             let mut found = None;
             let mut answer = 0.0;
             ctx.run_ui(egui::RawInput::default(), |ui| {
-                found = painter::notices::the_question_box(
+                found = painter::notices::the_question_box_with_no_button(
                     ui.painter(),
                     &pane,
                     &theme,
@@ -3164,7 +3694,7 @@ mod tests {
                 let mut found = None;
                 let mut answers = [0.0_f32; 2];
                 ctx.run_ui(egui::RawInput::default(), |ui| {
-                    found = painter::notices::the_question_box(
+                    found = painter::notices::the_question_box_with_no_button(
                         ui.painter(),
                         &pane,
                         &theme,
@@ -3248,8 +3778,9 @@ mod tests {
                 egui::Order::Foreground,
                 egui::Id::new("the console"),
             ));
-            box_of_it =
-                painter::notices::the_question_box(&painter, &pane, &theme, &metrics, narrow);
+            box_of_it = painter::notices::the_question_box_with_no_button(
+                &painter, &pane, &theme, &metrics, narrow,
+            );
             painter::paint_a_console(
                 &painter,
                 &pane,
@@ -3339,7 +3870,13 @@ mod tests {
             .drop_without_applying_deltas();
         let mut found = None;
         ctx.run_ui(egui::RawInput::default(), |ui| {
-            found = painter::notices::the_question_box(ui.painter(), &pane, &theme, &metrics, hair);
+            found = painter::notices::the_question_box_with_no_button(
+                ui.painter(),
+                &pane,
+                &theme,
+                &metrics,
+                hair,
+            );
         })
         .drop_without_applying_deltas();
 
@@ -3377,7 +3914,7 @@ mod tests {
             .drop_without_applying_deltas();
         let mut found = None;
         ctx.run_ui(egui::RawInput::default(), |ui| {
-            found = painter::notices::the_question_box(
+            found = painter::notices::the_question_box_with_no_button(
                 ui.painter(),
                 &pane,
                 &theme,
@@ -3420,8 +3957,13 @@ mod tests {
             .drop_without_applying_deltas();
         let mut found = None;
         ctx.run_ui(egui::RawInput::default(), |ui| {
-            found =
-                painter::notices::the_question_box(ui.painter(), &pane, &theme, &metrics, roomy);
+            found = painter::notices::the_question_box_with_no_button(
+                ui.painter(),
+                &pane,
+                &theme,
+                &metrics,
+                roomy,
+            );
         })
         .drop_without_applying_deltas();
         let box_of_it = found.expect("a console with room to spare has a box");
@@ -3478,7 +4020,10 @@ mod tests {
             egui::pos2(41.0, metrics.height() * 1.5),
             egui::vec2(metrics.width() * 20.0, metrics.height() * 40.0),
         );
-        let box_of_it = the_notice_box(&pane, &theme, &metrics, narrow);
+        // The question on its own: with the button under it the pair is what ends at the middle, and
+        // the sweep over the button's place asserts that.
+        let box_of_it = the_question_alone(&pane, &theme, &metrics, narrow)
+            .expect("that console has a question with a box worth pressing");
 
         // **Its own guard against asserting nothing.** A box that never reaches the ceiling satisfies
         // any bound on where it ends, so the shape has to be one whose question does not fit.
@@ -3988,7 +4533,9 @@ mod tests {
         let mut refused = 0;
         let mut allowed = 0;
 
-        for rows in 4..=40 {
+        // To seventy rows and not forty: the sentence now stands under the button's place as well as
+        // the question, so the first height with room for it is taller than it was.
+        for rows in 4..=70 {
             let area = egui::Rect::from_min_size(
                 egui::pos2(41.0, metrics.height() * 1.5),
                 egui::vec2(metrics.width() * 40.0, metrics.height() * rows as f32),
@@ -4050,12 +4597,15 @@ mod tests {
             egui::vec2(metrics.width() * 20.0, metrics.height() * 40.0),
         );
 
-        let paste = the_notice_box(&pane, &theme, &metrics, narrow);
+        // What the question holds is the question and the button's place under it, so that is what
+        // has to reach the ceiling for this shape to leave no room.
+        let (_, send, _) = the_notices_on(&pane, &theme, &metrics, narrow);
+        let paste = send.expect("a console this size has room for the button");
 
         assert!(
             paste.bottom() > narrow.top() + narrow.height() * 0.5 - metrics.height(),
-            "the question's box ends at {:?}, well short of the ceiling, so there is room for the \
-             second notice and this shape says nothing about the precedence",
+            "the question and its button end at {:?}, well short of the ceiling, so there is room \
+             for the second notice and this shape says nothing about the precedence",
             paste.bottom()
         );
         assert!(
@@ -4435,8 +4985,13 @@ mod tests {
             .drop_without_applying_deltas();
         let mut found = None;
         ctx.run_ui(egui::RawInput::default(), |ui| {
-            found =
-                painter::notices::the_question_box(ui.painter(), &pane, &theme, &metrics, sliver);
+            found = painter::notices::the_question_box_with_no_button(
+                ui.painter(),
+                &pane,
+                &theme,
+                &metrics,
+                sliver,
+            );
         })
         .drop_without_applying_deltas();
 
@@ -19626,7 +20181,36 @@ mod tests {
         shapes: &[egui::epaint::ClippedShape],
         outline: egui::Color32,
     ) -> (usize, egui::Rect) {
-        the_only_rectangle_stroked_in(shapes, outline, true, "the held paste's box")
+        // **The button under the question is the other rounded box in that colour**, so it is taken
+        // out of the queue first — found by the label painted in it, not by asking the function that
+        // placed it. Replaced rather than removed, so every index still names the shape it named.
+        let label = where_the_send_label_is(shapes);
+        let without_the_button: Vec<_> = shapes
+            .iter()
+            .map(|clipped| match (&clipped.shape, label) {
+                (egui::Shape::Rect(shape), Some(at))
+                    if shape.rect.contains(at)
+                        && shape.corner_radius != egui::CornerRadius::ZERO =>
+                {
+                    egui::epaint::ClippedShape {
+                        clip_rect: clipped.clip_rect,
+                        shape: egui::Shape::Noop,
+                    }
+                }
+                _ => clipped.clone(),
+            })
+            .collect();
+        the_only_rectangle_stroked_in(&without_the_button, outline, true, "the held paste's box")
+    }
+
+    /// Where the send button's label was painted, if it was.
+    fn where_the_send_label_is(shapes: &[egui::epaint::ClippedShape]) -> Option<egui::Pos2> {
+        shapes.iter().find_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) if text.galley.text() == "Send it anyway" => {
+                Some(text.pos + text.galley.rect.center().to_vec2())
+            }
+            _ => None,
+        })
     }
 
     /// The colours these tests look the two stroked marks up by, **written out**.
@@ -26004,7 +26588,8 @@ mod tests {
         // **A press on a button does not hand the console back to the person** (**AC15**): that door
         // is the application writing on their behalf — a remote control they were shown and pressed —
         // and revoking on it would take a console away from the agent the moment somebody used the
-        // button beside it. The three doors that do revoke are the person's own keys, wheel and mouse.
+        // button beside it. The doors that do revoke carry the person's own input: keys, wheel,
+        // mouse reports, and a held paste sent from its notice (**D44**).
         assert!(
             window.active().panes()[0].taken_over.is_none(),
             "a press on a panel's button revoked the console"

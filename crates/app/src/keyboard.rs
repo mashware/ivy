@@ -188,8 +188,8 @@ pub fn bytes(event: &Event, cursor_keys: CursorKeys) -> Option<Cow<'static, [u8]
 ///
 /// **It is not `pub`, and that is the point.** Composing a paste without going through the gate is
 /// exactly the bug: an ungated door sitting beside the gated one, equally reachable and better
-/// named, is one autocomplete away from being used. [`paste_or_hold`] and [`what_a_button_sends`]
-/// are the only two ways out, and a guard in `tests/shape.rs` counts them.
+/// named, is one autocomplete away from being used. [`paste_or_hold`], [`what_a_button_sends`] and
+/// [`HeldPaste::send_anyway`] are the only ways out, and a guard in `tests/shape.rs` counts them.
 fn paste(text: &str, bracketed: bool) -> Vec<u8> {
     const OPENS: &[u8] = b"\x1b[200~";
     const CLOSES: &[u8] = b"\x1b[201~";
@@ -436,7 +436,7 @@ impl HeldPaste {
     ///
     /// Not the mode it was in when the question was asked — see this type's own docblock for why
     /// that is the difference between a paste and an execution.
-    pub fn send_anyway(self, bracketed: bool) -> Vec<u8> {
+    pub fn send_anyway(&self, bracketed: bool) -> Vec<u8> {
         paste(&self.text, bracketed)
     }
 
@@ -1079,6 +1079,38 @@ impl crate::Pane {
         }
 
         requests
+    }
+
+    /// Sends the held paste, if there is one, because somebody clicked the notice's button.
+    ///
+    /// **Composed against the mode the program is in at this click**, through the same
+    /// [`HeldPaste::send_anyway`] the `Ctrl+Enter` answer uses — the mode moves under a standing
+    /// question, and this feature already shipped once composing against the old one.
+    ///
+    /// **It goes out the way a keystroke does, minus the stopwatch**: the view comes back to where
+    /// the program writes, a failed write is said, and the console is the person's again (**D44**) —
+    /// it is their own paste, the bytes `Ctrl+Enter` would have sent through the keyboard's door. It
+    /// is not timed, because a paste is kept out of the keystroke series for the reason `send_keys`
+    /// gives.
+    ///
+    /// **The question is only let go once the write took it.** A write fails when the console's
+    /// writer has given up (**D29**), and then the paste stays held and its question stays standing —
+    /// nothing is lost in silence, which is the failure **D31** exists against — while the same
+    /// «gave up» takes the button away from the next frame on, so it is not offered again.
+    pub(crate) fn send_the_held_paste(&mut self) {
+        let Some(held) = self.held.as_ref() else {
+            return;
+        };
+        let bytes = held.send_anyway(self.screen.bracketed_paste());
+        if let Err(failure) = self.pty.write(&bytes) {
+            eprintln!(
+                "the held paste could not be sent to the program, and is still held: {failure}"
+            );
+            return;
+        }
+        self.screen.scroll_by(Scroll::ToBottom);
+        self.held = None;
+        self.hand_it_back_to_the_person();
     }
 }
 

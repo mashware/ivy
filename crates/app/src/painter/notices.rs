@@ -1,4 +1,5 @@
-//! The two things the application says **over** a console, and where each of them goes.
+//! What the application says **over** a console — two notices, and the button under the first —
+//! and where each of them goes.
 //!
 //! **They are here and not in the painter because a module holds six hundred production lines**
 //! (**D28**) and the painter reached them the moment the second notice arrived. The piece that left
@@ -6,14 +7,14 @@
 //! and it is a piece rather than a slice: what a notice says, how much of a console it may take,
 //! which of the two gives way, and where a press on one lands, all in one place.
 //!
-//! **Nothing here is stored.** Both boxes are worked out from the console and its rectangle every
+//! **Nothing here is stored.** Every box is worked out from the console and its rectangle every
 //! time they are asked for, by the painting and by the mouse alike, so there is no rectangle kept
 //! anywhere to go stale — an earlier shape of the held paste's notice kept one and it was wrong in
 //! four separate ways.
 
 use super::CellMetrics;
 use crate::theme::Theme;
-use eframe::egui::{Painter, Rect, Stroke, StrokeKind, pos2, vec2};
+use eframe::egui::{Painter, Rect, Stroke, StrokeKind, Vec2, pos2, vec2};
 
 /// How much of a console a notice may take.
 ///
@@ -30,10 +31,11 @@ const NOTICE_SHARE: f32 = 0.5;
 
 /// What a notice says about how to answer it, **when the keyboard reaches that console**.
 ///
-/// **A click discards and never sends**, and the asymmetry is deliberate: sending a line the program
-/// will cut in half is the irreversible half of this question, so it keeps costing a deliberate
-/// chord. Dismissing a question you did not ask for is the safe half, and it is the one somebody
-/// with a hand on the mouse actually wants.
+/// **A click on this box discards and never sends**, and the asymmetry is deliberate: sending a line
+/// the program will cut in half is the irreversible half of this question, so it never shares a
+/// target with the dismissal — it costs a deliberate chord, or a press on a box of its own labelled
+/// [`SEND_IT_ANYWAY`]. Dismissing a question you did not ask for is the safe half, and it is the one
+/// somebody with a hand on the mouse most often wants.
 pub(crate) const ANSWERED_BY_HAND: &str =
     "Escape or a click discards it · Ctrl+Enter sends it anyway";
 
@@ -47,19 +49,44 @@ pub(crate) const ANSWERED_BY_HAND: &str =
 pub(crate) const ANSWERED_BY_CLICK: &str =
     "A click discards it · focus this console to send it anyway";
 
-/// Where a held paste's notice goes on that console, or nothing if it holds none.
+/// What the box under the question says, and a press on it sends the held paste (**D31**).
 ///
-/// **The one place that decides it, called by the two passes that need it**: this module to draw the
-/// box, and the mouse pass to know whether a press landed on it. **Nothing is stored**, so there is no
-/// rectangle kept on the paste to go stale — an earlier shape of this fix kept one and it was wrong in
-/// four separate ways, all of them found in review.
+/// **A box of its own, under the question and never inside it**, so «a click discards it» stays
+/// literally true of the box it is written in, and the irreversible answer never shares a target
+/// with the safe one.
+pub(crate) const SEND_IT_ANYWAY: &str = "Send it anyway";
+
+/// Where a held paste's notice goes **when no button is placed under it**, or nothing if the console
+/// holds no paste.
 ///
-/// **That is not the same as the press being judged against this frame's geometry, and a review was
-/// right to say so.** The mouse pass runs before anything is painted, so the console rectangle it
-/// hands in is the one the previous frame drew with; on the frame a panel first appears they differ.
-/// The press is answered where the person aimed it, which is what they could see. What is gone is the
-/// *stored* rectangle, not the one-frame-old geometry — those are different claims and only the first
-/// one is made here.
+/// **Only the tests ask for it**, and on purpose: the painter and the mouse pass both ask
+/// [`the_boxes`], which decides between this box and a shorter one with the button's slot under it,
+/// from the same measurement. What this one keeps checkable is the question's own ceiling and floor,
+/// apart from the button's.
+#[cfg(test)]
+pub(crate) fn the_question_box_with_no_button(
+    painter: &Painter,
+    console: &crate::Pane,
+    theme: &Theme,
+    metrics: &CellMetrics,
+    area: Rect,
+) -> Option<Rect> {
+    let measured = measure_the_question(painter, console, theme, metrics, area)?;
+    question_box_under(area, metrics, &measured, 0.0)
+}
+
+/// What the question's text needs, laid out once and asked of by every ceiling.
+struct Measured {
+    /// The whole question, the taller of its two wordings.
+    taller: Vec2,
+    /// The way out on its own, which is what the floor asks for.
+    answer: f32,
+}
+
+/// Lays the question out, or nothing if the console holds no paste.
+///
+/// **Once per pass, whatever ceilings are tried after it**: laying it out again for each one is work
+/// the frame would not be declaring (**D13**).
 ///
 /// **It is laid out against BOTH answer sentences and takes the taller box, whichever one will be
 /// shown.** Otherwise the box would change size on the very frame the focus moves, and the mouse pass
@@ -70,35 +97,15 @@ pub(crate) const ANSWERED_BY_CLICK: &str =
 /// console one of them takes two lines and the other three, so measuring by length made an unfocused
 /// pane's box one line short — text painted outside its own border, and a hit target smaller than the
 /// drawing.
-///
-/// **It takes at most half the console's height**, and the bottom half is what that buys: a dead
-/// console's last output is at the bottom of its grid, it is the first thing somebody wants to mark
-/// and copy, and marking starts with a bare press. Without the ceiling the box runs the console's
-/// whole height at the width two panes get — measured at 168 pt — so the entire console becomes a
-/// button that throws the paste away.
-///
-/// `None` unless **the whole answer fits inside the capped box**, and a few cells wide. Two things
-/// about that floor, and both were got wrong first:
-///
-/// - **It is measured against what the ceiling leaves**, not against the box the text asked for.
-///   The other way round, a three-row console gets a box of about 26 px over a text area of about
-///   10 — under one line — which is stroked, swallows the press and shows nothing. That is the
-///   defect this floor has always existed against, recreated by the ceiling.
-/// - **The answer, not «a line».** A review pointed out that one line's worth of room is not the
-///   promise: the line saying how to get out wraps to about three at this application's narrowest
-///   console, so «a line fits» let through boxes showing half an instruction. A console that cannot
-///   show the whole way out gets no box, which is a silence — recorded as such rather than traded
-///   for an unreadable rectangle.
-pub(crate) fn the_question_box(
+fn measure_the_question(
     painter: &Painter,
     console: &crate::Pane,
     theme: &Theme,
     metrics: &CellMetrics,
     area: Rect,
-) -> Option<Rect> {
+) -> Option<Measured> {
     let held = console.held.as_ref()?;
-    let margin = metrics.width();
-    let wrap = (area.width() - 4.0 * margin).max(metrics.width());
+    let wrap = (area.width() - 4.0 * metrics.width()).max(metrics.width());
     let taller = [ANSWERED_BY_HAND, ANSWERED_BY_CLICK]
         .into_iter()
         .map(|how| {
@@ -124,6 +131,40 @@ pub(crate) fn the_question_box(
                 .y
         })
         .reduce(f32::max)?;
+    Some(Measured { taller, answer })
+}
+
+/// The question's box with `reserved` points of the top half left free under it.
+///
+/// **Only the ceiling moves.** A question that does not reach it comes out exactly as it would have
+/// anyway, and one that does is shortened — which clips the tail of the explanation, never the way
+/// out, because the keys are first in the galley — and still has to pass the same floor.
+///
+/// **It takes at most half the console's height**, and the bottom half is what that buys: a dead
+/// console's last output is at the bottom of its grid, it is the first thing somebody wants to mark
+/// and copy, and marking starts with a bare press. Without the ceiling the box runs the console's
+/// whole height at the width two panes get — measured at 168 pt — so the entire console becomes a
+/// button that throws the paste away.
+///
+/// `None` unless **the whole answer fits inside the capped box**, and a few cells wide. Two things
+/// about that floor, and both were got wrong first:
+///
+/// - **It is measured against what the ceiling leaves**, not against the box the text asked for.
+///   The other way round, a three-row console gets a box of about 26 px over a text area of about
+///   10 — under one line — which is stroked, swallows the press and shows nothing. That is the
+///   defect this floor has always existed against, recreated by the ceiling.
+/// - **The answer, not «a line».** A review pointed out that one line's worth of room is not the
+///   promise: the line saying how to get out wraps to about three at this application's narrowest
+///   console, so «a line fits» let through boxes showing half an instruction. A console that cannot
+///   show the whole way out gets no box, which is a silence — recorded as such rather than traded
+///   for an unreadable rectangle.
+fn question_box_under(
+    area: Rect,
+    metrics: &CellMetrics,
+    measured: &Measured,
+    reserved: f32,
+) -> Option<Rect> {
+    let margin = metrics.width();
     // **Clamped to the console, and what the clamp does and does not do is worth being exact about.**
     // A pane can be three rows tall and twenty columns wide, and an unclamped box runs off it. The
     // clamp keeps the **box** inside the console so its border is not stroked where the console is
@@ -134,11 +175,11 @@ pub(crate) fn the_question_box(
     // The box starts a margin below the console's top, so what the ceiling leaves it is half the
     // height minus that offset — which is what makes «nothing is drawn in the bottom half» true of
     // the box's own bottom edge and not merely of its origin.
-    let ceiling = area.height() * NOTICE_SHARE - margin;
-    let tall_enough = (taller.y + 2.0 * margin).min(ceiling);
+    let ceiling = area.height() * NOTICE_SHARE - margin - reserved;
+    let tall_enough = (measured.taller.y + 2.0 * margin).min(ceiling);
     let box_of_it = Rect::from_min_size(
         area.left_top() + vec2(margin, margin),
-        vec2(taller.x + 2.0 * margin, tall_enough),
+        vec2(measured.taller.x + 2.0 * margin, tall_enough),
     )
     .intersect(area);
     // **The floor asks for the ANSWER, not a line, and not a box a line tall.** With the ceiling in
@@ -146,8 +187,21 @@ pub(crate) fn the_question_box(
     // area of one row minus two margins, which is nothing — and one row of room still cuts an
     // instruction that wraps to three at a narrow console.
     let worth_pressing =
-        box_of_it.height() - 2.0 * margin >= answer && box_of_it.width() >= 4.0 * margin;
+        box_of_it.height() - 2.0 * margin >= measured.answer && box_of_it.width() >= 4.0 * margin;
     worth_pressing.then_some(box_of_it)
+}
+
+/// The button's label, laid out on one line: it is two words and it is never wrapped.
+fn send_label(
+    painter: &Painter,
+    theme: &Theme,
+    metrics: &CellMetrics,
+) -> std::sync::Arc<eframe::egui::Galley> {
+    painter.layout_no_wrap(
+        SEND_IT_ANYWAY.to_owned(),
+        metrics.font(),
+        theme.foreground(),
+    )
 }
 
 /// What the console says when it has stopped receiving its program's output.
@@ -227,14 +281,15 @@ pub(crate) fn went_quiet(ending: Option<term_core::Ending>) -> bool {
 /// none — a console that cannot show it says nothing, and what a person sees then is a console that
 /// stopped and a window that stayed open.
 ///
-/// **It is told where the question's box ends** so the two are worked out in one pass.
+/// **It is told where the boxes above it end** — the question, or the button's slot under it — so
+/// they are worked out in one pass and a dismissal of this one moves nothing above it.
 fn the_silence_box_under(
     painter: &Painter,
     console: &crate::Pane,
     theme: &Theme,
     metrics: &CellMetrics,
     area: Rect,
-    question: Option<Rect>,
+    above: Option<Rect>,
 ) -> Option<Rect> {
     if !still_says_it_went_quiet(console) {
         return None;
@@ -249,10 +304,10 @@ fn the_silence_box_under(
             wrap,
         )
         .size();
-    // Under the paste's box when there is one, and a margin below the console's top when there is
-    // not. Asked of the one place that decides that box, so the two cannot disagree about where it
-    // ends.
-    let top = question.map_or(area.top() + margin, |paste| paste.bottom() + margin);
+    // Under the paste's boxes when there are any, and a margin below the console's top when there
+    // are not. Asked of the one place that decides them, so the two cannot disagree about where they
+    // end.
+    let top = above.map_or(area.top() + margin, |paste| paste.bottom() + margin);
     let box_of_it = Rect::from_min_size(
         pos2(area.left() + margin, top),
         vec2(sentence.x + 2.0 * margin, sentence.y + 2.0 * margin),
@@ -335,6 +390,7 @@ fn paint_the_question_over_it(
     metrics: &CellMetrics,
     area: Rect,
     box_of_it: Rect,
+    reserved: f32,
 ) {
     let Some(held) = console.held.as_ref() else {
         return;
@@ -369,7 +425,7 @@ fn paint_the_question_over_it(
     // panicked while painting a held paste, in exactly the case this clause exempts.
     debug_assert!(
         sentence.size().y <= box_of_it.height() - 2.0 * margin + 1.0
-            || box_of_it.height() + 1.0 >= area.height() * NOTICE_SHARE - margin,
+            || box_of_it.height() + 1.0 >= area.height() * NOTICE_SHARE - margin - reserved,
         "the box is {:?} and its sentence lays out {:?}, and the box is not at its ceiling either: \
          it was measured against something other than what is being drawn",
         box_of_it,
@@ -411,7 +467,7 @@ fn paint_the_question_over_it(
         );
 }
 
-/// Where both notices go on one console, worked out in one pass.
+/// Where the notices and the button go on one console, worked out in one pass.
 ///
 /// **One pass because the second box is measured against where the first one ends**, so asking for
 /// them separately lays the question's text out twice — four layouts on every quiet pane, in the
@@ -420,11 +476,22 @@ fn paint_the_question_over_it(
 pub(crate) struct Notices {
     /// The held paste's question, which keeps the top.
     pub question: Option<Rect>,
-    /// The sentence about this console having gone quiet, under it.
+    /// Where the button goes, whether or not it is offered: the question left this room under it.
+    pub slot: Option<Rect>,
+    /// The button under it that sends the paste, where it has room and the console takes input.
+    pub send: Option<Rect>,
+    /// The sentence about this console having gone quiet, under whatever is above it.
     pub silence: Option<Rect>,
 }
 
-/// Where both notices go, asked once by whoever needs either.
+/// Where every box goes, asked once by whoever needs any of them.
+///
+/// **That is not the same as the press being judged against this frame's geometry, and a review was
+/// right to say so.** The mouse pass runs before anything is painted, so the console rectangle it
+/// hands in is the one the previous frame drew with; on the frame a panel first appears they differ.
+/// The press is answered where the person aimed it, which is what they could see. What is gone is the
+/// *stored* rectangle, not the one-frame-old geometry — those are different claims and only the first
+/// one is made here.
 pub(crate) fn the_boxes(
     painter: &Painter,
     console: &crate::Pane,
@@ -432,15 +499,52 @@ pub(crate) fn the_boxes(
     metrics: &CellMetrics,
     area: Rect,
 ) -> Notices {
-    let question = the_question_box(painter, console, theme, metrics, area);
+    let Some(measured) = measure_the_question(painter, console, theme, metrics, area) else {
+        return Notices {
+            question: None,
+            slot: None,
+            send: None,
+            silence: the_silence_box_under(painter, console, theme, metrics, area, None),
+        };
+    };
+    let margin = metrics.width();
+    let button = send_label(painter, theme, metrics).size() + vec2(2.0 * margin, 2.0 * margin);
+    // **The button is the convenience and it is the one that gives way.** The question is laid out
+    // leaving the button's height free under the ceiling; if that shorter question fails its own
+    // floor, or the button placed a margin in would run past the console's right edge, there is no
+    // slot and the question is the one it always was — so no console loses the notice to make room.
+    // The slot's bottom edge is inside the top half by construction: the question is capped at the
+    // ceiling minus exactly what goes under it.
+    let with_room =
+        question_box_under(area, metrics, &measured, button.y + margin).and_then(|question| {
+            let slot =
+                Rect::from_min_size(pos2(question.left(), question.bottom() + margin), button);
+            (slot.right() <= area.right()).then_some((question, slot))
+        });
+    let (question, slot) = match with_room {
+        Some((question, slot)) => (Some(question), Some(slot)),
+        None => (question_box_under(area, metrics, &measured, 0.0), None),
+    };
+    // **The geometry above depends neither on the reading's ending nor on whether «stopped
+    // receiving» was dismissed** — two things that can change between a paint and a press — so a
+    // press aimed at the button cannot find the question grown under it. Whether the button is **offered** is the one thing
+    // left to the console's state: not on a console whose writer gave up, where the write would go
+    // nowhere. Its slot stays empty there, and a press on it answers whatever is drawn there — the
+    // sentence about that console when it stands, the grid otherwise.
+    let send = slot.filter(|_| !is_deaf(console));
 
     Notices {
-        silence: the_silence_box_under(painter, console, theme, metrics, area, question),
+        // Under the button when it is offered. On a console whose writer gave up its empty place
+        // protects nothing, and the sentence about that console is worth more than the room; the
+        // writer never comes back, so the sentence only ever moves up, where a press dismisses it.
+        silence: the_silence_box_under(painter, console, theme, metrics, area, send.or(question)),
         question,
+        slot,
+        send,
     }
 }
 
-/// Says both notices over a console, in the order they stack.
+/// Says the notices over a console, and the button under the question, in the order they stack.
 pub(crate) fn paint_them_over_it(
     painter: &Painter,
     console: &crate::Pane,
@@ -451,9 +555,44 @@ pub(crate) fn paint_them_over_it(
     let boxes = the_boxes(painter, console, theme, metrics, area);
 
     if let Some(box_of_it) = boxes.question {
-        paint_the_question_over_it(painter, console, theme, metrics, area, box_of_it);
+        // What the question was laid out leaving free under it, which is what its assert's escape
+        // clause has to be measured against — read off the slot, not worked out again.
+        let reserved = boxes
+            .slot
+            .map_or(0.0, |slot| slot.bottom() - box_of_it.bottom());
+        paint_the_question_over_it(painter, console, theme, metrics, area, box_of_it, reserved);
+    }
+    if let Some(box_of_it) = boxes.send {
+        paint_the_button_over_it(painter, theme, metrics, box_of_it);
     }
     if let Some(box_of_it) = boxes.silence {
         paint_the_silence_over_it(painter, console, theme, metrics, area, box_of_it);
     }
+}
+
+/// Paints the button that sends a held paste.
+///
+/// The notice's own look — filled, stroked in the focus colour, fill before stroke so the border is
+/// not covered — and its label clipped to its box for the reason the question gives.
+fn paint_the_button_over_it(
+    painter: &Painter,
+    theme: &Theme,
+    metrics: &CellMetrics,
+    box_of_it: Rect,
+) {
+    let margin = metrics.width();
+    painter.rect_filled(box_of_it, margin, theme.panel_background());
+    painter.rect_stroke(
+        box_of_it,
+        margin,
+        Stroke::new(1.0, theme.focus()),
+        StrokeKind::Inside,
+    );
+    painter
+        .with_clip_rect(box_of_it.intersect(painter.clip_rect()))
+        .galley(
+            box_of_it.left_top() + vec2(margin, margin),
+            send_label(painter, theme, metrics),
+            theme.foreground(),
+        );
 }
