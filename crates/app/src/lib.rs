@@ -22718,6 +22718,107 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
+    /// Three changes, each with the deadline it armed expired, and how many of them attempted the
+    /// write. **Only a deadline the change armed is expired**: setting one by hand would walk past
+    /// the very decision these tests are about.
+    fn attempts_over_three_changes(window: &mut Window) -> usize {
+        for ratio in [0.25, 0.6, 0.4] {
+            window.active_mut().move_divider(0, ratio);
+            window.check_whether_the_layout_moved();
+            if window.save_due.is_some() {
+                window.save_due = Some(Instant::now() - SAVE_DELAY);
+            }
+            window.save_if_due();
+        }
+        let after_the_refusal = window.save_due;
+        window.active_mut().move_divider(0, 0.7);
+        window.check_whether_the_layout_moved();
+        assert_eq!(
+            (after_the_refusal, window.save_due),
+            (None, None),
+            "a session that can no longer write still armed a deadline, which wakes the window for \
+             an attempt that cannot succeed"
+        );
+        window.saving.attempts()
+    }
+
+    #[test]
+    fn a_session_forbidden_to_overwrite_attempts_once_and_then_stops() {
+        // **Once, and not zero**: the first attempt is the one that says the line, and every
+        // measurement batch runs forbidden to overwrite, so the script's guard needs it. **And not
+        // three**: nothing this session does lifts the prohibition, so every attempt after the first
+        // is the whole copy, comparison and validation paid for a write that cannot happen — twice a
+        // second while a divider is dragged. Three changes and not two, so that «stops after the
+        // second» cannot pass either.
+        let (mut window, base, _) = a_window_that_saves("forbidden-once");
+        window
+            .persistence
+            .forbid_overwrite("the layout that was saved could not be opened");
+
+        let attempts = attempts_over_three_changes(&mut window);
+        let _ = std::fs::remove_dir_all(&base);
+
+        assert_eq!(
+            attempts, 1,
+            "a refusal that cannot change during the session was attempted {attempts} times"
+        );
+    }
+
+    #[test]
+    fn a_session_with_nowhere_to_write_attempts_once_and_then_stops() {
+        // The same rule for the other reason that lasts the session, which comes from the path and
+        // not from a prohibition: with no path, no later change gives it one.
+        let mut window = window_with("sleep 30", "sleep 30");
+        window.persistence = session::Persistence::at(None);
+
+        let attempts = attempts_over_three_changes(&mut window);
+
+        assert_eq!(
+            attempts, 1,
+            "with nowhere to write, the save was attempted {attempts} times"
+        );
+    }
+
+    #[test]
+    fn a_layout_that_does_not_fit_is_warned_about() {
+        // **The only signal before losing the layout**: more consoles than the format admits cannot
+        // be saved, and without the line the user finds out on reopening. What is asserted is the
+        // decision recorded by the warned-once set, because the error output cannot be read from
+        // inside the process.
+        let mut window = window_with("sleep 30", "sleep 30");
+        window.persistence = session::Persistence::at(None);
+        let one_too_many = session::StoredChild {
+            weight: 1.0,
+            node: session::StoredNode::Leaf(session::StoredLeaf {
+                panel_width: 36,
+                folded: false,
+            }),
+        };
+        window.last_seen = Some(session::StoredDocument {
+            v: session::VERSION,
+            tabs: vec![session::StoredTab {
+                root: session::StoredNode::Branch {
+                    orientation: session::StoredOrientation::Columns,
+                    children: vec![one_too_many; session::MAX_LEAVES + 1],
+                },
+            }],
+        });
+        window.save_due = Some(Instant::now() - SAVE_DELAY);
+        window.save_if_due();
+
+        assert!(
+            window
+                .persistence
+                .warned_about(&session::SaveFailure::DoesntFit),
+            "a layout with more consoles than the format admits was dropped without a warning"
+        );
+        assert_eq!(
+            window.saving.attempts(),
+            0,
+            "a layout that does not fit reached the write"
+        );
+    }
+
     #[test]
     fn closing_the_window_writes_what_was_still_pending() {
         // **Closing the window by hand is not dying**, and it is the only ending in which the half
@@ -23053,7 +23154,7 @@ mod tests {
 
         let mut persistence = session::Persistence::at(Some(path));
         assert!(
-            persistence.save(&saving_two_tabs()),
+            persistence.save(&saving_two_tabs()).is_ok(),
             "what the test was going to restore was not saved"
         );
         let saved = persistence

@@ -1365,7 +1365,9 @@ fi
 # as not to clobber the layout of whoever is measuring — so a run's write count is **zero by
 # construction** and demanding it invalidated every batch with gestures. The work that has to be
 # declared does happen and is timed: copying the layout, validating it and reaching the gate. What
-# the guard watches is that that path gets walked.
+# the guard watches is that that path gets walked. **Once per run, not once per deadline**: a refusal
+# the session cannot lift ends the attempts after the first (D16, item 4), so a good batch declares
+# exactly one attempt, and the guard invalidates both the zero and anything above one.
 #
 # **It is only demanded where the batch moves the layout.** In a still batch there is nothing to
 # save, and neither in the one that marks text, the one that sends the mouse to the program, the one
@@ -1385,6 +1387,10 @@ if [ "$DRAGS" != 0 ] && [ "$GESTURE" != mark ] && [ "$GESTURE" != mouse ] && [ "
     if [ "$ATTEMPTS" = 0 ]; then
         invalidate "the layout was moved and saving it was not attempted even once: that path's cost \
 would be published as zero, which reads as «saving costs nothing»"
+    fi
+    if [ -n "$ATTEMPTS" ] && [ "$ATTEMPTS" -gt 1 ]; then
+        invalidate "saving was attempted $ATTEMPTS times in a session that cannot write: every attempt \
+after the first pays for a write that cannot happen (D16, item 4), and the run measures that"
     fi
     echo "attempts at saving the layout during the batch: $ATTEMPTS (none of them writes: a batch has \
 saving vetoed)" >&2

@@ -28,9 +28,9 @@ pub struct Saving {
     /// How many times the layout file has been written.
     ///
     /// **The report publishes it and the script cannot know it**, which is the same partition the
-    /// project already uses with the injected gestures: this number lives inside the process. The script
-    /// invalidates the run if it is zero, because a batch that says it measures the saving and saves
-    /// nothing would publish the cost of a path that was not walked.
+    /// project already uses with the injected gestures: this number lives inside the process. **The
+    /// script does not guard on it**: every batch has saving vetoed, so it is zero by construction, and
+    /// the guard reads the attempts instead.
     writes: usize,
 }
 
@@ -105,7 +105,7 @@ impl Saving {
             writeln!(a, "  {}", self.write)?;
             writeln!(
                 a,
-                "  covers copying the layout, VALIDATING it, serializing it, resolving the path, creating\n                   the directory the first time, writing the temporary and renaming it over; and\n                   if something fails, deleting the temporary and stating the failing line. It only\n                   happens when the deadline expires, not every frame: an attempt that never\n                   reaches the disk is almost all validation"
+                "  covers copying the layout, VALIDATING it, serializing it, resolving the path, creating\n                   the directory the first time, writing the temporary and renaming it over; and\n                   if something fails, deleting the temporary and stating the failing line. It only\n                   happens when the deadline expires, not every frame: an attempt that never\n                   reaches the disk is almost all validation, and a session that can never write makes\n                   only one"
             )?;
         }
 

@@ -658,6 +658,22 @@ impl std::fmt::Display for SaveFailure {
     }
 }
 
+impl SaveFailure {
+    /// Whether nothing this session does can make the next attempt succeed.
+    ///
+    /// **Three reasons, and each is fixed only by restarting**: the veto and the prohibition are set
+    /// once and never lifted, and the path is resolved when the session starts. The disk's four are
+    /// the opposite — a full disk empties, a planted temporary is dodged by the next attempt's name —
+    /// and so is `NotSerializable`, which belongs to the document and not to the session. Classifying a transient
+    /// reason here would stop saving for good over a disk that was busy for a second.
+    fn lasts_the_session(&self) -> bool {
+        matches!(
+            self,
+            Self::Vetoed { .. } | Self::WontOverwrite(_) | Self::NoPlace
+        )
+    }
+}
+
 /// How long is waited from the first change without writing until the layout is written.
 ///
 /// **Half a second, and the number has two reasons.** It is the same order as the breather of the
@@ -728,6 +744,14 @@ pub struct Persistence {
     /// travels with whoever already traveled. Returning it in the `Option` would have forced changing the
     /// type the window opens with and the six tests that build it by hand.
     load_time: Option<Duration>,
+    /// Whether an attempt already failed for a reason that [lasts the
+    /// session](SaveFailure::lasts_the_session).
+    ///
+    /// **Learned from an attempt and not from the fields above, on purpose**: the veto, the
+    /// prohibition and the missing path are all known before anything is tried, but deciding from
+    /// them would skip the first attempt too — and that attempt is the one that says the line, and
+    /// the one the measurement script demands to see in a batch, where writing is always forbidden.
+    refused_for_good: bool,
 }
 
 impl Persistence {
@@ -745,6 +769,7 @@ impl Persistence {
             warned: HashSet::new(),
             attempts: 0,
             load_time: None,
+            refused_for_good: false,
         }
     }
 
@@ -816,7 +841,7 @@ impl Persistence {
         }
     }
 
-    /// Leaves that layout on disk, and says whether it succeeded.
+    /// Leaves that layout on disk, or says why it did not.
     ///
     /// **It receives the already-validated one and not just any document, and a review asked for that.**
     /// Without it, the writing path accepted exactly what the reading path would reject: a file could be
@@ -825,10 +850,11 @@ impl Persistence {
     /// Passing through the same type the read demands, what is written can be read back **by
     /// construction**.
     ///
-    /// **Each failure is warned about once per reason, and the retry is not suppressed**: the caller
-    /// tries again with the next change, so a disk that empties recovers on its own without having filled
-    /// the error output while it was full.
-    pub fn save(&mut self, layout: &Validated) -> bool {
+    /// **Each failure is warned about once per reason, and the retry is suppressed only when it cannot
+    /// succeed**: the caller tries again with the next change, so a disk that empties recovers on its
+    /// own without having filled the error output while it was full; a reason that lasts the session
+    /// is remembered, and [`Self::will_never_write`] tells the caller to stop arming deadlines.
+    pub(crate) fn save(&mut self, layout: &Validated) -> Result<(), SaveFailure> {
         self.attempts = self.attempts.wrapping_add(1);
         let attempt = if let Some(found) = self.veto {
             Err(SaveFailure::Vetoed { found })
@@ -840,13 +866,16 @@ impl Persistence {
             Err(SaveFailure::NoPlace)
         };
 
-        match attempt {
-            Ok(()) => true,
-            Err(error) => {
-                self.warn(error);
-                false
-            }
+        if let Err(error) = &attempt {
+            self.refused_for_good |= error.lasts_the_session();
+            self.warn(error);
         }
+        attempt
+    }
+
+    /// Whether a save already failed for a reason nothing this session does can change.
+    pub(crate) fn will_never_write(&self) -> bool {
+        self.refused_for_good
     }
 
     /// Warns that what is on screen **cannot be saved**, once per session.
@@ -863,8 +892,8 @@ impl Persistence {
     }
 
     /// Says the line, if that reason has not been said already.
-    fn warn(&mut self, error: SaveFailure) {
-        if self.should_warn(&error) {
+    fn warn(&mut self, error: &SaveFailure) {
+        if self.should_warn(error) {
             eprintln!("the layout was not saved: {error}");
         }
     }
@@ -873,6 +902,12 @@ impl Persistence {
     /// because writing to the error output cannot be observed from inside the process.
     fn should_warn(&mut self, error: &SaveFailure) -> bool {
         self.warned.insert(std::mem::discriminant(error))
+    }
+
+    /// Whether that reason has already been said, for tests.
+    #[cfg(test)]
+    pub(crate) fn warned_about(&self, error: &SaveFailure) -> bool {
+        self.warned.contains(&std::mem::discriminant(error))
     }
 }
 
@@ -1016,8 +1051,10 @@ impl crate::Window {
             self.last_seen = Some(current);
             // **Only if it was empty**, which is the difference between a cap and a postponement:
             // during a drag the layout changes on every frame, and by rearming here it would never
-            // be written.
-            if self.save_due.is_none() {
+            // be written. **And never for a session that can no longer write**: a deadline it arms
+            // wakes the window for an attempt that cannot succeed, and the copy, comparison and
+            // validation that attempt pays.
+            if self.save_due.is_none() && !self.persistence.will_never_write() {
                 self.save_due = Some(Instant::now() + SAVE_DELAY);
             }
         }
@@ -1092,7 +1129,7 @@ impl crate::Window {
             }
         };
 
-        let written = self.persistence.save(&validated);
+        let written = self.persistence.save(&validated).is_ok();
         let how_much = started.elapsed();
         self.timed_separately += how_much;
         self.saving.record_write(how_much, written);
@@ -1721,7 +1758,9 @@ mod file_tests {
         let path = directory.file();
 
         assert!(
-            Persistence::at(Some(path.clone())).save(&test_layout()),
+            Persistence::at(Some(path.clone()))
+                .save(&test_layout())
+                .is_ok(),
             "it was not saved"
         );
 
@@ -1743,9 +1782,9 @@ mod file_tests {
         let path = directory.file();
         let mut persistence = Persistence::at(Some(path.clone()));
 
-        assert!(persistence.save(&test_layout()));
+        assert!(persistence.save(&test_layout()).is_ok());
         let first = std::fs::metadata(&path).expect("it exists").ino();
-        assert!(persistence.save(&test_layout()));
+        assert!(persistence.save(&test_layout()).is_ok());
         let second = std::fs::metadata(&path).expect("it exists").ino();
 
         assert_ne!(
@@ -1762,8 +1801,8 @@ mod file_tests {
 
         // Twice, because the second save is the one that finds the directory and the destination already
         // made: it is the path that is really walked, twice per second while dragging.
-        assert!(file.save(&test_layout()));
-        assert!(file.save(&test_layout()));
+        assert!(file.save(&test_layout()).is_ok());
+        assert!(file.save(&test_layout()).is_ok());
 
         let inside: Vec<_> = std::fs::read_dir(path.parent().expect("the dedicated directory"))
             .expect("read the directory")
@@ -1779,7 +1818,11 @@ mod file_tests {
 
         let directory = TestDir::new("permissions");
         let path = directory.file();
-        assert!(Persistence::at(Some(path.clone())).save(&test_layout()));
+        assert!(
+            Persistence::at(Some(path.clone()))
+                .save(&test_layout())
+                .is_ok()
+        );
 
         let modo = |path: &Path| {
             std::fs::metadata(path)
@@ -1880,7 +1923,7 @@ mod file_tests {
         let directory = TestDir::new("no-text");
         let path = directory.file();
         let mut file = Persistence::at(Some(path.clone()));
-        assert!(file.save(&test_layout()));
+        assert!(file.save(&test_layout()).is_ok());
         let start = std::fs::read_to_string(&path).expect("there is something saved");
 
         let error = save_described(&path, 1, None);
@@ -1965,12 +2008,75 @@ mod file_tests {
         );
         // Two attempts, because the veto belongs to the session and not to the attempt: with one, a veto
         // that only held for the first would pass just the same.
-        assert!(!file.save(&test_layout()));
-        assert!(!file.save(&test_layout()));
+        assert!(file.save(&test_layout()).is_err());
+        assert!(file.save(&test_layout()).is_err());
         assert_eq!(
             std::fs::read_to_string(&path).expect("it is still there"),
             of_the_future,
             "an old binary ran over the new one's layout"
+        );
+    }
+
+    #[test]
+    fn only_the_three_reasons_restarting_fixes_end_the_attempts() {
+        // **Every variant, both ways.** Calling a transient reason permanent stops saving for the
+        // rest of the session over a disk that was busy for a second, and the window-level retry
+        // test only walks `Directory`: without this table, a `TempFile` or a `Writing` added to the
+        // match would pass everything.
+        let io = || std::io::Error::other("test");
+        let cases = [
+            (SaveFailure::NoPlace, true),
+            (SaveFailure::Vetoed { found: VERSION + 1 }, true),
+            (SaveFailure::WontOverwrite("test"), true),
+            (SaveFailure::NotSerializable, false),
+            (SaveFailure::Directory(io()), false),
+            (SaveFailure::TempFile(io()), false),
+            (SaveFailure::Writing(io()), false),
+            (SaveFailure::Renaming(io()), false),
+            (SaveFailure::DoesntFit, false),
+        ];
+        for (failure, lasts) in cases {
+            assert_eq!(
+                failure.lasts_the_session(),
+                lasts,
+                "«{failure}» was classified the wrong way round"
+            );
+        }
+    }
+
+    #[test]
+    fn a_newer_version_on_disk_ends_the_attempts_after_the_first() {
+        // **The veto is one of the three reasons that last the session, and the only one no other
+        // test binds**: the prohibition and the missing path are exercised through the window in
+        // `lib.rs`, the veto only here. And the permanence is **learned from an attempt**: deciding
+        // it from the veto on loading would skip the attempt that says the line, so before saving
+        // it has to be false even though the veto is already known.
+        let directory = TestDir::new("newer-version-ends-attempts");
+        let path = directory.file();
+        std::fs::create_dir_all(path.parent().expect("the dedicated directory"))
+            .expect("create it");
+        let of_the_future = format!(
+            r#"{{"v":{},"solapas":[{{"raiz":{{"hoja":{{"ancho":36,"plegado":false}}}}}}]}}"#,
+            VERSION + 1
+        );
+        std::fs::write(&path, &of_the_future).expect("write the file from the future");
+        let mut persistence = Persistence::at(Some(path.clone()));
+
+        assert!(persistence.load().is_none(), "a newer version was restored");
+        assert!(
+            !persistence.will_never_write(),
+            "the session gave up before attempting a single save: the line would never be said"
+        );
+        assert!(
+            matches!(
+                persistence.save(&test_layout()),
+                Err(SaveFailure::Vetoed { found }) if found == VERSION + 1
+            ),
+            "a newer version on disk did not veto the save"
+        );
+        assert!(
+            persistence.will_never_write(),
+            "a veto that lasts the session left the window retrying on every change"
         );
     }
 
@@ -1993,7 +2099,7 @@ mod file_tests {
 
         assert!(persistence.load().is_none());
         assert!(
-            persistence.save(&test_layout()),
+            persistence.save(&test_layout()).is_ok(),
             "a file with no version was treated as one from the future"
         );
         assert_eq!(
@@ -2013,7 +2119,7 @@ mod file_tests {
 
         assert!(file.load().is_none());
         assert!(
-            file.save(&test_layout()),
+            file.save(&test_layout()).is_ok(),
             "a file of ours that is broken is not replaced"
         );
         assert_eq!(
@@ -2027,7 +2133,7 @@ mod file_tests {
         let mut file = Persistence::at(None);
 
         assert!(file.load().is_none());
-        assert!(!file.save(&test_layout()));
+        assert!(file.save(&test_layout()).is_err());
     }
 
     #[test]
@@ -2110,11 +2216,11 @@ mod file_tests {
         let mut persistence = Persistence::at(Some(path.clone()));
 
         assert!(
-            !persistence.save(&test_layout()),
+            persistence.save(&test_layout()).is_err(),
             "the temporary that was there was adopted"
         );
         assert!(
-            persistence.save(&test_layout()),
+            persistence.save(&test_layout()).is_ok(),
             "an orphan left the whole session unable to save"
         );
         assert_eq!(
@@ -2213,7 +2319,7 @@ mod file_tests {
         let mut persistence = Persistence::at(Some(path.clone()));
         assert!(persistence.load().is_none());
         assert!(
-            persistence.save(&test_layout()),
+            persistence.save(&test_layout()).is_ok(),
             "a file that could not be read was treated as one from the future"
         );
         assert_eq!(
@@ -2251,7 +2357,7 @@ mod file_tests {
             "a tree that validation rejects was restored"
         );
         assert!(
-            persistence.save(&test_layout()),
+            persistence.save(&test_layout()).is_ok(),
             "a file of ours with a shape that is no good was treated as one from the future"
         );
         assert_eq!(
@@ -2274,7 +2380,9 @@ mod file_tests {
 
         assert!(matches!(error, Err(SaveFailure::Directory(_))), "{error:?}");
         assert!(
-            !Persistence::at(Some(path.clone())).save(&test_layout()),
+            Persistence::at(Some(path.clone()))
+                .save(&test_layout())
+                .is_err(),
             "it was taken as saved without anywhere to put it"
         );
         assert!(!path.exists(), "something ended up in the file's place");
@@ -2290,7 +2398,11 @@ mod file_tests {
             matches!(without_directory, Err(SaveFailure::NoPlace)),
             "{without_directory:?}"
         );
-        assert!(!Persistence::at(Some(PathBuf::from("/"))).save(&test_layout()));
+        assert!(
+            Persistence::at(Some(PathBuf::from("/")))
+                .save(&test_layout())
+                .is_err()
+        );
 
         let directory = TestDir::new("no-name");
         let subiendo = directory
@@ -2319,7 +2431,11 @@ mod file_tests {
         std::fs::write(&victim, "what was outside").expect("write the victim");
         std::os::unix::fs::symlink(&victim, &path).expect("plant the link");
 
-        assert!(Persistence::at(Some(path.clone())).save(&test_layout()));
+        assert!(
+            Persistence::at(Some(path.clone()))
+                .save(&test_layout())
+                .is_ok()
+        );
 
         assert_eq!(
             std::fs::read_to_string(&victim).expect("it is still there"),
@@ -2341,7 +2457,7 @@ mod file_tests {
         // lines per second while the window is in use, which is what the list exists to avoid.
         let mut file = Persistence::at(None);
 
-        assert!(!file.save(&test_layout()));
+        assert!(file.save(&test_layout()).is_err());
 
         assert!(
             !file.should_warn(&SaveFailure::NoPlace),

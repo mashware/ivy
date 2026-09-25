@@ -1673,7 +1673,15 @@ of the window, not which tab was active. Nine decisions define it:
    attempt** and not of a session; and none is adopted, which was the point. The destination never
    holds a half-written document. Permissions `0600` on the file and `0700` on its directory. If the
    rename fails, the temporary is deleted and a warning is given **once per session and per
-   reason**; what retries is the next change.
+   reason**; what retries is the next change. **Amended after #185: the next change retries only
+   what it could fix.** A refusal nothing in the session can lift —a newer version on disk (item 7),
+   a session forbidden to overwrite, no absolute path (item 2)— ends the attempts after the first one,
+   which is the one that warns. Retrying those cost the whole copy, comparison and validation on every
+   change, twice a second while dragging, for a write that could only succeed after a restart. The
+   disk's own failures and a layout that does not fit keep being retried, because a disk empties and
+   closing consoles makes a layout fit. Discarded: deciding from the veto before the first attempt,
+   which silences the warning and leaves a measurement batch —always forbidden to overwrite— with no
+   attempt for the script's guard to see.
 5. **A restored console starts a fresh identity**: new `PANEL_ID` and `PANEL_DIR`, an empty panel
    until somebody publishes.
 6. **Tolerance per document, not per field.** What is not understood is discarded **whole** and the
@@ -1831,7 +1839,13 @@ opens two paths inside the frame and both of them are declared:
   that expires with nothing new to save, and a layout the format does not admit, are counted in the
   mirror's span, which is what they are —comparing and validating—. That way the write's span
   describes **only** what writing costs, and the report can publish «so many writes out of so many
-  attempts» without mixing.
+  attempts» without mixing. **A session that can never write makes one attempt** (item 4, amended
+  after #185), so in a measurement batch —always forbidden to overwrite— the write series holds a
+  single sample and no deadline is armed after it. **So the drag batches stop paying the copy and the
+  validation once per deadline**: that work was timed separately and subtracted, so the framework's
+  figure is untouched, but a batch's total frame after #185 is not comparable with one before it —
+  and neither ever measured what a session that **can** write pays, since serializing and renaming
+  were always vetoed.
 
 **And each one needs TWO things, not one, because subtracting and publishing are different
 mechanisms.** The rest of the frame is worked out by subtracting from what it cost as a whole **what
