@@ -3106,7 +3106,7 @@ changed, which is exactly what this project says is worse than having no number.
 
 **It was written and knocked down on the first go.** The shortcut discarded **all** ASCII, and
 Unicode gives `Emoji=Yes` to the **hash, the asterisk and the ten digits**: `#` followed by the
-selector is `#️⃣`. Eleven keys that would have come out monochrome, in the milestone whose point is
+selector is `#️⃣`. Twelve keys that would have come out monochrome, in the milestone whose point is
 that they come out in color. The shortcut now discards only the ASCII **with nothing attached**.
 
 ### The ceiling stopped being a counter and it is better that way
@@ -3133,9 +3133,76 @@ gives them a cell of their own instead of attaching them to the base emoji's, an
 rule cannot look at the next cell: it does not have it in its signature. The base comes out in color
 and the modifier comes out on its own.
 
-**And the status panel does not paint color.** It discovers fonts —the previous delivery fixed that—
-but its text is laid out by the engine in one go, not cell by cell, so an emoji in a summary comes
-out monochrome. The milestone is about the console; this is stated so that nobody reads it as a bug.
+### The status panel, by another route to the same glyphs (#178)
+
+**Its text is laid out by the engine a row at a time, not cell by cell**, so there is no cell to decide
+in. A row carrying a character whose presentation asks for color is laid out as a job in which that
+character and its selector are **transparent** — a transparent section keeps its advance, so nothing
+after it moves — and the console's own glyph is drawn where it landed, from the same atlas and by the
+same presentation rule, queued after all of the panel's text for the batching reason above. A row
+with no such character is painted exactly as before. Three things were discarded: replacing the
+emoji with a space (a space is narrower, and the rest of the row shifts), routing the panel's rows
+through the console's cell painter (the panel has no column model, and a grid bug would then break
+ordinary panel text), and drawing the image over the visible outline (the outline shows around it).
+
+**The glyph is asked at the room it was laid out in, and the atlas remembers it by that width.**
+The atlas is shared with the console and used to remember a glyph by character and height alone, so
+whichever surface painted a character first fixed its drawing for the other — `☁️` two cells wide in
+a console that gives it one, or squeezed into one cell in a panel that laid out two. Remembering it by
+width too gives each surface its own drawing, and the price is atlas room, not memory: the texture
+stays one fixed mebibyte, but a character can now hold two or three of its roughly eight hundred
+places — the console's one or two cells and the panel's room, whose width is the sum of the glyphs'
+advances so it does not change with the column the emoji falls in. A failure is remembered once for
+every width, since no width makes a face paint in color. Asking the panel
+at the console's width instead was tried and taken back, because it needs a second table of
+character widths to agree with the engine's and it lets the drawing spill over the letters beside it
+wherever the panel's face lays the emoji out narrower. The height is one cell for a harder reason: a
+change of height empties the atlas, so a panel asking another would empty it on every frame that
+painted both.
+
+**Where it landed is read by index and checked by character.** epaint pads a shaped cluster that has
+fewer glyphs than characters, but not one that has more, so past such a cluster the index drifts
+while staying in range; a glyph whose character is not the expected one gives no slot and the
+character is shown in ink. A shaped cluster stamps its first character on every glyph it produced,
+so a selector comes back carrying its base's character.
+
+**Its rasterizing leaves the panel's span by a read of its own.** Reading the color cost empties it,
+so the console's read, taken before the panel is painted, never sees the panel's glyphs — moving that
+one read later would subtract them from the console, which never did the work, and leave them inside
+the panel's span as well. No test can see which span a few microseconds landed in; the placement of
+the two reads is the guard. Batch `Z` puts emoji in the panels, with the consoles dumping ASCII, and
+its control is `C`. The emoji were placed where their two extra characters wrap nothing — both
+documents lay out into the same thirteen rows at the panel width a batch window gives — and none
+carries a selector, because the panel notes `U+FE0F` for font discovery, no face egui ships covers
+it, and a batch that searches the machine is invalidated as not being `P`.
+
+**What it does not reach**: link labels stay monochrome; the panel's sanitizing, by the contract's
+list of what is shown as itself, turns the joiner into a space, so a family emoji is painted as its
+separate members; and a single word longer than the panel is cut by characters, which can leave a
+character on one row and its selector on the next.
+
+**Measured** (26 September 2026, release, 1280×800, two consoles dumping 44 MiB of ASCII, two runs of
+each batch, `compare` says both pairs can be averaged):
+
+| | `C` — panels without emoji | `Z` — four emoji per panel |
+|---|---|---|
+| The status panel, left pane (mean) | 5.14 · 4.67 µs | 68.23 · 10.16 µs |
+| The status panel, right pane (mean) | 2.87 · 2.99 µs | 8.61 · 6.91 µs |
+| The rest of the frame (mean) | 208.0 · 214.1 µs | 258.5 · 226.2 µs |
+| Colour glyphs rasterized | 0 | 4, in one frame (1.32 · 1.03 ms) |
+
+**A panel with emoji costs 3.9 to 5.7 microseconds more per frame and per pane**, pairing each run
+with the plain one taken beside it, which is laying out its colour rows as jobs and queueing four
+images. The right pane rasterizes nothing: its panel asks the same glyphs at the same widths and
+finds them in the atlas the left one filled. **The 68.23 µs is one frame of the first run and not a
+steady state**, so the two runs are not averaged for that pane — `compare` says the windows match,
+not that the spans do. It is not rasterizing, whose 1.32 ms is taken off, and it is not the
+machine's fonts being enumerated the first time a colour glyph is asked either: the second run
+enumerates them too, rasterizes its four glyphs, and shows no such frame. Cold font files on the
+first launch after a build are the likely reason and were not measured. **The rest of the frame
+moves by 12 to 50 µs** between runs paired in order, a spread as wide as the difference, so it is
+published as what it is: the images are one more draw batch, and these two runs cannot say more
+precisely what that costs.
 
 ### What was discarded
 

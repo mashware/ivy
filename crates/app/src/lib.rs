@@ -16694,6 +16694,64 @@ mod tests {
         );
     }
 
+    /// **A color glyph the panel rasterized is read after the panel, and reaches what the pane hands
+    /// the report.** The cost is emptied on reading, so the console's read — taken before the panel is
+    /// painted — never sees it: without a second read it would accumulate into the next frame's
+    /// console, and without the sum it would never be declared.
+    ///
+    /// **What this does not tie down**, because no test can see which span a few microseconds landed
+    /// in: that the panel's rasterizing is taken off the panel's span and not the console's. The
+    /// placement of the two reads around `panel::paint` is the guard.
+    #[test]
+    fn a_color_glyph_the_panel_rasterized_is_read_and_declared() {
+        let mut pane = pane_with_panel("{\"lines\":[\"hot \u{1F525}\"]}");
+        let mut discoverer = fonts::Discoverer::default();
+        let ctx = egui::Context::default();
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        let mut declared = None;
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            let metrics =
+                CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE));
+            let outcome = painter::paint_pane(
+                ui,
+                &mut pane,
+                area_of(800.0),
+                &Theme::default(),
+                &metrics,
+                &mut discoverer,
+                painter::HowToPaint {
+                    blink: painter::Blink {
+                        ceiling: Some(false),
+                        since_a_key: std::time::Duration::ZERO,
+                        keys: painter::Keys::Here,
+                    },
+                    headers: header::Headers::PAINTED,
+                    button: header::Button::in_a_tab_of(&[egui::Rect::NOTHING]),
+                    measure_links: false,
+                },
+            );
+            declared = Some(outcome.color);
+        })
+        .drop_without_applying_deltas();
+
+        assert_eq!(
+            discoverer.color_cost(),
+            fonts::ColorCost::default(),
+            "the panel's color cost went unread: the next frame's console would subtract it from \
+             a painting that never did that work"
+        );
+        let declared = declared.expect("the pane was painted");
+        // Rasterized where the machine has a color font, failed where it has fonts but none in color:
+        // both were paid. A machine with no fonts at all counts neither, like its neighbours in `fonts`.
+        assert_eq!(
+            declared.rasterized + declared.failed,
+            1,
+            "the emoji the panel asked for is not in what the pane declares: its cost would be \
+             published as the framework's"
+        );
+    }
+
     /// **The guarantee of this PR.** A console whose producer has published nothing looks exactly
     /// as it did before the panel existed: with no width discounted and no second rectangle.
     #[test]

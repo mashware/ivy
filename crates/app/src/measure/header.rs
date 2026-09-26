@@ -191,9 +191,10 @@ impl Discovery {
 /// **It goes apart from the font search because it happens elsewhere in the frame, and that changes who
 /// pays for it.** Registering a face rebuilds the engine's atlas, so it is done **outside** the
 /// painting and its span is subtracted from the rest; rasterizing an emoji invalidates nothing, so it
-/// is done where it is needed — inside "enqueuing the paint". Without subtracting it from there, that
-/// span would stop meaning what its name says, and this project already has it written that a
-/// mislabelled number is worse than no number.
+/// is done where it is needed — inside "enqueuing the paint" for the console, and inside painting the
+/// panel for a status panel's emoji. It is subtracted from whichever of the two it happened in:
+/// without that, the span would stop meaning what its name says, and this project already has it
+/// written that a mislabelled number is worse than no number.
 #[derive(Default)]
 pub struct Rasterizing {
     rasterizing: Series,
@@ -231,11 +232,11 @@ impl Rasterizing {
         writeln!(a, "  {}", self.rasterizing)?;
         writeln!(
             a,
-            "  does NOT happen every frame: only the first time an emoji appears at a given cell\n                   height, so this mean does not describe an ordinary frame. It covers searching the\n                   system's emoji families for the one that carries it in color, decoding its bitmap\n                   —in Noto Color Emoji an indexed 136x128 PNG—, scaling it down to the cell and\n                   uploading the texture. A character NO font paints in color is paid all the same\n                   and returns nothing: that is why the two counters are separate"
+            "  does NOT happen every frame: only the first time an emoji is asked at a given\n                   height and width, so this mean does not describe an ordinary frame. It covers searching the\n                   system's emoji families for the one that carries it in color, decoding its bitmap\n                   —in Noto Color Emoji an indexed 136x128 PNG—, scaling it down to the cell and\n                   uploading the texture. A character NO font paints in color is paid all the same\n                   and returns nothing: that is why the two counters are separate"
         )?;
         writeln!(
             a,
-            "  IT IS SUBTRACTED from the paying console's \"enqueueing the paint\", not added on top: it\n                   runs WITHIN that span, the opposite of searching a font. Without the subtraction,\n                   the span that claims to measure the cost of enqueueing would also measure this"
+            "  IT IS SUBTRACTED from the span it ran in, not added on top: the paying console's\n                   \"enqueueing the paint\", or that pane's panel for an emoji in its status panel. It\n                   runs WITHIN those spans, the opposite of searching a font. Without the subtraction,\n                   the span that claims to measure enqueueing or the panel would also measure this"
         )?;
         Ok(())
     }

@@ -540,23 +540,49 @@ fn paint_in_color(
     slot: Rect,
     discoverer: &mut crate::fonts::Discoverer,
 ) -> bool {
+    let Some(glyph) = color_glyph_in(painter.ctx(), character, slot, discoverer) else {
+        return false;
+    };
+    glyph.paint(painter);
+    true
+}
+
+/// A color glyph ready to be queued: which texture, where on screen, and which part of the texture.
+///
+/// **Separate from painting it because the status panel has to know before it paints.** Its text is
+/// laid out in one go, and the character a color glyph replaces has to be hidden in that layout or
+/// shown in it — which is only known once the glyph was or was not found.
+pub(crate) struct ColorGlyph {
+    atlas: eframe::egui::TextureId,
+    drawing: Rect,
+    uv: Rect,
+}
+
+impl ColorGlyph {
+    pub(crate) fn paint(&self, painter: &Painter) {
+        painter.image(self.atlas, self.drawing, self.uv, Color32::WHITE);
+    }
+}
+
+/// That character's color glyph, centered in its slot, if any font on the machine paints it that way.
+pub(crate) fn color_glyph_in(
+    ctx: &eframe::egui::Context,
+    character: char,
+    slot: Rect,
+    discoverer: &mut crate::fonts::Discoverer,
+) -> Option<ColorGlyph> {
     // **In PHYSICAL pixels, not in points.** The texture is uploaded at the size it will be seen at:
     // asking for it in points would leave it at half resolution on a screen at 200 % and the emoji
     // would come out blurry right where it shows most.
-    let per_point = painter.ctx().pixels_per_point();
+    let per_point = ctx.pixels_per_point();
     let height = (slot.height() * per_point).round() as u32;
     let width = (slot.width() * per_point).round() as u32;
-    let Some((atlas, uv, measurements)) =
-        discoverer.color_glyph(painter.ctx(), character, height, width)
-    else {
-        return false;
-    };
+    let (atlas, uv, measurements) = discoverer.color_glyph(ctx, character, height, width)?;
     // **Centered in its slot, and that is why the real texture size is needed**: the rescaling keeps
     // the drawing's proportion, so it almost never fills the exact slot — there is room to spare on one
     // axis. Stretching it to fill would deform the emoji.
     let drawing = Rect::from_center_size(slot.center(), measurements / per_point);
-    painter.image(atlas, drawing, uv, Color32::WHITE);
-    true
+    Some(ColorGlyph { atlas, drawing, uv })
 }
 
 /// How long each half of a blink lasts.
@@ -1029,8 +1055,8 @@ pub(crate) fn paint_pane(
     // registering a face are done outside because they rebuild the atlas, but uploading a
     // texture invalidates nothing. Without this subtraction, «queueing the painting» would also
     // measure what decoding a PNG and scaling it down cost.
-    let color = discoverer.color_cost();
-    let queued = before.elapsed().saturating_sub(color.spent);
+    let in_the_console = discoverer.color_cost();
+    let queued = before.elapsed().saturating_sub(in_the_console.spent);
 
     let before_painting_it = std::time::Instant::now();
     let mut buttons = std::time::Duration::ZERO;
@@ -1065,7 +1091,22 @@ pub(crate) fn paint_pane(
     // glyphs above already have. That span means six named things and its docblock enumerates them
     // so that nothing creeps in; letting a seventh in would be a published series quietly changing
     // meaning, which this file records having paid for twice.
-    let panel_cost = cost_of_reading + before_painting_it.elapsed().saturating_sub(buttons);
+    //
+    // **The panel rasterizes color glyphs too, and they leave by a read of their own.** Reading the
+    // cost empties it, so the one above only ever held the console's: moving that single read down
+    // here would subtract the panel's rasterizing from the console, which never did it, and leave it
+    // inside this span as well — counted twice.
+    let in_the_panel = discoverer.color_cost();
+    let panel_cost = cost_of_reading
+        + before_painting_it
+            .elapsed()
+            .saturating_sub(buttons)
+            .saturating_sub(in_the_panel.spent);
+    let color = crate::fonts::ColorCost {
+        spent: in_the_console.spent + in_the_panel.spent,
+        rasterized: in_the_console.rasterized + in_the_panel.rasterized,
+        failed: in_the_console.failed + in_the_panel.failed,
+    };
 
     // **The strip is painted last of the pane's own painting and timed on its own** (**D13**): the
     // frame's cost is split by subtraction, so a band painted inside somebody else's span would be
@@ -1858,7 +1899,7 @@ mod tests {
         assert_eq!(
             images, 1,
             "the «#️⃣» keycap came out via the text path: the painter is discarding ASCII without \
-             looking at what is attached to it, and eats the eleven keycaps Unicode makes with ASCII"
+             looking at what is attached to it, and eats the twelve keycaps Unicode makes with ASCII"
         );
     }
 

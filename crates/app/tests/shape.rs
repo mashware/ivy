@@ -70,6 +70,7 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/panel/buttons.rs"),
     ),
     ("src/panel/links.rs", include_str!("../src/panel/links.rs")),
+    ("src/panel/color.rs", include_str!("../src/panel/color.rs")),
     (
         "src/panel/driving.rs",
         include_str!("../src/panel/driving.rs"),
@@ -82,6 +83,7 @@ const MODULES: &[(&str, &str)] = &[
     ),
     ("src/session.rs", include_str!("../src/session.rs")),
     ("src/fonts.rs", include_str!("../src/fonts.rs")),
+    ("src/fonts/atlas.rs", include_str!("../src/fonts/atlas.rs")),
     ("src/header.rs", include_str!("../src/header.rs")),
     ("src/settings.rs", include_str!("../src/settings.rs")),
     ("src/keyboard.rs", include_str!("../src/keyboard.rs")),
@@ -119,10 +121,10 @@ const MODULES: &[(&str, &str)] = &[
 /// below 542 would have failed on work nobody had been asked to do; one far above it would never
 /// have fired.
 ///
-/// **Today the largest is `src/fonts.rs`, at exactly 600.** The margin the number was chosen for is
-/// spent, and that is said here rather than fixed by raising it: a ceiling that moves whenever
-/// something reaches it is not a ceiling. The next line `fonts.rs` gains fails this guard, and what
-/// it will need is a piece taken out — the same answer `lib.rs` is getting.
+/// **`src/fonts.rs` reached exactly 600 and the next line it needed failed this guard**, which is
+/// the answer it was written to give: the color glyph and its atlas went out to `src/fonts/atlas.rs`
+/// rather than the ceiling going up. A ceiling that moves whenever something reaches it is not a
+/// ceiling.
 const MODULE_CEILING: usize = 600;
 
 /// Production lines an `impl` block may hold.

@@ -370,7 +370,7 @@ if [ "${MEASURE_AS_CONSOLE:-}" = "1" ]; then
 fi
 
 # ── Batch mode ──────────────────────────────────────────────────────────────────
-BATCH=${1:?the batch is missing: A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V or W}
+BATCH=${1:?the batch is missing: A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y or Z}
 MIB=${2:-44}
 OUTPUT="$ROOT/target/measurements"
 mkdir -p "$OUTPUT"
@@ -402,7 +402,7 @@ RESTORES=0
 # batch, and the guards read the same variable, so they judge the leaked load as the batch's own. A
 # `PATCHES=1` in the environment runs X as Y and publishes it under X's name; a `LARGE=1` pads S and
 # the file batches to the ceiling, and hides U and V from the leak guard that only fires without it.
-ACTIONS= CONTROL= HEADER= READS= PATCHES= LINKS= LARGE= CJK= EMOJI=
+ACTIONS= CONTROL= HEADER= READS= PATCHES= LINKS= LARGE= CJK= EMOJI= PANEL_EMOJI=
 case "$BATCH" in
     A|B|C|D) TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console ;;
     F)       TABS=2; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console ;;   # the background one, still: none of them dumps
@@ -416,7 +416,7 @@ case "$BATCH" in
     N)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=100000; GESTURE=mark ;;         # two, and marking text in the left one: the right one is the control
     O)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=100000; GESTURE=mouse ;;           # two, and the SAME walk, but the left program asked for the mouse
     P)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; CJK=1 ;;       # two, and both dumping in JAPANESE: the only one that discovers fonts
-    Q)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; EMOJI=1 ;;     # two, and both dumping EMOJI: the only one that rasterises colour glyphs
+    Q)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; EMOJI=1 ;;     # two, and both dumping EMOJI: the only one whose CONSOLES rasterise colour glyphs (Z does it from its panels)
     R)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=100000; GESTURE=button; ACTIONS=1 ;;   # two, and pressing a button on a panel: its control is C
     S)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; CONTROL=1 ;;       # two, and both published over the CHANNEL instead of by file: its control is C
     T)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; HEADER=1 ;;        # two, and the only one that PAINTS THE STRIP over each console: its control is C
@@ -424,8 +424,9 @@ case "$BATCH" in
     V)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; CONTROL=1; READS=1 ;;  # two, and the only one that PROVES THE OFF-FRAME READ PATH RAN: its control is S, but their frame delta is not read latency
     X)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; CONTROL=1; LARGE=1 ;;            # S, with a document near the ceiling: the control of Y
     Y)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; CONTROL=1; LARGE=1; PATCHES=1 ;; # X, and patching it with U's ops: its control is X
+    Z)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; PANEL_EMOJI=1 ;;  # two, and the only one whose PANELS carry emoji: the consoles dump ASCII, so its control is C
     W)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=100000; GESTURE=link; LINKS=1 ;; # two, and OPENING links of all three sources with the desktop hand-off suppressed: its nearest is C, but its consoles also rewrite two link rows and its panel paints a link label, so W − C is not the gesture alone
-    *) echo "unknown batch «$BATCH»: use A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X or Y" >&2; exit 2 ;;
+    *) echo "unknown batch «$BATCH»: use A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y or Z" >&2; exit 2 ;;
 esac
 # **Why the dragging batch asks for a hundred thousand gestures**: the number is deliberately above
 # what fits, because what is needed is for the gesture to last **from start to finish**. A batch that
@@ -641,13 +642,30 @@ document_body() {  # document_body <which of the consoles> <turn> [the key on th
     if [ "${LARGE:-}" = 1 ]; then
         filler=$(large_filler)
     fi
+    # **Only batch Z puts emoji in its panels**, one at the head of each of the first four text lines,
+    # read from the batch's own shell like $ACTIONS. They go in front of the words that were already
+    # there rather than replacing any, so every row the control paints is still painted. **And the
+    # same number of rows**: each emoji is two characters more on its line, which could wrap a line
+    # that fit in C, and at the width a batch window gives the panel — thirty-four cells of text — both
+    # documents lay out into thirteen rows, measured by laying them out with the panel's own code. Four
+    # different ones, so the atlas rasterizes four glyphs once and then only draws them — the steady
+    # state of a panel somebody published with emoji in it.
+    #
+    # **None of them carries a selector, and that is not an omission.** The panel notes every
+    # character of its text for font discovery, `U+FE0F` included, and no face egui ships covers the
+    # selector: a `☁️` here sends the window off to search the machine, which is batch P's work, and
+    # the guard that only P may search invalidates the run.
+    e1='' e2='' e3='' e4=''
+    if [ "${PANEL_EMOJI:-}" = 1 ]; then
+        e1='🔥 ' e2='✅ ' e3='📦 ' e4='🚀 '
+    fi
     cat <<JSON
 {"v":1,"stale_after_minutes":600,"attention":"$attention",$actions"lines":[
-  {"text":"Batch $BATCH · publication $2","style":"title"},
+  {"text":"${e1}Batch $BATCH · publication $2","style":"title"},
   "",
-  {"ref":"load","text":"$MIB MiB per console, TUI-style dump","mark":"current"},
-  {"ref":"panel","text":"regime $BATCH — this is what is being measured","mark":"info"},
-  {$note_key"ref":"note","text":"the layout is redone on every good re-read","mark":"info"},
+  {"ref":"load","text":"${e2}$MIB MiB per console, TUI-style dump","mark":"current"},
+  {"ref":"panel","text":"${e3}regime $BATCH — this is what is being measured","mark":"info"},
+  {$note_key"ref":"note","text":"${e4}the layout is redone on every good re-read","mark":"info"},
   "",
   {"text":"six lines and a warning: the size of a real working panel","mark":"done"$panel_link}$filler
 ]}
@@ -864,7 +882,7 @@ seed() {
 case "$BATCH" in
     A) : ;;                       # no panel: nobody publishes anything
     B) seed quiet & ;;
-    C|D|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y) seed talkative & ;;
+    C|D|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
 esac
 
 echo "batch $BATCH · $TABS tab(s) of $PANES · $DUMPING of $DIRECTORIES consoles dumping $MIB MiB · window $WINDOW_SIZE · do not touch the machine until it closes" >&2
@@ -993,23 +1011,29 @@ fi
 
 
 # **The colour-glyph guard, and it reads both ways like all the ones above.** Batch Q is the only
-# one that dumps emoji, and therefore the only one that walks the rasterising path. Without this
-# number, a run in which the load never got out — or in which the machine had no colour emoji font —
-# would publish the colour section **empty** and it would read as «painting a colour emoji costs
-# nothing», which is exactly the deceit the witness prevents with the panels.
+# one whose consoles dump emoji, and Z the only one whose panels carry them: those two, and no other,
+# walk the rasterising path. Without this number, a run in which the load never got out — or in which
+# the machine had no colour emoji font — would publish the colour section **empty** and it would
+# read as «painting a colour emoji costs nothing», which is exactly the deceit the witness prevents
+# with the panels.
 #
-# And the other way round: if a batch that is NOT Q rasterises colour glyphs, something other than
-# the load is triggering it, and its spans mix in work that does not belong to what it claims to
+# And the other way round: if any other batch rasterises colour glyphs, something other than the
+# load is triggering it, and its spans mix in work that does not belong to what it claims to
 # measure. The usual load is pure ASCII: there is not one emoji in it.
+
 RASTERIZED=$(grep -oE "[0-9]+ glyphs rasterized" "$REPORT" | grep -oE "^[0-9]+" | head -1)
 RASTERIZED=${RASTERIZED:-0}
-if [ "${EMOJI:-}" = 1 ] && [ "$RASTERIZED" = 0 ]; then
-    invalidate "this batch dumps emoji to measure what rasterising a colour glyph costs and it \
-rasterised none: either the load never got out, or the machine has no colour emoji font, and in both \
-cases the colour section would be published empty and would read as costing nothing"
+COLOR_GLYPHS=
+if [ "${EMOJI:-}" = 1 ] || [ "${PANEL_EMOJI:-}" = 1 ]; then
+    COLOR_GLYPHS=1
 fi
-if [ "${EMOJI:-}" != 1 ] && [ "$RASTERIZED" != 0 ]; then
-    invalidate "this batch does not dump emoji and yet it rasterised $RASTERIZED colour glyphs: \
+if [ "$COLOR_GLYPHS" = 1 ] && [ "$RASTERIZED" = 0 ]; then
+    invalidate "this batch paints emoji to measure what a colour glyph costs and it rasterised none: \
+either the load never got out, or the machine has no colour emoji font, and in both cases the colour \
+section would be published empty and would read as costing nothing"
+fi
+if [ "$COLOR_GLYPHS" != 1 ] && [ "$RASTERIZED" != 0 ]; then
+    invalidate "this batch paints no emoji and yet it rasterised $RASTERIZED colour glyphs: \
 something other than the load is triggering it, so its spans mix in work that does not belong to what \
 it claims to measure"
 fi

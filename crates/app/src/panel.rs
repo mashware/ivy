@@ -22,6 +22,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 mod buttons;
+mod color;
 mod document;
 mod driving;
 mod links;
@@ -575,16 +576,18 @@ impl PanelState {
         let still_valid =
             matches!(&self.layout, Some(done) if done.width == width && done.warning == warning);
         if !still_valid {
+            let mut rows = lay_out(
+                self.last_good.as_deref(),
+                id,
+                width,
+                theme,
+                warning.as_deref(),
+                attention,
+                self.holder.as_ref().map(|held| held.source.as_str()),
+            );
+            color::flag(&mut rows);
             self.layout = Some(PanelLayout {
-                rows: lay_out(
-                    self.last_good.as_deref(),
-                    id,
-                    width,
-                    theme,
-                    warning.as_deref(),
-                    attention,
-                    self.holder.as_ref().map(|held| held.source.as_str()),
-                ),
+                rows,
                 width,
                 warning,
             });
@@ -817,6 +820,9 @@ struct Row {
     role: RowRole,
     /// A compact link label painted on this row, independently of its body text.
     link: Option<LaidOutLink>,
+    /// Which of its characters go to color, as ranges of character indices, set once the whole layout
+    /// is done — the text is still being composed until then.
+    color_spans: Vec<std::ops::Range<usize>>,
 }
 
 impl Row {
@@ -828,6 +834,7 @@ impl Row {
             color,
             role: RowRole::Text,
             link: None,
+            color_spans: Vec::new(),
         }
     }
 }
@@ -1180,6 +1187,7 @@ pub fn paint(
     let text_left = rect.left() + MARGIN * metrics.width();
     let mut overflowed: std::collections::BTreeSet<RowRole> = std::collections::BTreeSet::new();
     let mut links_painted = Vec::new();
+    let mut color_glyphs = Vec::new();
     for (n, row) in visible.iter().enumerate() {
         let x = text_left + row.column as f32 * metrics.width();
         let y = rect.top() + n as f32 * metrics.height();
@@ -1188,13 +1196,8 @@ pub fn paint(
             // text, in any language—, and without noting it a summary in Japanese stayed as boxes
             // forever because nothing triggered the search.
             discoverer.note_text(&row.text);
-            let inked = painter.text(
-                Pos2::new(x, y),
-                Align2::LEFT_TOP,
-                &row.text,
-                metrics.font(),
-                row.color,
-            );
+            let at = Pos2::new(x, y);
+            let inked = color::paint_text(painter, at, row, metrics, discoverer, &mut color_glyphs);
             // **What a row really measures is asked of whoever drew it**, and that closes the last
             // way a press could send a command nobody could read. This module lays text out counting
             // characters, and a character is not a column: twenty-nine kanji are fifty-eight columns,
@@ -1221,6 +1224,10 @@ pub fn paint(
             metrics.font(),
             theme.panel_color(Some(Mark::Pending), None),
         );
+    }
+    // **After every piece of the panel's text**, so the images share one draw batch (**D25**).
+    for glyph in &color_glyphs {
+        glyph.paint(painter);
     }
 
     // **Recorded last, once nothing else borrows the layout.** What a press may reach is what this
@@ -1475,6 +1482,16 @@ mod tests {
         place: Rect,
         now: SystemTime,
     ) -> Vec<eframe::egui::Shape> {
+        paint_the_state_with(state, place, now, &mut crate::fonts::Discoverer::default())
+    }
+
+    /// The same, with the font discoverer the test hands it — which is how a test gets a full atlas.
+    pub(super) fn paint_the_state_with(
+        state: &mut PanelState,
+        place: Rect,
+        now: SystemTime,
+        discoverer: &mut crate::fonts::Discoverer,
+    ) -> Vec<eframe::egui::Shape> {
         let ctx = eframe::egui::Context::default();
         let mut output = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
             let metrics = CellMetrics::measure(
@@ -1488,7 +1505,7 @@ mod tests {
                 &Theme::default(),
                 &metrics,
                 now,
-                &mut crate::fonts::Discoverer::default(),
+                discoverer,
             );
         });
 
@@ -4513,6 +4530,28 @@ mod pressing {
         );
         assert_eq!(
             roomy.buttons_drawn().count(),
+            1,
+            "the case needs the same command to be pressable once there is room, or it proves nothing"
+        );
+    }
+
+    /// **The same rule for a command whose characters go to color**: that row is laid out by another
+    /// path, and what it inked still has to reach the check.
+    #[test]
+    fn a_command_of_emoji_drawn_past_the_strip_is_not_pressable() {
+        let wide = "\u{1F525}".repeat(20);
+        let document =
+            format!(r#"{{"actions": [{{"label": "Hot", "send": "{wide}"}}], "lines": ["b"]}}"#);
+        let strip = Rect::from_min_size(Pos2::new(100.0, 50.0), eframe::egui::vec2(260.0, 600.0));
+
+        assert_eq!(
+            painted(&document, strip).buttons_drawn().count(),
+            0,
+            "a command of emoji drawn outside the strip is still reachable by a press"
+        );
+        let roomy = Rect::from_min_size(Pos2::new(100.0, 50.0), eframe::egui::vec2(1400.0, 600.0));
+        assert_eq!(
+            painted(&document, roomy).buttons_drawn().count(),
             1,
             "the case needs the same command to be pressable once there is room, or it proves nothing"
         );

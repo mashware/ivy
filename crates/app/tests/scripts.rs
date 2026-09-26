@@ -102,6 +102,10 @@ const MODULES: &[(&str, &str)] = &[
     ),
     ("app/src/session.rs", include_str!("../src/session.rs")),
     ("app/src/fonts.rs", include_str!("../src/fonts.rs")),
+    (
+        "app/src/fonts/atlas.rs",
+        include_str!("../src/fonts/atlas.rs"),
+    ),
     ("app/src/settings.rs", include_str!("../src/settings.rs")),
     ("app/src/keyboard.rs", include_str!("../src/keyboard.rs")),
     ("app/src/painter.rs", include_str!("../src/painter.rs")),

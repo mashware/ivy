@@ -154,6 +154,10 @@ pub struct Spans {
     /// and a span with no owner is taken by the one computed by subtraction — which here is the
     /// interface framework, that is, precisely the figure D3 has to decide about.
     ///
+    /// **Minus the color glyphs the panel rasterized while being painted**, which go to the color
+    /// span with the console's — drawing them is painting the panel, decoding and scaling a bitmap is
+    /// not.
+    ///
     /// **It goes apart and not summed into `enqueued`, and that separation is the reason the field
     /// exists.** Both happen inside the frame and both have to be returned, so for the subtraction it
     /// would make no difference. But a span called "enqueuing the paint" that also included reading a

@@ -728,3 +728,35 @@ fn the_large_document_lands_between_the_floor_and_the_ceiling() {
         ordinary.len()
     );
 }
+
+/// **The batch whose panels carry emoji is counted as a batch that rasterizes**, in both directions.
+///
+/// Batch `Z` dumps ASCII in its consoles and publishes emoji in its panels. The colour guard used to
+/// ask only whether the batch was `Q`, so every `Z` run would invalidate itself for rasterizing, and
+/// a `Z` whose panels never reached the screen would be read as «the panel's colour path is free».
+#[test]
+fn the_batch_with_emoji_in_its_panels_is_held_to_the_colour_guard() {
+    assert!(
+        MEASURE
+            .lines()
+            .any(|line| line.trim_start().starts_with("Z)") && line.contains("PANEL_EMOJI=1")),
+        "no batch declares emoji in its panels"
+    );
+    // **The whole block, because the knob's test also appears where the panels are seeded**: a
+    // search for the test alone stays green with it deleted from the guard, and two assertions over
+    // the `if` and its body separately stay green with the body moved under another `if`.
+    assert!(
+        MEASURE.contains(
+            "if [ \"${EMOJI:-}\" = 1 ] || [ \"${PANEL_EMOJI:-}\" = 1 ]; then\n    COLOR_GLYPHS=1\nfi"
+        ),
+        "the colour guard does not count the panel knob as a batch that must rasterize"
+    );
+    assert!(
+        invalidates_on("[ \"$COLOR_GLYPHS\" = 1 ] && [ \"$RASTERIZED\" = 0 ]"),
+        "a batch painting emoji that rasterized none is not invalidated"
+    );
+    assert!(
+        invalidates_on("[ \"$COLOR_GLYPHS\" != 1 ] && [ \"$RASTERIZED\" != 0 ]"),
+        "a batch painting no emoji that rasterized some is not invalidated"
+    );
+}

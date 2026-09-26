@@ -102,6 +102,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         include_str!("../src/panel/links.rs"),
         40,
     ),
+    (
+        "src/panel/color.rs",
+        include_str!("../src/panel/color.rs"),
+        50,
+    ),
     ("src/measure.rs", include_str!("../src/measure.rs"), 780),
     (
         "src/measure/header.rs",
@@ -109,7 +114,12 @@ const SOURCES: &[(&str, &str, usize)] = &[
         579,
     ),
     ("src/session.rs", include_str!("../src/session.rs"), 737),
-    ("src/fonts.rs", include_str!("../src/fonts.rs"), 977),
+    ("src/fonts.rs", include_str!("../src/fonts.rs"), 840),
+    (
+        "src/fonts/atlas.rs",
+        include_str!("../src/fonts/atlas.rs"),
+        135,
+    ),
     ("src/header.rs", include_str!("../src/header.rs"), 224),
     ("src/settings.rs", include_str!("../src/settings.rs"), 599),
     ("src/keyboard.rs", include_str!("../src/keyboard.rs"), 985),
