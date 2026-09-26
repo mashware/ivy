@@ -802,6 +802,20 @@ mod tests {
         );
     }
 
+    /// **An open answers with its handle, or says it has none** — never with the verb's word. An open
+    /// is asked under the same word as a publication, so a handle-less open that reached the empty
+    /// `ok` would read «published».
+    #[test]
+    fn an_open_answers_with_its_handle_or_says_it_has_none() {
+        let said = |answered| result_of("published", answered)["content"][0]["text"].clone();
+
+        assert_eq!(said(Answered::Opened(Some("h-1".to_owned()))), "h-1");
+        assert_eq!(
+            said(Answered::Opened(None)),
+            "opened, with no addressable identity"
+        );
+    }
+
     /// **The verb's word first, then what fell away**, for both verbs that can lose a word — and a
     /// clean answer is the bare word, so the two can never be confused.
     #[test]

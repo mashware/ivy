@@ -218,7 +218,9 @@ impl Producer {
             Some(true) => match raw.pane {
                 // **Present and possibly null**: an open answers with the handle, or with a JSON null
                 // where the console has no addressable identity, and those are two different
-                // answers a caller can act on differently.
+                // answers a caller can act on differently. A handle that is neither text nor null
+                // would also land on `None`; the wire writes only those two (`Reply::Opened` in
+                // `wire.rs`), so no separate answer is kept for it.
                 Some(pane) => Ok(Answered::Opened(text_of(Some(pane)))),
                 // **Before the fallback and not after it.** Everything that is not `pane` and not
                 // `text` used to land on `Answered::Ok` — success carrying nothing — so a reply whose
@@ -250,7 +252,7 @@ impl Producer {
 
 /// One reply line, **with the document kept as the bytes it arrived as**.
 ///
-/// Every field is borrowed raw for the reason the request's own envelope states: this crate does not
+/// Every JSON-valued field is borrowed raw for the reason the request's own envelope states: this crate does not
 /// re-serialise somebody else's JSON, because re-serialising is what silently reordered a document's
 /// keys on the way back to its producer.
 #[derive(serde::Deserialize)]
@@ -260,7 +262,10 @@ struct Reply<'a> {
     closed: Option<usize>,
     #[serde(default)]
     preserved: Option<usize>,
-    #[serde(default, borrow)]
+    /// **A null `pane` is an answer of its own** — the console was opened with no addressable
+    /// identity — so it must not be read as an absent field, which is what `Option`'s own
+    /// `Deserialize` does with a null. Hence [`present`].
+    #[serde(default, borrow, deserialize_with = "present")]
     pane: Option<&'a serde_json::value::RawValue>,
     #[serde(default, borrow)]
     text: Option<&'a serde_json::value::RawValue>,
@@ -270,6 +275,15 @@ struct Reply<'a> {
     dropped: Option<&'a serde_json::value::RawValue>,
     #[serde(default, borrow)]
     error: Option<&'a serde_json::value::RawValue>,
+}
+
+/// `Some` for a field that is there, **null included** — serde only calls this for a present field,
+/// and `default` supplies the `None` for an absent one.
+fn present<'de, D>(field: D) -> Result<Option<&'de serde_json::value::RawValue>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    serde::Deserialize::deserialize(field).map(Some)
 }
 
 /// What a pane answered.
@@ -527,6 +541,33 @@ mod tests {
         assert_eq!(producer.close_a_pane("h-1").expect("close"), Answered::Ok);
 
         window.join().expect("the window thread finished");
+    }
+
+    /// **An open whose console has no addressable identity reads as an open, not as a publication.**
+    /// The wire carries it as `"pane":null`, and a field read through `Option`'s own `Deserialize`
+    /// takes a JSON null for an absent one — so the reply used to fall all the way through to
+    /// `Answered::Ok`, which the MCP bridge words as «published». The window answers over a real
+    /// listener, so the null is the one the wire writes, not one typed into the test.
+    #[test]
+    fn an_open_with_no_addressable_identity_comes_back_as_an_open() {
+        let (dir, _channel, inbox) = a_pane();
+        let mut producer = Producer::of(dir.path(), dir.id()).expect("open the channel");
+        let window = std::thread::spawn(move || {
+            let open = inbox
+                .recv_timeout(Duration::from_secs(5))
+                .expect("the open");
+            let asked_to_open = matches!(open.what, What::Open { .. });
+            let _ = open.answer.send(Answer::Opened(None));
+            asked_to_open
+        });
+
+        let answered = producer.open_a_pane(Side::Right, None, &[]).expect("open");
+
+        assert!(
+            window.join().expect("the window thread finished"),
+            "the window was handed something other than an open"
+        );
+        assert_eq!(answered, Answered::Opened(None));
     }
 
     /// A document that is not JSON is refused **to its author, here**, instead of travelling to the
