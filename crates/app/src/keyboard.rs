@@ -353,26 +353,6 @@ pub struct HeldPaste {
     /// silent loss the whole thing was built to stop. Found in review. Now the first question stands
     /// and the later ones are counted into it, so nothing goes without being said.
     turned_away: usize,
-    /// Whether the keyboard reaches the console this question is standing on.
-    ///
-    /// **It is written by the pass that knows the focus and read by the one that paints**, and the
-    /// order between them is what makes that safe: the mouse is attended to before anything is
-    /// painted, so the answer here is this frame's and not the previous one's.
-    ///
-    /// It sits on the paste and not in the painter's arguments **because there is nowhere else for
-    /// it to go**: the window's core is against D28's recorded number and may not gain a line, which
-    /// includes the call that paints a console — whose own docblock says it exists to avoid a
-    /// seventh argument for exactly that reason.
-    ///
-    /// **It starts `true`, because that is the only value that is ever correct at birth.** A question
-    /// is created while attending to the keyboard, which reaches the **focused** console — so a
-    /// question nobody has marked yet is standing on the console the keys do reach. It started
-    /// `false` for one afternoon, described as «the safe way round», and a review pointed out that
-    /// the docblock convicted itself: there is no frame on which `false` is right there, so the
-    /// wrong value was being justified instead of removed. It never showed either way, because the
-    /// mouse pass rewrites the mark in the same frame before anything is painted; the point is that
-    /// now there is no state that should not exist.
-    within_reach: bool,
 }
 
 impl HeldPaste {
@@ -407,19 +387,6 @@ impl HeldPaste {
     /// Records that another paste arrived and was not taken, so the standing question can say so.
     fn and_another(&mut self) {
         self.turned_away += 1;
-    }
-
-    /// Records whether the keyboard reaches the console this question stands on.
-    ///
-    /// **A setter, and its name says so.** An earlier version of it read like a question and
-    /// answered none, which a review took apart.
-    pub fn reached_by_the_keyboard_now(&mut self, reached: bool) {
-        self.within_reach = reached;
-    }
-
-    /// Whether the keys its notice can name would actually arrive.
-    pub fn reached_by_the_keyboard(&self) -> bool {
-        self.within_reach
     }
 
     /// How long the offending line is.
@@ -598,7 +565,6 @@ pub fn paste_or_hold(
                 longest,
                 ceiling,
                 turned_away: 0,
-                within_reach: true,
             });
         }
     }

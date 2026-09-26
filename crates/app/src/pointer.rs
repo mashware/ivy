@@ -572,11 +572,6 @@ impl Window {
 
         self.a_link_gesture_was_released(link_was_released, frame_nr);
 
-        // **The last thing, because the focus is only final now.** The loop above moves it when
-        // somebody presses on another console, and the painting follows in this same frame: marking
-        // the questions any earlier means marking them against the focus of the frame before.
-        self.tell_the_questions_who_has_the_keyboard();
-
         MouseOutcome {
             target,
             the_tree_changed,
@@ -1021,29 +1016,6 @@ impl Window {
             return rest;
         }
         queue
-    }
-
-    /// Tells every standing question whether the keyboard reaches the console it stands on.
-    ///
-    /// **It runs after the loop that moves the focus, and that is the whole reason it is a function
-    /// of its own.** Reading the focus before that loop meant a press on another console marked
-    /// every question against the *old* focus, and the painting follows in the same frame: the
-    /// console that had just lost the keyboard went on saying «Escape discards it» and the one that
-    /// had just gained it said «focus this console». **It would not have stayed on screen for ever**
-    /// — the desktop layer asks for a repaint on every mouse button event, so the release of that
-    /// same press corrects it on the next frame — but one frame of an instruction that does not work
-    /// is one frame of the defect this work exists to remove, and it is free to not have it.
-    fn tell_the_questions_who_has_the_keyboard(&mut self) {
-        let focused = self.active().focus;
-        // **Each console's own name, not the list taken before the loop.** That loop can reorder the
-        // tree — dropping one console onto another does — and a stale list zipped against the panes
-        // then marks a question with somebody else's name, which paints the wrong instruction.
-        for pane in self.active_mut().panes_mut() {
-            let its_name = pane.name;
-            if let Some(held) = pane.held.as_mut() {
-                held.reached_by_the_keyboard_now(its_name == focused);
-            }
-        }
     }
 
     /// Tells the program that the button it saw go down was released.

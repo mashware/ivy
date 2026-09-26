@@ -19,7 +19,6 @@ file_paths:
 symbols:
   - the_only_rectangle_stroked_in
   - paint_the_question_over_it
-  - text_painted
 content_hashes:
   crates/app/src/lib.rs: 'sha256:e8bd846a3440e53be756ff25a7fc65376922d1ef1119dff8d912594f58492213'
   crates/app/src/painter.rs: 'sha256:8ffdf3a61b18c3a0a9c7c55f78d2b7591595b8c60b3b4259875a66477f3a697d'

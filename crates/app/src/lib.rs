@@ -2175,7 +2175,7 @@ impl eframe::App for Window {
             .into_iter()
             .zip(rects.iter().copied())
         {
-            let focused = the_window_has_the_keyboard && pane.name == with_the_focus;
+            let keys = painter::Keys::of(the_window_has_the_keyboard, pane.name, with_the_focus);
             let pane_outcome = painter::paint_pane(
                 ui,
                 pane,
@@ -2186,7 +2186,7 @@ impl eframe::App for Window {
                 // **How many consoles this tab has decides whether the strip carries its button**,
                 // and the list being walked is the answer: one rectangle per console of the active
                 // tab. See [`header::Button::in_a_tab_of`].
-                painter::HowToPaint::of(blink.on(focused), headers, &rects)
+                painter::HowToPaint::of(blink.on(keys), headers, &rects)
                     .measuring_links(measuring_links),
             );
             // **What the painting really drew, not what the program asked for**: it is what the
@@ -2546,47 +2546,7 @@ mod tests {
         painted
     }
 
-    /// Everything a console's painter put on screen as text, concatenated.
-    ///
-    /// **It reads the galleys the painter enqueued**, so what it asserts on is what a person would
-    /// read. Asserting on the string a helper returns would prove the helper and not that anybody
-    /// calls it — a disguise this project has on file nine times over.
-    fn text_painted(pane: &Pane, theme: &theme::Theme, rect: egui::Rect) -> String {
-        let ctx = egui::Context::default();
-        ctx.run_ui(egui::RawInput::default(), |_| {})
-            .drop_without_applying_deltas();
-        let mut discoverer = fonts::Discoverer::default();
-        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            let painter = ui.ctx().layer_painter(egui::LayerId::new(
-                egui::Order::Foreground,
-                egui::Id::new("the console"),
-            ));
-            let metrics =
-                painter::CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE));
-            painter::paint_a_console(
-                &painter,
-                pane,
-                theme,
-                &metrics,
-                rect,
-                &mut discoverer,
-                painter::CursorInk::Filled,
-            );
-        });
-        let read = output
-            .shapes
-            .iter()
-            .filter_map(|shape| match &shape.shape {
-                egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join(" ");
-        output.drop_without_applying_deltas();
-        read
-    }
-
-    /// The two things a notice can say, so an assertion can check the box fits **both**.
+    /// Every thing a notice can say, so an assertion can check the box fits **all** of them.
     ///
     /// **It lives here and not beside the painter, and that is not tidiness.** The shape guard counts
     /// a file's production lines and stops only at a module literally called `tests`, so two
@@ -2594,10 +2554,16 @@ mod tests {
     /// `painter.rs`'s ceiling — and wrapping them in a module of another name made it worse, by four
     /// lines. A reviewer found it by counting the file with the guard's own rules; here they cost
     /// nothing, because this module is the one the walk stops at.
-    fn both_ways_to_answer() -> [&'static str; 2] {
+    ///
+    /// **Written out rather than read off the painter's own list**, so the assertions over the box do
+    /// not shrink with that list. The third one is held to never being the tallest, so dropping it
+    /// from the painter's list changes no box and nothing here goes red — which is the point of that
+    /// rule, not a gap in this one.
+    fn every_way_to_answer() -> [&'static str; 3] {
         [
             painter::notices::ANSWERED_BY_HAND,
             painter::notices::ANSWERED_BY_CLICK,
+            painter::notices::ANSWERED_ONCE_BACK,
         ]
     }
 
@@ -2741,9 +2707,12 @@ mod tests {
     /// console only, so the notice has to name what would work **there** — asserted against the text
     /// that was really painted, both ways round.
     ///
-    /// **The two readings are taken in one frame each with the focus really moved**, not with the
-    /// mark set by hand: a review found that setting it by hand hid a defect where the mark was
-    /// written against the *previous* frame's focus.
+    /// **The two readings are taken with the focus really moved**, not set by hand, and **read off
+    /// the window's own frame**, since what a console is told is what the window hands its painter —
+    /// a console's painter on its own cannot know it. The click and the painting are separate frames
+    /// here: that the notice follows the click **in the click's own frame** is held by the cursor's
+    /// test of it, `a_click_moves_the_filled_cursor_in_the_same_frame_that_moves_the_focus`, since
+    /// both marks are painted from the one value.
     #[test]
     fn the_notice_names_the_keys_only_where_they_would_arrive() {
         let ctx = egui::Context::default();
@@ -2753,10 +2722,12 @@ mod tests {
         if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
             return;
         }
-        let theme = window.theme;
+        let area = area_of(800.0 + DIVIDER_THICKNESS);
+        let painted = egui::Context::default();
+        // The text engine does not exist until there has been a pass.
+        text_of_the_two_consoles(&mut window, &painted, area, true);
 
-        // The focus is put on the right-hand console **by the gesture**, in the same pass that marks
-        // the questions.
+        // The focus is put on the right-hand console **by the gesture**.
         deliver_to_the_mouse(
             &mut window,
             &ctx,
@@ -2764,7 +2735,7 @@ mod tests {
             &metrics,
             click_at(rects[1].center()),
         );
-        let out_of_reach = text_painted(window.active().panes()[0], &theme, rects[0]);
+        let out_of_reach = text_of_the_two_consoles(&mut window, &painted, area, true).remove(0);
 
         // And back to the left one, which is where the question stands.
         deliver_to_the_mouse(
@@ -2774,7 +2745,7 @@ mod tests {
             &metrics,
             click_at(rects[0].right_bottom() - egui::vec2(metrics.width(), metrics.height())),
         );
-        let within_reach = text_painted(window.active().panes()[0], &theme, rects[0]);
+        let within_reach = text_of_the_two_consoles(&mut window, &painted, area, true).remove(0);
 
         assert!(
             !out_of_reach.contains("Escape") && !out_of_reach.contains("Ctrl+Enter"),
@@ -3388,7 +3359,7 @@ mod tests {
                 box_of_it.height(),
                 narrow.height()
             );
-            for how in both_ways_to_answer() {
+            for how in every_way_to_answer() {
                 let answer = the_answer_laid_out(&theme, &metrics, narrow, how);
                 assert!(
                     answer <= box_of_it.height() - 2.0 * metrics.width(),
@@ -3404,9 +3375,9 @@ mod tests {
     /// **The border of the notice could be deleted outright and every test stayed green**, which is
     /// the whole of why this exists.
     ///
-    /// The painting *was* being walked — `text_painted` goes through `painter::paint_a_console`,
-    /// which paints the question — but every test that walked it read `Shape::Text` and nothing
-    /// else, while the ones that reason about the box's size enter through
+    /// The painting *was* being walked — a helper of these tests went through
+    /// `painter::paint_a_console`, which paints the question — but every test that walked it read
+    /// `Shape::Text` and nothing else, while the ones that reason about the box's size enter through
     /// `painter::notices::the_question_box_with_no_button`, which measures it and hands the rectangle back without drawing
     /// anything. So the border had no assertion of any kind on it, and it fails the way the cursor's
     /// outline did: `Stroke::new(0.0, …)` is queued, carries the right colour and covers the right
@@ -3652,6 +3623,38 @@ mod tests {
         );
     }
 
+    /// **The wording for a window that lost the desktop's focus never lays out taller than the other
+    /// two**, with the built-in font, at every width from 4 to 120 cells.
+    ///
+    /// **The way out on its own is enough to ask about**: the explanation under it is the same for
+    /// all three and starts on a line of its own, so the whole question differs by exactly this.
+    ///
+    /// The box is measured against every wording, so a taller third one raises the floor of every
+    /// console — in a focused window too, where it is never shown — and a console that used to hold
+    /// the question holds its paste in silence instead. The first wording written for it did that.
+    #[test]
+    fn the_wording_for_an_absent_window_costs_no_console_its_notice() {
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let theme = theme::Theme::default();
+        let mut pane = pane_with("sleep 30", 0);
+        if !hold_a_paste_on(&mut pane) {
+            return;
+        }
+        let [by_hand, by_click, once_back] = every_way_to_answer();
+        for cells in 4..=120 {
+            let area = egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(metrics.width() * cells as f32, metrics.height() * 24.0),
+            );
+            let answer = |how| the_answer_laid_out(&theme, &metrics, area, how);
+            assert!(
+                answer(once_back) <= answer(by_hand).max(answer(by_click)),
+                "at {cells} cells «{once_back}» lays out taller than both other ways out, so it \
+                 raises the floor of every console"
+            );
+        }
+    }
+
     /// **The way out that fits has to be the one that will be shown, and which one that is depends on
     /// where the keyboard is** — so a floor measured against either sentence on its own promises
     /// nothing.
@@ -3692,7 +3695,7 @@ mod tests {
                     ),
                 );
                 let mut found = None;
-                let mut answers = [0.0_f32; 2];
+                let mut answers = [0.0_f32; 3];
                 ctx.run_ui(egui::RawInput::default(), |ui| {
                     found = painter::notices::the_question_box_with_no_button(
                         ui.painter(),
@@ -3702,7 +3705,7 @@ mod tests {
                         area,
                     );
                     let wrap = (area.width() - 4.0 * margin).max(metrics.width());
-                    for (at, how) in both_ways_to_answer().into_iter().enumerate() {
+                    for (at, how) in every_way_to_answer().into_iter().enumerate() {
                         answers[at] = ui
                             .painter()
                             .layout(how.to_owned(), metrics.font(), theme.foreground(), wrap)
@@ -3716,17 +3719,20 @@ mod tests {
                     continue;
                 };
                 let room = box_of_it.height() - 2.0 * margin;
+                // **The guard is about the two that wrap apart, and only them**: the third is held
+                // to never being the tallest by a test of its own, so letting it satisfy this guard
+                // would make the walk look discriminating while it checked nothing about the two.
                 let taller = answers[0].max(answers[1]);
                 if answers[0] != answers[1] && room < taller + metrics.height() {
                     saw_a_box_where_the_two_wrap_apart = true;
                 }
-                for (at, how) in both_ways_to_answer().into_iter().enumerate() {
+                for (at, how) in every_way_to_answer().into_iter().enumerate() {
                     assert!(
                         room + 1.0 >= answers[at],
                         "a console of {cells} cells by {rows} rows got a box leaving {room:?} for \
                          text, and «{how}» lays out {:?} there: the console that shows that line \
                          has its own way out clipped, so the floor was measured against something \
-                         other than the room this box leaves for BOTH sentences — the other \
+                         other than the room this box leaves for EVERY sentence — another \
                          sentence, or the box instead of its text area",
                         answers[at]
                     );
@@ -3816,9 +3822,9 @@ mod tests {
         // there is nothing missing to notice: **the sentence is queued, clipped to nowhere, and
         // never drawn**.
         //
-        // Measured against the **taller** of the two answers for the same reason the box is: which
-        // one is shown depends on where the keyboard is, and whichever it is has to be whole.
-        let answer = both_ways_to_answer()
+        // Measured against the **tallest** of the answers for the same reason the box is: which one
+        // is shown depends on where the keyboard is, and whichever it is has to be whole.
+        let answer = every_way_to_answer()
             .map(|how| the_answer_laid_out(&theme, &metrics, narrow, how))
             .into_iter()
             .fold(0.0_f32, f32::max);
@@ -3972,7 +3978,7 @@ mod tests {
         // console proves nothing, and a mutation showed it: the ceiling is half MINUS a margin, so a
         // box pinned to the ceiling is always strictly under half and the comparison stayed green
         // while every box came out exactly half a console tall.
-        let needed = both_ways_to_answer()
+        let needed = every_way_to_answer()
             .map(|how| the_sentence_laid_out(&pane, &theme, &metrics, roomy, how).y)
             .into_iter()
             .fold(0.0_f32, f32::max);
@@ -4027,7 +4033,7 @@ mod tests {
 
         // **Its own guard against asserting nothing.** A box that never reaches the ceiling satisfies
         // any bound on where it ends, so the shape has to be one whose question does not fit.
-        let needed = both_ways_to_answer()
+        let needed = every_way_to_answer()
             .map(|how| the_sentence_laid_out(&pane, &theme, &metrics, narrow, how).y)
             .into_iter()
             .fold(0.0_f32, f32::max);
@@ -4971,7 +4977,7 @@ mod tests {
         let three_cells = metrics.width() * 3.0;
         let probe =
             egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(three_cells, metrics.height()));
-        let answer = both_ways_to_answer()
+        let answer = every_way_to_answer()
             .map(|how| the_answer_laid_out(&theme, &metrics, probe, how))
             .into_iter()
             .fold(0.0_f32, f32::max);
@@ -15524,7 +15530,7 @@ mod tests {
                     blink: painter::Blink {
                         ceiling: Some(false),
                         since_a_key: std::time::Duration::ZERO,
-                        focused: true,
+                        keys: painter::Keys::Here,
                     },
                     headers: header::Headers::PAINTED,
                     button: header::Button::in_a_tab_of(&[egui::Rect::NOTHING]),
@@ -16041,7 +16047,7 @@ mod tests {
                         blink: painter::Blink {
                             ceiling: Some(false),
                             since_a_key: std::time::Duration::ZERO,
-                            focused: true,
+                            keys: painter::Keys::Here,
                         },
                         headers: header::Headers::PAINTED,
                         button: header::Button::in_a_tab_of(&rects),
@@ -16306,7 +16312,7 @@ mod tests {
                     blink: painter::Blink {
                         ceiling: Some(false),
                         since_a_key: std::time::Duration::ZERO,
-                        focused: true,
+                        keys: painter::Keys::Here,
                     },
                     headers: header::Headers::PAINTED,
                     button: header::Button::in_a_tab_of(&[egui::Rect::NOTHING]),
@@ -16667,7 +16673,7 @@ mod tests {
                     blink: painter::Blink {
                         ceiling: Some(false),
                         since_a_key: std::time::Duration::ZERO,
-                        focused: true,
+                        keys: painter::Keys::Here,
                     },
                     headers: header::Headers::PAINTED,
                     button: header::Button::in_a_tab_of(&[egui::Rect::NOTHING]),
@@ -16728,7 +16734,7 @@ mod tests {
                     blink: painter::Blink {
                         ceiling: Some(false),
                         since_a_key: std::time::Duration::ZERO,
-                        focused: true,
+                        keys: painter::Keys::Here,
                     },
                     headers: header::Headers::PAINTED,
                     button: header::Button::in_a_tab_of(&[egui::Rect::NOTHING]),
@@ -16781,7 +16787,7 @@ mod tests {
                     blink: painter::Blink {
                         ceiling: Some(false),
                         since_a_key: std::time::Duration::ZERO,
-                        focused: true,
+                        keys: painter::Keys::Here,
                     },
                     headers: header::Headers::PAINTED,
                     button: header::Button::in_a_tab_of(&[egui::Rect::NOTHING]),
@@ -20300,25 +20306,9 @@ mod tests {
         the_window_has_the_keyboard: bool,
     ) -> Vec<Option<bool>> {
         let ink = A_CURSOR_OF_ITS_OWN;
-        let input = egui::RawInput {
-            screen_rect: Some(area),
-            focused: the_window_has_the_keyboard,
-            ..Default::default()
-        };
-        let mut frame = eframe::Frame::_new_kittest();
-        let mut output = ctx.run_ui(input, |ui| eframe::App::ui(window, ui, &mut frame));
-        let shapes = std::mem::take(&mut output.shapes);
-        output.drop_without_applying_deltas();
-
-        let metrics =
-            painter::CellMetrics::measure(ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
-        let tiling = tile(
-            area,
-            Orientation::Columns,
-            &weights_of(INITIAL_FRACTION),
-            metrics.width(),
-        );
-        let mut filled = vec![None; tiling.parts.len()];
+        let (shapes, consoles) =
+            one_frame_of_the_window(window, ctx, area, the_window_has_the_keyboard);
+        let mut filled = vec![None; consoles.len()];
         for clipped in &shapes {
             let egui::Shape::Rect(rect) = &clipped.shape else {
                 continue;
@@ -20332,7 +20322,7 @@ mod tests {
             };
             // The console it belongs to is the one whose rectangle contains the clip it was painted
             // under. The focus highlight is painted with no clip of its own, and in another colour.
-            for (at, console) in tiling.parts.iter().enumerate() {
+            for (at, console) in consoles.iter().enumerate() {
                 if console.contains_rect(clipped.clip_rect) {
                     // **A second one is not overwritten in silence.** A console queues exactly one
                     // shape in the cursor's colour; two would mean the mark is being painted twice,
@@ -20787,6 +20777,113 @@ mod tests {
             cursors_of_the_two_consoles(&mut window, &ctx, area, true),
             vec![false, true],
             "coming back to the window did not return the filled cursor to the console with the focus"
+        );
+    }
+
+    /// One frame of the whole window with no input but the desktop's focus, and the rectangles of
+    /// its two consoles to attribute what it queued by.
+    fn one_frame_of_the_window(
+        window: &mut Window,
+        ctx: &egui::Context,
+        area: egui::Rect,
+        the_window_has_the_keyboard: bool,
+    ) -> (Vec<egui::epaint::ClippedShape>, Vec<egui::Rect>) {
+        let input = egui::RawInput {
+            screen_rect: Some(area),
+            focused: the_window_has_the_keyboard,
+            ..Default::default()
+        };
+        let mut frame = eframe::Frame::_new_kittest();
+        let mut output = ctx.run_ui(input, |ui| eframe::App::ui(window, ui, &mut frame));
+        let shapes = std::mem::take(&mut output.shapes);
+        output.drop_without_applying_deltas();
+
+        let metrics =
+            painter::CellMetrics::measure(ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
+        let tiling = tile(
+            area,
+            Orientation::Columns,
+            &weights_of(INITIAL_FRACTION),
+            metrics.width(),
+        );
+        (shapes, tiling.parts)
+    }
+
+    /// Everything each console of the window put on screen as text, painted by the window itself.
+    ///
+    /// **Through the window's own frame and not through a console's painter**, because what is under
+    /// test is what the window hands that painter: the desktop's focus only exists at the window.
+    /// Attributed by clip, for the reason [`maybe_cursors_of_the_two_consoles`] gives.
+    fn text_of_the_two_consoles(
+        window: &mut Window,
+        ctx: &egui::Context,
+        area: egui::Rect,
+        the_window_has_the_keyboard: bool,
+    ) -> Vec<String> {
+        let (shapes, consoles) =
+            one_frame_of_the_window(window, ctx, area, the_window_has_the_keyboard);
+        let mut read = vec![String::new(); consoles.len()];
+        for clipped in &shapes {
+            let egui::Shape::Text(text) = &clipped.shape else {
+                continue;
+            };
+            for (at, console) in consoles.iter().enumerate() {
+                if console.contains_rect(clipped.clip_rect) {
+                    read[at].push_str(text.galley.text());
+                    read[at].push(' ');
+                }
+            }
+        }
+        read
+    }
+
+    #[test]
+    fn a_window_that_lost_the_desktops_focus_tells_its_focused_console_to_come_back() {
+        // **The cursor and the notice answer the same question, and they used to answer it apart**:
+        // with the window alt-tabbed away the focused console outlined its cursor — nobody is typing
+        // here — while its notice went on saying that `Ctrl+Enter` sends the paste.
+        let area = area_of(800.0 + DIVIDER_THICKNESS);
+        let mut window = window_with("sleep 30", "sleep 30");
+        for pane in window.active_mut().panes_mut() {
+            if !hold_a_paste_on(pane) {
+                return;
+            }
+        }
+        focus_on(window.active_mut(), 1);
+        let ctx = egui::Context::default();
+        // The text engine does not exist until there has been a pass.
+        text_of_the_two_consoles(&mut window, &ctx, area, true);
+
+        let away = text_of_the_two_consoles(&mut window, &ctx, area, false);
+        assert!(
+            away[1].contains(painter::notices::ANSWERED_ONCE_BACK),
+            "with the window out of the desktop's focus the console that has the keyboard inside it \
+             did not say to come back: {:?}",
+            away[1]
+        );
+        assert!(
+            !away[1].contains(painter::notices::ANSWERED_BY_HAND),
+            "with the window out of the desktop's focus the console that has the keyboard inside it \
+             still said its keys answer now: {:?}",
+            away[1]
+        );
+        assert!(
+            away[0].contains(painter::notices::ANSWERED_BY_CLICK),
+            "the console without the keyboard stopped saying to focus it: {:?}",
+            away[0]
+        );
+
+        // And back, so the assertions above are not satisfied by a notice that never names the keys.
+        let back = text_of_the_two_consoles(&mut window, &ctx, area, true);
+        assert!(
+            back[1].contains(painter::notices::ANSWERED_BY_HAND),
+            "coming back to the window did not give the focused console its keys again: {:?}",
+            back[1]
+        );
+        assert!(
+            back[0].contains(painter::notices::ANSWERED_BY_CLICK),
+            "coming back to the window changed what the console without the keyboard says: {:?}",
+            back[0]
         );
     }
 

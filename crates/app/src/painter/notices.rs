@@ -49,6 +49,25 @@ pub(crate) const ANSWERED_BY_HAND: &str =
 pub(crate) const ANSWERED_BY_CLICK: &str =
     "A click discards it · focus this console to send it anyway";
 
+/// What it says on **the console that has the keyboard inside a window that lost the desktop's
+/// focus**, which is what the cursor says too: an outlined one there means nobody is typing.
+///
+/// **Neither of the other two is true there.** The keys it names would not arrive until the window
+/// comes back, and «focus this console» asks for what that console already has.
+///
+/// **It may never lay out taller than the other two**, and that is why it is this short. The box is
+/// measured against every wording, so a longer one raised the floor of every console — including the
+/// ones in a focused window, where it is never shown — and a console that used to hold the question
+/// held its paste in silence instead. The first wording did exactly that, and so did «come back,
+/// then Ctrl+Enter sends it» at twenty cells; a test holds the line, with the built-in font. The box
+/// is still measured against all three, because a font somebody chose is what that test cannot walk.
+pub(crate) const ANSWERED_ONCE_BACK: &str =
+    "A click discards it · come back and Ctrl+Enter sends it";
+
+/// Every way a notice can say how it is answered, which is what its box is measured against.
+pub(crate) const EVERY_ANSWER: [&str; 3] =
+    [ANSWERED_BY_HAND, ANSWERED_BY_CLICK, ANSWERED_ONCE_BACK];
+
 /// What the box under the question says, and a press on it sends the held paste (**D31**).
 ///
 /// **A box of its own, under the question and never inside it**, so «a click discards it» stays
@@ -77,8 +96,8 @@ pub(crate) fn the_question_box_with_no_button(
 
 /// What the question's text needs, laid out once and asked of by every ceiling.
 struct Measured {
-    /// The whole question, the taller of its two wordings.
-    taller: Vec2,
+    /// The whole question, the tallest of its wordings.
+    tallest: Vec2,
     /// The way out on its own, which is what the floor asks for.
     answer: f32,
 }
@@ -88,15 +107,15 @@ struct Measured {
 /// **Once per pass, whatever ceilings are tried after it**: laying it out again for each one is work
 /// the frame would not be declaring (**D13**).
 ///
-/// **It is laid out against BOTH answer sentences and takes the taller box, whichever one will be
-/// shown.** Otherwise the box would change size on the very frame the focus moves, and the mouse pass
-/// would be hit-testing a rectangle different from the one the painter is about to draw.
+/// **It is laid out against EVERY answer sentence and takes the tallest box, whichever one will be
+/// shown.** Otherwise the box would change size on the very frame the focus moves — the console's or
+/// the window's — and the mouse pass would be hit-testing a rectangle different from the one the
+/// painter is about to draw.
 ///
-/// **Taking the longer string was the first attempt and a review took it apart**: the two are exactly
-/// the same length in characters, and what sets the height is **wrapping**, not counting. At a narrow
-/// console one of them takes two lines and the other three, so measuring by length made an unfocused
-/// pane's box one line short — text painted outside its own border, and a hit target smaller than the
-/// drawing.
+/// **Taking the longest string was the first attempt and a review took it apart**: what sets the
+/// height is **wrapping**, not counting. At a narrow console one of two sentences of the same length
+/// took two lines and the other three, so measuring by length made an unfocused pane's box one line
+/// short — text painted outside its own border, and a hit target smaller than the drawing.
 fn measure_the_question(
     painter: &Painter,
     console: &crate::Pane,
@@ -106,7 +125,7 @@ fn measure_the_question(
 ) -> Option<Measured> {
     let held = console.held.as_ref()?;
     let wrap = (area.width() - 4.0 * metrics.width()).max(metrics.width());
-    let taller = [ANSWERED_BY_HAND, ANSWERED_BY_CLICK]
+    let tallest = EVERY_ANSWER
         .into_iter()
         .map(|how| {
             painter
@@ -120,9 +139,9 @@ fn measure_the_question(
         })
         .reduce(|one, other| one.max(other))?;
     // How much room the way out needs on its own, which is what the floor asks for. Laid out at the
-    // same width, and the taller of the two for the same reason the box is: whichever is shown, it
-    // has to be whole.
-    let answer = [ANSWERED_BY_HAND, ANSWERED_BY_CLICK]
+    // same width, and the tallest of them for the same reason the box is: whichever is shown, it has
+    // to be whole.
+    let answer = EVERY_ANSWER
         .into_iter()
         .map(|how| {
             painter
@@ -131,7 +150,7 @@ fn measure_the_question(
                 .y
         })
         .reduce(f32::max)?;
-    Some(Measured { taller, answer })
+    Some(Measured { tallest, answer })
 }
 
 /// The question's box with `reserved` points of the top half left free under it.
@@ -176,10 +195,10 @@ fn question_box_under(
     // height minus that offset — which is what makes «nothing is drawn in the bottom half» true of
     // the box's own bottom edge and not merely of its origin.
     let ceiling = area.height() * NOTICE_SHARE - margin - reserved;
-    let tall_enough = (measured.taller.y + 2.0 * margin).min(ceiling);
+    let tall_enough = (measured.tallest.y + 2.0 * margin).min(ceiling);
     let box_of_it = Rect::from_min_size(
         area.left_top() + vec2(margin, margin),
-        vec2(measured.taller.x + 2.0 * margin, tall_enough),
+        vec2(measured.tallest.x + 2.0 * margin, tall_enough),
     )
     .intersect(area);
     // **The floor asks for the ANSWER, not a line, and not a box a line tall.** With the ceiling in
@@ -376,33 +395,22 @@ fn paint_the_silence_over_it(
 
 /// Says, over the console, that a paste is being held and what answers it.
 ///
-/// **A console with nothing held pays one comparison**, which is the same shape the color pass uses:
-/// the frame must not carry the cost of a thing that is almost never there.
-///
 /// It is painted **over the grid and not into it**. Writing the sentence into the screen would put
 /// words in the program's mouth — the grid is what the program wrote — and it would survive in the
 /// scrollback as if it had. This is the application speaking, and it goes where the application can
 /// take it back.
 fn paint_the_question_over_it(
     painter: &Painter,
-    console: &crate::Pane,
+    question: String,
     theme: &Theme,
     metrics: &CellMetrics,
     area: Rect,
     box_of_it: Rect,
     reserved: f32,
 ) {
-    let Some(held) = console.held.as_ref() else {
-        return;
-    };
     let margin = metrics.width();
-    let how_to_answer = if held.reached_by_the_keyboard() {
-        ANSWERED_BY_HAND
-    } else {
-        ANSWERED_BY_CLICK
-    };
     let sentence = painter.layout(
-        format!("{how_to_answer}\n\n{}", held.sentence()),
+        question,
         metrics.font(),
         theme.foreground(),
         (area.width() - 4.0 * margin).max(metrics.width()),
@@ -545,22 +553,33 @@ pub(crate) fn the_boxes(
 }
 
 /// Says the notices over a console, and the button under the question, in the order they stack.
+///
+/// `keys` is what the caller paints this console's cursor from. See [`crate::painter::Keys`].
 pub(crate) fn paint_them_over_it(
     painter: &Painter,
     console: &crate::Pane,
     theme: &Theme,
     metrics: &CellMetrics,
     area: Rect,
+    keys: crate::painter::Keys,
 ) {
     let boxes = the_boxes(painter, console, theme, metrics, area);
 
-    if let Some(box_of_it) = boxes.question {
+    if let (Some(box_of_it), Some(held)) = (boxes.question, console.held.as_ref()) {
         // What the question was laid out leaving free under it, which is what its assert's escape
         // clause has to be measured against — read off the slot, not worked out again.
         let reserved = boxes
             .slot
             .map_or(0.0, |slot| slot.bottom() - box_of_it.bottom());
-        paint_the_question_over_it(painter, console, theme, metrics, area, box_of_it, reserved);
+        // **Every console but the one the window hands its keys to is told «focus this console»**,
+        // with the window away or not: a click there focuses both.
+        let how_to_answer = match keys {
+            crate::painter::Keys::Here => ANSWERED_BY_HAND,
+            crate::painter::Keys::OnceTheWindowIsBack => ANSWERED_ONCE_BACK,
+            crate::painter::Keys::Elsewhere => ANSWERED_BY_CLICK,
+        };
+        let question = format!("{how_to_answer}\n\n{}", held.sentence());
+        paint_the_question_over_it(painter, question, theme, metrics, area, box_of_it, reserved);
     }
     if let Some(box_of_it) = boxes.send {
         paint_the_button_over_it(painter, theme, metrics, box_of_it);

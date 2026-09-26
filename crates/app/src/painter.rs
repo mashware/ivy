@@ -596,19 +596,51 @@ pub struct Blink {
     /// type instead of at whatever point of the cycle you caught it. Every terminal does this, and
     /// it is why typing continuously never leaves the cursor half-drawn.
     pub since_a_key: Duration,
-    /// Whether **this** console has the keyboard in a window that has the desktop's focus.
+    /// Where the keys go, said of **this** console.
     ///
     /// **The only per-console piece, and it rides here rather than as an argument of its own**: a
     /// console is painted through seven parameters already, and an eighth is where a reader stops
-    /// being able to tell which `bool` is which.
-    pub focused: bool,
+    /// being able to tell which argument is which.
+    pub keys: Keys,
+}
+
+/// Where the keys go, said of one console: the answer its cursor **and** its notices are painted
+/// from.
+///
+/// **One value and not two readings**, and that is the decision: the held paste's notice once asked
+/// the console alone while the cursor asked the window too, and with the window alt-tabbed away the
+/// two marks of the same console contradicted each other (**D31**, amended).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Keys {
+    /// This console has the keyboard, in a window that has the desktop's focus.
+    Here,
+    /// This console is the one the window hands its keys to, and the window is away.
+    OnceTheWindowIsBack,
+    /// The window hands its keys to another console.
+    Elsewhere,
+}
+
+impl Keys {
+    /// From whether the window has the desktop's focus, this console's name and the name of the one
+    /// the window hands its keys to.
+    ///
+    /// **The two names and not a `bool` for their comparison**, so the call cannot be written the
+    /// wrong way round: a second `bool` beside the first would type-check swapped, and the two names
+    /// are only ever compared, which reads the same either way.
+    pub(crate) fn of(the_window_has_them: bool, this_console: usize, with_them: usize) -> Self {
+        match (this_console == with_them, the_window_has_them) {
+            (false, _) => Keys::Elsewhere,
+            (true, true) => Keys::Here,
+            (true, false) => Keys::OnceTheWindowIsBack,
+        }
+    }
 }
 
 /// The three things the frame resolves before it walks the panes, travelling together.
 ///
 /// **It is an argument count and it is said so**, rather than dressed up as a concept: painting a
 /// console reached eight arguments with the strip's decision, and the lint that guards this crate
-/// stops at seven. Riding them in one value is the same answer [`Blink::focused`] already gave one
+/// stops at seven. Riding them in one value is the same answer [`Blink::keys`] already gave one
 /// level down, for the same reason its docblock gives — an eighth argument is where a reader stops
 /// being able to tell which value is which.
 ///
@@ -682,8 +714,8 @@ impl Blink {
     }
 
     /// The same blink, said of one console.
-    pub(crate) fn on(self, focused: bool) -> Self {
-        Self { focused, ..self }
+    pub(crate) fn on(self, keys: Keys) -> Self {
+        Self { keys, ..self }
     }
 
     /// The ink a console's cursor is drawn with this frame.
@@ -691,7 +723,7 @@ impl Blink {
     /// `asked_for` is what the program wants; the ceiling overrules it in both directions, which is
     /// what makes `cursor.blink` a ceiling instead of a default a program can climb over (**D37**).
     pub(crate) fn ink(self, asked_for: bool) -> CursorInk {
-        if !self.focused {
+        if self.keys != Keys::Here {
             return CursorInk::Outline;
         }
         match self.ceiling.unwrap_or(asked_for).then(|| self.phase()) {
@@ -848,7 +880,15 @@ pub(crate) fn paint_a_console(
 ) -> bool {
     let view = console.screen.view();
     let blinking = paint_a_console_view(painter, &view, theme, metrics, area, discoverer, ink);
-    notices::paint_them_over_it(painter, console, theme, metrics, area);
+    // This entry takes an ink rather than a blink, and an outlined cursor says nobody types here.
+    // It cannot tell an absent window from another console, so what the window hands the painter
+    // is tested through the window, never through this.
+    let keys = if matches!(ink, CursorInk::Outline) {
+        Keys::Elsewhere
+    } else {
+        Keys::Here
+    };
+    notices::paint_them_over_it(painter, console, theme, metrics, area, keys);
     blinking
 }
 
@@ -972,6 +1012,7 @@ pub(crate) fn paint_pane(
         theme,
         metrics,
         panel_split.console,
+        blink.keys,
     );
     let painted = crate::links::PaintedConsole {
         view,
@@ -2191,7 +2232,7 @@ mod tests {
         Blink {
             ceiling: None,
             since_a_key: Duration::from_millis(millis),
-            focused: true,
+            keys: Keys::Here,
         }
     }
 
@@ -2244,7 +2285,7 @@ mod tests {
         );
         assert_eq!(blink_at(60_000).phase(), None);
         assert_eq!(
-            blink_at(15_000).on(true).ink(true),
+            blink_at(15_000).on(Keys::Here).ink(true),
             CursorInk::Filled,
             "a stopped blink has to leave the cursor painted, and asking for no more frames"
         );
@@ -2285,37 +2326,37 @@ mod tests {
         let forced_off = Blink {
             ceiling: Some(false),
             since_a_key: dark,
-            focused: true,
+            keys: Keys::Here,
         };
-        assert_eq!(forced_off.on(true).ink(true), CursorInk::Filled);
+        assert_eq!(forced_off.on(Keys::Here).ink(true), CursorInk::Filled);
 
         let forced_on = Blink {
             ceiling: Some(true),
             since_a_key: dark,
-            focused: true,
+            keys: Keys::Here,
         };
         assert_eq!(
-            forced_on.on(true).ink(false),
+            forced_on.on(Keys::Here).ink(false),
             CursorInk::Blinking { lit: false }
         );
 
         let program_decides = Blink {
             ceiling: None,
             since_a_key: dark,
-            focused: true,
+            keys: Keys::Here,
         };
         assert_eq!(
-            program_decides.on(true).ink(true),
+            program_decides.on(Keys::Here).ink(true),
             CursorInk::Blinking { lit: false }
         );
-        assert_eq!(program_decides.on(true).ink(false), CursorInk::Filled);
+        assert_eq!(program_decides.on(Keys::Here).ink(false), CursorInk::Filled);
         assert_eq!(
             Blink {
                 ceiling: None,
                 since_a_key: lit,
-                focused: true,
+                keys: Keys::Here,
             }
-            .on(true)
+            .on(Keys::Here)
             .ink(true),
             CursorInk::Blinking { lit: true }
         );
@@ -2328,7 +2369,7 @@ mod tests {
         for asked_for in [true, false] {
             for millis in [0, 600, 1_200] {
                 assert_eq!(
-                    blink_at(millis).on(false).ink(asked_for),
+                    blink_at(millis).on(Keys::Elsewhere).ink(asked_for),
                     CursorInk::Outline,
                     "an unfocused console at {millis} ms asking {asked_for}"
                 );

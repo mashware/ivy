@@ -19,7 +19,6 @@ file_paths:
 symbols:
   - 'Window::handle_the_mouse'
   - 'Tab::focus'
-  - 'Window::tell_the_questions_who_has_the_keyboard'
 content_hashes:
   scripts/measure-frame.sh: 'sha256:ae5f21bf87adf36350d78dad4ef3cc4970d0620f8506024e51a596dc48c8d112'
   crates/app/src/pointer.rs: 'sha256:1e956a5d4794d7e182236be288b3231dd7aa3b92304a91df977ac1e81d555c95'

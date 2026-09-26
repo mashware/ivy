@@ -133,7 +133,7 @@ const SOURCES: &[(&str, &str, usize)] = &[
     ("src/theme.rs", include_str!("../src/theme.rs"), 202),
     ("src/mouse.rs", include_str!("../src/mouse.rs"), 201),
     ("src/opening.rs", include_str!("../src/opening.rs"), 148),
-    ("src/pointer.rs", include_str!("../src/pointer.rs"), 661),
+    ("src/pointer.rs", include_str!("../src/pointer.rs"), 648),
     (
         "src/pointer/links.rs",
         include_str!("../src/pointer/links.rs"),

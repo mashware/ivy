@@ -56,8 +56,10 @@ Format: `- <date> · <ticket> · <what> — <why it matters>`.
   sentence in `theme.panel_background()` leaves it invisible inside a correct box; moving its origin
   to `area.left_top()` paints it outside its own border, which is what the `debug_assert` above it
   exists to prevent and which no test drives; and a corner radius of 120 turns the box into an oval
-  whose corners cut the first line. `text_painted` reads `galley.text()` and never a colour or a
-  position. The owner is whoever next works on that notice — #170 and #211 are both in that area.
+  whose corners cut the first line. The tests read the notice through `galley.text()` and never a
+  colour or a position — `text_of_the_two_consoles` since #211, which changed what the notice says
+  and not how it is drawn, so it leaves all three standing. The owner is whoever next works on that
+  notice's drawing — #170 is in that area.
 - 2026-09-09 · 210 · **The third of `paint_cursor`'s three guards cannot be reached, and the clamp
   that feeds it is inert** — «no cell where the cursor stands» is named in the design beside the
   other two, and no `Screen` can produce it: the row is range-checked and the column clamped where

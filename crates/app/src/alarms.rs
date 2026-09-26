@@ -88,8 +88,10 @@ impl BlinkState {
             since_a_key: self.typed_at.elapsed(),
             // **The window's own snapshot answers for no console in particular.** Each one puts its
             // own answer on it with [`Blink::on`] as it is handed over to be painted; here it is
-            // false so that a caller which forgets to gets the still cursor, never a false blink.
-            focused: false,
+            // «elsewhere», so a caller which forgets gets the still cursor and never a false blink —
+            // and its notice says «focus this console», which is wrong on the focused one. Forgetting
+            // is not harmless; this only picks the failure that shows.
+            keys: crate::painter::Keys::Elsewhere,
         }
     }
 

@@ -4981,9 +4981,45 @@ the held paste, and a bare press on the question still discards it. #199.
 #### What it leaves open
 
 - **The sentence on an unfocused console still says «focus this console to send it anyway»** with a
-  button right under it. True, and roundabout; kept so that neither sentence changes.
+  button right under it. True, and roundabout; kept so that neither sentence changes. (A third
+  sentence arrived later for a different case, and the amendment below records it.)
 - **The pasted text is not shown**: the button sends what the person pasted moments ago, which
   `Ctrl+Enter` already sends the same way.
+
+### Amendment — a third sentence, for a window that lost the desktop's focus (September 2026)
+
+**The notice and the cursor answer the same question — is anybody typing into this console? — and
+they answered it apart.** **D36** taught the cursor the window's focus: alt-tabbed away, every
+console outlines its cursor. The notice asked only whether its console had the keyboard inside the
+window, so the focused console of an absent window said «Escape or a click discards it · Ctrl+Enter
+sends it anyway» under a cursor saying nobody was there. #211.
+
+- **That console now says «A click discards it · come back and Ctrl+Enter sends it»**, and goes
+  back to the usual sentence the moment the window returns. Every other console keeps «focus this
+  console to send it anyway», which stays true with the window away: a click on it focuses both.
+- **The notice is handed the value the cursor is painted from** — one value that says where the
+  keys go: here, here once the window is back, or to another console. The mark the paste used to
+  carry, written by the mouse pass, is gone: a second reading is what let the two drift apart.
+- **The third sentence may never lay out taller than the other two**, and a test holds it with the
+  built-in font at every width from 4 to 120 cells. The box is still measured against all three at
+  run time — two layouts more per console holding a paste — because a font of somebody's choosing
+  (**D26**) is exactly what that test cannot walk. The box is measured against every sentence so
+  that it keeps its size when the focus moves (the amendment above), which means a longer third
+  sentence raises the floor of **every** console —
+  in a focused window too, where it is never shown — and consoles that used to hold the question
+  would hold the paste in silence. The sentence first agreed on did exactly that, and so did the
+  first shorter one, at twenty cells.
+- **Escape is not named**: it does not reach an absent window either.
+- **The price, named**: the natural way back to a window is a click, and a click on the notice
+  discards the paste. The sentence opens with exactly that; a click on the grid brings the window
+  back and keeps the question standing, and one on «Send it anyway» sends it.
+
+| Discarded | Why |
+|---|---|
+| **The click sentence on the focused console too** («focus this console…») | It asks for what that console already has, exactly where it is read |
+| **Leaving it as it was** — the instruction is true once the window comes back | Two marks of the same window contradicting each other about the same console |
+| **«A click discards it · come back to this window to send it with Ctrl+Enter»** (the first agreed) | Longer than the other two: measured against all three, the box stopped fitting narrow consoles that showed the question before, in a focused window too |
+| **Measuring the box only against the sentences that can show right now** | The box would change size the frame the window's focus moves, and the mouse pass would hit-test a rectangle other than the one painted |
 
 ### The sentence D6 needs, and why it is here
 
