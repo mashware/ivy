@@ -13,7 +13,7 @@ use eframe::egui::text::{LayoutJob, TextFormat};
 use eframe::egui::{Align2, Color32, Galley, Painter, Pos2, Rect, vec2};
 
 use super::Row;
-use crate::fonts::{Presentation, presentation_of};
+use crate::fonts::{ColorEmoji, Presentation, presentation_of};
 use crate::painter::{CellMetrics, ColorGlyph, color_glyph_in};
 
 /// Notes on each row which of its characters go to color. **Once per layout, not per frame**: the
@@ -52,8 +52,10 @@ pub(super) fn paint_text(
     // that character in ink.
     let before = shown.len();
     shown.retain(|span| {
-        let found = slot(&galley, &chars, span, origin, metrics)
-            .and_then(|slot| color_glyph_in(painter.ctx(), chars[span.start], slot, discoverer));
+        let found = slot(&galley, &chars, span, origin, metrics).and_then(|slot| {
+            let emoji = ColorEmoji::of(chars[span.start], &chars[span.start + 1..span.end]);
+            color_glyph_in(painter.ctx(), emoji, slot, discoverer)
+        });
         // **Queued rather than drawn**, so the caller draws every one after all of the panel's text:
         // the engine only batches consecutive shapes that share a texture (**D25**).
         match found {
@@ -146,7 +148,8 @@ fn job(chars: &[char], hidden: &[Range<usize>], ink: Color32, metrics: &CellMetr
 /// that is neither gives no slot and the character is shown in ink, as does one with no advance: a
 /// ligature's continuation, with nothing of its own to replace.
 ///
-/// **As wide as that room and no wider**, so the drawing never covers the letters beside it; the
+/// **As wide as that room** — and across a space after it for an emoji whose base is text by default,
+/// up to two cells — so the drawing never covers a letter beside it; the
 /// atlas keeps it apart from the console's drawing of the same character, because it remembers each
 /// glyph by the width it was asked at. **And one cell tall**, because a change of height empties the
 /// atlas: a panel asking another would empty it on every frame that painted both.
@@ -167,10 +170,23 @@ fn slot(
     // **The width is the sum of the advances and not the distance between positions**: epaint snaps
     // each glyph's position to the pixel grid on its own, so the distance changes by a pixel with the
     // column the emoji falls in — and every distinct width is one more drawing in the atlas.
-    let width: f32 = row.glyphs[span.clone()]
+    let room: f32 = row.glyphs[span.clone()]
         .iter()
         .map(|glyph| glyph.advance_width)
         .sum();
+    // **Across the space after it too, up to two cells, for an emoji whose base is text by
+    // default** — `☁️`, a keycap: colour only because of what follows it, the same emoji the console
+    // widens, and laid out where its base goes, as narrow as one cell. An emoji that is colour on its
+    // own (`🔥`, with or without a selector) keeps the room it was laid out in. The space is read off
+    // the laid-out glyph, which is the one the drawing would cover.
+    let two_cells = 2.0 * metrics.width();
+    let text_by_default = presentation_of(chars[span.start], &[]) == Presentation::Text;
+    let width = match row.glyphs.get(span.end) {
+        Some(next) if text_by_default && next.chr == ' ' && room < two_cells => {
+            (room + next.advance_width).min(two_cells)
+        }
+        _ => room,
+    };
     let left = origin.x + row.pos.x + first.pos.x;
     Some(Rect::from_min_size(
         Pos2::new(left, origin.y),
@@ -293,7 +309,8 @@ mod tests {
     #[test]
     fn an_emoji_in_a_panel_line_comes_out_in_color_and_its_outline_does_not() {
         // AC1. Asserted in both scenarios, like the console's: without a color font the emoji still has
-        // to come out, through the text path.
+        // to come out, through the text path. **A space after it, and it stays in its own room**: only
+        // an emoji carrying the selector spills, and this one has none.
         let shapes = flat(queued(&["build \u{1F525} done"]));
         if there_is_color_on_this_machine() {
             assert_eq!(images(&shapes), 1, "the emoji was not drawn as an image");
@@ -537,6 +554,109 @@ mod tests {
         assert!(
             with_a_selector.is_none(),
             "a drifted index over an emoji with its selector still produced a slot"
+        );
+    }
+
+    /// The room a three-character keycap starting with `base` was laid out in, and the advance of
+    /// the glyph after it, from the painted row that carries it.
+    fn keycap_room(shapes: &[Shape], base: char) -> (f32, f32, f32) {
+        shapes
+            .iter()
+            .find_map(|shape| match shape {
+                Shape::Text(text) => {
+                    let at = text.galley.text().chars().position(|c| c == base)?;
+                    let row = text.galley.rows.first()?;
+                    let glyphs = row.glyphs.get(at..at + 3)?;
+                    let room = glyphs.iter().map(|glyph| glyph.advance_width).sum();
+                    let next = row
+                        .glyphs
+                        .get(at + 3)
+                        .map_or(0.0, |glyph| glyph.advance_width);
+                    Some((text.pos.x + row.pos.x + glyphs[0].pos.x, room, next))
+                }
+                _ => None,
+            })
+            .expect("no painted row carries that keycap")
+    }
+
+    #[test]
+    fn an_emoji_with_the_selector_spills_into_the_space_after_it() {
+        if !there_is_color_on_this_machine() {
+            return;
+        }
+        let ctx = Context::default();
+        let mut cell = 0.0;
+        ctx.run_ui(RawInput::default(), |ui| {
+            cell =
+                CellMetrics::measure(ui.ctx(), FontId::monospace(crate::DEFAULT_FONT_SIZE)).width();
+        })
+        .drop_without_applying_deltas();
+
+        let spilled = flat(queued(&["1\u{FE0F}\u{20E3} first"]));
+        let (left, room, space) = keycap_room(&spilled, '1');
+        // The premise, measured rather than assumed: the keycap is laid out in less than two cells,
+        // or there would be nothing to spill into.
+        assert!(
+            room < 2.0 * cell,
+            "the keycap was laid out in {room} points, two cells or more: the case proves nothing"
+        );
+        let image = image_rects(&spilled)[0];
+        assert!(
+            image.width() > room + 0.5,
+            "the keycap is {} wide in a room of {room}: it did not spill into the space",
+            image.width()
+        );
+        assert!(
+            image.right() <= left + (room + space).min(2.0 * cell) + 0.5,
+            "the keycap spans {:?}: past its room and the space after it",
+            image.x_range()
+        );
+
+        // An emoji that is colour on its own keeps its room, with or without a selector.
+        let own = flat(queued(&["\u{1F525}\u{FE0F} hot"]));
+        let room = box_of(&own, '\u{1F525}');
+        let image = image_rects(&own)[0];
+        assert!(
+            image.right() <= room.right() + 0.5,
+            "the fire with a selector spans {:?}: it spilled out of the room {room:?}",
+            image.x_range()
+        );
+
+        let together = flat(queued(&["1\u{FE0F}\u{20E3}2\u{FE0F}\u{20E3} second"]));
+        let (left, room, _) = keycap_room(&together, '1');
+        let first = image_rects(&together)[0];
+        assert!(
+            first.right() <= left + room + 0.5,
+            "the first keycap spans {:?}: it covered the second",
+            first.x_range()
+        );
+    }
+
+    #[test]
+    fn a_keycap_in_the_panel_is_asked_as_a_keycap() {
+        // The keycap's mark is part of the span; the drawing has to be asked for the keycap, or the
+        // font's thin digit comes out — an image of the same size, which only the atlas tells apart.
+        if !there_is_color_on_this_machine() {
+            return;
+        }
+        let mut discoverer = crate::fonts::Discoverer::default();
+        let shapes = flat(queued_for(&["1\u{FE0F}\u{20E3} first"], &mut discoverer));
+        assert_eq!(
+            images(&shapes),
+            1,
+            "the keycap was not drawn in colour at all"
+        );
+        let keycap = crate::fonts::ColorEmoji {
+            base: '1',
+            keycap: true,
+        };
+        assert!(
+            discoverer.remembers(keycap),
+            "the panel did not ask for the keycap"
+        );
+        assert!(
+            !discoverer.remembers(crate::fonts::ColorEmoji::from('1')),
+            "the panel asked for the bare digit"
         );
     }
 

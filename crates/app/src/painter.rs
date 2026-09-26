@@ -15,6 +15,12 @@ mod blocks;
 /// delivery was already editing.
 pub(crate) mod notices;
 
+/// The console's colour emoji: the drawing asked of the atlas, where it goes, and when it spills
+/// into the cell beside it. It left when the spill pushed this module past **D28**'s ceiling.
+mod emoji;
+pub(crate) use emoji::{ColorGlyph, color_glyph_in};
+use emoji::{paint_in_color, spills};
+
 use crate::fonts::Presentation;
 use crate::theme::Theme;
 use eframe::egui::{
@@ -359,7 +365,8 @@ pub fn paint(
                     cell.c,
                     attached,
                     metrics.cell(origin, row, column as u16),
-                    cell.width == CellWidth::WideHead,
+                    cell.width == CellWidth::WideHead
+                        || (pass == Presentation::Color && spills(view, cell, row, column as u16)),
                     colors_of(cell, theme).0,
                     metrics,
                     discoverer,
@@ -444,7 +451,12 @@ fn paint_character(
         slot
     };
     if crate::fonts::presentation_of(character, attached) == crate::fonts::Presentation::Color
-        && paint_in_color(painter, character, its_own, discoverer)
+        && paint_in_color(
+            painter,
+            crate::fonts::ColorEmoji::of(character, attached),
+            its_own,
+            discoverer,
+        )
     {
         return;
     }
@@ -526,63 +538,6 @@ fn paint_a_block(
             ink,
         );
     }
-}
-
-/// Paints that character's color glyph, centered in its slot. Says whether it painted anything.
-///
-/// **Returning `false` is not a failure: it is Contract 5 of the design.** A character whose
-/// presentation asks for color but that no font on the machine paints in color is drawn with whatever
-/// the engine gives —its monochrome silhouette, or its tofu box— and nothing more is attempted. The
-/// terminal does not draw glyphs the machine does not have.
-fn paint_in_color(
-    painter: &Painter,
-    character: char,
-    slot: Rect,
-    discoverer: &mut crate::fonts::Discoverer,
-) -> bool {
-    let Some(glyph) = color_glyph_in(painter.ctx(), character, slot, discoverer) else {
-        return false;
-    };
-    glyph.paint(painter);
-    true
-}
-
-/// A color glyph ready to be queued: which texture, where on screen, and which part of the texture.
-///
-/// **Separate from painting it because the status panel has to know before it paints.** Its text is
-/// laid out in one go, and the character a color glyph replaces has to be hidden in that layout or
-/// shown in it — which is only known once the glyph was or was not found.
-pub(crate) struct ColorGlyph {
-    atlas: eframe::egui::TextureId,
-    drawing: Rect,
-    uv: Rect,
-}
-
-impl ColorGlyph {
-    pub(crate) fn paint(&self, painter: &Painter) {
-        painter.image(self.atlas, self.drawing, self.uv, Color32::WHITE);
-    }
-}
-
-/// That character's color glyph, centered in its slot, if any font on the machine paints it that way.
-pub(crate) fn color_glyph_in(
-    ctx: &eframe::egui::Context,
-    character: char,
-    slot: Rect,
-    discoverer: &mut crate::fonts::Discoverer,
-) -> Option<ColorGlyph> {
-    // **In PHYSICAL pixels, not in points.** The texture is uploaded at the size it will be seen at:
-    // asking for it in points would leave it at half resolution on a screen at 200 % and the emoji
-    // would come out blurry right where it shows most.
-    let per_point = ctx.pixels_per_point();
-    let height = (slot.height() * per_point).round() as u32;
-    let width = (slot.width() * per_point).round() as u32;
-    let (atlas, uv, measurements) = discoverer.color_glyph(ctx, character, height, width)?;
-    // **Centered in its slot, and that is why the real texture size is needed**: the rescaling keeps
-    // the drawing's proportion, so it almost never fills the exact slot — there is room to spare on one
-    // axis. Stretching it to fill would deform the emoji.
-    let drawing = Rect::from_center_size(slot.center(), measurements / per_point);
-    Some(ColorGlyph { atlas, drawing, uv })
 }
 
 /// How long each half of a blink lasts.
@@ -819,7 +774,10 @@ fn paint_cursor(
     let mut slot = metrics.cell(origin, cursor.row, cursor.col);
     // Over a wide character, the cursor covers **the two columns** that character occupies. Covering
     // only one leaves half the letter covered and the other half not, which reads as a drawing error.
-    if under_cursor.width == CellWidth::WideHead {
+    // An emoji drawn across a blank neighbour is covered the same way, for the same reason.
+    let two_columns = under_cursor.width == CellWidth::WideHead
+        || spills(view, under_cursor, cursor.row, cursor.col);
+    if two_columns {
         slot.max.x += metrics.width;
     }
     let color = theme.color(TermColor::Cursor);
@@ -859,7 +817,7 @@ fn paint_cursor(
                     under_cursor.c,
                     view.combining_of(under_cursor),
                     metrics.cell(origin, cursor.row, cursor.col),
-                    under_cursor.width == CellWidth::WideHead,
+                    two_columns,
                     colors_of(under_cursor, theme).1,
                     metrics,
                     discoverer,
@@ -873,7 +831,7 @@ fn paint_cursor(
             let height = (metrics.height * 0.1).max(1.0);
             let bar = Rect::from_min_size(
                 slot.left_bottom() - vec2(0.0, height),
-                vec2(metrics.width, height),
+                vec2(slot.width(), height),
             );
             painter.rect_filled(bar, 0.0, color);
         }
@@ -1900,6 +1858,262 @@ mod tests {
             images, 1,
             "the «#️⃣» keycap came out via the text path: the painter is discarding ASCII without \
              looking at what is attached to it, and eats the twelve keycaps Unicode makes with ASCII"
+        );
+    }
+
+    /// Paints a screen on a 10×20 cell and returns where each colour image went, and every rectangle
+    /// filled with the cursor's colour.
+    fn images_and_cursor(screen: &Screen, ink: CursorInk) -> (Vec<Rect>, Vec<Rect>) {
+        let view = screen.view();
+        let ctx = Context::default();
+        ctx.run_ui(eframe::egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        let theme = Theme::default();
+        let output = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+            let painter = ui.ctx().layer_painter(eframe::egui::LayerId::new(
+                eframe::egui::Order::Foreground,
+                eframe::egui::Id::new("spilling"),
+            ));
+            paint(
+                &painter,
+                &view,
+                &theme,
+                &metrics(10.0, 20.0),
+                Pos2::ZERO,
+                &mut crate::fonts::Discoverer::default(),
+                ink,
+            );
+        });
+        let cursor = theme.color(TermColor::Cursor);
+        let (mut images, mut cursors) = (Vec::new(), Vec::new());
+        for shape in &output.shapes {
+            match &shape.shape {
+                eframe::egui::Shape::Mesh(mesh)
+                    if mesh.texture_id != eframe::egui::TextureId::default() =>
+                {
+                    images.push(mesh.calc_bounds());
+                }
+                eframe::egui::Shape::Rect(rect) if rect.fill == cursor => cursors.push(rect.rect),
+                _ => {}
+            }
+        }
+        output.drop_without_applying_deltas();
+        (images, cursors)
+    }
+
+    #[test]
+    fn an_emoji_with_the_selector_spills_into_a_blank_neighbour() {
+        // A keycap takes one cell; with a blank after it, it is drawn across both.
+        if !there_is_color_on_this_machine() {
+            return;
+        }
+        let (images, _) = images_and_cursor(&of_text("1\u{FE0F}\u{20E3} x"), CursorInk::Filled);
+        let drawn = images.first().expect("the keycap was drawn in colour");
+        assert!(
+            drawn.width() > 15.0 && drawn.right() <= 20.5,
+            "with a blank after it the keycap is {} wide ({:?}): it should span two 10-point cells",
+            drawn.width(),
+            drawn.x_range()
+        );
+    }
+
+    #[test]
+    fn an_emoji_with_something_after_it_stays_in_its_cell() {
+        // Written together, the second keycap sits where the first would spill.
+        if !there_is_color_on_this_machine() {
+            return;
+        }
+        let (images, _) = images_and_cursor(
+            &of_text("1\u{FE0F}\u{20E3}2\u{FE0F}\u{20E3} "),
+            CursorInk::Filled,
+        );
+        let first = images
+            .first()
+            .expect("the first keycap was drawn in colour");
+        assert!(
+            first.right() <= 10.5,
+            "the first keycap spans {:?}: it covered the second",
+            first.x_range()
+        );
+    }
+
+    #[test]
+    fn an_emoji_does_not_spill_under_the_cursor() {
+        // Typing right after an emoji leaves the cursor on the blank beside it; the cursor is painted
+        // after the emoji and would cover half of a spilled drawing.
+        if !there_is_color_on_this_machine() {
+            return;
+        }
+        let (images, _) = images_and_cursor(&of_text("\u{2601}\u{FE0F}"), CursorInk::Filled);
+        let drawn = images.first().expect("the cloud was drawn in colour");
+        assert!(
+            drawn.right() <= 10.5,
+            "the cloud spans {:?} with the cursor on the cell beside it",
+            drawn.x_range()
+        );
+    }
+
+    #[test]
+    fn an_emoji_does_not_spill_over_a_space_painted_for_something() {
+        // Agent programs hide the terminal's cursor and draw their own as an inverted space: typing
+        // after an emoji there, a spill would cover half of that cursor.
+        if !there_is_color_on_this_machine() {
+            return;
+        }
+        let (images, _) = images_and_cursor(
+            &of_text("\u{2601}\u{FE0F}\x1b[7m \x1b[0m\x1b[?25l"),
+            CursorInk::Filled,
+        );
+        let drawn = images.first().expect("the cloud was drawn in colour");
+        assert!(
+            drawn.right() <= 10.5,
+            "the cloud spans {:?}: it covered the program's own inverted cursor",
+            drawn.x_range()
+        );
+    }
+
+    #[test]
+    fn an_emoji_does_not_spill_over_a_blank_of_another_colour() {
+        // A status bar paints its blanks in a colour of its own.
+        if !there_is_color_on_this_machine() {
+            return;
+        }
+        let (images, _) = images_and_cursor(
+            &of_text("\u{2601}\u{FE0F}\x1b[41m \x1b[0m x"),
+            CursorInk::Filled,
+        );
+        let drawn = images.first().expect("the cloud was drawn in colour");
+        assert!(
+            drawn.right() <= 10.5,
+            "the cloud spans {:?}: it covered a blank painted red",
+            drawn.x_range()
+        );
+    }
+
+    #[test]
+    fn inside_an_inverted_bar_an_emoji_still_spills() {
+        // The neighbour looks like the emoji's own cell there, so it is blank for the rule.
+        if !there_is_color_on_this_machine() {
+            return;
+        }
+        let (images, _) = images_and_cursor(
+            &of_text("\x1b[7m\u{2601}\u{FE0F} ok\x1b[0m x"),
+            CursorInk::Filled,
+        );
+        let drawn = images.first().expect("the cloud was drawn in colour");
+        assert!(
+            drawn.width() > 15.0,
+            "inside an inverted bar the cloud is {} wide: the inversion alone stopped the spill",
+            drawn.width()
+        );
+    }
+
+    #[test]
+    fn an_underline_cursor_on_a_spilled_emoji_underlines_both_cells() {
+        if !there_is_color_on_this_machine() {
+            return;
+        }
+        let mut screen = of_text("\u{2601}\u{FE0F} x\x1b[4 q");
+        screen.advance(b"\r");
+        let (_, cursors) = images_and_cursor(&screen, CursorInk::Filled);
+        let bar = cursors.first().expect("the underline cursor was painted");
+        assert!(
+            bar.width() > 15.0,
+            "the underline under a spilled emoji is {} wide: half the drawing is not underlined",
+            bar.width()
+        );
+    }
+
+    #[test]
+    fn a_hidden_cursor_beside_an_emoji_still_keeps_it_in_its_cell() {
+        // The rule reads where the cursor is, not whether a program hid it: a program that hides and
+        // shows it around every redraw would otherwise make the emoji change size every frame.
+        if !there_is_color_on_this_machine() {
+            return;
+        }
+        let (images, _) =
+            images_and_cursor(&of_text("\u{2601}\u{FE0F}\x1b[?25l"), CursorInk::Filled);
+        let drawn = images.first().expect("the cloud was drawn in colour");
+        assert!(
+            drawn.right() <= 10.5,
+            "with the cursor hidden beside it the cloud spans {:?}",
+            drawn.x_range()
+        );
+    }
+
+    #[test]
+    fn an_emoji_in_the_last_column_does_not_spill_out_of_the_console() {
+        if !there_is_color_on_this_machine() {
+            return;
+        }
+        let mut screen = Screen::new(Size { rows: 2, cols: 3 });
+        screen.advance("xx\u{2601}\u{FE0F}\r\n".as_bytes());
+        let (images, _) = images_and_cursor(&screen, CursorInk::Filled);
+        let drawn = images.first().expect("the cloud was drawn in colour");
+        assert!(
+            drawn.right() <= 30.5,
+            "the cloud in the last of three columns spans {:?}: past the console's edge",
+            drawn.x_range()
+        );
+    }
+
+    #[test]
+    fn a_cursor_on_a_spilled_emoji_covers_both_cells_whatever_the_blink() {
+        // The cursor sits on the emoji itself: it covers both cells, as over a wide character, and
+        // the emoji is the same size with the blink lit and dark — the rule reads where the cursor
+        // is, never whether it is showing.
+        if !there_is_color_on_this_machine() {
+            return;
+        }
+        let mut screen = of_text("\u{2601}\u{FE0F} x");
+        screen.advance(b"\r");
+        let (lit, cursors) = images_and_cursor(&screen, CursorInk::Blinking { lit: true });
+        let (dark, _) = images_and_cursor(&screen, CursorInk::Blinking { lit: false });
+        let block = cursors.first().expect("the lit block cursor was painted");
+        assert!(
+            block.width() > 15.0,
+            "the cursor on a spilled emoji covers {} points: half of the drawing is outside it",
+            block.width()
+        );
+        for drawn in lit.iter().chain(&dark) {
+            assert!(
+                drawn.width() > 15.0,
+                "an emoji under the cursor was drawn {} wide: its size follows the blink",
+                drawn.width()
+            );
+        }
+        assert!(
+            !dark.is_empty(),
+            "with the blink dark the emoji was not drawn at all"
+        );
+    }
+
+    #[test]
+    fn a_keycap_in_the_console_is_asked_as_a_keycap() {
+        // The cell carries the keycap's mark among what is attached to it; the colour drawing has to
+        // be asked for the keycap, or the font's thin digit comes out. Asked afterwards for the keycap
+        // at the cell's size, the atlas must already remember it — which only the console's own
+        // request could have left there.
+        if !there_is_color_on_this_machine() {
+            return;
+        }
+        let mut discoverer = crate::fonts::Discoverer::default();
+        let (images, _) = shapes_of_with(&of_text("1\u{FE0F}\u{20E3}"), &mut discoverer);
+        assert_eq!(images, 1, "the keycap was not drawn in colour at all");
+        discoverer.color_cost();
+
+        let ctx = Context::default();
+        ctx.run_ui(eframe::egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        let keycap = crate::fonts::ColorEmoji {
+            base: '1',
+            keycap: true,
+        };
+        discoverer.color_glyph(&ctx, keycap, 20, 10);
+        assert_eq!(
+            discoverer.color_cost().rasterized,
+            0,
+            "the console asked for the bare digit: the keycap was not in the atlas"
         );
     }
 

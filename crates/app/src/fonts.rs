@@ -43,6 +43,38 @@ pub enum Presentation {
     Color,
 }
 
+/// What a colour drawing is asked for: a character, and whether it carries the keycap's mark.
+///
+/// **The keycap is the one sequence the colour path draws whole.** Its drawing is a ligature of the
+/// sequence in the emoji font, not an entry for the digit: asked by the digit alone, `1️⃣` came out
+/// as the font's thin `1`. A character with no mark converts from a plain `char`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ColorEmoji {
+    pub base: char,
+    pub keycap: bool,
+}
+
+impl ColorEmoji {
+    /// The drawing a character asks for, given what it carries attached. Only the twelve keycap bases
+    /// — the digits, `#` and `*` — make a keycap: the mark behind anything else has no keycap to draw,
+    /// and asking for one would take away the colour drawing the character does have.
+    pub fn of(base: char, attached: &[char]) -> Self {
+        Self {
+            base,
+            keycap: matches!(base, '0'..='9' | '#' | '*') && attached.contains(&'\u{20E3}'),
+        }
+    }
+}
+
+impl From<char> for ColorEmoji {
+    fn from(base: char) -> Self {
+        Self {
+            base,
+            keycap: false,
+        }
+    }
+}
+
 /// What presentation a character gets, given what it carries attached.
 ///
 /// **The rule, and it is Ghostty's:** it goes color **if and only if** the emoji selector
@@ -380,7 +412,7 @@ impl Discoverer {
     pub fn color_glyph(
         &mut self,
         ctx: &egui::Context,
-        which_char: char,
+        which_char: impl Into<ColorEmoji>,
         height: u32,
         max_width: u32,
     ) -> Option<(egui::TextureId, egui::Rect, egui::Vec2)> {
@@ -400,6 +432,7 @@ impl Discoverer {
             ..
         } = self;
         let collection = collection.as_mut()?;
+        let which_char = which_char.into();
         // **Only the path that does work is timed.** A glyph already remembered is returned with a
         // map lookup, and putting that lookup in the stretch would dilute it until the number stopped
         // describing what rasterizing costs — which is what the report has to declare.
@@ -428,6 +461,16 @@ impl Discoverer {
     /// How many color glyphs are remembered. So the measurement report can declare it.
     pub fn glyphs_remembered(&self) -> usize {
         self.glyphs.how_many()
+    }
+
+    /// Whether a drawing was rasterized for that emoji, at any width. So a surface's test can tell
+    /// which drawing it asked for when the two are the same size on screen.
+    #[cfg(test)]
+    pub fn remembers(&self, which: ColorEmoji) -> bool {
+        self.glyphs
+            .saved_ones
+            .iter()
+            .any(|((emoji, _), spot)| *emoji == which && spot.is_some())
     }
 
     /// Fills the color glyph atlas until not one more fits, at that cell height.
@@ -1914,6 +1957,61 @@ mod tests {
             std::time::Duration::ZERO,
             "time was counted for consulting something already remembered: the report stretch would stop describing \
              what rasterizing costs"
+        );
+    }
+
+    #[test]
+    fn only_the_twelve_keycap_bases_make_a_keycap() {
+        for base in ['0', '5', '9', '#', '*'] {
+            assert!(
+                ColorEmoji::of(base, &['\u{FE0F}', '\u{20E3}']).keycap,
+                "{base} is a keycap base"
+            );
+        }
+        // The mark behind anything else has no keycap to draw, and asking for one would lose the
+        // character's own colour drawing.
+        assert!(!ColorEmoji::of('\u{2764}', &['\u{FE0F}', '\u{20E3}']).keycap);
+        assert!(
+            !ColorEmoji::of('1', &['\u{FE0F}']).keycap,
+            "no mark, no keycap"
+        );
+    }
+
+    #[test]
+    fn a_keycap_is_drawn_whole_and_not_as_its_digit() {
+        // The emoji font draws `1️⃣` as a ligature of the sequence; the digit's own entry is a thin
+        // `1` in a 32×78 ink box — measured at 1 216 inked pixels against 14 582 for the keycap on the
+        // 136×128 strike. Counting ink is what tells them apart: both are images.
+        let mut discoverer = Discoverer::default();
+        let context = context();
+        if discoverer
+            .color_glyph(&context, '\u{1F600}', 20, 20)
+            .is_none()
+        {
+            return;
+        }
+        let Discoverer {
+            collection,
+            sources,
+            ..
+        } = &mut discoverer;
+        let collection = collection
+            .as_mut()
+            .expect("the collection was just ensured");
+        let keycap = ColorEmoji {
+            base: '1',
+            keycap: true,
+        };
+        let drawn = color_glyph_of(collection, sources, keycap, 40, 40)
+            .expect("a machine that paints emoji in colour has no keycap to give");
+        let digit = color_glyph_of(collection, sources, ColorEmoji::from('1'), 40, 40)
+            .expect("a face that draws the keycap draws the digit too");
+        let ink = |image: &egui::ColorImage| image.pixels.iter().filter(|p| p.a() > 16).count();
+        assert!(
+            ink(&drawn) > 3 * ink(&digit),
+            "the keycap inks {} pixels and the bare digit {}: it was drawn as its digit",
+            ink(&drawn),
+            ink(&digit)
         );
     }
 

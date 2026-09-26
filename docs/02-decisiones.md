@@ -3109,6 +3109,50 @@ Unicode gives `Emoji=Yes` to the **hash, the asterisk and the ten digits**: `#` 
 selector is `#️⃣`. Twelve keys that would have come out monochrome, in the milestone whose point is
 that they come out in color. The shortcut now discards only the ASCII **with nothing attached**.
 
+**Going to colour was half of it, and the other half came out in #283.** The drawing was asked of the
+emoji font for the digit alone, and `Noto Color Emoji` keeps a digit's own entry as a thin `1` in a
+32×78 ink box — 1 216 inked pixels against 14 582 for the keycap on the 136×128 strike. The
+keycap is a **ligature of the whole sequence**, reached only by shaping it, so a character carrying
+the keycap's mark — one of the twelve keycap bases — is now shaped with `harfrust` — the shaper epaint runs underneath — on the glyph the
+atlas does not remember yet, and remembered apart from its bare digit. It stays one cell wide, as
+every emoji carrying the selector does. Discarded: drawing the digit over a keycap frame of our own
+(a drawing the font does not have is invented), and shaping every emoji sequence (flags, skin tones
+and joined families are split into cells by the engine before they get here, so there would be
+nothing to shape).
+
+**And a keycap drawn whole was still a speck, because an emoji carrying the selector takes one
+cell.** The engine gives `☁️` and `1️⃣` the width of their base character — and so does every program
+counting with `wcwidth`, which is why the terminal cannot simply disagree. So such an emoji is
+**drawn across the next cell when that cell is blank**, in the console and in the status panel, up to
+the two cells a `😀` gets; the grid, the cursor's column and every program's count stay as they were.
+Blank means a space painted like the emoji's own cell — same background, same inversion, same
+selection — because agent programs hide the terminal's cursor and draw their own as an inverted
+space, and a status bar paints its blanks in a colour of its own; inside an inverted bar or a
+selection, where the neighbour looks like the emoji's own cell, it still spills. Not into the cell the cursor sits on — it is
+painted after the emoji and would cover half of it — reading the cursor's **position only**, never
+its blink or whether a program hid it, or the emoji would change size every half-second or on every
+redraw — so a program that parks its hidden cursor right after an emoji keeps that emoji in one
+cell; and a cursor sitting on a spilled emoji covers both cells, as over a wide character. The one
+mismatch accepted: with no colour font, or the atlas full, the emoji falls back to a one-cell
+silhouette while a cursor on it still covers two. In the panel the emoji that spill are those whose
+base is text by default — colour only because of what follows it, the ones the engine gives one cell
+in the console — while `🔥` and its kind keep the room they were laid out in. Written together
+with no space (`1️⃣2️⃣`) they stay one cell each: that is the declared price. **What was discarded,
+with the user**: widening the grid always, as kitty and WezTerm do, which desynchronises every
+program counting with `wcwidth` — line editing drifts and a backspace leaves half a drawing — and
+widening only for a program that asks with DECSET 2027, as Ghostty does, which is correct and today
+changes nothing a person sees, since almost no program asks. Honouring 2027 later is not excluded by
+this.
+
+**Measured** with batch `Q` (its consoles dump emoji, and one in three of its selector emoji is
+followed by a space), two runs on `main` and two on this change, the same session, release builds:
+the rest of the frame 363.5 · 376.7 µs against 328.8 · 375.1 µs, and enqueueing the paint 374.1 ·
+461.3 µs (left) against 352.5 · 446.3 µs — **no measurable change**, the differences inside the
+spread between runs. The machine was busier than in the annexes above, so these absolutes compare
+with each other and not with those. What does change is the count: 14 colour glyphs rasterized
+against 11, the three selector emoji now also drawn at two cells. **No batch walks the panel's
+spill**: batch `Z` carries no selector on purpose, so that half is unmeasured and declared so.
+
 ### The ceiling stopped being a counter and it is better that way
 
 The design asked for «the memory of the rasterized glyphs has a declared ceiling». With an atlas,

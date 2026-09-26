@@ -65,7 +65,7 @@ pub(super) struct Glyphs {
     /// **Keyed by the width it was asked at too**, because two surfaces ask: the console at the cells
     /// the engine gives a character, the status panel at the room its text engine laid out for it.
     /// Keyed by character alone, whichever painted first fixed the drawing for the other.
-    pub(super) saved_ones: std::collections::HashMap<(char, u32), Option<InAtlas>>,
+    pub(super) saved_ones: std::collections::HashMap<(ColorEmoji, u32), Option<InAtlas>>,
     /// Where the free slot of the row being filled starts.
     pub(super) next_spot: [usize; 2],
     /// How tall the row being filled measures. On jumping rows this is advanced.
@@ -87,7 +87,7 @@ impl Glyphs {
         ctx: &egui::Context,
         collection: &mut Collection,
         sources: &mut SourceCache,
-        which_char: char,
+        which_char: ColorEmoji,
         height: u32,
         max_width: u32,
     ) -> Option<(egui::TextureId, egui::Rect, egui::Vec2)> {
@@ -185,7 +185,7 @@ impl Glyphs {
     ///
     /// **It looks at the height too**, because a change of height empties the whole atlas: without that, the first
     /// glyph after a zoom change would be rasterized **without** its cost entering the stretch.
-    pub(super) fn remembers(&self, which_char: char, height: u32, max_width: u32) -> bool {
+    pub(super) fn remembers(&self, which_char: ColorEmoji, height: u32, max_width: u32) -> bool {
         self.height == height
             && [max_width, 0]
                 .iter()
@@ -213,7 +213,7 @@ impl Glyphs {
 pub(super) fn color_glyph_of(
     collection: &mut Collection,
     sources: &mut SourceCache,
-    which_char: char,
+    which_char: ColorEmoji,
     height: u32,
     max_width: u32,
 ) -> Option<egui::ColorImage> {
@@ -233,7 +233,7 @@ pub(super) fn color_glyph_of(
             let Ok(font) = skrifa::FontRef::from_index(blob.data(), face.index()) else {
                 continue;
             };
-            let Some(glyph) = font.charmap().map(which_char) else {
+            let Some(glyph) = glyph_of(&font, which_char) else {
                 continue;
             };
             // **Covering it is not enough: it has to bring it in color.** The families the system
@@ -247,6 +247,43 @@ pub(super) fn color_glyph_of(
         }
     }
     None
+}
+
+/// The glyph that draws it in that face, if the face has one.
+///
+/// **A keycap is shaped, not mapped.** The emoji font draws it as a ligature of the whole sequence —
+/// in `Noto Color Emoji`, `1 U+FE0F U+20E3` shapes to one glyph, the boxed keycap — while the digit's
+/// own entry is a thin `1` in a 32×78 ink box on its 136×128 canvas. Shaping only runs here, on a glyph the
+/// atlas does not remember yet, never on a frame that finds it. A face whose shaping does not end in
+/// a single glyph has no keycap to give, and the next face is asked.
+fn glyph_of(font: &skrifa::FontRef<'_>, which_char: ColorEmoji) -> Option<skrifa::GlyphId> {
+    if !which_char.keycap {
+        return font.charmap().map(which_char.base);
+    }
+    // A face that does not even map the base and the mark has no keycap to shape: most of the faces
+    // the system calls emoji are monochrome symbol fonts, and building a shaper for each is waste.
+    let charmap = font.charmap();
+    if charmap.map(which_char.base).is_none() || charmap.map('\u{20E3}').is_none() {
+        return None;
+    }
+    let data = harfrust::ShaperData::new(font);
+    let shaper = data.shaper(font).build();
+    let mut buffer = harfrust::UnicodeBuffer::new();
+    buffer.push_str(&format!("{}\u{FE0F}\u{20E3}", which_char.base));
+    buffer.guess_segment_properties();
+    let shaped = shaper.shape(buffer, harfrust::ShapeOptions::new());
+    // **A glyph with no advance is left out before counting**: a font whose ligature takes only the
+    // digit and the mark keeps the selector as an empty glyph of its own, and that is still a keycap.
+    let mut drawn = shaped
+        .glyph_infos()
+        .iter()
+        .zip(shaped.glyph_positions())
+        .filter(|(_, position)| position.x_advance != 0)
+        .map(|(info, _)| info.glyph_id);
+    match (drawn.next(), drawn.next()) {
+        (Some(only), None) if only != 0 => Some(skrifa::GlyphId::new(only)),
+        _ => None,
+    }
 }
 
 /// The pixels of a bitmap, in RGBA and with **the alpha already premultiplied**. `None` if what it brings

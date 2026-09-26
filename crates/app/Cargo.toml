@@ -109,6 +109,11 @@ fontique = { version = "0.11", features = ["fontconfig-dlopen"] }
 # inside its own pass, where there is nothing that can catch it.
 skrifa = "0.44"
 
+# **Who shapes a keycap into the glyph that draws it.** The emoji font draws `1️⃣` as a ligature of
+# the whole sequence, which only shaping reaches; mapping the digit gives its thin `1` instead. Chosen
+# because it is the shaper epaint runs underneath, rather than bringing a second one into the tree.
+harfrust = "0.12"
+
 # **To decode an emoji's bitmap and shrink it to the size of a cell.** `Noto Color Emoji`'s colour
 # glyphs come inside the font as **palette-indexed PNG** of 136×128 — checked by running it — so they
 # have to be expanded to RGBA and rescaled; `skrifa` hands the bytes over as they are and does neither.

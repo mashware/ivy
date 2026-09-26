@@ -135,6 +135,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         87,
     ),
     (
+        "src/painter/emoji.rs",
+        include_str!("../src/painter/emoji.rs"),
+        30,
+    ),
+    (
         "src/pty_output.rs",
         include_str!("../src/pty_output.rs"),
         456,
