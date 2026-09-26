@@ -7428,8 +7428,24 @@ terminal answered `EPERM`, and closing that console froze the real window until 
 to force-quit it. The cause is the wait, not the signal: a parent can always reap its own child
 whatever its uid — only signalling is gated by identity — so `waitpid` blocked for the program's whole
 life on the interface pass, and nothing this process can send shortens it. The kernel's own hang-up
-would not rescue it either: it needs every descriptor of the master closed, and the reader thread
+would not rescue the wait either: it needs every descriptor of the master closed, and the reader thread
 still holds a clone at that point.
+
+**Amended on 26 September 2026** ([#288](https://github.com/mashware/agent-terminal/issues/288)):
+**«left running» is what happens at the moment of the close, not what happens after it.** The rest of
+the close drops every copy of the master — the reader's once it ends, the console's own, and the
+writer thread's, which is never joined and can be the last. That last close makes the kernel hang the
+terminal up and send SIGHUP to its **session leader**, which is the console's child, and the kernel
+checks no identity to do so. So a program that keeps the default action for SIGHUP ends a moment
+after the close anyway, root or not. It stays alive only if it ignores or handles the hang-up, or
+while some copy of the master is still open — an abandoned reader (D32) holds one until the survivor's
+next byte. Measured with a forged refusal: a program that trapped SIGHUP logged it after a close in
+which this crate sent nothing, and holding a duplicate of the master across the close kept it alive
+until the duplicate closed. **The real `exec pkexec` case is not measured**: that pkexec keeps the
+pid and the controlling terminal is read from how it works, not run, because it needs an
+authenticated prompt. The line on standard error says «may keep running» for this reason, and the
+regression test's program ignores SIGHUP, which it did not before and which made it fail now and
+then.
 
 **Who meets it, and who does not** (D54). **`sudo` does not**, which is the opposite of what D55 and
 the issue said. Both sudo-rs 0.2.13 (Ubuntu's `/usr/bin/sudo`) and classic sudo 1.9.17p2 leave the
@@ -7450,7 +7466,7 @@ otherwise — the console that would have shown it is gone. Decided by the user 
 | **Dropping the child without waiting** | It leaves the program a zombie for the life of this process once it ends. The thread is the smallest thing that reaps it |
 | **Saying nothing**, as D32 does for an abandoned reader | That abandonment leaves nothing behind that anybody could act on. This one leaves a live program running as root with no console, and the person who closed it is the only one who could know |
 | **Moving every close off the interface pass**, which would take this special case and D55's inline grace with it | D55 discarded it and its reasons still stand: nothing joins at process exit, so a program being closed as the window goes could outlive the app, and `Pane` drops its `Pty` before its panel directory, so the directory would go with the program alive. Here the program is left running only because nothing can end it — the one case where both costs are already paid |
-| **Closing the master before waiting**, so the kernel hangs the terminal up with its own authority | The reader's clone keeps the master open, and the last close only sends SIGHUP to the session leader and the foreground group — a root program that ignores it survives anyway. Unmeasured, and not needed: the fix does not rest on the kernel |
+| **Closing the master before waiting**, so the kernel hangs the terminal up with its own authority | The reader's clone keeps the master open, and the last close only sends SIGHUP to the session leader — a root program that ignores it survives anyway. Not needed: the fix does not rest on the kernel. (It used to say «and the foreground group» too: Linux signals the leader only. And the hang-up does arrive once the close has dropped every copy of the master — see the amendment above) |
 
 **What it costs, declared.** One thread per such console, parked in `wait` for as long as its program
 lives, the same shape of leak as the writer's and the reader's. If that thread cannot be created, the

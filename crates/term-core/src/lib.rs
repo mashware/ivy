@@ -1016,10 +1016,17 @@ impl Drop for Pty {
                     // **Not `eprintln!`**, which panics when standard error is a closed pipe
                     // (`agent-terminal | head`) — and a panic here is inside the interface pass,
                     // or an abort if this drop runs while unwinding.
+                    //
+                    // **"May", because this is written before the last copy of the master closes.**
+                    // That close makes the kernel hang the terminal up and signal the program with
+                    // an authority no refusal applies to, so most programs end a moment later. One
+                    // that ignores or handles the hang-up does not, and nor does any while a copy of
+                    // the master stays open — an abandoned reader holds one (D56). No condition is
+                    // named in the line because this is not placed to know which of those holds.
                     let _ = writeln!(
                         std::io::stderr().lock(),
-                        "a console was closed with its program still running (pid {}): the system \
-                         refused the signal to end it ({refused}), so it is left to end on its own",
+                        "a console was closed and the system refused the signal to end its program \
+                         (pid {}): {refused}. It may keep running",
                         pid.map_or_else(|| "unknown".to_owned(), |pid| pid.to_string())
                     );
                 }
@@ -2565,7 +2572,9 @@ mod tests {
     ///
     /// **Why each of the three can fail on its own defect.** The program lives thirty seconds, so a
     /// close that waited for it cannot come back under a second; a close that got there by some
-    /// other signal leaves nothing alive; and a child nobody waits for stays a zombie for the life
+    /// other way leaves nothing alive — though only a kill: the programs ignore SIGHUP, because the
+    /// kernel's own hang-up is a signal no forgery reaches, so a close that sent one around the
+    /// forgery would go unseen; and a child nobody waits for stays a zombie for the life
     /// of this process — `kill(pid, 0)` answers for a zombie exactly as for a live program.
     #[cfg(unix)]
     fn close_one_that_refuses(
@@ -2586,6 +2595,11 @@ mod tests {
         let exists = || unsafe { libc::kill(pid, 0) } == 0;
 
         let took = time_the_close(pty, output, marker);
+        // **Looked at after a pause, not at once.** The kernel's hang-up lands when the last copy of
+        // the master closes, and that can be the writer thread's, which the close never joins; a
+        // program killed by it is gone a moment later. Looking at once let such a program pass for
+        // alive on almost every run, so the test failed now and then instead of every time.
+        thread::sleep(Duration::from_millis(200));
         let alive_after_closing = exists();
         // Ended by the test, the way it would end on its own: the refusal was forged, this signal is
         // real.
@@ -2618,13 +2632,20 @@ mod tests {
     /// its own — inside the interface pass, measured as a window the desktop offered to force-quit.
     /// A second is ten times the most this close can cost — the reader's deadline, which a program
     /// still holding the pseudoterminal may make it pay.
+    ///
+    /// **The program ignores the hang-up, and not as decoration.** The forgery covers the signals
+    /// this crate sends and nothing else: once the last copy of the master closes, the kernel hangs
+    /// the terminal up and signals the session leader itself, with no refusal to forge. A program
+    /// that did not ignore it died a moment after the close, and this test passed only while its
+    /// look came first. The marker comes after the `trap`, so the process holding the premise is the
+    /// one that proves it.
     #[cfg(unix)]
     #[test]
     fn a_program_that_refuses_the_hang_up_is_left_running_and_reaped_when_it_ends() {
         const MARKER: &str = "root";
 
         let (took, alive, reaped) = close_one_that_refuses(
-            &format!("printf {MARKER} && exec sleep 30"),
+            &format!("trap '' HUP && printf {MARKER} && exec sleep 30"),
             MARKER,
             refuse_every_signal,
         );
