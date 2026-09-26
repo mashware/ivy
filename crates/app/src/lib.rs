@@ -4888,6 +4888,207 @@ mod tests {
         );
     }
 
+    /// A console whose program asked for the mouse and holds a paste, beside room to press that is
+    /// not the notice — the staging of the test above — with where the notice is and where the
+    /// program can be pressed.
+    fn a_question_beside_a_program_that_asks_for_the_mouse(
+        rects: &[egui::Rect],
+        metrics: &CellMetrics,
+        case: &str,
+    ) -> Option<(Window, egui::Rect, egui::Rect, egui::Pos2)> {
+        let mut window = a_pane_that_asks_for_the_mouse(rects, metrics, case);
+        if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
+            return None;
+        }
+        let theme = window.theme;
+        let console = window.active_mut().panes_mut()[0].console_within(
+            rects[0],
+            metrics,
+            SystemTime::now(),
+            header::Headers::PAINTED,
+        );
+        let notice = the_notice_box(window.active().panes()[0], &theme, metrics, console);
+        let elsewhere =
+            console.left_bottom() + egui::vec2(metrics.width() * 2.5, -metrics.height());
+        // **Clear of every box the mouse pass answers, not only the question**: a press on the
+        // button that sends the paste would be answered too, and the program would never see it.
+        let (question, send, silence) =
+            the_notices_on(window.active().panes()[0], &theme, metrics, console);
+        assert!(
+            [question, send, silence]
+                .into_iter()
+                .flatten()
+                .all(|answered| !answered.contains(elsewhere))
+                && console.contains(elsewhere),
+            "the press meant for the program is on a notice: console {console:?}, question \
+             {question:?}, send {send:?}, silence {silence:?}, point {elsewhere:?}"
+        );
+        Some((window, console, notice, elsewhere))
+    }
+
+    /// The report a press on that point sends, as `cat -v` shows it.
+    fn the_press_report_at(
+        window: &Window,
+        console: egui::Rect,
+        at: egui::Pos2,
+        metrics: &CellMetrics,
+    ) -> String {
+        let cell = window.active().panes()[0]
+            .cell_under(console, at, metrics)
+            .expect("the point is on a cell of the console");
+        format!("^[[<0;{};{}M", cell.col + 1, cell.row + 1)
+    }
+
+    #[test]
+    fn a_press_that_answers_the_question_is_not_handed_to_the_program_on_a_repeated_pass() {
+        // **The answer takes the press out of the batch; a mouse pass that read the same batch
+        // again would put it back.** egui 0.36 hands a frame's events to its first pass only (see
+        // `egui_hands_a_frame_s_events_to_its_first_pass_only`), so this is the case the barrier
+        // is kept against, not one it meets today. The notice pass runs on every mouse pass, before
+        // the barrier: on a second one the question is gone, the press is collected again, and
+        // nothing but the barrier stops it being routed to a program that asked for the mouse. The
+        // barrier's sibling tests all route a press on their first pass, so a barrier armed only
+        // when the answered batch still carries a press passes them; this one's first pass routes
+        // nothing.
+        let ctx = egui::Context::default();
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let rects = [
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 600.0)),
+            egui::Rect::from_min_size(egui::pos2(910.0, 0.0), egui::vec2(900.0, 600.0)),
+        ];
+        let Some((mut window, console, notice, elsewhere)) =
+            a_question_beside_a_program_that_asks_for_the_mouse(
+                &rects,
+                &metrics,
+                "a_press_that_answers_the_question_is_not_handed_to_the_program_on_a_repeated_pass",
+            )
+        else {
+            return;
+        };
+        let on_the_notice = notice.center();
+
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            window.handle_the_mouse(ui, &rects, &metrics);
+        })
+        .drop_without_applying_deltas();
+        ctx.run_ui(
+            egui::RawInput {
+                events: vec![
+                    egui::Event::PointerMoved(on_the_notice),
+                    egui::Event::PointerButton {
+                        pos: on_the_notice,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+                ..Default::default()
+            },
+            |ui| {
+                // Two calls inside one egui pass stand for two passes of one frame because the
+                // barrier reads the frame number, which both share; egui's own repeated pass
+                // would carry no events to repeat.
+                window.handle_the_mouse(ui, &rects, &metrics);
+                window.handle_the_mouse(ui, &rects, &metrics);
+            },
+        )
+        .drop_without_applying_deltas();
+        assert!(
+            window.active().panes()[0].held.is_none(),
+            "the press on the notice did not answer the question"
+        );
+
+        // **A sentinel, so the absence below means something**: once its report is on screen, any
+        // report the answered press produced would have arrived before it.
+        deliver_to_the_mouse(
+            &mut window,
+            &ctx,
+            &rects,
+            &metrics,
+            vec![
+                egui::Event::PointerButton {
+                    pos: on_the_notice,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerMoved(elsewhere),
+                egui::Event::PointerButton {
+                    pos: elsewhere,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        let sentinel = the_press_report_at(&window, console, elsewhere, &metrics);
+        wait_for_the_pane_to_say(&mut window, 0, &sentinel);
+
+        let answered = the_press_report_at(&window, console, on_the_notice, &metrics);
+        let on_screen = window.active().panes()[0]
+            .screen
+            .to_text()
+            .replace('\n', "");
+        assert_eq!(
+            on_screen.matches(answered.as_str()).count(),
+            0,
+            "the press that answered the question reached the program — on the second mouse pass \
+             if the barrier let it through, or on the first if the answer left it in the batch; \
+             on screen there is: {on_screen:?}"
+        );
+    }
+
+    #[test]
+    fn a_drag_from_a_press_that_answered_the_question_marks_text() {
+        // **The drag latch is read on a later frame than the press that set it.** A press that
+        // reached the program leaves it saying «the program's»; a press that answers the question
+        // has to put it back, or the drag that begins at the answered press is decided by the one
+        // before and goes to the program — which never received a press to go with it.
+        let ctx = egui::Context::default();
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let rects = [
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 600.0)),
+            egui::Rect::from_min_size(egui::pos2(910.0, 0.0), egui::vec2(900.0, 600.0)),
+        ];
+        let Some((mut window, console, notice, elsewhere)) =
+            a_question_beside_a_program_that_asks_for_the_mouse(
+                &rects,
+                &metrics,
+                "a_drag_from_a_press_that_answered_the_question_marks_text",
+            )
+        else {
+            return;
+        };
+
+        // The premise, proved by the program: the press before this gesture was its.
+        deliver_to_the_mouse(&mut window, &ctx, &rects, &metrics, click_at(elsewhere));
+        let before = the_press_report_at(&window, console, elsewhere, &metrics);
+        wait_for_the_pane_to_say(&mut window, 0, &before);
+
+        let from = notice.center();
+        let to = from + egui::vec2(metrics.width() * 6.0, metrics.height() * 2.0);
+        drag_with(
+            &mut window,
+            &ctx,
+            &rects,
+            egui::PointerButton::Primary,
+            from,
+            to,
+            egui::Modifiers::NONE,
+            egui::Modifiers::NONE,
+        );
+
+        assert!(
+            window.active().panes()[0].held.is_none(),
+            "the press on the notice did not answer the question"
+        );
+        assert!(
+            window.active().panes()[0].screen.has_selection(),
+            "the drag from the press that answered the question marked nothing: it was decided by \
+             the press before it and handed to the program"
+        );
+    }
+
     /// **Only the primary button answers, and nothing pinned that.** Accepting any button leaves the
     /// whole suite green, and the middle one is X11's paste — this file's own comment calls that
     /// button «not theoretical». A middle press on a notice would have destroyed the held paste.
@@ -9695,6 +9896,52 @@ mod tests {
         assert!(
             urls_opened_in(&mut window, &ctx, area, click_at(at), 1).is_empty(),
             "a click opened a label from a painting that is no longer on screen"
+        );
+    }
+
+    #[test]
+    fn egui_hands_a_frame_s_events_to_its_first_pass_only() {
+        // **A tripwire, not a guarantee this project relies on.** Read in egui 0.36.1: the loop
+        // behind `run_ui` (private to egui, `context.rs:823`) begins every pass with
+        // `new_input.take()`, and `RawInput::take` moves the events out, so a
+        // repeated pass sees the pointer where it was but not the press. The guards that count
+        // button presses once per frame protect a case this egui does not produce; the tests that
+        // pin them repeat the mouse pass by hand. If an upgrade starts handing the events to every
+        // pass, those guards become load-bearing for real and #290 is where their fate is decided.
+        let ctx = egui::Context::default();
+        let mut seen = Vec::new();
+        let input = egui::RawInput {
+            events: vec![egui::Event::PointerButton {
+                pos: egui::pos2(10.0, 10.0),
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            ..Default::default()
+        };
+
+        let output = ctx.run_ui(input, |ui| {
+            seen.push(ui.ctx().input(|state| state.events.len()));
+            if seen.len() == 1 {
+                ui.ctx()
+                    .request_discard("the test needs a frame of two passes");
+            }
+        });
+        output.drop_without_applying_deltas();
+
+        // First that there were two passes at all: with one, nothing about the second was seen, and
+        // the assertion below would blame the hand-off for a pass that never ran.
+        assert_eq!(
+            seen.len(),
+            2,
+            "egui did not repeat the pass, so the test is not looking at what it thinks"
+        );
+        assert_eq!(
+            seen,
+            [1, 0],
+            "egui no longer hands a frame's events to its first pass only: a repeated pass now \
+             reads the same press again, and the once-per-frame button guards stopped being \
+             defence and started being needed — see #290"
         );
     }
 
