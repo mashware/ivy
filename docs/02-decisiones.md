@@ -4819,7 +4819,8 @@ as a tool going out and never read as a risk coming in.
 ### The decision
 
 - **The write is handed to a thread of its own**, one per console, and `Pty::write` returns without
-  waiting. It is the shape Alacritty uses for the same problem, minus its non-blocking descriptor.
+  waiting. It is the shape Alacritty uses for the same problem — **and since #159, on Linux, with its
+  non-blocking descriptor too** (the amendment below).
 - **In order and dropping nothing** while the console lives.
 - **The queue carries no ceiling.** The reason is volume, not principle: what arrives is what
   somebody's hands produced. There is no producer here to outrun a consumer the way a program
@@ -4831,7 +4832,7 @@ as a tool going out and never read as a risk coming in.
 
 | | |
 |---|---|
-| **A non-blocking descriptor** (Alacritty's model, and the first candidate) | Read in `portable-pty` 0.9 rather than assumed: the writer and the reader are both `dup`s of the master, so they share one open file description. `O_NONBLOCK` on one lands on the other — and the reader's blocking `read` **is** the output chain, D8's brake included. It would mean rewriting the side that works |
+| **A non-blocking descriptor** (Alacritty's model, and the first candidate) — **reversed on 26 September 2026 for Linux**, see the amendment | Read in `portable-pty` 0.9 rather than assumed: the writer and the reader are both `dup`s of the master, so they share one open file description. `O_NONBLOCK` on one lands on the other — and the reader's blocking `read` **is** the output chain, D8's brake included. It would mean rewriting the side that works |
 | **A ceiling with backpressure to the caller** (what D8 really did) | It is the honest ceiling and it is not discarded for ever: it is deferred. It needs an answer to «what does the window do when it cannot accept a keystroke», and that is a product question, not an implementation detail |
 | **Discarding when full** | The failure that takes longest to understand from the other side of the screen. D8 refused it on the output side and this refuses it too |
 | **Giving `Ctrl+C` a path of its own** (a signal to the process group) | Measured over a real pty in three termios states: in raw mode `0x03` **is not a signal** — the program asked to read that byte — so signalling would interrupt the very TUI agents this terminal exists to host. WezTerm, Alacritty, Kitty and xterm all write the byte. And in canonical mode the interrupt was never broken: the queue cannot jam there, because the line discipline discards instead of blocking |
@@ -4855,11 +4856,67 @@ report say so. The second figure existed *because* the write waited.
   fifteen seconds after dropping such a `Pty`, the thread was still there — killing the child does
   **not** unblock a write to the master. One thread and its payload per console closed in that state,
   for the life of the process. Undoing it needs an interruptible write, which is the discarded row
-  above coming back.
+  above coming back. **Closed on Linux by the amendment below; still open on macOS and Windows.**
 - **Why a blocked write does not end when the child dies is not explained.** Measured at ≥19 s in one
   run and 54 s in another, with a child that never wrote a byte. The slave end *is* dropped at spawn,
   so the obvious answer is already ruled out. It is written here so nobody closes it with a guess:
-  this investigation was caught doing exactly that once.
+  this investigation was caught doing exactly that once. **Answered as observed behaviour by #159**,
+  below — the mechanism still is not traced.
+
+### Amended on 26 September 2026: on Linux the master is non-blocking ([#159](https://github.com/mashware/agent-terminal/issues/159))
+
+**The new signal is a measurement.** On Linux 7.0, a blocking write to a master whose buffer toward the
+program is full **does not end when the program dies and every copy of the slave is closed**: the
+master answers `POLLHUP`, a read answers `EIO`, a non-blocking write answers `EAGAIN` rather than `EIO`,
+and the write parked in the kernel keeps waiting. Nothing a closing process can do wakes it — measured:
+`tcflush` in every direction, `TIOCSWINSZ`, `TIOCPKT`, `tcflow`, `TIOCSTI`, closing another copy of the
+master; `vhangup` is refused without privileges. A signal aimed at the thread ends the call with a
+partial count, and the rest waits again at once. The block is tied to the buffer being **full**: a
+write that fits returns in 47 µs on a dead slave. The most likely mechanism, read in upstream
+`pty_common_install` and not traced here, is that the master counts itself on the slave, so the
+write's «the other side is gone» check can never pass while a master descriptor is open — and the
+blocked write holds one. So the premise of the discarded row — that the blocking write is harmless to
+keep — was false, and in **two** places: the writer loop's `write_all`, and `portable-pty`'s own writer,
+whose destructor writes a newline and the end-of-file character on a full buffer.
+
+**What changed:**
+
+- The master's open file description is **non-blocking**, so the reader's duplicate gets the flag too,
+  exactly as the discarded row warned.
+- **The reader waits for what its blocking `read` waited for**, in a `poll` for input, and reads again.
+  It never reads while the channel is full, so D8's brake is untouched, and a survivor holding the
+  program's side still parks it, which D32 bounds as before.
+- **The writer waits for room in a `poll` that also watches a pipe the console holds**, and closing
+  drops the pipe's writing end. A master that answers a hang-up with no room means the program's side
+  is gone, and the writer gives up. The destructor's write fails at once on a full buffer.
+- **Windows and macOS keep the blocking write**, and the leak with it. ConPTY is a pipe nobody has
+  measured here yet (F2.7). And macOS's `poll` is known not to wait on a pseudoterminal — it answers
+  at once — which is why the `filedescriptor` crate beneath `portable-pty` switches to `select` there:
+  this shape would spin an idle console and read a full buffer as a program gone. The review caught it
+  before it shipped; F2.7 decides what macOS does, with a measurement.
+- **Every descriptor is made before the program is spawned**, so a process out of descriptors fails
+  the open instead of dropping a child nobody waits for.
+- **A `poll` that wakes with neither the event it waited for nor a hang-up is an error**, not a retry:
+  retrying «would block» after it would spin.
+- **An idle console is measured to cost no processor time** (`tests/idle_console_cpu.rs`, its own
+  process): a reader that retried «would block» without waiting delivered every byte and left every
+  other test green.
+
+**What it costs, measured and not hidden.** A non-blocking reader pays a failed read and a `poll`
+each time it catches up with the program, where the blocking one slept inside a single `read`.
+`cargo run --release --example delivery -p term-core`, alternating builds on the same machine and
+day: log lines through the kernel's output processing came out at **48.2 MiB/s** on average over four
+runs (43.2–50.7), against **54.3** over five on `main` (51.4–57.9) — about **11 % less**. The other three
+rows of that bench showed no consistent difference. It is paid on the reader thread, not in the
+frame, and it sits beside a grid that absorbs **55.7 MiB/s** in the same bench family (`throughput`), so
+on a dump the two now run close. No frame batch was run to see whether that ever shows in a frame.
+
+| Discarded | Why |
+|---|---|
+| **A signal to interrupt the writer** | The handler is process-wide, installed by a library for its own thread, and the rest of the write waits again the moment it is retried |
+| **Emptying the program's input from the slave side at closing** (open the slave, flush it until the writer gets through) | It keeps D29 but chases the writer with a loop of its own, and only frees one bufferful per pass — a long paste needs many — and the destructor's write can still find the buffer full after the last one |
+| **`poll` for room before a write that still blocks** | «There is room» means *some* room: a larger write still parks in the kernel, and if the program dies in the meantime it is the same leak, narrower |
+| **Closing another copy of the master from `Drop`** | Measured: it does not wake the writer. The blocked write holds its own |
 
 ---
 
@@ -5185,8 +5242,8 @@ wait itself.
 - **Abandoning costs a thread and a descriptor while the survivor stays silent.** The stop flag is
   already raised, so the survivor's **next byte** ends the thread: the read returns, the delivery sees
   the flag and it leaves. Only a survivor that never writes again holds them for the life of the
-  process. It is the same trade **D29** already records for the writer thread (**#159**) and it is
-  audited with it.
+  process. It is the same trade **D29** recorded for the writer thread (**#159**) — which since that
+  issue the writer makes only off Linux.
 - **No signal goes to a process group.** Not because it would do nothing — see the table — but because
   it would not be enough and because sending one is a decision about what closing *means*, which this
   fix does not take. **`Ctrl+C` stays a byte** either way: in raw mode `0x03` is data a TUI agent asked
@@ -7422,9 +7479,10 @@ own on the crates, files and lines it reaches.
 
 **Why.** A thread that waits is not looking at the thing that would normally wake it, so every wait
 needs its own way out. The rule was in the knowledge store before this, and `term-core` broke it
-twice anyway. The first was the writer thread, which can block for ever and so is never joined
-(#159). The second was the reader thread: it had its stop flag and still hung the window, because it
-was parked inside a `read` where the flag is never consulted (D32). A comment is read once, so a
+twice anyway. The first was the writer thread, which could block for ever and so is never joined
+(#159 — since that issue, only off Linux). The second was the reader thread: it had its stop flag
+and still hung the window, because it was parked inside a `read` where the flag is never consulted
+(D32). A comment is read once, so a
 third reminder would not hold. The three guards that already walk source and break the build
 (`shape.rs`, `prose.rs`, `glossary.rs`) are what showed this can be enforced.
 

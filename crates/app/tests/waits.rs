@@ -2,7 +2,8 @@
 //!
 //! A thread that waits is not looking at the thing that would normally wake it, so every wait needs
 //! its own way out. The rule was written down before this guard existed and `term-core` broke it
-//! twice anyway: the writer thread, never joined because it can block for ever (#159), and the reader
+//! twice anyway: the writer thread, never joined because it could block for ever (#159; since that
+//! issue, only off Linux), and the reader
 //! thread, which had its stop flag and hung regardless, because it was parked inside a `read` where
 //! the flag is never consulted (D32). A third reminder in a comment would not have held, so this
 //! breaks the build instead. **D57** carries the decision.
@@ -50,7 +51,7 @@ use std::path::{Path, PathBuf};
 /// How many waits the workspace declares today. **An equality, not a floor**: a floor would let the
 /// number go stale the day a wait is removed, and an equality is also what goes red if the matcher
 /// stops matching anything at all.
-const DECLARED_WAITS: usize = 5;
+const DECLARED_WAITS: usize = 6;
 
 /// The crates, files and production lines the walk must reach. A walk that examined nothing finds
 /// no undeclared wait, and would pass.

@@ -24,6 +24,8 @@ use std::time::Instant;
 
 use portable_pty::{Child, CommandBuilder, MasterPty, native_pty_system};
 
+#[cfg(target_os = "linux")]
+mod nonblocking;
 mod screen;
 mod view;
 
@@ -147,6 +149,10 @@ pub struct Pty {
     /// «we choose not to wait for it» is not a choice anybody can see in the code, and no test can
     /// reach the thread. See [`Pty::drop`] for why it is not joined.
     writer: Option<JoinHandle<()>>,
+    /// **Dropping this is what ends the writer's wait for room**: the thread waits on the other end
+    /// of this pipe as well as on the master, and a pipe whose writing end is gone reads as ready.
+    #[cfg(target_os = "linux")]
+    knock: Option<std::io::PipeWriter>,
     reader: Option<JoinHandle<()>>,
     /// Goes quiet when the reader thread ends, which is how closing waits for it **with a deadline**.
     ///
@@ -186,9 +192,9 @@ pub struct Pty {
 ///
 /// **It exists because the fix for the blocking write traded a visible failure for an invisible
 /// one.** With the write on a thread of its own the window no longer freezes — but a program that
-/// stops reading for good leaves that thread stuck inside a single `write_all`, and everything typed
-/// afterwards queues behind it, `Ctrl+C` included. `Pty::write` keeps answering «taken», the console
-/// keeps repainting, and it simply stops listening.
+/// stops reading for good leaves that thread waiting for room to write a single chunk, and
+/// everything typed afterwards queues behind it, `Ctrl+C` included. `Pty::write` keeps answering
+/// «taken», the console keeps repainting, and it simply stops listening.
 ///
 /// **The old bug was at least legible.** This is what makes the new one legible too: whoever hosts
 /// this crate can ask how much is owed and since when, and say so. Declaring it rather than deducing
@@ -418,6 +424,30 @@ impl Pty {
             pixel_height: 0,
         })?;
 
+        // **Every descriptor the console needs is made before the program exists**, because each
+        // of these can fail — a process out of descriptors is realistic with many consoles open —
+        // and a failure after the spawn would drop a child nobody hangs up or waits for.
+        let reader = pair.master.try_clone_reader()?;
+        let mut writer = pair.master.take_writer()?;
+        #[cfg(target_os = "linux")]
+        let (reader, room, knock) = {
+            let master = pair
+                .master
+                .as_raw_fd()
+                .ok_or("the pseudoterminal has no descriptor to wait on")?;
+            nonblocking::set_nonblocking(master)?;
+            let (knocked, knock) = std::io::pipe()?;
+            let reader = nonblocking::Readable {
+                reader,
+                master: nonblocking::duplicate(master)?,
+            };
+            let room = nonblocking::Writable {
+                master: nonblocking::duplicate(master)?,
+                knocked,
+            };
+            (reader, room, knock)
+        };
+
         let mut cmd = CommandBuilder::new(program);
         cmd.args(args);
         for (name, value) in FIXED_ENV {
@@ -438,14 +468,11 @@ impl Pty {
         // one of those lives there is no end of file either. See [`READER_GIVE_UP`].
         drop(pair.slave);
 
-        let reader = pair.master.try_clone_reader()?;
-        let mut writer = pair.master.take_writer()?;
-
-        // **A thread of its own for writing, and it is not symmetry for its own sake.** `write_all`
-        // on a pseudoterminal whose program is not reading blocks until somebody reads, and there are
-        // cases measured in this repository where that is never. Here it blocks a thread that paints
-        // nothing and reads nothing, so the window keeps answering and the bytes go in when the
-        // program comes back for them.
+        // **A thread of its own for writing, and it is not symmetry for its own sake.** Writing to a
+        // pseudoterminal whose program is not reading waits until somebody reads, and there are
+        // cases measured in this repository where that is never. Here the waiting is done by a
+        // thread that paints nothing and reads nothing, so the window keeps answering and the bytes
+        // go in when the program comes back for them.
         let (to_write, waiting) = channel::<Vec<u8>>();
         let stop = Arc::new(AtomicBool::new(false));
         let input = Arc::new(Input::default());
@@ -453,8 +480,8 @@ impl Pty {
         let stop_for_writer = Arc::clone(&stop);
         let writer = thread::spawn(move || {
             // Bounded: the only sender lives in `Pty`, and its destructor drops it right after
-            // raising the stop flag. What this thread may never leave is the `write_all` below,
-            // which is why it is not joined (#159).
+            // raising the stop flag. Off Linux what this thread may never leave is the
+            // `write_all` in `write_chunk`, which is why it is not joined.
             while let Ok(bytes) = waiting.recv() {
                 // **Abandoned on close, not drained into a pseudoterminal that is being killed.**
                 // The sender is dropped first and the child killed right after, so without this the
@@ -462,15 +489,19 @@ impl Pty {
                 if stop_for_writer.load(Ordering::Relaxed) {
                     break;
                 }
-                let outcome = writer
-                    .write_all(&bytes)
-                    // **The `flush` travels with the write, error included.** It is a no-op on Unix
-                    // for this writer —and on Windows's ConPTY too— but discarding its `Result`
-                    // would leave the loop happily writing into something that is not delivering, on
-                    // the one platform where it could ever say so.
-                    .and_then(|()| writer.flush());
-                input_for_thread.settle(bytes.len(), outcome.as_ref().err());
-                if outcome.is_err() {
+                #[cfg(target_os = "linux")]
+                let outcome = write_chunk(&mut writer, &bytes, &room);
+                #[cfg(not(target_os = "linux"))]
+                let outcome = write_chunk(&mut writer, &bytes);
+                let failure = match outcome {
+                    Ok(()) => None,
+                    // What is owed stays owed: the console it was for is going away, and nobody is
+                    // left to read the number.
+                    Err(Unwritten::Closing) => break,
+                    Err(Unwritten::Failed(failure)) => Some(failure),
+                };
+                input_for_thread.settle(bytes.len(), failure.as_ref());
+                if failure.is_some() {
                     // **There is nobody left to write to** —the program died, the pseudoterminal is
                     // gone— and retrying would spin. What was queued behind this is **not** thrown
                     // away in silence: it stays counted as owed, and [`Pty::backlog`] is what
@@ -478,6 +509,9 @@ impl Pty {
                     break;
                 }
             }
+            // `portable-pty`'s writer is dropped here, and its destructor writes a newline and the
+            // end-of-file character into the master. On Linux, with the master non-blocking, a full
+            // buffer makes that write fail at once instead of waiting for room for ever.
         });
 
         let (tx, output) = sync_channel(READS_IN_FLIGHT);
@@ -507,6 +541,8 @@ impl Pty {
                 to_write: Some(to_write),
                 input,
                 writer: Some(writer),
+                #[cfg(target_os = "linux")]
+                knock: Some(knock),
                 reader: Some(reader),
                 reader_ended,
                 ending,
@@ -756,6 +792,71 @@ fn deliver(
     }
 }
 
+/// Why a chunk handed over for writing did not go in whole.
+enum Unwritten {
+    /// Whoever owns the console is closing it.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    Closing,
+    /// Nothing more can go in: the program's side is gone, or the write failed.
+    Failed(std::io::Error),
+}
+
+/// Writes one chunk, waiting for room **where closing can reach the wait**.
+///
+/// The master is non-blocking (see the `nonblocking` module), so a full buffer answers «would block»
+/// here instead of parking this thread inside the kernel, where — measured — the program dying does not
+/// end the wait.
+#[cfg(target_os = "linux")]
+fn write_chunk(
+    writer: &mut dyn Write,
+    bytes: &[u8],
+    room: &nonblocking::Writable,
+) -> std::result::Result<(), Unwritten> {
+    use std::io::ErrorKind;
+
+    let mut rest = bytes;
+    while !rest.is_empty() {
+        match writer.write(rest) {
+            Ok(0) => return Err(Unwritten::Failed(ErrorKind::WriteZero.into())),
+            Ok(written) => rest = &rest[written..],
+            Err(e) if e.kind() == ErrorKind::Interrupted => {}
+            // Bounded: by room, by the console closing — `Drop for Pty` drops the knock — or by the
+            // program's side of the pseudoterminal closing, which answers as `Room::Gone`.
+            Err(e) if e.kind() == ErrorKind::WouldBlock => match room.wait() {
+                Ok(nonblocking::Room::Ready) => {}
+                Ok(nonblocking::Room::Closing) => return Err(Unwritten::Closing),
+                Ok(nonblocking::Room::Gone) => {
+                    return Err(Unwritten::Failed(std::io::Error::new(
+                        ErrorKind::BrokenPipe,
+                        "the program's side of the pseudoterminal is closed",
+                    )));
+                }
+                Err(failure) => return Err(Unwritten::Failed(failure)),
+            },
+            Err(e) => return Err(Unwritten::Failed(e)),
+        }
+    }
+    // **The `flush` travels with the write, error included**, as it did before the write was split:
+    // a no-op for this writer, kept so this loop answers the same thing on every platform.
+    writer.flush().map_err(Unwritten::Failed)
+}
+
+/// Writes one chunk, with the blocking write: a program that stops reading still parks this thread
+/// inside it. **Off Linux on purpose, and not because the leak is absent there.** Windows's ConPTY is a
+/// pipe this crate has not measured (F2.7), and macOS's `poll` is known not to wait on a
+/// pseudoterminal at all — the filedescriptor crate beneath `portable-pty` switches to `select`
+/// there for that reason — so the Linux shape would spin instead of waiting.
+#[cfg(not(target_os = "linux"))]
+fn write_chunk(writer: &mut dyn Write, bytes: &[u8]) -> std::result::Result<(), Unwritten> {
+    writer
+        .write_all(bytes)
+        // **The `flush` travels with the write, error included.** It is a no-op on Windows's ConPTY
+        // too, but discarding its `Result` would leave the loop happily writing into something that
+        // is not delivering, on the one platform where it could ever say so.
+        .and_then(|()| writer.flush())
+        .map_err(Unwritten::Failed)
+}
+
 /// Hangs up the program and gives it [`HANGUP_GRACE`] to go before killing it.
 ///
 /// **It is `portable-pty`'s own `kill` with a finer grid, and not a call to it**: that one sleeps
@@ -851,25 +952,25 @@ impl Drop for Pty {
         // room, and neither killing the child nor closing the pseudoterminal pulls it out of there.
         // Without this, the `join` below waits forever and **closing the window hangs** — confirmed.
         self.stop.store(true, Ordering::Relaxed);
-        // **The sender is dropped and the writer thread is NEVER joined**, and both halves matter.
-        // Dropping it is what ends the loop; not joining is because that thread may be blocked
-        // inside a `write_all` that will not return, so waiting for it would hang closing the
-        // console — the very failure the flag above exists to prevent. The flag is what it reads to
-        // abandon what is still queued instead of writing it into a pseudoterminal about to be
-        // killed.
+        // **The sender is dropped, the knock is dropped, and the writer thread is NEVER joined.**
+        // Dropping the sender ends the loop between chunks; dropping the knock ends a wait for room
+        // in the middle of one. The flag is what the thread reads to abandon what is still queued
+        // instead of writing it into a pseudoterminal about to be killed.
         //
-        // **And killing the child does NOT unblock that write, which is measured and not assumed.**
-        // Fifteen seconds after dropping a `Pty` whose writer was blocked, the thread was still
-        // there. So a console closed while its program had stopped reading **leaks that thread and
-        // what it was holding, for the life of the process** — once per such console. It is not
-        // fixed here: undoing it needs the write to be interruptible, which is a different shape of
-        // write, and it is ticketed with this measurement.
+        // **Killing the child does NOT end a write waiting for room, which is measured and not
+        // assumed**: on Linux the program's side closes, a read answers `EIO`, and a write parked in
+        // the kernel keeps waiting — fifteen seconds and more after the drop, for the life of the
+        // process. That is why, on Linux, the write waits outside the write call, on the knock as
+        // well as on the master (D29, amended). **Not joined anyway**, because off Linux the write is
+        // still the blocking one, and waiting for it would hang closing the console there.
         //
         // **What is queued at this point is abandoned, and that is an exception to what `write`
         // promises.** It is stated here rather than left to be discovered: closing a console throws
         // away what had been handed over and not yet written. There is nowhere for those bytes to go
         // — the program they were for is being killed on the next line.
         drop(self.to_write.take());
+        #[cfg(target_os = "linux")]
+        drop(self.knock.take());
         // Not joined, on purpose — see above. Taking it here says so where somebody looking for the
         // `join` will find it.
         let _ = self.writer.take();
@@ -953,11 +1054,11 @@ impl Drop for Pty {
                 }
                 // **Abandoned on purpose, and it costs a thread and a descriptor for as long as the
                 // survivor stays silent.** Dropping the handle detaches it; the thread is still
-                // inside `read`, but the stop flag above is already raised, so **the survivor's next
-                // byte ends it** — the read returns, the delivery sees the flag and the thread
+                // waiting for input, but the stop flag above is already raised, so **the survivor's
+                // next byte ends it** — the read returns, the delivery sees the flag and the thread
                 // leaves. A survivor that never writes again holds them until the process ends. That
-                // is the same trade the writer thread already makes for the same reason, and a better
-                // one than the window freezing for ever, which is what the alternative was.
+                // is the trade the writer thread still makes off Linux (D29), and a better one than
+                // the window freezing for ever, which is what the alternative was.
                 Err(RecvTimeoutError::Timeout) => drop(reader),
                 // **Unreachable, and spelled out rather than folded into the arm above.** Nothing is
                 // ever sent on that channel, so this cannot happen; if somebody ever gives it a
@@ -1850,6 +1951,270 @@ mod tests {
 
         let _ = counted.send(());
         let _ = writer.join();
+    }
+
+    /// Waits up to `within` for a thread to end, and answers whether it did.
+    ///
+    /// **The thread ending is what these tests assert, never the drop returning**: `Drop for Pty`
+    /// returns whether or not the writer ever ends, so «closing came back» would pass over the leak.
+    #[cfg(target_os = "linux")]
+    fn ends_within(thread: &JoinHandle<()>, within: Duration) -> bool {
+        let deadline = Instant::now() + within;
+        while !thread.is_finished() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        thread.is_finished()
+    }
+
+    /// Hands over `chunks` one-byte writes and answers how many of them the kernel took once the
+    /// writer settles: what it is still owed stops moving when the buffer toward the program is full.
+    ///
+    /// **Settled means three equal readings in a row, 200 ms apart**, not two: a writer descheduled
+    /// for one interval would otherwise read as settled with room still left.
+    #[cfg(target_os = "linux")]
+    fn one_byte_chunks_taken(pty: &mut Pty, chunks: usize) -> usize {
+        for _ in 0..chunks {
+            pty.write(&[FILLER]).expect("hand over");
+        }
+        let deadline = Instant::now() + DEADLINE;
+        let mut readings = [usize::MAX - 1, usize::MAX];
+        while Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(200));
+            let now = pty.backlog().map_or(0, |backlog| backlog.bytes);
+            if readings == [now, now] {
+                return chunks - now;
+            }
+            readings = [readings[1], now];
+        }
+        panic!("what the writer owes was still moving after {DEADLINE:?}");
+    }
+
+    /// Whether the master has room for a write right now, asked without waiting.
+    #[cfg(target_os = "linux")]
+    fn has_room(pty: &Pty) -> bool {
+        let fd = pty.master.as_raw_fd().expect("the master's descriptor");
+        let mut watched = libc::pollfd {
+            fd,
+            events: libc::POLLOUT,
+            revents: 0,
+        };
+        // SAFETY: one valid, exclusively borrowed `pollfd`, and a zero timeout.
+        let ready = unsafe { libc::poll(&mut watched, 1, 0) };
+        assert!(
+            ready >= 0,
+            "poll failed: {}",
+            std::io::Error::last_os_error()
+        );
+        watched.revents & libc::POLLOUT != 0
+    }
+
+    /// **The regression test of the writer left behind by a close (#159's first half).** With the
+    /// program alive and not reading, the writer waits for room in the pseudoterminal. Closing kills
+    /// the program — and on Linux a write parked in the kernel does not end with it: measured, the
+    /// slave gone (`POLLHUP`, a read answering `EIO`) and the write still waiting seconds later, for
+    /// the life of the process. What closing must do is end that thread.
+    ///
+    /// **Linux only, like the fix**: elsewhere the write is still the blocking one (D29).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn closing_a_console_whose_program_stopped_reading_ends_its_writer() {
+        const MARKER: &str = "raw-and-deaf-for-good";
+        // `&&` for the reason its siblings above give: with the echo still on, the line discipline
+        // would hand the payload straight back and nothing would ever wait for room.
+        let script = format!("stty raw -echo && printf {MARKER} && exec sleep 60");
+        let (mut pty, output) =
+            Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
+        wait_for_marker(&output, MARKER);
+
+        pty.write(&vec![FILLER; 4 * PAYLOAD]).expect("hand over");
+        thread::sleep(Duration::from_millis(300));
+        // **The premise, asserted rather than assumed**: the writer has to be waiting for room when
+        // the console closes, or this measures a writer that had already finished.
+        assert!(
+            pty.backlog().is_some_and(|backlog| backlog.bytes > 0),
+            "the program took all {} bytes: the writer is not waiting for room, so closing would \
+             prove nothing about a writer that is",
+            4 * PAYLOAD
+        );
+
+        let writer = pty.writer.take().expect("the writer thread");
+        drop(pty);
+        assert!(
+            ends_within(&writer, Duration::from_secs(2)),
+            "the writer thread was still alive two seconds after its console closed: it is parked in \
+             a write that nothing closing does can end"
+        );
+        drop(output);
+    }
+
+    /// **#159's second half: the writer that has nothing left to write, over a buffer that is
+    /// full.** When the writer's loop ends, `portable-pty`'s own writer is dropped, and its destructor
+    /// writes a newline and the terminal's end-of-file character into the pseudoterminal — `stty raw`
+    /// leaves that character set. With the buffer toward the program exactly full, that write waits
+    /// for room as well, so a fix that only reached the loop would still leave the thread behind.
+    ///
+    /// **Exactly full is calibrated, not guessed**: a first console measures how many one-byte writes
+    /// the kernel takes before it stops, and the second is handed exactly that many — the same shape
+    /// of writes, so the kernel's buffer ends up just as full and nothing is owed. And «full» is then
+    /// asked of the master itself, because «nothing owed» alone would also hold with room left.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn closing_a_console_whose_buffer_is_exactly_full_ends_its_writer() {
+        const MARKER: &str = "raw-and-full";
+        const MORE_THAN_FITS: usize = 4 * PAYLOAD;
+        let script = format!("stty raw -echo && printf {MARKER} && exec sleep 60");
+
+        let (mut probe, probe_output) =
+            Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
+        wait_for_marker(&probe_output, MARKER);
+        let fits = one_byte_chunks_taken(&mut probe, MORE_THAN_FITS);
+        assert!(
+            fits < MORE_THAN_FITS,
+            "the kernel took all {MORE_THAN_FITS} bytes: nothing was ever full"
+        );
+        drop(probe);
+        drop(probe_output);
+
+        let (mut pty, output) =
+            Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
+        wait_for_marker(&output, MARKER);
+        let taken = one_byte_chunks_taken(&mut pty, fits);
+        // The premise: every byte went in, so the loop has nothing to wait on and only the
+        // destructor's write is left to find the buffer full.
+        assert_eq!(
+            taken, fits,
+            "the second console took {taken} of the {fits} bytes the first one did: the buffer is not \
+             in the state this test needs"
+        );
+        assert!(
+            !has_room(&pty),
+            "nothing is owed but the master still has room: the destructor's write would find room \
+             and this would prove nothing about a full buffer"
+        );
+
+        let writer = pty.writer.take().expect("the writer thread");
+        drop(pty);
+        assert!(
+            ends_within(&writer, Duration::from_secs(2)),
+            "the writer thread was still alive two seconds after its console closed with nothing left \
+             to write: the write its destructor makes waited for room"
+        );
+        drop(output);
+    }
+
+    /// **#159's third way out of the writer's wait: the program dies while the console stays
+    /// open.** Nobody closes anything here, so no knock arrives; what ends the wait has to be the
+    /// master answering a hang-up with no room. Before the fix the writer sat inside the kernel's
+    /// write for the life of the process — measured, the program's death does not end it — so
+    /// `Pty::write` kept answering «taken» into a console that would never take anything again.
+    ///
+    /// **The effect is asserted, not only the flag**: the writer thread ends and a later write is
+    /// refused. `gave_up` is asserted beside them, not instead of them.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_program_that_dies_with_its_writer_waiting_for_room_makes_the_writer_give_up() {
+        const MARKER: &str = "raw-and-deaf-until-it-dies";
+        // `&&` for the reason its siblings above give: with the echo still on, the line discipline
+        // would hand the payload straight back and nothing would ever wait for room. And the program
+        // ends on its own, which is the whole case: the console is never closed. Four seconds leave
+        // the premise below room on a loaded machine.
+        let script = format!("stty raw -echo && printf {MARKER} && exec sleep 4");
+        let (mut pty, output) =
+            Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
+        wait_for_marker(&output, MARKER);
+
+        pty.write(&vec![FILLER; 4 * PAYLOAD]).expect("hand over");
+        thread::sleep(Duration::from_millis(300));
+        // **The premise, asserted rather than assumed**: the program is still alive and the writer
+        // is waiting for room, or what follows measures a writer that had already finished.
+        assert!(
+            pty.ending().is_none(),
+            "the program ended before the writer was seen waiting: the premise cannot be checked"
+        );
+        assert!(
+            pty.backlog()
+                .is_some_and(|backlog| backlog.bytes > 0 && !backlog.gave_up),
+            "the writer is not waiting for room with the program alive, so its death would prove \
+             nothing about a writer that is"
+        );
+
+        // The program dies on its own; the reader records it.
+        let deadline = Instant::now() + DEADLINE;
+        while pty.ending().is_none() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            pty.ending().is_some(),
+            "the program did not end within {DEADLINE:?}: the case this test covers never happened"
+        );
+
+        let writer = pty.writer.take().expect("the writer thread");
+        assert!(
+            ends_within(&writer, Duration::from_secs(2)),
+            "the writer thread was still alive two seconds after its program died, with the console \
+             open: it is waiting for room that will never come"
+        );
+        assert!(
+            pty.backlog().is_some_and(|backlog| backlog.gave_up),
+            "the writer ended without saying it gave up"
+        );
+        assert!(
+            pty.write(b"x").is_err(),
+            "a write into a console whose program is gone was answered «taken»"
+        );
+        drop(pty);
+        drop(output);
+    }
+
+    /// **The knock, on its own.** In the tests above the program dies, and a master whose program
+    /// has gone answers a hang-up — which ends the writer's wait whether closing knocked or not, so
+    /// none of them can see the knock. Here a survivor keeps the program's side of the pseudoterminal
+    /// open, so there is no hang-up, and the only thing that can end the writer's wait is closing.
+    ///
+    /// **And the knock goes early, which is what the timing asserts.** With a survivor, closing
+    /// spends the reader's whole abandon deadline, so the writer has had that long by the time the
+    /// drop returns. A knock left for the end of the drop — the field falling with the struct — would
+    /// still arrive, a few microseconds before this looks: the writer ending first is the order
+    /// `Drop for Pty` chose, and this is where it is pinned — mutated: with the early drop removed,
+    /// this goes red.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn closing_a_console_whose_program_left_a_survivor_ends_its_writer_before_the_close_returns() {
+        const MARKER: &str = "raw-deaf-and-held";
+        // The brace group is load-bearing for the reason the survivor test further down gives: it
+        // backgrounds only the survivor, and `setsid` makes it escape the hang-up closing sends.
+        let script = format!(
+            "{{ setsid sleep 10 & }} && stty raw -echo && printf {MARKER} && exec sleep 60"
+        );
+        let (mut pty, output) =
+            Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
+        wait_for_marker(&output, MARKER);
+
+        pty.write(&vec![FILLER; 4 * PAYLOAD]).expect("hand over");
+        thread::sleep(Duration::from_millis(300));
+        assert!(
+            pty.backlog().is_some_and(|backlog| backlog.bytes > 0),
+            "the program took all {} bytes: the writer is not waiting for room",
+            4 * PAYLOAD
+        );
+
+        let writer = pty.writer.take().expect("the writer thread");
+        let closing = Instant::now();
+        drop(pty);
+        let took = closing.elapsed();
+        // The premise: the survivor really held the program's side, so the close waited out the
+        // reader's deadline — otherwise a hang-up could have ended the writer instead of the knock.
+        assert!(
+            took >= READER_GIVE_UP,
+            "closing took {took:?}, less than the {READER_GIVE_UP:?} a held pseudoterminal costs: \
+             the survivor did not hold it, so this proves nothing about the knock"
+        );
+        assert!(
+            writer.is_finished(),
+            "the writer thread had not ended when a close that took {took:?} returned: nothing but \
+             the knock can end its wait here, and it did not arrive in time"
+        );
+        drop(output);
     }
 
     /// **The regression test of closing a console whose program left a survivor behind.** `Drop for
