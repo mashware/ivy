@@ -487,8 +487,14 @@ fn converse(
 
         // **A read already received when closing wins the pane-lifetime race.** Other requests stop
         // at the flag so a pipelined run cannot hold this thread through all of their deadlines;
-        // `panel_get` still reaches the weak capability and receives either the admitted document
-        // or the exact pane-gone refusal instead of losing its reply at transport shutdown.
+        // one `panel_get` read once the flag is up still reaches the weak capability and receives
+        // either the admitted document or the exact pane-gone refusal instead of losing its reply
+        // at transport shutdown. **Only what this thread still reads is covered**: it leaves after
+        // the first read that begins with the flag raised, whether that read returns data or times
+        // out. A request that read took and did not answer ends in a clean end of file when nothing
+        // else is left unread; on Linux, bytes still unread when the socket closes — a request that
+        // arrived after the thread had gone, or the rest of a pipeline longer than one read —
+        // answer the client with a reset, and a write after the close gets a broken pipe.
         while let Some(incoming) = framing.take() {
             if stop.load(Ordering::Relaxed) {
                 if !is_the_one_closing_read(&incoming, closing_read_answered) {
@@ -932,6 +938,89 @@ mod tests {
             "reading drained the window queue"
         );
         assert_eq!(woken.load(Ordering::Relaxed), 0, "reading woke the window");
+    }
+
+    /// **The closing-read exception, through the connection's own loop and not only its
+    /// predicate.** Three reads arrive in one write — on Linux a write this small is taken by one
+    /// read, which is what lets the socket close with nothing left unread and the last reply be a
+    /// clean end instead of a reset. The pane closes while the first is being answered. The second
+    /// is answered once, here with the refusal a closed pane gives; the third, another read, is not,
+    /// because the exception admits one and no more.
+    #[test]
+    fn one_read_is_answered_after_the_pane_closes_and_no_more() {
+        use std::sync::Mutex;
+        use std::sync::atomic::AtomicBool;
+
+        let dir = PanelDir::create().expect("create the panel directory");
+        let (sender, _inbox) = sync_channel::<Delivery>(8);
+        let (entered, first_read_began) = sync_channel::<()>(1);
+        let (go, resume) = sync_channel::<()>(1);
+        let resume = Mutex::new(resume);
+        let answered_once = AtomicBool::new(false);
+        let channel = Channel::open_with_reader(
+            dir.path(),
+            dir.id(),
+            sender,
+            Arc::new(move || {
+                if answered_once.swap(true, Ordering::Relaxed) {
+                    return Err("this pane is gone".to_owned());
+                }
+                // The first read parks until the test has closed the pane under it.
+                let _ = entered.send(());
+                let _ = resume
+                    .lock()
+                    .expect("the gate")
+                    .recv_timeout(Duration::from_secs(5));
+                Ok(r#"{"lines":[]}"#.to_owned())
+            }),
+            Arc::new(|| {}),
+        )
+        .expect("open the channel");
+        let mut client = endpoint::connect(dir.path(), dir.id()).expect("connect to the pane");
+        // So the last look can tell the connection ending from the connection going silent, within
+        // a deadline and without hanging the suite.
+        client
+            .set_recv_timeout(Some(Duration::from_millis(100)))
+            .expect("a deadline on the client");
+
+        client
+            .write_all(
+                b"{\"tool\":\"panel_get\"}\n{\"tool\":\"panel_get\"}\n{\"tool\":\"panel_get\"}\n",
+            )
+            .expect("send the three reads");
+        first_read_began
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the first read reached the pane");
+        drop(channel);
+        go.send(()).expect("let the first read finish");
+
+        assert_eq!(
+            read_reply(&mut client),
+            r#"{"ok":true,"document":{"lines":[]}}"#
+        );
+        assert_eq!(
+            read_reply(&mut client),
+            r#"{"ok":false,"error":"this pane is gone"}"#,
+            "the one read admitted after the pane closed lost its reply"
+        );
+        // **The end of the connection itself, not the absence of a reply**: silence that outlasts
+        // the deadline would read as "" through `read_reply`, and a connection left open is exactly
+        // the defect this look has to catch.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut byte = [0_u8; 1];
+        let how_it_ended = loop {
+            match client.read(&mut byte) {
+                Ok(0) => break "ended",
+                Ok(_) => break "a second read after the close was served",
+                Err(failure) if failure.kind() == io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        break "the connection stayed open after the pane closed";
+                    }
+                }
+                Err(_) => break "the connection was reset instead of ending",
+            }
+        };
+        assert_eq!(how_it_ended, "ended");
     }
 
     #[test]

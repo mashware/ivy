@@ -5861,13 +5861,16 @@ mod tests {
         };
         let largest = left_document.len().max(right_document.len());
 
+        // **No read is sent to the left pane after it closes.** One would be answered only while that
+        // connection's thread is still parked in its read — an idle one leaves within a receive
+        // timeout of the close — and after that the producer gets a broken pipe, or a reset when its
+        // bytes land between the timeout and the socket closing. That race is the design's, not a
+        // defect: the refusal counted after a close is pinned on the counter itself, by
+        // `the_window_accumulator_keeps_a_completion_and_refusal_after_pane_close`, and the one read
+        // a closing connection still answers by a test beside `panel_control`'s listener.
         window
             .close_a_pane_called(0, &ctx)
             .expect("close the left pane");
-        assert_eq!(
-            left.read_the_document().expect("the closing pane answers"),
-            panel_control::Answered::Failed("this pane is gone".to_owned())
-        );
         window.tabs[0].panes_mut()[0]
             .timings
             .record_outbound(std::time::Duration::from_micros(10));
@@ -5875,7 +5878,7 @@ mod tests {
         let report = report_of(&window);
         assert!(
             report.contains(&format!(
-                "documents:    2 read back, 1 refused, 0 patched, 0 patches refused, {largest} bytes the largest written out"
+                "documents:    2 read back, 0 refused, 0 patched, 0 patches refused, {largest} bytes the largest written out"
             )),
             "the final report lost reads across a real pane close:\n{report}"
         );
