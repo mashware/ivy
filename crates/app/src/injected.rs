@@ -150,9 +150,12 @@ pub(crate) struct InjectedDrags {
     pub(crate) grabbed_at: Option<f32>,
     /// The last frame on which it advanced, and **nothing** while it has not advanced on any.
     ///
-    /// **egui can repeat the pass over the same input**, and the raw input hook runs once per pass.
-    /// Without this count, a repeated pass would send the «button pressed» of the same gesture
-    /// twice, and the drag egui holds between frames would be left half done.
+    /// **The raw input hook can run more than once on one frame number**, and this count is what
+    /// holds the gesture to one step. eframe calls it before egui's passes, so a repeated pass never
+    /// reaches it — but it also calls it on every logic-only tick while the window is hidden
+    /// (eframe 0.36.1, `native/epi_integration.rs:323-362`), and those ticks do not advance
+    /// `cumulative_frame_nr`. A second call on the same frame would send the «button pressed» of the
+    /// same gesture twice, and the drag egui holds between frames would be left half done.
     pub(crate) last_frame: Option<u64>,
 }
 

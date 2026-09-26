@@ -841,11 +841,11 @@ impl Tab {
     /// divider would not be where the mouse is. With the absolute position, the divider chases the
     /// pointer and the clip only decides where it plants itself.
     ///
-    /// And there is a second reason that was discovered later, more serious than the precision:
-    /// **the interface pass can run twice over the same input**, and with the displacement the
-    /// second pass would apply it again, moving the divider twice as far. With the absolute
-    /// position the second pass computes the same thing and changes nothing. It is the same trap
-    /// that forced consuming the keyboard's events instead of reading them.
+    /// And there is a second reason, a defence: **the interface pass can run twice in one frame**.
+    /// egui 0.36 gives the repeated pass a zero drag delta, but an egui that replayed the frame's
+    /// events would have the displacement applied again, moving the divider twice as far. With the
+    /// absolute position a second pass computes the same thing and changes nothing, whichever egui
+    /// runs it — the same defence the keyboard keeps by consuming its events.
     pub(crate) fn drag_the_divider(
         &mut self,
         ui: &egui::Ui,

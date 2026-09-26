@@ -1057,8 +1057,9 @@ struct Window {
     rest_of_frame: RestOfFrame,
     /// When the frame in progress began, which is where the outbound stopwatch starts.
     frame_started: Instant,
-    /// The last frame whose cost was already recorded, so as not to count it twice if egui repeats
-    /// the pass over the same input.
+    /// The last frame whose cost was already recorded, so as not to count it twice when `logic`
+    /// runs again on the same frame number: egui repeating the pass runs the whole closure again,
+    /// and eframe's logic-only ticks while the window is hidden do not advance the number.
     last_closed_frame: u64,
     /// What this frame has spent **outside the panes that are still alive**, and which therefore
     /// none of them is going to declare.
@@ -1079,7 +1080,7 @@ struct Window {
     timed_separately: std::time::Duration,
     /// What it has cost to paint the bar **in the frame in progress**, still unrecorded.
     ///
-    /// **It exists because egui repeats the pass** over the same input, and both passes really
+    /// **It exists because egui repeats the pass** after a discard, and both passes really
     /// paint. Recording in each one, the counter would say «frames» and would be counting passes,
     /// and the mean the report publishes would come out diluted under a label that promises
     /// something else. The repeated work **is** added up —it happened twice—, but the frame is
@@ -1198,8 +1199,9 @@ struct Window {
     /// The last frame in which presses and releases were shared out, and **nothing** until the
     /// first one.
     ///
-    /// See the reason where it is used: button events cannot be consumed, so a repeated pass would
-    /// send the same click twice.
+    /// See the reason where it is used: button events cannot be consumed, so an egui that replayed
+    /// them on a repeated pass would send the same click twice. egui 0.36 does not — it is defence,
+    /// and `egui_hands_a_frame_s_events_to_its_first_pass_only` trips if that changes.
     last_frame_with_buttons: Option<u64>,
     /// The pane whose link owns the current primary-button gesture, until its release.
     ///
@@ -1864,9 +1866,10 @@ impl eframe::App for Window {
         };
 
         let started = Instant::now();
-        // **The frame and not the pass**, which is the trap this project has already paid for: egui
-        // can repeat the pass over the same input, and with the pass number the gesture would
-        // advance twice in the same frame.
+        // **The frame and not the pass.** eframe calls this hook before egui's passes, so a
+        // repeated pass never reaches it, but also on every logic-only tick while the window is
+        // hidden, and those do not advance the frame number (eframe 0.36.1,
+        // `native/epi_integration.rs:323-362`); keying the gesture on it holds it to one step.
         let events = injected_drags.events(&self.last_painted, ctx.cumulative_frame_nr());
         raw_input.events.extend(events);
 
@@ -1896,9 +1899,9 @@ impl eframe::App for Window {
 
         // What the previous frame cost, whole. It arrives one frame late because that is how long
         // it takes to be known: by the time it is tessellated and drawn, the pass is already over.
-        // It is closed **once per frame and not per pass**: egui can repeat the pass over the same
-        // input, and then the second close would pair this frame's spans with the previous one's
-        // total — an invented sample, and the real total lost.
+        // It is closed **once per frame and not per pass**: egui can repeat the pass, running this
+        // whole closure again, and then the second close would pair this frame's spans with the
+        // previous one's total — an invented sample, and the real total lost.
         //
         // **And the counter has to be the frame one, not the pass one.** This was written with
         // `cumulative_pass_nr` and that way it filtered nothing, because that one **goes up on
@@ -2310,7 +2313,7 @@ impl eframe::App for Window {
             // be subtracted to know what it is worth.
             //
             // **It is accumulated per pass and noted on closing the frame**, like the layout's
-            // mirror: egui repeats the pass over the same input, so counting here would publish a
+            // mirror: egui repeats the pass and paints the bar again, so counting here would publish a
             // mean **per pass** under a label that says «per frame». The repeated work is indeed
             // added up —it happened twice— but the frame is still one.
             let tab_bar_outcome = self.paint_the_tab_bar(ui, tab_bar, &metrics, SystemTime::now());
@@ -7119,10 +7122,11 @@ mod tests {
 
     #[test]
     fn a_key_is_not_sent_twice_even_if_the_frame_makes_two_passes() {
-        // egui can run the interface pass twice over the same input. The events that go to the
-        // program are consumed because of that: reading them and leaving them there would write the
-        // same key twice to the pseudoterminal, and the program inside has no way of knowing that
-        // one of them is spare.
+        // Two keyboard passes over one queue, made by hand: egui 0.36 hands a repeated pass no
+        // events, so what this pins is that the keys are consumed — which egui's own end of pass
+        // needs as well, since it reads the queue for its quit and zoom keys. Read and left there,
+        // a second reader would write the same key twice to the pseudoterminal, and the program
+        // inside has no way of knowing one of them is spare.
         let mut pane = pane_with("sleep 30", 0);
         let ctx = egui::Context::default();
         let mut modifiers = egui::Modifiers::NONE;
@@ -7151,7 +7155,7 @@ mod tests {
         );
         assert!(
             pane.keystrokes.is_empty(),
-            "the same key was sent on the second pass"
+            "the same key was sent again by the second keyboard pass over the same queue"
         );
 
         // What is not translated stays where it was: the loop takes its keys away, not the whole
@@ -8935,9 +8939,9 @@ mod tests {
         let ctx = egui::Context::default();
         let mut result = None;
         // **The body is taken out on the first pass and does not come back**, because `run_ui`
-        // takes an `FnMut`: egui may repeat the pass over the same input, and a body that ran twice
-        // would assert twice over state already touched. It is the same trap that forced consuming
-        // the keyboard events.
+        // takes an `FnMut`: egui may repeat the pass, running the whole closure again, and a body
+        // that ran twice would assert twice over state already touched. The closure repeats even
+        // though the frame's events do not.
         let mut pending = Some(visit);
 
         ctx.run_ui(egui::RawInput::default(), |ui| {
@@ -9382,6 +9386,9 @@ mod tests {
                 ..Default::default()
             },
             |ui| {
+                // Several calls inside one egui pass stand for several passes of one frame that
+                // all carry the events, because the barrier reads the frame number, which they
+                // share; egui 0.36's own repeated pass would carry no events to repeat.
                 for _ in 0..passes {
                     eframe::App::ui(window, ui, &mut frame);
                 }
@@ -9517,7 +9524,7 @@ mod tests {
         assert_eq!(
             urls_opened_in(&mut window, &ctx, area, ctrl_click_at(at), 2),
             ["https://example.test/once"],
-            "egui's second pass opened the same physical click again"
+            "a second pass handed the same events opened the same physical click again"
         );
     }
 
@@ -9902,12 +9909,12 @@ mod tests {
     #[test]
     fn egui_hands_a_frame_s_events_to_its_first_pass_only() {
         // **A tripwire, not a guarantee this project relies on.** Read in egui 0.36.1: the loop
-        // behind `run_ui` (private to egui, `context.rs:823`) begins every pass with
+        // behind `run_ui` (private to egui, `context.rs:854`) begins every pass with
         // `new_input.take()`, and `RawInput::take` moves the events out, so a
         // repeated pass sees the pointer where it was but not the press. The guards that count
         // button presses once per frame protect a case this egui does not produce; the tests that
         // pin them repeat the mouse pass by hand. If an upgrade starts handing the events to every
-        // pass, those guards become load-bearing for real and #290 is where their fate is decided.
+        // pass, those guards become load-bearing for real, which is why #290 kept them as defence.
         let ctx = egui::Context::default();
         let mut seen = Vec::new();
         let input = egui::RawInput {
@@ -12715,10 +12722,10 @@ mod tests {
 
     #[test]
     fn a_repeated_pass_does_not_close_a_second_console_with_the_same_click() {
-        // **egui can run the interface pass twice over the same input, and a pointer press cannot be
-        // consumed** — it is what egui needs in order to decide who is being dragged. The program's
-        // presses already defend themselves by counting the frame; a close is not a keystroke that
-        // arrives twice, it is a **second program killed by one click**.
+        // **A defence, pinned with a second mouse pass made by hand inside one egui pass**: egui
+        // 0.36 hands a repeated pass no events, but a pointer press cannot be consumed — egui needs
+        // it to decide who is being dragged — so an egui that replayed it would not deliver a
+        // keystroke twice, it would kill a **second program with one click**.
         //
         // **Three consoles, because two hide it**: after the first close the survivor is alone in its
         // tab and carries no button, so the second pass finds nothing. With three, the siblings refill
@@ -12752,9 +12759,9 @@ mod tests {
             |ui| {
                 let metrics =
                     CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE));
-                // **The tiling is recomputed between the two passes**, which is what the real frame
-                // does: `eframe` runs the whole closure again and the layout comes out of the tree as
-                // it is now. Reusing the first pass's rectangles would hide the defect by accident.
+                // **The tiling is recomputed between the two calls**, which is what a real repeated
+                // pass does: `eframe` runs the whole closure again and the layout comes out of the
+                // tree as it is now. Reusing the first call's rectangles would hide the defect.
                 for _ in 0..2 {
                     let rects = window
                         .active()
@@ -12771,7 +12778,7 @@ mod tests {
         assert_eq!(
             names_in_order(&window).len(),
             2,
-            "one click closed two consoles: the repeated pass read the same press again"
+            "one click closed two consoles: a second mouse pass handed the same press acted on it"
         );
     }
 
@@ -15170,10 +15177,10 @@ mod tests {
 
     #[test]
     fn the_injected_gesture_does_not_advance_twice_on_the_same_frame() {
-        // **The trap this project has already paid for:** egui can repeat the pass over the same
-        // input, and the raw-input hook runs once per pass. Without the frame count, a repeated
-        // pass would send the same gesture's «button down» twice and the drag egui holds across
-        // frames would be left halfway.
+        // **Two calls with one frame number**, which eframe really makes: it calls the raw-input
+        // hook on every logic-only tick while the window is hidden, and those do not advance the
+        // frame number. Without the frame count, a second call in one frame would send the same
+        // gesture's «button down» twice and the drag egui holds across frames would be left halfway.
         let mut injected_drags =
             InjectedDrags::new(1, InjectedGesture::MovePane).expect("one is more than none");
 
@@ -15181,10 +15188,10 @@ mod tests {
         let repeated = injected_drags.events(&two_side_by_side_painted(), 7);
         let next = injected_drags.events(&two_side_by_side_painted(), 8);
 
-        assert!(!first_part.is_empty(), "the first pass sent nothing");
+        assert!(!first_part.is_empty(), "the first call sent nothing");
         assert!(
             repeated.is_empty(),
-            "the repeated pass of the same frame sent again: {repeated:?}"
+            "a second call on the same frame sent again: {repeated:?}"
         );
         assert!(
             matches!(next.as_slice(), [egui::Event::PointerMoved(_)]),
@@ -25747,11 +25754,11 @@ mod tests {
 
     #[test]
     fn a_repeated_pass_does_not_send_the_click_twice_to_the_program() {
-        // **egui can run the UI pass twice over the same input**, and these events cannot be
-        // consumed: the press is what egui needs to start the drag. Without keeping track of the
-        // frame, the program inside received **two presses where the user gave one** — a double
-        // click nobody made, which inside an editor selects a word or opens whatever is under the
-        // pointer.
+        // **A defence, pinned by hand**: egui 0.36 hands a repeated pass no events, but these
+        // events cannot be consumed — the press is what egui needs to start the drag — so if an
+        // egui replayed them, without keeping track of the frame the program inside would receive
+        // **two presses where the user gave one** — a double click nobody made, which inside an
+        // editor selects a word or opens whatever is under the pointer.
         let ctx = egui::Context::default();
         let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
@@ -25768,9 +25775,10 @@ mod tests {
             )
         };
 
-        // **The same input, twice, within the SAME frame**: it is what egui does when something
-        // asks to be recomposed. And afterwards a click on another cell acting as a sentinel, so
-        // that counting happens once the first one's has already arrived.
+        // **Two mouse passes over one frame's events, inside ONE egui pass**: they stand for two
+        // passes of one frame because the barrier reads the frame number, which both share. And
+        // afterwards a click on another cell acting as a sentinel, so that counting happens once
+        // the first one's has already arrived.
         let input = |at: egui::Pos2| egui::RawInput {
             events: vec![
                 egui::Event::PointerMoved(at),
@@ -25790,7 +25798,7 @@ mod tests {
                     &rects,
                     &CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE)),
                 );
-                // The second pass of the same frame, which is what this test is after.
+                // The hand-made second pass of the same frame, which is what this test is after.
                 window.handle_the_mouse(
                     ui,
                     &rects,
@@ -26584,8 +26592,9 @@ mod tests {
         // consumption, the test asserting «nothing reached the program» stayed green — because
         // those four keys **had no bytes** in the keyboard milestone's table, so the defect and
         // the fix gave the same result. What has to be tied down is that the event **disappears
-        // from the queue**: one frame can run more than one pass over the same input (see
-        // `send_keys`), and a key left there would be translated by the next pass.
+        // from the queue**: a key left there would be translated by whatever read the queue next —
+        // a second keyboard pass over the same queue, which would turn the key into bytes after all
+        // (see `send_keys`).
         let ctx = egui::Context::default();
         let mut pane = pane_with_scrollback();
         let mut modifiers = egui::Modifiers::NONE;

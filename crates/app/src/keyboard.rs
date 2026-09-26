@@ -757,9 +757,12 @@ impl crate::Pane {
         let mut scrolls: Vec<Scroll> = Vec::new();
         let mut to_the_clipboard: Option<String> = None;
 
-        // The events that go to the program **are consumed**, not read and left. One frame can run
-        // more than one pass over the same input —egui does it when something asks to be
-        // recomposed—, and then the same key would be written twice to the pseudoterminal. The ones
+        // The events that go to the program **are consumed**, not read and left, and that is load-
+        // bearing today: egui's own end of pass reads the same queue for its quit shortcut and its
+        // zoom keys (egui 0.36.1, `context.rs:2442-2450`), so a key left there would reach the
+        // program and close or zoom the window as well. It is also defence against an egui that
+        // replayed a frame's events on its repeated pass — 0.36 does not, and
+        // `egui_hands_a_frame_s_events_to_its_first_pass_only` trips if that changes. The ones
         // that are not translated stay where they were, for whoever wants them afterwards.
         ctx.input_mut(|state| {
             // **The modifiers are rebuilt here, event by event, and are not read from

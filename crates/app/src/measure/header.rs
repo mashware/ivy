@@ -321,7 +321,7 @@ pub struct TabBar {
 impl TabBar {
     /// Records what it cost to paint it **in a frame**, with its passes already summed.
     ///
-    /// The caller is the frame close, not the painting: egui repeats the pass over the same input and
+    /// The caller is the frame close, not the painting: egui repeats the pass after a discard and
     /// both really paint, so recording per pass would give a mean per pass under a label that says "per
     /// frame".
     pub fn record(&mut self, how_long: Duration) {
@@ -762,7 +762,7 @@ impl Strips {
     /// Records what the strips cost **in a frame**, with its passes already summed.
     ///
     /// The caller is the frame close and not the painting, for the reason [`TabBar::record`] gives:
-    /// egui repeats the pass over the same input and both passes really paint, so recording there
+    /// egui repeats the pass after a discard and both passes really paint, so recording there
     /// would give a mean per pass under a label that says «per frame».
     ///
     /// **It takes no zero check, unlike the bar's caller**: what decides whether a frame is counted

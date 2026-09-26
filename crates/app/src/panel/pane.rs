@@ -426,10 +426,10 @@ impl Pane {
         // and not with the factory one. From that frame on the drag goes on ruling, which is what
         // was decided: your width, and the mouse ruling from there.
         //
-        // > **Declared blind spot:** egui can repeat the pass over the same input, and the second
-        // > one no longer sees the panel folded, so it writes the pointer's width instead of
-        // > keeping the saved one. The two are halves of what was decided —the earlier width, and
-        // > the mouse ruling— so no state of our own is invented to force one of the two. It is
+        // > **Declared blind spot:** egui can repeat the pass with the pointer where it was, and
+        // > the second one no longer sees the panel folded, so it writes the pointer's width
+        // > instead of keeping the saved one. The two are halves of what was decided —the earlier
+        // > width, and the mouse ruling— so no state of our own is invented to force one of the two. It is
         // > left said because it is the class of difference between frames this project has already
         // > paid for once without seeing it.
         if requested < panel::DRAG_FLOOR {

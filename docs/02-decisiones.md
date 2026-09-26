@@ -5122,6 +5122,18 @@ the held paste, and a bare press on the question still discards it. #199.
   the version that hid the button while the sentence stood — dismissing it made the button appear
   exactly under the dismissing click, so a double click, or egui running the same press through a
   second pass, sent the paste.
+
+  **Amended on 26 September 2026** ([#290](https://github.com/mashware/agent-terminal/issues/290)):
+  **egui 0.36 does not run the same press through a second pass.** Before every pass it moves the
+  frame's events out of the raw input (egui 0.36.1, `data/input/raw_input.rs:137`, called at
+  `context.rs:854`), so a pass repeated after a discard sees no press **event** — what it carries
+  over is state: the pointer's position and held buttons, the keys held down, the modifiers. The
+  double click stands as the reason; the second pass does not. The once-per-frame guard on this
+  press is **kept, as defence** against an egui that starts replaying: it costs one frame compare,
+  and a replaying upgrade would turn one click into two actions with nothing to warn but the
+  tripwire test `egui_hands_a_frame_s_events_to_its_first_pass_only`. Discarded: removing the guards,
+  which saves a few lines and leaves that upgrade silent; and keeping only those in front of a
+  destructive act, which splits one rule into two for the same price.
 - **It is not offered on a console whose writer gave up** (**D29**), where the write would go
   nowhere. Its place stays empty there, and a press on it answers whatever is drawn there — the
   sentence about that console when it stands, the grid otherwise.
@@ -6567,6 +6579,20 @@ the rightmost one's button pressed lost **two** programs to one click: the survi
 and the new rightmost strip puts its button on the same abscissa the press is still sitting at. Two
 consoles hide it, because the survivor of the first close carries no button at all.
 
+**Amended on 26 September 2026** ([#290](https://github.com/mashware/agent-terminal/issues/290)):
+**the second pass does not read the same press.** egui 0.36 moves a frame's events out of the raw
+input before each pass (egui 0.36.1, `data/input/raw_input.rs:137`, called at `context.rs:854`), so a
+pass repeated after a discard receives no events; the pointer's position and held buttons, the keys
+held down and the modifiers are kept, and a drag delta is zero there. What does run twice is the whole
+interface closure. **The two programs lost to one click were reproduced by the test's hand-made
+second mouse pass inside one egui pass, not by egui** — the paragraph above describes the mechanism
+it guards against, not something this egui was seen doing. The frame count on
+this button is **kept, as defence**: it costs one frame compare, and an egui upgrade that started
+replaying events would turn one click into two consoles closed, with only the tripwire test
+`egui_hands_a_frame_s_events_to_its_first_pass_only` to warn. Discarded: removing the guards, which
+saves a few lines and leaves that upgrade silent; and keeping only the destructive ones, which
+splits one rule into two for the same price.
+
 **A strip with no room for both keeps the handle and loses the button.** Nothing stops a window being
 dragged narrow — no minimum size is asked of the desktop, which is why the strip's own cut is already
 clamped — and a button merely squeezed would take a narrow strip **whole**: every press on a console's
@@ -7040,6 +7066,14 @@ A bare console press keeps selecting text or reporting the mouse to the hosted p
 `Ctrl+Shift` keeps moving panes. The panel has no competing text-selection contract, so its explicit
 link label needs no modifier. Both effects cross one once-per-frame barrier before selection or
 mouse reporting: a second egui pass cannot turn one physical press into two browser requests.
+
+**Amended on 26 September 2026** ([#290](https://github.com/mashware/agent-terminal/issues/290)):
+that sentence states what the barrier guarantees, and it stays true — but egui 0.36 does not hand a
+repeated pass the frame's events at all (egui 0.36.1, `data/input/raw_input.rs:137`), so today the barrier is
+**defence** against an egui that starts replaying. It is kept for the reason D31's and D46's
+amendments give: one frame compare, against one click opening two tabs after an upgrade with only
+the tripwire test `egui_hands_a_frame_s_events_to_its_first_pass_only` to warn. Removing it was
+discarded.
 
 The console recognizes two sources from the exact `View` and rectangle used for its last paint. OSC
 8 is semantic and wins when its sparse span covers the cell. Otherwise the terminal core recognizes

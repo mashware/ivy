@@ -269,8 +269,9 @@ impl Window {
         //
         // **It is collected just once and before the loop**: inside it would be read for each pane
         // and the scroll would be applied as many times as there are consoles. And it is
-        // **consumed**, for the same reason as the keyboard: one frame can run two passes over the
-        // same input.
+        // **consumed**, so that no later reader of the queue applies the same scroll again — ours,
+        // or an egui that replayed a frame's events on its repeated pass, which 0.36 does not do.
+        // Unlike the keyboard's keys, egui itself does not read it again (see `collect_the_wheel`).
         let wheel = Self::collect_the_wheel(ui, metrics);
 
         // **Which chord it was pressed with, from the event itself and not from the state.** See
@@ -289,12 +290,12 @@ impl Window {
         // console's response: egui gives `clicked()` **on release**, so the program would find out
         // about the press late and never about which button was released. See [`ButtonPress`].
         //
-        // **And just once per frame, not per pass.** egui can run the interface pass twice over the
-        // same input, and these events **cannot be consumed** —the press is what egui needs to
-        // start the drag—, so without this count the program inside received **two presses where
-        // the user gave one**: a double click nobody made. The keyboard defends itself by
-        // consuming; here the count has to be kept. `cumulative_frame_nr` goes up once per frame;
-        // `cumulative_pass_nr` goes up per pass and would filter nothing.
+        // **And just once per frame, not per pass.** egui 0.36 hands a frame's events to its first
+        // pass only, so this count is defence: these events **cannot be consumed** —the press is
+        // what egui needs to start the drag—, and an egui that replayed them would hand the program
+        // **two presses where the user gave one**, a double click nobody made; the tripwire is
+        // `egui_hands_a_frame_s_events_to_its_first_pass_only`. `cumulative_frame_nr` goes up once
+        // per frame; `cumulative_pass_nr` goes up per pass and would filter nothing.
         // **A press aimed at a standing question is answered before the press is routed**, because
         // below it is handed to whichever program asked for the mouse: dismissing a notice must not
         // also send a button press into somebody's `vim`.
@@ -312,12 +313,12 @@ impl Window {
         // **Which console the strip's button was pressed on is worked out here, under the same
         // once-per-frame guard as the routing below, and acted on after the walk.** The guard is not
         // shared for tidiness: the press is **not consumed** — egui needs it to decide who is being
-        // dragged — so a repeated pass reads the very same event again, and a close is not a
-        // keystroke that arrives twice, it is a **second console killed by one click**. With three
-        // consoles in a row and the rightmost one's button pressed, the second pass finds the
-        // siblings refilled over the whole area and the new rightmost strip's button on the same
-        // abscissa: the same press closes that one too. Two panes hide it, because the survivor of
-        // the first close carries no button at all.
+        // dragged — so an egui that replayed it on a repeated pass (0.36 does not; the tripwire is
+        // `egui_hands_a_frame_s_events_to_its_first_pass_only`) would not deliver a keystroke twice,
+        // it would kill a **second console with one click**. With three consoles in a row and the
+        // rightmost one's button pressed, a second reading finds the siblings refilled over the
+        // whole area and the new rightmost strip's button on the same abscissa: the same press
+        // closes that one too. Two panes hide it, as the survivor of the first close has no button.
         let frame_nr = ui.ctx().cumulative_frame_nr();
         self.a_link_gesture_ended(frame_nr);
         let mut asked_to_close = None;
@@ -750,8 +751,10 @@ impl Window {
     /// it that way is.
     ///
     /// It also returns **where** the pointer was, which is what decides whose turn it is, and it
-    /// returns something **even when the wheel asks for nothing**: the event exists and has to be
-    /// consumed, or the framework would interpret it on its own.
+    /// returns something **even when the wheel asks for nothing**: the event exists and is consumed
+    /// so that nothing reading the queue after it applies the same scroll again. egui itself is not
+    /// what that stops — it turns the wheel into its scroll deltas at the start of the pass (egui
+    /// 0.36.1, `input_state/mod.rs:417-469`), before this runs.
     ///
     /// **It is not a method of the window**: it reads nothing from it, and a receiver promises a
     /// dependency that does not exist.

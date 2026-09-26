@@ -96,7 +96,7 @@ impl Strips {
     /// Closes the frame: what its passes accumulated becomes one sample of the run.
     ///
     /// **Once per frame and not once per pass**, for the reason the tab bar's own close gives: egui
-    /// repeats the pass over the same input and both passes really paint, so recording there would
+    /// repeats the pass after a discard and both passes really paint, so recording there would
     /// publish a mean per pass under a label that says «per frame». The work of both passes is
     /// summed, which is what [`Strips::a_strip_was_painted`] does; the frame is still one.
     pub(crate) fn close_the_frame(&mut self) {

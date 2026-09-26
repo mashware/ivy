@@ -231,7 +231,7 @@ impl Spans {
 
     /// Merges the spans of **another pass of the same frame**.
     ///
-    /// egui may repeat the pass over the same input, and `eframe` calls the two halves of the
+    /// egui may repeat the pass after a discard, and `eframe` calls the two halves of the
     /// application inside the closure that repeats (`epi_integration.rs:288-303`), so in a repeated
     /// frame it pumps and paints again. **Both jobs happened**, and both have to be returned to the
     /// frame's subtraction: summing them is what tells the truth.

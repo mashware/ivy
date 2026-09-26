@@ -24,8 +24,8 @@ impl PaintedConsole {
 
     pub(crate) fn link_at(&self, point: Pos2, metrics: &CellMetrics, frame: u64) -> Option<Link> {
         // The preceding frame is what is on the glass when a new one starts. The current one is
-        // accepted for egui's repeated pass, although the window's once-per-frame barrier will
-        // already have spent its button events there.
+        // accepted for egui's repeated pass, although in egui 0.36 that pass carries no button
+        // events, and the window's once-per-frame barrier would refuse a replayed one.
         // **The painted area bounds the point, not only the grid**: while a panel grows, the grid is
         // resized a frame after the area shrinks, so a cell past the area exists and is not visible.
         if !self.is_current(frame) || !self.area.contains(point) {
