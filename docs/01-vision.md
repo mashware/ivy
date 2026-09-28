@@ -13,9 +13,9 @@ Window
 ```
 
 The panel is not written by the app. It is written by **whoever is doing the work**, through an open
-contract. The app only paints it. Today that contract arrives through a file, but **the transport is
-not the contract** ([02-decisiones.md](02-decisiones.md) → D17): the document is what gets
-versioned, and it can also arrive over MCP or from the terminal itself.
+contract. The app only paints it. Today that contract arrives through a file or over MCP, and
+**the transport is not the contract** ([02-decisiones.md](02-decisiones.md) → D17): the document is
+what gets versioned, and it could also arrive from the terminal itself.
 
 ## Who it is for
 
@@ -142,8 +142,10 @@ it is having producers writing before it happens.
 **For personal use: yes, with margin.** The eight complete products do not do this —verified product
 by product, not guessed—. The argument that «three do not even run on Linux» **no longer holds**:
 Orca and Herdr run on all three platforms, they are free and they are very polished. What is left is
-the body of the panel, not the availability. F1.0 to F1.3 are closed, the terminal is in use and the
-panel prototype works: there is less ahead than has already been done.
+the body of the panel, not the availability. When this sentence was first written, on 11 August,
+F1.0 to F1.3 were closed, the terminal was in use and the panel prototype worked: there was less
+ahead than had already been done. (The assessment keeps its August 2026 wording; where the project
+stands today is in [05-roadmap.md](05-roadmap.md).)
 
 **As a product: fragile, and it has to be said.** Competing with Warp —cross-platform, open source,
 64k stars—, with Orca —MIT, 52k, daily pushes— and with Herdr —Apache-2.0, 32k in five months—

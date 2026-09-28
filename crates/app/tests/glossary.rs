@@ -100,6 +100,7 @@ const GLOSSARY_CLEAN_FILES: &[&str] = &[
     "app/examples/fonts.rs",
     "app/examples/screen_demo.rs",
     "app/tests/waits.rs",
+    "app/tests/decisions.rs",
 ];
 
 /// Files covered by the complete citations manifest but not yet declared glossary-clean.
@@ -209,6 +210,7 @@ const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/tests/batches.rs", "app"),
     ("app/tests/vendor_patch.rs", "app"),
     ("app/tests/waits.rs", "app"),
+    ("app/tests/decisions.rs", "app"),
 ];
 
 /// How much each shape of the annex has to yield for this test to mean anything.

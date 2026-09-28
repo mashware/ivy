@@ -198,7 +198,11 @@ agent-terminal/
 ├── crates/
 │   ├── panel-contract/     panel.json types, reading, validation   ← depends on nothing visual
 │   ├── term-core/          one pane = PTY + grid                   ← depends on nothing visual
+│   ├── panel-control/      the control channel and its MCP binary  ← depends on nothing visual
+│   ├── host-load/          the load the measurement batches run    ← not shipped, only measured
 │   └── app/                window, panes, painting                 ← the only piece tied to egui
+├── vendor/egui-winit/      the patched copy every build uses (D33)
+├── scripts/                measure-frame.sh, which runs the measurement batches
 ├── docs/
 └── prototipos/
 ```
@@ -310,9 +314,9 @@ more expensive every assumption that turned out to be a Linux one gets.
 
 ## Phase 3 — Bidirectional
 
-- [ ] `actions`: buttons declared in the contract that write to their pane's PTY
+- [x] `actions`: buttons declared in the contract that write to their pane's PTY (**D42**)
 - [x] **MCP** server with `panel_set`, `panel_get`, `panel_patch`, `panel_retire`, `split_open`,
-      `split_read`, `split_close`
+      `split_read`, `split_close` — the three `split_` verbs keep that word on purpose (**D44**)
 - [ ] Scoped by the pane's endpoint and the live connection: each agent reaches its own pane and only
       the auxiliary consoles that connection opened
 

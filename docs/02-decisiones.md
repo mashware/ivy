@@ -21,6 +21,12 @@ on all three platforms is Warp — and it is also the only one that meets every 
 ([07-panorama.md](07-panorama.md) → E5). That being cross-platform is rare in this category does not
 weaken D1: it marks it as what actually sets the strongest rival apart from the rest.
 
+> **Corrected on 28 September 2026: that count is the landscape's first round.** Later in August
+> the landscape reached eight analyses, and in its side-by-side table **three** run on all three
+> platforms — Warp, Orca and Herdr ([07-panorama.md](07-panorama.md) → «The seven analyzed, side by
+> side»). Being cross-platform is no longer rare in this category, and D1 stands for the reason it
+> was taken, which never depended on that.
+
 ---
 
 ## D2 — The terminal engine is consumed as a library
@@ -257,6 +263,11 @@ looked at the milliseconds would give a false impression of «this is ready»:
    stopping —`yes`, `cat /dev/urandom`— exhausts memory. The only real brake is to stop reading the
    pseudoterminal, and that lives in `term-core`.
 
+> **Corrected on 28 September 2026: neither of the two bites any more.** The system fonts reach the
+> engine since F2.9 (**D24**), and the output queue has had a ceiling since **D8**, which stops
+> reading the pseudoterminal exactly as this paragraph asked. The list is kept as what was true on
+> 9 August.
+
 **What it means for this decision.** D3 stands as it is: **egui takes what Phase 1 needs with room
 to spare**, which is exactly the role this decision gave it. What these numbers add is a question
 that before could not even be put with data —if the headroom is this, what does GPUI bring that
@@ -331,90 +342,6 @@ contradiction.
   opens **always two** consoles, so the 1-against-2 comparison stopped being measurable from inside.
   The instrument that would give it is the bench with real tiling, which is not built
   ([#33](https://github.com/mashware/agent-terminal/issues/33)).
-
----
-
-## D11 — Pasting belongs to the terminal, `Ctrl+V` belongs to the program, and what is pasted goes without controls
-
-**Decided.** `Ctrl+Shift+V` pastes: the terminal writes the clipboard's text into the program
-inside. `Ctrl+V` **does not paste** — it hands the program the control byte that corresponds to it,
-and the program decides what it means. And everything that is pasted **has its control characters
-removed**, except the tab and the line breaks.
-
-**Why the work is split between the two shortcuts, and not left to one alone.** They are different
-layers attending to each key, and that was checked by looking at what a real terminal does: in Tilix
-`Ctrl+V` does not paste, but **inside that same window** Claude does paste with `Ctrl+V`, because it
-receives the byte and has decided that for it that means pasting. Vim receives the same byte and
-enters visual block; a shell uses it for *quoted-insert*. **Who pastes with `Ctrl+V` is not the
-terminal's decision**, and keeping it would break visual block without anybody asking for it.
-
-**The technical workaround it takes to get this**, because it is not free: the desktop emits the
-**same event** for both shortcuts —checked in `egui-winit`'s source: the condition is «command + V»
-and it does not look at Shift— and **it swallows the key event**. Telling them apart demands
-reconstructing the state of the modifier keys by walking the events in order. Reading the field the
-framework publishes **is no good**: it is a single one per pass and it describes how they were at
-the **end** of the batch, not when the paste arrived.
-
-**Why the controls are filtered, and there are two different reasons.**
-
-1. **The paste mark can be closed from inside.** A clipboard that brings its closing sequence closes
-   it on its own, and whatever comes behind enters as typed — **executing with no Enter**. Removing
-   only that sequence **is not enough**: a proven attack rebuilds it by taking advantage of the fact
-   that search-and-delete does not look again at what it leaves behind.
-2. **And the wrapper does not protect from the kernel.** Control characters are processed by the
-   line discipline, which sees the bytes **before** the program does: a `0x03` interrupts, a `0x1a`
-   suspends the shell, a `0x1c` triggers a dump, a `0x04` closes the input — and with both consoles
-   closed, the window. Marking the paste changes none of that. It is the reason `xterm` and `VTE`
-   have filtered paste's controls for years.
-
-**A line break comes out differently depending on whether there is a mark or not, and getting it
-wrong shows on screen.** Without a mark the key has to be imitated, and Enter sends a **carriage
-return**. With a mark the break goes **as it is**: the program knows it is a paste and decides for
-itself. Sending it a carriage return inside the mark is putting a control character in the middle of
-a text, and it inserts it literally — a box comes out in the command and the shell prints it on
-executing. It was found by pasting two lines and looking.
-
-**What it costs, and is accepted.** A text with color sequences loses its escapes and the rest stays
-as ordinary text: pasting a colored dump leaves `[32mok[0m` on the line. It is the same thing
-`xterm` does by default. From the terminal **there is no way to tell the control the user wanted
-from the one that was slipped in**, and one whose paste can execute or suspend is worse than one
-that pastes as plain text.
-
-**What was discarded, and why.**
-
-- **Making `Ctrl+V` paste as well.** Simpler and it removes the most delicate mechanism — but it
-  takes out vim's visual block and the shell's *quoted-insert*, which are used daily.
-- **Reading the modifiers from the framework's field.** It does not tell the two shortcuts apart:
-  see above.
-- **Removing only the closing sequence.** It escapes, checked.
-- **Repeating the deletion until none is left.** It would close *that* hole and none of the
-  kernel's.
-- **The middle click** (the desktop's primary selection). `egui` does not expose it: its clipboard
-  only knows how to read and write the normal one, and the piece underneath that does have it is
-  private.
-- **Copying.** It drags mouse selection along with it and, in practice, scrollback. It stays in
-  F2.6.
-
-**What you need to know so as not to get a fright.**
-
-- **The program inside can ask for what is pasted to reach it marked**, and the terminal asks the
-  engine about it. That accessor returns a `bool` and not the engine's type, so that the terminal
-  crate carries on without letting its dependencies show through.
-- **With a clipboard that holds no text, `Ctrl+V` sent nothing — and this note got both halves
-  wrong.** The desktop swallows the key and emits no event when there is nothing to paste, so the
-  control byte did not come out either. What was written here was that it is *barely noticeable,
-  because an empty clipboard is rare*, and that *it cannot be fixed from here*. **Neither is true.**
-  An **image** on the clipboard hits the same path, and in a terminal built to host agents, handing
-  an agent a screenshot is an ordinary gesture rather than an edge — the promise this very decision
-  makes was unkeepable in exactly the case that matters most. And it was fixable: **D33** carries the
-  fix, a copy of `egui-winit` in the tree with that one `return` made conditional. Corrected on
-  8 September 2026, with the whole autopsy in D33.
-- **On macOS the two shortcuts behave differently** and this rule would break them: there the
-  «command» is ⌘, so ⌘+V would give the control byte while `Ctrl+V` arrives as a key. The first
-  build on that system is F2.7 and it will have to review this.
-- **Pasting can hang the window** for as long as the program inside does not read its input. It is
-  not pasting's doing: it is that writing to the pseudoterminal blocks with no ceiling
-  ([#50](https://github.com/mashware/agent-terminal/issues/50)). Pasting only makes it reachable.
 - **«Enqueuing» is not egui's cost: it is this project's painter**, which is still the most naive
   one possible —one cell at a time, with no cache and no tracking of what changed— calling
   `rect_filled` and `text`. Of the 3.21 ms of drawing, the only thing attributable to the framework
@@ -926,6 +853,12 @@ as boxes. The check is tied down by a test that asks the font and fails if any s
 measuring one cell, so the day it changes whoever runs the suite will find out and not whoever looks
 at the screen.
 
+> **Corrected on 28 September 2026: the boxes stopped biting with F2.9, and this set still holds.**
+> Since 25 August the machine's fonts are handed to the engine (**D24**), so CJK and the icons of a
+> modern `ls` come out with their own glyphs. They go in **behind** the built-in fonts, so the six
+> marks above are still drawn by the font they were measured in, and the test that asks the font is
+> what would say otherwise.
+
 ### What F2.8 added: the three of the claim, measured the same way
 
 **Decision.** A pane's claim — the `attention` field of **D18** — is painted with `?` (`wait`),
@@ -1125,6 +1058,93 @@ ten-thousandths.
 
 ---
 
+## D11 — Pasting belongs to the terminal, `Ctrl+V` belongs to the program, and what is pasted goes without controls
+
+**Decided.** `Ctrl+Shift+V` pastes: the terminal writes the clipboard's text into the program
+inside. `Ctrl+V` **does not paste** — it hands the program the control byte that corresponds to it,
+and the program decides what it means. And everything that is pasted **has its control characters
+removed**, except the tab and the line breaks.
+
+**Why the work is split between the two shortcuts, and not left to one alone.** They are different
+layers attending to each key, and that was checked by looking at what a real terminal does: in Tilix
+`Ctrl+V` does not paste, but **inside that same window** Claude does paste with `Ctrl+V`, because it
+receives the byte and has decided that for it that means pasting. Vim receives the same byte and
+enters visual block; a shell uses it for *quoted-insert*. **Who pastes with `Ctrl+V` is not the
+terminal's decision**, and keeping it would break visual block without anybody asking for it.
+
+**The technical workaround it takes to get this**, because it is not free: the desktop emits the
+**same event** for both shortcuts —checked in `egui-winit`'s source: the condition is «command + V»
+and it does not look at Shift— and **it swallows the key event**. Telling them apart demands
+reconstructing the state of the modifier keys by walking the events in order. Reading the field the
+framework publishes **is no good**: it is a single one per pass and it describes how they were at
+the **end** of the batch, not when the paste arrived.
+
+**Why the controls are filtered, and there are two different reasons.**
+
+1. **The paste mark can be closed from inside.** A clipboard that brings its closing sequence closes
+   it on its own, and whatever comes behind enters as typed — **executing with no Enter**. Removing
+   only that sequence **is not enough**: a proven attack rebuilds it by taking advantage of the fact
+   that search-and-delete does not look again at what it leaves behind.
+2. **And the wrapper does not protect from the kernel.** Control characters are processed by the
+   line discipline, which sees the bytes **before** the program does: a `0x03` interrupts, a `0x1a`
+   suspends the shell, a `0x1c` triggers a dump, a `0x04` closes the input — and with both consoles
+   closed, the window. Marking the paste changes none of that. It is the reason `xterm` and `VTE`
+   have filtered paste's controls for years.
+
+**A line break comes out differently depending on whether there is a mark or not, and getting it
+wrong shows on screen.** Without a mark the key has to be imitated, and Enter sends a **carriage
+return**. With a mark the break goes **as it is**: the program knows it is a paste and decides for
+itself. Sending it a carriage return inside the mark is putting a control character in the middle of
+a text, and it inserts it literally — a box comes out in the command and the shell prints it on
+executing. It was found by pasting two lines and looking.
+
+**What it costs, and is accepted.** A text with color sequences loses its escapes and the rest stays
+as ordinary text: pasting a colored dump leaves `[32mok[0m` on the line. It is the same thing
+`xterm` does by default. From the terminal **there is no way to tell the control the user wanted
+from the one that was slipped in**, and one whose paste can execute or suspend is worse than one
+that pastes as plain text.
+
+**What was discarded, and why.**
+
+- **Making `Ctrl+V` paste as well.** Simpler and it removes the most delicate mechanism — but it
+  takes out vim's visual block and the shell's *quoted-insert*, which are used daily.
+- **Reading the modifiers from the framework's field.** It does not tell the two shortcuts apart:
+  see above.
+- **Removing only the closing sequence.** It escapes, checked.
+- **Repeating the deletion until none is left.** It would close *that* hole and none of the
+  kernel's.
+- **The middle click** (the desktop's primary selection). `egui` does not expose it: its clipboard
+  only knows how to read and write the normal one, and the piece underneath that does have it is
+  private.
+- **Copying.** It drags mouse selection along with it and, in practice, scrollback. It stays in
+  F2.6.
+
+**What you need to know so as not to get a fright.**
+
+- **The program inside can ask for what is pasted to reach it marked**, and the terminal asks the
+  engine about it. That accessor returns a `bool` and not the engine's type, so that the terminal
+  crate carries on without letting its dependencies show through.
+- **With a clipboard that holds no text, `Ctrl+V` sent nothing — and this note got both halves
+  wrong.** The desktop swallows the key and emits no event when there is nothing to paste, so the
+  control byte did not come out either. What was written here was that it is *barely noticeable,
+  because an empty clipboard is rare*, and that *it cannot be fixed from here*. **Neither is true.**
+  An **image** on the clipboard hits the same path, and in a terminal built to host agents, handing
+  an agent a screenshot is an ordinary gesture rather than an edge — the promise this very decision
+  makes was unkeepable in exactly the case that matters most. And it was fixable: **D33** carries the
+  fix, a copy of `egui-winit` in the tree with that one `return` made conditional. Corrected on
+  8 September 2026, with the whole autopsy in D33.
+- **On macOS the two shortcuts behave differently** and this rule would break them: there the
+  «command» is ⌘, so ⌘+V would give the control byte while `Ctrl+V` arrives as a key. The first
+  build on that system is F2.7 and it will have to review this.
+- **Pasting can hang the window** for as long as the program inside does not read its input. It is
+  not pasting's doing: it is that writing to the pseudoterminal blocks with no ceiling
+  ([#50](https://github.com/mashware/agent-terminal/issues/50)). Pasting only makes it reachable.
+  **Corrected on 28 September 2026: it no longer can.** Since **D29** the write goes to a thread of
+  its own per console and the window does not wait for the program, and since **D60** a write
+  arriving once too much is already owed is refused and said over the console, never waited for.
+
+---
+
 ## D12 — The pseudoterminal keeps the kernel's output processing, even though it costs
 
 **Decided.** The pseudoterminal does **not** touch `termios`: `OPOST` stays on and the kernel goes
@@ -1260,8 +1280,9 @@ because the number comes out plausible.
 > is what holds up this decision's conclusions.
 
 Three batches, **two runs each**, in release, without touching the machine, with
-`scripts/measure-frame.sh C|F|G`. All three with the four panels publishing at a rate of once per
-second, so that they can be compared with each other. A load of 44 MiB per dumping console.
+`scripts/measure-frame.sh C|F|G`. All three with every panel publishing at a rate of once per
+second —two in C, four in F and G—, so that they can be compared with each other. A load of 44 MiB
+per dumping console.
 
 | | **C** — 1 tab | **F** — 2, the background one idle | **G** — 2, the background one dumping |
 |---|---|---|---|
@@ -4247,6 +4268,10 @@ test functions**, and the one with the most tests in the repository. It goes alo
 and the cut was not by size but because *«all of `app` except the big file»* and *«the big file»*
 are two different products.
 
+> **Checked on 28 September 2026: the file had 23 142 lines**, the figure the eight-modules section
+> gives, both before this delivery and after it (`git cat-file` over the revisions on either side).
+> The 23 143 above is kept as written; no revision that reached `main` had it.
+
 **It was split into five areas by first appearance of the name** —constants and geometry, the
 console, the tree and the tabs, the window, and the 16 000 lines of tests— and each area had its own
 map proposal. **The five came out mutually consistent: 317 names and zero conflicts**, not one with
@@ -4868,6 +4893,11 @@ as a tool going out and never read as a risk coming in.
   dumping hundreds of MiB/s does on the other side, which is why D8's ceiling is not copied over.
 - **What the program is not taking is published**, and the frame says it once. `Pty::backlog` answers
   how many bytes are owed and since when.
+
+> **Corrected on 28 September 2026: the queue has a ceiling now.** The deferred row below — the
+> ceiling with backpressure to the caller — was decided in **D60**: once 256 KiB are owed, a further
+> write is refused and said over the console, and nothing already owed is dropped. The «carries no
+> ceiling» bullet and that row are kept as what this decision said on its day.
 
 ### What was discarded, and why
 
@@ -6409,6 +6439,15 @@ question: what may a connection name.** `split_open`, `split_read` and `split_cl
 other than the one whose channel asked, which is the first time a message has to point at a pane —
 and pointing is exactly what the transport refused to allow.
 
+**The three verbs keep `split` in their name, and that is not a slip against D27.** D27 gives
+`split` to the gesture and `pane` to the thing; `split_open` *is* the gesture — it splits the pane
+that asked — and its two siblings keep the prefix so the three read as one surface. They are names
+on the wire, declared by the channel's crate, and nothing in D27's rules turns them away. Renaming
+them would change the wire contract, not correct a translation, so on 28 September 2026 they were
+kept ([#147](https://github.com/mashware/agent-terminal/issues/147)). *Discarded:* `pane_open` /
+`pane_read` / `pane_close`, which buys consistency with the noun at the price of a change across the
+wire, the MCP binary, the application and four documents, for a first verb that already reads right.
+
 ### The decision, in four parts
 
 **1. The handle is sixteen random bytes, and it is scoped to the connection that opened the pane.**
@@ -6670,87 +6709,6 @@ measured series nobody asked for.
 
 ---
 
-## D48 — The application can write the document back out, and what the writer promises is a round trip, not the producer's bytes
-
-**Status: taken.** Delivered in the first PR of the milestone that lets a producer read its panel
-back and change one line of it.
-
-**[D17](#d17--the-contract-is-the-document-not-the-file-the-source-of-truth-is-the-apps-state) said
-the source of truth is the state the application holds per pane, and until now nothing had to test
-that literally.** The application read documents and never wrote one; while the only verb was
-`panel_set` it could, in principle, have kept the bytes as they arrived and handed them back. It
-cannot any more: the milestone this belongs to goes on to change a document a line at a time, and a
-patched document has no bytes of its own. So the writer is the piece of real work, and the whole
-decision is what it is allowed to promise.
-
-### 1. It cannot promise the producer's bytes, and pretending otherwise would be the mistake
-
-The parse is lossy **on purpose** — that is the contract's first rule and it is the right one: a
-document is somebody's summary, so an unknown field is dropped, an indentation past 64 is clipped, a
-list of buttons past eight is cut and a word none of the vocabularies knows falls away, rather than
-the whole panel being lost over a field nobody looks at. A writer that claimed fidelity to what
-arrived would therefore be claiming something the reader already threw away.
-
-**What it promises instead is that the round trip is closed:**
-
-```text
-parse(serialize(p)) == p          for every p the parser can produce
-serialize(parse(serialize(p))) == serialize(p)
-```
-
-which is the property a producer actually leans on — read it, edit it, publish it, and the panel is
-what the document says.
-
-### 2. It never grows a document, and that is a promise about bytes rather than values
-
-**This came out of the review of the design and it had already broken an acceptance criterion on
-paper.** The first shape wrote `"text"` on every line. A line published as `{"indent":1}` — twelve
-bytes — came back as `{"text":"","indent":1}`, twenty-two; a document of some twenty thousand such
-lines is legal going in and **over the 256 KiB ceiling coming out**. A panel painting perfectly would
-have answered *over 256 KiB* to a producer asking what was on it, for a document the contract's own
-parser had produced.
-
-The rule that fixes it is one line and it is the writer's whole shape: **emit no field the document
-did not carry**, empty `text` included, defaults included. Every other difference between what
-arrived and what goes out shrinks it — whitespace gone, escapes resolved, unknown fields dropped — so
-
-```text
-len(serialize(p)) ≤ len(the bytes p was parsed from)
-```
-
-and the tests that hold it are written over **compact** sources on purpose: a pretty-printed document
-shrinks by so much that the assertion would pass however much the writer added.
-
-**The price, named here so it is not read later as a bug**: a producer that published an explicit
-`"header": true` reads back a document without it. After the parse there is no difference between
-*the producer did not say* and *the producer said the default*, so writing one would assert something
-the application does not know.
-
-### 3. One line, and no newline anywhere
-
-The reply that carries a document is one line on a newline-framed channel, and it is **the only reply
-that is interpolated raw instead of being escaped** — because escaping a document would roughly
-double a large one and make the channel refuse an answer the file transport would have accepted,
-which is the two-transport drift **D17** forbids, seen from the reply side. What keeps that safe is
-not the reply: it is this writer, whose every string goes through the same escaping and whose
-structure carries no newline of its own. There is a test on the emitted bytes for exactly that, and
-it is the one property the round trip cannot see — a raw newline between two tokens re-parses
-perfectly.
-
-### Discarded
-
-| Discarded | Why |
-|---|---|
-| Keeping the producer's original bytes and handing those back | There are none once a document has been patched, which is the whole reason this exists |
-| A `Serialize` derive on the document's types | A dependency feature to buy the half the channel's reply already buys by hand, in the one crate that exists in order to survive the interface being rewritten, and whose manifest carries a written reason per dependency |
-| Writing through a generic JSON value | The clipping, the truncation and the per-field tolerance do not survive a round trip through a value that knows none of them, and the drift would be per field — which is exactly the failure the one-parser rule exists to prevent |
-| Emitting the defaults, so a reader need not know them | It asserts something the application does not know: after the parse, *absent* and *the default* are the same document |
-| Emitting `written_at` | It is the file's own date, held by the application, and the parser does not read it back: it would invent a contract field |
-| Dividing the expiry by sixty | The parse saturates at `u64::MAX` seconds, and a plain division comes back fifteen seconds short of it and does not saturate again. Rounding up overflows into the saturation and lands where it started, and is exact everywhere else |
-| Asserting on the emitted text rather than on the re-parsed panel | **D30**: a writer that emitted the expiry in seconds would satisfy a text assertion and still hand back a different document. The two exceptions are the two properties a round trip cannot reach — the newline and the growth |
-
----
-
 ## D47 — A line carries an address its producer chose, and a patch is all-or-nothing over it
 
 **Status: taken.** Delivered in the second PR of the milestone that lets a producer read its panel
@@ -6938,6 +6896,87 @@ the suite holds the batch table so that `X` is `Y` minus the patch and nobody el
 | Measuring the large patch against `S` | `S` publishes seven lines, so `Y − S` would be the large document and not the patch. `X` publishes the same document as `Y` and nothing else changes between them, which the suite holds on the batch table |
 | One long line to reach the ceiling | It measures the painter's layout — 65.8 ms the first time for a line that size — instead of the patch. The large document is 1 590 lines of a working panel's length, every one keyed so the index a patch builds is at its widest |
 | Passing the large document as an argument | Linux refuses it with `E2BIG`: one argument may not exceed `MAX_ARG_STRLEN`, and the document is about twice that |
+
+---
+
+## D48 — The application can write the document back out, and what the writer promises is a round trip, not the producer's bytes
+
+**Status: taken.** Delivered in the first PR of the milestone that lets a producer read its panel
+back and change one line of it.
+
+**[D17](#d17--the-contract-is-the-document-not-the-file-the-source-of-truth-is-the-apps-state) said
+the source of truth is the state the application holds per pane, and until now nothing had to test
+that literally.** The application read documents and never wrote one; while the only verb was
+`panel_set` it could, in principle, have kept the bytes as they arrived and handed them back. It
+cannot any more: the milestone this belongs to goes on to change a document a line at a time, and a
+patched document has no bytes of its own. So the writer is the piece of real work, and the whole
+decision is what it is allowed to promise.
+
+### 1. It cannot promise the producer's bytes, and pretending otherwise would be the mistake
+
+The parse is lossy **on purpose** — that is the contract's first rule and it is the right one: a
+document is somebody's summary, so an unknown field is dropped, an indentation past 64 is clipped, a
+list of buttons past eight is cut and a word none of the vocabularies knows falls away, rather than
+the whole panel being lost over a field nobody looks at. A writer that claimed fidelity to what
+arrived would therefore be claiming something the reader already threw away.
+
+**What it promises instead is that the round trip is closed:**
+
+```text
+parse(serialize(p)) == p          for every p the parser can produce
+serialize(parse(serialize(p))) == serialize(p)
+```
+
+which is the property a producer actually leans on — read it, edit it, publish it, and the panel is
+what the document says.
+
+### 2. It never grows a document, and that is a promise about bytes rather than values
+
+**This came out of the review of the design and it had already broken an acceptance criterion on
+paper.** The first shape wrote `"text"` on every line. A line published as `{"indent":1}` — twelve
+bytes — came back as `{"text":"","indent":1}`, twenty-two; a document of some twenty thousand such
+lines is legal going in and **over the 256 KiB ceiling coming out**. A panel painting perfectly would
+have answered *over 256 KiB* to a producer asking what was on it, for a document the contract's own
+parser had produced.
+
+The rule that fixes it is one line and it is the writer's whole shape: **emit no field the document
+did not carry**, empty `text` included, defaults included. Every other difference between what
+arrived and what goes out shrinks it — whitespace gone, escapes resolved, unknown fields dropped — so
+
+```text
+len(serialize(p)) ≤ len(the bytes p was parsed from)
+```
+
+and the tests that hold it are written over **compact** sources on purpose: a pretty-printed document
+shrinks by so much that the assertion would pass however much the writer added.
+
+**The price, named here so it is not read later as a bug**: a producer that published an explicit
+`"header": true` reads back a document without it. After the parse there is no difference between
+*the producer did not say* and *the producer said the default*, so writing one would assert something
+the application does not know.
+
+### 3. One line, and no newline anywhere
+
+The reply that carries a document is one line on a newline-framed channel, and it is **the only reply
+that is interpolated raw instead of being escaped** — because escaping a document would roughly
+double a large one and make the channel refuse an answer the file transport would have accepted,
+which is the two-transport drift **D17** forbids, seen from the reply side. What keeps that safe is
+not the reply: it is this writer, whose every string goes through the same escaping and whose
+structure carries no newline of its own. There is a test on the emitted bytes for exactly that, and
+it is the one property the round trip cannot see — a raw newline between two tokens re-parses
+perfectly.
+
+### Discarded
+
+| Discarded | Why |
+|---|---|
+| Keeping the producer's original bytes and handing those back | There are none once a document has been patched, which is the whole reason this exists |
+| A `Serialize` derive on the document's types | A dependency feature to buy the half the channel's reply already buys by hand, in the one crate that exists in order to survive the interface being rewritten, and whose manifest carries a written reason per dependency |
+| Writing through a generic JSON value | The clipping, the truncation and the per-field tolerance do not survive a round trip through a value that knows none of them, and the drift would be per field — which is exactly the failure the one-parser rule exists to prevent |
+| Emitting the defaults, so a reader need not know them | It asserts something the application does not know: after the parse, *absent* and *the default* are the same document |
+| Emitting `written_at` | It is the file's own date, held by the application, and the parser does not read it back: it would invent a contract field |
+| Dividing the expiry by sixty | The parse saturates at `u64::MAX` seconds, and a plain division comes back fifteen seconds short of it and does not saturate again. Rounding up overflows into the saturation and lands where it started, and is exact everywhere else |
+| Asserting on the emitted text rather than on the re-parsed panel | **D30**: a writer that emitted the expiry in seconds would satisfy a text assertion and still hand back a different document. The two exceptions are the two properties a round trip cannot reach — the newline and the growth |
 
 ---
 
