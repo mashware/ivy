@@ -18,6 +18,8 @@
 //! cargo run --release --example leak -p app -- yes         # two-byte lines, without end
 //! cargo run --release --example leak -p app -- bounded     # ~10 MiB: it terminates
 //! cargo run --release --example leak -p app -- no-bridge   # urandom, consuming the channel bare
+//! cargo run --release --example leak -p app -- paceless-keep   # urandom, a bare `for` that keeps it all
+//! cargo run --release --example leak -p app -- paceless-count  # the same `for`, keeping nothing
 //! ```
 
 use std::sync::mpsc::Receiver;
@@ -39,7 +41,8 @@ const FRAME: Duration = Duration::from_millis(16);
 /// megabytes, so overrunning this can only mean that nothing is holding back the producer.
 const CEILING: u64 = 512 * 1024;
 
-/// When to give up waiting for it to grow, in a scenario that should terminate.
+/// When to give up waiting for it to grow, in a scenario that should terminate — or, in
+/// `paceless-count`, how long it has to stay flat to be called bounded.
 const DEADLINE: Duration = Duration::from_secs(30);
 
 /// How often a row of the table is noted.
@@ -51,7 +54,7 @@ fn main() {
     let (program, args): (&str, &[&str]) = match scenario.as_str() {
         // Raw bytes and endless, in big blocks: the load that really delivers faster than it is
         // collected. It is the issue's case.
-        "urandom" | "no-bridge" => ("cat", &["/dev/urandom"]),
+        "urandom" | "no-bridge" | "paceless-keep" | "paceless-count" => ("cat", &["/dev/urandom"]),
         // The same without the cost of generating randomness, in case the machine had it expensive and
         // what was measuring the limit were the generator and not the chain.
         "zeros" => ("cat", &["/dev/zero"]),
@@ -70,7 +73,9 @@ fn main() {
         ),
         other => {
             eprintln!("unknown scenario: {other}");
-            eprintln!("use: urandom | zeros | yes | bounded | no-bridge");
+            eprintln!(
+                "use: urandom | zeros | yes | bounded | no-bridge | paceless-keep | paceless-count"
+            );
             std::process::exit(2);
         }
     };
@@ -86,6 +91,8 @@ fn main() {
 
     let verdict = match scenario.as_str() {
         "no-bridge" => pump_direct(output, resident_at_start),
+        "paceless-keep" => paceless(output, resident_at_start, true),
+        "paceless-count" => paceless(output, resident_at_start, false),
         _ => pump_through_bridge(output, resident_at_start),
     };
 
@@ -126,6 +133,30 @@ fn main() {
                 DEADLINE.as_secs()
             );
         }
+        Verdict::Kept { seconds, growth } => {
+            println!(
+                "KEPT: resident memory grew {growth} KiB in {seconds:.1} s and passed the \
+                 {CEILING} KiB cap, growing with what this consumer kept."
+            );
+            println!(
+                "The channel holds at most eight reads: what grew is the consumer's own storage. Compare \
+                 paceless-count, the same drain keeping nothing."
+            );
+        }
+        Verdict::Bounded {
+            seconds,
+            growth,
+            collected,
+        } => {
+            println!(
+                "BOUNDED: {:.1} MiB drained without pace in {seconds:.1} s, and resident memory \
+                 never grew more than {growth} KiB.",
+                collected as f64 / (1024.0 * 1024.0)
+            );
+            println!(
+                "Nothing was kept, so nothing grew: what a consumer costs in memory is what it keeps."
+            );
+        }
     }
 }
 
@@ -134,6 +165,16 @@ enum Verdict {
     Reproduced { seconds: f64, growth: u64 },
     /// The program closed its output on its own.
     Terminated {
+        seconds: f64,
+        growth: u64,
+        collected: u64,
+    },
+    /// Passed the memory cap in `paceless-keep`, where growing is the point: what grew is what the
+    /// consumer kept, not anything the chain holds, so it is not the failure this bench reproduces.
+    Kept { seconds: f64, growth: u64 },
+    /// Drained without pace for the whole deadline, keeping nothing, and stayed under the cap. Only
+    /// `paceless-count` reaches it: it is that scenario's expected outcome, not a missing one.
+    Bounded {
         seconds: f64,
         growth: u64,
         collected: u64,
@@ -234,6 +275,82 @@ fn pump_direct(output: Receiver<Vec<u8>>, resident_at_start: u64) -> Verdict {
         }
 
         std::thread::sleep(FRAME);
+    }
+}
+
+/// No bridge and no pace: a bare `for` over the channel, which is what a new consumer writes first.
+///
+/// It separates what the channel holds from what the consumer keeps. With `keep` the memory grows
+/// with every byte read; without it the same drain stays put. The difference is the consumer's
+/// storage and nothing else, and that is why the ceiling lives in whoever stores and not in the type
+/// that hands the output out.
+///
+/// **It is not evidence that the channel's ceiling holds**: `cat /dev/urandom` delivers slower than a
+/// bare `for` drains, so the channel sits nearly empty and is never filled. What bounds the channel is
+/// its `sync_channel`, and `term-core`'s own tests pin that.
+///
+/// Resident memory is only read once per [`SAMPLING`], and only when a chunk arrives: reading
+/// `/proc/self/status` on every chunk would make the reading, not the keeping, what is measured.
+/// **The firewall does not wait for that sample**: this is the one scenario that grows on purpose,
+/// at the full speed of the load, and half a second of it is hundreds of MiB past [`CEILING`]. So
+/// what is kept is held against the cap on every chunk, which costs a comparison.
+fn paceless(output: Receiver<Vec<u8>>, resident_at_start: u64, keep: bool) -> Verdict {
+    let mut kept: Vec<u8> = Vec::new();
+    let mut collected: u64 = 0;
+    let started = Instant::now();
+    let mut last_sample = Instant::now();
+    let mut max_growth = 0;
+
+    for chunk in output {
+        collected += chunk.len() as u64;
+        if keep {
+            kept.extend_from_slice(&chunk);
+            if kept.len() as u64 / 1024 > CEILING {
+                let resident = resident_kib().unwrap_or(resident_at_start);
+                return Verdict::Kept {
+                    seconds: started.elapsed().as_secs_f64(),
+                    growth: resident.saturating_sub(resident_at_start),
+                };
+            }
+        }
+
+        if last_sample.elapsed() >= SAMPLING {
+            let resident = resident_kib().unwrap_or(resident_at_start);
+            let growth = resident.saturating_sub(resident_at_start);
+            max_growth = max_growth.max(growth);
+            row(started.elapsed(), resident, growth, collected);
+            last_sample = Instant::now();
+
+            if growth > CEILING {
+                let seconds = started.elapsed().as_secs_f64();
+                return if keep {
+                    Verdict::Kept { seconds, growth }
+                } else {
+                    Verdict::Reproduced { seconds, growth }
+                };
+            }
+        }
+        if started.elapsed() > DEADLINE {
+            // Keeping nothing, reaching the deadline under the cap is the result, not its absence.
+            // One last look first: the samples are half a second apart, and «never grew more
+            // than» is a claim about the whole run, not about the samples.
+            if !keep {
+                let resident = resident_kib().unwrap_or(resident_at_start);
+                return Verdict::Bounded {
+                    seconds: started.elapsed().as_secs_f64(),
+                    growth: max_growth.max(resident.saturating_sub(resident_at_start)),
+                    collected,
+                };
+            }
+            return Verdict::Deadline { growth: max_growth };
+        }
+    }
+
+    // The channel closed: the program died, which `cat /dev/urandom` does not do on its own.
+    Verdict::Terminated {
+        seconds: started.elapsed().as_secs_f64(),
+        growth: max_growth,
+        collected,
     }
 }
 

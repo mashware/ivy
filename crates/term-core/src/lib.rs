@@ -452,8 +452,13 @@ impl Pty {
     ///
     /// **The channel has a ceiling, and that is what brakes the program inside.** See
     /// [`READS_IN_FLIGHT`]. Whoever drains the channel without ever stopping —a `for` over it, with no
-    /// pace or limit of its own— leaves the ceiling without effect and hands the problem back to where
-    /// it was.
+    /// pace or limit of its own— leaves the ceiling without effect: the program inside runs flat out.
+    /// **What that costs in memory is decided by the consumer, not by the channel**: one that keeps
+    /// what it reads grows with it, and one that does not stays put. No shape of this function could
+    /// bound the first — a pull `read(max)` called in a loop keeps just the same — so the bound lives
+    /// where the bytes are kept, as the application's bridge does with a ceiling on its own queue.
+    /// Both cases are measured by the application crate's leak example, scenarios «paceless-keep» and
+    /// «paceless-count».
     pub fn spawn(program: &str, args: &[&str], size: Size) -> Result<(Self, Receiver<Vec<u8>>)> {
         Self::spawn_with_env(program, args, size, &[])
     }
