@@ -12,13 +12,13 @@ created_at: '2026-09-28T16:49:54.503Z'
 updated_at: '2026-09-28T16:49:54.503Z'
 last_verified: '2026-09-28T16:49:54.503Z'
 file_paths:
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
   - crates/app/tests/glossary.rs
   - crates/app/tests/decisions.rs
 symbols:
   - NOT_OURS
 content_hashes:
-  docs/02-decisiones.md: 'sha256:b53044393a7694d2c1f56d6f41680d1dd0df011e6f7448de57e3b6d5edc66e4d'
+  docs/02-decisions.md: 'sha256:b53044393a7694d2c1f56d6f41680d1dd0df011e6f7448de57e3b6d5edc66e4d'
   crates/app/tests/glossary.rs: 'sha256:90d6c32c3639ed72476a08556a5782aedb6529d909f3629eb7791aafedf52ae2'
 tags:
   - decisions-record
@@ -44,4 +44,4 @@ Two more habits the same delivery paid for:
 
 ## Where it lives
 
-`docs/02-decisiones.md` (the dated notes in D1, D3's 9 August annex, D9, D11, D29, D44 and the big-file annex of D27); the order guard is `crates/app/tests/decisions.rs`; `NOT_OURS` is in `crates/app/tests/glossary.rs`.
+`docs/02-decisions.md` (the dated notes in D1, D3's 9 August annex, D9, D11, D29, D44 and the big-file annex of D27); the order guard is `crates/app/tests/decisions.rs`; `NOT_OURS` is in `crates/app/tests/glossary.rs`.

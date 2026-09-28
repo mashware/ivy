@@ -13,13 +13,13 @@ updated_at: '2026-09-06T19:30:45.543Z'
 last_verified: '2026-09-06T19:30:45.543Z'
 file_paths:
   - crates/app/src/keyboard.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - paste_or_hold
   - HeldPaste
 content_hashes:
   crates/app/src/keyboard.rs: 'sha256:c427780eccb982faa34da9e6de95c43c774cdcbfc1df64cab0596327ca7cb199'
-  docs/02-decisiones.md: 'sha256:96121e6d8650618d166ab688841fe0b2e590d7e6b16a0f4491c8735d188870d7'
+  docs/02-decisions.md: 'sha256:96121e6d8650618d166ab688841fe0b2e590d7e6b16a0f4491c8735d188870d7'
 tags:
   - paste
   - security

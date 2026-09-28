@@ -16,7 +16,7 @@ file_paths:
   - crates/term-core/src/lib.rs
   - crates/term-core/examples/closing.rs
   - crates/app/src/closing.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - Pty
   - Drop
@@ -30,7 +30,7 @@ content_hashes:
   crates/term-core/src/lib.rs: 'sha256:7d458cd12c3301833284d892b02b1731909b406a21779d771cb71eec244fddb9'
   crates/term-core/examples/closing.rs: 'sha256:86f214f6bd9fca8794efa504f6f028044afaf3bb751c4cc96c3be463ac094e59'
   crates/app/src/closing.rs: 'sha256:a611022a376f88bffac12049a7242c76013f52ae9d91f614439d3be4575eeeb4'
-  docs/02-decisiones.md: 'sha256:d2dcb9abf55336e4eec456ec7bdf9faf9da3aadc5306c5f699b6fc7bbdf5fa83'
+  docs/02-decisions.md: 'sha256:d2dcb9abf55336e4eec456ec7bdf9faf9da3aadc5306c5f699b6fc7bbdf5fa83'
 tags:
   - measured
   - closing
@@ -85,4 +85,4 @@ Every mechanism here is Linux-specific — the kernel hangup, `EIO`, the `VEOF` 
 
 ## Where it lives
 
-`Drop for Pty`, `hang_up` and `READER_GIVE_UP` in `crates/term-core/src/lib.rs`; the reproduction is `crates/term-core/examples/closing.rs` (seven rows, run by hand, exits non-zero if a row costs something its own explanation does not cover). Regression tests in that crate's `mod tests`: `closing_does_not_hang_when_a_survivor_holds_the_pseudoterminal`, `closing_an_ordinary_console_does_not_spend_the_abandon_deadline`, and D55's three. The destructor is walked from `crates/app/src/closing.rs`. Decisions: **D32** and **D55** in `docs/02-decisiones.md`. Tickets: #62, #196.
+`Drop for Pty`, `hang_up` and `READER_GIVE_UP` in `crates/term-core/src/lib.rs`; the reproduction is `crates/term-core/examples/closing.rs` (seven rows, run by hand, exits non-zero if a row costs something its own explanation does not cover). Regression tests in that crate's `mod tests`: `closing_does_not_hang_when_a_survivor_holds_the_pseudoterminal`, `closing_an_ordinary_console_does_not_spend_the_abandon_deadline`, and D55's three. The destructor is walked from `crates/app/src/closing.rs`. Decisions: **D32** and **D55** in `docs/02-decisions.md`. Tickets: #62, #196.

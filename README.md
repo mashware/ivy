@@ -33,8 +33,8 @@ Every agent goes back to being just an agent.
 | | |
 |---|---|
 | **Working** | `cargo run -p app --release` opens a terminal that gets used: tabs, panes placed where you want them, a shell inside, colours, `vim`, keyboard, resizing and large dumps without freezing the window. Each pane paints the status panel its producer publishes, is dragged and dropped with the mouse, remembers where you left it, says when the work there is claiming you, and lets you scroll back, select and copy. **Fifteen milestones closed**: F1.0 to F1.6, F2.1 to F2.6, F2.8 and F2.9 |
-| **Also working** | `flow-panel` — the status panel and its contract, over WezTerm ([prototipos/](prototipos/)) |
-| **Decided** | Stack, channel architecture, economic model, and twenty-eight decisions with their reasons ([docs/02-decisiones.md](docs/02-decisiones.md)) |
+| **Also working** | `flow-panel` — the status panel and its contract, over WezTerm ([prototypes/](prototypes/)) |
+| **Decided** | Stack, channel architecture, economic model, and twenty-eight decisions with their reasons ([docs/02-decisions.md](docs/02-decisions.md)) |
 | **Next** | **F2.12** — the whole repository moves to English. It goes ahead of everything else, and the reason is written down in D27. Behind it: macOS and Windows, and the per-pane header ([docs/05-roadmap.md](docs/05-roadmap.md)) |
 
 ## Documentation
@@ -42,10 +42,11 @@ Every agent goes back to being just an agent.
 | Document | Contents |
 |---|---|
 | [01-vision.md](docs/01-vision.md) | What it is, who it is for, and what it is not |
-| [02-decisiones.md](docs/02-decisiones.md) | Technical decisions with their reason and what was discarded |
-| [03-arquitectura.md](docs/03-arquitectura.md) | The pieces and the three channels |
-| [04-contrato-panel.md](docs/04-contrato-panel.md) | Specification of `panel.json` |
+| [02-decisions.md](docs/02-decisions.md) | Technical decisions with their reason and what was discarded |
+| [03-architecture.md](docs/03-architecture.md) | The pieces and the three channels |
+| [04-panel-contract.md](docs/04-panel-contract.md) | Specification of `panel.json` |
 | [05-roadmap.md](docs/05-roadmap.md) | Phases, in order, with what is parked |
-| [06-referencias.md](docs/06-referencias.md) | How each terminal is built, with data |
-| [07-panorama.md](docs/07-panorama.md) | Who is in the space and what to steal from each |
-| [09-glosario-de-prosa.md](docs/09-glosario-de-prosa.md) | The crib the English prose is written against |
+| [06-references.md](docs/06-references.md) | How each terminal is built, with data |
+| [07-landscape.md](docs/07-landscape.md) | Who is in the space and what to steal from each |
+| [08-configuration.md](docs/08-configuration.md) | The settings file: its keys, and what happens when one is wrong |
+| [09-prose-glossary.md](docs/09-prose-glossary.md) | The crib the English prose is written against |

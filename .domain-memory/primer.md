@@ -89,5 +89,5 @@ multiplexer of remote sessions (that is tmux/Zellij), and it does not rewrite th
 Rust 1.97.1, pinned exactly rather than as a range because the numbers this project publishes are
 only comparable with each other if the compiler is the same. **GPUI** for the product and **egui**
 for prototyping (D3); Electron/Tauri + xterm.js discarded for its ceiling with many panes. The live
-decisions are in `docs/02-decisiones.md` (D1–D28) and the phased plan in `docs/05-roadmap.md`: Part
+decisions are in `docs/02-decisions.md` (D1–D28) and the phased plan in `docs/05-roadmap.md`: Part
 I defines what belongs to each phase and Part II how it is built.

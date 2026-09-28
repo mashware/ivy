@@ -12,14 +12,14 @@ created_at: '2026-08-24T08:26:17.392Z'
 updated_at: '2026-08-24T08:26:17.392Z'
 last_verified: '2026-08-24T08:26:17.392Z'
 file_paths:
-  - docs/02-decisiones.md
-  - docs/03-arquitectura.md
-  - docs/04-contrato-panel.md
+  - docs/02-decisions.md
+  - docs/03-architecture.md
+  - docs/04-panel-contract.md
 symbols: []
 content_hashes:
-  docs/02-decisiones.md: 'sha256:97753287aa018f84f87473e2872f7347a4aacb199a69cc2007289f3c34ee1475'
-  docs/03-arquitectura.md: 'sha256:04750055e66a4260a0e5342bf03a5b365859fca8a888a7e9b61b6826701ff321'
-  docs/04-contrato-panel.md: 'sha256:95629fb310672544479a213c3275547f03e137cc6cdad1da3920c8076c83eba9'
+  docs/02-decisions.md: 'sha256:97753287aa018f84f87473e2872f7347a4aacb199a69cc2007289f3c34ee1475'
+  docs/03-architecture.md: 'sha256:04750055e66a4260a0e5342bf03a5b365859fca8a888a7e9b61b6826701ff321'
+  docs/04-panel-contract.md: 'sha256:95629fb310672544479a213c3275547f03e137cc6cdad1da3920c8076c83eba9'
 tags:
   - contract
   - transport
@@ -60,4 +60,4 @@ feature_id: feat_panel-contract_8y2gc0
 
 ## Where it lives
 
-`docs/02-decisiones.md` → **D17** (the whole decision with the table and what was discarded) and **D5** (the table of channels, which no longer names `panel.json` as if it were the channel). `docs/04-contrato-panel.md`, split into **Part I — The document** and **Part II — The transports**. `docs/03-arquitectura.md` → «The three channels», channel 1.
+`docs/02-decisions.md` → **D17** (the whole decision with the table and what was discarded) and **D5** (the table of channels, which no longer names `panel.json` as if it were the channel). `docs/04-panel-contract.md`, split into **Part I — The document** and **Part II — The transports**. `docs/03-architecture.md` → «The three channels», channel 1.

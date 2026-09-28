@@ -11,6 +11,7 @@
 #![allow(dead_code)]
 
 use std::collections::BTreeSet;
+use std::ffi::OsStr;
 use std::path::Path;
 
 /// Lowercase, and Spanish accents folded onto ASCII.
@@ -42,7 +43,23 @@ pub fn fold(text: &str) -> String {
 /// declared file that is renamed or deleted is a compile error; the walk closes the opposite hole, a
 /// file that exists on disk and that no list declares.
 pub fn rust_sources(root: &Path, dirs: &[&str]) -> BTreeSet<String> {
-    fn walk(dir: &Path, root: &Path, found: &mut BTreeSet<String>) {
+    // Exact, because rustc resolves `mod foo;` to `foo.rs` and never to `foo.RS`.
+    files_below(root, dirs, &|extension| extension == "rs")
+}
+
+/// Every Markdown file below each of `dirs`, listed the way [`rust_sources`] lists the Rust ones.
+///
+/// **The extension is compared ignoring case**, because a document is read by people and a
+/// `NOTES.MD` is as much a document as a `notes.md` — and an exact match would let it walk past
+/// the census that asked for Markdown.
+pub fn markdown_below(root: &Path, dirs: &[&str]) -> BTreeSet<String> {
+    files_below(root, dirs, &|extension| {
+        extension.eq_ignore_ascii_case("md")
+    })
+}
+
+fn files_below(root: &Path, dirs: &[&str], keep: &dyn Fn(&OsStr) -> bool) -> BTreeSet<String> {
+    fn walk(dir: &Path, root: &Path, keep: &dyn Fn(&OsStr) -> bool, found: &mut BTreeSet<String>) {
         let entries = std::fs::read_dir(dir)
             .unwrap_or_else(|failure| panic!("cannot read {}: {failure}", dir.display()));
         for entry in entries {
@@ -54,8 +71,8 @@ pub fn rust_sources(root: &Path, dirs: &[&str]) -> BTreeSet<String> {
                 panic!("cannot read the file type of {}: {failure}", path.display())
             });
             if file_type.is_dir() {
-                walk(&path, root, found);
-            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                walk(&path, root, keep, found);
+            } else if path.extension().is_some_and(keep) {
                 let relative = path
                     .strip_prefix(root)
                     .expect("a file found below the root has the root as its prefix")
@@ -71,7 +88,7 @@ pub fn rust_sources(root: &Path, dirs: &[&str]) -> BTreeSet<String> {
 
     let mut found = BTreeSet::new();
     for dir in dirs {
-        walk(&root.join(dir), root, &mut found);
+        walk(&root.join(dir), root, keep, &mut found);
     }
     found
 }

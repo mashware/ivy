@@ -13,7 +13,7 @@ updated_at: '2026-09-25T18:49:01.943Z'
 last_verified: '2026-09-25T18:49:01.943Z'
 file_paths:
   - crates/term-core/src/lib.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - hang_up
   - send_signal
@@ -21,7 +21,7 @@ symbols:
   - HangUp
 content_hashes:
   crates/term-core/src/lib.rs: 'sha256:7d458cd12c3301833284d892b02b1731909b406a21779d771cb71eec244fddb9'
-  docs/02-decisiones.md: 'sha256:d2dcb9abf55336e4eec456ec7bdf9faf9da3aadc5306c5f699b6fc7bbdf5fa83'
+  docs/02-decisions.md: 'sha256:d2dcb9abf55336e4eec456ec7bdf9faf9da3aadc5306c5f699b6fc7bbdf5fa83'
 tags:
   - closing
   - signals
@@ -41,4 +41,4 @@ feature_id: feat_term-core_nx0g1r
 
 ## Where it lives
 
-crates/term-core/src/lib.rs — `hang_up`, `send_signal`, `Drop for Pty`; docs/02-decisiones.md D56 (and D55's struck-through «one hole»)
+crates/term-core/src/lib.rs — `hang_up`, `send_signal`, `Drop for Pty`; docs/02-decisions.md D56 (and D55's struck-through «one hole»)

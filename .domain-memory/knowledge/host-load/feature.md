@@ -46,4 +46,4 @@ It does not depend on `term-core` or on any other crate: it is a writer to `stdo
 
 ## Where it lives
 
-`crates/host-load/`. The checkable logic in `src/lib.rs` (`build_load`, `start_instant`, `pace_delay`, `Run`, `aggregate`); the binary and the argument parsing in `src/main.rs`. The measurement protocol and the reference numbers of WezTerm and Orca are in the `//!` of `lib.rs`. The decision that originates it, in `docs/02-decisiones.md`, D3, section «Measured».
+`crates/host-load/`. The checkable logic in `src/lib.rs` (`build_load`, `start_instant`, `pace_delay`, `Run`, `aggregate`); the binary and the argument parsing in `src/main.rs`. The measurement protocol and the reference numbers of WezTerm and Orca are in the `//!` of `lib.rs`. The decision that originates it, in `docs/02-decisions.md`, D3, section «Measured».

@@ -14,7 +14,7 @@ last_verified: '2026-09-11T20:21:27.942Z'
 file_paths:
   - crates/panel-contract/src/lib.rs
   - crates/app/src/lib.rs
-  - docs/03-arquitectura.md
+  - docs/03-architecture.md
 symbols:
   - 'PanelDir::env'
   - 'PanelDir::create'
@@ -22,7 +22,7 @@ symbols:
 content_hashes:
   crates/panel-contract/src/lib.rs: 'sha256:89f2403cb9e6b68c083cc6b3305065b05da811214801cb502ad15341310a9e5a'
   crates/app/src/lib.rs: 'sha256:171c1421de9c4a6d0646eb0c98664b64626350b32415c7e52c7c788d0838ed09'
-  docs/03-arquitectura.md: 'sha256:ab0843c9bbfa404b3b248fecd83bcbca5d8e6b922ae18cc6abae877bd4cd11d8'
+  docs/03-architecture.md: 'sha256:ab0843c9bbfa404b3b248fecd83bcbca5d8e6b922ae18cc6abae877bd4cd11d8'
 tags:
   - security
   - phase-3
@@ -48,4 +48,4 @@ Two consequences worth knowing before designing anything here:
 
 ## Where it lives
 
-`crates/panel-contract/src/lib.rs` — `ENV_NAMES` (`:45`), `PanelDir::create` (`:67`), `PanelDir::id` (`:75`), `PanelDir::env` (`:91`). The security rule it refutes is in `docs/03-arquitectura.md`, channel 2 and the Security table.
+`crates/panel-contract/src/lib.rs` — `ENV_NAMES` (`:45`), `PanelDir::create` (`:67`), `PanelDir::id` (`:75`), `PanelDir::env` (`:91`). The security rule it refutes is in `docs/03-architecture.md`, channel 2 and the Security table.

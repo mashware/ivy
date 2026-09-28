@@ -1,10 +1,10 @@
 # Contract — the panel document
 
-Current state: **implemented and in use in the application**, and also in `prototipos/flow-panel`
+Current state: **implemented and in use in the application**, and also in `prototypes/flow-panel`
 with `flow` as its first producer. What is here is the specification as it works today, plus what is
 left pending at the end.
 
-**This document is split in two on purpose** ([02-decisiones.md](02-decisiones.md) → D17):
+**This document is split in two on purpose** ([02-decisions.md](02-decisions.md) → D17):
 
 | | |
 |---|---|
@@ -62,7 +62,7 @@ transports feed it.
 
 The only field the application **interprets**, and it is bounded to the only question it needs to
 answer in order to navigate: *do I have to go there?* The complete decision, with what was discarded,
-in [02-decisiones.md](02-decisiones.md) → D18.
+in [02-decisions.md](02-decisions.md) → D18.
 
 | Value | What it says | Example |
 |---|---|---|
@@ -86,7 +86,7 @@ in [02-decisiones.md](02-decisiones.md) → D18.
   falling silent is what whoever finished does (D18).
 - **It does not say what the program is doing.** For «working» or «idle» there is no field and there
   is not going to be one: that is either deduced by the app or declared by a harness that does not
-  know the question ([02-decisiones.md](02-decisiones.md) → D6).
+  know the question ([02-decisions.md](02-decisions.md) → D6).
 
 ### `actions`
 
@@ -181,7 +181,7 @@ it is not painted blank: an empty line where there was garbage would be inventin
   read and the frame their click lands in, the click opens the address under the pixels they saw,
   not the new one. A label the panel clipped, or one painted on the frame the document changed, is
   not clickable — the same rule as a button.
-- The decision, with what was discarded, in [02-decisiones.md](02-decisiones.md) → D51.
+- The decision, with what was discarded, in [02-decisions.md](02-decisions.md) → D51.
 
 **A line with no `key` is a line.** Nothing about publishing changes if you never write one, and
 nothing about how a panel is painted changes if you do — the field exists for what a channel can say
@@ -212,8 +212,8 @@ wants two lines, let them publish two elements in `lines`.
   needs**, including whatever the user of that pane happens to ask its agent for, without waiting for
   a new version of the format. The app only understands marks, styles, alignment and `attention`; the
   vocabulary belongs to whoever does the work. The AI's metrics are a use case of the contract, not
-  its reason for being ([07-panorama.md](07-panorama.md) → Conductor, which shows them and still does
-  not have this panel).
+  its reason for being ([07-landscape.md](07-landscape.md) → Conductor, which shows them and still
+  does not have this panel).
 - **`phase` is the text that gets shown**; whether the work is closed is decided by the real state,
   not by `phase`. A `phase` outside any known cycle (`watching`, `deploying`) is perfectly valid.
 - **Publish *before* a long stretch, not after.** If the process dies halfway through, the document
@@ -239,7 +239,7 @@ wants two lines, let them publish two elements in `lines`.
 # Part II — The transports
 
 Which one exists and why, with the five candidates compared and the three discarded, in
-[02-decisiones.md](02-decisiones.md) → D17.
+[02-decisions.md](02-decisions.md) → D17.
 
 | Transport | State | Who it is for |
 |---|---|---|
@@ -264,7 +264,7 @@ running inside the pane.
 | The prototype on WezTerm | `.claude/work/<trabajo>/panel.json`, by convention of `flow` |
 
 The prototype discovers the file by convention; the app does it by pane identity (see
-[02-decisiones.md](02-decisiones.md) → D7), since F1.5 for the directory and F1.6 for the reading.
+[02-decisions.md](02-decisions.md) → D7), since F1.5 for the directory and F1.6 for the reading.
 **The document is the same**, only where it is looked for changes.
 
 ### Rules of this transport
@@ -685,7 +685,7 @@ itself.
 ## Pending
 
 - [x] **`actions` — declared buttons that write to their pane's program** — **done**: specified
-      above. The risks are in [03-arquitectura.md](03-arquitectura.md) → Security, and what replaced
+      above. The risks are in [03-architecture.md](03-architecture.md) → Security, and what replaced
       the row that said the document's origin is checked is there too
 - [ ] **`open` — a button that opens an address** (`{"label": "View PR", "open": "https://…"}`).
       Still out, and now for a narrower reason: `link` already opens an address from a document of
@@ -695,9 +695,9 @@ itself.
       turned out to be free**: the source is the **holder's name**, claimed on the first publication
       over the channel and released when the connection closes, and while it is held the file is not
       read at all. Herdr pairs its `--source` with a strictly increasing `--seq` to discard what
-      arrives late ([07-panorama.md](07-panorama.md) → E8); **there is no `seq` here and there is not
-      going to be one**, because one endpoint per pane plus an unread file leaves exactly one writer
-      and a connection's requests cannot reorder themselves. **D43**
+      arrives late ([07-landscape.md](07-landscape.md) → E8); **there is no `seq` here and there is
+      not going to be one**, because one endpoint per pane plus an unread file leaves exactly one
+      writer and a connection's requests cannot reorder themselves. **D43**
 - [ ] **The system notification on going to `wait`.** The `attention` field already says when a pane
       claims (D18) and the tab's indicator already accumulates it; what is left is deciding whether
       the user is interrupted on top of that, and that is left for when the field has producers: a

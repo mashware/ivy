@@ -15,14 +15,14 @@ last_verified: '2026-08-25T13:57:29.445Z'
 file_paths:
   - crates/app/examples/fonts.rs
   - crates/app/src/fonts.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - presentation_of
   - goes_to_color_by_default
   - who_covers
   - first_in_color
 content_hashes:
-  docs/02-decisiones.md: 'sha256:0de8ae72f3ac308cb5cc9ba4d96b4b7d71443f38da0b0ca87bafa69318fc44ce'
+  docs/02-decisions.md: 'sha256:0de8ae72f3ac308cb5cc9ba4d96b4b7d71443f38da0b0ca87bafa69318fc44ce'
 tags:
   - fonts
   - emoji
@@ -88,4 +88,4 @@ enum is `#[non_exhaustive]`: a future category would fall into the default arm a
 
 The rule lives in `crates/app/src/fonts.rs` (`presentation_of`, `goes_to_color_by_default`). The bench that
 uncovered the alphabetical-order business is `crates/app/examples/fonts.rs`. The numbers are published in
-**D24** of `docs/02-decisiones.md`.
+**D24** of `docs/02-decisions.md`.

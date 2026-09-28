@@ -16,7 +16,7 @@ file_paths:
   - crates/app/src/pointer/links.rs
   - crates/app/src/panel/links.rs
   - crates/term-core/src/view.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - PaintedConsole
   - LinkGesture
@@ -27,7 +27,7 @@ content_hashes:
   crates/app/src/pointer/links.rs: 'sha256:7e8a2830de64475ec210f446f7b372e783b46bafd435c61c78b179fd5ac9db1e'
   crates/app/src/panel/links.rs: 'sha256:9148b2f640bd2526f7691cb854e643281f7cfafe608700c1d4bd8f4310f26863'
   crates/term-core/src/view.rs: 'sha256:555d89ad879f7983354d1a0d6868ca13d479c31e1adb21e1dcd08481f7a83d7a'
-  docs/02-decisiones.md: 'sha256:7e5600d1c11b0e40126e8873b82fe6f878a2035602c771fcf8a0b3b3f20514b4'
+  docs/02-decisions.md: 'sha256:7e5600d1c11b0e40126e8873b82fe6f878a2035602c771fcf8a0b3b3f20514b4'
 tags:
   - links
   - pointer
@@ -50,4 +50,4 @@ Plain URLs are parsed only for the clicked logical line (wrapped rows joined by 
 
 ## Where it lives
 
-`crates/app/src/links/console.rs` (`PaintedConsole`), `crates/app/src/pointer/links.rs` (`open_link_presses`, `LinkGesture`), `crates/app/src/panel/links.rs` (`PaintedLink`, `reachable`), `crates/term-core/src/view.rs` (`link_at`); decision D51 in `docs/02-decisiones.md`.
+`crates/app/src/links/console.rs` (`PaintedConsole`), `crates/app/src/pointer/links.rs` (`open_link_presses`, `LinkGesture`), `crates/app/src/panel/links.rs` (`PaintedLink`, `reachable`), `crates/term-core/src/view.rs` (`link_at`); decision D51 in `docs/02-decisions.md`.

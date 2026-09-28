@@ -46,7 +46,7 @@ Consequences, all verified by mutation rather than argued:
 
 > **A counting guard over a private item has to remove the test blocks by counting braces — not truncate at the first one — and to read every `MODULES` entry under the target's own path.** Otherwise it counts the doors it can see and calls that all of them. Both fixes were re-mutated and both go red.
 
-**The ceilings still truncate, deliberately**: changing `production_lines` would move every recorded ratchet number at once. The blindness was already written in `settings.rs`'s prose as «filed rather than fixed»; what it had never had is a measurement showing a guard passing over a real defect because of it. It is in `docs/DEBT.md`.
+**The ceilings still truncate, deliberately**: changing `production_lines` would move every recorded ratchet number at once. The blindness was already written in `settings.rs`'s prose as «left rather than fixed»; what it had never had is a measurement showing a guard passing over a real defect because of it. It was listed in `docs/DEBT.md`, which #150 deleted; `git log -p -- docs/DEBT.md` recovers it.
 
 ## Where it lives
 

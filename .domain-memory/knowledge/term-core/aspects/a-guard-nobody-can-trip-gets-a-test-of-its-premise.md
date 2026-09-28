@@ -39,8 +39,8 @@ feature_id: feat_term-core_nx0g1r
 
 > **Pin the RELATIONSHIP that keeps the guard inert, not the guard.** «Whenever the view reports a cursor, there is a cell where it stands.» «The stop is a whole number of half-periods.» Each fails the day somebody moves a constant or simplifies a clamp — which is exactly when the guard starts mattering — and each says where to look. Keep the guard: it costs a line and keeps the function correct for inputs the current constants forbid. What is not acceptable is prose claiming it does something.
 
-Both are recorded in the repository's debt log rather than deleted, because **a guard nobody can trip reads, to the next person, as a case that happens**.
+Both were kept rather than deleted, because **a guard nobody can trip reads, to the next person, as a case that happens**.
 
 ## Where it lives
 
-`crates/app/src/painter.rs` — `a_reported_cursor_always_stands_on_a_cell_and_that_is_why_the_third_guard_is_inert` and the sibling test on the two blink constants. Both entries are in `docs/DEBT.md`.
+`crates/app/src/painter.rs` — `a_reported_cursor_always_stands_on_a_cell_and_that_is_why_the_third_guard_is_inert` and the sibling test on the two blink constants. Both entries were listed in `docs/DEBT.md`, which #150 deleted; `git log -p -- docs/DEBT.md` recovers them.

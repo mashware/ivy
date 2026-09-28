@@ -3,7 +3,7 @@
 ## `flow-panel`
 
 The status panel working, in Python, over WezTerm. **It is the contract's reference
-implementation** ([../docs/04-contrato-panel.md](../docs/04-contrato-panel.md)).
+implementation** ([../docs/04-panel-contract.md](../docs/04-panel-contract.md)).
 
 The working copy is installed at `~/.local/bin/flow-panel`. This is the repository's — if you
 touch one, sync the other.

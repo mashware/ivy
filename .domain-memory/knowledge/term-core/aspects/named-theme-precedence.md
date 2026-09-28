@@ -14,7 +14,7 @@ last_verified: '2026-09-28T10:27:50.497Z'
 file_paths:
   - crates/app/src/settings.rs
   - crates/app/src/theme.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - 'Settings::resolved_theme'
   - 'NamedTheme::theme'
@@ -22,7 +22,7 @@ symbols:
 content_hashes:
   crates/app/src/settings.rs: 'sha256:0f5d3514c630adc0cc813d9b0a408717d52b6a6770e45cce09f24d5d3276bb49'
   crates/app/src/theme.rs: 'sha256:6db6707e13762f2ac1656a5bef79c24434e39aa8f8a1e1ff5d54e6ca15d958af'
-  docs/02-decisiones.md: 'sha256:d081c660a24d5d7a7ac70e572491483b7c104f4b18af4645ff4d3fe3f5378526'
+  docs/02-decisions.md: 'sha256:d081c660a24d5d7a7ac70e572491483b7c104f4b18af4645ff4d3fe3f5378526'
 tags:
   - configuration
   - themes
@@ -38,4 +38,4 @@ A theme line does not reset colors written above it: `theme` and each color are 
 
 ## Where it lives
 
-`Settings::resolved_theme` composes `NamedTheme::theme` with `Theme::with_colors` in `crates/app/src/settings.rs` and `crates/app/src/theme.rs`; D59 in `docs/02-decisiones.md` records the reason and discarded alternatives.
+`Settings::resolved_theme` composes `NamedTheme::theme` with `Theme::with_colors` in `crates/app/src/settings.rs` and `crates/app/src/theme.rs`; D59 in `docs/02-decisions.md` records the reason and discarded alternatives.

@@ -47,4 +47,4 @@ See [[an-event-that-cannot-be-consumed-is-counted-per-frame]] and [[a-click-reso
 
 ## Where it lives
 
-crates/app/src/pointer.rs (answer_a_clicked_question, before the last_frame_with_buttons barrier); crates/app/src/painter/notices.rs (the_boxes, Notices.slot); docs/02-decisiones.md D31 «Amended again»
+crates/app/src/pointer.rs (answer_a_clicked_question, before the last_frame_with_buttons barrier); crates/app/src/painter/notices.rs (the_boxes, Notices.slot); docs/02-decisions.md D31 «Amended again»

@@ -12,12 +12,12 @@ created_at: '2026-08-13T13:23:40.325Z'
 updated_at: '2026-08-13T13:23:40.325Z'
 last_verified: '2026-08-13T13:23:40.325Z'
 file_paths:
-  - docs/04-contrato-panel.md
+  - docs/04-panel-contract.md
   - docs/05-roadmap.md
   - CLAUDE.md
 symbols: []
 content_hashes:
-  docs/04-contrato-panel.md: 'sha256:74a34b90ad96f4314965ff99fe2a644715d2ae032f5914bdfe890ef4d0608c4d'
+  docs/04-panel-contract.md: 'sha256:74a34b90ad96f4314965ff99fe2a644715d2ae032f5914bdfe890ef4d0608c4d'
   docs/05-roadmap.md: 'sha256:f4fad6e2e1bd05b99530a83799119485719ec743b268d99c9786de393e4b9225'
   CLAUDE.md: 'sha256:45a196c9ea4057500d64d1d1b866c2cb0e2cf95ce7189355f259456702b0ad39'
 tags:
@@ -42,4 +42,4 @@ The nine, compressed: `updated_at` said it is painted and it is not painted Â· Â
 
 ## Where it lives
 
-`docs/04-contrato-panel.md` (the public `panel.json` contract), `docs/05-roadmap.md` and `CLAUDE.md`. Blind reviewer role used in the review of the last PR of F1.6.
+`docs/04-panel-contract.md` (the public `panel.json` contract), `docs/05-roadmap.md` and `CLAUDE.md`. Blind reviewer role used in the review of the last PR of F1.6.

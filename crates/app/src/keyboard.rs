@@ -3129,7 +3129,7 @@ mod keymap_tests {
     /// the day the document turned English. This one did not notice, which is the point.
     #[test]
     fn each_chord_the_document_publishes_the_code_understands() {
-        const DOCUMENT: &str = include_str!("../../../docs/08-configuracion.md");
+        const DOCUMENT: &str = include_str!("../../../docs/08-configuration.md");
 
         // **The example blocks are removed before splitting on the backticks**, and not for
         // fun: their fences are three backticks, so splitting over the whole document
@@ -3171,7 +3171,7 @@ mod keymap_tests {
 
     #[test]
     fn each_action_is_published_in_the_configuration_document() {
-        const DOCUMENT: &str = include_str!("../../../docs/08-configuracion.md");
+        const DOCUMENT: &str = include_str!("../../../docs/08-configuration.md");
 
         let unpublished: Vec<&str> = ALL
             .iter()
@@ -3208,7 +3208,7 @@ mod keymap_tests {
     /// asserting on a set instead of on the mapping, which is the whole thing being published.
     #[test]
     fn the_document_publishes_the_shortcut_table_the_code_really_has() {
-        const DOCUMENT: &str = include_str!("../../../docs/08-configuracion.md");
+        const DOCUMENT: &str = include_str!("../../../docs/08-configuration.md");
 
         // Every backticked token of a cell, in the order the cell writes them.
         fn backticked(cell: &str) -> Vec<&str> {

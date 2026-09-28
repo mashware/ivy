@@ -47,4 +47,4 @@ Found by an adversarial reviewer against the design of #210, before the code exi
 
 ## Where it lives
 
-`crates/app/src/painter.rs` — `paint_cursor` returns whether what it drew is in a blink; `crates/app/src/alarms.rs` — `BlinkState::painted` is set from that answer and `set_the_alarm` reads it. The decision and its discarded alternatives are **D37** in `docs/02-decisiones.md`.
+`crates/app/src/painter.rs` — `paint_cursor` returns whether what it drew is in a blink; `crates/app/src/alarms.rs` — `BlinkState::painted` is set from that answer and `set_the_alarm` reads it. The decision and its discarded alternatives are **D37** in `docs/02-decisions.md`.

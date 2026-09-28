@@ -160,7 +160,7 @@ fn real_files(bench: &Bench) {
 
     let mut real = Vec::new();
     collect_into(&root.join(".claude/work"), &mut real);
-    collect_into(&root.join("prototipos"), &mut real);
+    collect_into(&root.join("prototypes"), &mut real);
     real.sort();
 
     if real.is_empty() {

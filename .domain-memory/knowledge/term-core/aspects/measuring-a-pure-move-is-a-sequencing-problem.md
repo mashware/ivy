@@ -14,13 +14,13 @@ last_verified: '2026-09-07T15:52:45.998Z'
 file_paths:
   - scripts/measure-frame.sh
   - crates/app/src/report.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - publish_the_report
   - close_the_unpainted_rounds
 content_hashes:
   scripts/measure-frame.sh: 'sha256:ae5f21bf87adf36350d78dad4ef3cc4970d0620f8506024e51a596dc48c8d112'
-  docs/02-decisiones.md: 'sha256:72862e89835bb5f95229c18221eaa6bc0f712c24fc943eb2122a6f45d696fa6c'
+  docs/02-decisions.md: 'sha256:72862e89835bb5f95229c18221eaa6bc0f712c24fc943eb2122a6f45d696fa6c'
 tags:
   - measurement
   - method
@@ -65,4 +65,4 @@ Four runs a side gave a median of 305.1 µs on `main` against 281.5 on the branc
 
 ## Where it lives
 
-`scripts/measure-frame.sh` takes the batches and writes each report into `<tree>/target/measurements/`; its `compare` mode only says whether two reports describe the same window, so **it does not protect against either mistake above** — picking the runs and ordering them is the caller's job. The moved code is `crates/app/src/report.rs` (`publish_the_report`, `close_the_unpainted_rounds`). The measurement of the train's first delivery, with the same «the reason was false» finding, is the annex of **D28** in `docs/02-decisiones.md`; the span the verdict is about is the one **D3** judges egui by.
+`scripts/measure-frame.sh` takes the batches and writes each report into `<tree>/target/measurements/`; its `compare` mode only says whether two reports describe the same window, so **it does not protect against either mistake above** — picking the runs and ordering them is the caller's job. The moved code is `crates/app/src/report.rs` (`publish_the_report`, `close_the_unpainted_rounds`). The measurement of the train's first delivery, with the same «the reason was false» finding, is the annex of **D28** in `docs/02-decisions.md`; the span the verdict is about is the one **D3** judges egui by.

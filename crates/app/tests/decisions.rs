@@ -13,7 +13,7 @@
 //! decision that was deleted without saying so — this project edits a decision, it does not remove it.
 
 /// The record, read at compile time like the sibling guards read it.
-const DECISIONS: &str = include_str!("../../../docs/02-decisiones.md");
+const DECISIONS: &str = include_str!("../../../docs/02-decisions.md");
 
 /// Fewer headings than this means the walk stopped recognising them, not that the record shrank: a
 /// record with none is in perfect order, and this guard would pass on it. It only catches a walk
@@ -152,7 +152,7 @@ fn every_decision_comes_after_the_one_before_it() {
     faults.extend(misshapen(DECISIONS));
     assert!(
         faults.is_empty(),
-        "docs/02-decisiones.md is out of order — whatever follows a misplaced heading reads as that \
+        "docs/02-decisions.md is out of order — whatever follows a misplaced heading reads as that \
          decision's content:\n  {}",
         faults.join("\n  ")
     );

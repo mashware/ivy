@@ -14,7 +14,7 @@ last_verified: '2026-08-12T14:06:14.300Z'
 file_paths:
   - crates/panel-contract/src/lib.rs
   - crates/panel-contract/src/panel.rs
-  - docs/04-contrato-panel.md
+  - docs/04-panel-contract.md
 symbols:
   - Panel
   - Line
@@ -30,7 +30,7 @@ symbols:
 content_hashes:
   crates/panel-contract/src/lib.rs: 'sha256:eef1e94af37a47b31674f9c0a32cbb016c13a971396af680b7e6c0e74a2de17a'
   crates/panel-contract/src/panel.rs: 'sha256:2f88d49d982871a2367457566cc72b098caee9f6217d84e0ed9db26e29c6b7b7'
-  docs/04-contrato-panel.md: 'sha256:5af2cb170fb82f7c94d1f1a491cd2349f599e2bde0740449655e5fcc44a2e75f'
+  docs/04-panel-contract.md: 'sha256:5af2cb170fb82f7c94d1f1a491cd2349f599e2bde0740449655e5fcc44a2e75f'
 tags:
   - contract
   - panel
@@ -64,6 +64,6 @@ a color or an icon would be the app deciding what somebody else's work means.
 
 `crates/panel-contract/`. The types, the reading and the staleness in `src/panel.rs`; the pane's
 directory (`PanelDir`) and the public constants in `src/lib.rs`. The specification this box
-implements is in `docs/04-contrato-panel.md`, and it is a **public document of the project**:
+implements is in `docs/04-panel-contract.md`, and it is a **public document of the project**:
 whoever ports the prototype reads that, not the design. The bench that re-runs the numbers the code
 claims, in `examples/read.rs`.

@@ -61,4 +61,4 @@ faithful either.
 `crates/term-core/src/screen.rs` — `Screen::new` builds the `Term` and **sets no mode at all**,
 which is the decision; `Screen::advance` is one line that passes the bytes to the parser without
 touching them. The lines cited from `alacritty_terminal` are from 0.26.0 in the local cargo
-registry. Written up as a turned-down alternative in **D12** of `docs/02-decisiones.md`.
+registry. Written up as a turned-down alternative in **D12** of `docs/02-decisions.md`.

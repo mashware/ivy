@@ -14,14 +14,14 @@ last_verified: '2026-09-25T12:47:36.212Z'
 file_paths:
   - vendor/egui-winit/src/lib.rs
   - crates/app/src/keyboard.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - is_copy_command
   - key_bytes
 content_hashes:
   vendor/egui-winit/src/lib.rs: 'sha256:17e760455520be79b41f2cbc2524f862c6403768eb785f262d77c9c6cf232f17'
   crates/app/src/keyboard.rs: 'sha256:7e963bf8423cdd2068c9fa24d2bd5506c3191d8e7bae74949bac8037eea89286'
-  docs/02-decisiones.md: 'sha256:d2dcb9abf55336e4eec456ec7bdf9faf9da3aadc5306c5f699b6fc7bbdf5fa83'
+  docs/02-decisions.md: 'sha256:d2dcb9abf55336e4eec456ec7bdf9faf9da3aadc5306c5f699b6fc7bbdf5fa83'
 tags:
   - macos
   - f2.7
@@ -45,4 +45,4 @@ Result: on macOS the terminal's copy shortcut sends SIGINT to whatever runs in t
 
 ## Where it lives
 
-`vendor/egui-winit/src/lib.rs` (`is_copy_command`), `crates/app/src/keyboard.rs` (the `Key::V` silence arm in `bytes`, `key_bytes`, the `Event::Copy` door), `docs/02-decisiones.md` D53 (macOS bullet).
+`vendor/egui-winit/src/lib.rs` (`is_copy_command`), `crates/app/src/keyboard.rs` (the `Key::V` silence arm in `bytes`, `key_bytes`, the `Event::Copy` door), `docs/02-decisions.md` D53 (macOS bullet).

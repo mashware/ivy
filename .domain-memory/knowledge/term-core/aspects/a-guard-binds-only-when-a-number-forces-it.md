@@ -17,7 +17,7 @@ file_paths:
   - crates/app/tests/prose.rs
   - crates/app/tests/glossary.rs
   - crates/app/tests/scripts.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - OVER_CEILING_TODAY
   - no_entry_of_the_ratchet_is_stale
@@ -31,7 +31,7 @@ content_hashes:
   crates/app/tests/prose.rs: 'sha256:ab0b9e74bd4600f582efddfc69ed57e17ebd23567f4fc186e61044fe0943baa0'
   crates/app/tests/glossary.rs: 'sha256:90d6c32c3639ed72476a08556a5782aedb6529d909f3629eb7791aafedf52ae2'
   crates/app/tests/scripts.rs: 'sha256:0203fb55ee365b3246dc5f31fd1f042cc21f6e8746e7aaa8c25bd89c8663cfd0'
-  docs/02-decisiones.md: 'sha256:b53044393a7694d2c1f56d6f41680d1dd0df011e6f7448de57e3b6d5edc66e4d'
+  docs/02-decisions.md: 'sha256:b53044393a7694d2c1f56d6f41680d1dd0df011e6f7448de57e3b6d5edc66e4d'
 tags:
   - guards
   - ratchet
@@ -89,4 +89,4 @@ By the end every length floor sat exactly at its real count (19/19, 23/23, 28/28
 
 ## Where it lives
 
-`crates/app/tests/shape.rs` holds `OVER_CEILING_TODAY`, the `production_lines` walk that breaks at `mod tests`, `no_entry_of_the_ratchet_is_stale` — an `assert_eq!` — and, since #187, the pure functions `measured`, `ceiling_of`, `type_sizes` and `unreadable_headers` with their synthetic tests. The three file lists are `crates/app/tests/prose.rs` (`SOURCES` and `COMMENT_LINES_AT_LEAST`), `crates/app/tests/glossary.rs` (`GLOSSARY_CLEAN_FILES` and `CITATIONS_CHECKED`) and `crates/app/tests/scripts.rs` (`MODULES`); the fixed-size one is the `SOURCES` array inside `crates/app/src/settings.rs`'s test module. The rule the whole thing serves is **D28** in `docs/02-decisiones.md`, and the mutation discipline behind it is **D30**.
+`crates/app/tests/shape.rs` holds `OVER_CEILING_TODAY`, the `production_lines` walk that breaks at `mod tests`, `no_entry_of_the_ratchet_is_stale` — an `assert_eq!` — and, since #187, the pure functions `measured`, `ceiling_of`, `type_sizes` and `unreadable_headers` with their synthetic tests. The three file lists are `crates/app/tests/prose.rs` (`SOURCES` and `COMMENT_LINES_AT_LEAST`), `crates/app/tests/glossary.rs` (`GLOSSARY_CLEAN_FILES` and `CITATIONS_CHECKED`) and `crates/app/tests/scripts.rs` (`MODULES`); the fixed-size one is the `SOURCES` array inside `crates/app/src/settings.rs`'s test module. The rule the whole thing serves is **D28** in `docs/02-decisions.md`, and the mutation discipline behind it is **D30**.

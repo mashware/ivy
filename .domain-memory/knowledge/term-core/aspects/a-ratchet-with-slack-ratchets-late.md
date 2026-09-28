@@ -14,13 +14,13 @@ last_verified: '2026-09-06T19:32:33.883Z'
 file_paths:
   - crates/app/tests/shape.rs
   - crates/app/src/lib.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - OVER_CEILING_TODAY
 content_hashes:
   crates/app/tests/shape.rs: 'sha256:dacd8ab2296ccc7fdae225663020f07a83cc0454f098024665c9be83731910a5'
   crates/app/src/lib.rs: 'sha256:06780a0eaae7013bb6602574e7d50386ede8e464b226f9458287d5071106f017'
-  docs/02-decisiones.md: 'sha256:96121e6d8650618d166ab688841fe0b2e590d7e6b16a0f4491c8735d188870d7'
+  docs/02-decisions.md: 'sha256:96121e6d8650618d166ab688841fe0b2e590d7e6b16a0f4491c8735d188870d7'
 tags:
   - guards
   - ratchet

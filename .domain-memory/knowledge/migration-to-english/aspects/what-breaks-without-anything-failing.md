@@ -71,4 +71,4 @@ There was an `assert_eq!(FILE, "layout.json")`. It looks like it ties the name o
 
 `crates/app/src/measure.rs:2879` — the pattern to copy: one half derived from the other.
 
-`docs/02-decisiones.md` — **AC14** of milestone F2.12 (the runtime keys still match after the rename), which is still not closed.
+`docs/02-decisions.md` — **AC14** of milestone F2.12 (the runtime keys still match after the rename), which is still not closed.

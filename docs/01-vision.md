@@ -14,7 +14,7 @@ Window
 
 The panel is not written by the app. It is written by **whoever is doing the work**, through an open
 contract. The app only paints it. Today that contract arrives through a file or over MCP, and
-**the transport is not the contract** ([02-decisiones.md](02-decisiones.md) → D17): the document is
+**the transport is not the contract** ([02-decisions.md](02-decisions.md) → D17): the document is
 what gets versioned, and it could also arrive from the terminal itself.
 
 ## Who it is for
@@ -30,7 +30,7 @@ People who work with several terminal agents in parallel and need to know, at a 
 ## Who we compete against
 
 **Against terminal emulators** —WezTerm, Ghostty, Kitty, iTerm2, Windows Terminal—, not against
-agent orchestrators ([02-decisiones.md](02-decisiones.md) → **D19**). The user to be won over is the
+agent orchestrators ([02-decisions.md](02-decisions.md) → **D19**). The user to be won over is the
 one who already has one of those open with agents inside.
 
 That decides the bar: they have to be given what they take for granted —scrollback, copying,
@@ -44,7 +44,7 @@ this has users.
 
 ## What sets it apart
 
-Contrasted against eight competitors in August 2026 ([07-panorama.md](07-panorama.md) → «How we
+Contrasted against eight competitors in August 2026 ([07-landscape.md](07-landscape.md) → «How we
 differ»). **One** thing is left, not several:
 
 **The body of the panel is decided by whoever does the work, and it is structured, persistent
@@ -60,7 +60,7 @@ and a global view that summarizes them.
 
 **What no longer sets it apart, and was written here: preserving subscriptions.** All eight do it
 —they all launch the agent's official binary and none of them charges for the API separately—. It is
-still the right decision ([02-decisiones.md](02-decisiones.md) → D4) and a condition for this to be
+still the right decision ([02-decisions.md](02-decisions.md) → D4) and a condition for this to be
 adopted, but it is not an argument that distinguishes anything.
 
 ## What it is NOT
@@ -81,7 +81,7 @@ adopted, but it is not an argument that distinguishes anything.
    step the task is on, what has it blocked, and whatever the user of that pane wants to publish
    while playing with their agent: only whoever does the work knows that. The AI metrics —remaining
    context, cost— are a **use case** of this, not its definition; see the free-body rule in
-   [04-contrato-panel.md](04-contrato-panel.md).
+   [04-panel-contract.md](04-panel-contract.md).
 
 ---
 

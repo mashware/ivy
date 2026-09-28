@@ -48,4 +48,4 @@ So a full-screen program that asks for a steady beam inside the alternate screen
 
 ## Where it lives
 
-`crates/term-core/src/screen.rs` — the `Config` in `Screen::new` carries the default, and `Screen::cursor_blinks` is the O(1) reader the painter uses. The decision is **D37**; `docs/08-configuracion.md` tells whoever uses the terminal that a program's request outlives it.
+`crates/term-core/src/screen.rs` — the `Config` in `Screen::new` carries the default, and `Screen::cursor_blinks` is the O(1) reader the painter uses. The decision is **D37**; `docs/08-configuration.md` tells whoever uses the terminal that a program's request outlives it.

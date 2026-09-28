@@ -11,12 +11,12 @@ updated_at: '2026-08-08T21:26:20.297Z'
 last_verified: '2026-08-08T21:26:20.297Z'
 file_paths:
   - docs/05-roadmap.md
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
   - crates/host-load/src/lib.rs
 symbols: []
 content_hashes:
   docs/05-roadmap.md: 'sha256:fb6628f3b9309687a4d815b927ef4c9ae979a2c270414ca49dbbfb0f06cfa6e1'
-  docs/02-decisiones.md: 'sha256:755c58ddfca86a83e18f70795c4477ede05615e490fd9f1e807cd210776d6ded'
+  docs/02-decisions.md: 'sha256:755c58ddfca86a83e18f70795c4477ede05615e490fd9f1e807cd210776d6ded'
   crates/host-load/src/lib.rs: 'sha256:cb1d4bed2f3afd7e12c233f07ec78cbb3a75875b3776adc4bd988c8958722e7d'
 tags:
   - D3
@@ -58,6 +58,6 @@ returns 10.0 MiB/s dead on and with a slow one drops to 0.3.
 ## Where it lives
 
 Written in three places on purpose, because it is what prevents the wrong conclusion: the `//!` of
-`crates/host-load/src/lib.rs`, D3's «Measured» annex in `docs/02-decisiones.md`, and the «Concrete
+`crates/host-load/src/lib.rs`, D3's «Measured» annex in `docs/02-decisions.md`, and the «Concrete
 risks» of Phase 1 in `docs/05-roadmap.md`, which is where the sentence about repainting only when
 the PTY produces changes comes from.

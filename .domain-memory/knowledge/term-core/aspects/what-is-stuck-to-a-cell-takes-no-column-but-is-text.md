@@ -15,7 +15,7 @@ last_verified: '2026-08-25T13:58:32.624Z'
 file_paths:
   - crates/term-core/src/view.rs
   - crates/term-core/src/screen.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - CombiningSpan
   - ViewCell
@@ -25,7 +25,7 @@ symbols:
 content_hashes:
   crates/term-core/src/view.rs: 'sha256:8bb69d1e65b99d0bc3c8a4c29da0701affe1d675cbb02b5b782636ae76a99cc9'
   crates/term-core/src/screen.rs: 'sha256:6af1919efa54066bdf18665edd3cf6316c9ff4c01f3cfbd0b9a94a029dd24ef9'
-  docs/02-decisiones.md: 'sha256:0de8ae72f3ac308cb5cc9ba4d96b4b7d71443f38da0b0ca87bafa69318fc44ce'
+  docs/02-decisions.md: 'sha256:0de8ae72f3ac308cb5cc9ba4d96b4b7d71443f38da0b0ca87bafa69318fc44ce'
 tags:
   - term-core
   - unicode
@@ -60,4 +60,4 @@ feature_id: feat_term-core_nx0g1r
 
 ## Where it lives
 
-The `CombiningSpan` type and the `View::combining_of` reader live in `crates/term-core/src/view.rs`; the construction of the snapshot and the dump to text, in `crates/term-core/src/screen.rs`. The rules of what «the text» is are in **D22** of `docs/02-decisiones.md`.
+The `CombiningSpan` type and the `View::combining_of` reader live in `crates/term-core/src/view.rs`; the construction of the snapshot and the dump to text, in `crates/term-core/src/screen.rs`. The rules of what «the text» is are in **D22** of `docs/02-decisions.md`.

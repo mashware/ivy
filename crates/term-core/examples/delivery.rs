@@ -16,7 +16,7 @@
 //! **This cost is paid on purpose.** We tried to remove it by turning off `OPOST` when opening the
 //! pseudoterminal, and reverted it: putting the carriage return back from outside requires knowing
 //! whether the program wants it, and that information disappears the moment you lie to it about the
-//! state of its terminal. The full autopsy is in **D12** of `docs/02-decisiones.md`. The example
+//! state of its terminal. The full autopsy is in **D12** of `docs/02-decisions.md`. The example
 //! stays because the cost is still there and it is worth being able to look at it again.
 
 use std::io::Write;

@@ -15,14 +15,14 @@ last_verified: '2026-09-06T15:16:51.376Z'
 file_paths:
   - crates/app/src/measure.rs
   - crates/app/src/lib.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - record_outbound
   - record_mouse_outbound
 content_hashes:
   crates/app/src/measure.rs: 'sha256:898abb44e8a03d68ea655fa4407688345cdcb919c4911a656f706c25ff25c730'
   crates/app/src/lib.rs: 'sha256:16cf7238d33ef681a4275bd08787a1c153e6e8f5ab1c54e2d30cd5157e62f4f4'
-  docs/02-decisiones.md: 'sha256:b76cc17fbac2d55b9f81f75cd1d31295e188704e9dc21642114375042b66e8c9'
+  docs/02-decisions.md: 'sha256:b76cc17fbac2d55b9f81f75cd1d31295e188704e9dc21642114375042b66e8c9'
 tags:
   - measurement
   - D3
@@ -54,4 +54,4 @@ Sibling of [[the-stopwatch-line-goes-where-the-effect-ends]]: that one is about 
 
 ## Where it lives
 
-`crates/app/src/measure.rs` — `record_outbound`, `record_mouse_outbound` and the two report lines they feed. The published figures are in **D3** and **D23**; **D29** records that they moved. `docs/02-decisiones.md`.
+`crates/app/src/measure.rs` — `record_outbound`, `record_mouse_outbound` and the two report lines they feed. The published figures are in **D3** and **D23**; **D29** records that they moved. `docs/02-decisions.md`.

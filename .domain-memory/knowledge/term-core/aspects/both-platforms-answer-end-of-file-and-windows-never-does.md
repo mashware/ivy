@@ -50,4 +50,4 @@ That is the survivor case of [[closing-hot-hangs-the-window]] and **D32** arrivi
 
 `crates/term-core/src/lib.rs` — `Pty::spawn_with_env`'s `drop(pair.slave)` and the comment above it, which states the Unix reasoning; the reading loop that turns `Ok(0)` into an ordinary ending. The dependency sources are in cargo's registry, `portable-pty-0.9.0` and `filedescriptor-0.8.3`.
 
-Cases 17 and 18 for [[someone-elses-api-is-read-not-assumed]], and the second one is a live entry in `docs/DEBT.md` owned by F2.7.
+Cases 17 and 18 for [[someone-elses-api-is-read-not-assumed]], and the second one is carried in the F2.7 row of `docs/05-roadmap.md`, where it moved when #150 deleted `docs/DEBT.md`.

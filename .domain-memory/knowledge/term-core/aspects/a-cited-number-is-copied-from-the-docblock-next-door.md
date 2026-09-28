@@ -17,7 +17,7 @@ file_paths:
   - crates/app/src/measure.rs
   - crates/app/src/settings.rs
   - scripts/measure-frame.sh
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - ensure_the_collection
   - use_the_family
@@ -27,7 +27,7 @@ content_hashes:
   crates/app/src/measure.rs: 'sha256:b1880ad9f4993a2551dc9c33cff803f5bfafa3400490943a915b284ad1935861'
   crates/app/src/settings.rs: 'sha256:ec91bf9d6dff6a0da719ea1943a774d0b78a862e8a00a50292a677857318b8e1'
   scripts/measure-frame.sh: 'sha256:0d3e8ba30e5e7e7750fde4fd84725803c5a98cf5879f8dde30b20974618caef0'
-  docs/02-decisiones.md: 'sha256:7cacc3ed2d651a60a94b720172661e7827062b623ffab79104d7654feee799b7'
+  docs/02-decisions.md: 'sha256:7cacc3ed2d651a60a94b720172661e7827062b623ffab79104d7654feee799b7'
 tags:
   - measurement
   - comments
@@ -56,4 +56,4 @@ None of the four file-walking guards catches it. `glossary.rs` reads identifiers
 
 ## Where it lives
 
-`crates/app/src/fonts.rs` (the original, in `ensure_the_collection`'s docblock), plus `lib.rs`, `measure.rs`, `settings.rs` and `scripts/measure-frame.sh`. The record itself is **D24** in `docs/02-decisiones.md`, section «The numbers, measured here».
+`crates/app/src/fonts.rs` (the original, in `ensure_the_collection`'s docblock), plus `lib.rs`, `measure.rs`, `settings.rs` and `scripts/measure-frame.sh`. The record itself is **D24** in `docs/02-decisions.md`, section «The numbers, measured here».

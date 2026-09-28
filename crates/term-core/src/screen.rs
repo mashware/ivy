@@ -177,7 +177,7 @@ impl Scroll {
 ///
 /// **The number is set by this project and not inherited from the engine**, which ships 10,000. It was chosen by measuring
 /// —the bench is in `examples/scrollback.rs`— and the whole decision, with the table and what was discarded, is
-/// **D21** in `docs/02-decisiones.md`. What you have to know to touch it:
+/// **D21** in `docs/02-decisions.md`. What you have to know to touch it:
 ///
 /// - **It is WezTerm's default**, which is the bar this project measures itself against.
 /// - **Relaying out the text when the width changes walks the whole scrollback.** With these lines and

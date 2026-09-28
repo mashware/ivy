@@ -18,7 +18,7 @@ What has been researched, with what each case contributes. Data as of August 202
 
 **Conclusion:** what is scarce is not the cross-platform UI framework — there are plenty. It is the
 **cross-platform terminal widget**. That is why everybody ends up writing their own… except Zed,
-which consumes it as a crate. See [02-decisiones.md](02-decisiones.md) → D2.
+which consumes it as a crate. See [02-decisions.md](02-decisions.md) → D2.
 
 ---
 
@@ -50,7 +50,7 @@ precisely so that state is not repeated in the conversation.
 than 75 providers: Anthropic, OpenAI, Copilot, Gemini, Bedrock, Groq, DeepSeek, Ollama and local
 models — and that is why it is by far the most popular open-source agent. But **with Claude it goes
 through the API and pays tokens since 4 April 2026**, when subscriptions stopped covering
-third-party tools ([02-decisiones.md](02-decisiones.md) → D4). Hosted here as an agent, its user's
+third-party tools ([02-decisions.md](02-decisions.md) → D4). Hosted here as an agent, its user's
 Claude pays per use; with Copilot or Ollama, it does not.
 
 **And it is not competition: it is the best candidate for a second producer.** Its sidebar already
@@ -77,7 +77,7 @@ From the issue [«Support dozens of terminals on a single page»](https://github
 - Terminals compete for the main thread: **2 instances → 30 fps, 4 → 15 fps**
 
 It applies only with several terminals **producing output at the same time** — which is exactly our
-case. The basis of [02-decisiones.md](02-decisiones.md) → D3.
+case. The basis of [02-decisions.md](02-decisions.md) → D3.
 
 ---
 
@@ -87,7 +87,7 @@ case. The basis of [02-decisiones.md](02-decisiones.md) → D3.
 - [claude-code#43333](https://github.com/anthropics/claude-code/issues/43333) — `claude -p` with OAuth billing as API
 - [claude-code#37686](https://github.com/anthropics/claude-code/issues/37686) — a Max subscriber with $1 800 in two days
 
-The basis of [02-decisiones.md](02-decisiones.md) → D4.
+The basis of [02-decisions.md](02-decisions.md) → D4.
 
 ---
 

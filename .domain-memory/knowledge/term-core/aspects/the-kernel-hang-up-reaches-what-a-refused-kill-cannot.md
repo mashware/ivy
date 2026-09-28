@@ -14,14 +14,14 @@ updated_at: '2026-09-26T20:14:28.672Z'
 last_verified: '2026-09-26T20:14:28.672Z'
 file_paths:
   - crates/term-core/src/lib.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - Drop for Pty
   - hang_up
   - close_one_that_refuses
 content_hashes:
   crates/term-core/src/lib.rs: 'sha256:598307ef482b8847d279ad556b074bb929e86396d7284e83bd995094bd17b1e8'
-  docs/02-decisiones.md: 'sha256:b003d183812e140541e040f9ee58c03010e9631c6f99decf2f3da9d51cbad7e0'
+  docs/02-decisions.md: 'sha256:b003d183812e140541e040f9ee58c03010e9631c6f99decf2f3da9d51cbad7e0'
 tags:
   - pty
   - sighup
@@ -47,4 +47,4 @@ Closing a console drops every copy of the master: the `Pty`'s own field, the rea
 
 ## Where it lives
 
-`Drop for Pty` and `hang_up` in crates/term-core/src/lib.rs; tests `close_one_that_refuses` and the two refusal tests; D56 in docs/02-decisiones.md (amendment of 26 September 2026)
+`Drop for Pty` and `hang_up` in crates/term-core/src/lib.rs; tests `close_one_that_refuses` and the two refusal tests; D56 in docs/02-decisions.md (amendment of 26 September 2026)

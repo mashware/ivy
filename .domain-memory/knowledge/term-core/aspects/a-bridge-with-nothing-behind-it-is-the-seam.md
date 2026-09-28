@@ -16,7 +16,6 @@ file_paths:
   - crates/app/src/lib.rs
   - crates/app/src/pty_output.rs
   - crates/term-core/src/lib.rs
-  - docs/DEBT.md
 symbols:
   - make_it_go_quiet
   - 'PtyOutput::new'
@@ -28,7 +27,6 @@ content_hashes:
   crates/app/src/lib.rs: 'sha256:171c1421de9c4a6d0646eb0c98664b64626350b32415c7e52c7c788d0838ed09'
   crates/app/src/pty_output.rs: 'sha256:e86ddf6c839cd5597c18e2a1a61ee4128cae5d001d589c146bead8f237cf3f2d'
   crates/term-core/src/lib.rs: 'sha256:5af3288f30591cf1465e35c369b5fd72b46a34799967c3c9dc421abb80bb2aaa'
-  docs/DEBT.md: 'sha256:8f02899880fa7e6ec60fb602c7dedc7fcd31f94387d62d5529ab9f137d51548a'
 tags:
   - d30
   - d40
@@ -63,4 +61,4 @@ feature_id: feat_term-core_nx0g1r
 
 ## Where it lives
 
-The recipe lives in `make_it_go_quiet` in `crates/app/src/lib.rs`'s test module, and the mechanism it exploits is `PtyOutput::new` in `crates/app/src/pty_output.rs` taking a plain `Receiver`. The decision it exercises is `pty_output::is_finished`, cited by **D40**; the arms it still cannot reach (a failed read, a panicked reader) are why that function takes values instead of a pane. What is left uncovered is in `docs/DEBT.md` under 192.
+The recipe lives in `make_it_go_quiet` in `crates/app/src/lib.rs`'s test module, and the mechanism it exploits is `PtyOutput::new` in `crates/app/src/pty_output.rs` taking a plain `Receiver`. The decision it exercises is `pty_output::is_finished`, cited by **D40**; the arms it still cannot reach (a failed read, a panicked reader) are why that function takes values instead of a pane. What was left uncovered was listed under 192 in `docs/DEBT.md`, which #150 deleted; `git log -p -- docs/DEBT.md` recovers it.

@@ -15,14 +15,14 @@ last_verified: '2026-09-09T17:09:26.559Z'
 file_paths:
   - scripts/measure-frame.sh
   - crates/app/src/pointer.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - 'Window::handle_the_mouse'
   - 'Tab::focus'
 content_hashes:
   scripts/measure-frame.sh: 'sha256:ae5f21bf87adf36350d78dad4ef3cc4970d0620f8506024e51a596dc48c8d112'
   crates/app/src/pointer.rs: 'sha256:1e956a5d4794d7e182236be288b3231dd7aa3b92304a91df977ac1e81d555c95'
-  docs/02-decisiones.md: 'sha256:e7f276490256e6c54c6bf249aa1729ba670046841ab85b4dade0182ae0e1fcf8'
+  docs/02-decisions.md: 'sha256:e7f276490256e6c54c6bf249aa1729ba670046841ab85b4dade0182ae0e1fcf8'
 tags:
   - measurement
   - batches
@@ -45,6 +45,6 @@ feature_id: feat_term-core_nx0g1r
 
 ## Where it lives
 
-`scripts/measure-frame.sh` and the batch table in `CLAUDE.md`; the gesture that moves the focus is in `crates/app/src/pointer.rs`. The corrected paragraph is the «What is not measured, and why no batch changes» block of **D36** in `docs/02-decisiones.md`, which now names the five batches that do move it and says where the wrong premise came from — kept rather than edited out, for the same reason [[two-annexes-from-different-days-are-not-compared]] keeps its own.
+`scripts/measure-frame.sh` and the batch table in `CLAUDE.md`; the gesture that moves the focus is in `crates/app/src/pointer.rs`. The corrected paragraph is the «What is not measured, and why no batch changes» block of **D36** in `docs/02-decisions.md`, which now names the five batches that do move it and says where the wrong premise came from — kept rather than edited out, for the same reason [[two-annexes-from-different-days-are-not-compared]] keeps its own.
 
 Found by a comment auditor reading the decision record against the code during the review of PR #212, in a delivery whose author had already run fourteen mutations against the painting and never once questioned the sentence about the bench.

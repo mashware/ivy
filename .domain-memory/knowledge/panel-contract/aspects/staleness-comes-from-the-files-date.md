@@ -13,7 +13,7 @@ updated_at: '2026-08-12T14:08:09.474Z'
 last_verified: '2026-08-12T14:08:09.474Z'
 file_paths:
   - crates/panel-contract/src/panel.rs
-  - docs/04-contrato-panel.md
+  - docs/04-panel-contract.md
 symbols:
   - 'Panel::written_at'
   - 'Panel::is_stale_at'
@@ -21,7 +21,7 @@ symbols:
   - STALE_AFTER
 content_hashes:
   crates/panel-contract/src/panel.rs: 'sha256:2f88d49d982871a2367457566cc72b098caee9f6217d84e0ed9db26e29c6b7b7'
-  docs/04-contrato-panel.md: 'sha256:5af2cb170fb82f7c94d1f1a491cd2349f599e2bde0740449655e5fcc44a2e75f'
+  docs/04-panel-contract.md: 'sha256:5af2cb170fb82f7c94d1f1a491cd2349f599e2bde0740449655e5fcc44a2e75f'
 tags:
   - contract
   - stale
@@ -65,5 +65,5 @@ the other two reasons.
 ## Where it lives
 
 `crates/panel-contract/src/panel.rs`: the `Panel::written_at` field with its comment, and
-`Panel::is_stale_at`. Written down as well in `docs/04-contrato-panel.md` so that the producer knows
+`Panel::is_stale_at`. Written down as well in `docs/04-panel-contract.md` so that the producer knows
 how it is measured.

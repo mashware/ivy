@@ -51,7 +51,7 @@ use crate::theme::Theme;
 ///
 /// The whole reasoning —why in cells, why it is the panel that yields, that the width belongs to each
 /// pane, what the gesture's minimum is and why folding is a state apart— is in **D10** of
-/// `docs/02-decisiones.md`, with what was discarded in each case.
+/// `docs/02-decisions.md`, with what was discarded in each case.
 pub(crate) const DEFAULT_WIDTH: usize = 36;
 
 /// The least left to the console when its panel takes room from it, in cells.
@@ -4071,8 +4071,8 @@ mod tests {
     /// have to say the same thing and no place where that is asserted.
     #[test]
     fn the_three_claim_phrases_are_the_ones_the_contract_publishes() {
-        const CONTRACT: &str = include_str!("../../../docs/04-contrato-panel.md");
-        const DECISIONS: &str = include_str!("../../../docs/02-decisiones.md");
+        const CONTRACT: &str = include_str!("../../../docs/04-panel-contract.md");
+        const DECISIONS: &str = include_str!("../../../docs/02-decisions.md");
         const HEADER: &[&str] = &["Value", "What it says", "Example"];
 
         // D18's table has the contract's header too, so it is read from D18's heading to the next

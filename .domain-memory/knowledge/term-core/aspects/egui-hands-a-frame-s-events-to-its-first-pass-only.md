@@ -17,7 +17,7 @@ file_paths:
   - crates/app/src/pointer.rs
   - crates/app/src/keyboard.rs
   - crates/app/src/injected.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - last_frame_with_buttons
   - handle_the_mouse
@@ -28,7 +28,7 @@ content_hashes:
   crates/app/src/pointer.rs: 'sha256:f384df68dd3715e3e27ade9e33ef2e44981f70f478d0876379c3b2307411dd63'
   crates/app/src/keyboard.rs: 'sha256:8de7e63e699188ed4ad7cddaf074fac66eff1f5376c704896c71e05e26b679d7'
   crates/app/src/injected.rs: 'sha256:d894b21ba9be60046a9431c5adf539d0ba284b482776f6f944e64eba04689351'
-  docs/02-decisiones.md: 'sha256:7e5600d1c11b0e40126e8873b82fe6f878a2035602c771fcf8a0b3b3f20514b4'
+  docs/02-decisions.md: 'sha256:7e5600d1c11b0e40126e8873b82fe6f878a2035602c771fcf8a0b3b3f20514b4'
 tags:
   - egui
   - events
@@ -53,4 +53,4 @@ feature_id: feat_term-core_nx0g1r
 
 ## Where it lives
 
-egui-0.36.1 src/context.rs:835-874, :2442-2450, :912-939; src/data/input/raw_input.rs:124-143; src/input_state/mod.rs:417-469; eframe-0.36.1 src/native/epi_integration.rs:288-303, :323-362; tripwire in crates/app/src/lib.rs; amendments to D31, D46, D51 in docs/02-decisiones.md
+egui-0.36.1 src/context.rs:835-874, :2442-2450, :912-939; src/data/input/raw_input.rs:124-143; src/input_state/mod.rs:417-469; eframe-0.36.1 src/native/epi_integration.rs:288-303, :323-362; tripwire in crates/app/src/lib.rs; amendments to D31, D46, D51 in docs/02-decisions.md

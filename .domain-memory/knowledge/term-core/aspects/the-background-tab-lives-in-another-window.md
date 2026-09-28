@@ -87,4 +87,4 @@ reaches the program inside— by asking it with `stty size`.
 `Window::measure_the_ones_out_of_sight` (the fix), `Window::paint_pane` and
 `Pane::resize` in `crates/app/src/lib.rs`; the symptom showed in the header of the
 `on_exit` report and affected the batches of `scripts/measure-frame.sh`. The annex that confirms it,
-in `docs/02-decisiones.md`, under **D13**.
+in `docs/02-decisions.md`, under **D13**.

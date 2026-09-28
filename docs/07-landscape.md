@@ -1,7 +1,7 @@
 # Landscape — who is here and what to steal from them
 
 August 2026. Sorted by category, with what is worth taking from each one.
-The details of *how* each terminal *is built* are in [06-referencias.md](06-referencias.md);
+The details of *how* each terminal *is built* are in [06-references.md](06-references.md);
 this is the map of the territory.
 
 **If you only came for one thing, go to [«How we differ»](#how-we-differ--august-2026):**
@@ -180,7 +180,7 @@ their README:
 
 Verified in the `Cargo.toml` of both crates: `license = "MIT"`. So there exists **a UI framework in
 Rust, with GPU, a permissive license and proven in a real cross-platform terminal**. It is a
-third candidate for [02-decisiones.md](02-decisiones.md) → D3, noted there with its two cautions:
+third candidate for [02-decisions.md](02-decisions.md) → D3, noted there with its two cautions:
 it is not verified that `warpui` is usable independently —it may drag in dependencies on
 AGPL crates from the same repository—, and nothing from the rest of the code gets copied into a
 project that is not AGPL.
@@ -283,7 +283,7 @@ it does not compete with us, it competes with Claude Code. It is a potential *pr
   and it was true:** since **4 April 2026** the Pro, Max and Team subscriptions **do not cover** use
   through third-party tools —opencode, OpenClaw and anything that routes through OAuth—, and anyone
   integrating Claude needs an API key with pay-per-use billing. The whole timeline and what it
-  means for this project, in [02-decisiones.md](02-decisiones.md) → D4.
+  means for this project, in [02-decisions.md](02-decisions.md) → D4.
 
 And they put the gap in writing: *«We're not trying to replace your terminal.»* They are a layer on
 top. We are the layer underneath. The three differences that remain, and that are the project's
@@ -389,7 +389,7 @@ not there — which is **D7** under another name and with the same job.
    does not get in through that door. That maintenance is exactly what an open contract saves.
 4. **The ground is the one we already discarded.** Electron + xterm.js is Orca's stack, with a
    measurement of our own in the «Measured — 8 August 2026» annex of
-   [02-decisiones.md](02-decisiones.md) → D3: negative scaling, 7.1 MiB/s aggregate with four panes
+   [02-decisions.md](02-decisions.md) → D3: negative scaling, 7.1 MiB/s aggregate with four panes
    against 8.6 with one.
 
 **And here is somebody else's empirical evidence for D6**, which is the most valuable thing on this
@@ -475,7 +475,7 @@ CI run that wants to say «blocked waiting for approval for 40 minutes» can onl
 
 **The ground is the one we already measured and discarded.** Electron + `xterm.js` with WebGL, with a
 measurement of our own in the «Measured — 8 August 2026» annex of
-[02-decisiones.md](02-decisiones.md) → D3: **negative scaling**, 7.1 MiB/s aggregate with four panes
+[02-decisions.md](02-decisions.md) → D3: **negative scaling**, 7.1 MiB/s aggregate with four panes
 against 8.6 with one. On top of that, according to third-party reviews, **400-800 MiB of RAM at rest**
 with a handful of agents, ~250 MB of installer, and Linux **only as an AppImage**. Their product
 dodges that ceiling because it fans out agents that think; ours cannot, and that is why D3 stays
@@ -800,7 +800,7 @@ missing the product.** That is the race, said in one line.
 landscape. This document is still the map of the league next door —you have to know what they do and
 what to steal from them— but **the bar that decides whether this ships is set by a WezTerm user, not
 by an Orca one**. The list of what is left out, with who has it, is in
-[02-decisiones.md](02-decisiones.md) → D19.
+[02-decisions.md](02-decisions.md) → D19.
 
 **The consequence for prioritizing, and it is the reason this summary is written:** the contract is not
 the last leg to implement once the terminal is polished. It is **the only one that holds the project
@@ -824,7 +824,7 @@ up**, and everything done before it is done knowing it does not differentiate.
 | **Conductor / Vibe Kanban** | Diff review before merging as part of the flow, not as a separate step |
 | **Conductor** | **Reserving a range of ports per pane** (`CONDUCTOR_PORT` to `+9`) instead of detecting which port something came up on. It fits with `PANEL_ID`/`PANEL_DIR` from D7 and takes a deduction job away from the app, which is exactly what D6 forbids |
 | **Cline Kanban** | Chains of dependencies between tasks: when one finishes the next starts on its own, with no script to write (see «Ideas with no phase» in [05-roadmap.md](05-roadmap.md)) |
-| **Xirp** | **Notifying** on going to «waiting for input», not just painting it: it solves «which pane do I go to now» without having all four in view (see «Pending» in [04-contrato-panel.md](04-contrato-panel.md)) |
+| **Xirp** | **Notifying** on going to «waiting for input», not just painting it: it solves «which pane do I go to now» without having all four in view (see «Pending» in [04-panel-contract.md](04-panel-contract.md)) |
 | **Orca** | A **status line hook** as a way for an agent that knows nothing about you to emit state without touching its code: you install it in its configuration and it paints the title. It works for any harness with a configurable status line, and it does not force you to maintain a wrapper per agent |
 | **Herdr** | **Authority per source and a sequence number.** `--source custom:<name>` identifies each producer, gives it command over its own and releases it on leaving; `--seq` is a strictly increasing counter with which they **discard reports that arrive late**. Our `panel.json` is one file per pane where the last writer wins: with two producers on the same pane —an agent and the CI run it launched— or with out-of-order writes, there is no way to know which one holds. **It is the most concrete gap this landscape finds in the contract.** And the second one: **accumulating the state upwards** (agent → pane → tab → workspace, with `blocked` beating everything), which is what makes their sidebar answer «which pane do I go to» better than ours |
 | **Superset** | A built-in browser with **port detection per pane** — and the producer already knows which port it brought its server up on, so it can publish it. Agents launched on cron: a `panel.json` with a scheduled producer asks nothing new of the contract. And **telling two waits apart**: a permission granted in a second (`PermissionRequest`) is not a question that demands thinking (`PendingQuestion`); our contract has a single `wait` |

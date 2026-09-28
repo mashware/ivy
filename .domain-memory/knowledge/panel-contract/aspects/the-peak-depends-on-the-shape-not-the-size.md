@@ -14,7 +14,7 @@ last_verified: '2026-08-12T14:07:12.510Z'
 file_paths:
   - crates/panel-contract/src/panel.rs
   - crates/panel-contract/examples/read.rs
-  - docs/04-contrato-panel.md
+  - docs/04-panel-contract.md
 symbols:
   - MAX_BYTES
   - read
@@ -22,7 +22,7 @@ symbols:
 content_hashes:
   crates/panel-contract/src/panel.rs: 'sha256:2f88d49d982871a2367457566cc72b098caee9f6217d84e0ed9db26e29c6b7b7'
   crates/panel-contract/examples/read.rs: 'sha256:a8b364eb1f469d850d060adb5c8953582075b21cbb4022073e517dbf9726db8a'
-  docs/04-contrato-panel.md: 'sha256:5af2cb170fb82f7c94d1f1a491cd2349f599e2bde0740449655e5fcc44a2e75f'
+  docs/04-panel-contract.md: 'sha256:5af2cb170fb82f7c94d1f1a491cd2349f599e2bde0740449655e5fcc44a2e75f'
 tags:
   - measurement
   - memory
@@ -56,4 +56,4 @@ feature_id: feat_panel-contract_8y2gc0
 
 ## Where it lives
 
-The ceiling and its figures, in `crates/panel-contract/src/panel.rs` (`MAX_BYTES`). The bench that re-runs them, in `crates/panel-contract/examples/read.rs`. The warning for whoever publishes, in `docs/04-contrato-panel.md`.
+The ceiling and its figures, in `crates/panel-contract/src/panel.rs` (`MAX_BYTES`). The bench that re-runs them, in `crates/panel-contract/examples/read.rs`. The warning for whoever publishes, in `docs/04-panel-contract.md`.

@@ -60,4 +60,4 @@ It is the reason **AC10** of the milestone exists: when renaming fields or varia
 
 `crates/app/src/measure.rs:2879` — `the_script_seeds_the_same_layout_file_the_application_writes`, the derived guard that closes the half that could not be seen; its own comment explains the disguise it replaces.
 
-`docs/02-decisiones.md` — **AC10** of milestone F2.12, and the annex of **D27** in the section on which names are the on-disk format.
+`docs/02-decisions.md` — **AC10** of milestone F2.12, and the annex of **D27** in the section on which names are the on-disk format.

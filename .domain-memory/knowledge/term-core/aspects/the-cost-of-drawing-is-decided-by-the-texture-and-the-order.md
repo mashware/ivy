@@ -15,7 +15,7 @@ last_verified: '2026-08-25T17:16:09.795Z'
 file_paths:
   - crates/app/src/fonts.rs
   - crates/app/src/painter.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - Glyphs
   - paint
@@ -24,7 +24,7 @@ symbols:
 content_hashes:
   crates/app/src/fonts.rs: 'sha256:d6d2b2e362c00d1b61b89b14f41b98bc0d7c28513c69d568685c156cc1730c74'
   crates/app/src/painter.rs: 'sha256:109c7e330be5065d3b14b62eafcd3fa4c3b54cd36122350c39c71084337b8a87'
-  docs/02-decisiones.md: 'sha256:d4108883d45707cfa55aee07a21e7083a329aba25d304ecd5269a601f8a84e88'
+  docs/02-decisions.md: 'sha256:d4108883d45707cfa55aee07a21e7083a329aba25d304ecd5269a601f8a84e88'
 tags:
   - performance
   - egui
@@ -91,5 +91,5 @@ measurement, not by reading the code.
 
 The atlas and its placement live in `crates/app/src/fonts.rs` (`Glyphs`, `ATLAS_SIDE`); the two
 passes, in the `paint` loop in `crates/app/src/painter.rs`. The whole subtraction, with the four
-rows of the table and its control, is in **D25** of `docs/02-decisiones.md`. The batch that measures
+rows of the table and its control, is in **D25** of `docs/02-decisions.md`. The batch that measures
 it is `Q` of `scripts/measure-frame.sh`, whose control is `C`.

@@ -13,7 +13,7 @@ updated_at: '2026-08-17T16:10:27.076Z'
 last_verified: '2026-08-17T16:10:27.076Z'
 file_paths:
   - crates/app/src/panel.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - DEFAULT_WIDTH
   - MINIMUM_CONSOLE
@@ -21,7 +21,7 @@ symbols:
   - PanelTiling
 content_hashes:
   crates/app/src/panel.rs: 'sha256:6e305e69f27f7fd80801f34a64fa332f571bc0b1924c7d85017fc37faedcd0a1'
-  docs/02-decisiones.md: 'sha256:e931de7f9b29b21429b9a259db1cd9648470337c6e11d13deba391055a972ea5'
+  docs/02-decisions.md: 'sha256:e931de7f9b29b21429b9a259db1cd9648470337c6e11d13deba391055a972ea5'
 tags:
   - product
   - tiling
@@ -65,4 +65,4 @@ And along the way, what the same annex proves about the frame: **the interface f
 
 ## Where it lives
 
-`crates/app/src/panel.rs`: the two constants and the function that tiles, with its type `PanelTiling`. The geometry lives in the panel's module and not in the window's, which is the one that calls it. The check with four panes, in the «Measured» annex of D14 (`docs/02-decisiones.md`) and in the `H` and `I` batches of `scripts/measure-frame.sh`.
+`crates/app/src/panel.rs`: the two constants and the function that tiles, with its type `PanelTiling`. The geometry lives in the panel's module and not in the window's, which is the one that calls it. The check with four panes, in the «Measured» annex of D14 (`docs/02-decisions.md`) and in the `H` and `I` batches of `scripts/measure-frame.sh`.

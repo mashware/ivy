@@ -15,7 +15,7 @@ file_paths:
   - crates/app/src/keyboard.rs
   - crates/app/src/lib.rs
   - crates/term-core/src/screen.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - paste
   - 'Screen::bracketed_paste'
@@ -24,7 +24,7 @@ content_hashes:
   crates/app/src/keyboard.rs: 'sha256:fac665b7c9d92b5de4f79218612a98ba1d6c97b26242a606fd4149487b51b79c'
   crates/app/src/lib.rs: 'sha256:a05a4309b46dd644b5b6a2389c026f7fef94d9e1a7cb1fcde40b75eb39607291'
   crates/term-core/src/screen.rs: 'sha256:858f97327f67c34b3921b2beb9f07f3b3ebe6c26c2d6a915d535bb6e1e7a04a0'
-  docs/02-decisiones.md: 'sha256:da19a4989a8d929cc92409af0e0c4267a1e2e9dbb2b06e341954025e551b9e5e'
+  docs/02-decisions.md: 'sha256:da19a4989a8d929cc92409af0e0c4267a1e2e9dbb2b06e341954025e551b9e5e'
 tags:
   - clipboard
   - security
@@ -49,4 +49,4 @@ feature_id: feat_term-core_nx0g1r
 
 ## Where it lives
 
-`keyboard::paste` in `crates/app/src/keyboard.rs`, decided in **D11** of `docs/02-decisiones.md`. The mode is queried with `Screen::bracketed_paste()`, which returns `bool` so as not to let the engine's type show through.
+`keyboard::paste` in `crates/app/src/keyboard.rs`, decided in **D11** of `docs/02-decisions.md`. The mode is queried with `Screen::bracketed_paste()`, which returns `bool` so as not to let the engine's type show through.

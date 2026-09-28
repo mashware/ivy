@@ -14,7 +14,7 @@ last_verified: '2026-09-06T15:16:14.533Z'
 file_paths:
   - crates/term-core/src/lib.rs
   - crates/app/src/pty_output.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - 'Pty::write'
   - 'Pty::spawn'
@@ -23,7 +23,7 @@ symbols:
 content_hashes:
   crates/term-core/src/lib.rs: 'sha256:36606ed55bf82b06567677e0eac02210dd9c77467ee0ebae732f83244bfae7e8'
   crates/app/src/pty_output.rs: 'sha256:deaab103083c3aaf54a7d7eb8a910390aa2087ba44696ad37d605109c80cea73'
-  docs/02-decisiones.md: 'sha256:b76cc17fbac2d55b9f81f75cd1d31295e188704e9dc21642114375042b66e8c9'
+  docs/02-decisions.md: 'sha256:b76cc17fbac2d55b9f81f75cd1d31295e188704e9dc21642114375042b66e8c9'
 tags:
   - pty
   - concurrency
@@ -63,4 +63,4 @@ See [[the-pseudoterminal-measured]] for the 20 KiB and the «blocking loses noth
 
 ## Where it lives
 
-`crates/term-core/src/lib.rs`: `Pty::write`, the writer thread in `Pty::spawn`, `Pty::backlog`, `Drop for Pty`. The sentence it rests on is in **D8**; the fix and what it discarded are **D29**, both in `docs/02-decisiones.md`. The console's own sentence lives in `crates/app/src/pty_output.rs`.
+`crates/term-core/src/lib.rs`: `Pty::write`, the writer thread in `Pty::spawn`, `Pty::backlog`, `Drop for Pty`. The sentence it rests on is in **D8**; the fix and what it discarded are **D29**, both in `docs/02-decisions.md`. The console's own sentence lives in `crates/app/src/pty_output.rs`.

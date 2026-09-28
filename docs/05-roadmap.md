@@ -83,9 +83,9 @@ being doing them and becomes knowing which one to go to.
 > **Corrected in August 2026.** This used to say «no tool in the landscape has this: they all show
 > the tasks, none of them order them by what claims you», and it **stopped being true**: Herdr's
 > sidebar accumulates state from agent to panel, to tab and to workspace, and orders by who needs
-> attention ([07-panorama.md](07-panorama.md) → E8). What still nobody has is not the **order**, it
-> is the **body**: why it is stuck, which step it is on and how much is left. This phase's list is
-> ordered with `attention` (D18) and read from whatever the producer publishes.
+> attention ([07-landscape.md](07-landscape.md) → E8). What still nobody has is not the **order**,
+> it is the **body**: why it is stuck, which step it is on and how much is left. This phase's list
+> is ordered with `attention` (D18) and read from whatever the producer publishes.
 
 **Why it is parked:** it only works if the state that arrives is trustworthy, and that is known
 after using Phase 3 for a while. Before that it is laying out a pretty list with data you do not
@@ -120,11 +120,11 @@ way. If it is never done, nothing extra will have been built to get there. That 
 
 ## Phase 0 — Done
 
-- [x] Status panel working on top of WezTerm (`prototipos/flow-panel`)
+- [x] Status panel working on top of WezTerm (`prototypes/flow-panel`)
 - [x] `panel.json` contract defined and with a real producer (`flow`)
 - [x] Two views: global (every task) and focus (one task, pinned)
-- [x] Visual mockup of the app to judge proportions (`prototipos/mockup-terminal.html`)
-- [x] Stack and architecture decisions ([02-decisiones.md](02-decisiones.md))
+- [x] Visual mockup of the app to judge proportions (`prototypes/mockup-terminal.html`)
+- [x] Stack and architecture decisions ([02-decisions.md](02-decisions.md))
 
 ---
 
@@ -188,7 +188,7 @@ before. The two concrete symptoms to watch for are in F1.3's risks.
 > consoles cost 1.96× one and the frame spends 36 % of its slot— and typing costs 36 µs. The jump is
 > not due. What is left to check is the load these numbers do **not** cover: four panes and the
 > panels painting at the same time, which is to say F1.4 and F1.6. The numbers, with what they prove
-> and what they do not, are in the «Measured — 9 August 2026» annex of [D3](02-decisiones.md).
+> and what they do not, are in the «Measured — 9 August 2026» annex of [D3](02-decisions.md).
 
 ### Structure
 
@@ -204,7 +204,7 @@ agent-terminal/
 ├── vendor/egui-winit/      the patched copy every build uses (D33)
 ├── scripts/                measure-frame.sh, which runs the measurement batches
 ├── docs/
-└── prototipos/
+└── prototypes/
 ```
 
 The first two boxes are the ones to protect. If `app` gets thrown away and rewritten in GPUI,
@@ -242,8 +242,8 @@ three-month one and does not answer the question any better.
 | Risk | Where it shows up | What to do |
 |---|---|---|
 | **Glyph width** — CJK, emoji and combining characters knock the grid out of place | F1.3 | **There is nothing to port** (corrected, Aug 2026): the parser already resolves the width and marks the companion cell, and `term-core`'s reader exposes it as `CellWidth`. What is left for whoever paints is to **respect** the two columns, not to compute them |
-| **Full repaint** — egui is immediate mode: it repaints everything every frame | F1.3 | **ANSWERED (Aug 2026): the symptom does not show up.** Two consoles cost 1.96× one —linear scaling— and the frame spends 36 % of its slot with the most naive painter possible. It only repaints when the PTY produces changes, as was foreseen. **Measured again in F1.4 with two real panes (Aug 2026), and the suspect changes:** with both consoles dumping at once the frame costs 5.92 ms and fits in the 120 Hz slot, but **only 0.74 ms of that is attributable to the framework** — 3.35 are spent by the parser swallowing its budget and the rest by an unoptimized painter of our own. The keyboard keeps responding while it lasts: 3.42 ms from the key to the byte, against the 36 µs with no dump. **It does not compare with the bench's 36 %**: that one measured full screens and continuous repainting, and this one a dump over nearly twice as many cells. **The worst case with two panes is still unmeasured**, and the p95 of the double dump already falls outside 120 Hz. Numbers and limits in the «Measured — 11 August 2026» annex of [D3](02-decisiones.md) |
-| **Key latency** — a terminal that feels slow to type in is useless | F1.3 | **ANSWERED (Aug 2026): 36 µs** from the key in the frame to the byte in the program. **There is no «key→pixel» number**: egui's events carry no stamp of their own and the clock of its input is «relative to whatever», so that span is not measurable from inside the process — publishing it under that name would have been making it up. What is measured, and broken down, is in [D3](02-decisiones.md) |
+| **Full repaint** — egui is immediate mode: it repaints everything every frame | F1.3 | **ANSWERED (Aug 2026): the symptom does not show up.** Two consoles cost 1.96× one —linear scaling— and the frame spends 36 % of its slot with the most naive painter possible. It only repaints when the PTY produces changes, as was foreseen. **Measured again in F1.4 with two real panes (Aug 2026), and the suspect changes:** with both consoles dumping at once the frame costs 5.92 ms and fits in the 120 Hz slot, but **only 0.74 ms of that is attributable to the framework** — 3.35 are spent by the parser swallowing its budget and the rest by an unoptimized painter of our own. The keyboard keeps responding while it lasts: 3.42 ms from the key to the byte, against the 36 µs with no dump. **It does not compare with the bench's 36 %**: that one measured full screens and continuous repainting, and this one a dump over nearly twice as many cells. **The worst case with two panes is still unmeasured**, and the p95 of the double dump already falls outside 120 Hz. Numbers and limits in the «Measured — 11 August 2026» annex of [D3](02-decisions.md) |
+| **Key latency** — a terminal that feels slow to type in is useless | F1.3 | **ANSWERED (Aug 2026): 36 µs** from the key in the frame to the byte in the program. **There is no «key→pixel» number**: egui's events carry no stamp of their own and the clock of its input is «relative to whatever», so that span is not measurable from inside the process — publishing it under that name would have been making it up. What is measured, and broken down, is in [D3](02-decisions.md) |
 | **Dead keys and IME** | F1.3 | Accept that it comes out mediocre in the prototype; it is Phase 2 |
 | **Performance of the massive dump** (`cat` of a big file) | F1.2 | Cap how many bytes get processed per frame |
 | **Windows** — ConPTY behaves differently | outside Phase 1 | Not touched until Phase 2. `portable-pty` abstracts it, but abstracting is not testing |
@@ -256,18 +256,18 @@ What turns the prototype into something used daily.
 
 | Milestone | What |
 |---|---|
-| **F2.1** ✅ | Tabs — **closed on 16 August 2026**. Eight deliveries; the frame measured with one and two tabs in [D13](02-decisiones.md)'s annex |
-| **F2.2** ✅ | Arbitrary panes — **closed on 17 August 2026**. Seven deliveries; the n-ary tree with weights and the three chords in [D14](02-decisiones.md), and the frame measured with two and with four panes in its annex |
-| **F2.3** ✅ | **Dragging panes with the mouse** to rearrange them — **closed on 18 August 2026**. Three deliveries; the gesture, its atomicity and the identity of the drag in [D15](02-decisiones.md), and the frame measured while dragging non-stop in its annex |
-| **F2.4** ✅ | Folding the panel away per pane and **narrowing its width by dragging** — **closed on 19 August 2026**. Three deliveries; the per-pane width, the gesture's minimum and folding as a separate state in [D10](02-decisiones.md), and what the gesture costs measured in its annex |
-| **F2.5** ✅ | Saving and restoring the layout on opening — **closed on 24 August 2026**. Eight deliveries; the file of its own, its version and what is not understood in [D16](02-decisiones.md), and in its annex what it costs to open with the consoles you left: **5.42 ms once only and before the first frame**, with batch `L` measuring it and `H` as the control |
-| **F2.6** ✅ | Scrollback, selection and **copying**, and forwarding the mouse to the program inside — **closed on 25 August 2026**. Four deliveries; the scrollback's ceiling chosen with the measurements in front of us in [D21](02-decisiones.md), how the left button is shared out in [D20](02-decisiones.md), what «the text» that gets copied is in [D22](02-decisiones.md), and who keeps each gesture —with the report's encoding, which the library does not bring— in [D23](02-decisiones.md). Pasting had been brought forward out of phase ([#46](https://github.com/mashware/agent-terminal/issues/46)), see D11. In the annexes: the scrollback costs **+39 % more interpreting and +1.2 % of the full round trip**, having text marked **50–60 µs per frame and console** —declared **without isolating it**— and encoding a gesture for the program and writing it to it **5.1–5.3 µs**, that one isolated in a series of its own |
-| **F2.7** | First compilation and real test on **macOS and Windows**. The keyboard is checked by hand against the list in [D53](02-decisiones.md), because no test here can reach the stretch from the desktop's key to the framework's event; that decision already names the rows expected to differ on each platform. The control channel is exercised on each platform with its public endpoint removed before the channel: dropping it must return within its bound and leave no listener worker alive |
-| **F2.8** ✅ | **The panel says when it claims you, and the tab accumulates it** — **closed on 24 August 2026**. Three deliveries; the `attention` field and who declares it in [D18](02-decisiones.md), the three measured symbols and the color table of its own in [D9](02-decisiones.md)'s annex, and in D18's annex what the bar costs now that its card accumulates: **between 2.35 and 2.69 µs per frame**, measured with two tabs and the four producers claiming. The system notification was left out on purpose, until the field has producers |
-| **F2.9** ✅ | **The system fonts** — **closed on 25 August 2026**. Four deliveries; CJK, the icons of an `ls` and **color emoji** stop coming out as boxes. That they be looked up **when they are needed** and not at startup was decided by a measurement ([D24](02-decisiones.md): 23.5–31.0 ms at startup against 4.0–5.7 lazily), and color emoji goes its own way because **epaint cannot rasterize color** ([D25](02-decisiones.md)). Two findings that reordered work: `Fonts::has_glyph` **lies** —it returns `false` for `'a'`—, and an icon font placed in front took **three letters out of every five** away from the terminal. In the annexes: drawing with emoji on screen costs **356 µs against the control's 269**, after the atlas and the pass of its own brought it down from 743. `COLR` —what Windows uses— and skin tones are left out, with their reason |
+| **F2.1** ✅ | Tabs — **closed on 16 August 2026**. Eight deliveries; the frame measured with one and two tabs in [D13](02-decisions.md)'s annex |
+| **F2.2** ✅ | Arbitrary panes — **closed on 17 August 2026**. Seven deliveries; the n-ary tree with weights and the three chords in [D14](02-decisions.md), and the frame measured with two and with four panes in its annex |
+| **F2.3** ✅ | **Dragging panes with the mouse** to rearrange them — **closed on 18 August 2026**. Three deliveries; the gesture, its atomicity and the identity of the drag in [D15](02-decisions.md), and the frame measured while dragging non-stop in its annex |
+| **F2.4** ✅ | Folding the panel away per pane and **narrowing its width by dragging** — **closed on 19 August 2026**. Three deliveries; the per-pane width, the gesture's minimum and folding as a separate state in [D10](02-decisions.md), and what the gesture costs measured in its annex |
+| **F2.5** ✅ | Saving and restoring the layout on opening — **closed on 24 August 2026**. Eight deliveries; the file of its own, its version and what is not understood in [D16](02-decisions.md), and in its annex what it costs to open with the consoles you left: **5.42 ms once only and before the first frame**, with batch `L` measuring it and `H` as the control |
+| **F2.6** ✅ | Scrollback, selection and **copying**, and forwarding the mouse to the program inside — **closed on 25 August 2026**. Four deliveries; the scrollback's ceiling chosen with the measurements in front of us in [D21](02-decisions.md), how the left button is shared out in [D20](02-decisions.md), what «the text» that gets copied is in [D22](02-decisions.md), and who keeps each gesture —with the report's encoding, which the library does not bring— in [D23](02-decisions.md). Pasting had been brought forward out of phase ([#46](https://github.com/mashware/agent-terminal/issues/46)), see D11. In the annexes: the scrollback costs **+39 % more interpreting and +1.2 % of the full round trip**, having text marked **50–60 µs per frame and console** —declared **without isolating it**— and encoding a gesture for the program and writing it to it **5.1–5.3 µs**, that one isolated in a series of its own |
+| **F2.7** | First compilation and real test on **macOS and Windows**. The keyboard is checked by hand against the list in [D53](02-decisions.md), because no test here can reach the stretch from the desktop's key to the framework's event; that decision already names the rows expected to differ on each platform. The control channel is exercised on each platform with its public endpoint removed before the channel: dropping it must return within its bound and leave no listener worker alive. **Two things that will read green on the new platforms without having run**, carried here when the debt file that held them was deleted (#150): every test that returns early on `hold_a_paste_on` or on `the_longest_line_a_reader_keeps()` being `None` — `grep -n "hold_a_paste_on\|the_longest_line_a_reader_keeps" crates/app/src` finds them, in more than one form — returns before asserting anything off Linux, where that boundary is `None` — decide between a per-platform boundary, a reported skip, or a panic where none is declared; and on Windows the pipe's write end belongs to the pseudoconsole, so `drop(pair.slave)` closes nothing and **no end of file arrives while the console lives** — the D32 survivor case as the platform's default |
+| **F2.8** ✅ | **The panel says when it claims you, and the tab accumulates it** — **closed on 24 August 2026**. Three deliveries; the `attention` field and who declares it in [D18](02-decisions.md), the three measured symbols and the color table of its own in [D9](02-decisions.md)'s annex, and in D18's annex what the bar costs now that its card accumulates: **between 2.35 and 2.69 µs per frame**, measured with two tabs and the four producers claiming. The system notification was left out on purpose, until the field has producers |
+| **F2.9** ✅ | **The system fonts** — **closed on 25 August 2026**. Four deliveries; CJK, the icons of an `ls` and **color emoji** stop coming out as boxes. That they be looked up **when they are needed** and not at startup was decided by a measurement ([D24](02-decisions.md): 23.5–31.0 ms at startup against 4.0–5.7 lazily), and color emoji goes its own way because **epaint cannot rasterize color** ([D25](02-decisions.md)). Two findings that reordered work: `Fonts::has_glyph` **lies** —it returns `false` for `'a'`—, and an icon font placed in front took **three letters out of every five** away from the terminal. In the annexes: drawing with emoji on screen costs **356 µs against the control's 269**, after the atlas and the pass of its own brought it down from 743. `COLR` —what Windows uses— and skin tones are left out, with their reason |
 | **F2.10** ✅ | **Configuration** — font, size, colors and shortcuts — **closed on 6 September 2026**. It is the first thing anybody does on installing a terminal, and until **D19** it did not appear in this roadmap. Four deliveries: the file with its twenty-two colors, the font size with a veto of its own under the measurement gate, the twelve shortcuts —and `none`, which gives a chord back to the program inside— and the font **by its name**. The file is written by hand and **tolerates being broken**: a line that is not understood is said with its number and the rest is applied. Asking for a family is the one setting that costs anything on opening, so the machine is enumerated **only** when the file names one, which is what keeps **D24** standing; the report declares which of the two happened and the bench invalidates a run that paid it. Its own ceiling bit back: **D28**'s ratchet refused the last delivery's ten lines in `lib.rs`, and reading the settings file left it for `settings.rs` |
 | **F2.12** ✅ | **The whole repository in English** — **closed on 5 September 2026**. — the project's own code, the comments, the tests and the documents have been **in Spanish since the first commit**, and that decision **is not written down anywhere**, which is what let it grow. It moves everything to English, configuration keys and messages included, **with no backwards compatibility**: nobody has this terminal installed, so there is no file out there whose anything has to be respected, and it is the only window in which it comes free. Commits, branches and PRs move to English **from now on**, without waiting for the milestone. **It is run first of what is left of the phase** — see below. [#122](https://github.com/mashware/agent-terminal/issues/122), **D27** |
-| **F2.11** ✅ | **A header per pane** — Tilix style: the handle to drag it by, its close button, and at a glance which one has the focus — **closed on 18 September 2026**. Five deliveries; it comes out of **D20**, where it was discarded **as part of F2.6** for the price it puts on every published batch, and the milestone paid that price rather than argue it away: the strip in [D45](02-decisiones.md), gated off every measured run and switched on for a batch of its own, and the close button — with no confirmation, absent on a pane with no sibling — in [D46](02-decisiones.md). **The third of the original three things had already landed, outside the milestone** ([#209](https://github.com/mashware/agent-terminal/issues/209), **D36**): only the console being typed into fills its cursor, and a window that lost the desktop's focus outlines every one of them. In the annexes: two runs of batch `T` against its control `C` on merged `main` put the strip at **between 524 ns and 1.03 µs per frame** — under a thousandth of 1 % of the 60 Hz slot — with `T`'s grid one column narrower than `C`'s, declared rather than subtracted |
+| **F2.11** ✅ | **A header per pane** — Tilix style: the handle to drag it by, its close button, and at a glance which one has the focus — **closed on 18 September 2026**. Five deliveries; it comes out of **D20**, where it was discarded **as part of F2.6** for the price it puts on every published batch, and the milestone paid that price rather than argue it away: the strip in [D45](02-decisions.md), gated off every measured run and switched on for a batch of its own, and the close button — with no confirmation, absent on a pane with no sibling — in [D46](02-decisions.md). **The third of the original three things had already landed, outside the milestone** ([#209](https://github.com/mashware/agent-terminal/issues/209), **D36**): only the console being typed into fills its cursor, and a window that lost the desktop's focus outlines every one of them. In the annexes: two runs of batch `T` against its control `C` on merged `main` put the strip at **between 524 ns and 1.03 µs per frame** — under a thousandth of 1 % of the 60 Hz slot — with `T`'s grid one column narrower than `C`'s, declared rather than subtracted |
 | **F2.13** | **Search in the scrollback** — Part I promises it by name, and what Phase 1 «leaves out on purpose» defers it here explicitly, next to the scrollback, the selection and the copying that **F2.6** did deliver. Until [#177](https://github.com/mashware/agent-terminal/issues/177) **no milestone carried it**, and nobody had said so. It is **not** an idea coming in through the front door —it is a commitment already made— so it needs no decision of its own; what it does need is **a batch of its own**, because it paints matches over the whole scrollback and a painted path that is not declared gets published as the framework's cost, the figure **D3** judges egui by. And it lands on top of two decisions that are already taken: who keeps the left button (**D20**) and what «the text» is (**D22**), so what a match does to a selection that is already there gets decided inside it |
 
 **Where this list comes from, since D19.** The bar to clear before publishing is that of a WezTerm,
@@ -301,7 +301,7 @@ declares its work to the bench.
 commits, decisions and in the knowledge store, so renumbering costs more than accepting that the
 table is out of order. The reason for bringing it forward: it is the only thing in Phase 2 that
 touches **the leg that differentiates**, and August's landscape left two competitors a single field
-away ([07-panorama.md](07-panorama.md) → E7 and E8). Scrollback and portability are terminal, and
+away ([07-landscape.md](07-landscape.md) → E7 and E8). Scrollback and portability are terminal, and
 the terminal is no longer what has to be defended.
 
 F2.3 is the whole reason the phase exists: it is the gap that led to considering this, and it is
@@ -334,7 +334,7 @@ operation but no harness adapter; unsupported integrations remain unsupported ra
 fresh connection or inferring lifecycle from content. The operation is also absent on Windows with
 the rest of the control channel until F2.7 proves the named pipe on a real host.
 
-**Do not start without rereading the security table in [03-arquitectura.md](03-arquitectura.md).** A
+**Do not start without rereading the security table in [03-architecture.md](03-architecture.md).** A
 file that declares commands and a button that runs them is code execution in the user's shell; the
 command has to be seen before it is run.
 
@@ -363,7 +363,7 @@ use the same channel. If it is never done, nothing has been lost.
 > of ours to a model**: since **4 April 2026** Claude subscriptions do not cover third-party tools,
 > so an agent the app called over the API would be paid for by the user separately — exactly what
 > **D4** exists to avoid. The supervisor has to be **another console agent**, in its own pane,
-> speaking MCP like any other. See [02-decisiones.md](02-decisiones.md) → D4.
+> speaking MCP like any other. See [02-decisions.md](02-decisions.md) → D4.
 
 ---
 
@@ -373,14 +373,14 @@ use the same channel. If it is never done, nothing has been lost.
 - [ ] `flow-note "text"` — a short command to write into the panel of the current branch's task
 - [ ] A hook that publishes the state automatically at the end of every step, instead of by hand
 - [ ] Tie off two loose ends of the contract: `actions`, and making `header: false` not depend on
-      `meta.json` (see [04-contrato-panel.md](04-contrato-panel.md))
+      `meta.json` (see [04-panel-contract.md](04-panel-contract.md))
 - [ ] Review the terms of use before distributing to third parties (automating subscription sessions
-      is a gray area; see [02-decisiones.md](02-decisiones.md) → D4). **Sharper since April 2026**:
+      is a gray area; see [02-decisions.md](02-decisions.md) → D4). **Sharper since April 2026**:
       hosting the official binary is clearly inside —it uses its own session and we do not touch its
       token— but **automating it** from outside is not resolved in writing
 - [ ] **A bridge between opencode and `panel.json`** — its backend exposes HTTP with events and its
       sidebar already computes what the panel wants to paint. It would be the contract's second
-      producer without touching a line of its code (see [06-referencias.md](06-referencias.md))
+      producer without touching a line of its code (see [06-references.md](06-references.md))
 
 ~~Install `inotify-tools`~~ — it falls with F1.6: the `notify` crate does the same thing and on
 macOS and Windows too. As long as the panel keeps running on top of WezTerm, polling by `mtime`
@@ -393,7 +393,7 @@ every second works and does not get in the way.
 Things we like that **have no phase assigned**. They are neither debt nor commitment: they are
 written down so as not to lose them and so that nobody sneaks them into a phase «while we are at
 it». If one of them ever goes in, it will be through the front door — with its slot in Part I and
-its decision in `02-decisiones.md`.
+its decision in `02-decisions.md`.
 
 ### Tasks and board
 

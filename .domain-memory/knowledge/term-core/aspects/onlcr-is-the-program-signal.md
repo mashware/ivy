@@ -95,4 +95,4 @@ descriptor **before** launching the child (a shell reads the settings on startin
 photographs them so as to restore them on exit), and `apply` translated in the reader thread by
 consulting `lo_quiere_el_programa`. Six tests at the end of the file went through it with a real
 `sh`. All of it was reverted the same day it was delivered — the autopsy is **D12** in
-`docs/02-decisiones.md`, and `crates/term-core/src/lib.rs` carries none of it today.
+`docs/02-decisions.md`, and `crates/term-core/src/lib.rs` carries none of it today.

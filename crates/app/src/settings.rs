@@ -1621,7 +1621,7 @@ mod tests {
 
     #[test]
     fn the_ceiling_and_the_warning_cap_are_the_ones_the_document_says() {
-        // **Both constants are published in `docs/08-configuracion.md`**, and the tests that use them
+        // **Both constants are published in `docs/08-configuration.md`**, and the tests that use them
         // are parameterized **with themselves**: moving the number took nothing down while the document
         // kept promising the old one. It is the disguise this project has on record —choosing a number with
         // which the defect and the fix give the same— and they need to be written literal once.
@@ -1645,7 +1645,7 @@ mod tests {
     /// the list twice again.
     #[test]
     fn the_document_publishes_keys_the_application_accepts() {
-        const DOCUMENT: &str = include_str!("../../../docs/08-configuracion.md");
+        const DOCUMENT: &str = include_str!("../../../docs/08-configuration.md");
 
         let table = markdown::table(DOCUMENT, &["Key", "What it is"]);
         let published: Vec<&str> = table
@@ -1692,7 +1692,7 @@ mod tests {
     /// to exempt.
     #[test]
     fn the_document_examples_are_interpreted_without_a_single_warning() {
-        const DOCUMENT: &str = include_str!("../../../docs/08-configuracion.md");
+        const DOCUMENT: &str = include_str!("../../../docs/08-configuration.md");
 
         let examples: Vec<&str> = markdown::fenced(DOCUMENT)
             .code
@@ -1809,7 +1809,7 @@ mod tests {
     /// that made the cursor blink, and the sentence went with it.
     #[test]
     fn the_messages_the_document_publishes_are_the_ones_the_terminal_writes() {
-        const DOCUMENT: &str = include_str!("../../../docs/08-configuracion.md");
+        const DOCUMENT: &str = include_str!("../../../docs/08-configuration.md");
         const WINDOW: &str = include_str!("settings.rs");
 
         let published: Vec<&str> = markdown::fenced(DOCUMENT)
@@ -2199,7 +2199,7 @@ mod tests {
         // keeps `Action`, `Chord` and `Keymap` below its own — about a hundred and sixty production
         // lines this walk therefore does not read. **`shape.rs` cannot see those lines either**,
         // which is the same invisibility D28 records as costing one delivery fifty lines, and it is
-        // filed rather than fixed; the one guard that could not live with it — the one counting the
+        // left rather than fixed; the one guard that could not live with it — the one counting the
         // doors to the control-character gate — removes the test blocks by counting braces instead
         // of truncating, and its own comment says why. Whenever a top-level item lands below a test
         // module its sentences leave this walk in silence, which is why the floor is stated as a

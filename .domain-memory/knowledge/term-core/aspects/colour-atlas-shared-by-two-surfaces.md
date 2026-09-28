@@ -41,4 +41,4 @@ The price is atlas room, not memory: the texture stays 1 MiB, but a character ca
 
 ## Where it lives
 
-crates/app/src/fonts/atlas.rs `Glyphs::texture`, `Glyphs::remembers`; crates/app/src/panel/color.rs `slot`; D25 in docs/02-decisiones.md
+crates/app/src/fonts/atlas.rs `Glyphs::texture`, `Glyphs::remembers`; crates/app/src/panel/color.rs `slot`; D25 in docs/02-decisions.md

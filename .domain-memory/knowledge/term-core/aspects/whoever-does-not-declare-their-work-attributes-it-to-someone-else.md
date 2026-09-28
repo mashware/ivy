@@ -83,4 +83,4 @@ which **always** returns what was timed even when it records no series. The one 
 `Window::close_frame` in `crates/app/src/lib.rs`, which sums that of all the consoles before
 subtracting a single time. The test that pins the behavior is
 `a_console_with_no_output_declares_all_the_same_what_it_cost_to_paint_it`; the resulting number is
-published in the annex «Measured — 11 August 2026» of D3, in `docs/02-decisiones.md`.
+published in the annex «Measured — 11 August 2026» of D3, in `docs/02-decisions.md`.

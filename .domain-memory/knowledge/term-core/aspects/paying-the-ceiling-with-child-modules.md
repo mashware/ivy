@@ -46,4 +46,4 @@ feature_id: feat_term-core_nx0g1r
 
 ## Where it lives
 
-`crates/app/tests/shape.rs` (`type_sizes`, `type_of`, `OVER_CEILING_TODAY`), `crates/app/tests/prose.rs`, `crates/app/tests/glossary.rs`; D28 «Amended: the `impl` ceiling holds a type, not only a block» in `docs/02-decisiones.md`.
+`crates/app/tests/shape.rs` (`type_sizes`, `type_of`, `OVER_CEILING_TODAY`), `crates/app/tests/prose.rs`, `crates/app/tests/glossary.rs`; D28 «Amended: the `impl` ceiling holds a type, not only a block» in `docs/02-decisions.md`.

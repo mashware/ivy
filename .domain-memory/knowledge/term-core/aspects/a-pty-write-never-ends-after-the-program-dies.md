@@ -17,7 +17,7 @@ file_paths:
   - crates/term-core/src/lib.rs
   - crates/term-core/examples/writer_wake.rs
   - crates/term-core/examples/writer_leak.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - 'Pty::spawn_with_env'
   - write_chunk
@@ -27,7 +27,7 @@ symbols:
   - Readable
 content_hashes:
   crates/term-core/src/lib.rs: 'sha256:598307ef482b8847d279ad556b074bb929e86396d7284e83bd995094bd17b1e8'
-  docs/02-decisiones.md: 'sha256:b003d183812e140541e040f9ee58c03010e9631c6f99decf2f3da9d51cbad7e0'
+  docs/02-decisions.md: 'sha256:b003d183812e140541e040f9ee58c03010e9631c6f99decf2f3da9d51cbad7e0'
 tags:
   - pty
   - kernel
@@ -51,4 +51,4 @@ feature_id: feat_term-core_nx0g1r
 
 ## Where it lives
 
-`crates/term-core/src/nonblocking.rs` (the waits), `crates/term-core/src/lib.rs` (`Pty::spawn_with_env`, `write_chunk`, `Drop for Pty`), `crates/term-core/examples/writer_wake.rs` (the below-the-crate probe: `none|flush-out|flush-in|flush-both|winsz|close-master|diag|hold`), `crates/term-core/examples/writer_leak.rs` (thread count after a close), D29's amendment in `docs/02-decisiones.md`.
+`crates/term-core/src/nonblocking.rs` (the waits), `crates/term-core/src/lib.rs` (`Pty::spawn_with_env`, `write_chunk`, `Drop for Pty`), `crates/term-core/examples/writer_wake.rs` (the below-the-crate probe: `none|flush-out|flush-in|flush-both|winsz|close-master|diag|hold`), `crates/term-core/examples/writer_leak.rs` (thread count after a close), D29's amendment in `docs/02-decisions.md`.

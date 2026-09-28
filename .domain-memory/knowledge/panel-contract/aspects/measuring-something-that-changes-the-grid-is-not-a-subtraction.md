@@ -12,14 +12,14 @@ created_at: '2026-08-13T15:24:41.224Z'
 updated_at: '2026-08-13T15:24:41.224Z'
 last_verified: '2026-08-13T15:24:41.224Z'
 file_paths:
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
   - scripts/measure-frame.sh
   - crates/app/src/measure.rs
 symbols:
   - 'Timings::publish_spans'
   - header
 content_hashes:
-  docs/02-decisiones.md: 'sha256:315a02dd674468d2ff9049b2b9750cd655d842d9e9b347b4cb6de82ece55c25f'
+  docs/02-decisions.md: 'sha256:315a02dd674468d2ff9049b2b9750cd655d842d9e9b347b4cb6de82ece55c25f'
   scripts/measure-frame.sh: 'sha256:3da4da4657cf7b2b100640bc4feb8e2606a9b52079895401e847cdab18618b78'
   crates/app/src/measure.rs: 'sha256:2c620cfa14e9ac593b3293628869a8ddb5d48b5ba3de54e08eb72f775d3ebe17'
 tags:
@@ -47,4 +47,4 @@ feature_id: feat_panel-contract_8y2gc0
 
 ## Where it lives
 
-Annex «Measured — 13 August 2026» of D3 in `docs/02-decisiones.md`, taken with `scripts/measure-frame.sh` (batches A with no panel, B with the panel still, C publishing, D control for the temporary one).
+Annex «Measured — 13 August 2026» of D3 in `docs/02-decisions.md`, taken with `scripts/measure-frame.sh` (batches A with no panel, B with the panel still, C publishing, D control for the temporary one).

@@ -14,7 +14,7 @@ last_verified: '2026-08-12T15:18:25.660Z'
 file_paths:
   - crates/app/src/panel.rs
   - crates/panel-contract/src/panel.rs
-  - docs/04-contrato-panel.md
+  - docs/04-panel-contract.md
 symbols:
   - MAX_CHARACTERS
   - MAX_BYTES
@@ -23,7 +23,7 @@ symbols:
 content_hashes:
   crates/app/src/panel.rs: 'sha256:b229abf065c777de9460a87101cb6343d6f7e56eddac128b0f4f261f5d440247'
   crates/panel-contract/src/panel.rs: 'sha256:024c1d104e63a6ddc80b1dc2596686d28bff05a93cc3f44ef57dc86b59e4ff0a'
-  docs/04-contrato-panel.md: 'sha256:3db1e8ddfe5ca04a53e88131e5eb07c1b1600c8d00d81b5df051fb5baee44edd'
+  docs/04-panel-contract.md: 'sha256:3db1e8ddfe5ca04a53e88131e5eb07c1b1600c8d00d81b5df051fb5baee44edd'
 tags:
   - measurement
   - frame
@@ -48,4 +48,4 @@ The contract's ceiling of 256 KiB bounds what a file makes it reserve **when it 
 
 ## Where it lives
 
-`crates/app/src/panel.rs`: the cap constant and the function that sanitizes, with its test `an_absurdly_long_line_is_cut_before_being_painted`. The warning for whoever publishes, in `docs/04-contrato-panel.md`.
+`crates/app/src/panel.rs`: the cap constant and the function that sanitizes, with its test `an_absurdly_long_line_is_cut_before_being_painted`. The warning for whoever publishes, in `docs/04-panel-contract.md`.

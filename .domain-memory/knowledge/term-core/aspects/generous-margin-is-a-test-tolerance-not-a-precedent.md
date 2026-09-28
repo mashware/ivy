@@ -14,7 +14,7 @@ updated_at: '2026-09-28T14:25:15.266Z'
 last_verified: '2026-09-28T14:25:15.266Z'
 file_paths:
   - crates/term-core/src/lib.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - GENEROUS_MARGIN
   - without_consuming_it_what_arrives_is_bounded
@@ -23,7 +23,7 @@ symbols:
   - MAX_OWED
 content_hashes:
   crates/term-core/src/lib.rs: 'sha256:a9ffaf445eb42e55e3727ab8952a28d8012b37eaedc1a7bc9bc1e21335d03f16'
-  docs/02-decisiones.md: 'sha256:b53044393a7694d2c1f56d6f41680d1dd0df011e6f7448de57e3b6d5edc66e4d'
+  docs/02-decisions.md: 'sha256:b53044393a7694d2c1f56d6f41680d1dd0df011e6f7448de57e3b6d5edc66e4d'
 tags:
   - d8
   - d60
@@ -44,4 +44,4 @@ feature_id: feat_term-core_nx0g1r
 
 ## Where it lives
 
-`crates/term-core/src/lib.rs`: `GENEROUS_MARGIN` inside `without_consuming_it_what_arrives_is_bounded` (the comment above that test carries the arithmetic); `READS_IN_FLIGHT` and `READ_SIZE` near the top of the file; `MAX_OWED`, whose doc comment names this trap. The decision that uses the corrected anchor is **D60** in `docs/02-decisiones.md`.
+`crates/term-core/src/lib.rs`: `GENEROUS_MARGIN` inside `without_consuming_it_what_arrives_is_bounded` (the comment above that test carries the arithmetic); `READS_IN_FLIGHT` and `READ_SIZE` near the top of the file; `MAX_OWED`, whose doc comment names this trap. The decision that uses the corrected anchor is **D60** in `docs/02-decisions.md`.

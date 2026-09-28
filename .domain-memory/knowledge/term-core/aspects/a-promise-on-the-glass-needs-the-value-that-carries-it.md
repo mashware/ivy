@@ -14,7 +14,7 @@ last_verified: '2026-09-10T22:24:48.322Z'
 file_paths:
   - crates/app/src/painter/notices.rs
   - crates/term-core/src/lib.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - STOPPED_RECEIVING
   - AND_STILL_TAKES_WHAT_YOU_TYPE
@@ -24,7 +24,7 @@ symbols:
 content_hashes:
   crates/app/src/painter/notices.rs: 'sha256:ad4f8857c2c5e495f094b96f491b54045f30df3e6b45d3a63c7b09a88ea7cee3'
   crates/term-core/src/lib.rs: 'sha256:5af3288f30591cf1465e35c369b5fd72b46a34799967c3c9dc421abb80bb2aaa'
-  docs/02-decisiones.md: 'sha256:60927be357e2acc44b11b824c1fb0a8a28fb43f098536d2957a1a9ec72219821'
+  docs/02-decisions.md: 'sha256:60927be357e2acc44b11b824c1fb0a8a28fb43f098536d2957a1a9ec72219821'
 tags:
   - d29
   - d38
@@ -44,10 +44,10 @@ It was written into the design's own literal contract, survived every earlier ro
 
 > **A promise on a surface must be traceable to the value that carries it.** In a feature built around «the reason is a value now», every clause has to name which value says it — and a clause about the other direction has no value at all until somebody reads one.
 
-**The fix has a shape worth reusing**: the clause became a second constant appended only where it is true, and the decision was written over the **fact** rather than over the console — `what_it_says(deaf: bool)` — so both wordings can be asserted. A write failure cannot be produced from outside `term-core` any more than a failed read can, so the reading of `gave_up` itself stays unpinned (`docs/DEBT.md`).
+**The fix has a shape worth reusing**: the clause became a second constant appended only where it is true, and the decision was written over the **fact** rather than over the console — `what_it_says(deaf: bool)` — so both wordings can be asserted. A write failure cannot be produced from outside `term-core` any more than a failed read can, so the reading of `gave_up` itself stays unpinned (it was listed in `docs/DEBT.md`, which #150 deleted; `git log -p -- docs/DEBT.md` recovers it).
 
 **This was the third blocker of one delivery that was a claim about somebody else's half**, which is why it is a card and not a line in a review: a false Windows risk published in the design (the pseudoterminal library maps a broken pipe to end of file on both platforms), and «a clip takes the tail, never the answer» published as the reason a **product** question was decided when nothing clipped at all.
 
 ## Where it lives
 
-`crates/app/src/painter/notices.rs` holds both sentences and `what_it_says`; `Backlog` and `Ending` are in `crates/term-core/src/lib.rs`. The product decision is **D41** in `docs/02-decisiones.md`, and the ceiling the notice lives under is **D39**.
+`crates/app/src/painter/notices.rs` holds both sentences and `what_it_says`; `Backlog` and `Ending` are in `crates/term-core/src/lib.rs`. The product decision is **D41** in `docs/02-decisions.md`, and the ceiling the notice lives under is **D39**.

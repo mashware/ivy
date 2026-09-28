@@ -13,13 +13,13 @@ updated_at: '2026-09-25T15:18:55.282Z'
 last_verified: '2026-09-25T15:18:55.282Z'
 file_paths:
   - crates/app/src/measure.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - close_frame
   - record_round
 content_hashes:
   crates/app/src/measure.rs: 'sha256:6feea1edd4c721d24de2ef333587ace2fe1d7a16caa4870041e873ce4b7e645c'
-  docs/02-decisiones.md: 'sha256:d2dcb9abf55336e4eec456ec7bdf9faf9da3aadc5306c5f699b6fc7bbdf5fa83'
+  docs/02-decisions.md: 'sha256:d2dcb9abf55336e4eec456ec7bdf9faf9da3aadc5306c5f699b6fc7bbdf5fa83'
 tags:
   - measurement-bench
   - d13
@@ -40,4 +40,4 @@ So a per-event cost — a publication, a patch, a read — cannot be derived as 
 
 ## Where it lives
 
-`crates/app/src/measure.rs` — `close_frame`; the D47 block «Measured at the ceiling» in `docs/02-decisiones.md`.
+`crates/app/src/measure.rs` — `close_frame`; the D47 block «Measured at the ceiling» in `docs/02-decisions.md`.

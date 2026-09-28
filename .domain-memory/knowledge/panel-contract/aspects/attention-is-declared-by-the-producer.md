@@ -12,13 +12,13 @@ created_at: '2026-08-24T08:26:45.811Z'
 updated_at: '2026-08-24T08:26:45.811Z'
 last_verified: '2026-08-24T08:26:45.811Z'
 file_paths:
-  - docs/02-decisiones.md
-  - docs/04-contrato-panel.md
+  - docs/02-decisions.md
+  - docs/04-panel-contract.md
   - docs/05-roadmap.md
 symbols: []
 content_hashes:
-  docs/02-decisiones.md: 'sha256:97753287aa018f84f87473e2872f7347a4aacb199a69cc2007289f3c34ee1475'
-  docs/04-contrato-panel.md: 'sha256:95629fb310672544479a213c3275547f03e137cc6cdad1da3920c8076c83eba9'
+  docs/02-decisions.md: 'sha256:97753287aa018f84f87473e2872f7347a4aacb199a69cc2007289f3c34ee1475'
+  docs/04-panel-contract.md: 'sha256:95629fb310672544479a213c3275547f03e137cc6cdad1da3920c8076c83eba9'
   docs/05-roadmap.md: 'sha256:d6b3727577809ebf4b11c0171d1beba0910ec2b86610b88e3ae5a294cb66b583'
 tags:
   - contract
@@ -47,4 +47,4 @@ feature_id: feat_panel-contract_8y2gc0
 
 ## Where it lives
 
-`docs/02-decisiones.md` → **D18**. `docs/04-contrato-panel.md` → Part I, the `attention` field and its table. `docs/05-roadmap.md` → milestone **F2.8**, brought forward ahead of F2.6 and F2.7, and the correction of the Phase 4 sentence. See also [[the-transport-is-not-the-contract]].
+`docs/02-decisions.md` → **D18**. `docs/04-panel-contract.md` → Part I, the `attention` field and its table. `docs/05-roadmap.md` → milestone **F2.8**, brought forward ahead of F2.6 and F2.7, and the correction of the Phase 4 sentence. See also [[the-transport-is-not-the-contract]].

@@ -61,4 +61,4 @@ The same delivery closed a duplicate-key hole in `Index::inserted_at` and wrote 
 
 ## Where it lives
 
-`crates/panel-contract/src/patch.rs` — `Op::Set(Scalar)`, `set_op`, `fn set`, and `Index::remember`. **D47** in `docs/02-decisiones.md` records both the collapse and the replacement collision in its discarded table.
+`crates/panel-contract/src/patch.rs` — `Op::Set(Scalar)`, `set_op`, `fn set`, and `Index::remember`. **D47** in `docs/02-decisions.md` records both the collapse and the replacement collision in its discarded table.

@@ -1,7 +1,7 @@
 //! The inverted ratchet: **it fails for what is still in Spanish**, crate by crate.
 //!
 //! Every other guard in this repository protects behaviour. This one protects a decision — the
-//! glossary written in `docs/02-decisiones.md` — and it is the only thing standing between a
+//! glossary written in `docs/02-decisions.md` — and it is the only thing standing between a
 //! milestone that renames tens of thousands of lines and a tree that ends up half translated
 //! without anybody noticing. The compiler cannot help: a Spanish identifier compiles perfectly.
 //!
@@ -33,7 +33,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 /// The decisions record, which carries the glossary in its annex.
-const DECISIONS: &str = include_str!("../../../docs/02-decisiones.md");
+const DECISIONS: &str = include_str!("../../../docs/02-decisions.md");
 
 /// The crates whose identifiers are **all English**, under `crates/`. One entry per delivery.
 const FINISHED_CRATES: &[&str] = &["panel-contract", "host-load", "term-core", "panel-control"];

@@ -16,7 +16,7 @@ file_paths:
   - crates/app/src/links.rs
   - crates/app/Cargo.toml
   - Cargo.toml
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - WebTarget
   - Desktop
@@ -24,7 +24,7 @@ symbols:
 content_hashes:
   crates/app/Cargo.toml: 'sha256:5bf10ac6e13903ae27496c807266875a38d5bcd2ebf15220c80021be08345660'
   Cargo.toml: 'sha256:51bcda70fa5f02b270cb6883d6d1d1875b50b25c48da19d04b278a2b300cbd61'
-  docs/02-decisiones.md: 'sha256:ecc41dc2084fbb08906e9695aecb329047cf089cc71722a9e293a06f8a26b2b9'
+  docs/02-decisions.md: 'sha256:ecc41dc2084fbb08906e9695aecb329047cf089cc71722a9e293a06f8a26b2b9'
 tags:
   - links
   - webbrowser

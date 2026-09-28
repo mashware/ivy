@@ -87,7 +87,7 @@ pub struct Panel {
     pub version: Option<u64>,
     /// What the producer says about when it published, as is, **as text and uninterpreted**. It is
     /// neither painted yet nor used to compute the age — the age comes from the file's own date, see
-    /// [`Panel::written_at`], and `docs/04-contrato-panel.md` records that this field is read and not
+    /// [`Panel::written_at`], and `docs/04-panel-contract.md` records that this field is read and not
     /// painted.
     pub updated_at: Option<String>,
     /// What the producer is working on. Free text of its own, and painted literally: translating it

@@ -25,7 +25,7 @@
 ### 1. State — the panel document (producer → app)
 
 Published by whoever does the work. **The source of truth is the state the app holds per pane**,
-and the transports feed it ([02-decisiones.md](02-decisiones.md) → D17):
+and the transports feed it ([02-decisions.md](02-decisions.md) → D17):
 
 | Transport | State | Who it is for |
 |---|---|---|
@@ -33,7 +33,7 @@ and the transports feed it ([02-decisiones.md](02-decisiones.md) → D17):
 | **MCP** — `panel_set` hands the document over without writing the file | Phase 3 | the agent that also drives the app |
 | **OSC over the PTY** | candidate, after F2.7 | whoever is behind an `ssh` or in a container with no volume |
 
-Full specification: [04-contrato-panel.md](04-contrato-panel.md).
+Full specification: [04-panel-contract.md](04-panel-contract.md).
 
 **Why the file is the default one:** it is the only one where the dumbest possible producer publishes
 without writing code — `cat >` from a script — and the only one where the state survives the producer

@@ -14,13 +14,13 @@ last_verified: '2026-09-06T15:17:03.535Z'
 file_paths:
   - crates/app/src/keyboard.rs
   - crates/term-core/src/lib.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - 'Pty::write'
 content_hashes:
   crates/app/src/keyboard.rs: 'sha256:c427780eccb982faa34da9e6de95c43c774cdcbfc1df64cab0596327ca7cb199'
   crates/term-core/src/lib.rs: 'sha256:36606ed55bf82b06567677e0eac02210dd9c77467ee0ebae732f83244bfae7e8'
-  docs/02-decisiones.md: 'sha256:b76cc17fbac2d55b9f81f75cd1d31295e188704e9dc21642114375042b66e8c9'
+  docs/02-decisions.md: 'sha256:b76cc17fbac2d55b9f81f75cd1d31295e188704e9dc21642114375042b66e8c9'
 tags:
   - pty
   - termios
@@ -53,4 +53,4 @@ feature_id: feat_term-core_nx0g1r
 
 ## Where it lives
 
-`crates/app/src/keyboard.rs` turns the chord into `[3]`; `crates/term-core/src/lib.rs` `Pty::write` carries it. The reasoning and what was discarded are in **D29**, `docs/02-decisiones.md`.
+`crates/app/src/keyboard.rs` turns the chord into `[3]`; `crates/term-core/src/lib.rs` `Pty::write` carries it. The reasoning and what was discarded are in **D29**, `docs/02-decisions.md`.

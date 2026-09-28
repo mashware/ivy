@@ -14,14 +14,14 @@ last_verified: '2026-09-06T17:06:57.340Z'
 file_paths:
   - crates/app/src/lib.rs
   - crates/app/tests/scripts.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - confirm_the_console_is_in_the_mode_it_asked_for
   - wait_for_this_console_to_say
   - a_pane_that_asks_for_the_mouse
 content_hashes:
   crates/app/src/lib.rs: 'sha256:06780a0eaae7013bb6602574e7d50386ede8e464b226f9458287d5071106f017'
-  docs/02-decisiones.md: 'sha256:96121e6d8650618d166ab688841fe0b2e590d7e6b16a0f4491c8735d188870d7'
+  docs/02-decisions.md: 'sha256:96121e6d8650618d166ab688841fe0b2e590d7e6b16a0f4491c8735d188870d7'
 tags:
   - testing
   - termios

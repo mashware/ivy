@@ -68,4 +68,4 @@ construction.
 
 The fan-out of who keeps each gesture is in `crates/app/src/lib.rs`; the encoding of the report,
 in `crates/app/src/mouse.rs`; what the program has asked for, in `crates/term-core/src/screen.rs`.
-The decision with the order, the table and what is left out is **D23** in `docs/02-decisiones.md`.
+The decision with the order, the table and what is left out is **D23** in `docs/02-decisions.md`.

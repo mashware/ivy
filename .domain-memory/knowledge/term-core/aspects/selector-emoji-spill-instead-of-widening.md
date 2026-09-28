@@ -14,14 +14,14 @@ last_verified: '2026-09-26T18:09:44.390Z'
 file_paths:
   - crates/app/src/painter/emoji.rs
   - crates/app/src/panel/color.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - spills
   - slot
 content_hashes:
   crates/app/src/painter/emoji.rs: 'sha256:d81556ae5c1f6968c22a2d78f84b3c5869d144a5080a464f58b79c4a6aa40f04'
   crates/app/src/panel/color.rs: 'sha256:98ee668acb004ca1cc56add273ad697d7809512ea322ae96676f78f5c7430637'
-  docs/02-decisiones.md: 'sha256:b003d183812e140541e040f9ee58c03010e9631c6f99decf2f3da9d51cbad7e0'
+  docs/02-decisions.md: 'sha256:b003d183812e140541e040f9ee58c03010e9631c6f99decf2f3da9d51cbad7e0'
 tags:
   - colour-emoji
   - width

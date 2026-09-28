@@ -13,13 +13,13 @@ created_at: '2026-08-24T22:26:20.874Z'
 updated_at: '2026-08-24T22:26:20.874Z'
 last_verified: '2026-08-24T22:26:20.874Z'
 file_paths:
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
   - scripts/measure-frame.sh
   - crates/term-core/src/screen.rs
 symbols:
   - SCROLLBACK
 content_hashes:
-  docs/02-decisiones.md: 'sha256:2201996a78171d760ec80e0cf445419050c036975883ef44094d7ec0ca3013f9'
+  docs/02-decisions.md: 'sha256:2201996a78171d760ec80e0cf445419050c036975883ef44094d7ec0ca3013f9'
   scripts/measure-frame.sh: 'sha256:5164b53754c528c121b0dc462bd6b6ded7dd92b97e504c321ea968fdd7d77d2f'
   crates/term-core/src/screen.rs: 'sha256:53c0f8b50a8a8c82c87d3d9afc31d84ff9f171f5720cf419937e1ac25464f193'
 tags:
@@ -51,4 +51,4 @@ The annex of **D21** published that turning on the scrollback **doubled the full
 
 ## Where it lives
 
-The corrected annex and the withdrawal of the previous one are in `docs/02-decisiones.md`, decision **D21**, in «Measured — 25 August 2026: what the scrollback does to the real window». The constant that is turned off for the control is `term_core::SCROLLBACK` in `crates/term-core/src/screen.rs`. The batches are launched with `scripts/measure-frame.sh C`, and the reports are left in `target/measurements/`, which is **not versioned**.
+The corrected annex and the withdrawal of the previous one are in `docs/02-decisions.md`, decision **D21**, in «Measured — 25 August 2026: what the scrollback does to the real window». The constant that is turned off for the control is `term_core::SCROLLBACK` in `crates/term-core/src/screen.rs`. The batches are launched with `scripts/measure-frame.sh C`, and the reports are left in `target/measurements/`, which is **not versioned**.

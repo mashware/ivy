@@ -14,7 +14,7 @@ last_verified: '2026-08-13T13:21:52.516Z'
 file_paths:
   - crates/app/src/watcher.rs
   - crates/app/src/panel.rs
-  - docs/04-contrato-panel.md
+  - docs/04-panel-contract.md
 symbols:
   - Watcher
   - Flag
@@ -22,7 +22,7 @@ symbols:
 content_hashes:
   crates/app/src/watcher.rs: 'sha256:d1afca028fafa9587fe2b06defd2f3d8459aacb424b110958b01297266e7d621'
   crates/app/src/panel.rs: 'sha256:568e67aba57fd9f60e9ca802161c515776057b5d550f6074bf1af4cf561d98a8'
-  docs/04-contrato-panel.md: 'sha256:74a34b90ad96f4314965ff99fe2a644715d2ae032f5914bdfe890ef4d0608c4d'
+  docs/04-panel-contract.md: 'sha256:74a34b90ad96f4314965ff99fe2a644715d2ae032f5914bdfe890ef4d0608c4d'
 tags:
   - inotify
   - notify

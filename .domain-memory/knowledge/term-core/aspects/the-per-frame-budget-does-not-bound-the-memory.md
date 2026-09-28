@@ -68,4 +68,4 @@ flowchart LR
 
 ## Where it lives
 
-`crates/term-core/src/lib.rs` — `Pty::spawn` with its `sync_channel(READS_IN_FLIGHT)` and the `deliver` function, which waits for room and **while it waits does not read**: that is where the brake is. `crates/app/src/pty_output.rs` — the `QUEUE_CEILING` constant and the thread's wait in `PtyOutput::new`, the other half without which the first one is useless. `crates/app/src/lib.rs` — `PUMP_BUDGET`, which bounds work and not memory. `crates/app/examples/leak.rs` — the bench that produces all these numbers. `docs/02-decisiones.md` — D8.
+`crates/term-core/src/lib.rs` — `Pty::spawn` with its `sync_channel(READS_IN_FLIGHT)` and the `deliver` function, which waits for room and **while it waits does not read**: that is where the brake is. `crates/app/src/pty_output.rs` — the `QUEUE_CEILING` constant and the thread's wait in `PtyOutput::new`, the other half without which the first one is useless. `crates/app/src/lib.rs` — `PUMP_BUDGET`, which bounds work and not memory. `crates/app/examples/leak.rs` — the bench that produces all these numbers. `docs/02-decisions.md` — D8.

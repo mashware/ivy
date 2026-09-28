@@ -17,7 +17,7 @@ file_paths:
   - crates/app/src/session.rs
   - crates/app/tests/glossary.rs
   - crates/app/tests/prose.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - set_aside
   - PanelTiling
@@ -30,7 +30,7 @@ content_hashes:
   crates/app/src/session.rs: 'sha256:b7824b96a3e438e7695ed87ccecbe9d65ed9dd16258b5e74ba3c39c8008f09e3'
   crates/app/tests/glossary.rs: 'sha256:bb3266feceb40eb1c3c4847deb16921f3432c141ca48f81cb8d8ab367e00fa32'
   crates/app/tests/prose.rs: 'sha256:b3b194d61079eaeef5626f13b7b1d59f308fe619c376a967181913fc0c47b441'
-  docs/02-decisiones.md: 'sha256:4eb23bb4f11a5f60d8d236644be773469b8f5a617d1657294e0b9d39d4c9872a'
+  docs/02-decisions.md: 'sha256:4eb23bb4f11a5f60d8d236644be773469b8f5a617d1657294e0b9d39d4c9872a'
 tags:
   - d27
   - f2.12
@@ -77,7 +77,7 @@ What a translation delivery **claims about itself** is verified by counting, not
 
 ## Where it lives
 
-**The glossary that decides**: `docs/02-decisiones.md`, annex of D27 — `:3457` and `:3470` («the thing is a `Pane`, and the gesture is `split`», with Ghostty cited as the terminal that uses `split` for the thing, that is, the option the decision weighed and discarded), `:3494` and `:3504` (`Reparto`→`Tiling`), `:3553` (`Division`→`Pane`), `:3524` (the batch letters are not translated).
+**The glossary that decides**: `docs/02-decisions.md`, annex of D27 — `:3620` and `:3633` («the thing is a `Pane`, and the gesture is `split`», with Ghostty cited as the terminal that uses `split` for the thing, that is, the option the decision weighed and discarded), `:3657` and `:3667` (`Reparto`→`Tiling`), `:3716` (`Division`→`Pane`), `:3687` (the batch letters are not translated). Line numbers as of 28 September 2026.
 
 **The places that give themselves away**: `crates/app/src/panel.rs:42`, `:53`, `:85`.
 

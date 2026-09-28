@@ -68,4 +68,4 @@ Verified in September 2026: `measure.rs:2722 every_pattern_the_script_looks_for_
 
 `crates/app/src/measure.rs` — the producer of the report, `CONSOLE_NAME`, and at `:2722` the guard that **derives** the patterns instead of copying them.
 
-`docs/02-decisiones.md` — **AC8** of milestone F2.12, which is this finding turned into a criterion: no guard of the bench is left dead, and the four that nothing covered are tested by breaking them on purpose.
+`docs/02-decisions.md` — **AC8** of milestone F2.12, which is this finding turned into a criterion: no guard of the bench is left dead, and the four that nothing covered are tested by breaking them on purpose.

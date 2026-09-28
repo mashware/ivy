@@ -80,4 +80,4 @@ confirm the rule is the way to make a declared corner the one that knocks you do
 
 `crates/term-core/src/lib.rs` — `Pty::spawn_with_env` **does not touch `termios`**, and that is now
 deliberate. `crates/term-core/examples/delivery.rs` measures the cost that is paid on purpose. The whole
-autopsy is in **D12** of `docs/02-decisiones.md`.
+autopsy is in **D12** of `docs/02-decisions.md`.

@@ -15,7 +15,7 @@ file_paths:
   - crates/panel-contract/src/panel.rs
   - crates/panel-contract/src/dropped.rs
   - crates/panel-contract/src/patch.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - parse_noting
   - vocabulary
@@ -25,7 +25,7 @@ symbols:
 content_hashes:
   crates/panel-contract/src/panel.rs: 'sha256:6ae8abe521ff7f03c57eded34d78ab82781cb19eeccd21ba4d895e7ac59a93e4'
   crates/panel-contract/src/patch.rs: 'sha256:43bdc42651cf6fb4b9608cffadbe356676b2a0604b601c0c6f25d15d9dcb35ba'
-  docs/02-decisiones.md: 'sha256:d2dcb9abf55336e4eec456ec7bdf9faf9da3aadc5306c5f699b6fc7bbdf5fa83'
+  docs/02-decisions.md: 'sha256:d2dcb9abf55336e4eec456ec7bdf9faf9da3aadc5306c5f699b6fc7bbdf5fa83'
 tags:
   - frame-cost
   - D13
@@ -46,4 +46,4 @@ The first version always recorded, and let the file's reader throw the record aw
 
 ## Where it lives
 
-`crates/panel-contract/src/panel.rs` — `parse` (passes `None`), `parse_noting`, `read_line_noting`, `vocabulary`, `parse_document_noting`. `crates/panel-contract/src/patch.rs` — `parse_ops` / `parse_ops_noting` over `read_ops`. `crates/panel-contract/src/dropped.rs` — `Dropped`, `Head` (the bounded writer). D58, D13 in `docs/02-decisiones.md`.
+`crates/panel-contract/src/panel.rs` — `parse` (passes `None`), `parse_noting`, `read_line_noting`, `vocabulary`, `parse_document_noting`. `crates/panel-contract/src/patch.rs` — `parse_ops` / `parse_ops_noting` over `read_ops`. `crates/panel-contract/src/dropped.rs` — `Dropped`, `Head` (the bounded writer). D58, D13 in `docs/02-decisions.md`.

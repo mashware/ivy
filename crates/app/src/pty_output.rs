@@ -1135,7 +1135,7 @@ mod tests {
         // nothing, so `backlog()` answers `None` and an assertion against it would be satisfied by
         // hardcoding `None` in the seam — measured, the mutation survives. Binding it needs a
         // program that stops reading and enough bytes owed to it, which is the input side's own
-        // scenario and has no test in this crate at all. In the debt log.
+        // scenario and has no test in this crate at all.
     }
 
     #[test]

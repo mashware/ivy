@@ -44,7 +44,7 @@ Correct at every construction site, and it reached the wire as:
 {"ok":false,"error":"not understood (no line of this panel carries the key \"tets\")"}
 ```
 
-which is **not** the sentence `docs/04-contrato-panel.md` promises a producer.
+which is **not** the sentence `docs/04-panel-contract.md` promises a producer.
 
 > **A published sentence has two halves — the words and the wrapper — and the diff only shows the first.**
 
@@ -62,4 +62,4 @@ It was found by a **contract verifier blinded to the design** — given only the
 
 ## Where it lives
 
-`crates/panel-contract/src/panel.rs` — `enum Problem` and its `Display`. The refusals themselves are built in `crates/panel-contract/src/patch.rs` (`fn refused`), and the sentences they have to match are published in `docs/04-contrato-panel.md` under `panel_patch`.
+`crates/panel-contract/src/panel.rs` — `enum Problem` and its `Display`. The refusals themselves are built in `crates/panel-contract/src/patch.rs` (`fn refused`), and the sentences they have to match are published in `docs/04-panel-contract.md` under `panel_patch`.

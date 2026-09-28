@@ -13,13 +13,13 @@ updated_at: '2026-09-09T21:54:15.630Z'
 last_verified: '2026-09-09T21:54:15.630Z'
 file_paths:
   - crates/app/src/settings.rs
-  - docs/08-configuracion.md
+  - docs/08-configuration.md
 symbols:
   - apply
   - the_document_publishes_keys_the_application_accepts
 content_hashes:
   crates/app/src/settings.rs: 'sha256:4094267b69277606646a9cfd8696332fa80ffdc67b1b23f5414a628ca6011d3a'
-  docs/08-configuracion.md: 'sha256:fa17a9be37ccb673b4a05d37ab8a826ee33729472a50e1366fad8621caee7210'
+  docs/08-configuration.md: 'sha256:fa17a9be37ccb673b4a05d37ab8a826ee33729472a50e1366fad8621caee7210'
 tags:
   - settings
   - guards
@@ -29,7 +29,7 @@ feature_id: feat_term-core_nx0g1r
 
 ## What it does
 
-**`the_document_publishes_keys_the_application_accepts` (`crates/app/src/settings.rs`) `include_str!`s `docs/08-configuracion.md`, hooks on the line `| Key |`, takes the first backticked cell of every row after it, and feeds each one through the real `apply`.** Verified by reading the function, not from a summary.
+**`the_document_publishes_keys_the_application_accepts` (`crates/app/src/settings.rs`) `include_str!`s `docs/08-configuration.md`, hooks on the line `| Key |`, takes the first backticked cell of every row after it, and feeds each one through the real `apply`.** Verified by reading the function, not from a summary.
 
 Two consequences for anyone adding a key:
 
@@ -44,4 +44,4 @@ One practical note: the walk tries each key with two values (`#ff0000`, `14`) an
 
 ## Where it lives
 
-`crates/app/src/settings.rs`, in the `mod tests` block, against `docs/08-configuracion.md`'s `| Key |` table and its fenced example blocks.
+`crates/app/src/settings.rs`, in the `mod tests` block, against `docs/08-configuration.md`'s `| Key |` table and its fenced example blocks.

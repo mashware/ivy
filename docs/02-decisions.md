@@ -18,14 +18,14 @@ write them off.
 **Confirmed by the landscape, August 2026.** Of the four competitors analyzed, three are **macOS
 only** (Xirp, Conductor, and Superset except for an experimental AppImage). The only one that runs
 on all three platforms is Warp — and it is also the only one that meets every other condition
-([07-panorama.md](07-panorama.md) → E5). That being cross-platform is rare in this category does not
-weaken D1: it marks it as what actually sets the strongest rival apart from the rest.
+([07-landscape.md](07-landscape.md) → E5). That being cross-platform is rare in this category does
+not weaken D1: it marks it as what actually sets the strongest rival apart from the rest.
 
 > **Corrected on 28 September 2026: that count is the landscape's first round.** Later in August
 > the landscape reached eight analyses, and in its side-by-side table **three** run on all three
-> platforms — Warp, Orca and Herdr ([07-panorama.md](07-panorama.md) → «The seven analyzed, side by
-> side»). Being cross-platform is no longer rare in this category, and D1 stands for the reason it
-> was taken, which never depended on that.
+> platforms — Warp, Orca and Herdr ([07-landscape.md](07-landscape.md) → «The seven analyzed, side
+> by side»). Being cross-platform is no longer rare in this category, and D1 stands for the reason
+> it was taken, which never depended on that.
 
 ---
 
@@ -73,7 +73,7 @@ there are none yet. Two things have to be checked before this is even an option:
 2. **That nothing gets copied from the rest.** The rest of the repository is AGPLv3 and this project
    is not.
 
-See [07-panorama.md](07-panorama.md) → E5 for the product context.
+See [07-landscape.md](07-landscape.md) → E5 for the product context.
 
 **Discarded — Electron/Tauri + xterm.js.** It was the cheapest in effort (a known stack), but it has
 a ceiling right in our use case. From xterm.js's own issue
@@ -540,7 +540,7 @@ adopted.
 binaries in a process, not by calling models over the API; and Xirp authenticates each agent
 *«through its native CLI»* — with thousands of engineers and a company invoice behind it, which is
 exactly where paying for the API separately would have cost less to justify. See
-[07-panorama.md](07-panorama.md) → E1 and E3.
+[07-landscape.md](07-landscape.md) → E1 and E3.
 
 **Design consequence:** the app must **never** define `ANTHROPIC_API_KEY` (or equivalents) when
 launching a panel. That variable takes priority over the subscription's session and would change the
@@ -580,7 +580,7 @@ that is, the user paying separately for what they already pay for. It has to be 
 agent**, in its pane, speaking over MCP like any other. The roadmap says that Phase 5 «does not need
 any new piece»; that is still true, and **this is the reason it has to go on being true**.
 
-**And about opencode in particular** ([06-referencias.md](06-referencias.md)): it supports more than
+**And about opencode in particular** ([06-references.md](06-references.md)): it supports more than
 75 providers —it is the most agnostic of them all— but **with Claude it goes over the API and tokens
 since 4 April 2026**. As a panel *producer* it is perfect; as a hosted agent, its Claude user pays
 by usage.
@@ -593,7 +593,7 @@ Sources: [alternativeto.net](https://alternativeto.net/news/2026/2/anthropic-off
 
 ## D5 — Three channels, not one
 
-**Decided.** See [03-arquitectura.md](03-arquitectura.md).
+**Decided.** See [03-architecture.md](03-architecture.md).
 
 | Direction | Channel | What for |
 |---|---|---|
@@ -654,11 +654,11 @@ of a cycle look identical: `Working`. And a CI, a deployment or a script of one'
 harness— have nowhere to publish anything.
 
 Source: [Get started with Xirp](https://backstage.spotify.com/docs/xirp/getting-started). The rest
-of the comparison, in [07-panorama.md](07-panorama.md) → E3.
+of the comparison, in [07-landscape.md](07-landscape.md) → E3.
 
 ### Level 2 reinterpreted fails just like guessing — with someone else's data
 
-**Superset** ([07-panorama.md](07-panorama.md) → E4) does the same as Xirp but with four events
+**Superset** ([07-landscape.md](07-landscape.md) → E4) does the same as Xirp but with four events
 instead of three: `Start`, `Stop`, `PermissionRequest`, `PendingQuestion`. And since its code can be
 consulted, the whole failure can be seen instead of reasoned about.
 
@@ -741,7 +741,7 @@ application consumes them yet, so a console without a directory is still a compl
 would publish in a place nobody looks at.
 
 **What this milestone deliberately leaves undone:** nobody reads the file — that is F1.6, and until
-then the pending «discovery through `PANEL_DIR`» of the [contract](04-contrato-panel.md) stays open
+then the pending «discovery through `PANEL_DIR`» of the [contract](04-panel-contract.md) stays open
 — and there is no sweep of orphaned directories: a sweep deletes by discovery instead of by «I made
 this one myself», which is the dangerous variety of deletion.
 
@@ -2068,18 +2068,18 @@ publish.**
   the hole nobody plugs today: a CI inside an `ssh` inside the pane, with no mounted volume and no
   port. It is also **the only transport where the per-pane bounding cannot be faked**, because it
   arrives over that pane's PTY and not through an identifier the sender chooses. Its limit is shown
-  by cmux: notices fit through there, not big bodies ([07-panorama.md](07-panorama.md) → E6).
+  by cmux: notices fit through there, not big bodies ([07-landscape.md](07-landscape.md) → E6).
 
 **What was discarded, and why:**
 
 - **The HTTP API.** Everything it brings is covered by another transport, and it adds a port,
-  authentication, discovery and a network surface that [03-arquitectura.md](03-arquitectura.md)'s
+  authentication, discovery and a network surface that [03-architecture.md](03-architecture.md)'s
   security table does not have today. It is the only one of the five that turns «whoever writes in
   your directory» into «anyone who reaches your machine».
 - **The local socket as the main transport.** It is what Herdr does, and its real advantage —knowing
   which process writes— does not make up for losing the producer that cannot speak it: a container,
   a CI on another machine, an `scp`. That is where the difference between «out of band» and «out of
-  process» lies ([07-panorama.md](07-panorama.md) → E8).
+  process» lies ([07-landscape.md](07-landscape.md) → E8).
 - **Replacing the file instead of accompanying it.** Any transport that demands a client raises the
   entry bar, and the entry bar is what makes it possible for the format to have producers — which is
   the only thing that can turn into a moat ([01-vision.md](01-vision.md)).
@@ -2099,7 +2099,7 @@ publish.**
   machine are 1 024 instances and 524 288 paths. Watching files does not scale badly here, and that
   argument must not be used against the file.
 
-**Consequences, and one of them is pending work:** [04-contrato-panel.md](04-contrato-panel.md)
+**Consequences, and one of them is pending work:** [04-panel-contract.md](04-panel-contract.md)
 splits in two —the document and the transports—, **D5**'s channel table stops naming `panel.json` as
 if it were the channel, and **it remains to be decided how the source and the order are expressed in
 the document itself**: Herdr solves it with `--source` and a strictly increasing `--seq`, and here
@@ -2144,12 +2144,12 @@ body, or from the `phase`, or from the console's activity. **Saying nothing is s
 
 **Why now and not in Phase 4.** Because it unblocks three things that are written down as pending in
 three different documents and all of them were waiting for this decision: the notification on going
-to «waiting» ([04-contrato-panel.md](04-contrato-panel.md) → Pending), the indicator of a tab you
+to «waiting» ([04-panel-contract.md](04-panel-contract.md) → Pending), the indicator of a tab you
 are not looking at —today what runs in a background tab is not announced in any way—, and Phase 4's
 summary view, which orders by this very thing. And because the claim that **nobody else orders by
 what claims you stopped being true in August 2026**: Herdr accumulates agent → panel → tab →
 workspace and its sidebar answers that question better than ours does
-([07-panorama.md](07-panorama.md) → E8).
+([07-landscape.md](07-landscape.md) → E8).
 
 **What was discarded, and why:**
 
@@ -2256,7 +2256,7 @@ on this having users.
   Orca and nothing of its own is worse than Orca**.
 - **The surface race cannot be won.** Orca has been going since March 2026 with a team and daily
   pushes; its Chromium browser per worktree, its mobile app and its Linear integration are whole
-  projects each ([07-panorama.md](07-panorama.md) → E7).
+  projects each ([07-landscape.md](07-landscape.md) → E7).
 - **The clock runs the other way.** Every month spent on parity is a month in which Herdr may grow
   the field it is missing in order to take away the only leg that is left (E8). And there is a
   precedent from the current year: **Herdr came out with far less surface than tmux and reached 31
@@ -4524,6 +4524,33 @@ exactly what the previous annex announced —«the remaining deliveries are goin
 fewer»— and the first confirmation with numbers: **the milestone's last mechanical delivery fixes
 citations from the second to last**.
 
+### Amended on 28 September 2026: the documents' names, which the milestone closed without ([#150](https://github.com/mashware/agent-terminal/issues/150))
+
+F2.12 closed on 5 September with every document English **inside** and six of them Spanish **by
+name**, plus the `prototipos/` directory: `02-decisiones`, `03-arquitectura`, `04-contrato-panel`,
+`06-referencias`, `08-configuracion` and `09-glosario-de-prosa`. The last was created by one of the
+milestone's own deliveries, PR #148, under the convention it was retiring — the convention still
+producing instances, not a leftover. `07-panorama` went with them although «panorama» is English
+too, so that the file carries the name its own heading uses, «Landscape». #150 renamed all seven
+with every link, `include_str!` path and tracked stored-knowledge citation that named them, and the
+two sentences above that describe the file while it was still `02-decisiones.md` keep that name,
+because they are history.
+
+**Decided with it: a name is held by a guard, not by this note**, beside the language guard in
+`crates/app/tests/prose.rs`, which states its reach where it can be checked. Two limits are
+accepted, not missed:
+
+- **A name is judged by two word lists, not by the prose oracle**, because a name is one to three
+  words and the oracle needs three. A Spanish word on neither list passes by its name; the body is
+  still judged, because every document has to have a row.
+- **The root's files are not judged, and its directories only against the names this repository
+  retired.** A personal `CLAUDE.md`, `FLOW.md` or directory sits at the root of the main checkout
+  untracked, and a guard that fails on somebody's own setup is one that gets switched off.
+
+**Discarded: judging every path `git ls-files` lists.** It would judge exactly the tracked tree and
+leave personal files alone by construction, but no test of this workspace shells out to `git`, and
+the suite would stop running from a source tree without its history.
+
 ## D28 — A module has a ceiling, and a guard holds it
 
 **One file of this repository has 3 119 lines of production code and the other eleven have between 97
@@ -6338,7 +6365,7 @@ happening and the application paints it. This is the decision that turns it into
 in — a producer declares buttons and pressing one writes into its own pane's program.
 
 The rule this has to satisfy predates it by a year and is in
-[03-arquitectura.md](03-arquitectura.md) → Security: *a file that declares commands and a button
+[03-architecture.md](03-architecture.md) → Security: *a file that declares commands and a button
 that runs them is code execution in the user's shell, so the command must be visible before it
 runs.* Everything below is how that sentence is made true rather than asserted.
 
@@ -6452,7 +6479,8 @@ load.
   That is the premise rather than a gap: the painted command is the defence, and there is no second
   one.
 - **No batch measures opening or closing a pane**, by hand or over the channel that arrives in the
-  next PRs. It is in `docs/DEBT.md`, in the same class as «no batch draws a block element».
+  next PRs. It was listed in `docs/DEBT.md` — deleted by #150, still in its history — in the same
+  class as «no batch draws a block element».
 
 ## D43 — A connection holds a pane, the file is not read while it does, and the hold dies with the connection
 
@@ -7760,7 +7788,7 @@ changes is the reply. A taken request that lost something answers
 `{"ok":true,"dropped":"<sentence>"}` instead of `{"ok":true}`, and the bridge an agent speaks to
 answers `published; 4 lines carry an unknown mark "doing"` instead of `published`. The tool's own
 description names the three vocabularies word by word. The literal sentences are in
-[the contract](04-contrato-panel.md#what-fell-away-is-said).
+[the contract](04-panel-contract.md#what-fell-away-is-said).
 
 **Why.** A session driving a pane published five lines with `"mark":"doing"` on four of them and was
 answered `published` — the same word a perfect document gets. Four lines lost their symbol, colour

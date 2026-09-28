@@ -12,7 +12,7 @@ created_at: '2026-09-03T16:06:33.222Z'
 updated_at: '2026-09-03T16:06:33.222Z'
 last_verified: '2026-09-03T16:06:33.222Z'
 file_paths:
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
   - crates/app/tests/glossary.rs
   - crates/app/tests/prose.rs
   - docs/05-roadmap.md
@@ -22,7 +22,7 @@ symbols:
   - NOT_OURS
   - SPANISH_FUNCTION_WORDS
 content_hashes:
-  docs/02-decisiones.md: 'sha256:4eb23bb4f11a5f60d8d236644be773469b8f5a617d1657294e0b9d39d4c9872a'
+  docs/02-decisions.md: 'sha256:4eb23bb4f11a5f60d8d236644be773469b8f5a617d1657294e0b9d39d4c9872a'
   crates/app/tests/glossary.rs: 'sha256:bb3266feceb40eb1c3c4847deb16921f3432c141ca48f81cb8d8ab367e00fa32'
   crates/app/tests/prose.rs: 'sha256:b3b194d61079eaeef5626f13b7b1d59f308fe619c376a967181913fc0c47b441'
   docs/05-roadmap.md: 'sha256:053371b4421327ea70ca30a39835b3b60f8726fe9944622dcf4cc402c50cfb0c'
@@ -44,7 +44,7 @@ What this feature records is not how one translates, but **what goes wrong when 
 
 ## Where it lives
 
-**The decision and the glossary**: `docs/02-decisiones.md`, annex of **D27** — the term-by-term table, what is never translated (the batch letters `A`–`Q`, among others) and which names are the on-disk format, which is the only place where renaming breaks something without anything failing.
+**The decision and the glossary**: `docs/02-decisions.md`, annex of **D27** — the term-by-term table, what is never translated (the batch letters `A`–`Q`, among others) and which names are the on-disk format, which is the only place where renaming breaks something without anything failing.
 
 **The schedule**: `docs/05-roadmap.md`, Part II.
 

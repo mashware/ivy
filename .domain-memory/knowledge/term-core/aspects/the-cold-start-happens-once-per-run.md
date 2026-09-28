@@ -13,13 +13,13 @@ updated_at: '2026-08-25T13:58:59.656Z'
 last_verified: '2026-08-25T13:58:59.656Z'
 file_paths:
   - crates/app/examples/fonts.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
   - scripts/measure-frame.sh
 symbols:
   - summary
   - SAMPLES
 content_hashes:
-  docs/02-decisiones.md: 'sha256:0de8ae72f3ac308cb5cc9ba4d96b4b7d71443f38da0b0ca87bafa69318fc44ce'
+  docs/02-decisions.md: 'sha256:0de8ae72f3ac308cb5cc9ba4d96b4b7d71443f38da0b0ca87bafa69318fc44ce'
   scripts/measure-frame.sh: 'sha256:b41b8d91a5fb47b233a78a5da664f8d0563c96031a5d9556d93510866c9663ab'
 tags:
   - measurement
@@ -72,5 +72,5 @@ before timing anything.
 
 The bench that uncovered it is `crates/app/examples/fonts.rs` —its `summary` function is the one
 that separates the cold sample from the median of the hot ones, and it has its two tests—. The
-published ranges are in **D24** of `docs/02-decisiones.md`. For the frame batches, the script is
+published ranges are in **D24** of `docs/02-decisions.md`. For the frame batches, the script is
 `scripts/measure-frame.sh`.

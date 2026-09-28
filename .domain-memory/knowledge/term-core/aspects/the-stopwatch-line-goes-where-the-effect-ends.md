@@ -15,13 +15,13 @@ file_paths:
   - crates/app/src/lib.rs
   - crates/app/src/measure.rs
   - crates/app/src/session.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols: []
 content_hashes:
   crates/app/src/lib.rs: 'sha256:695b2cbd997807c09dca51b084938c643b9c16d416f9dfbc830ffa69ae766479'
   crates/app/src/measure.rs: 'sha256:635e8c4744515c06065172fe15fa48e988d3d1f8d39a906942d9e25212a5cfe7'
   crates/app/src/session.rs: 'sha256:e830c75bff3ba304a58835e5647deeb2ef55331849d5092066f7d021d49030c6'
-  docs/02-decisiones.md: 'sha256:2d9d5fed62b28f810dee8f7e3130a4e54dea4f09de41cde4dcd5ae464dc835ae'
+  docs/02-decisions.md: 'sha256:2d9d5fed62b28f810dee8f7e3130a4e54dea4f09de41cde4dcd5ae464dc835ae'
 tags:
   - measurement
   - stopwatch
@@ -49,4 +49,4 @@ feature_id: feat_term-core_nx0g1r
 
 ## Where it lives
 
-The stopwatch and its line: `Window::opening`, branch `OpenWith::Restored`, in `crates/app/src/lib.rs`. The type that is published: `measure::Restoring` (`consoles`, `read: Option<Duration>`, `opening`). The reading time: `session::Persistence::load_time`. The numbers and the autopsy of the 15 %, in the annex «Measured — 24 August 2026» of **D16** in `docs/02-decisiones.md`. See also [[the-measurement-round-closes-on-painting]] and [[a-test-that-pins-the-helper-does-not-pin-the-path]].
+The stopwatch and its line: `Window::opening`, branch `OpenWith::Restored`, in `crates/app/src/lib.rs`. The type that is published: `measure::Restoring` (`consoles`, `read: Option<Duration>`, `opening`). The reading time: `session::Persistence::load_time`. The numbers and the autopsy of the 15 %, in the annex «Measured — 24 August 2026» of **D16** in `docs/02-decisions.md`. See also [[the-measurement-round-closes-on-painting]] and [[a-test-that-pins-the-helper-does-not-pin-the-path]].

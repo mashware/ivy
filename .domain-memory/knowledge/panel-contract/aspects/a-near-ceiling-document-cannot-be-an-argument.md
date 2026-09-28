@@ -42,4 +42,4 @@ feature_id: feat_panel-contract_8y2gc0
 
 ## Where it lives
 
-`crates/panel-control/examples/publish.rs` (stdin), `scripts/measure-frame.sh` (`publish_over_the_channel`, `large_filler`, `LARGE_FLOOR`), `crates/app/src/control.rs` (`a_patch_near_the_ceiling_applies_and_is_counted_at_that_size`, `measure_a_patch_at_the_ceiling`), D47 in `docs/02-decisiones.md`.
+`crates/panel-control/examples/publish.rs` (stdin), `scripts/measure-frame.sh` (`publish_over_the_channel`, `large_filler`, `LARGE_FLOOR`), `crates/app/src/control.rs` (`a_patch_near_the_ceiling_applies_and_is_counted_at_that_size`, `measure_a_patch_at_the_ceiling`), D47 in `docs/02-decisions.md`.

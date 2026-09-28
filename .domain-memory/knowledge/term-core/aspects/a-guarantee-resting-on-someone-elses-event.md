@@ -14,14 +14,14 @@ updated_at: '2026-09-08T09:13:08.032Z'
 last_verified: '2026-09-08T09:13:08.032Z'
 file_paths:
   - crates/app/src/keyboard.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols:
   - bytes
   - 'Event::Paste'
   - 'Event::Copy'
 content_hashes:
   crates/app/src/keyboard.rs: 'sha256:345522591ba5b695d69c974a854c72542d5148a73ae1aa0cc9f95cda935ce0c8'
-  docs/02-decisiones.md: 'sha256:a882fc9bdfa1ef397ba991d62b8e391eecae0d6cda42533de02466b23b0596a3'
+  docs/02-decisions.md: 'sha256:a882fc9bdfa1ef397ba991d62b8e391eecae0d6cda42533de02466b23b0596a3'
 tags:
   - design
   - keyboard
@@ -51,4 +51,4 @@ feature_id: feat_term-core_nx0g1r
 
 ## Where it lives
 
-`keyboard::bytes` in `crates/app/src/keyboard.rs`; D11 and D33 in `docs/02-decisiones.md`. The mechanism it broke on is in [[ctrl-v-is-discarded-when-the-clipboard-holds-no-text]].
+`keyboard::bytes` in `crates/app/src/keyboard.rs`; D11 and D33 in `docs/02-decisions.md`. The mechanism it broke on is in [[ctrl-v-is-discarded-when-the-clipboard-holds-no-text]].

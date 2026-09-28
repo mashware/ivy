@@ -52,4 +52,4 @@ feature_id: feat_term-core_nx0g1r
 
 ## Where it lives
 
-`hang_up`, `HANGUP_GRACE`, `HANGUP_CHECK_EVERY` and `Drop for Pty` in `crates/term-core/src/lib.rs`; rows and bands in `crates/term-core/examples/closing.rs` (`cargo run --release --example closing -p term-core`); decision **D55** in `docs/02-decisiones.md`; ticket #196.
+`hang_up`, `HANGUP_GRACE`, `HANGUP_CHECK_EVERY` and `Drop for Pty` in `crates/term-core/src/lib.rs`; rows and bands in `crates/term-core/examples/closing.rs` (`cargo run --release --example closing -p term-core`); decision **D55** in `docs/02-decisions.md`; ticket #196.

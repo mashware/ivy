@@ -15,12 +15,12 @@ last_verified: '2026-08-25T07:36:53.108Z'
 file_paths:
   - scripts/measure-frame.sh
   - crates/app/src/measure.rs
-  - docs/02-decisiones.md
+  - docs/02-decisions.md
 symbols: []
 content_hashes:
   scripts/measure-frame.sh: 'sha256:96a1e649a130812d99a0d5a88ec31fa3ecb1403745a9d5a00fd270dc962dc043'
   crates/app/src/measure.rs: 'sha256:5c0a49ba86ceeeb28966cab5ea4899a9e7ddfbcd858788896af1912796621d8b'
-  docs/02-decisiones.md: 'sha256:fc611d2106ed7c61fbf2afacb79dd2ed3c5987f805d981a1861a3d90883c58c3'
+  docs/02-decisions.md: 'sha256:fc611d2106ed7c61fbf2afacb79dd2ed3c5987f805d981a1861a3d90883c58c3'
 tags:
   - measurement
   - instrument
@@ -76,7 +76,7 @@ means per frame are not compared with those of a still batch.
 
 The fan-out by subtraction is in `crates/app/src/measure.rs`; the batches with a control console
 (`K`, `M`, `N`) and their guards, in `scripts/measure-frame.sh`. The two annexes affected are those
-of **D21** and **D22** in `docs/02-decisiones.md`, both already rewritten. It is the same family of
+of **D21** and **D22** in `docs/02-decisions.md`, both already rewritten. It is the same family of
 error as [[whoever-does-not-declare-their-work-attributes-it-to-someone-else]] and
 [[measuring-something-that-changes-the-grid-is-not-a-subtraction]]: the instrument shares out by
 subtraction, and every difference that is not declared is kept by the term that is worked out by

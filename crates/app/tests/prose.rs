@@ -53,7 +53,7 @@
 
 mod common;
 
-use common::{fold, list_against_disk, rust_sources};
+use common::{fold, list_against_disk, markdown_below, rust_sources};
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -1059,12 +1059,14 @@ fn no_comment_in_the_translated_files_reads_as_spanish() {
 
 // ── The documents, which are the other half of the same milestone ────────────────────────────────
 
-/// Every document of the repository, pulled in **at compile time** for the reason [`SOURCES`] gives.
+/// Every document of `docs/` and `prototypes/` plus the root README — the set
+/// [`every_document_has_a_row_and_an_english_name`] holds against the disk — pulled in **at compile
+/// time** for the reason [`SOURCES`] gives.
 ///
 /// **AC5 of the milestone («`docs/` translated, with no file mixing the two languages inside
 /// itself») was marked `test` and had no test.** Measured before this list was written: a Spanish
-/// paragraph inserted into `docs/02-decisiones.md`, `docs/04-contrato-panel.md`,
-/// `docs/05-roadmap.md` and `docs/08-configuracion.md` **at the same time** left the whole suite
+/// paragraph inserted into `docs/02-decisions.md`, `docs/04-panel-contract.md`,
+/// `docs/05-roadmap.md` and `docs/08-configuration.md` **at the same time** left the whole suite
 /// green, 893 passed. Three of those four are already read by a guard — the glossary annex, the
 /// three claim rows, the key table — but every one of those reads an **anchor**, and an anchor says
 /// nothing about the language of the file around it.
@@ -1077,53 +1079,53 @@ const DOCUMENTS: &[(&str, &str)] = &[
         include_str!("../../../docs/01-vision.md"),
     ),
     (
-        "docs/02-decisiones.md",
-        include_str!("../../../docs/02-decisiones.md"),
+        "docs/02-decisions.md",
+        include_str!("../../../docs/02-decisions.md"),
     ),
     (
-        "docs/03-arquitectura.md",
-        include_str!("../../../docs/03-arquitectura.md"),
+        "docs/03-architecture.md",
+        include_str!("../../../docs/03-architecture.md"),
     ),
     (
-        "docs/04-contrato-panel.md",
-        include_str!("../../../docs/04-contrato-panel.md"),
+        "docs/04-panel-contract.md",
+        include_str!("../../../docs/04-panel-contract.md"),
     ),
     (
         "docs/05-roadmap.md",
         include_str!("../../../docs/05-roadmap.md"),
     ),
     (
-        "docs/06-referencias.md",
-        include_str!("../../../docs/06-referencias.md"),
+        "docs/06-references.md",
+        include_str!("../../../docs/06-references.md"),
     ),
     (
-        "docs/07-panorama.md",
-        include_str!("../../../docs/07-panorama.md"),
+        "docs/07-landscape.md",
+        include_str!("../../../docs/07-landscape.md"),
     ),
     (
-        "docs/08-configuracion.md",
-        include_str!("../../../docs/08-configuracion.md"),
+        "docs/08-configuration.md",
+        include_str!("../../../docs/08-configuration.md"),
     ),
     (
-        "docs/09-glosario-de-prosa.md",
-        include_str!("../../../docs/09-glosario-de-prosa.md"),
+        "docs/09-prose-glossary.md",
+        include_str!("../../../docs/09-prose-glossary.md"),
     ),
     ("README.md", include_str!("../../../README.md")),
     (
-        "prototipos/README.md",
-        include_str!("../../../prototipos/README.md"),
+        "prototypes/README.md",
+        include_str!("../../../prototypes/README.md"),
     ),
 ];
 
 /// How many prose lines the walk has to still find, in total and in the thinnest document.
 ///
 /// **Two floors and not one**, the lesson [`COMMENT_LINES_AT_LEAST`] already paid for. Measured as
-/// this guard lands: **5 005** prose lines, `docs/02-decisiones.md` carrying 3 546 of them and
-/// `prototipos/README.md` being the thinnest at **13**.
+/// this guard lands: **5 005** prose lines, `docs/02-decisions.md` carrying 3 546 of them and
+/// `prototypes/README.md` being the thinnest at **13**.
 ///
 /// The total floor leaves 205 lines of slack, which is more than five of the eleven documents carry
 /// — so `docs/01-vision.md` (129) could be emptied and the total would wave it through. The per-file
-/// floor is what notices that. The other way round, `docs/07-panorama.md` (599) going silent drops
+/// floor is what notices that. The other way round, `docs/07-landscape.md` (599) going silent drops
 /// the corpus to 4 406 and the total fires loudly while the per-file one, looking at eleven
 /// documents that all still answer, would not. The two floors answer different halves.
 const DOCUMENT_LINES_AT_LEAST: usize = 4_800;
@@ -1137,7 +1139,7 @@ const DOCUMENT_LINES_PER_FILE_AT_LEAST: usize = 10;
 ///
 /// **It has one entry, and that is the measurement rather than a target.** The bulk of the Spanish
 /// these documents quote — the glossary annex's arrow lists, the false-friend table of
-/// `docs/09-glosario-de-prosa.md` — is **exempt by construction**, because it lives inside
+/// `docs/09-prose-glossary.md` — is **exempt by construction**, because it lives inside
 /// backticks and [`document_prose`] reads what is outside them. Eleven lines were reported before
 /// that rule and one after it, and the one left is a bug report quoted word for word in guillemets,
 /// where no backtick belongs.
@@ -1154,7 +1156,7 @@ const DOCUMENT_ISLANDS: &[(&str, &str)] = &[(
 /// where a whole file's Spanish needs no entry because it lives in string literals.
 ///
 /// - A **fenced block** is a configuration file, a `panel.json` or a terminal transcript. Its keys
-///   and its output are not prose in any language, and `docs/08-configuracion.md` publishes on-screen
+///   and its output are not prose in any language, and `docs/08-configuration.md` publishes on-screen
 ///   messages there that `src/settings.rs` already confronts with the code word for word.
 /// - An **inline code span** is a name being cited. The glossary annex is four thousand lines of
 ///   exactly that — a Spanish name, an arrow, the English one that replaced it — and it is a
@@ -1166,7 +1168,7 @@ const DOCUMENT_ISLANDS: &[(&str, &str)] = &[(
 /// **The count of fences comes back with the lines, and it is not decoration.** An **unbalanced**
 /// fence does not hide a document, it **inverts** it: every block becomes prose and every paragraph
 /// becomes a block, so the walk goes on returning a plausible number of lines while judging the
-/// wrong half. Measured — opening a stray fence at the top of `docs/03-arquitectura.md` left every
+/// wrong half. Measured — opening a stray fence at the top of `docs/03-architecture.md` left every
 /// floor green. [`the_walk_still_reads_the_prose_of_every_document`] is what asserts it is even.
 fn document_prose(md: &str) -> (Vec<(usize, String)>, usize) {
     let mut found = Vec::new();
@@ -1229,6 +1231,156 @@ fn the_walk_still_reads_the_prose_of_every_document() {
         total >= DOCUMENT_LINES_AT_LEAST,
         "the walk found {total} prose lines across the eleven documents and there are 5 005: the \
          detection stopped matching and this guard is judging almost nothing"
+    );
+}
+
+/// The words the documents' names carried until #150 renamed them, so that none of them comes back.
+///
+/// **A name is judged by a list and not by the prose oracle**, because a name is one to three
+/// words and the oracle needs three markers before it calls anything Spanish. The list is these
+/// whole words plus [`SPANISH_WORDS`], compared word by word — «contrato» does not catch
+/// «contratos». A document named with a Spanish word on neither list walks through by its name; its
+/// body is still judged by [`no_document_mixes_the_two_languages`], because the census below gives
+/// it a row, and an English body under a Spanish name passes both. «panorama» is not here: it is an
+/// English word too.
+const RETIRED_NAME_WORDS: &[&str] = &[
+    "decisiones",
+    "arquitectura",
+    "contrato",
+    "referencias",
+    "configuracion",
+    "glosario",
+    "prosa",
+    "prototipos",
+];
+
+/// The listed Spanish words a file or directory name carries: folded, then split on anything that
+/// is not an ASCII letter. One is a verdict here, unlike in prose — the store's names are judged
+/// the same way.
+fn spanish_words_in_name(name: &str) -> BTreeSet<String> {
+    fold(name)
+        .split(|c: char| !c.is_ascii_alphabetic())
+        .filter(|word| RETIRED_NAME_WORDS.contains(word) || SPANISH_WORDS.contains(word))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The name check is exercised on names chosen for it, not only on a tree that happens to be clean.
+#[test]
+fn a_name_is_judged_by_its_words() {
+    for name in [
+        "docs/10-decisiones.md",
+        "docs/10-ficheros.md",
+        "docs/10-Configuración.md",
+        "prototipos",
+    ] {
+        assert!(
+            !spanish_words_in_name(name).is_empty(),
+            "«{name}» is named in Spanish and the name check let it through"
+        );
+    }
+    for (name, _) in DOCUMENTS {
+        assert!(
+            spanish_words_in_name(name).is_empty(),
+            "«{name}» is one of the English documents and the name check reports it: {:?}",
+            spanish_words_in_name(name)
+        );
+    }
+}
+
+/// The documents under `root` that [`DOCUMENTS`] has to declare: every Markdown file of `docs/` and
+/// `prototypes/`, and the README.
+fn documents_on_disk(root: &Path) -> BTreeSet<String> {
+    let mut found = markdown_below(root, &["docs", "prototypes"]);
+    found.insert("README.md".to_owned());
+    found
+}
+
+/// What under `root` is named in Spanish: any document of [`documents_on_disk`], by both lists,
+/// and any directory at the root, by [`RETIRED_NAME_WORDS`] alone.
+///
+/// **The root's files are not judged, and its directories only against the retired words.** A
+/// personal `CLAUDE.md` or `FLOW.md` sits at the root of the main checkout untracked, and so can a
+/// personal directory; a guard that fails on somebody's own setup is one that gets switched off.
+/// The retired words are the names this repository used and dropped, so a directory carrying one
+/// is the old tree coming back — a `prototipos/` beside `prototypes/` — and not somebody's own.
+fn names_in_spanish(root: &Path) -> Vec<String> {
+    let mut found: Vec<String> = documents_on_disk(root)
+        .into_iter()
+        .filter(|name| !spanish_words_in_name(name).is_empty())
+        .collect();
+    for entry in std::fs::read_dir(root)
+        .unwrap_or_else(|failure| panic!("cannot read {}: {failure}", root.display()))
+    {
+        let entry = entry.unwrap_or_else(|failure| panic!("cannot read an entry: {failure}"));
+        // `Path::is_dir` follows a symbolic link, so `prototipos -> prototypes` is judged too.
+        if !entry.path().is_dir() {
+            continue;
+        }
+        let name = format!("{}/", entry.file_name().to_string_lossy());
+        if fold(&name)
+            .split(|c: char| !c.is_ascii_alphabetic())
+            .any(|word| RETIRED_NAME_WORDS.contains(&word))
+        {
+            found.push(name);
+        }
+    }
+    found.sort();
+    found
+}
+
+/// [`names_in_spanish`] over a tree built for it: what it must report, and what it must leave.
+#[test]
+fn the_names_are_judged_where_the_guard_says() {
+    let root = std::env::temp_dir().join(format!("agent-terminal-names-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    for dir in ["docs", "prototypes", "prototipos", "pruebas"] {
+        std::fs::create_dir_all(root.join(dir)).expect("create a fixture directory");
+    }
+    for file in [
+        "README.md",
+        "docs/02-decisions.md",
+        "docs/10-ficheros.MD",
+        "prototypes/README.md",
+        "prototipos.txt",
+    ] {
+        std::fs::write(root.join(file), "").expect("write a fixture file");
+    }
+
+    let reported = names_in_spanish(&root);
+    let _ = std::fs::remove_dir_all(&root);
+    assert_eq!(
+        reported,
+        ["docs/10-ficheros.MD", "prototipos/"],
+        "a document named with a listed word (whatever the case of its extension) and a root \
+         directory named with a retired word are reported; a root file, and a root directory \
+         named with a word only the general list has, are not"
+    );
+}
+
+/// **Every document has a row in [`DOCUMENTS`], and nothing [`names_in_spanish`] judges is named
+/// in Spanish.**
+///
+/// Without the census a document with no row was judged by nothing: `docs/DEBT.md` sat outside
+/// the language guard until #150 deleted it, with nothing saying so. And
+/// `docs/09-prose-glossary.md` was created under a Spanish name *during* the milestone whose point
+/// was retiring them, which is the convention still producing instances rather than a leftover.
+#[test]
+fn every_document_has_a_row_and_an_english_name() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let declared: Vec<&str> = DOCUMENTS.iter().map(|(name, _)| *name).collect();
+    if let Err(failure) = list_against_disk("DOCUMENTS", &declared, &documents_on_disk(&root)) {
+        panic!(
+            "{failure}. Without a row a document's language is judged by nothing — a scratch file \
+             counts too, because this walks the disk and not the index"
+        );
+    }
+
+    let spanish = names_in_spanish(&root);
+    assert!(
+        spanish.is_empty(),
+        "these are named in Spanish, and D27 moved the whole repository to English, names \
+         included: {spanish:?}"
     );
 }
 
@@ -1781,11 +1933,7 @@ fn no_record_of_the_store_is_named_in_spanish() {
     );
     let mut reported = Vec::new();
     for (name, _) in &records {
-        let folded = fold(name);
-        let listed = folded
-            .split(|c: char| !c.is_ascii_alphabetic())
-            .filter(|word| SPANISH_WORDS.contains(word))
-            .collect::<BTreeSet<_>>();
+        let listed = spanish_words_in_name(name);
         if !listed.is_empty() {
             reported.push(format!("  {name} → {listed:?}"));
         }
