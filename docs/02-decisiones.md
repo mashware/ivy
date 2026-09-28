@@ -7618,3 +7618,35 @@ indent or a refused button still fall silently, so a bare `ok` promises that no 
 nothing more. Two values that agree up to the 32-character cut are named as one, though each of their lines is counted. And a
 publication the window takes after its five-second answer deadline has already been answered *the
 window did not answer in time*, so what it lost is never said.
+
+## D59 — A named theme is a built-in base; explicit colors always override it
+
+**Decided for [#179](https://github.com/mashware/agent-terminal/issues/179).** The first catalog
+ships two complete named themes, `tokyonight` and `gruvbox-dark`, inside the binary. Names ignore
+ASCII case, as `font` already does. A `theme = name`
+line chooses the base for all twenty-two colors. Every explicit `color.N`, `background`,
+`foreground`, `cursor`, `divider`, `focus`, or `panel` line overrides its own slot regardless of where
+the theme line appears. If `theme` occurs more than once, the last valid name wins and the existing
+repeated-key warning says so. An unknown name is reported with its line number and the available
+names; the previous valid name and every other valid line remain in force. With no `theme` line, the
+existing factory theme remains the base.
+
+**Why.** D26 reserved a named catalog after F2.10 while keeping the configuration file tolerant
+line by line. `Settings::Colors` already holds each explicit color as an optional override, and
+`Theme` already applies those overrides one slot at a time. Treating a theme as a base fits that
+model and lets a person reorder the lines of their file without changing their explicit tweaks.
+Keeping the catalog in the binary avoids a new startup path lookup, directory convention and file
+failure mode for two static palettes. One name alone would offer no choice; these two give distinct
+cool and warm dark palettes alongside the existing dark factory theme. The sixteen terminal colors
+follow [Tokyo Night's Night terminal palette](https://github.com/folke/tokyonight.nvim/blob/main/extras/windows_terminal/tokyonight_night.json)
+and [Gruvbox dark's terminal palette](https://github.com/alacritty/alacritty/wiki/Color-schemes#gruvbox),
+respectively; the exact forty-four values are pinned in the work's design and its tests. The six
+colors for the terminal's own interface are choices made here.
+
+| Discarded | Why |
+|---|---|
+| Theme files on disk, or imports from other files | D26 already discarded imports. A disk catalog needs search paths, missing-file behavior and startup I/O before the first two themes need any of them. |
+| A theme line resets colors written above it | Moving a theme line would erase an unrelated explicit override, despite `theme` and each color being distinct keys. |
+| Rejecting the whole file for an unknown name | D26's line-by-line tolerance would be broken and valid font, shortcut and color lines would be lost. |
+| Silently falling back to factory colors | The person who typed the name would see a different appearance with no explanation. |
+| Shipping one theme or a large collection first | One has no choice; every additional palette has twenty-two values to check. Two make the first catalog useful without making it a palette import project. |

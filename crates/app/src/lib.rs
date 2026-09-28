@@ -9267,6 +9267,28 @@ mod tests {
     }
 
     #[test]
+    fn a_named_theme_reaches_the_window_with_explicit_colors_on_top() {
+        let (settings, warnings) = settings::interpret("theme = tokyonight\ncolor.4 = #010203")
+            .expect("the documented theme settings are valid");
+        assert_eq!(warnings.total(), 0);
+        let mut window = window_with("sleep 30", "sleep 30");
+        window.apply_the_settings(&settings);
+
+        assert_eq!(
+            window.theme.background(),
+            egui::Color32::from_rgb(0x1A, 0x1B, 0x26)
+        );
+        assert_eq!(
+            window.theme.color(term_core::TermColor::Indexed(4)),
+            egui::Color32::from_rgb(1, 2, 3)
+        );
+        assert_eq!(
+            window.theme.color(term_core::TermColor::Indexed(1)),
+            egui::Color32::from_rgb(0xF7, 0x76, 0x8E)
+        );
+    }
+
+    #[test]
     fn an_unbound_shortcut_gives_its_chord_back_to_the_program() {
         // **It is the whole point of being able to unbind**, and the criterion this change closes:
         // whoever needs `Ctrl+Shift+D` inside `vim` or `tmux` gets it back by writing `none`, and

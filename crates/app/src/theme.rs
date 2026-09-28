@@ -49,6 +49,65 @@ pub struct Theme {
     panel_background: Color32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NamedTheme {
+    TokyoNight,
+    GruvboxDark,
+}
+
+impl NamedTheme {
+    pub fn from_written(value: &str) -> Option<Self> {
+        if value.eq_ignore_ascii_case("tokyonight") {
+            Some(Self::TokyoNight)
+        } else if value.eq_ignore_ascii_case("gruvbox-dark") {
+            Some(Self::GruvboxDark)
+        } else {
+            None
+        }
+    }
+
+    pub fn theme(self) -> Theme {
+        // The sixteen terminal entries follow Tokyo Night Night and Gruvbox dark medium.
+        // The six application colors below are chosen for this terminal's own surfaces.
+        let (palette, background, foreground, cursor, divider, focus, panel) = match self {
+            Self::TokyoNight => (
+                [
+                    0x15161e, 0xf7768e, 0x9ece6a, 0xe0af68, 0x7aa2f7, 0xbb9af7, 0x7dcfff, 0xa9b1d6,
+                    0x414868, 0xf7768e, 0x9ece6a, 0xe0af68, 0x7aa2f7, 0x9d7cd8, 0x7dcfff, 0xc0caf5,
+                ],
+                0x1a1b26,
+                0xc0caf5,
+                0xc0caf5,
+                0x414868,
+                0x7aa2f7,
+                0x15161e,
+            ),
+            Self::GruvboxDark => (
+                [
+                    0x282828, 0xcc241d, 0x98971a, 0xd79921, 0x458588, 0xb16286, 0x689d6a, 0xa89984,
+                    0x928374, 0xfb4934, 0xb8bb26, 0xfabd2f, 0x83a598, 0xd3869b, 0x8ec07c, 0xebdbb2,
+                ],
+                0x282828,
+                0xebdbb2,
+                0xebdbb2,
+                0x504945,
+                0x83a598,
+                0x1d2021,
+            ),
+        };
+        let color = |rgb: u32| Color32::from_rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8);
+        Theme {
+            palette: palette.map(color),
+            background: color(background),
+            foreground: color(foreground),
+            cursor: color(cursor),
+            divider: color(divider),
+            focus: color(focus),
+            panel_background: color(panel),
+        }
+    }
+}
+
 impl Default for Theme {
     /// The aesthetics of the project.
     ///
@@ -106,25 +165,28 @@ impl Theme {
     /// writing all twenty-two. And the palette is overwritten slot by slot for the same reason: asking for color 1 must
     /// not erase the other fifteen.
     pub fn from_colors(colors: &crate::settings::Colors) -> Self {
-        let mut theme = Self::default();
-        for (slot, asked_for) in theme.palette.iter_mut().zip(colors.palette.iter()) {
+        Self::default().with_colors(colors)
+    }
+
+    pub fn with_colors(mut self, colors: &crate::settings::Colors) -> Self {
+        for (slot, asked_for) in self.palette.iter_mut().zip(colors.palette.iter()) {
             if let Some(color) = asked_for {
                 *slot = *color;
             }
         }
         for (slot, asked_for) in [
-            (&mut theme.background, colors.background),
-            (&mut theme.foreground, colors.foreground),
-            (&mut theme.cursor, colors.cursor),
-            (&mut theme.divider, colors.divider),
-            (&mut theme.focus, colors.focus),
-            (&mut theme.panel_background, colors.panel),
+            (&mut self.background, colors.background),
+            (&mut self.foreground, colors.foreground),
+            (&mut self.cursor, colors.cursor),
+            (&mut self.divider, colors.divider),
+            (&mut self.focus, colors.focus),
+            (&mut self.panel_background, colors.panel),
         ] {
             if let Some(color) = asked_for {
                 *slot = color;
             }
         }
-        theme
+        self
     }
 }
 
@@ -350,6 +412,53 @@ mod tests {
 
     fn theme() -> Theme {
         Theme::default()
+    }
+
+    #[test]
+    fn the_two_named_themes_have_all_twenty_two_published_colors() {
+        let cases = [
+            (
+                NamedTheme::TokyoNight,
+                [
+                    0x15161e, 0xf7768e, 0x9ece6a, 0xe0af68, 0x7aa2f7, 0xbb9af7, 0x7dcfff, 0xa9b1d6,
+                    0x414868, 0xf7768e, 0x9ece6a, 0xe0af68, 0x7aa2f7, 0x9d7cd8, 0x7dcfff, 0xc0caf5,
+                ],
+                [0x1a1b26, 0xc0caf5, 0xc0caf5, 0x414868, 0x7aa2f7, 0x15161e],
+            ),
+            (
+                NamedTheme::GruvboxDark,
+                [
+                    0x282828, 0xcc241d, 0x98971a, 0xd79921, 0x458588, 0xb16286, 0x689d6a, 0xa89984,
+                    0x928374, 0xfb4934, 0xb8bb26, 0xfabd2f, 0x83a598, 0xd3869b, 0x8ec07c, 0xebdbb2,
+                ],
+                [0x282828, 0xebdbb2, 0xebdbb2, 0x504945, 0x83a598, 0x1d2021],
+            ),
+        ];
+        let code = |color: Color32| {
+            (u32::from(color.r()) << 16) | (u32::from(color.g()) << 8) | u32::from(color.b())
+        };
+
+        for (name, palette, own_colors) in cases {
+            let theme = name.theme();
+            assert_eq!(
+                theme.palette.map(code),
+                palette,
+                "ANSI palette for {name:?}"
+            );
+            assert_eq!(
+                [
+                    theme.background,
+                    theme.foreground,
+                    theme.cursor,
+                    theme.divider,
+                    theme.focus,
+                    theme.panel_background,
+                ]
+                .map(code),
+                own_colors,
+                "application colors for {name:?}"
+            );
+        }
     }
 
     /// **The contract rule that is easy to read backwards.** Its table describes `style` as something "for

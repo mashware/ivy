@@ -135,6 +135,8 @@ pub enum Missing {
     UnknownKey(String),
     /// The value is not valid for that key.
     InvalidValue { key: String, value: String },
+    /// The theme name is not in the built-in catalog.
+    UnknownTheme(String),
     /// That key was already set above; this one wins.
     Repeated(String),
     /// That action's chord is decided by the desktop: it can only be turned off.
@@ -151,6 +153,11 @@ impl std::fmt::Display for Warning {
             Missing::InvalidValue { key, value } => {
                 write!(f, "'{}' is not valid for '{key}'", trimmed(value))
             }
+            Missing::UnknownTheme(value) => write!(
+                f,
+                "'{}' is not a known theme; choose 'tokyonight' or 'gruvbox-dark'",
+                trimmed(value)
+            ),
             Missing::Repeated(key) => write!(f, "'{key}' was already set above; this one wins"),
             Missing::OnlyTurnsOff(key) => write!(
                 f,
@@ -203,6 +210,7 @@ pub struct Colors {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Settings {
     pub colors: Colors,
+    pub theme: Option<crate::theme::NamedTheme>,
     /// The family the file asks to paint with. `None` if it asks for none.
     ///
     /// **The name arrives as it was written, and it is not laziness.** Whether that family exists is
@@ -534,7 +542,7 @@ impl crate::Window {
     /// span: taking it inside would force passing it through three constructors with dozens of
     /// calls, and none of them configures anything.
     pub(crate) fn apply_the_settings(&mut self, settings: &Settings) {
-        self.theme = crate::theme::Theme::from_colors(&settings.colors);
+        self.theme = settings.resolved_theme();
         // **What the file does not ask for stays as it is**, which is what makes it possible to
         // configure just one color without inheriting along the way a font size nobody wrote.
         self.font_size = settings.font_size.unwrap_or(self.font_size);
@@ -555,6 +563,15 @@ impl crate::Window {
                 );
             }
         }
+    }
+}
+
+impl Settings {
+    fn resolved_theme(&self) -> crate::theme::Theme {
+        self.theme
+            .map(crate::theme::NamedTheme::theme)
+            .unwrap_or_default()
+            .with_colors(&self.colors)
     }
 }
 
@@ -608,6 +625,13 @@ fn apply(settings: &mut Settings, key: &str, value: &str) -> Result<(), Missing>
     }
     if key == "font" {
         settings.font = Some(value.to_owned());
+        return Ok(());
+    }
+    if key == "theme" {
+        settings.theme = Some(
+            crate::theme::NamedTheme::from_written(value)
+                .ok_or_else(|| Missing::UnknownTheme(value.to_owned()))?,
+        );
         return Ok(());
     }
     if key == "size" {
@@ -1431,6 +1455,118 @@ mod tests {
         );
     }
 
+    #[test]
+    fn explicit_colors_override_the_named_theme_in_either_line_order() {
+        for text in [
+            "theme = tokyonight\ncolor.4 = #010203",
+            "color.4 = #010203\ntheme = tokyonight",
+        ] {
+            let (settings, warnings) = parsed(text);
+            assert_eq!(warnings.total(), 0);
+            let theme = settings.resolved_theme();
+            assert_eq!(
+                theme.color(term_core::TermColor::Indexed(4)),
+                Color32::from_rgb(1, 2, 3),
+                "explicit blue was lost for {text:?}"
+            );
+            assert_eq!(
+                theme.color(term_core::TermColor::Indexed(1)),
+                Color32::from_rgb(0xF7, 0x76, 0x8E),
+                "another slot stopped coming from Tokyo Night for {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn overriding_named_blue_preserves_every_other_named_color() {
+        let base = crate::theme::NamedTheme::TokyoNight.theme();
+        for text in [
+            "theme = tokyonight\ncolor.4 = #010203",
+            "color.4 = #010203\ntheme = tokyonight",
+        ] {
+            let (settings, warnings) = parsed(text);
+            assert_eq!(warnings.total(), 0);
+            let actual = settings.resolved_theme();
+            assert_eq!(
+                actual.color(term_core::TermColor::Indexed(4)),
+                Color32::from_rgb(1, 2, 3),
+                "explicit blue was lost for {text:?}"
+            );
+            for index in (0..16).filter(|index| *index != 4) {
+                assert_eq!(
+                    actual.color(term_core::TermColor::Indexed(index)),
+                    base.color(term_core::TermColor::Indexed(index)),
+                    "ANSI color {index} changed for {text:?}"
+                );
+            }
+            for (slot, actual, expected) in [
+                ("background", actual.background(), base.background()),
+                ("foreground", actual.foreground(), base.foreground()),
+                (
+                    "cursor",
+                    actual.color(term_core::TermColor::Cursor),
+                    base.color(term_core::TermColor::Cursor),
+                ),
+                ("divider", actual.divider(), base.divider()),
+                ("focus", actual.focus(), base.focus()),
+                ("panel", actual.panel_background(), base.panel_background()),
+            ] {
+                assert_eq!(actual, expected, "{slot} changed for {text:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn an_unknown_theme_warns_without_erasing_valid_settings() {
+        let (settings, warnings) =
+            parsed("theme = tokyonight\ntheme = unknown\nforeground = #abcdef");
+        assert_eq!(settings.theme, Some(crate::theme::NamedTheme::TokyoNight));
+        assert_eq!(warnings.total(), 1);
+        assert_eq!(
+            settings.resolved_theme().background(),
+            Color32::from_rgb(0x1A, 0x1B, 0x26)
+        );
+        assert_eq!(
+            settings.resolved_theme().foreground(),
+            Color32::from_rgb(0xAB, 0xCD, 0xEF)
+        );
+
+        let (settings, warnings) = parsed(
+            "theme = tokyonight\ntheme = unknown\nforeground = #abcdef\ntheme = gruvbox-dark",
+        );
+        assert_eq!(settings.theme, Some(crate::theme::NamedTheme::GruvboxDark));
+        assert_eq!(warnings.total(), 2);
+        assert_eq!(
+            warnings.kept()[0].to_string(),
+            "line 2: 'unknown' is not a known theme; choose 'tokyonight' or 'gruvbox-dark'"
+        );
+        assert_eq!(
+            warnings.kept()[1].to_string(),
+            "line 4: 'theme' was already set above; this one wins"
+        );
+        let theme = settings.resolved_theme();
+        assert_eq!(theme.foreground(), Color32::from_rgb(0xAB, 0xCD, 0xEF));
+        assert_eq!(theme.background(), Color32::from_rgb(0x28, 0x28, 0x28));
+    }
+
+    #[test]
+    fn theme_names_ignore_ascii_case_and_no_name_keeps_the_factory() {
+        let (settings, warnings) = parsed("theme = TokyoNight");
+        assert_eq!(warnings.total(), 0);
+        assert_eq!(settings.theme, Some(crate::theme::NamedTheme::TokyoNight));
+        assert_eq!(
+            settings.resolved_theme().background(),
+            Color32::from_rgb(0x1A, 0x1B, 0x26)
+        );
+
+        let (settings, _) = parsed("color.4 = #010203");
+        assert_eq!(settings.theme, None);
+        assert_eq!(
+            settings.resolved_theme().background(),
+            crate::theme::Theme::default().background()
+        );
+    }
+
     /// A directory of its own per test, with the process number.
     ///
     /// **The suite runs in parallel and the file's name is fixed**, so two tests that
@@ -1519,24 +1655,21 @@ mod tests {
             .collect();
         // **Without a floor this test passes by being empty**, which is how a guard that reads another
         // file dies: someone changes the table's header, the walk does not hook, and nothing is
-        // left to check. Ten is what the table publishes today.
+        // left to check. Eleven is what the table publishes today.
         assert_eq!(
             published.len(),
-            10,
+            11,
             "the document's key table gave {} rows: either the document changed shape, or this \
              walk stopped finding it and the test is not looking at anything — {published:?}",
             published.len()
         );
 
         for key in published {
-            // Each key is tested with the two values the document admits, because the value's shape
-            // depends on the key and what is asserted is only that the key exists.
-            let known = ["#ff0000", "14"].iter().any(|value| {
-                !matches!(
-                    apply(&mut Settings::default(), key, value),
-                    Err(Missing::UnknownKey(_))
-                )
-            });
+            // One of these values must really apply; merely avoiding UnknownKey would admit a
+            // published key whose documented value is rejected.
+            let known = ["#ff0000", "14", "on", "tokyonight"]
+                .iter()
+                .any(|value| apply(&mut Settings::default(), key, value).is_ok());
             assert!(
                 known,
                 "the document publishes «{key}» and the application rejects it as unknown: whoever follows the \
@@ -1578,7 +1711,7 @@ mod tests {
         // blocks, this test passes by being empty.
         assert_eq!(
             examples.len(),
-            10,
+            12,
             "the document's example blocks gave {} configuration lines: either the document \
              changed shape, or this walk stopped finding them — {examples:?}",
             examples.len()
@@ -1829,6 +1962,7 @@ mod tests {
                 key: "size".to_owned(),
                 value: "abc".to_owned(),
             },
+            Missing::UnknownTheme("unknown".to_owned()),
             Missing::Repeated("size".to_owned()),
             Missing::OnlyTurnsOff("key.copy".to_owned()),
         ];
@@ -1852,6 +1986,7 @@ mod tests {
                 | Missing::Incomplete
                 | Missing::UnknownKey(_)
                 | Missing::InvalidValue { .. }
+                | Missing::UnknownTheme(_)
                 | Missing::Repeated(_)
                 | Missing::OnlyTurnsOff(_) => {}
             }
@@ -1868,8 +2003,8 @@ mod tests {
             .collect();
         assert_eq!(
             said.len(),
-            13,
-            "the thirteen on-screen messages were not walked: {said:?}"
+            14,
+            "the fourteen on-screen messages were not walked: {said:?}"
         );
 
         for message in said {
@@ -2219,12 +2354,7 @@ mod tests {
         // so the whole disk path could be deleted with the suite green. A review caught it with
         // seven live mutations.
         let dir = TestDir::new("for-real");
-        let path = dir.with(
-            b"# a theme
-color.1 = #ff0000
-bad
-",
-        );
+        let path = dir.with(b"theme = tokyonight\ncolor.1 = #ff0000\nbad\n");
 
         let (settings, warnings) = read(&path).expect("the test file had to be read");
         assert_eq!(
@@ -2232,9 +2362,26 @@ bad
             Some(Color32::from_rgb(0xFF, 0, 0))
         );
         assert_eq!(
+            settings.resolved_theme().background(),
+            Color32::from_rgb(0x1A, 0x1B, 0x26)
+        );
+        assert_eq!(
             warnings.total(),
             1,
             "the bad line did not warn when reading from disk"
+        );
+    }
+
+    #[test]
+    fn a_measurement_still_vetoes_the_whole_settings_file() {
+        let dir = TestDir::new("theme-measurement-veto");
+        let path = dir.with(b"theme = tokyonight\n");
+        let (settings, reading) = to_use(Entry::Measuring, Some(&path));
+        assert_eq!(reading, crate::measure::ReadingSettings::Vetoed);
+        assert_eq!(settings.theme, None);
+        assert_eq!(
+            settings.resolved_theme().background(),
+            crate::theme::Theme::default().background()
         );
     }
 

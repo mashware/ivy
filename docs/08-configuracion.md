@@ -34,6 +34,7 @@ It is the same thing Kitty and Ghostty do.
 | `divider` | the line that separates two consoles |
 | `focus` | what marks out the console that has the keyboard |
 | `panel` | the status panel's background |
+| `theme` | a built-in set of all twenty-two colours: `tokyonight` or `gruvbox-dark` |
 | `size` | the font size, in points |
 | `font` | the font family it paints with, by its name |
 | `cursor.blink` | whether the cursor blinks: `on` always, `off` never. Leave the line out and the program inside decides, over a default of «yes» |
@@ -101,6 +102,24 @@ anyway: it is your file.
 > write this line, nothing is searched** and the terminal opens exactly as fast as it does today.
 
 **What you do not set stays as it was.** You can change a single colour and not write the rest.
+
+### Choose a colour theme
+
+```
+theme = tokyonight
+color.4 = #010203
+```
+
+`tokyonight` uses the Night variant; `gruvbox-dark` uses the dark, medium-contrast palette. Names
+ignore letter case. Each theme supplies all twenty-two colours. A colour you write yourself replaces
+that one colour in the theme, whether its line comes before or after `theme`.
+
+If you write `theme` more than once, the last valid name wins and the terminal reports the repeated
+key. An unknown name is reported with its line number and the two available names; other valid lines
+still apply. With no `theme` line, the current built-in appearance remains the base.
+
+The catalog is part of the binary. It reads no theme files and does not reload a changed config while
+the terminal is open.
 
 ## The shortcuts
 
