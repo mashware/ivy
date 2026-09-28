@@ -2153,6 +2153,37 @@ mod tests {
     }
 
     #[test]
+    fn a_line_under_the_boundary_in_characters_and_over_it_in_bytes_is_held_and_said_in_bytes() {
+        let Some(boundary) = the_boundary_or_stand_down() else {
+            return;
+        };
+        // **ASCII is the one input where this cannot fail.** Until this test every held paste here was
+        // built from ASCII, where a byte and a character are the same number, so counting characters
+        // — or saying «characters» beside a byte count, which is how the first version of
+        // `HeldPaste::sentence` shipped past every guard — gave the same result as the fix. `ñ` is
+        // two bytes: this line is about half the boundary in characters and just over it in bytes.
+        let characters = boundary / 2 + 1;
+        let text = "ñ".repeat(characters);
+        let bytes = text.len();
+        assert!(
+            characters <= boundary && bytes > boundary,
+            "the line has to sit between the two units or it tells them apart no better than `x`: \
+             {characters} characters, {bytes} bytes, boundary {boundary}"
+        );
+        let mut held = None;
+
+        paste_or_hold(&text, false, &mut Vec::new(), &mut held);
+
+        let said = held
+            .expect("a line over the boundary in bytes was sent: the gate counted characters")
+            .sentence();
+        assert!(
+            said.contains(&format!("a line of {bytes} bytes")),
+            "the question has to give the line in bytes and call them bytes: {said:?}"
+        );
+    }
+
+    #[test]
     fn a_lone_held_paste_does_not_claim_another_one_was_turned_away() {
         let Some(boundary) = the_boundary_or_stand_down() else {
             return;

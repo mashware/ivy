@@ -2664,8 +2664,11 @@ mod tests {
         let rows = what_gets_painted(&format!(r#"{{"phase":"{long}","lines":[]}}"#));
 
         let painted: usize = rows.iter().map(|(t, _)| t.chars().count()).sum();
+        // The cap is applied to the whole identity line, prefix included, so the prefix earns no
+        // allowance on top of it. It used to be granted one, counted in bytes: eight where the
+        // prefix is seven characters, so the bound sat eight characters above the cap.
         assert!(
-            painted <= MAX_CHARACTERS + "a1b2 · ".len(),
+            painted <= MAX_CHARACTERS,
             "{painted} characters of a 60,000-character phase were laid out"
         );
         assert!(

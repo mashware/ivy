@@ -35,6 +35,19 @@
 //! an eñe. It was eight until this delivery translated the panel's three claim phrases. A line-level exemption is a hole: it would also excuse a fresh Spanish sentence written
 //! on that same line. One oracle, with its limits stated, was chosen over two with an escape hatch.
 //!
+//! **It does not judge a unit, and no narrow guard could.** «a line of {} characters» beside a byte
+//! length is English, so it walks through — and that exact sentence shipped past this file in the
+//! delivery whose subject was a mislabelled constant. Whether «characters» is right depends on the
+//! type of a number measured elsewhere, a dozen lines or a function away, which a line walk cannot
+//! see. Measured over `src/` and `examples/` of every crate in September 2026, before deciding:
+//! «character» within three lines of a byte length (`len()`, `as_bytes`, `u8`, `bytes()`) matched 28
+//! lines, none of them wrong, and would have caught neither of the two that shipped — that sentence,
+//! and a comment calling the kernel's 4 095 bytes «characters»; «a number followed by characters»
+//! caught both and matched 6 lines, every one of them correct, so it would have been an allowlist
+//! rather than a guard. That sentence is asserted below as passing. **Where a unit is bound is the
+//! test that feeds it non-ASCII input**, the one input where bytes and characters differ — for the
+//! held paste's question, the `ñ` held-paste test in `src/keyboard.rs`.
+//!
 //! **What a green here means, exactly**: no comment line in the declared source and example files carries three
 //! different common Spanish words. It does **not** mean every comment is good English.
 
@@ -873,6 +886,15 @@ fn the_oracle_answers_what_it_promises() {
              {markers:?}: the claim is out of date, not wrong in the good direction — rewrite it"
         );
     }
+
+    // **And the unit the header declares it cannot judge**, in the words it shipped in.
+    let mislabelled = "\"this paste has a line of {} characters, and a program that reads lines\"";
+    let markers = spanish_markers(mislabelled);
+    assert!(
+        markers.is_empty(),
+        "the header declares a byte count called «characters» as something this oracle cannot see, \
+         and «{mislabelled}» now scores {markers:?}: rewrite the paragraph"
+    );
 }
 
 /// Every declared island is still in the tree, and none of them is Spanish enough to fail on its own.
