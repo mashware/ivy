@@ -19,3 +19,10 @@ libc = "0.2"
 # you measure first, and the number decides what API is needed.
 [dev-dependencies]
 alacritty_terminal = "0.26"
+
+# **Test support for whoever hosts this crate**: `received`, which reads what a console's program got
+# from a file the program wrote. A host's tests reach it through a development dependency that turns
+# this on. With resolver 3 that keeps it out of `cargo build` and `cargo run`; `cargo test` compiles
+# the host's binary with it too, where it adds a type nothing calls.
+[features]
+testing = []

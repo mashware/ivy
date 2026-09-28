@@ -2872,36 +2872,15 @@ mod tests {
             let ctx = egui::Context::default();
             let rects = two_wide_panes();
             let metrics = with_metrics(|metrics| metrics.clone());
-            let stem = std::env::temp_dir().join(format!(
-                "agent-terminal-send-held-{}-{turned_on_before_the_click}",
-                std::process::id()
-            ));
-            let received = stem.with_extension("received");
-            let ready = stem.with_extension("ready");
-            let _ = std::fs::remove_file(&received);
-            let _ = std::fs::remove_file(&ready);
-            let mut window = window_with(
-                &format!(
-                    "stty raw -echo; touch {}; exec cat > {}",
-                    ready.display(),
-                    received.display()
-                ),
-                "sleep 30",
-            );
+            let received = term_core::received::Received::new("send-held");
+            let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
             focus_on(window.active_mut(), 1);
             if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
                 return;
             }
             let held_bytes =
                 keyboard::the_longest_line_a_reader_keeps().expect("a paste was held") + 1;
-            let deadline = Instant::now() + Duration::from_secs(5);
-            while !ready.exists() {
-                assert!(
-                    Instant::now() < deadline,
-                    "the console never got to raw mode"
-                );
-                std::thread::sleep(Duration::from_millis(10));
-            }
+            received.wait_until_ready(Duration::from_secs(5));
             let headers = window.headers;
             let pane = &mut window.active_mut().panes_mut()[0];
             pane.taken_over = None;
@@ -2936,17 +2915,7 @@ mod tests {
             if turned_on_before_the_click {
                 expected.extend_from_slice(b"\x1b[201~");
             }
-            let deadline = Instant::now() + Duration::from_secs(5);
-            let mut got = Vec::new();
-            while Instant::now() < deadline {
-                got = std::fs::read(&received).unwrap_or_default();
-                if got.len() >= expected.len() {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            let _ = std::fs::remove_file(&received);
-            let _ = std::fs::remove_file(&ready);
+            let got = received.wait_for(expected.len(), Duration::from_secs(5));
 
             assert!(
                 got == expected,
@@ -2991,35 +2960,14 @@ mod tests {
         let ctx = egui::Context::default();
         let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
-        let stem = std::env::temp_dir().join(format!(
-            "agent-terminal-discard-held-{}",
-            std::process::id()
-        ));
-        let received = stem.with_extension("received");
-        let ready = stem.with_extension("ready");
-        let _ = std::fs::remove_file(&received);
-        let _ = std::fs::remove_file(&ready);
-        let mut window = window_with(
-            &format!(
-                "stty raw -echo; touch {}; exec cat > {}",
-                ready.display(),
-                received.display()
-            ),
-            "sleep 30",
-        );
+        let received = term_core::received::Received::new("discard-held");
+        let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
         focus_on(window.active_mut(), 1);
         if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
             return;
         }
         let boundary = keyboard::the_longest_line_a_reader_keeps().expect("a paste was held");
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while !ready.exists() {
-            assert!(
-                Instant::now() < deadline,
-                "the console never got to raw mode"
-            );
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        received.wait_until_ready(Duration::from_secs(5));
         let headers = window.headers;
         let theme = window.theme;
         let console = window.active().panes()[0].console_within(
@@ -3068,17 +3016,7 @@ mod tests {
         deliver_to_the_mouse(&mut window, &ctx, &rects, &metrics, click_at(send.center()));
 
         let expected = vec![b'y'; boundary + 1];
-        let deadline = Instant::now() + Duration::from_secs(5);
-        let mut got = Vec::new();
-        while Instant::now() < deadline {
-            got = std::fs::read(&received).unwrap_or_default();
-            if got.len() >= expected.len() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        let _ = std::fs::remove_file(&received);
-        let _ = std::fs::remove_file(&ready);
+        let got = received.wait_for(expected.len(), Duration::from_secs(5));
 
         let xs = got.iter().filter(|&&byte| byte == b'x').count();
         assert!(
@@ -27330,12 +27268,8 @@ mod tests {
         let ctx = egui::Context::default();
         let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
-        let received = std::env::temp_dir().join(format!(
-            "agent-terminal-button-{}-received.txt",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_file(&received);
-        let mut window = window_with(&format!("cat > {}", received.display()), "sleep 30");
+        let received = term_core::received::Received::new("button");
+        let mut window = window_with(&received.script(""), "sleep 30");
 
         // The panel is made visible by publishing a real one, and the grid is derived from the same
         // tiling the window uses: a panel nobody published takes up no columns, so without this the
@@ -27389,16 +27323,9 @@ mod tests {
         deliver_to_the_mouse(&mut window, &ctx, &rects, &metrics, click_at(at));
 
         // The write goes to a thread of its own (**D29**), and `cat` has to be scheduled on top of
-        // that, so what is waited for is the file's content and not a single pump.
-        let deadline = Instant::now() + Duration::from_secs(5);
-        let mut got = String::new();
-        while Instant::now() < deadline {
-            window.active_mut().panes_mut()[0].pump();
-            got = std::fs::read_to_string(&received).unwrap_or_default();
-            if !got.is_empty() {
-                break;
-            }
-        }
+        // that, so what is waited for is the file's content.
+        let got = received.wait_for(b"npm test\n".len(), Duration::from_secs(5));
+        let got = String::from_utf8_lossy(&got);
 
         assert_eq!(
             got, "npm test\n",
@@ -27414,7 +27341,6 @@ mod tests {
             window.active().panes()[0].taken_over.is_none(),
             "a press on a panel's button revoked the console"
         );
-        let _ = std::fs::remove_file(&received);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

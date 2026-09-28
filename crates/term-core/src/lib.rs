@@ -26,6 +26,8 @@ use portable_pty::{Child, CommandBuilder, MasterPty, native_pty_system};
 
 #[cfg(target_os = "linux")]
 mod nonblocking;
+#[cfg(any(test, feature = "testing"))]
+pub mod received;
 mod screen;
 mod view;
 

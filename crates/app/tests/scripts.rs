@@ -148,6 +148,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../../term-core/src/view.rs"),
     ),
     (
+        "term-core/src/received.rs",
+        include_str!("../../term-core/src/received.rs"),
+    ),
+    (
         "term-core/examples/hang.rs",
         include_str!("../../term-core/examples/hang.rs"),
     ),
@@ -185,8 +189,8 @@ const MODULES: &[(&str, &str)] = &[
 #[test]
 fn the_list_still_names_every_module() {
     assert!(
-        MODULES.len() >= 36,
-        "`MODULES` names {} files and this delivery left thirty-six: a piece came out of a module \
+        MODULES.len() >= 43,
+        "`MODULES` names {} files and the last delivery left forty-three: a piece came out of a module \
          and its new home was not added, so whatever this guard reports, it is not reporting on \
          every script these crates run",
         MODULES.len()

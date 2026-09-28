@@ -134,6 +134,12 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 [dev-dependencies]
 host-load = { path = "../host-load" }
 
+# **The same crate again, for its test support**: `term_core::received` reads what a console's
+# program got from a file the program wrote, where the line discipline's echo cannot forge it. As a
+# development dependency its feature stays out of `cargo build` and `cargo run` (resolver 3);
+# `cargo tree -p app -e normal,features -i term-core` is how to see which features a build takes.
+term-core = { path = "../term-core", features = ["testing"] }
+
 # **So that the bench's tests run with `cargo test`, and not only if somebody remembers to ask for
 # `--examples`.** A cargo example is not a test target by default: the `tests` module of
 # `examples/fonts.rs` would be compiled and never run, which is worse than not having it — a test that
