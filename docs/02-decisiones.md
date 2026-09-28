@@ -5039,6 +5039,63 @@ the effect it has— in its sharpest form: **the effect was real and the author 
   raw string carrying a quote of its own. Both leave the same footprint, and a test fails on any line
   that names a mode command and yields no literal at all. Declared rather than papered over.
 
+### Extended on 28 September 2026: a fourth disguise — the premise is proved by whoever holds it ([#191](https://github.com/mashware/agent-terminal/issues/191))
+
+This decision is where the project keeps the ways a test covers nothing while staying green. The
+record numbers three of them: asserting on the place a value is recorded instead of on the effect it
+has, cited as the project's first recorded disguise; and, cited as the second and third «of D30»,
+picking a number where the defect and the fix give the same result, and a test over a terminal that
+never set the mode it needs. The third is this decision's own case, which
+the text above files as the first disguise in its sharpest form. **#62 produced a fourth, and it is
+not a variant of the third.**
+
+**A backgrounded list exits 0 whatever happens inside it.**
+
+```
+sh -c '{ nosuchcmd & } && echo REACHED'   # prints REACHED
+```
+
+The regression test for closing a console with a survivor needed a process holding the slave end of
+the pseudoterminal. It launched one with `{ setsid … & }` and waited for a marker the **shell**
+printed. On a host without `setsid(1)` — every macOS, and **F2.7** goes there — the chain would reach
+its `exec` with nobody holding anything, and that version of the test would pass over a live bug.
+It was never run that way, on macOS or anywhere. What was run is the same missing survivor against
+the test as it stands now — the survivor's command made nonexistent, a row of D32's mutation round —
+and it goes red because nobody prints `HELD`. D32 tells the case and carries its numbers; they are
+not repeated here.
+
+**The rule, in its general form: the process that holds the premise is the one that announces it.**
+A marker printed by whoever launched it says nothing about what it launched. The third disguise is
+the special case where the premise is a mode and the holder is the program; this one is about any
+premise a scenario depends on — a survivor, a child, a held descriptor, a peer that is listening.
+
+- **The proof is the holder's own marker.** `HELD` in `crates/term-core/src/lib.rs` is printed by
+  the survivor, so seeing it come out of the master proves the survivor exists *and* that it can
+  write through the descriptor it inherited. It comes after `stty -echo &&`, so it also proves the
+  `stty` exited 0.
+- **An effect only the premise produces is a weaker fallback, and must be called that.** The test
+  `closing_a_console_whose_program_left_a_survivor_ends_its_writer_before_the_close_returns` has no
+  marker of its survivor's own; it asserts the close took at least `READER_GIVE_UP`, which a close
+  with nobody holding the slave does not spend. That makes a missing survivor go red in the usual
+  case, not in every case: **a loaded machine can meet a lower bound on time with no survivor at
+  all**. Where the holder can print, it prints.
+
+**Two neighbouring lessons from the same case**, both already held by tests:
+
+- **A «did it finish?» test needs a floor.** A test that only bounds a wait from above passes on
+  every accidental rescue, in hundredths of a second. The floor is written as the constant —
+  `took >= READER_GIVE_UP` — so a delivery that makes the mechanism cheaper moves the bound instead
+  of going red.
+- **The other half of the claim needs its own test.** The hang test said nothing about the healthy
+  close, so the whole timed wait could have been made unconditional with the suite green:
+  `closing_an_ordinary_console_does_not_spend_the_abandon_deadline` is that half.
+
+**No guard enforces it**, for the reason the «Banning `;`» row above already gives: a scan for
+`{ … & } &&` followed by a shell-printed marker would fire on
+`closing_a_console_whose_program_left_a_survivor_ends_its_writer_before_the_close_returns`, whose
+floor is an acceptable fallback declared as one, and a guard that fires on acceptable code gets
+deleted.
+
 ---
 
 ## D31 — A pasted line that does not fit is held and asked about, never sent to be cut
