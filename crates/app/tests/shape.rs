@@ -131,13 +131,22 @@ const MODULES: &[(&str, &str)] = &[
 /// ceiling.
 const MODULE_CEILING: usize = 600;
 
-/// Production lines an `impl` block may hold.
+/// Production lines an `impl` block may hold — and a type's own blocks, summed across every module
+/// up to its first `mod tests`, the cut every count of this file makes.
 ///
 /// A type whose behaviour does not fit in 300 lines is more than one type, or its seams are in the
 /// wrong place. Measured as this guard lands: the largest block outside `src/lib.rs` is
 /// `impl Discoverer` at 269, so this ceiling asks nothing of the code that is already in shape. It
 /// read 223 until somebody counted again: a number in a comment decays on its own, and the ones this
 /// file states about the crate are re-measured by every delivery that touches it.
+///
+/// **For its first three weeks it held blocks only, and a type walked straight through it.** A block
+/// is where the code sits; the sentence above is about a type. Moving methods into an `impl Window`
+/// of a child module passed every block ceiling while the type kept growing — 1 124 production lines
+/// in two blocks when the rule landed, 1 782 in fifteen blocks across twelve files when it was summed
+/// again on 28 September 2026. So the same number is now held twice: per block, which still catches
+/// a foreign trait's impl, and per type, which is what the rationale always said. D28 records the
+/// amendment.
 const IMPL_CEILING: usize = 300;
 
 /// What is over a ceiling today, with the number it is at and the reason it is not fixed here.
@@ -145,10 +154,14 @@ const IMPL_CEILING: usize = 300;
 /// **A ratchet, not an exemption**: the guard fails when one of these grows. Lowering a number is
 /// the normal outcome of a delivery that takes a piece out, and this table is where that progress is
 /// recorded.
-const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[(
-    "src/lib.rs",
-    775,
-    "the window's core, and the file nobody ever split. D28 has the order its pieces come out \
+///
+/// **Three kinds of entry, told apart by their shape**: a module (`src/lib.rs`), one block of one
+/// module (`src/x.rs::impl Foo`) and a type summed across the crate (`impl Foo`).
+const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
+    (
+        "src/lib.rs",
+        775,
+        "the window's core, and the file nobody ever split. D28 has the order its pieces come out \
          in; it cannot come under the ceiling in one change because 16 953 lines of tests reach \
          into its private items. **It came in at 3 119; the bench's injected gestures were the \
          first piece out and reading the settings file the second, which left for `settings.rs` \
@@ -272,7 +285,41 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[(
          counted here — both constructors sit where this guard does not count. **784 - 2 leaves \
          782**. **Watcher rearming then followed pane closing into `closing.rs`: eight production \
          lines left the core and one new call remained, so 782 + 1 - 8 leaves 775.**",
-)];
+    ),
+    (
+        "impl Window",
+        1782,
+        "the window's own behaviour. D28's order moved its methods out of `lib.rs` into \
+         satellite blocks in twelve modules, which shrank the file and not the type. Recorded on 28 September \
+         2026, the day the guard first summed a type's blocks.",
+    ),
+    (
+        "impl Pane",
+        591,
+        "a console with its panel, its keys and its mouse. On the day it was recorded it was six \
+         blocks in six files: the keyboard and mouse passes (157 each), how a pane is opened (112) \
+         and how it gets its panel (120), and 45 more in `lib.rs` and `control.rs`.",
+    ),
+    (
+        "impl PanelState",
+        378,
+        "what a pane holds of its panel. On the day it was recorded it was split over `panel.rs` \
+         and its child modules for the document, links, driving and the pane, to pay the block \
+         ceiling.",
+    ),
+    (
+        "impl InjectedDrags",
+        334,
+        "the bench's injected gestures. On the day it was recorded its link gestures sat in a \
+         child module (45 lines) that had gone there to pay the block ceiling.",
+    ),
+    (
+        "impl Node",
+        321,
+        "the layout tree's node. On the day it was recorded it was two blocks of `tree.rs`, of 265 \
+         and 56 lines.",
+    ),
+];
 
 /// The production lines of a module: no comments, and nothing from `mod tests` onwards.
 ///
@@ -330,10 +377,158 @@ fn impl_blocks<'a>(lines: &[&'a str]) -> Vec<(&'a str, usize, bool)> {
     out
 }
 
+/// A block's header without its opening brace — the one spelling every lookup of this file uses.
+fn head(header: &str) -> &str {
+    header.trim_end_matches(" {").trim_end()
+}
+
 /// The name this guard calls an `impl` block, which is what a failure has to be searchable by.
 fn name_of(module: &str, header: &str) -> String {
-    let head = header.trim_end_matches(" {").trim_end();
-    format!("{module}::{head}")
+    format!("{module}::{}", head(header))
+}
+
+/// The last segment of a path, without its generic arguments: `crate::Window` and `Window<T>` are
+/// both `Window`.
+fn last_segment(path: &str) -> &str {
+    let path = path.split(['<', ' ']).next().unwrap_or(path);
+    path.rsplit("::").next().unwrap_or(path)
+}
+
+/// A top-level declaration without the visibility in front of it.
+fn without_visibility(line: &str) -> &str {
+    ["pub(crate) ", "pub(super) ", "pub "]
+        .iter()
+        .find_map(|visibility| line.strip_prefix(visibility))
+        .unwrap_or(line)
+}
+
+/// The traits this crate declares itself, found the same way the blocks are: at column zero.
+fn local_traits<'a>(modules: &[(&str, &'a str)]) -> std::collections::BTreeSet<&'a str> {
+    let mut traits = std::collections::BTreeSet::new();
+    for (_, source) in modules {
+        for line in production_lines(source) {
+            if let Some(rest) = without_visibility(line).strip_prefix("trait ") {
+                traits.insert(last_segment(rest.split([':', '{']).next().unwrap_or(rest)));
+            }
+        }
+    }
+    traits
+}
+
+/// The type an `impl` header charges its lines to, or `None` for the impl of a foreign trait.
+///
+/// **A foreign trait's impl is left out of the type's sum on purpose**: `Display`, `Drop` or
+/// `eframe::App` is a contract somebody else wrote, and its size is set by that contract rather than
+/// by the type's own seams. The per-block ceiling still holds it. **A trait this crate declares is
+/// not left out**, because moving a type's methods into `impl OurTrait for Window` would otherwise be
+/// the same walk around the ceiling that splitting it into blocks was.
+///
+/// **The key is the last segment of the type's path**, so `impl crate::Window` and `impl Window` are
+/// one type. It reads a one-line header with no generics of its own, and
+/// [`every_impl_header_is_one_the_type_walk_can_read`] is what fails when a header stops being one.
+fn type_of<'a>(header: &'a str, local: &std::collections::BTreeSet<&str>) -> Option<&'a str> {
+    let rest = head(header).strip_prefix("impl ")?;
+    match rest.split_once(" for ") {
+        Some((tr, ty)) => local.contains(last_segment(tr)).then(|| last_segment(ty)),
+        None => Some(last_segment(rest)),
+    }
+}
+
+/// Every type's `impl` blocks, summed across the given modules.
+///
+/// **Two distinct types sharing a name in different modules are summed together** — there is no
+/// compiler here to tell them apart. Unratcheted, that only makes the ceiling fire sooner. Ratcheted,
+/// one of the two could grow while the other shrank by as much, so
+/// [`no_entry_of_the_ratchet_is_stale`] refuses a type entry whose name is defined twice.
+fn type_sizes<'a>(modules: &[(&str, &'a str)]) -> std::collections::BTreeMap<&'a str, usize> {
+    let local = local_traits(modules);
+    let mut sizes = std::collections::BTreeMap::new();
+    for (_, source) in modules {
+        let lines = production_lines(source);
+        for (header, size, _) in impl_blocks(&lines) {
+            if let Some(ty) = type_of(header, &local) {
+                *sizes.entry(ty).or_insert(0) += size;
+            }
+        }
+    }
+    sizes
+}
+
+/// How many times the given modules define a `struct` or `enum` with this name.
+fn definitions_of(modules: &[(&str, &str)], name: &str) -> usize {
+    modules
+        .iter()
+        .flat_map(|(_, source)| production_lines(source))
+        .filter(|line| {
+            ["struct ", "enum "].iter().any(|kind| {
+                without_visibility(line)
+                    .strip_prefix(kind)
+                    .is_some_and(|rest| {
+                        last_segment(rest.split([';', '(', '{']).next().unwrap_or(rest)) == name
+                    })
+            })
+        })
+        .count()
+}
+
+/// The size of the one block a ratchet entry names, or why it names none or several.
+///
+/// **One entry, one block.** A name matching two blocks would hand the entry's number to both as
+/// their ceiling, so the smaller one could grow to it with nothing firing.
+fn the_one_block(source: &str, header: &str) -> Result<usize, String> {
+    let lines = production_lines(source);
+    let named: Vec<usize> = impl_blocks(&lines)
+        .into_iter()
+        .filter(|(h, ..)| head(h) == header)
+        .map(|(_, size, _)| size)
+        .collect();
+    match named.as_slice() {
+        [size] => Ok(*size),
+        [] => Err("names an impl block that no longer exists".to_string()),
+        several => Err(format!(
+            "names {} impl blocks of that module, so its number would be the ceiling of all of \
+             them: merge them or record the type instead",
+            several.len()
+        )),
+    }
+}
+
+/// What a ratchet entry measures today, by the kind its shape names — or why it cannot say.
+fn measured(what: &str, modules: &[(&str, &str)]) -> Result<usize, String> {
+    let module = |name: &str| {
+        modules
+            .iter()
+            .find(|(module, _)| *module == name)
+            .map(|(_, source)| *source)
+            .ok_or_else(|| "names a module this guard does not walk".to_string())
+    };
+    if let Some(ty) = what.strip_prefix("impl ") {
+        if definitions_of(modules, ty) != 1 {
+            return Err(
+                "sums every type of that name, so one could grow while another shrank \
+                        and the number would not move: rename one of them first"
+                    .to_string(),
+            );
+        }
+        type_sizes(modules)
+            .get(ty)
+            .copied()
+            .ok_or_else(|| "names a type with no impl block any more".to_string())
+    } else if let Some((name, header)) = what.split_once("::") {
+        the_one_block(module(name)?, header)
+    } else {
+        Ok(production_lines(module(what)?).len())
+    }
+}
+
+/// The ceiling a ratchet entry would be under if it were not in the table: each kind its own, so a
+/// module that fell under 600 is not «still too big» because it is over 300.
+fn ceiling_of(what: &str) -> usize {
+    if what.contains("impl ") {
+        IMPL_CEILING
+    } else {
+        MODULE_CEILING
+    }
 }
 
 fn ceiling_for(name: &str) -> Option<usize> {
@@ -407,9 +602,10 @@ fn no_impl_block_is_over_its_ceiling() {
         }
     }
     // The same floor, for the same reason: a scanner that stops recognising `impl` reports nothing
-    // and reads exactly like a crate in good shape. There are fifty-seven of them today.
+    // and reads exactly like a crate in good shape. There are 121 of them today; the floor sits
+    // below that on purpose, because merging two blocks of a type is a change the ratchet wants.
     assert!(
-        seen >= 30,
+        seen >= 100,
         "the scanner found {seen} impl blocks in the whole crate: it stopped recognising them"
     );
     assert!(
@@ -419,6 +615,137 @@ fn no_impl_block_is_over_its_ceiling() {
          they are at**, and that number may only go down:\n{}",
         over.join("\n")
     );
+}
+
+#[test]
+fn no_type_is_over_its_ceiling() {
+    let sizes = type_sizes(MODULES);
+    // A floor over what the walk found, for the reason every guard here carries one: a `type_of`
+    // that stopped matching would find no types and read exactly like a crate in shape. Sixty-eight
+    // types are charged lines today; the floor leaves room for a delivery that deletes one.
+    assert!(
+        sizes.len() >= 55 && sizes.get("Window").copied().unwrap_or(0) > IMPL_CEILING,
+        "the walk found {} types with impl blocks charged to them: it stopped recognising them",
+        sizes.len()
+    );
+    let over: Vec<String> = sizes
+        .iter()
+        .filter_map(|(ty, size)| {
+            let ceiling = ceiling_for(&format!("impl {ty}")).unwrap_or(IMPL_CEILING);
+            (*size > ceiling).then(|| {
+                format!("  impl {ty}: {size} production lines, over its ceiling of {ceiling}")
+            })
+        })
+        .collect();
+    assert!(
+        over.is_empty(),
+        "a type grew past what D28 allows it. A type's impl blocks — its own and those of the \
+         traits this crate declares — summed across every module, hold {IMPL_CEILING} production lines — moving methods into another block or \
+         another file does not pay it. The ones already over it are declared in \
+         `OVER_CEILING_TODAY` **with the number they are at**, and that number may only go \
+         down:\n{}",
+        over.join("\n")
+    );
+}
+
+#[test]
+fn a_type_spread_across_modules_is_summed_as_one() {
+    // Two blocks of one type in two files, one of them through a path, and a foreign trait's impl
+    // beside them. The sizes are picked so each block is under the ceiling and the sum is over it,
+    // which is the shape that walked through the guard when it only counted blocks.
+    let body = "    fn f() {}\n".repeat(160);
+    let first = format!("impl Thing {{\n{body}}}\n");
+    let second = format!("impl crate::Thing {{\n{body}}}\nimpl Drop for Thing {{\n{body}}}\n");
+    let sizes = type_sizes(&[("a.rs", &first), ("b.rs", &second)]);
+    assert_eq!(sizes.get("Thing"), Some(&324));
+    assert_eq!(
+        sizes.len(),
+        1,
+        "a foreign trait's impl is charged to nobody: {sizes:?}"
+    );
+    assert!(sizes["Thing"] > IMPL_CEILING);
+}
+
+#[test]
+fn a_trait_this_crate_declares_is_charged_to_the_type() {
+    // The other way around the per-type ceiling: move the methods into the impl of a trait declared
+    // for the purpose. Its lines stay the type's; a foreign trait's beside it stay nobody's.
+    let body = "    fn f() {}\n".repeat(160);
+    let own = format!("impl Thing {{\n{body}}}\n");
+    let moved = format!(
+        "pub(crate) trait Pointer {{\n    fn f();\n}}\nimpl Pointer for crate::Thing {{\n{body}}}\n\
+         impl std::fmt::Display for Thing {{\n{body}}}\n"
+    );
+    let sizes = type_sizes(&[("a.rs", &own), ("b.rs", &moved)]);
+    assert_eq!(sizes.get("Thing"), Some(&324), "{sizes:?}");
+    assert_eq!(sizes.len(), 1, "{sizes:?}");
+}
+
+#[test]
+fn every_impl_header_is_one_the_type_walk_can_read() {
+    // `type_of` reads the first line of a block at column zero, with no generics of its own. A
+    // header rustfmt wrapped would lose its ` for `, one with `impl<` would need its generics
+    // parsed, `impl dyn` names no type, and an `impl` indented inside a module or a function is
+    // never found at all. None of them exists today; the first one to appear fails here, where the
+    // walk can be taught it, instead of charging its lines to the wrong type or to none.
+    let unreadable = unreadable_headers(MODULES);
+    assert!(
+        unreadable.is_empty(),
+        "impl headers the type walk cannot read:\n{}",
+        unreadable.join("\n")
+    );
+    let odd = "impl<T> Thing<T> {\n}\nimpl VeryLongTrait\n    for Thing\n{\n}\nmod inner {\n    \
+               impl super::Thing {\n    }\n}\nimpl dyn Shape {\n}\nimpl Fine {\n}\n";
+    assert_eq!(unreadable_headers(&[("a.rs", odd)]).len(), 4);
+}
+
+/// Every production line that opens an `impl` the type walk would misread or miss.
+fn unreadable_headers(modules: &[(&str, &str)]) -> Vec<String> {
+    let mut unreadable = Vec::new();
+    for (module, source) in modules {
+        for line in production_lines(source) {
+            let code = line.trim_start();
+            let opens = code.starts_with("impl ") || code.starts_with("impl<");
+            let nested = opens && code.len() < line.len();
+            let odd =
+                !line.ends_with(" {") || line.starts_with("impl<") || line.starts_with("impl dyn ");
+            if opens && (nested || odd) {
+                unreadable.push(format!("  {module}: {line}"));
+            }
+        }
+    }
+    unreadable
+}
+
+#[test]
+fn a_ratchet_entry_is_measured_by_its_kind_and_refused_when_ambiguous() {
+    let body = "    fn f() {}\n".repeat(3);
+    let one =
+        format!("struct Thing;\nstruct Strips;\nimpl Thing {{\n{body}}}\nimpl Strips {{\n}}\n");
+    let two = format!("struct Strips;\nimpl Strips {{\n{body}}}\n");
+    let modules = [("src/a.rs", one.as_str()), ("src/b.rs", two.as_str())];
+    assert_eq!(measured("impl Thing", &modules), Ok(5));
+    assert!(
+        measured("impl Strips", &modules).is_err(),
+        "two types share the name"
+    );
+    assert_eq!(measured("src/a.rs::impl Thing", &modules), Ok(5));
+    assert_eq!(measured("src/b.rs", &modules), Ok(6));
+    assert!(measured("src/c.rs", &modules).is_err());
+    assert_eq!(ceiling_of("src/lib.rs"), MODULE_CEILING);
+    assert_eq!(ceiling_of("impl Window"), IMPL_CEILING);
+    assert_eq!(ceiling_of("src/lib.rs::impl Window"), IMPL_CEILING);
+}
+
+#[test]
+fn a_ratchet_entry_that_names_two_blocks_is_refused() {
+    // Nine names of this crate match more than one block of their module; an entry keyed by one of
+    // them used to measure whichever block came first and lend its number to the other.
+    let source =
+        "impl Thing {\n    fn a() {}\n}\nimpl Thing {\n    fn b() {}\n}\nimpl Other {\n}\n";
+    assert!(the_one_block(source, "impl Thing").is_err());
+    assert_eq!(the_one_block(source, "impl Other"), Ok(2));
+    assert!(the_one_block(source, "impl Gone").is_err());
 }
 
 #[test]
@@ -449,36 +776,17 @@ fn no_entry_of_the_ratchet_is_stale() {
     // **And it is what turns the ratchet into progress rather than paperwork**: a delivery that
     // takes a piece out has to come here and lower the number, because leaving it high is a failure.
     for (what, at, why) in OVER_CEILING_TODAY {
-        let real = if let Some((module, header)) = what.split_once("::") {
-            let source = MODULES
-                .iter()
-                .find(|(name, _)| name == &module)
-                .map(|(_, src)| *src)
-                .unwrap_or_else(|| panic!("`{what}` names a module this guard does not walk"));
-            let lines = production_lines(source);
-            impl_blocks(&lines)
-                .into_iter()
-                .find(|(h, ..)| h.trim_end_matches(" {").trim_end() == header)
-                .map(|(_, size, _)| size)
-                .unwrap_or_else(|| panic!("`{what}` names an impl block that no longer exists"))
-        } else {
-            let source = MODULES
-                .iter()
-                .find(|(name, _)| name == what)
-                .map(|(_, src)| *src)
-                .unwrap_or_else(|| panic!("`{what}` names a module this guard does not walk"));
-            production_lines(source).len()
-        };
-
+        let real = measured(what, MODULES).unwrap_or_else(|problem| panic!("`{what}` {problem}"));
         assert!(
             real <= *at,
             "`{what}` is at {real} production lines and the ratchet records {at}: it grew. The \
              reason recorded for it is «{why}»"
         );
+        let ceiling = ceiling_of(what);
         assert!(
-            real > MODULE_CEILING.min(IMPL_CEILING) || real > *at,
-            "`{what}` is at {real} lines, under every ceiling: it does not need an entry any more, \
-             and leaving one reads as «still too big»"
+            real > ceiling,
+            "`{what}` is at {real} lines, under its ceiling of {ceiling}: it does not need an entry \
+             any more, and leaving one reads as «still too big»"
         );
         // **Zero tolerance, and it used to be two hundred.** A ratchet that allows slack is a
         // ratchet that ratchets late: at 200 — two thirds of `IMPL_CEILING` — a delivery could take

@@ -10,8 +10,8 @@ status: active
 superseded_by: null
 confidence: 80
 created_at: '2026-09-07T17:43:53.647Z'
-updated_at: '2026-09-07T17:43:53.647Z'
-last_verified: '2026-09-07T17:43:53.647Z'
+updated_at: '2026-09-28T19:05:09.464Z'
+last_verified: '2026-09-28T19:05:09.464Z'
 file_paths:
   - crates/app/tests/shape.rs
   - crates/app/tests/prose.rs
@@ -24,12 +24,14 @@ symbols:
   - production_lines
   - COMMENT_LINES_AT_LEAST
   - GLOSSARY_CLEAN_FILES
+  - measured
+  - ceiling_of
 content_hashes:
-  crates/app/tests/shape.rs: 'sha256:3518e642c9eb392f687f8342964d7f0d35668c7907d2e0e46e0e3cc17615549a'
-  crates/app/tests/prose.rs: 'sha256:cd800b209129b690083c67aaea71bb374c1e470b7f24533c1a9ed48c3f00945e'
-  crates/app/tests/glossary.rs: 'sha256:e81cee638e6d52574a447c8be39bd0c41afb992e35d9f45e0c2dfbfacb6eb597'
-  crates/app/tests/scripts.rs: 'sha256:e79bbe5ce7c7990529def9645a3b75653eb943728eb566968f73d76c6ae954a5'
-  docs/02-decisiones.md: 'sha256:72862e89835bb5f95229c18221eaa6bc0f712c24fc943eb2122a6f45d696fa6c'
+  crates/app/tests/shape.rs: 'sha256:b8474648d5df70f6dad440a1c2864dd695f49fb5efd5a6ba66be8d1a5ccc0cca'
+  crates/app/tests/prose.rs: 'sha256:ab0b9e74bd4600f582efddfc69ed57e17ebd23567f4fc186e61044fe0943baa0'
+  crates/app/tests/glossary.rs: 'sha256:90d6c32c3639ed72476a08556a5782aedb6529d909f3629eb7791aafedf52ae2'
+  crates/app/tests/scripts.rs: 'sha256:0203fb55ee365b3246dc5f31fd1f042cc21f6e8746e7aaa8c25bd89c8663cfd0'
+  docs/02-decisiones.md: 'sha256:b53044393a7694d2c1f56d6f41680d1dd0df011e6f7448de57e3b6d5edc66e4d'
 tags:
   - guards
   - ratchet
@@ -75,10 +77,16 @@ Three of this crate's guards are constant arrays of files. Unlisting a file sile
 
 By the end every length floor sat exactly at its real count (19/19, 23/23, 28/28), so no file can leave for free. **The strongest form is not a floor at all — it is a type that cannot hold the wrong number of elements.**
 
+**But an exact floor is only right over a list somebody edits by hand.** Over a *count the walk finds* — impl blocks (121), types charged lines (68) — an exact floor fails the change the ratchet wants: merging two blocks of a type. #187 set those floors to today's exact numbers and the review caught it; they sit below (100, 55) with today's number in the comment.
+
+### 4. A refusal the real tree never meets cannot be mutated
+
+**Measured on #187**: two checks written inline inside `no_entry_of_the_ratchet_is_stale` — refuse a type entry whose name is defined twice, and hold a module entry to 600 rather than 300 — stayed **GREEN when deleted**, because no ratchet entry today is ambiguous and no module entry sits between 300 and 600. A guard over the real crate proves only the states the crate is in. The fix: the logic goes into a pure function over `&[(&str, &str)]` modules (`measured`, `ceiling_of`, `unreadable_headers`, `the_one_block`, `type_sizes`) with a test over synthetic sources, and the real-crate guard just calls it. After that, all fourteen mutations of the delivery went red.
+
 ### And the shape that has no fix yet
 
 `prose.rs` states, in prose, the list of files carrying fewer comment lines than the floor's slack. The slack is *corpus minus floor*, so **every comment anybody writes anywhere moves it**: the list changed three times during a single delivery and grew from fourteen files to seventeen. A number over a corpus cannot be stated as a list of names; it needs a per-file table. Filed, not fixed.
 
 ## Where it lives
 
-`crates/app/tests/shape.rs` holds `OVER_CEILING_TODAY`, the `production_lines` walk that breaks at `mod tests`, and `no_entry_of_the_ratchet_is_stale` — now an `assert_eq!`. The three file lists are `crates/app/tests/prose.rs` (`SOURCES` and `COMMENT_LINES_AT_LEAST`), `crates/app/tests/glossary.rs` (`GLOSSARY_CLEAN_FILES` and `CITATIONS_CHECKED`) and `crates/app/tests/scripts.rs` (`MODULES`); the fixed-size one is the `SOURCES` array inside `crates/app/src/settings.rs`'s test module. The rule the whole thing serves is **D28** in `docs/02-decisiones.md`, whose order table this train closed, and the mutation discipline behind it is **D30**.
+`crates/app/tests/shape.rs` holds `OVER_CEILING_TODAY`, the `production_lines` walk that breaks at `mod tests`, `no_entry_of_the_ratchet_is_stale` — an `assert_eq!` — and, since #187, the pure functions `measured`, `ceiling_of`, `type_sizes` and `unreadable_headers` with their synthetic tests. The three file lists are `crates/app/tests/prose.rs` (`SOURCES` and `COMMENT_LINES_AT_LEAST`), `crates/app/tests/glossary.rs` (`GLOSSARY_CLEAN_FILES` and `CITATIONS_CHECKED`) and `crates/app/tests/scripts.rs` (`MODULES`); the fixed-size one is the `SOURCES` array inside `crates/app/src/settings.rs`'s test module. The rule the whole thing serves is **D28** in `docs/02-decisiones.md`, and the mutation discipline behind it is **D30**.

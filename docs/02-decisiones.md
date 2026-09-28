@@ -4855,13 +4855,56 @@ a reader of the decision could not tell that this shape had been forced rather t
 
 **The other half of the same pressure is [#187](https://github.com/mashware/agent-terminal/issues/187).**
 The `impl` ceiling measures blocks, not types, so a type can pay it by spreading into more blocks
-without shrinking at all. That is how `impl Window` ended up across five files while `lib.rs`'s
-number went down, as the section above records.
+without shrinking at all. That is how `impl Window` ended up across five files by the time #187 was
+filed — twelve when it was closed — while `lib.rs`'s number went down, as the section above records.
+The amendment below closed it.
 
 **So the rule is one sentence.** When the ceiling decides where a piece goes, the delivery names the
 placement and says that the ceiling chose it — in its PR, **and** in the decision it amends, because
 the decision is what the next reader opens. Then the next person knows which shapes are free to be
 undone once there is room.
+
+### Amended: the `impl` ceiling holds a type, not only a block
+
+**The 300 is now held twice**: per block, as before, and per **type** — a type's `impl` blocks
+summed across every module of the crate, up to each module's first `mod tests`, the cut every count
+of D28 makes. The rationale always said «a type whose behaviour does not
+fit in 300 lines»; the guard counted blocks, and the gap was walked through by the practice this
+entry itself recommended. Summed on 28 September 2026, `Window` was **1 782** production lines over
+**fifteen blocks in twelve files** — against the 1 124 in two blocks the rule landed on — while every
+single block was under 300 and the suite was green.
+
+**What counts toward a type**: its inherent blocks, keyed by the last segment of the type's path, so
+`impl crate::Window` and `impl Window` are one type — **and the impls of traits this crate declares**,
+because moving a type's methods into `impl OurTrait for Window` would be the same walk around the
+ceiling by another door. **A foreign trait's impl does not** — `Display`, `Drop`, `eframe::App` are
+contracts somebody else wrote, and the per-block ceiling still holds them. The review of the first
+version found that door; the first version excluded every trait impl.
+
+**Two distinct types sharing a name are summed together**, because a text walk has no compiler to
+tell them apart. Unratcheted, that only makes the ceiling fire sooner; ratcheted, one could grow while
+the other shrank by as much, so a type entry whose name is defined twice is refused. And the walk
+reads a one-line header at column zero with no generics of its own: a wrapped header, an `impl<`, an
+`impl dyn` or an `impl` indented inside a module fails a guard of its own rather than being charged
+to the wrong type or to none. None exists today.
+
+**The five types over it are ratcheted at the number they had that day**: `Window` 1 782, `Pane` 591,
+`PanelState` 378, `InjectedDrags` 334, `Node` 321. They may only go down.
+
+**What this changes for whoever pays the ceiling**: moving a type's methods into a child module no
+longer pays it. A child module still pays the **module** ceiling — that part of the practice stands —
+but a type that needs room has to lose lines, or become two types with a seam between them.
+
+**And a ratchet entry names one thing.** A block entry is keyed `module::header`, and nine names of
+this crate matched more than one block of their module (`src/lib.rs::impl Window`, `src/tree.rs::impl
+Node`, …): the lookup handed the entry's number to every block of that name, so a small sibling could
+grow to it with nothing firing. The staleness check now refuses an entry whose name matches two
+blocks, and it holds each kind of entry to its own ceiling: it used to call a module «still too big»
+as long as it was over 300.
+
+**Discarded**: keeping the per-block rule and only stopping publishing a block's number as a type's.
+Honest and cheaper, and it left the first hole open on purpose — the one the practice above walks
+through every time.
 
 
 ---
