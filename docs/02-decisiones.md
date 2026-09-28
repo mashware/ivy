@@ -4797,6 +4797,47 @@ The fix is not judgement but arithmetic: close everything, build, and open only 
 names. Thirteen fields were opened and twelve were needed; of the items, less than half. **The
 compiler is the cheapest reviewer of visibility there is, and it was never asked.**
 
+### The ceiling designs the code around it, and a delivery says when it did
+
+**This entry records the ceiling as a limit, and it is also a force.** A fix written under it will
+sometimes put state where the types would not have put it, because the place the types want is a
+file that may not grow. That is expected, and it is not a sign that whoever is under the ratchet is
+doing it wrong. What would be wrong is to present the shape afterwards as if it had been chosen
+freely.
+
+**The clearest case so far is #170** (PR #197), the notice that stopped naming keys on consoles those
+keys do not reach. Every placement in it was defensible on its own terms, and none of them was chosen
+by the types:
+
+- The mark «does the keyboard reach this console?» went **on the held paste** rather than becoming an
+  argument of the function that paints a console, because that call site is in `lib.rs` and the
+  ratchet allowed it no extra line. The delivery measured the file at 1 434 before and after.
+- **Which module each piece landed in was decided by which module had room**: the mouse pass, the
+  painter and the paste's own type, in the delivery's own words.
+- An `impl` block went over 300 lines, and two functions moved between `pointer.rs`'s two blocks to
+  bring it back under.
+- Two test-only helpers had to move too, because the guard counts by file and stops only at a module
+  literally called `tests`.
+
+**And the first of those placements is also the one that went wrong later.** A mark stored on the
+paste was a second answer to the question the cursor already answered from the frame, and the two
+drifted apart: #211 (PR #281) was a notice promising `Ctrl+Enter` in a window that no longer had the
+desktop's focus, while the cursor beside it said nobody was typing there. The fix removed the mark
+and painted both from one value built in the frame loop. The ceiling did not cause that defect, but
+it chose the shape the defect lived in. PR #197 said the ceiling had shaped the delivery; D31's
+first amendment (#170), the record a later reader opens, never mentions the mark or the ceiling, so
+a reader of the decision could not tell that this shape had been forced rather than chosen.
+
+**The other half of the same pressure is [#187](https://github.com/mashware/agent-terminal/issues/187).**
+The `impl` ceiling measures blocks, not types, so a type can pay it by spreading into more blocks
+without shrinking at all. That is how `impl Window` ended up across five files while `lib.rs`'s
+number went down, as the section above records.
+
+**So the rule is one sentence.** When the ceiling decides where a piece goes, the delivery names the
+placement and says that the ceiling chose it — in its PR, **and** in the decision it amends, because
+the decision is what the next reader opens. Then the next person knows which shapes are free to be
+undone once there is room.
+
 
 ---
 
