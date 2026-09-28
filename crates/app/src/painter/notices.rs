@@ -241,6 +241,16 @@ pub(crate) const STOPPED_RECEIVING: &str =
 /// standard error denied it. The clause is added only where it is true.
 pub(crate) const AND_STILL_TAKES_WHAT_YOU_TYPE: &str = " What you type still reaches it.";
 
+/// What the console says when the input queue refused what was just typed — **#161, D60**.
+///
+/// **A sentence of its own, not a clause appended to [`STOPPED_RECEIVING`].** That sentence opens
+/// by claiming the *output* stopped, which is false here: the queue's ceiling is an input-side
+/// limit, and it is routinely hit while the program is reading its output perfectly normally.
+/// Promising the wrong direction is exactly the mistake **D41** recorded once already, over the
+/// clause this sentence's sibling adds.
+pub(crate) const INPUT_QUEUE_FULL: &str =
+    "This console's input queue is full. What you just typed did not reach the program.";
+
 /// What a console that went quiet says, whole.
 ///
 /// **It takes the fact and not the console**, so both sentences can be asked for: a write failure
@@ -286,6 +296,57 @@ pub(crate) fn went_quiet(ending: Option<term_core::Ending>) -> bool {
     ending.is_some_and(|how| how != term_core::Ending::EndedWell)
 }
 
+/// Whether this console still has something to say about a write the input queue refused —
+/// **#161, D60** — independent of whether its output also stopped: the two are different threads
+/// with different endings, the same reason [`still_says_it_went_quiet`] is a question of its own
+/// rather than a clause on this one.
+///
+/// **«Still» means «since the last dismissal», not «ever»**: each refusal is owed its own sentence,
+/// and [`crate::pty_output::PtyOutput::still_owes_the_refusal`] is what tells them apart.
+pub(crate) fn still_says_a_write_was_refused(console: &crate::Pane) -> bool {
+    console
+        .pty_output
+        .still_owes_the_refusal(console.pty.backlog())
+}
+
+/// Which of its two reasons the box under the held paste's question is about.
+///
+/// **One answer, asked by the painting and by the press alike**, because a press dismisses the
+/// reason on screen and nothing else. The delivery that brought the second reason first wrote the
+/// precedence out twice — once to choose the sentence, once to choose what a press dismisses — and
+/// two copies of one rule are how a press ends up dismissing a sentence nobody was shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Silence {
+    /// The console stopped receiving its program's output (**D40**, **D41**).
+    WentQuiet,
+    /// The input queue refused what was just typed (**D60**).
+    Refused,
+}
+
+/// What the box under the held paste's question is about, or nothing if it has nothing to say.
+///
+/// **The output ending wins when both apply.** A write that gave up entirely (permanent) can leave
+/// `refused` true from before it did, alongside an ending that has since gone quiet too; composing
+/// both into one sentence is out of this ticket's scope (`03-design.md`'s `## Identified risks`,
+/// F2) — the existing, more severe claim about the program being gone is the one kept.
+pub(crate) fn what_the_silence_is(console: &crate::Pane) -> Option<Silence> {
+    if still_says_it_went_quiet(console) {
+        Some(Silence::WentQuiet)
+    } else if still_says_a_write_was_refused(console) {
+        Some(Silence::Refused)
+    } else {
+        None
+    }
+}
+
+/// The sentence for a reason, as the box lays it out and paints it.
+fn what_the_silence_says(console: &crate::Pane, silence: Silence) -> String {
+    match silence {
+        Silence::WentQuiet => what_it_says(is_deaf(console)),
+        Silence::Refused => INPUT_QUEUE_FULL.to_owned(),
+    }
+}
+
 /// Where the notice about a console going quiet goes, or nothing if there is no room for it whole.
 ///
 /// **It stacks under the held paste's box, and gives way to it.** Both notices share one ceiling —
@@ -310,14 +371,12 @@ fn the_silence_box_under(
     area: Rect,
     above: Option<Rect>,
 ) -> Option<Rect> {
-    if !still_says_it_went_quiet(console) {
-        return None;
-    }
+    let silence = what_the_silence_is(console)?;
     let margin = metrics.width();
     let wrap = (area.width() - 4.0 * margin).max(metrics.width());
     let sentence = painter
         .layout(
-            what_it_says(is_deaf(console)),
+            what_the_silence_says(console, silence),
             metrics.font(),
             theme.foreground(),
             wrap,
@@ -355,11 +414,11 @@ fn paint_the_silence_over_it(
     theme: &Theme,
     metrics: &CellMetrics,
     area: Rect,
-    box_of_it: Rect,
+    (box_of_it, silence): (Rect, Silence),
 ) {
     let margin = metrics.width();
     let sentence = painter.layout(
-        what_it_says(is_deaf(console)),
+        what_the_silence_says(console, silence),
         metrics.font(),
         theme.foreground(),
         (area.width() - 4.0 * margin).max(metrics.width()),
@@ -584,8 +643,8 @@ pub(crate) fn paint_them_over_it(
     if let Some(box_of_it) = boxes.send {
         paint_the_button_over_it(painter, theme, metrics, box_of_it);
     }
-    if let Some(box_of_it) = boxes.silence {
-        paint_the_silence_over_it(painter, console, theme, metrics, area, box_of_it);
+    if let Some(silence) = boxes.silence.zip(what_the_silence_is(console)) {
+        paint_the_silence_over_it(painter, console, theme, metrics, area, silence);
     }
 }
 

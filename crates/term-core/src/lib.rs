@@ -208,6 +208,19 @@ struct Input {
     waiting_since: AtomicU64,
     /// Whether the writer gave up, which means the program or the pseudoterminal is gone.
     gave_up: AtomicBool,
+    /// Whether the most recent call to [`Pty::write`] was refused for being past [`MAX_OWED`].
+    ///
+    /// **Edge-triggered, not sticky.** It is set the moment a write is refused and cleared the
+    /// moment a later write is accepted, so a program that stalls, drains and stalls again can be
+    /// warned about each stall — unlike [`Input::gave_up`], which is permanent once true.
+    refused: AtomicBool,
+    /// How many writes have been refused so far, for the life of this pseudoterminal.
+    ///
+    /// **It is what lets a dismissal be about particular refusals rather than about a state.**
+    /// Whoever hides the sentence remembers this number; a later refusal changes it, so the
+    /// sentence comes back even when no write was accepted in between — a person retrying into a
+    /// queue that is still full is told each time that it did not go in.
+    refusals: AtomicU64,
 }
 
 /// What the program has not taken yet, for whoever wants to say it out loud.
@@ -219,7 +232,28 @@ pub struct Backlog {
     pub waiting: Duration,
     /// Whether the writer gave up: nothing else will ever go in through this pseudoterminal.
     pub gave_up: bool,
+    /// Whether the most recent [`Pty::write`] was refused because the queue was already at its
+    /// ceiling. Clears on the next write that is accepted — see [`Input::refused`].
+    pub refused: bool,
+    /// How many writes have been refused so far. It only ever goes up — see [`Input::refusals`].
+    pub refusals: u64,
 }
+
+/// How much may be owed to the program before [`Pty::write`] starts refusing.
+///
+/// **Checked against what is already owed, before adding this write's bytes** — a queue under the
+/// ceiling always accepts a write whole, however large, so one legitimate paste sent while the
+/// program is only momentarily behind is never refused for its own size. Only a write attempted
+/// once the queue is *already* at or past the ceiling is turned away.
+///
+/// **Anchored to the output side's real measured ceiling, not to a fresh measurement of its
+/// own.** [`READS_IN_FLIGHT`] × [`READ_SIZE`] plus the kernel's own buffer (~20 KiB measured on
+/// Linux) puts that ceiling at roughly 90-100 KiB; this is that number with headroom, rounded up.
+/// No input-side flood benchmark exists in this repository to measure a number of its own against
+/// — an earlier draft of this constant cited the unit test constant `GENEROUS_MARGIN` below as if
+/// it were such a precedent, which it is not (see that test's own comment): it is a deliberately
+/// loose assertion bound, not a production margin.
+const MAX_OWED: usize = 256 * 1024;
 
 impl Input {
     /// The clock these two numbers share. Monotonic, so a change of the wall clock cannot make a
@@ -231,6 +265,9 @@ impl Input {
     }
 
     /// Notes that these bytes were handed over.
+    ///
+    /// **Clears a standing refusal.** A write only reaches here once it has been accepted (see
+    /// [`Pty::write`]), so acceptance itself is the edge that ends a refusal streak.
     fn handed_over(&self, bytes: usize) {
         // **The stamp is only set by the first one waiting**, which is what makes `waiting` mean «how
         // long the oldest has been stuck» instead of «how long since the last keystroke».
@@ -241,6 +278,19 @@ impl Input {
             Ordering::Relaxed,
         );
         self.owed.fetch_add(bytes, Ordering::Relaxed);
+        self.refused.store(false, Ordering::Relaxed);
+    }
+
+    /// What is currently owed, for the ceiling check in [`Pty::write`] — cheaper than building the
+    /// whole [`Backlog`] snapshot for a single comparison made on every write.
+    fn owed(&self) -> usize {
+        self.owed.load(Ordering::Relaxed)
+    }
+
+    /// Notes that a write was refused for being past [`MAX_OWED`].
+    fn refuse(&self) {
+        self.refused.store(true, Ordering::Relaxed);
+        self.refusals.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Notes that a write finished, well or badly.
@@ -267,10 +317,17 @@ impl Input {
     }
 
     /// What is owed right now, or nothing when the program is keeping up.
+    ///
+    /// **`refused` is checked here too, not only `bytes`.** A refusal can outlive the backlog that
+    /// caused it: the program may drain what was owed down to zero through ordinary writes
+    /// (`settle`) without a new write ever being attempted to clear the flag (only
+    /// [`Input::handed_over`] does that). Without this, a console that just had a write refused
+    /// could report no backlog at all the moment the old bytes finish landing.
     fn backlog(&self) -> Option<Backlog> {
         let bytes = self.owed.load(Ordering::Relaxed);
         let gave_up = self.gave_up.load(Ordering::Relaxed);
-        if bytes == 0 && !gave_up {
+        let refused = self.refused.load(Ordering::Relaxed);
+        if bytes == 0 && !gave_up && !refused {
             return None;
         }
         let since = self.waiting_since.load(Ordering::Relaxed);
@@ -283,6 +340,8 @@ impl Input {
             bytes,
             waiting,
             gave_up,
+            refused,
+            refusals: self.refusals.load(Ordering::Relaxed),
         })
     }
 }
@@ -582,16 +641,14 @@ impl Pty {
     /// growing. Whoever hosts this crate is expected to say so — otherwise the console simply stops
     /// listening without a word, which is a worse failure than the freeze this replaced.
     ///
-    /// **The queue carries no ceiling.** The reason is volume, not principle: what arrives here is
-    /// what somebody's hands produced —a keystroke, a paste the desktop already holds whole in
-    /// memory— so there is no producer to outrun a consumer the way a program dumping hundreds of
-    /// MiB/s does on the output side. That asymmetry is why **D8**'s ceiling is not copied here: D8
-    /// chose ceilings *with backpressure* for a producer that had to be braked, and there is nothing
-    /// to brake on this side. What a ceiling here would buy is bounded memory in one case —a program
-    /// that never reads again— at the price of choosing what to throw away, and it would have to be
-    /// backpressure rather than discarding. It is written up as a decision of its own.
+    /// **The queue has a ceiling, [`MAX_OWED`], checked against what is already owed.** Past it,
+    /// a write is **refused** rather than accepted — never discarded silently, and never blocked:
+    /// the caller is the thread that paints, and blocking it here would reopen the freeze this
+    /// function's own fix (D29) removed. This is a deliberate asymmetry with **D8**'s ceiling,
+    /// which blocks-and-retries its producer instead — see **D60**.
     ///
-    /// The error is returned when the writer thread is gone, which means the console is closing.
+    /// The error is returned when the writer thread is gone (the console is closing), or when the
+    /// queue is already at its ceiling.
     pub fn write(&mut self, bytes: &[u8]) -> Result<()> {
         // **A writer that gave up is reported here and not left to be discovered.** Once it has
         // broken out of its loop nothing else will ever reach the program, and answering «taken» to
@@ -599,6 +656,17 @@ impl Pty {
         // this line existed: four writes after the program had died all returned `Ok`.
         if self.input.gave_up() {
             return Err("the program is no longer taking what is written to it".into());
+        }
+        // **Checked before this write's own bytes are added**, so a queue under the ceiling always
+        // accepts a write whole, however large — a single legitimate paste is never refused for
+        // its own size, only for arriving once the queue is already full.
+        if self.input.owed() >= MAX_OWED {
+            self.input.refuse();
+            return Err(format!(
+                "the input queue is full ({MAX_OWED} bytes already owed to the program); \
+                 what was just typed did not go in"
+            )
+            .into());
         }
         // **`Option` only so that `Drop` can close the channel**; no caller can observe the `None`,
         // because a value being dropped no longer answers `&mut self`.
@@ -2169,6 +2237,260 @@ mod tests {
             pty.write(b"x").is_err(),
             "a write into a console whose program is gone was answered «taken»"
         );
+        drop(pty);
+        drop(output);
+    }
+
+    /// **#161: the ceiling.** A write attempted once [`MAX_OWED`] is already owed is refused, not
+    /// accepted into an unbounded queue — the honest ceiling #50/D29 deferred. The boundary is
+    /// inclusive: a write that lands *exactly* on the ceiling is what the next one is refused
+    /// against, matching D8's own `try_send` semantics (full means full).
+    ///
+    /// **Not `#[cfg(target_os = "linux")]`**: unlike its neighbours above, this does not depend on
+    /// the non-blocking write path #159 added — the ceiling check is a plain comparison inside
+    /// `Pty::write`, run before any platform-specific write happens at all.
+    #[test]
+    fn a_write_past_the_ceiling_is_refused_and_named_by_its_own_message() {
+        const MARKER: &str = "raw-and-deaf-for-the-ceiling";
+        let script = format!("stty raw -echo && printf {MARKER} && exec sleep 60");
+        let (mut pty, output) =
+            Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
+        wait_for_marker(&output, MARKER);
+
+        pty.write(&vec![FILLER; 4 * PAYLOAD])
+            .expect("a write landing exactly on the ceiling must still be accepted whole");
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(
+            pty.backlog().map(|backlog| backlog.bytes),
+            Some(4 * PAYLOAD),
+            "the ceiling-sized write did not stay fully owed: the premise for this test does not \
+             hold"
+        );
+
+        let refusal = pty
+            .write(b"one more byte")
+            .expect_err("a write past the ceiling was answered «taken»");
+        let text = refusal.to_string();
+        assert!(
+            text.contains("queue is full"),
+            "the refusal's message does not name the queue: {text}"
+        );
+        assert!(
+            !text.contains("no longer taking"),
+            "the refusal reused the wording of a program that gave up, which this is not: {text}"
+        );
+        assert!(
+            pty.backlog().is_some_and(|backlog| backlog.refused),
+            "the refusal was not recorded in the backlog"
+        );
+
+        drop(pty);
+        drop(output);
+    }
+
+    /// **#161, AC1's second half: a refused write queues nothing.** The test above proves the
+    /// answer is `Err`; this one proves the bytes did not go in anyway — a refusal that still
+    /// handed them to the writer would grow the queue it exists to bound while telling the caller
+    /// the opposite. Several refusals in a row, one of them far larger than the ceiling, so a
+    /// queue that took even one of them cannot land back on the same number by coincidence.
+    #[test]
+    fn a_refused_write_adds_nothing_to_what_is_owed() {
+        const MARKER: &str = "raw-and-deaf-for-a-refusal-that-queues-nothing";
+        let script = format!("stty raw -echo && printf {MARKER} && exec sleep 60");
+        let (mut pty, output) =
+            Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
+        wait_for_marker(&output, MARKER);
+
+        pty.write(&vec![FILLER; 4 * PAYLOAD])
+            .expect("a write landing exactly on the ceiling must still be accepted whole");
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(
+            pty.backlog().map(|backlog| backlog.bytes),
+            Some(4 * PAYLOAD),
+            "the ceiling-sized write did not stay fully owed: the premise for this test does not \
+             hold"
+        );
+
+        for refused in [vec![FILLER; 1], vec![FILLER; 8 * PAYLOAD], vec![FILLER; 3]] {
+            pty.write(&refused)
+                .expect_err("a write past the ceiling was answered «taken»");
+        }
+        thread::sleep(Duration::from_millis(300));
+
+        assert_eq!(
+            pty.backlog().map(|backlog| backlog.bytes),
+            Some(4 * PAYLOAD),
+            "a refused write was handed to the writer anyway"
+        );
+
+        drop(pty);
+        drop(output);
+    }
+
+    /// **#161: every refusal is counted, including a retry into a queue that is still full.** The
+    /// flag alone cannot tell a second refusal from the first — it is already up — and a dismissal
+    /// keyed on the flag would silence the retry. The count is what the notice's dismissal is
+    /// keyed on instead.
+    #[test]
+    fn each_refused_write_is_counted_even_while_the_flag_is_already_up() {
+        const MARKER: &str = "raw-and-deaf-for-counting-refusals";
+        let script = format!("stty raw -echo && printf {MARKER} && exec sleep 60");
+        let (mut pty, output) =
+            Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
+        wait_for_marker(&output, MARKER);
+
+        pty.write(&vec![FILLER; 4 * PAYLOAD])
+            .expect("a write landing exactly on the ceiling must still be accepted whole");
+        assert_eq!(
+            pty.backlog().map(|backlog| backlog.refusals),
+            Some(0),
+            "a write that was accepted was counted as refused"
+        );
+
+        for expected in 1..=3 {
+            pty.write(b"x")
+                .expect_err("a write past the ceiling was answered «taken»");
+            assert_eq!(
+                pty.backlog()
+                    .map(|backlog| (backlog.refused, backlog.refusals)),
+                Some((true, expected)),
+                "refusal number {expected} was not counted"
+            );
+        }
+
+        drop(pty);
+        drop(output);
+    }
+
+    /// **#161: one console's refusal is its own.** Two consoles, one of them past its ceiling:
+    /// the other must still accept what is typed into it and report no refusal — the ceiling and
+    /// its flag belong to each pseudoterminal, not to the process.
+    #[test]
+    fn a_refusal_in_one_console_leaves_another_console_accepting() {
+        const MARKER: &str = "raw-and-deaf-for-a-refusal-of-its-own";
+        let script = format!("stty raw -echo && printf {MARKER} && exec sleep 60");
+        let (mut full, full_output) =
+            Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
+        let (mut other, other_output) =
+            Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
+        wait_for_marker(&full_output, MARKER);
+        wait_for_marker(&other_output, MARKER);
+
+        full.write(&vec![FILLER; 4 * PAYLOAD])
+            .expect("a write landing exactly on the ceiling must still be accepted whole");
+        full.write(b"one more byte")
+            .expect_err("the premise does not hold: the full console accepted a write");
+
+        other
+            .write(b"typed into the other console")
+            .expect("a refusal in one console turned away a write into another");
+        assert!(
+            !other.backlog().is_some_and(|backlog| backlog.refused),
+            "a refusal in one console was reported by another"
+        );
+        assert!(
+            full.backlog().is_some_and(|backlog| backlog.refused),
+            "the other console's accepted write cleared the full console's refusal"
+        );
+
+        drop(full);
+        drop(other);
+        drop(full_output);
+        drop(other_output);
+    }
+
+    /// **#161: a single oversized write is never punished for its own size.** The ceiling is
+    /// checked against what is *already* owed, before this write's bytes are added — so a queue
+    /// with room left always accepts a write whole, however large. This is the held-paste case
+    /// the design challenger asked to see covered explicitly: some backlog already present, under
+    /// the ceiling, then one write that alone would push past it.
+    #[test]
+    fn an_oversized_write_is_accepted_whole_when_the_queue_is_under_the_ceiling() {
+        const MARKER: &str = "raw-and-deaf-for-an-oversized-write";
+        let script = format!("stty raw -echo && printf {MARKER} && exec sleep 60");
+        let (mut pty, output) =
+            Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
+        wait_for_marker(&output, MARKER);
+
+        pty.write(&vec![FILLER; PAYLOAD])
+            .expect("a first write well under the ceiling must be accepted");
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(
+            pty.backlog().map(|backlog| backlog.bytes),
+            Some(PAYLOAD),
+            "the first write did not stay fully owed: the premise for this test does not hold"
+        );
+
+        // Owed (`PAYLOAD`) is still under `MAX_OWED`, so this is accepted whole even though it
+        // alone pushes the total past the ceiling.
+        pty.write(&vec![FILLER; 4 * PAYLOAD]).expect(
+            "a write that only exceeds the ceiling by its own size was refused instead of \
+             accepted",
+        );
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(
+            pty.backlog().map(|backlog| backlog.bytes),
+            Some(PAYLOAD + 4 * PAYLOAD),
+            "the second write was not handed over in full"
+        );
+        assert!(
+            !pty.backlog().is_some_and(|backlog| backlog.refused),
+            "an accepted write left the console marked as refused"
+        );
+
+        drop(pty);
+        drop(output);
+    }
+
+    /// **#161: a refusal is edge-triggered, not sticky.** It is cleared by the next write the
+    /// queue *accepts*, not by the backlog draining on its own — a program that stalls, drains and
+    /// stalls again has to be able to warn about each stall.
+    #[test]
+    fn a_refusal_clears_on_the_next_write_the_queue_accepts() {
+        const MARKER: &str = "raw-and-briefly-deaf-for-a-refusal";
+        // Deaf just long enough to be refused against, then reads everything: the backlog this
+        // hands over has to drain on its own, with no further write from this test forcing it.
+        let script =
+            format!("stty raw -echo && printf {MARKER} && sleep 0.3 && exec cat >/dev/null");
+        let (mut pty, output) =
+            Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
+        wait_for_marker(&output, MARKER);
+
+        pty.write(&vec![FILLER; 4 * PAYLOAD])
+            .expect("a write landing exactly on the ceiling must still be accepted whole");
+        pty.write(b"refused while the program is still asleep")
+            .expect_err("a write past the ceiling was answered «taken»");
+        assert!(
+            pty.backlog().is_some_and(|backlog| backlog.refused),
+            "the refusal was not recorded in the backlog"
+        );
+
+        // The script starts draining after its own 0.3 s sleep; give it a bounded deadline rather
+        // than a fixed one, the same idiom the ending-poll above this test uses.
+        let deadline = Instant::now() + DEADLINE;
+        while pty.backlog().map(|backlog| backlog.bytes).unwrap_or(0) > 0
+            && Instant::now() < deadline
+        {
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(
+            pty.backlog().map(|backlog| backlog.bytes).unwrap_or(0),
+            0,
+            "the program never drained the backlog within {DEADLINE:?}"
+        );
+        assert!(
+            pty.backlog().is_some_and(|backlog| backlog.refused),
+            "the refusal cleared on its own once the backlog drained, without a new write ever \
+             being accepted"
+        );
+
+        pty.write(b"accepted now that the queue has room")
+            .expect("owed dropped below the ceiling, this write should be accepted");
+        assert!(
+            !pty.backlog().is_some_and(|backlog| backlog.refused),
+            "the refusal did not clear on the next write the queue accepted"
+        );
+
         drop(pty);
         drop(output);
     }

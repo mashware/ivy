@@ -1063,9 +1063,11 @@ impl crate::Pane {
     /// gives.
     ///
     /// **The question is only let go once the write took it.** A write fails when the console's
-    /// writer has given up (**D29**), and then the paste stays held and its question stays standing —
-    /// nothing is lost in silence, which is the failure **D31** exists against — while the same
-    /// «gave up» takes the button away from the next frame on, so it is not offered again.
+    /// writer has given up (**D29**) or the input queue is at its ceiling (**D60**, #161), and
+    /// then the paste stays held and its question stays standing — nothing is lost in silence,
+    /// which is the failure **D31** exists against. Only «gave up» takes the button away from the
+    /// next frame on, since it alone is permanent; a refusal is a stall that may clear on its own,
+    /// so the button stays offered and a later click can simply try again.
     pub(crate) fn send_the_held_paste(&mut self) {
         let Some(held) = self.held.as_ref() else {
             return;

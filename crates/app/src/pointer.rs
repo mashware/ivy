@@ -972,10 +972,11 @@ impl Window {
                 return rest;
             }
 
-            // **Two comparisons and neither allocates**, which is the shape this loop already had
-            // for one notice: a console with nothing to say must not make the frame pay for the
-            // thing that is almost never there. The second is a read of a cell written once.
-            if pane.held.is_none() && !crate::painter::notices::still_says_it_went_quiet(pane) {
+            // **A few reads and no allocation**, which is the shape this loop already had for one
+            // notice: a console with nothing to say must not make the frame pay for the thing that
+            // is almost never there.
+            let silence = crate::painter::notices::what_the_silence_is(pane);
+            if pane.held.is_none() && silence.is_none() {
                 continue;
             }
             // **The console's rectangle, and this pass works it out without having refreshed the
@@ -1005,7 +1006,20 @@ impl Window {
             // readable, and the console's last output goes back to being markable, which is what
             // somebody clicking there most likely wanted.
             } else if on(boxes.silence) {
-                pane.pty_output.dismiss_the_silence(pane.pty.ending());
+                // **Only the reason on screen is dismissed**, and it is asked of the same function
+                // the painting chose the sentence by. Dismissing both was the first shape and a
+                // review refuted it: with the output ended *and* the queue refusing, only the
+                // ended-output sentence is shown, and a press on it silenced a refusal nobody had
+                // seen — the failure D31 exists against.
+                match silence {
+                    Some(crate::painter::notices::Silence::WentQuiet) => {
+                        pane.pty_output.dismiss_the_silence(pane.pty.ending());
+                    }
+                    Some(crate::painter::notices::Silence::Refused) => {
+                        pane.pty_output.dismiss_the_refusal(pane.pty.backlog());
+                    }
+                    None => {}
+                }
             } else {
                 continue;
             }

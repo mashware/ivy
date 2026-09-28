@@ -4068,6 +4068,30 @@ mod tests {
         );
     }
 
+    /// Writes enough bytes into that console's real pseudoterminal to trip #161's ceiling, and
+    /// asserts the refusal actually happened before returning — the premise-before-conclusion
+    /// shape term-core's own ceiling tests use, reached here through a real [`Pane`] instead.
+    ///
+    /// **The console's program has to already be raw, echo off, and not reading its input** — the
+    /// same `stty raw -echo; …; exec sleep N` shape those tests use — or these bytes are either
+    /// echoed back and drained by the line discipline, or land on a program that actually reads
+    /// them, and the premise below never holds.
+    fn make_it_refuse_a_write(pane: &mut Pane) {
+        // Comfortably past term-core's own ceiling (256 KiB) without this crate hard-coding the
+        // exact figure it has no business knowing — the margin is the point, not the number. The
+        // ceiling is checked against what is already owed the instant a write is *handed over*,
+        // not against how far the writer thread has gotten, so nothing here needs to wait for it.
+        const PAST_THE_CEILING: usize = 300 * 1024;
+        pane.pty
+            .write(&vec![b'z'; PAST_THE_CEILING])
+            .expect("a first write, alone, must still be accepted");
+        assert!(
+            pane.pty.write(b"one more byte").is_err(),
+            "the queue did not refuse a write past its ceiling: the premise for this test does \
+             not hold"
+        );
+    }
+
     /// Where that console's silence notice goes, asked of the same function the painter and the
     /// mouse pass both call.
     fn the_silence_box_on(
@@ -4467,6 +4491,251 @@ mod tests {
         assert!(
             the_silence_box_on(&pane, &theme, &metrics, a_roomy_console(&metrics)).is_none(),
             "a console that is still reading was told it had stopped receiving"
+        );
+    }
+
+    #[test]
+    fn a_refused_write_says_so_without_claiming_the_output_stopped() {
+        // #161, AC5. A refusal is an input-side fact; the output can be — and here is —
+        // perfectly fine, so this must never reuse the sentence that opens by claiming the output
+        // stopped, which D41 already recorded as the mistake once made about the clause below it.
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let theme = theme::Theme::default();
+        let mut pane = pane_with(
+            "stty raw -echo && printf refused-marker && exec sleep 60",
+            0,
+        );
+        wait_for_the_program_to_start(&mut pane);
+        make_it_refuse_a_write(&mut pane);
+        assert_eq!(
+            pane.pty.ending(),
+            None,
+            "the output ended too: this test needs it to still be reading fine"
+        );
+        let area = a_roomy_console(&metrics);
+
+        let box_of_it = the_silence_box_on(&pane, &theme, &metrics, area)
+            .expect("a refused write has nothing to say");
+        let _ = box_of_it;
+        let said = the_sentence_over(&pane, &theme, &metrics, area);
+        assert_eq!(
+            said,
+            painter::notices::INPUT_QUEUE_FULL,
+            "a refused write said something other than its own sentence"
+        );
+        assert!(
+            !said.starts_with(painter::notices::STOPPED_RECEIVING),
+            "a refusal that left the output untouched still opened by claiming it had stopped: \
+             {said}"
+        );
+    }
+
+    #[test]
+    fn a_console_still_reading_and_never_refused_says_nothing_about_a_refusal() {
+        // The negative this delivery adds to the one just above `a_refused_write_says_so…`: a
+        // console reading fine and never refused must stay exactly as silent as it was before
+        // #161 — this is `a_console_still_reading_says_nothing_over_its_grid` mutated by the
+        // feature this delivery adds, not a new claim.
+        let pane = pane_with("sleep 30", 0);
+
+        assert!(
+            !painter::notices::still_says_a_write_was_refused(&pane),
+            "a console that was never refused had something to say about being refused"
+        );
+    }
+
+    #[test]
+    fn a_held_paste_the_full_queue_refuses_stays_held_and_keeps_its_send_button() {
+        // #161: the one call site whose failure changes state rather than only printing. A
+        // refusal is a stall that may clear, unlike a writer that gave up, so the paste must
+        // survive the refused click *and* the button must still be offered for the next try —
+        // hiding it on `refused` the way it is hidden on `gave_up` would leave the person with
+        // no way to send the paste once the program catches up.
+        let ctx = egui::Context::default();
+        let rects = two_wide_panes();
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let mut window = window_with(
+            "stty raw -echo && printf refused-marker && exec sleep 60",
+            "sleep 30",
+        );
+        focus_on(window.active_mut(), 1);
+        {
+            let left = &mut window.active_mut().panes_mut()[0];
+            wait_for_the_program_to_start(left);
+            if !hold_a_paste_on(left) {
+                return;
+            }
+            make_it_refuse_a_write(left);
+        }
+        let headers = window.headers;
+        let theme = window.theme;
+        let console = window.active_mut().panes_mut()[0].console_within(
+            rects[0],
+            &metrics,
+            SystemTime::now(),
+            headers,
+        );
+        let (_, send, _) = the_notices_on(window.active().panes()[0], &theme, &metrics, console);
+        let send = send.expect("a refused console was not offered the button at all");
+
+        deliver_to_the_mouse(&mut window, &ctx, &rects, &metrics, click_at(send.center()));
+
+        let pane = window.active().panes()[0];
+        assert!(
+            pane.held.is_some(),
+            "a paste the full queue refused was let go anyway, so it is lost"
+        );
+        assert!(
+            the_notices_on(pane, &theme, &metrics, console).1.is_some(),
+            "a refusal took the send button away as if the writer had given up for good"
+        );
+    }
+
+    #[test]
+    fn a_retry_refused_after_the_sentence_was_dismissed_brings_the_sentence_back() {
+        // #161, the case the delta review found: the person dismisses «the input queue is full»,
+        // then types again into a queue that is still full. The flag never came down between the
+        // two refusals, so a dismissal keyed on the flag told them nothing the second time — only
+        // standard error, which a window's user does not see.
+        //
+        // No held paste here on purpose: with one, the question and its button take the top half
+        // and this sentence is not drawn at all (D39), so there would be nothing to press.
+        let ctx = egui::Context::default();
+        let rects = two_wide_panes();
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let mut window = window_with(
+            "stty raw -echo && printf refused-marker && exec sleep 60",
+            "sleep 30",
+        );
+        {
+            let left = &mut window.active_mut().panes_mut()[0];
+            wait_for_the_program_to_start(left);
+            make_it_refuse_a_write(left);
+        }
+        let theme = window.theme;
+        let notice = the_silence_box_on(window.active().panes()[0], &theme, &metrics, rects[0])
+            .expect("the console that was refused has nothing to say");
+        deliver_to_the_mouse(
+            &mut window,
+            &ctx,
+            &rects,
+            &metrics,
+            click_at(notice.center()),
+        );
+        assert!(
+            the_silence_box_on(window.active().panes()[0], &theme, &metrics, rects[0]).is_none(),
+            "the premise does not hold: the click did not take the sentence away"
+        );
+
+        window.active_mut().panes_mut()[0]
+            .pty
+            .write(b"typed again")
+            .expect_err("the premise does not hold: the retry was not refused");
+
+        assert!(
+            the_silence_box_on(window.active().panes()[0], &theme, &metrics, rects[0]).is_some(),
+            "a retry the full queue refused after the sentence was dismissed said nothing"
+        );
+    }
+
+    #[test]
+    fn a_click_on_the_refusal_takes_it_off_the_glass_through_the_mouse_pass() {
+        // #161, mirrors `a_click_on_the_silence_takes_it_off_the_glass_through_the_mouse_pass`:
+        // the press has to find the box in the same geometry the painter drew it with, in a pass
+        // whose first line skips every console with nothing to say — which is exactly the guard
+        // #161 had to extend.
+        let ctx = egui::Context::default();
+        let rects = two_wide_panes();
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let mut window = window_with(
+            "stty raw -echo && printf refused-marker && exec sleep 60",
+            "sleep 30",
+        );
+        {
+            let left = &mut window.active_mut().panes_mut()[0];
+            wait_for_the_program_to_start(left);
+            make_it_refuse_a_write(left);
+        }
+        let theme = window.theme;
+        let notice = the_silence_box_on(window.active().panes()[0], &theme, &metrics, rects[0])
+            .expect("the console that was refused has nothing to say");
+
+        deliver_to_the_mouse(
+            &mut window,
+            &ctx,
+            &rects,
+            &metrics,
+            click_at(notice.center()),
+        );
+
+        assert!(
+            !painter::notices::still_says_a_write_was_refused(window.active().panes()[0]),
+            "a click on the sentence left it on the glass"
+        );
+        assert!(
+            the_silence_box_on(window.active().panes()[0], &theme, &metrics, rects[0]).is_none(),
+            "the box is still there to swallow the next press, so the last output cannot be marked"
+        );
+    }
+
+    #[test]
+    fn dismissing_the_ended_output_notice_does_not_silence_a_separate_refusal() {
+        // The regression for a bug the built-in code review found: the dispatch used to
+        // dismiss both reasons unconditionally on any click on the silence box. When the
+        // output ended *and* the input queue was separately refused, only the ended-output
+        // sentence is shown — `what_the_silence_is`'s own precedence — so a click on the
+        // visible sentence was also silently dismissing the refusal nobody had ever seen, with
+        // no later write guaranteed to land and re-arm it: the exact "lost in silence" failure
+        // D31 exists against.
+        let ctx = egui::Context::default();
+        let rects = two_wide_panes();
+        let metrics = with_metrics(|metrics| metrics.clone());
+        // `exec yes`, not `exec sleep 60`: `make_it_go_quiet` needs the program to keep writing
+        // so its reader thread has something to fail *sending*, which is how it ever discovers
+        // its listener is gone (its own doc comment: "while the program inside is alive and
+        // writing"). `sleep` alone never writes again after the marker and this premise stalls.
+        let mut window = window_with(
+            "stty raw -echo && printf refused-marker && exec yes",
+            "sleep 30",
+        );
+        {
+            let left = &mut window.active_mut().panes_mut()[0];
+            wait_for_the_program_to_start(left);
+            make_it_refuse_a_write(left);
+            make_it_go_quiet(left);
+        }
+        let theme = window.theme;
+        assert!(
+            painter::notices::still_says_it_went_quiet(window.active().panes()[0]),
+            "the premise does not hold: the output did not go quiet"
+        );
+        assert!(
+            painter::notices::still_says_a_write_was_refused(window.active().panes()[0]),
+            "the premise does not hold: the write was not refused"
+        );
+        let notice = the_silence_box_on(window.active().panes()[0], &theme, &metrics, rects[0])
+            .expect("a console that went quiet and was refused has nothing to say");
+        let said = the_sentence_over(window.active().panes()[0], &theme, &metrics, rects[0]);
+        assert!(
+            said.starts_with(painter::notices::STOPPED_RECEIVING),
+            "the premise does not hold: the ended-output sentence did not win precedence: {said}"
+        );
+
+        deliver_to_the_mouse(
+            &mut window,
+            &ctx,
+            &rects,
+            &metrics,
+            click_at(notice.center()),
+        );
+
+        assert!(
+            !painter::notices::still_says_it_went_quiet(window.active().panes()[0]),
+            "the click did not dismiss the sentence it actually landed on"
+        );
+        assert!(
+            painter::notices::still_says_a_write_was_refused(window.active().panes()[0]),
+            "the click on the ended-output sentence silently dismissed a refusal nobody had seen"
         );
     }
 

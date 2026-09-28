@@ -7650,3 +7650,67 @@ colors for the terminal's own interface are choices made here.
 | Rejecting the whole file for an unknown name | D26's line-by-line tolerance would be broken and valid font, shortcut and color lines would be lost. |
 | Silently falling back to factory colors | The person who typed the name would see a different appearance with no explanation. |
 | Shipping one theme or a large collection first | One has no choice; every additional palette has twenty-two values to check. Two make the first catalog useful without making it a palette import project. |
+
+## D60 — The input queue's honest ceiling refuses, it does not block; and it refuses on what is already owed, never on a write's own size
+
+**Decided for [#161](https://github.com/mashware/agent-terminal/issues/161).** `Pty::write`
+(term-core) refuses once `MAX_OWED` (256 KiB) is already owed to the program, checked **before**
+this write's own bytes are added — so a single write, however large, is always accepted whole when
+the queue has room, and only a write arriving once the queue is *already* full is turned away.
+Nothing owed is ever discarded: what was already handed over stays queued and still lands if the
+program comes back to read it. The refusal is a new fact, not a new shape: `Backlog` gains
+`refused: bool`, edge-triggered — set the moment a write is refused, cleared the moment a later one
+is accepted — and `refusals: u64`, how many writes have been refused so far, both read the same
+way `gave_up` already is. The application shows it the same way it already shows a console that
+stopped receiving (D40/D41): a sentence over the top half of the console, dismissed by a click,
+sharing the same half-console ceiling (D39) — but its own sentence, never the output-ending one,
+since a refusal is routinely reached while the program is reading its output perfectly normally.
+**A dismissal is for the refusals it saw, not for the state**: it records the count, so the next
+refusal — a retry into a queue that is still full included — brings the sentence back. When the
+output has ended too, only the ended-output sentence is shown, and a press dismisses only the
+reason on screen; one function answers which reason that is, for the painting and for the press.
+
+**Why.** #50/D29 deferred this exact ceiling, on purpose, pending an answer to one product
+question: what does the window do when it cannot accept a keystroke? Discarding was already refused
+there, for the same reason D8 refuses it on the output side — a key or a mouse report that vanishes
+in silence is the failure hardest to understand from the other side of the screen. Refusing,
+visibly, is the only third path, and #161's own text already names it: "a limit past which
+`Pty::write` **refuses** instead of accepting."
+
+**The asymmetry with D8 is deliberate, not an oversight.** D8's ceiling blocks-and-retries its
+producer — the reader thread — because blocking a background thread costs nothing anybody is
+watching. `Pty::write` is called from the console's own input path, the same thread D29 already
+freed from blocking on this exact pseudoterminal; making it block again here would quietly reopen
+the freeze D29 was written to remove. Refusing is the only shape that keeps D29's guarantee intact.
+
+**The ceiling is checked against what is already owed, not against what this write would bring the
+total to.** The difference matters for one real case: a large, legitimate paste sent to a program
+that is only momentarily behind. Checking after adding would refuse that paste for its own size,
+which is not what "somebody's hands produced it" (D29's own reason for not discarding) was arguing
+against. Checking before means a queue with room left always takes a write whole, and only what
+arrives once the queue is already full is turned away — which is also what makes the ceiling
+harmless to the ordinary, healthy case: nothing about typing or pasting into a program that is
+actually reading its input changes at all.
+
+**256 KiB is a reasoned default, not a measured one — declared as such rather than borrowed from a
+number that only looked like a precedent.** An earlier draft anchored it to `GENEROUS_MARGIN`
+(term-core's own `without_consuming_it_what_arrives_is_bounded` test, `crates/term-core/src/
+lib.rs`), which reads like a production safety margin but is not one: it is a deliberately loose
+(10×) assertion bound, chosen so that test does not depend on this machine's exact kernel slack.
+The design's challenger caught the citation; the number now anchors instead to the one *real*
+measured ceiling this repository has on the input side's neighbour — the output side's
+`READS_IN_FLIGHT × READ_SIZE` plus the kernel's own buffer, on the order of 90-100 KiB — rounded up
+for headroom. No input-side flood benchmark exists to measure a number of its own against; this is
+recorded as a followup (F1 of the work that shipped this decision) rather than hidden behind false
+precision.
+
+| Discarded | Why |
+|---|---|
+| A second bounded channel, imitating D8's `sync_channel` + `try_send` + retry-on-`Full` shape literally | `Input.owed` already counts what a second queue's length would count; a second counter would only risk disagreeing with the first. Capping the existing counter inside `Pty::write` is the smaller, more honest change |
+| Blocking the caller once the ceiling is reached, matching D8 | `Pty::write`'s caller is the console's input-handling thread, the one D29 already freed from blocking on this exact call. Blocking here reopens that freeze |
+| Checking `owed + bytes.len() > MAX_OWED` (after adding this write's bytes) | Refuses a single legitimate oversized write — a big paste to a program that is merely behind — for its own size, punishing exactly the case D29's "no discarding" reasoning protects |
+| A public enum for the refusal, mirroring `Ending`'s shape | No caller branches on *why* a write failed today — all five write call sites already log the message and return on any `Err`. `Backlog.refused`, polled the same way `gave_up` already is, needs no new type on the return path |
+| A third, independent box in the notice layer for the refusal | Would need a real three-way stacking design under D39's half-console ceiling, which #161's design scoped out (recorded as a risk, not solved). Reusing the existing "console has something to say" box's trigger and sentence needed no new geometry at all |
+| Reusing `QuietConsole`'s sticky `dismissed` latch for the refusal too | An ending never reverses, so that latch is permanent by design. Refusals keep coming; a sticky latch would silence every later one |
+| A dismissal cleared by observing `refused` false (the first shape this delivery built) | A read that wrote, whose safety rested on a claim about threads nothing checked — and the flag stays up across a retry into a full queue, so the retry was refused in silence. Both reviews of this delivery found it. Keying the dismissal on the `refusals` count makes the question a pure read and gives each refusal its sentence |
+| Dismissing both reasons on any press on the shared box | When the output had ended *and* the queue was refusing, only the ended-output sentence was shown, and the press silenced a refusal nobody had seen. The built-in review found it; the press now dismisses the reason `notices::what_the_silence_is` says is on screen, the same function the sentence is chosen by |

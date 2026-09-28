@@ -74,6 +74,10 @@ pub struct PtyOutput {
     /// each side is a decision of its own with its own reasons for staying quiet, and one cell would
     /// have made them one type. See [`QuietConsole`].
     quiet: std::cell::RefCell<QuietConsole>,
+    /// Which refusal the sentence about a refused write was last taken off the glass for. See
+    /// [`RefusedWrite`] — it lives here for the same D28 reason as `deaf` and `quiet`, and it is a
+    /// third cell rather than folded into `quiet` because that one is sticky and this one is not.
+    refused_write: std::cell::RefCell<RefusedWrite>,
     /// A double-ended queue and not a vector: it is appended at the end and taken from the
     /// beginning, and taking from the beginning of a vector copies everything left behind it. With
     /// a dump in progress that would be megabytes copied on each frame, and that cost would end up
@@ -182,6 +186,7 @@ impl PtyOutput {
         Self {
             deaf: std::cell::RefCell::default(),
             quiet: std::cell::RefCell::default(),
+            refused_write: std::cell::RefCell::default(),
             queue,
             room,
             stop,
@@ -280,6 +285,32 @@ impl PtyOutput {
     pub fn dismiss_the_silence(&self, ending: Option<term_core::Ending>) {
         if crate::painter::notices::went_quiet(ending) {
             self.quiet.borrow_mut().dismissed = true;
+        }
+    }
+
+    /// Whether the sentence about a refused write is still owed: the most recent write was
+    /// refused, and nobody has dismissed **that** refusal.
+    ///
+    /// **Not sticky like [`Self::the_silence_was_dismissed`], and it reads nothing but its
+    /// arguments.** A dismissal records how many refusals there had been when it was made, so any
+    /// refusal after it — a retry into a queue that is still full — brings the sentence back. The
+    /// first shape of this reset a flag on observing `refused` false: a read that wrote, whose
+    /// safety depended on nobody accepting and refusing a write between two of its calls, and
+    /// which silenced a retry refused after a dismissal. Both reviews of D60 found it.
+    pub fn still_owes_the_refusal(&self, backlog: Option<term_core::Backlog>) -> bool {
+        backlog.is_some_and(|backlog| {
+            backlog.refused && self.refused_write.borrow().dismissed_at != Some(backlog.refusals)
+        })
+    }
+
+    /// Takes the sentence about a refused write off the glass, until the next refusal.
+    ///
+    /// **It asks for the backlog rather than trusting its caller**, the same guard
+    /// [`Self::dismiss_the_silence`] keeps: a latch nobody validates can be set on a console that
+    /// was never refused, which would silently swallow the sentence a *later*, real refusal earns.
+    pub fn dismiss_the_refusal(&self, backlog: Option<term_core::Backlog>) {
+        if let Some(backlog) = backlog.filter(|backlog| backlog.refused) {
+            self.refused_write.borrow_mut().dismissed_at = Some(backlog.refusals);
         }
     }
 
@@ -435,6 +466,20 @@ impl QuietConsole {
             }
         })
     }
+}
+
+/// Which refusal the sentence about a refused write was taken off the glass for, if any.
+///
+/// **It goes before this module's tests, beside [`QuietConsole`], for the same D28 reason that
+/// puts that one there.**
+///
+/// **Not sticky, unlike [`QuietConsole::dismissed`].** A read's ending never reverses, so once that
+/// sentence is dismissed it stays dismissed for the console's whole life. Refusals keep coming,
+/// and each one is something the person did not see go in — so the dismissal names the refusal it
+/// was for (the pseudoterminal's running count) and the next one is owed its own sentence.
+#[derive(Default)]
+struct RefusedWrite {
+    dismissed_at: Option<u64>,
 }
 
 #[cfg(test)]
@@ -1249,6 +1294,106 @@ mod tests {
             true,
             Some(term_core::Ending::EndedWell)
         ));
+    }
+
+    /// Builds a [`PtyOutput`] with nothing behind it — none of these tests touch the queue or the
+    /// pump, only the refusal latch, so a real pseudoterminal would be paying for nothing.
+    fn a_bare_pty_output() -> PtyOutput {
+        let (_sender, output) = channel();
+        PtyOutput::new(output, || {})
+    }
+
+    /// What the pseudoterminal reports after `refusals` refused writes, the last of them refused
+    /// or not. The other fields are the ones a full queue would carry; nothing here reads them.
+    fn a_backlog(refused: bool, refusals: u64) -> Option<term_core::Backlog> {
+        Some(term_core::Backlog {
+            bytes: 256 * 1024,
+            waiting: Duration::from_secs(2),
+            gave_up: false,
+            refused,
+            refusals,
+        })
+    }
+
+    #[test]
+    fn a_console_that_was_never_refused_owes_nothing() {
+        let pty_output = a_bare_pty_output();
+
+        assert!(!pty_output.still_owes_the_refusal(None));
+        assert!(!pty_output.still_owes_the_refusal(a_backlog(false, 0)));
+    }
+
+    #[test]
+    fn a_refusal_is_owed_until_it_is_dismissed() {
+        let pty_output = a_bare_pty_output();
+
+        assert!(
+            pty_output.still_owes_the_refusal(a_backlog(true, 1)),
+            "a fresh refusal was not owed"
+        );
+        // Asking again does not dismiss it: the question reads, it does not write.
+        assert!(
+            pty_output.still_owes_the_refusal(a_backlog(true, 1)),
+            "asking a second time dismissed it on its own"
+        );
+    }
+
+    #[test]
+    fn dismissing_a_refusal_that_is_not_there_does_nothing() {
+        // The same guard `dismiss_the_silence` keeps: a latch nobody validates can be set on a
+        // console that was never refused, which would silently swallow the sentence a later, real
+        // refusal earns.
+        let pty_output = a_bare_pty_output();
+
+        pty_output.dismiss_the_refusal(a_backlog(false, 0));
+
+        assert!(
+            pty_output.still_owes_the_refusal(a_backlog(true, 1)),
+            "dismissing a refusal that was not showing spent a later, real one"
+        );
+    }
+
+    #[test]
+    fn a_dismissed_refusal_stays_dismissed_while_it_is_the_same_refusal() {
+        let pty_output = a_bare_pty_output();
+
+        pty_output.dismiss_the_refusal(a_backlog(true, 1));
+
+        assert!(
+            !pty_output.still_owes_the_refusal(a_backlog(true, 1)),
+            "a dismissal did not survive being asked about again"
+        );
+    }
+
+    #[test]
+    fn a_retry_refused_after_a_dismissal_is_owed_again() {
+        // **The case the delta review found.** The queue is still full, so the flag never came
+        // down between the two refusals — a dismissal keyed on the flag would have silenced the
+        // second one, and the person retrying would have been told nothing.
+        let pty_output = a_bare_pty_output();
+        pty_output.dismiss_the_refusal(a_backlog(true, 1));
+
+        assert!(
+            pty_output.still_owes_the_refusal(a_backlog(true, 2)),
+            "a write refused after the dismissal was silenced by it"
+        );
+    }
+
+    #[test]
+    fn a_refusal_after_an_accepted_write_is_owed_again() {
+        // The other way a new refusal arrives: the queue drained, a write went in, and a later one
+        // was refused. No read has to happen in between for it to be noticed.
+        let pty_output = a_bare_pty_output();
+        pty_output.dismiss_the_refusal(a_backlog(true, 1));
+
+        assert!(
+            !pty_output.still_owes_the_refusal(a_backlog(false, 1)),
+            "an accepted write left a refusal owed"
+        );
+        assert!(
+            pty_output.still_owes_the_refusal(a_backlog(true, 2)),
+            "a later, unrelated refusal was silenced by a dismissal from before it"
+        );
     }
 }
 
