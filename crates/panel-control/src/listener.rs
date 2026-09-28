@@ -18,7 +18,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use interprocess::TryClone;
-use interprocess::local_socket::{Listener, Stream, prelude::*};
+use interprocess::local_socket::{Stream, prelude::*};
 use panel_contract::{Dropped, Panel, Patch};
 
 use crate::endpoint;
@@ -150,13 +150,11 @@ pub struct Channel {
     #[cfg_attr(not(test), allow(dead_code))]
     alive: Arc<AtomicUsize>,
     acceptor: Option<JoinHandle<()>>,
-    /// Knocks on this pane's own door, to wake the acceptor out of `accept`.
+    /// Interrupts this pane's listener to wake the acceptor out of `accept`.
     ///
-    /// **The listener blocks in `accept`**, so a pane that closes has to be able to reach its own
-    /// endpoint or its acceptor would sit parked for the life of the process. The self-connection is
-    /// accepted and dropped without being served, because the stop flag is already up when it
-    /// arrives.
-    door: Box<dyn Fn() + Send + Sync>,
+    /// It owns one end of a private descriptor pair rather than the endpoint's pathname: deleting a
+    /// pane's directory cannot make the wake unreachable, and a full backlog cannot delay it.
+    stopper: Option<endpoint::AcceptorStopper>,
 }
 
 impl Channel {
@@ -193,18 +191,9 @@ impl Channel {
         wake: Arc<dyn Fn() + Send + Sync>,
     ) -> io::Result<Self> {
         let listener = endpoint::bind(dir, id)?;
+        let (stopper, acceptor) = endpoint::acceptor(listener)?;
         let stop = Arc::new(AtomicBool::new(false));
         let alive = Arc::new(AtomicUsize::new(1));
-
-        // **The door to knock on at close**, captured before the acceptor thread borrows anything:
-        // the acceptor parks in `accept`, so this is what unparks it.
-        let door = {
-            let here = dir.to_path_buf();
-            let name = id.to_owned();
-            Box::new(move || {
-                let _ = endpoint::connect(&here, &name);
-            }) as Box<dyn Fn() + Send + Sync>
-        };
 
         let acceptor = std::thread::Builder::new()
             .name(format!("panel-control {id}"))
@@ -219,7 +208,7 @@ impl Channel {
                 move || {
                     accept_until_stopped(
                         &id,
-                        &listener,
+                        &acceptor,
                         &stop,
                         &alive,
                         &to_the_window,
@@ -233,7 +222,7 @@ impl Channel {
             stop,
             alive,
             acceptor: Some(acceptor),
-            door,
+            stopper: Some(stopper),
         })
     }
 
@@ -267,10 +256,10 @@ impl Drop for Channel {
     /// stayed minimised, which is worse than a thread that waits for the pass that ends the hold.
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
-        // **The knock comes before the handle is dropped**, and it is what ends the acceptor: it is
-        // parked in a blocking `accept`, and the one thing that wakes it is a connection — which
-        // this makes to its own endpoint.
-        (self.door)();
+        // **Closing the private wake descriptor comes before the handle is dropped**, and it is what
+        // ends the acceptor: it cannot fail, resolve a filesystem name another field may already
+        // have removed, or wait for room in the endpoint's connection backlog.
+        drop(self.stopper.take());
         drop(self.acceptor.take());
     }
 }
@@ -278,7 +267,7 @@ impl Drop for Channel {
 /// Waits for connections until somebody says to stop.
 fn accept_until_stopped(
     id: &str,
-    listener: &Listener,
+    acceptor: &endpoint::Acceptor,
     stop: &Arc<AtomicBool>,
     alive: &Arc<AtomicUsize>,
     to_the_window: &SyncSender<Delivery>,
@@ -288,16 +277,31 @@ fn accept_until_stopped(
     let next = AtomicU64::new(0);
     let mut stumbles = 0_u32;
 
-    // **The accept blocks, so this thread costs nothing while nothing happens.** The price is that
-    // it cannot look at the flag on its own; `Channel::drop` unparks it by connecting to this very
-    // endpoint, and the stream that arrives for it is dropped unserved below.
+    // **The poll blocks, so this thread costs nothing while nothing happens.** Its second
+    // descriptor belongs only to `Channel`: dropping that end wakes this one even after the public
+    // endpoint has been removed and without opening another connection.
     while !stop.load(Ordering::Relaxed) {
-        match listener.accept() {
+        // Abandoned on purpose: this acceptor waits without a deadline because either a connection
+        // or dropping its channel-owned wake descriptor ends the wait immediately and without a
+        // periodic wake-up.
+        match acceptor.wait() {
+            Ok(endpoint::AcceptorReady::Stop) => break,
+            Ok(endpoint::AcceptorReady::Connection) => {}
+            Err(failure) if failure.kind() == io::ErrorKind::Interrupted => continue,
+            Err(failure) => {
+                eprintln!(
+                    "console {id}: its control channel stopped waiting for connections \
+                     ({failure}{}); it publishes by file from now on",
+                    failure
+                        .raw_os_error()
+                        .map_or(String::new(), |number| format!(", errno {number}"))
+                );
+                break;
+            }
+        }
+        match acceptor.accept() {
             Ok(stream) => {
                 stumbles = 0;
-                // **The knock is not a client.** The flag is already up when it arrives, and it
-                // exists only to end this loop; serving it would spawn a thread for a pane that is
-                // closing.
                 if stop.load(Ordering::Relaxed) {
                     drop(stream);
                     break;
@@ -313,6 +317,7 @@ fn accept_until_stopped(
                 );
             }
             Err(failure) if failure.kind() == io::ErrorKind::Interrupted => {}
+            Err(_) if stop.load(Ordering::Relaxed) => break,
             Err(failure) => {
                 // **Running out of descriptors is not the endpoint being gone**, and the first
                 // version of this treated every failure as fatal: a terminal host is exactly who
@@ -1236,6 +1241,45 @@ mod tests {
             watching.load(Ordering::Relaxed),
             0,
             "threads outlived their pane"
+        );
+    }
+
+    /// The endpoint's path is an address, not the acceptor's lifetime. A pane removes that path as
+    /// part of closing, and the channel must still be able to stop the listener it already owns.
+    #[test]
+    fn closing_after_the_endpoint_path_is_removed_still_ends_the_acceptor() {
+        let mut pane = a_pane();
+        let _client = pane.connect();
+        let watching = Arc::clone(&pane.channel.as_ref().expect("the channel is open").alive);
+        let deadline = Instant::now() + Duration::from_millis(500);
+        while watching.load(Ordering::Relaxed) < 2 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(
+            watching.load(Ordering::Relaxed),
+            2,
+            "the acceptor and client"
+        );
+
+        let (closed, did_close) = sync_channel(1);
+        let channel = pane.channel.take();
+        std::thread::spawn(move || {
+            drop(pane.dir);
+            drop(channel);
+            let _ = closed.send(());
+        });
+        did_close
+            .recv_timeout(Duration::from_millis(500))
+            .expect("closing the channel itself did not return within 500 ms");
+
+        let deadline = Instant::now() + Duration::from_millis(500);
+        while watching.load(Ordering::Relaxed) > 0 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(
+            watching.load(Ordering::Relaxed),
+            0,
+            "removing the endpoint path before dropping the channel left its acceptor alive"
         );
     }
 

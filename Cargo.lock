@@ -2011,6 +2011,7 @@ name = "panel-control"
 version = "0.1.0"
 dependencies = [
  "interprocess",
+ "libc",
  "panel-contract",
  "serde",
  "serde_json",

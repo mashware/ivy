@@ -147,7 +147,7 @@ const IMPL_CEILING: usize = 300;
 /// recorded.
 const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[(
     "src/lib.rs",
-    782,
+    775,
     "the window's core, and the file nobody ever split. D28 has the order its pieces come out \
          in; it cannot come under the ceiling in one change because 16 953 lines of tests reach \
          into its private items. **It came in at 3 119; the bench's injected gestures were the \
@@ -270,7 +270,8 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[(
          saving state followed the saving policy into `session.rs`**: the pending deadline and the \
          last document written became fields of `Persistence`, and only their two declarations \
          counted here — both constructors sit where this guard does not count. **784 - 2 leaves \
-         782**.",
+         782**. **Watcher rearming then followed pane closing into `closing.rs`: eight production \
+         lines left the core and one new call remained, so 782 + 1 - 8 leaves 775.**",
 )];
 
 /// The production lines of a module: no comments, and nothing from `mod tests` onwards.

@@ -9,12 +9,106 @@
 use std::io;
 use std::path::Path;
 
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
+#[cfg(unix)]
+use std::os::unix::net::UnixStream;
+
 #[cfg(not(windows))]
 use interprocess::local_socket::GenericFilePath;
 #[cfg(windows)]
 use interprocess::local_socket::GenericNamespaced;
 use interprocess::local_socket::{Listener, Stream, prelude::*};
 use interprocess::local_socket::{ListenerOptions, Name};
+
+/// The channel-owned end of a private wake pair.
+///
+/// Dropping it makes the acceptor's end readable with a hang-up. It needs neither the endpoint's
+/// pathname nor room in its connection backlog, and closing a descriptor cannot wait.
+pub(crate) struct AcceptorStopper {
+    #[cfg(unix)]
+    _signal: UnixStream,
+}
+
+/// The listener and private wake descriptor owned by one acceptor thread.
+pub(crate) struct Acceptor {
+    listener: Listener,
+    #[cfg(unix)]
+    signal: UnixStream,
+}
+
+/// What woke the acceptor.
+pub(crate) enum AcceptorReady {
+    Connection,
+    Stop,
+}
+
+/// Gives one bound listener the private descriptor pair that stops it.
+pub(crate) fn acceptor(listener: Listener) -> io::Result<(AcceptorStopper, Acceptor)> {
+    #[cfg(windows)]
+    {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "the control channel has no Windows listener until F2.7",
+        ))
+    }
+    #[cfg(unix)]
+    {
+        let (stopper, wake) = UnixStream::pair()?;
+        Ok((
+            AcceptorStopper { _signal: stopper },
+            Acceptor {
+                listener,
+                signal: wake,
+            },
+        ))
+    }
+}
+
+impl Acceptor {
+    /// Sleeps until the endpoint has a connection or its owner disappears.
+    pub(crate) fn wait(&self) -> io::Result<AcceptorReady> {
+        #[cfg(windows)]
+        {
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "the control channel has no Windows listener until F2.7",
+            ))
+        }
+        #[cfg(unix)]
+        {
+            let Listener::UdSocket(listener) = &self.listener;
+            let mut descriptors = [
+                libc::pollfd {
+                    fd: listener.inner().as_raw_fd(),
+                    events: libc::POLLIN,
+                    revents: 0,
+                },
+                libc::pollfd {
+                    fd: self.signal.as_raw_fd(),
+                    events: libc::POLLIN,
+                    revents: 0,
+                },
+            ];
+            // SAFETY: both descriptors remain owned for the call, the array has the declared
+            // length, and `poll` only writes its `revents` fields.
+            let ready = unsafe { libc::poll(descriptors.as_mut_ptr(), descriptors.len() as _, -1) };
+            if ready < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            if descriptors[1].revents != 0 {
+                Ok(AcceptorReady::Stop)
+            } else {
+                Ok(AcceptorReady::Connection)
+            }
+        }
+    }
+
+    /// Accepts the connection whose readiness [`Self::wait`] reported.
+    pub(crate) fn accept(&self) -> io::Result<Stream> {
+        self.listener.accept()
+    }
+}
 
 /// The name of a pane's endpoint.
 ///
@@ -57,9 +151,9 @@ pub fn name_of(dir: &Path, id: &str) -> io::Result<Name<'static>> {
 /// earlier version made the accept non-blocking so the acceptor could poll its stop flag, which cost
 /// every pane a thread waking five times a second for the life of the window — four idle panes
 /// alone were about twenty wake-ups a second, and on a laptop that is what shows up as battery. The
-/// acceptor now parks in `accept` and is woken by a connection it makes to itself when its pane
-/// closes; the streams it hands out are blocking, which is what lets a receive timeout be put on
-/// them (see [`crate::listener`]).
+/// acceptor parks in `poll` over the listener and a private wake descriptor; dropping the other end
+/// wakes it without polling at rest or opening a client connection. The streams it hands out are
+/// blocking, which is what lets a receive timeout be put on them (see [`crate::listener`]).
 pub fn bind(dir: &Path, id: &str) -> io::Result<Listener> {
     #[cfg(windows)]
     {

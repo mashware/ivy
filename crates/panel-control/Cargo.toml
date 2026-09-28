@@ -36,6 +36,11 @@ serde = { version = "1", features = ["derive"] }
 # build of this branch fetches it. Worth knowing before running the delivery offline.
 interprocess = "2.4"
 
+# Closing a channel wakes its blocking accept without opening another client connection. The Unix
+# endpoint polls its listener beside a private stream pair; `libc` supplies that descriptor wait.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [[bin]]
 name = "panel-mcp"
 path = "src/bin/panel-mcp.rs"

@@ -14,7 +14,28 @@ use crate::measure;
 use crate::tree::{Closing, Node};
 use crate::{Pane, Window};
 
+impl Drop for Window {
+    fn drop(&mut self) {
+        // Whole-window destruction does not run a closing frame that can rearm the watcher. Stop
+        // it explicitly before Rust drops any pane-owned directory.
+        self.watcher.stop_before_retirement();
+    }
+}
+
 impl Window {
+    /// Arms the watcher again over every pane that is left.
+    ///
+    /// The old generation is made inert first, including on remote retirement. Every surviving
+    /// flag is then raised, so a publication during replacement cannot leave its panel stale.
+    pub(super) fn rearm_the_watcher(&mut self, ctx: &egui::Context) {
+        self.watcher.stop_before_retirement();
+        let watcher = Self::watch(ctx, self.all_panes());
+        self.watcher = watcher;
+        for pane in self.all_panes() {
+            pane.to_reread.raise();
+        }
+    }
+
     /// Banks a closing pane's channel counters on the window, **before it is dropped**.
     ///
     /// The report reads the live panes directly and adds [`Window::control`] on top, so a pane that
@@ -25,18 +46,13 @@ impl Window {
 
     /// Closes the tab that is being seen. If it is the only one, what is closed is the window.
     ///
-    /// **Rearming the watcher is indispensable**: without it it is left following the directories
-    /// of the tab that is leaving, however many it had, sees what it was watching disappear and
-    /// declares itself blind. From then on the window would reread every panel on every frame, for
-    /// ever and in the degraded mode, with nothing on screen saying so. There is a test that falls
-    /// if it is removed.
+    /// **Rearming the watcher is indispensable**: the old generation is made inert before the tab
+    /// leaves, so without its replacement the surviving panes would no longer be watched and their
+    /// next publications could remain unseen. There is a test that falls if it is removed.
     ///
-    /// **It is rearmed after dropping the tab, and the design asked for the opposite.** Its reason
-    /// was that the old watcher should not get to see the deletion and declare itself blind;
-    /// checked by inverting it, **the observable result is the same**, because the new watcher
-    /// brings its own blindness flag and the old one is discarded whole along with its own. With no
-    /// difference to defend, it is done in the order that does not need to know which tab is
-    /// leaving.
+    /// **The old watcher is stopped before the tab is dropped.** Rearming afterwards raises every
+    /// survivor's reread flag, so no publication in that interval can leave a panel stale and the
+    /// intentional deletions cannot be reported as lost tracking.
     pub(super) fn close_the_active_tab(&mut self, ctx: &egui::Context) {
         // **The last one is not removed from the list, and it is not a capricious exception:**
         // asking for the close does not close on the spot —frames are still running, and the report
@@ -86,9 +102,14 @@ impl Window {
             self.bank_control(did);
         }
 
+        // The tab leaves the layout first, then its old watcher is stopped before any directory is
+        // removed. The replacement below watches only the survivors.
+        let leaving_tab = self.tabs.remove(leaving);
+        self.watcher.stop_before_retirement();
+
         // Here its programs die and its directories disappear, however many it had, through the
-        // usual `Drop`s.
-        self.tabs.remove(leaving);
+        // usual `Drop`s. Its watcher no longer contains those directories.
+        drop(leaving_tab);
 
         // **Rearming the watcher goes inside the stopwatch**, and before it was left outside by a
         // line drawn in the wrong place: it rebuilds the watching over the panes of every tab that
@@ -163,8 +184,6 @@ impl Window {
         {
             self.bank_control(did);
         }
-        // Here its program dies and its directory disappears, through the usual `Drop`s.
-        drop(leaving);
         self.active_mut().focus = inherited;
         // **Closing a console by hand counts the same as closing a tab by hand**, and without this
         // line the same gesture protected the window or not depending on how many siblings the
@@ -174,9 +193,10 @@ impl Window {
         // left, and the usual rule would close the window taking what was being read with it.
         // Nobody asked for that: closing one console was asked for.
         self.some_closed_by_hand = true;
-        // Without rearming, the watcher is left looking at a directory that has just been deleted:
-        // it sees what it was watching disappear, declares itself blind, and from then on the
-        // window rereads every panel on every frame, for ever and with nothing saying so.
+        self.watcher.stop_before_retirement();
+        // Here its program dies and its directory disappears, through the usual `Drop`s. Its old
+        // watcher no longer contains that directory.
+        drop(leaving);
         self.rearm_the_watcher(ctx);
         self.timed_separately += its_cost + before.elapsed();
     }
@@ -229,11 +249,12 @@ impl Window {
         {
             self.bank_control(did);
         }
-        drop(leaving);
         if self.tabs[tab_index].focus == name {
             self.tabs[tab_index].focus = inherited;
         }
         self.some_closed_by_hand = true;
+        self.watcher.stop_before_retirement();
+        drop(leaving);
         self.rearm_the_watcher(ctx);
         self.timed_separately += its_cost;
         Ok(())

@@ -997,6 +997,10 @@ impl Pane {
 
 /// The root window: the tabs, and what belongs to the program and not to any layout.
 struct Window {
+    /// Who gives notice that a producer has published, over the paths of the open consoles.
+    /// Declared before `tabs` as a structural guard beside the explicit whole-window stop: pane
+    /// retirement must never be reported as lost panel tracking.
+    watcher: Watcher,
     /// The open layouts. **Never empty**: the window is always showing one.
     ///
     /// It opens with one, or with however many the measurement gate's variable says, and from then
@@ -1013,9 +1017,6 @@ struct Window {
     /// pressed arrived in the previous batch and is no longer in this one. And saving them in the
     /// window is what makes switching console with the chord held down not lose it.
     modifiers: egui::Modifiers,
-    /// Who gives notice that a producer has published. It lives with the window because its paths
-    /// are those of the consoles the window has open, and it is the window that knows who to wake.
-    watcher: Watcher,
     /// Who looks in the machine for the fonts that are needed, **when they are needed**.
     ///
     /// **One per window and not one per console**, because the faces are registered with the text
@@ -1820,31 +1821,6 @@ impl Window {
         self.tabs.push(tab);
         self.active = self.tabs.len() - 1;
         self.rearm_the_watcher(ctx);
-    }
-
-    /// Arms the watcher again over the panes of every tab that is left.
-    ///
-    /// **Afterwards every flag is raised, and what that saves is not a gap in time.** The new
-    /// watcher is built before being assigned, so the old one stays armed until the last moment and
-    /// there is no instant with nobody listening — an earlier version of this comment said there
-    /// was, and that was false. What is lost is **what the old one had in flight**: its thread may
-    /// be carrying notices received and not yet processed, and on dropping it they go with it. A
-    /// producer publishing at that moment would be left with nobody raising its flag, and its panel
-    /// would show the old thing until the next publication — which in an agent that has just
-    /// finished may never come.
-    ///
-    /// Rereading them all once is cheap and cannot lose anything. **That the flags end up raised is
-    /// tied down by a test; the order between arming and raising them is not** — provoking a
-    /// publication inside that window of microseconds cannot be done reliably from a test.
-    fn rearm_the_watcher(&mut self, ctx: &egui::Context) {
-        // The watcher is built in a scope of its own so that the borrow of the tab list ends before
-        // assigning it: the field and the list belong to the same owner.
-        let watcher = Self::watch(ctx, self.all_panes());
-
-        self.watcher = watcher;
-        for pane in self.all_panes() {
-            pane.to_reread.raise();
-        }
     }
 }
 
@@ -5884,6 +5860,49 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_control_requested_pane_close_retires_its_old_watcher_before_the_directory() {
+        let ctx = egui::Context::default();
+        let mut window = Window::with_tabs(&ctx, 1, OpeningLayout::DEFAULT, None)
+            .expect("open a production-shaped window");
+        let [leaving, staying] = dirs_of(window.active());
+        let retiring_watcher = window.watcher.blindness_witness();
+        let retirements = window.watcher.retirement_witness();
+        let retired_late = window.watcher.late_retirement_witness();
+
+        window
+            .close_a_pane_called(0, &ctx)
+            .expect("close the pane requested through control");
+
+        assert_eq!(
+            retirements.load(std::sync::atomic::Ordering::Relaxed),
+            1,
+            "the control close did not stop its old watcher before deleting the pane"
+        );
+        assert!(
+            !retired_late.load(std::sync::atomic::Ordering::Relaxed),
+            "the control close stopped its watcher only after deleting the pane"
+        );
+        let deadline = Instant::now() + Duration::from_millis(500);
+        while !retiring_watcher.load(std::sync::atomic::Ordering::Relaxed)
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            !retiring_watcher.load(std::sync::atomic::Ordering::Relaxed),
+            "the control close let its old watcher report the pane removal as lost tracking"
+        );
+        assert!(
+            !leaving.exists(),
+            "the control close left its pane directory"
+        );
+        assert!(
+            staying.exists(),
+            "the control close removed the surviving pane"
+        );
+    }
+
     /// Puts one request in the window's queue and runs the pass that answers it.
     ///
     /// **By hand and not over a socket**, because what these tests are about is what the window does
@@ -6216,6 +6235,8 @@ mod tests {
             "a refused retirement changed the panel"
         );
 
+        let retiring_watcher = window.watcher.blindness_witness();
+        let retirements = window.watcher.retirement_witness();
         let panel_control::Answer::Retired {
             closed: 2,
             preserved: 1,
@@ -6229,6 +6250,11 @@ mod tests {
         else {
             panic!("the owned session was not retired with its exact counts");
         };
+        assert_eq!(
+            retirements.load(std::sync::atomic::Ordering::Relaxed),
+            1,
+            "remote retirement replaced its watcher without retiring the old generation"
+        );
         assert!(
             window.all_panes().all(|pane| pane.name != untouched),
             "the untouched auxiliary console survived"
@@ -6301,6 +6327,16 @@ mod tests {
             window.control.retired_waiting(),
             0,
             "the next pass did not reap the one detached PTY left queued"
+        );
+        let deadline = Instant::now() + Duration::from_millis(500);
+        while !retiring_watcher.load(std::sync::atomic::Ordering::Relaxed)
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            !retiring_watcher.load(std::sync::atomic::Ordering::Relaxed),
+            "remote retirement let its old watcher report detached directory removal"
         );
         let panel_control::Answer::Refused(why) = ask_the_window(
             &mut window,
@@ -8152,10 +8188,32 @@ mod tests {
         );
 
         window.active = 1;
+        let retiring_watcher = window.watcher.blindness_witness();
+        let retirements = window.watcher.retirement_witness();
+        let retired_late = window.watcher.late_retirement_witness();
         one_frame_with(&mut window, &ctx, chord_with(egui::Key::W));
         assert!(
             !window.watcher.is_blind(),
             "closing a tab left the watcher blind: it was let go before rearming it"
+        );
+        let deadline = Instant::now() + Duration::from_millis(500);
+        while !retiring_watcher.load(std::sync::atomic::Ordering::Relaxed)
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            !retiring_watcher.load(std::sync::atomic::Ordering::Relaxed),
+            "the retiring tab's watcher reported an intentional directory removal"
+        );
+        assert_eq!(
+            retirements.load(std::sync::atomic::Ordering::Relaxed),
+            1,
+            "closing the tab did not stop its old watcher before deleting directories"
+        );
+        assert!(
+            !retired_late.load(std::sync::atomic::Ordering::Relaxed),
+            "closing the tab stopped its watcher only after deleting directories"
         );
     }
 
@@ -19094,6 +19152,9 @@ mod tests {
         let mut window = Window::with_tabs(&ctx, 1, OpeningLayout::DEFAULT, None)
             .expect("the window could not be opened");
         let [of_the_one_leaving, of_the_one_that_stays] = dirs_of(window.active());
+        let retiring_watcher = window.watcher.blindness_witness();
+        let retirements = window.watcher.retirement_witness();
+        let retired_late = window.watcher.late_retirement_witness();
 
         one_frame_in(
             &mut window,
@@ -19121,6 +19182,60 @@ mod tests {
             !window.watcher.is_blind(),
             "closing a console left the watcher blind: it saw the directory it was following \
              disappear and from then on the window re-reads every panel on every frame"
+        );
+        let deadline = Instant::now() + Duration::from_millis(500);
+        while !retiring_watcher.load(std::sync::atomic::Ordering::Relaxed)
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            !retiring_watcher.load(std::sync::atomic::Ordering::Relaxed),
+            "the watcher being replaced reported an intentional pane close as lost tracking"
+        );
+        assert_eq!(
+            retirements.load(std::sync::atomic::Ordering::Relaxed),
+            1,
+            "the old watcher was not stopped before the closing pane removed its directory"
+        );
+        assert!(
+            !retired_late.load(std::sync::atomic::Ordering::Relaxed),
+            "the old watcher was stopped only after the closing pane removed its directory"
+        );
+    }
+
+    #[test]
+    fn closing_the_window_stops_its_watcher_before_pane_directories_leave() {
+        let ctx = egui::Context::default();
+        let window = Window::with_tabs(&ctx, 1, OpeningLayout::DEFAULT, None)
+            .expect("the window could not be opened");
+        let directories: Vec<_> = window
+            .all_panes()
+            .filter_map(|pane| pane.panel.as_ref().map(|dir| dir.path().to_path_buf()))
+            .collect();
+        let retiring_watcher = window.watcher.blindness_witness();
+        let retirements = window.watcher.retirement_witness();
+
+        drop(window);
+
+        assert_eq!(
+            retirements.load(std::sync::atomic::Ordering::Relaxed),
+            1,
+            "whole-window shutdown did not stop its watcher explicitly"
+        );
+        let deadline = Instant::now() + Duration::from_millis(500);
+        while !retiring_watcher.load(std::sync::atomic::Ordering::Relaxed)
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            !retiring_watcher.load(std::sync::atomic::Ordering::Relaxed),
+            "whole-window shutdown reported its own pane removal as lost tracking"
+        );
+        assert!(
+            directories.iter().all(|dir| !dir.exists()),
+            "whole-window shutdown left a pane directory behind"
         );
     }
 

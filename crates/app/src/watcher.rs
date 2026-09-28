@@ -35,6 +35,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+#[cfg(test)]
+use std::sync::atomic::AtomicUsize;
+
 use notify::event::{AccessKind, AccessMode, ModifyKind, RenameMode};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode};
 // **The *trait* comes in unnamed**, and it is needed: `backend.watch(..)` is its, and its name clashes
@@ -94,13 +97,29 @@ struct Watched {
 
 /// The window's watcher.
 pub struct Watcher {
-    /// **It is kept for its lifetime, not for its interface**: dropping it ends its thread and nothing
-    /// more arrives. `None` means there is nothing to watch or that it could not be armed; which of the
-    /// two is told by [`Watcher::is_blind`], which is not the same.
+    /// **It is kept for its lifetime, not for its interface**: dropping it asks its thread to end.
+    /// That ending is asynchronous, so [`Self::active`] rejects anything that still arrives. `None`
+    /// means there is nothing to watch, arming failed, or this generation is being replaced; which
+    /// failures require fallback is told by [`Watcher::is_blind`].
     _backend: Option<RecommendedWatcher>,
     /// Whether the watcher has stopped being trustworthy. It shares it with its thread, because **almost
     /// all the ways of going blind happen after arming it** and only the thread sees them.
     blind: Arc<AtomicBool>,
+    /// Whether notices still belong to a live watcher generation.
+    ///
+    /// `notify` ends its backend thread asynchronously. This gate is lowered before asking it to
+    /// stop, so a queued event cannot turn an intentional pane retirement into lost tracking.
+    active: Arc<AtomicBool>,
+    /// How many times this generation changed from active to stopped before replacement or
+    /// intentional directory retirement.
+    #[cfg(test)]
+    retired: Arc<AtomicUsize>,
+    /// The watched directories and whether any was already gone when this generation stopped.
+    /// Test-only because it is an ordering oracle, not application state.
+    #[cfg(test)]
+    watched_dirs: Vec<PathBuf>,
+    #[cfg(test)]
+    retired_after_directory_loss: Arc<AtomicBool>,
 }
 
 impl Watcher {
@@ -115,6 +134,11 @@ impl Watcher {
     /// it carries on in the degraded mode that [`Watcher::is_blind`] describes.
     pub fn new(wake: impl Fn() + Send + 'static, consoles: &[(&Path, Flag)]) -> Self {
         let blind = Arc::new(AtomicBool::new(false));
+        let active = Arc::new(AtomicBool::new(true));
+        #[cfg(test)]
+        let watched_dirs = consoles.iter().map(|(dir, _)| dir.to_path_buf()).collect();
+        #[cfg(test)]
+        let retired_after_directory_loss = Arc::new(AtomicBool::new(false));
 
         // With no consoles with a directory there is nothing to track, and setting up an instance of the
         // system watcher and its thread to look at nothing would be paying for doing nothing. **And it is
@@ -123,6 +147,13 @@ impl Watcher {
             return Self {
                 _backend: None,
                 blind,
+                active,
+                #[cfg(test)]
+                retired: Arc::new(AtomicUsize::new(0)),
+                #[cfg(test)]
+                watched_dirs,
+                #[cfg(test)]
+                retired_after_directory_loss,
             };
         }
 
@@ -135,7 +166,7 @@ impl Watcher {
             })
             .collect();
 
-        let handler = handler(wake, watchlist, Arc::clone(&blind));
+        let handler = handler(wake, watchlist, Arc::clone(&blind), Arc::clone(&active));
         let mut backend = match notify::recommended_watcher(handler) {
             Ok(backend) => backend,
             Err(failure) => {
@@ -144,6 +175,13 @@ impl Watcher {
                 return Self {
                     _backend: None,
                     blind,
+                    active,
+                    #[cfg(test)]
+                    retired: Arc::new(AtomicUsize::new(0)),
+                    #[cfg(test)]
+                    watched_dirs,
+                    #[cfg(test)]
+                    retired_after_directory_loss,
                 };
             }
         };
@@ -158,6 +196,13 @@ impl Watcher {
                 return Self {
                     _backend: None,
                     blind,
+                    active,
+                    #[cfg(test)]
+                    retired: Arc::new(AtomicUsize::new(0)),
+                    #[cfg(test)]
+                    watched_dirs,
+                    #[cfg(test)]
+                    retired_after_directory_loss,
                 };
             }
         }
@@ -165,6 +210,31 @@ impl Watcher {
         Self {
             _backend: Some(backend),
             blind,
+            active,
+            #[cfg(test)]
+            retired: Arc::new(AtomicUsize::new(0)),
+            #[cfg(test)]
+            watched_dirs,
+            #[cfg(test)]
+            retired_after_directory_loss,
+        }
+    }
+
+    /// Stops this watcher before the window removes a directory intentionally.
+    ///
+    /// The handler is made inert before the backend is dropped because `notify` stops its thread
+    /// asynchronously. Rearming raises every survivor's reread flag, so a publication in the short
+    /// interval before the replacement is installed cannot leave a panel stale.
+    pub fn stop_before_retirement(&mut self) {
+        let _was_active = self.active.swap(false, Ordering::SeqCst);
+        self._backend = None;
+        #[cfg(test)]
+        if _was_active {
+            if self.watched_dirs.iter().any(|dir| !dir.exists()) {
+                self.retired_after_directory_loss
+                    .store(true, Ordering::Relaxed);
+            }
+            self.retired.fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -183,6 +253,24 @@ impl Watcher {
     pub fn is_blind(&self) -> bool {
         self.blind.load(Ordering::Relaxed)
     }
+
+    /// Keeps the retired watcher's verdict observable after the window replaces it.
+    #[cfg(test)]
+    pub(crate) fn blindness_witness(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.blind)
+    }
+
+    /// Keeps intentional shutdown observable after the window replaces this watcher.
+    #[cfg(test)]
+    pub(crate) fn retirement_witness(&self) -> Arc<AtomicUsize> {
+        Arc::clone(&self.retired)
+    }
+
+    /// Says whether this generation was stopped only after one of its directories disappeared.
+    #[cfg(test)]
+    pub(crate) fn late_retirement_witness(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.retired_after_directory_loss)
+    }
 }
 
 /// What runs on the watcher thread each time a notice arrives.
@@ -194,8 +282,12 @@ fn handler(
     wake: impl Fn() + Send + 'static,
     watchlist: Vec<Watched>,
     blind: Arc<AtomicBool>,
+    active: Arc<AtomicBool>,
 ) -> impl FnMut(notify::Result<notify::Event>) + Send + 'static {
     move |notice| {
+        if !active.load(Ordering::SeqCst) {
+            return;
+        }
         let event = match notice {
             Ok(event) => event,
             // After a failure **the watcher's state is unknown**, so it switches to the fallback instead
@@ -355,6 +447,7 @@ mod tests {
         consoles: [Console; 2],
         wakeups: Wakeups,
         blind: Arc<AtomicBool>,
+        active: Arc<AtomicBool>,
     }
 
     struct Console {
@@ -382,6 +475,7 @@ mod tests {
 
         let wakeups = Wakeups::default();
         let blind = Arc::new(AtomicBool::new(false));
+        let active = Arc::new(AtomicBool::new(true));
         let handler = handler(
             wakeups.wake_fn(),
             consoles
@@ -393,6 +487,7 @@ mod tests {
                 })
                 .collect(),
             Arc::clone(&blind),
+            Arc::clone(&active),
         );
 
         // The flags are born raised so that the first frame looks; what these tests measure is what
@@ -406,6 +501,7 @@ mod tests {
             consoles,
             wakeups,
             blind,
+            active,
         }
     }
 
@@ -619,6 +715,28 @@ mod tests {
         );
     }
 
+    /// `notify` may deliver an event after its backend has been dropped because backend shutdown is
+    /// asynchronous. Once this watcher generation is retired, that queued event belongs to nobody
+    /// and must not turn an intentional close into lost tracking.
+    #[test]
+    fn a_directory_loss_queued_after_retirement_is_ignored() {
+        let mut harness = two_consoles();
+        harness.active.store(false, Ordering::SeqCst);
+
+        (harness.handler)(Ok(Event::new(EventKind::Remove(RemoveKind::Folder))
+            .add_path(harness.consoles[0].dir.clone())));
+
+        assert!(
+            !harness.blind.load(Ordering::Relaxed),
+            "a queued notice from a retired watcher declared lost tracking"
+        );
+        assert_eq!(
+            harness.wakeups.count(),
+            0,
+            "a queued notice from a retired watcher woke the window"
+        );
+    }
+
     /// Deleting the `panel.json` leaves no one blind: the directory is still watched and the producer
     /// can publish again. It is the half that distinguishes the finding above from throwing in the
     /// towel.
@@ -683,6 +801,34 @@ mod tests {
         assert!(
             !watcher.is_blind(),
             "the watcher armed over a directory that exists and declares itself blind"
+        );
+    }
+
+    /// A pane close removes its directory on purpose. Stopping that watcher generation must make
+    /// even an event already queued on its backend inert.
+    #[test]
+    fn retiring_a_directory_before_removing_it_does_not_report_lost_tracking() {
+        let dir = panel_contract::PanelDir::create().expect("create the directory");
+        let path = dir.path().to_path_buf();
+        let mut watcher = Watcher::new(|| {}, &[(path.as_path(), Flag::raised())]);
+        let active = Arc::clone(&watcher.active);
+
+        watcher.stop_before_retirement();
+        assert!(
+            !active.load(Ordering::SeqCst),
+            "the retiring watcher still admits queued notices"
+        );
+        drop(dir);
+
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert!(
+            !watcher.is_blind(),
+            "an intentionally retired directory was reported as lost tracking"
+        );
+        assert_eq!(
+            watcher.retired.load(Ordering::Relaxed),
+            1,
+            "the watcher did not record the retirement"
         );
     }
 
