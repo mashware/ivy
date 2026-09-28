@@ -2694,6 +2694,7 @@ impl Keymap {
 #[cfg(test)]
 mod keymap_tests {
     use super::*;
+    use crate::tests::markdown;
     use eframe::egui::Key;
 
     #[test]
@@ -3134,18 +3135,7 @@ mod keymap_tests {
         // fun: their fences are three backticks, so splitting over the whole document
         // returns the block's body as if it were a token. The examples already have their own guard,
         // that passes them through the file's parser.
-        let mut inside = false;
-        let prose: String = DOCUMENT
-            .lines()
-            .filter(|line| {
-                if line.starts_with("```") {
-                    inside = !inside;
-                    return false;
-                }
-                !inside
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+        let prose: String = markdown::fenced(DOCUMENT).prose.join("\n");
         let published: Vec<&str> = prose
             .split('`')
             .skip(1)
@@ -3226,20 +3216,18 @@ mod keymap_tests {
         }
 
         let mut published: Vec<(&str, &str)> = Vec::new();
-        let rows = DOCUMENT
-            .lines()
-            .skip_while(|line| !line.starts_with("| Name | What it does | Out of the box |"))
-            .skip(2)
-            .take_while(|line| line.starts_with('|'));
-        for row in rows {
-            let cells: Vec<&str> = row.split('|').collect();
-            let names = backticked(cells.get(1).unwrap_or(&""));
-            let chords = backticked(cells.get(3).unwrap_or(&""));
+        let table = markdown::table(DOCUMENT, &["Name", "What it does", "Out of the box"]);
+        for (names, chords) in table
+            .column("Name")
+            .into_iter()
+            .zip(table.column("Out of the box"))
+        {
+            let (names, chords) = (backticked(names), backticked(chords));
             assert_eq!(
                 names.len(),
                 chords.len(),
-                "the row «{row}» publishes {} names and {} chords: whoever reads it cannot tell which \
-                 chord is which shortcut's",
+                "the row of {names:?} publishes {} names and {} chords: whoever reads it cannot tell \
+                 which chord is which shortcut's",
                 names.len(),
                 chords.len()
             );

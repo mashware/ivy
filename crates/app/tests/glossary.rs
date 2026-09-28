@@ -26,6 +26,9 @@
 //!   inside a test module is checked, locals included.
 //! - **Comments, rustdoc and string literals**, for the same reason: prose has its own delivery.
 
+mod common;
+
+use common::fold;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -101,6 +104,8 @@ const GLOSSARY_CLEAN_FILES: &[&str] = &[
     "app/examples/screen_demo.rs",
     "app/tests/waits.rs",
     "app/tests/decisions.rs",
+    "app/tests/common/mod.rs",
+    "app/src/tests/markdown.rs",
 ];
 
 /// Files covered by the complete citations manifest but not yet declared glossary-clean.
@@ -211,6 +216,8 @@ const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/tests/vendor_patch.rs", "app"),
     ("app/tests/waits.rs", "app"),
     ("app/tests/decisions.rs", "app"),
+    ("app/tests/common/mod.rs", "app"),
+    ("app/src/tests/markdown.rs", "app"),
 ];
 
 /// How much each shape of the annex has to yield for this test to mean anything.
@@ -267,37 +274,11 @@ struct Glossary {
     from_tables: usize,
 }
 
-/// Lowercase, and Spanish accents folded onto ASCII.
-///
-/// **Both sides get folded, and that is what closes a whole family of leftovers.** The glossary
-/// writes `Pestaña` and `TamañoPedido`; the code writes `pestanas` and `tamano_pedido`, because
-/// identifiers in this repository avoid the tilde on purpose. Without folding, the two never meet.
-///
-/// **The example this sentence used to carry was the measurement script's `TAMANO`, and the delivery
-/// that translated the script renamed it away.** A name with no tilde and no case mismatch cannot
-/// demonstrate folding, so it is replaced rather than kept: `tamano_pedido` — the test name two of
-/// the finished crates still carry — folds onto the glossary's `TamañoPedido`, which is what the rule
-/// is for. A live example, not a retired one.
-///
-/// **It lowercases first, so only the lowercase accents need an arm.** The two halves used to be two
-/// functions, and the split had one reason: the exemption list was matched **with the case kept**, so
-/// that an entry for somebody else's `Gesto` could not also exempt a file's own `gesto`. That list is
-/// gone — it had nothing left to exempt — and with it the only caller that ever wanted the case. Six
-/// uppercase arms with no caller are six arms no test can reach.
-fn fold(text: &str) -> String {
-    text.to_lowercase()
-        .chars()
-        .map(|c| match c {
-            'á' => 'a',
-            'é' => 'e',
-            'í' => 'i',
-            'ó' => 'o',
-            'ú' | 'ü' => 'u',
-            'ñ' => 'n',
-            other => other,
-        })
-        .collect()
-}
+// **Folding is what closes a whole family of leftovers here**: the glossary writes `Pestaña` and
+// `TamañoPedido`, and a Spanish identifier left in the code would be written `pestanas` or
+// `tamano_pedido`, because identifiers in this repository avoid the tilde on purpose. Without
+// `fold` the two never meet. It lives in `common` because `prose` needs the same one, and two copies
+// are two chances to disagree.
 
 fn glossary() -> Glossary {
     let annex = DECISIONS

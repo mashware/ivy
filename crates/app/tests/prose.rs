@@ -51,6 +51,9 @@
 //! **What a green here means, exactly**: no comment line in the declared source and example files carries three
 //! different common Spanish words. It does **not** mean every comment is good English.
 
+mod common;
+
+use common::{fold, list_against_disk, rust_sources};
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -169,6 +172,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
     ),
     ("src/report.rs", include_str!("../src/report.rs"), 238),
     ("src/tab_bar.rs", include_str!("../src/tab_bar.rs"), 171),
+    (
+        "src/tests/markdown.rs",
+        include_str!("../src/tests/markdown.rs"),
+        26,
+    ),
     ("src/tiling.rs", include_str!("../src/tiling.rs"), 276),
     ("src/tree.rs", include_str!("../src/tree.rs"), 512),
     ("src/main.rs", include_str!("../src/main.rs"), 1),
@@ -545,27 +553,6 @@ const SPANISH_WORDS: &[&str] = &[
     "noticias",
 ];
 
-/// Lowercase, and Spanish accents folded onto ASCII.
-///
-/// Both sides get folded — the line and the island — so a citation written «terminó» is found by an
-/// entry written the same way and by one written without the accent. The word list is ASCII on
-/// purpose for the same reason: real Spanish carries accents and the folding is what makes a single
-/// entry cover both spellings.
-fn fold(text: &str) -> String {
-    text.to_lowercase()
-        .chars()
-        .map(|c| match c {
-            'á' => 'a',
-            'é' => 'e',
-            'í' => 'i',
-            'ó' => 'o',
-            'ú' | 'ü' => 'u',
-            'ñ' => 'n',
-            other => other,
-        })
-        .collect()
-}
-
 /// The comment lines of a file, plus the block-comment depth left over at the end.
 ///
 /// Three shapes: a `//` comment — `///` and `//!` included, they are the same two slashes — the
@@ -605,46 +592,6 @@ fn comment_lines(src: &str) -> (Vec<(usize, String)>, usize) {
     (found, depth)
 }
 
-/// The Rust files whose prose this guard has to declare.
-///
-/// This walk discovers names only. The text still comes from [`SOURCES`] through `include_str!`, so
-/// removing or renaming a declared file is a compile error; the walk closes the opposite hole, a
-/// new file that exists on disk but has no row and therefore no floor.
-fn rust_sources() -> BTreeSet<String> {
-    fn walk(dir: &Path, root: &Path, found: &mut BTreeSet<String>) {
-        let entries = std::fs::read_dir(dir)
-            .unwrap_or_else(|failure| panic!("cannot read {}: {failure}", dir.display()));
-        for entry in entries {
-            let entry = entry.unwrap_or_else(|failure| {
-                panic!("cannot read an entry in {}: {failure}", dir.display())
-            });
-            let path = entry.path();
-            let file_type = entry.file_type().unwrap_or_else(|failure| {
-                panic!("cannot read the file type of {}: {failure}", path.display())
-            });
-            if file_type.is_dir() {
-                walk(&path, root, found);
-            } else if path.extension().is_some_and(|extension| extension == "rs") {
-                let relative = path
-                    .strip_prefix(root)
-                    .expect("a file found below the app crate has that crate as its prefix")
-                    .to_string_lossy()
-                    .replace('\\', "/");
-                assert!(
-                    found.insert(relative.clone()),
-                    "the source walk found {relative} twice"
-                );
-            }
-        }
-    }
-
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let mut found = BTreeSet::new();
-    walk(&root.join("src"), root, &mut found);
-    walk(&root.join("examples"), root, &mut found);
-    found
-}
-
 /// The different listed words a line carries, with the declared Spanish removed first.
 fn spanish_markers(line: &str) -> BTreeSet<String> {
     let mut text = fold(line);
@@ -672,6 +619,15 @@ const A_FILE_WITH_A_BLOCK_COMMENT: &str = "fn one() {}\n\
                                            \x20*/\n\
                                            fn two() {}\n";
 
+/// A file whose Spanish sits **after code on the same line**, the shape `src/theme.rs` writes
+/// sixteen of.
+///
+/// [`REAL_SPANISH`] carries the same shape but hands it straight to the oracle, so the walk never
+/// sees it: narrowing the `//` arm to full-line comments would drop every one of these from the
+/// corpus, and only the per-file floors of the files that happen to carry them would notice.
+const A_FILE_WITH_A_TRAILING_COMMENT: &str =
+    "let width = 8; // aqui se decide el ancho de cada celda\nfn two() {}\n";
+
 /// A file where a string literal holds an opening `/*` that nothing closes.
 ///
 /// This is the failure the depth check exists for: from that line on, a walk with a flag hands the
@@ -698,6 +654,19 @@ fn the_walk_finds_a_block_comment_and_notices_one_that_never_closes() {
         lines[1].1.trim()
     );
 
+    let (lines, _) = comment_lines(A_FILE_WITH_A_TRAILING_COMMENT);
+    assert_eq!(
+        lines,
+        vec![(1, "// aqui se decide el ancho de cada celda".to_owned())],
+        "the walk has to take the comment after the code, from its `//` on, and not the code"
+    );
+    let markers = spanish_markers(&lines[0].1);
+    assert!(
+        markers.len() >= MARKERS_TO_CALL_IT_SPANISH,
+        "the trailing comment «{}» is Spanish and scored {markers:?}",
+        lines[0].1
+    );
+
     let (_, depth) = comment_lines(A_FILE_WITH_AN_UNCLOSED_BLOCK);
     assert_eq!(
         depth, 1,
@@ -706,29 +675,90 @@ fn the_walk_finds_a_block_comment_and_notices_one_that_never_closes() {
     );
 }
 
+/// The check every file list of this suite leans on, over lists whose answer is known.
+///
+/// **It needs its own subject because the tree cannot give it one**: every list matches the tree
+/// on a green day, so a check that answered «they match» whatever it was handed left the three
+/// lists that use it green — measured. It lives here and not in `common` because a test there would run once
+/// per binary that includes it.
+#[test]
+fn a_list_is_told_apart_from_the_disk_in_both_directions() {
+    let on_disk: BTreeSet<String> = ["src/a.rs", "src/b.rs"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(
+        list_against_disk("L", &["src/a.rs", "src/b.rs"], &on_disk),
+        Ok(())
+    );
+    for (declared, says) in [
+        (&["src/a.rs"][..], "src/b.rs"),
+        (&["src/a.rs", "src/b.rs", "src/c.rs"][..], "src/c.rs"),
+        (&["src/a.rs", "src/a.rs"][..], "duplicate"),
+    ] {
+        let failure = list_against_disk("L", declared, &on_disk)
+            .expect_err("a list that is not the disk was taken for it");
+        assert!(failure.contains(says), "{declared:?}: {failure}");
+    }
+}
+
+/// The words [`SPANISH_WORDS`] takes from the sibling list are still the sibling list.
+///
+/// They were copied by hand and nothing tied the copy to its source, so a word the sibling gained
+/// was a word this guard would never know about. The sibling's list is private to its test module,
+/// so it is read out of the text this file already includes rather than made visible for a test.
+#[test]
+fn the_sibling_function_words_are_all_here_except_the_two_english_nouns() {
+    const LEFT_OUT: &[&str] = &["hay", "son"];
+    let settings = SOURCES
+        .iter()
+        .find(|(name, _, _)| *name == "src/settings.rs")
+        .expect("src/settings.rs is one of the declared sources")
+        .1;
+    let list = settings
+        .split_once("const SPANISH_FUNCTION_WORDS: &[&str] = &[")
+        .expect(
+            "src/settings.rs no longer declares SPANISH_FUNCTION_WORDS where this test reads it",
+        )
+        .1
+        .split_once("];")
+        .expect("the sibling list never closes")
+        .0;
+    let sibling: BTreeSet<&str> = list.split('"').skip(1).step_by(2).collect();
+    assert!(
+        sibling.len() >= 41,
+        "the sibling list yielded {} words and it carries forty-one: this read stopped matching",
+        sibling.len()
+    );
+    for word in LEFT_OUT {
+        assert!(
+            sibling.contains(word),
+            "«{word}» is left out as a sibling word that is also English, and the sibling no longer \
+             has it: the exemption is stale"
+        );
+        assert!(
+            !SPANISH_WORDS.contains(word),
+            "«{word}» is an English noun too, and this guard judges English prose"
+        );
+    }
+    let missing: Vec<_> = sibling
+        .iter()
+        .filter(|word| !LEFT_OUT.contains(word) && !SPANISH_WORDS.contains(word))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "the sibling list in src/settings.rs has words SPANISH_WORDS does not: {missing:?}"
+    );
+}
+
 /// The walk is still finding the prose — **per file and in total**.
 #[test]
 fn the_walk_still_reads_the_comments_of_every_file() {
-    let declared: BTreeSet<String> = SOURCES
-        .iter()
-        .map(|(name, _, _)| (*name).to_owned())
-        .collect();
-    assert_eq!(
-        declared.len(),
-        SOURCES.len(),
-        "SOURCES has {} rows but only {} different paths: a duplicate gives one file two floors \
-         while another file can be absent",
-        SOURCES.len(),
-        declared.len()
-    );
-    let discovered = rust_sources();
-    let undeclared: Vec<_> = discovered.difference(&declared).collect();
-    let absent: Vec<_> = declared.difference(&discovered).collect();
-    assert!(
-        undeclared.is_empty() && absent.is_empty(),
-        "SOURCES is not the app crate's Rust source set; without a row a file has no prose floor. \
-         Undeclared files: {undeclared:?}; declared paths absent from disk: {absent:?}"
-    );
+    let declared: Vec<&str> = SOURCES.iter().map(|(name, _, _)| *name).collect();
+    let on_disk = rust_sources(Path::new(env!("CARGO_MANIFEST_DIR")), &["src", "examples"]);
+    if let Err(failure) = list_against_disk("SOURCES", &declared, &on_disk) {
+        panic!("{failure}. Without a row a file has no prose floor");
+    }
 
     let mut total = 0usize;
     for (name, src, floor) in SOURCES {

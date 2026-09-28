@@ -718,6 +718,7 @@ fn classify(line: &str) -> ConfigLine<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tests::markdown;
 
     /// What parsing a text that is understood in full returns.
     fn parsed(text: &str) -> (Settings, Warnings) {
@@ -1646,12 +1647,11 @@ mod tests {
     fn the_document_publishes_keys_the_application_accepts() {
         const DOCUMENT: &str = include_str!("../../../docs/08-configuracion.md");
 
-        let published: Vec<&str> = DOCUMENT
-            .lines()
-            .skip_while(|line| !line.starts_with("| Key |"))
-            .skip(2)
-            .take_while(|line| line.starts_with('|'))
-            .filter_map(|line| line.split('`').nth(1))
+        let table = markdown::table(DOCUMENT, &["Key", "What it is"]);
+        let published: Vec<&str> = table
+            .column("Key")
+            .into_iter()
+            .filter_map(|cell| cell.split('`').nth(1))
             .collect();
         // **Without a floor this test passes by being empty**, which is how a guard that reads another
         // file dies: someone changes the table's header, the walk does not hook, and nothing is
@@ -1694,18 +1694,12 @@ mod tests {
     fn the_document_examples_are_interpreted_without_a_single_warning() {
         const DOCUMENT: &str = include_str!("../../../docs/08-configuracion.md");
 
-        let mut inside = false;
-        let examples: Vec<&str> = DOCUMENT
-            .lines()
-            .filter(|line| {
-                if line.starts_with("```") {
-                    inside = !inside;
-                    return false;
-                }
-                // The lines of the blocks that are not `key = value` —the on-screen messages— are not
-                // configuration examples and are not passed to the parser.
-                inside && line.contains(" = ") && !line.starts_with("agent-terminal:")
-            })
+        let examples: Vec<&str> = markdown::fenced(DOCUMENT)
+            .code
+            .into_iter()
+            // The lines of the blocks that are not `key = value` —the on-screen messages— are not
+            // configuration examples and are not passed to the parser.
+            .filter(|line| line.contains(" = ") && !line.starts_with("agent-terminal:"))
             .collect();
         // Same floor and for the same reason as its sibling guard: if the walk stops hooking the
         // blocks, this test passes by being empty.
@@ -1818,16 +1812,10 @@ mod tests {
         const DOCUMENT: &str = include_str!("../../../docs/08-configuracion.md");
         const WINDOW: &str = include_str!("settings.rs");
 
-        let mut inside = false;
-        let published: Vec<&str> = DOCUMENT
-            .lines()
-            .filter(|line| {
-                if line.starts_with("```") {
-                    inside = !inside;
-                    return false;
-                }
-                inside && line.starts_with("agent-terminal: ")
-            })
+        let published: Vec<&str> = markdown::fenced(DOCUMENT)
+            .code
+            .into_iter()
+            .filter(|line| line.starts_with("agent-terminal: "))
             .collect();
         // Same floor and for the same reason as the two sibling guards above: without it, a document
         // that stopped publishing messages leaves this test passing by looking at nothing.

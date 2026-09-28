@@ -167,11 +167,11 @@ pub struct AttentionState {
     pub backed: bool,
 }
 
-/// Which of two claims wins when **only one** has to be shown — a tab's chip has one symbol and its
+/// Which of two claims wins when **only one** has to be shown — a tab's card has one symbol and its
 /// panes can claim different things.
 ///
 /// **The class rules, and at equal class the one someone holds wins.** With two panes waiting for you
-/// and one of them alive, the chip has to say there is someone really waiting: painting the dimmed one
+/// and one of them alive, the card has to say there is someone really waiting: painting the dimmed one
 /// would send you to the one that is dead.
 ///
 /// **By hand and not derived**, for the same reason as the ordering of [`Attention`]: a derived `Ord`
@@ -1267,6 +1267,7 @@ fn clip(rows: &[Row], fit: usize) -> (&[Row], usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tests::markdown;
     use panel_contract::{PANEL_FILE, PanelDir};
 
     #[test]
@@ -3624,6 +3625,15 @@ mod tests {
         }
     }
 
+    /// The claim's row as the panel paints it, symbol and phrase.
+    ///
+    /// **Built from the two functions that paint it and never typed out**: the tests that use it are
+    /// about where the claim goes and what colour it takes, not about its wording, and a translated
+    /// phrase used to break all four of them. The wording has its own guard against the contract.
+    fn claim_row(class: Attention) -> String {
+        format!("{} {}", attention_symbol(class), attention_text(class))
+    }
+
     /// **The producer's flag does not hide the claim.** `header: false` removes the identity line —the one
     /// that is its own— and the claim carries on, because the answer to «do I have to go there?» is the
     /// application's. Painting it in the identity line, a producer would turn it off and the pane would
@@ -3638,7 +3648,7 @@ mod tests {
             rows,
             vec![
                 (
-                    "? it is waiting for you".to_owned(),
+                    claim_row(Attention::Wait),
                     theme.attention_color(Attention::Wait, true)
                 ),
                 ("  whatever".to_owned(), theme.panel_color(None, None)),
@@ -3656,11 +3666,7 @@ mod tests {
         let texts: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
         assert_eq!(
             texts,
-            [
-                "a1b2 · build",
-                "∎ it finished and nobody looked",
-                "  the body"
-            ]
+            ["a1b2 · build", &claim_row(Attention::Done), "  the body"]
         );
     }
 
@@ -3701,7 +3707,7 @@ mod tests {
         assert_eq!(
             rows[0],
             (
-                "⊘ stuck on something else, not you".to_owned(),
+                claim_row(Attention::Block),
                 theme.attention_color(Attention::Block, false)
             )
         );
@@ -3887,7 +3893,7 @@ mod tests {
         let texts: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
         assert_eq!(
             texts,
-            ["? it is waiting for you", "… 3 more"],
+            [claim_row(Attention::Wait).as_str(), "… 3 more"],
             "the claim has to be the first thing painted, and what is missing has to be said"
         );
     }
@@ -3961,7 +3967,11 @@ mod tests {
     fn the_exception_for_the_finished_does_not_reach_the_other_two_classes() {
         let theme = Theme::default();
 
-        for (class, value) in [(Attention::Wait, "wait"), (Attention::Block, "block")] {
+        for class in Attention::ALL
+            .into_iter()
+            .filter(|class| *class != Attention::Done)
+        {
+            let value = class.name();
             let dir = PanelDir::create().expect("create the directory");
             publish(
                 &dir,
@@ -4052,57 +4062,101 @@ mod tests {
         }
     }
 
-    /// **The three phrases live twice**: in the code that paints them and in the contract document, word
-    /// for word in both places. Its own comment says they are «the contract's, word for word» — and
-    /// nothing checked it.
+    /// **The three phrases live four times**: in the code that paints them, and in three places of the
+    /// documents — the contract's `attention` table, the contract's «How it looks» bullet, and D18's
+    /// own table in the decisions record — word for word in all of them. The guard used to read the
+    /// contract's table only, so of the four places a phrase is written, only one was checked.
     ///
-    /// It is the same kind of coupling as that of the measurement script with the report: two files that
+    /// It is the same kind of coupling as that of the measurement script with the report: files that
     /// have to say the same thing and no place where that is asserted.
     #[test]
     fn the_three_claim_phrases_are_the_ones_the_contract_publishes() {
         const CONTRACT: &str = include_str!("../../../docs/04-contrato-panel.md");
+        const DECISIONS: &str = include_str!("../../../docs/02-decisiones.md");
+        const HEADER: &[&str] = &["Value", "What it says", "Example"];
+
+        // D18's table has the contract's header too, so it is read from D18's heading to the next
+        // decision's: anchoring on the header alone would read whichever of the record's tables came
+        // first, and reading to the end would find a later decision's table if D18 lost its own.
+        let d18 = DECISIONS
+            .split_once("## D18 —")
+            .expect("the decisions record no longer carries D18")
+            .1;
+        let d18 = d18.split_once("\n## ").map_or(d18, |(it, _)| it);
+        let tables = [
+            ("the contract", markdown::table(CONTRACT, HEADER)),
+            ("D18", markdown::table(d18, HEADER)),
+        ];
+        // The bullet ends at the next bullet or at a blank line, whichever comes first, so that being
+        // the last of its list cannot hand it the sections below. Its lines are trimmed before they
+        // are joined, so a phrase the text wraps still reads whole.
+        let mut lines = CONTRACT
+            .lines()
+            .skip_while(|line| !line.starts_with("- **How it looks**"));
+        let bullet = lines
+            .next()
+            .into_iter()
+            .chain(lines.take_while(|line| !line.trim().is_empty() && !line.starts_with("- ")))
+            .map(str::trim)
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            !bullet.is_empty(),
+            "the contract no longer carries its «How it looks» bullet"
+        );
+        // Both directions of the vocabulary: every class the parser knows has a row, below, and no
+        // row names a value the parser does not know, here.
+        let names: Vec<String> = Attention::ALL
+            .into_iter()
+            .map(|class| format!("`{}`", class.name()))
+            .collect();
+        for (place, table) in &tables {
+            assert_eq!(
+                table.column("Value"),
+                names,
+                "{place} does not publish the values the parser reads, in the parser's order"
+            );
+        }
 
         // **It is searched in the row of ITS key, not in the file.** A `contains` over the whole document
         // passes with the three phrases **rotated among classes** —checked by measuring it— and with any
-        // loose fragment: «for you» is inside «it is waiting for you». That is exactly what the message
-        // below says it prevents, so the loose `contains` did not cover its own promise. The row is
-        // identified by the contract's key, which goes in the first column.
-        for (class, key) in [
-            (Attention::Wait, "wait"),
-            (Attention::Block, "block"),
-            (Attention::Done, "done"),
-        ] {
-            let phrase = attention_text(class);
-            let row = CONTRACT
-                .lines()
-                .find(|line| line.starts_with(&format!("| `{key}`")))
-                .unwrap_or_else(|| {
-                    panic!(
-                        "the contract document has no row for «{key}»: either it changed shape, \
-                         or it stopped publishing a value the application does paint"
-                    )
-                });
-            // **And the WHOLE phrase is compared, not whether it is inside.** A `contains` over the row
-            // passes with the phrase truncated —«it is waiting» is inside «it is waiting for you»—, and
-            // the long phrase is exactly what its comment defends: the «for you» is what separates it from
-            // the second. So what the row publishes as a phrase is taken out and they are compared by equality.
-            //
-            // **What the colon cuts off is the gloss, and that is the row's shape rather than a shortcut.**
-            // The `wait` row reads «**it is waiting for you**: a question, a permission, a decision»: the
-            // phrase is what the panel paints and the rest explains it to whoever writes the file. So a row
-            // growing a gloss is accepted on purpose; a row changing the words before the colon is not.
-            // Whole means whole up to that separator, which is the honest way to say it.
-            let published = row
-                .split('|')
-                .nth(2)
-                .expect("the contract row has three columns")
-                .trim()
-                .replace("**", "");
-            let published = published.split(':').next().unwrap_or(&published).trim();
-            assert_eq!(
-                published, phrase,
-                "the panel paints «{phrase}» for {class:?} and the «{key}» row of the contract publishes \
-                 «{published}»: the producer that reads the contract expects one text and sees another"
+        // loose fragment: «for you» is inside «it is waiting for you». The row is identified by the
+        // contract's key, which is the value the parser reads.
+        for class in Attention::ALL {
+            let (key, phrase) = (class.name(), attention_text(class));
+            for (place, table) in &tables {
+                let cell = table
+                    .cell("Value", &format!("`{key}`"), "What it says")
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "{place} has no row for «{key}»: either it changed shape, or it stopped \
+                             publishing a value the application does paint"
+                        )
+                    });
+                // **And the WHOLE phrase is compared, not whether it is inside.** A `contains` over the
+                // row passes with the phrase truncated —«it is waiting» is inside «it is waiting for
+                // you»—, and the «for you» is what separates it from the second.
+                //
+                // **What the colon cuts off is the gloss, and that is the row's shape rather than a
+                // shortcut.** The `wait` row reads «**it is waiting for you**: a question, a
+                // permission, a decision»: the phrase is what the panel paints and the rest explains it
+                // to whoever writes the file. So a row growing a gloss is accepted on purpose; a row
+                // changing the words before the colon is not.
+                let published = cell.replace("**", "");
+                let published = published.split(':').next().unwrap_or(&published).trim();
+                assert_eq!(
+                    published, phrase,
+                    "the panel paints «{phrase}» for {class:?} and the «{key}» row of {place} publishes \
+                     «{published}»: the producer that reads it expects one text and sees another"
+                );
+            }
+            // The bullet writes what the row of the application paints, symbol and phrase, each in
+            // backticks: the backticks are what make it whole rather than a fragment.
+            let painted = format!("`{} {phrase}`", attention_symbol(class));
+            assert!(
+                bullet.contains(&painted),
+                "the panel paints {painted} for {class:?} and the contract's «How it looks» bullet does \
+                 not show it: «{bullet}»"
             );
         }
     }

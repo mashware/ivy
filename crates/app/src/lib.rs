@@ -2419,6 +2419,8 @@ impl Window {
 
 #[cfg(test)]
 mod tests {
+    pub(crate) mod markdown;
+
     // **The tests reach further into the two modules than the code above does**, and this is
     // where that is said. They build tilings and weights directly to assert the arithmetic;
     // the window itself only ever asks for the result.
@@ -9360,7 +9362,7 @@ mod tests {
     }
 
     #[test]
-    fn the_chips_share_out_the_bar_without_overlapping_or_leaving_a_gap() {
+    fn the_cards_share_out_the_bar_without_overlapping_or_leaving_a_gap() {
         let tab_bar = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(900.0, 20.0));
 
         let first_tab = tab_rect(tab_bar, 0, 3);
@@ -11197,7 +11199,7 @@ mod tests {
     }
 
     #[test]
-    fn a_click_on_a_chip_switches_tab() {
+    fn a_click_on_a_card_switches_tab() {
         // AC8 through the other door. It is tested with a real `Ui` for the same reason as the
         // click on a console: what has to be checked is the translation of a desktop click, and
         // only egui knows that.
@@ -11349,7 +11351,7 @@ mod tests {
     }
 
     #[test]
-    fn a_click_goes_to_the_chip_that_was_pressed_and_not_the_one_beside_it() {
+    fn a_click_goes_to_the_card_that_was_pressed_and_not_the_one_beside_it() {
         // **The click goes to the card that is pressed, and that is not the same as «it switches
         // tab».** With two tabs both sentences hold at once, and that is why replacing the computed
         // offset with a fixed `Go(1)` left the suite green. With three they come apart: jumping to
@@ -24854,7 +24856,7 @@ mod tests {
     /// **With two frames this test passes with the defect in**, which is exactly what makes it
     /// necessary: the second paints what the first read.
     #[test]
-    fn a_background_tabs_chip_claims_in_the_same_frame_its_producer_publishes() {
+    fn a_background_tabs_card_claims_in_the_same_frame_its_producer_publishes() {
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
         let area = area_of(800.0);
@@ -24887,7 +24889,7 @@ mod tests {
     /// the painting and not through the helper that compares: what is seen is what has to be tied
     /// down.
     #[test]
-    fn the_chip_shows_the_loudest_claim_of_its_consoles() {
+    fn the_card_shows_the_loudest_claim_of_its_consoles() {
         let area = area_of(800.0);
         let tab_bar = tab_bar_of(2, area);
 
@@ -24926,7 +24928,7 @@ mod tests {
     /// dimmed one would send you to the one that no longer answers, which is the worst place a bar
     /// can send you.
     #[test]
-    fn between_two_equal_claims_the_chip_shows_the_one_someone_holds() {
+    fn between_two_equal_claims_the_card_shows_the_one_someone_holds() {
         // **Both orders, and that is the half that was missing.** Looking for the maximum of a list
         // returns the **last** of the tied ones, so with the live one always in the second pane the
         // test passed **by position** and not by the rule: removing the tie-break from the type's
@@ -24971,7 +24973,7 @@ mod tests {
     /// the pane next door, and not marking it would be one more conditional rule — with its test
     /// and its own way of coming out lame.
     #[test]
-    fn the_active_tabs_chip_is_marked_like_all_the_others() {
+    fn the_active_tabs_card_is_marked_like_all_the_others() {
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
         let area = area_of(800.0);
@@ -25001,7 +25003,7 @@ mod tests {
     /// when they all keep quiet, and whoever read it asking whether there is anything would mark
     /// **every** tab of a window at rest.
     #[test]
-    fn with_no_claims_no_chip_is_marked() {
+    fn with_no_claims_no_card_is_marked() {
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
         let area = area_of(800.0);
@@ -25027,7 +25029,7 @@ mod tests {
     /// and there is nobody behind it. Switching it off altogether would hide the tab, and this
     /// panel confesses instead of hiding.
     #[test]
-    fn a_claim_nobody_holds_reaches_the_chip_dimmed() {
+    fn a_claim_nobody_holds_reaches_the_card_dimmed() {
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
         let area = area_of(800.0);
@@ -25286,7 +25288,7 @@ mod tests {
     /// is read against on every other card. Asserting only the text's color —as the test next door
     /// does— passes with the defect in.
     #[test]
-    fn the_active_chips_symbol_is_painted_over_the_background_and_not_over_the_highlight() {
+    fn the_active_cards_symbol_is_painted_over_the_background_and_not_over_the_highlight() {
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
         let area = area_of(800.0);
@@ -25309,26 +25311,26 @@ mod tests {
             })
             .collect();
 
-        let [chip] = backgrounds.as_slice() else {
+        let [backing] = backgrounds.as_slice() else {
             panic!(
                 "behind the active card's symbol the background was not painted: {backgrounds:?}"
             );
         };
         assert_eq!(
-            chip.left(),
+            backing.left(),
             its_area.left(),
-            "the chip does not start at its own card"
+            "the backing does not start at its own card"
         );
         assert!(
-            chip.contains(egui::pos2(
+            backing.contains(egui::pos2(
                 its_area.left() + TAB_BAR_MARGIN + 1.0,
                 its_area.center().y
             )),
-            "the chip does not cover where the symbol falls: {chip:?}"
+            "the backing does not cover where the symbol falls: {backing:?}"
         );
         assert!(
-            chip.width() < its_area.width() / 2.0,
-            "the chip ate the whole card and covered the active one's highlight: {chip:?}"
+            backing.width() < its_area.width() / 2.0,
+            "the backing ate the whole card and covered the active one's highlight: {backing:?}"
         );
     }
 
@@ -25341,7 +25343,7 @@ mod tests {
     /// That is why **all six orderings and not one**: what is tied down is the rule, not the
     /// position — the same disguise that already slipped once into the tie-break test next door.
     #[test]
-    fn with_three_consoles_the_chip_shows_the_claim_that_rules() {
+    fn with_three_consoles_the_card_shows_the_claim_that_rules() {
         for request in [
             ["done", "block", "wait"],
             ["done", "wait", "block"],
@@ -25398,7 +25400,7 @@ mod tests {
     /// **The control goes inside**: a window at rest walks the bar just the same and marks nothing,
     /// so a counter that counted cards instead of claims also falls here.
     #[test]
-    fn the_tab_bar_counts_the_chips_it_actually_marked() {
+    fn the_tab_bar_counts_the_cards_it_actually_marked() {
         let area = area_of(800.0);
 
         let mut quiet = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);

@@ -94,7 +94,7 @@ pub(crate) fn set_the_tab_bar_aside(
 /// reading looked right. What refutes it is where the callers are: **eight of them, across three
 /// different subjects**, and none of them is about this strip.
 ///
-/// - Five are the tab card's **claim rollup** (`a_background_tabs_chip_claims_…` and its four
+/// - Five are the tab card's **claim rollup** (`a_background_tabs_card_claims_…` and its four
 ///   siblings): a different milestone, which uses this only to find the card it is asserting about.
 /// - One is the **pane floor** (`with_the_tab_bar_in_place_a_pane_stops_fitting_below`), which is
 ///   about splitting, not about the bar.

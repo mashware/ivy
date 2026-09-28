@@ -49,15 +49,19 @@
 //! `stty` replaced by `true` is the case `&&` cannot see. This guard holds the half that lives in
 //! the text.
 
+mod common;
+
+use common::{list_against_disk, rust_sources};
 use std::collections::BTreeSet;
+use std::path::Path;
 
 /// Every module the scripts can live in, pulled in **at compile time**.
 ///
-/// `shape.rs` does the same and for the same reason: a directory walk turns a renamed or deleted
-/// file into a target that is silently skipped, and a guard with no file to look at reads exactly
-/// like a clean one. Its two siblings walk at runtime instead — `prose` and `glossary` each
-/// enumerate the tree — which suits a rule that has to cover whatever exists; this one names its
-/// targets so that losing one breaks the build.
+/// `shape.rs` and `prose.rs` do the same and for the same reason: a directory walk that supplied the
+/// text would turn a renamed or deleted file into a target that is silently skipped, and a guard with
+/// no file to look at reads exactly like a clean one. So the list names its targets, and losing one
+/// breaks the build; the walk in [`the_list_still_names_every_module`] only finds the file nobody
+/// named.
 ///
 /// **All of them and not just the two files the scripts live in today**: the bench's pieces have
 /// already moved out of `app/src/lib.rs` once — the injected gestures to `src/injected.rs`, reading
@@ -67,7 +71,8 @@ use std::collections::BTreeSet;
 /// **And that is exactly what happened next, in silence.** The delivery that took the tiling and the
 /// tree out of `app/src/lib.rs` paid the four sibling lists — each of them fails when a file goes
 /// missing — and did not pay this one, because this one had no way to complain. It has one now:
-/// [`the_list_still_names_every_module`] counts the files and the reviewers no longer have to.
+/// [`the_list_still_names_every_module`] checks it against the tree and the reviewers no longer have
+/// to.
 const MODULES: &[(&str, &str)] = &[
     ("app/src/lib.rs", include_str!("../src/lib.rs")),
     ("app/src/alarms.rs", include_str!("../src/alarms.rs")),
@@ -135,6 +140,52 @@ const MODULES: &[(&str, &str)] = &[
     ("app/src/tiling.rs", include_str!("../src/tiling.rs")),
     ("app/src/tree.rs", include_str!("../src/tree.rs")),
     ("app/src/main.rs", include_str!("../src/main.rs")),
+    ("app/src/closing.rs", include_str!("../src/closing.rs")),
+    (
+        "app/src/tests/markdown.rs",
+        include_str!("../src/tests/markdown.rs"),
+    ),
+    ("app/src/links.rs", include_str!("../src/links.rs")),
+    (
+        "app/src/links/console.rs",
+        include_str!("../src/links/console.rs"),
+    ),
+    (
+        "app/src/injected/links.rs",
+        include_str!("../src/injected/links.rs"),
+    ),
+    (
+        "app/src/panel/color.rs",
+        include_str!("../src/panel/color.rs"),
+    ),
+    (
+        "app/src/panel/links.rs",
+        include_str!("../src/panel/links.rs"),
+    ),
+    (
+        "app/src/pointer/links.rs",
+        include_str!("../src/pointer/links.rs"),
+    ),
+    (
+        "term-core/src/nonblocking.rs",
+        include_str!("../../term-core/src/nonblocking.rs"),
+    ),
+    (
+        "term-core/examples/closing.rs",
+        include_str!("../../term-core/examples/closing.rs"),
+    ),
+    (
+        "term-core/examples/termios_probe.rs",
+        include_str!("../../term-core/examples/termios_probe.rs"),
+    ),
+    (
+        "term-core/examples/writer_leak.rs",
+        include_str!("../../term-core/examples/writer_leak.rs"),
+    ),
+    (
+        "term-core/examples/writer_wake.rs",
+        include_str!("../../term-core/examples/writer_wake.rs"),
+    ),
     (
         "term-core/src/lib.rs",
         include_str!("../../term-core/src/lib.rs"),
@@ -175,22 +226,73 @@ const MODULES: &[(&str, &str)] = &[
         "term-core/examples/throughput.rs",
         include_str!("../../term-core/examples/throughput.rs"),
     ),
+    (
+        "app/examples/fonts.rs",
+        include_str!("../examples/fonts.rs"),
+    ),
+    ("app/examples/leak.rs", include_str!("../examples/leak.rs")),
+    (
+        "app/examples/screen_demo.rs",
+        include_str!("../examples/screen_demo.rs"),
+    ),
+    (
+        "app/examples/sweep.rs",
+        include_str!("../examples/sweep.rs"),
+    ),
+    ("app/tests/batches.rs", include_str!("batches.rs")),
+    ("app/tests/decisions.rs", include_str!("decisions.rs")),
+    ("app/tests/glossary.rs", include_str!("glossary.rs")),
+    ("app/tests/prose.rs", include_str!("prose.rs")),
+    ("app/tests/shape.rs", include_str!("shape.rs")),
+    ("app/tests/vendor_patch.rs", include_str!("vendor_patch.rs")),
+    ("app/tests/waits.rs", include_str!("waits.rs")),
+    ("app/tests/common/mod.rs", include_str!("common/mod.rs")),
+    (
+        "term-core/tests/api_without_deps.rs",
+        include_str!("../../term-core/tests/api_without_deps.rs"),
+    ),
+    (
+        "term-core/tests/idle_console_cpu.rs",
+        include_str!("../../term-core/tests/idle_console_cpu.rs"),
+    ),
 ];
+
+/// The one file of the walked directories [`MODULES`] leaves out, with its reason: this file, whose
+/// fixtures carry the defect on purpose so the rule has something to report.
+const NOT_JUDGED: &str = "app/tests/scripts.rs";
 
 /// The files [`MODULES`] has to keep naming.
 ///
-/// **A floor over the count, and it is the one thing its four siblings had and this list did not.**
-/// They fail when a file leaves them — one walks the tree and cross-checks, three carry a number —
-/// and this one just went on reporting on whatever was left. Two modules came out of `app/src/lib.rs`
-/// and the suite stayed green with the guard blind to both.
-///
-/// **It counts and does not judge**, for the same reason `shape.rs` gives: a list that only ever
-/// grows cannot be narrowed by accident if the narrowing itself is the failure.
+/// **The list is checked against the tree, and the count stays beside it as a floor.** A count
+/// raised by hand binds only the delivery that remembers to raise it: with one, this list still fell
+/// twelve files behind, and one of those twelve printed its ready marker after a `stty` it did not
+/// wait for. The tree is every Rust file of `app` and `term-core` — their sources, examples and
+/// tests — minus [`NOT_JUDGED`]; the other crates run no shell.
 #[test]
 fn the_list_still_names_every_module() {
+    let declared: Vec<&str> = MODULES.iter().map(|(name, _)| *name).collect();
+    let crates = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let mut on_disk = rust_sources(
+        &crates,
+        &[
+            "app/src",
+            "app/examples",
+            "app/tests",
+            "term-core/src",
+            "term-core/examples",
+            "term-core/tests",
+        ],
+    );
     assert!(
-        MODULES.len() >= 43,
-        "`MODULES` names {} files and the last delivery left forty-three: a piece came out of a module \
+        on_disk.remove(NOT_JUDGED),
+        "{NOT_JUDGED} is left out by name and is no longer on disk"
+    );
+    if let Err(failure) = list_against_disk("MODULES", &declared, &on_disk) {
+        panic!("{failure}. A module with no row is one whose scripts nobody reads");
+    }
+    assert!(
+        MODULES.len() >= 70,
+        "`MODULES` names {} files and the last delivery left seventy: a piece came out of a module \
          and its new home was not added, so whatever this guard reports, it is not reporting on \
          every script these crates run",
         MODULES.len()

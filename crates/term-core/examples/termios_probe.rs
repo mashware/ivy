@@ -39,7 +39,9 @@ fn probe(label: &str, script: &str) {
     let mut reader = pair.master.try_clone_reader().expect("reader");
     let mut seen = Vec::new();
     let deadline = Instant::now() + Duration::from_secs(5);
-    while !seen.ends_with(b"ready") && Instant::now() < deadline {
+    // The word «failed» is the second way out: a script whose `stty` failed prints it instead of
+    // `ready`, and without it this loop would sit in a read that `cat` never answers.
+    while !seen.ends_with(b"ready") && !seen.ends_with(b"failed") && Instant::now() < deadline {
         let mut buf = [0u8; 64];
         match reader.read(&mut buf) {
             Ok(0) => break,
@@ -75,5 +77,8 @@ fn probe(label: &str, script: &str) {
 
 fn main() {
     probe("default   ", "printf ready; exec cat");
-    probe("stty raw  ", "stty raw -echo; printf ready; exec cat");
+    probe(
+        "stty raw  ",
+        "stty raw -echo && printf ready || printf failed; exec cat",
+    );
 }

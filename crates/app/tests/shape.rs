@@ -38,11 +38,20 @@
 //! the delivery that wrote this line, in silence, because it was the one list with no count floor;
 //! it has one now.
 
+mod common;
+
+use common::{list_against_disk, rust_sources};
+use std::path::Path;
+
 /// Every module of the crate, pulled in **at compile time** for the same reason its siblings give:
 /// a directory walk turns a renamed or deleted file into a target that is silently skipped, and a
 /// guard with no file to look at reads exactly like a clean one.
 const MODULES: &[(&str, &str)] = &[
     ("src/lib.rs", include_str!("../src/lib.rs")),
+    (
+        "src/tests/markdown.rs",
+        include_str!("../src/tests/markdown.rs"),
+    ),
     ("src/alarms.rs", include_str!("../src/alarms.rs")),
     ("src/closing.rs", include_str!("../src/closing.rs")),
     ("src/control.rs", include_str!("../src/control.rs")),
@@ -546,14 +555,18 @@ fn no_module_is_over_its_ceiling() {
     // `src/main.rs` with three.
     //
     // **Splitting a module does not raise the total and that is the point** — it moves lines from
-    // one entry to two — so a floor over the sum survives every delivery of D28's order. What has to
-    // be raised with each split is the module *count*, and a split that forgets to add its new files
-    // to `MODULES` fails right here instead of quietly exempting them.
+    // one entry to two — so a floor over the sum survives every delivery of D28's order.
     //
-    // **And that last sentence was false for two deliveries**, because the count sat at nineteen
-    // while the list held twenty-one: two modules could have been dropped with the suite green, which
-    // is the same slack this file's own ratchet prose warns about. It is tight now, and it stays
-    // tight only if the number is raised in the commit that adds the entry.
+    // **What catches a split that forgets its new files is the tree, not the count.** The count was
+    // that guard once and it went slack twice — nineteen against a list of twenty-one, then
+    // thirty-seven against forty-one — because a number raised by hand binds only the delivery that
+    // remembers to raise it. So the list is checked against `src/` in both directions, and the
+    // count stays as a floor against the walk itself collapsing.
+    let declared: Vec<&str> = MODULES.iter().map(|(name, _)| *name).collect();
+    let on_disk = rust_sources(Path::new(env!("CARGO_MANIFEST_DIR")), &["src"]);
+    if let Err(failure) = list_against_disk("MODULES", &declared, &on_disk) {
+        panic!("{failure}. A module with no row has no ceiling");
+    }
     let total: usize = MODULES
         .iter()
         .map(|(_, src)| production_lines(src).len())

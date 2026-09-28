@@ -122,9 +122,9 @@ third, by a code reviewer who **computed the contrast** instead of reading the c
 
 The fix for each is in `crates/app/src/lib.rs` (`mod tests`) and in `crates/app/src/theme.rs`:
 `each_attention_claim_carries_the_color_the_decision_assigned_it` nails each class to its palette entry;
-`between_two_equal_claims_the_chip_shows_the_one_someone_holds` walks both orders and
-`with_three_consoles_the_chip_shows_the_claim_that_rules` the six orderings of three; and
-`el_simbolo_de_la_ficha_activa_se_pinta_sobre_el_fondo_y_no_sobre_el_realce` looks at what is underneath.
+`between_two_equal_claims_the_card_shows_the_one_someone_holds` walks both orders and
+`with_three_consoles_the_card_shows_the_claim_that_rules` the six orderings of three; and
+`the_active_cards_symbol_is_painted_over_the_background_and_not_over_the_highlight` looks at what is underneath.
 The fourth's is in `crates/app/src/painter.rs` and `crates/app/src/lib.rs`: `A_CURSOR_OF_ITS_OWN`, a
 written-out constant used both to build the theme and to find the shape, with
 `theme_whose_cursor_is_its_own` / `window_whose_cursor_is_its_own` around it.
