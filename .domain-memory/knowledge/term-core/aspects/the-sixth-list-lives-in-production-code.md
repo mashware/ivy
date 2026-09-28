@@ -9,8 +9,8 @@ status: active
 superseded_by: null
 confidence: 80
 created_at: '2026-09-11T20:23:16.847Z'
-updated_at: '2026-09-11T20:23:16.847Z'
-last_verified: '2026-09-11T20:23:16.847Z'
+updated_at: '2026-09-28T16:49:39.417Z'
+last_verified: '2026-09-28T16:49:39.417Z'
 file_paths:
   - crates/app/tests/shape.rs
   - crates/app/src/settings.rs
@@ -21,12 +21,15 @@ symbols:
   - MODULES
   - SOURCES
   - COMMENT_LINES_AT_LEAST
+  - CITATIONS_CHECKED
+  - GLOSSARY_CLEAN_FILES
+  - GLOSSARY_PENDING_FILES
 content_hashes:
-  crates/app/tests/shape.rs: 'sha256:dafb615269cba5e6910c01d4fe77981f158c73a3cec9b2e736bd3728e0f7de99'
-  crates/app/src/settings.rs: 'sha256:b4bcf5132ae7c60dc9cccb4fedae1c93d77362d46527808e07d10c98d53a1040'
-  crates/app/tests/prose.rs: 'sha256:6a3dff196aac01ef74b59d6dc3d077e0ddd4c211cae097434f47b9b3a542f533'
-  crates/app/tests/glossary.rs: 'sha256:c547773d4b9a1fbc748d72b9ce900c2a11cfbbdd6cc9ac26304077c77dfbd5f5'
-  crates/app/tests/scripts.rs: 'sha256:6e13f37687b1d193d47c56b76a1f0d223d922f19b6ec7903752e0bfde4bc1672'
+  crates/app/tests/shape.rs: 'sha256:b8474648d5df70f6dad440a1c2864dd695f49fb5efd5a6ba66be8d1a5ccc0cca'
+  crates/app/src/settings.rs: 'sha256:31ae91ea13ad8b095237c0ac344e4507116cdffd046b4969b0b833ae5c3cc222'
+  crates/app/tests/prose.rs: 'sha256:ab0b9e74bd4600f582efddfc69ed57e17ebd23567f4fc186e61044fe0943baa0'
+  crates/app/tests/glossary.rs: 'sha256:90d6c32c3639ed72476a08556a5782aedb6529d909f3629eb7791aafedf52ae2'
+  crates/app/tests/scripts.rs: 'sha256:0203fb55ee365b3246dc5f31fd1f042cc21f6e8746e7aaa8c25bd89c8663cfd0'
 tags:
   - guards
   - d28
@@ -55,6 +58,8 @@ feature_id: feat_term-core_nx0g1r
 
 **Adding the sixth list has a cost worth expecting**: it walks files that were never checked, and the first thing it found was a user-facing message carrying an em dash. See [[user-facing-text-is-ascii-comments-are-not]].
 
+**Not only splits: a brand-new file trips the citations lists too** (measured on #147, 28 September 2026). A new integration test under `crates/app/tests/` fails `no_comment_cites_a_name_the_code_no_longer_has` until it is in `CITATIONS_CHECKED` (with its crate) **and** in one of `GLOSSARY_CLEAN_FILES` / `GLOSSARY_PENDING_FILES`, which partition that manifest. Once it is in, the guard reads **every backticked token in its comments as an identifier of the crate**: a decision cited as `` `D28` `` fails it — the crate's idiom is plain D28 or **D28**. Neither failure shows in `cargo test -p app --test <new file>`; only `cargo test --workspace` runs the guard.
+
 ## Where it lives
 
-`crates/app/tests/shape.rs`'s module header names all six. The fifth and sixth are the ones to look up by hand: `MODULES` in `crates/app/tests/scripts.rs`, and the `SOURCES` array inside `#[cfg(test)] mod tests` in `crates/app/src/settings.rs`.
+`crates/app/tests/shape.rs`'s module header names all six. The fifth and sixth are the ones to look up by hand: `MODULES` in `crates/app/tests/scripts.rs`, and the `SOURCES` array inside `#[cfg(test)] mod tests` in `crates/app/src/settings.rs`. The citations lists are `CITATIONS_CHECKED`, `GLOSSARY_CLEAN_FILES` and `GLOSSARY_PENDING_FILES` at the top of `crates/app/tests/glossary.rs`.
