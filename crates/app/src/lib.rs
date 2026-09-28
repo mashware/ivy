@@ -268,7 +268,7 @@ const PANES_VARIABLE: &str = "MEASURE_PANES";
 /// can type without encoding surprises.
 pub(crate) const DRAGS_VARIABLE: &str = "MEASURE_DRAGS";
 
-/// Which of the three gestures the batch asks for, and `console` when nothing is said.
+/// Which gesture the batch asks for, and `console` when nothing is said.
 ///
 /// **By default the console one**, so that the batches that already existed go on measuring exactly
 /// what they measured: an old batch that suddenly dragged panels would publish its numbers under
@@ -1610,7 +1610,7 @@ impl Window {
         // same owner, and the compiler does not let both be held at once.
         let mut modifiers = self.modifiers;
         let tabs_open = self.tabs.len();
-        // **The table is cloned, and it is cheap: twelve pairs of three booleans and an integer.**
+        // **The table is cloned, and it is cheap: at most one pair per `keyboard::Action`.**
         // The borrow is the same problem as the modifiers above —the pane and the field are two
         // borrows of the same owner— and here it is solved the same way, without leaving the table
         // somewhere nobody would look for it.
@@ -4895,7 +4895,10 @@ mod tests {
         make_it_go_quiet(&mut pane);
         let area = a_roomy_console(&metrics);
         let how_it_ended = pane.pty.ending();
-        assert!(the_silence_box_on(&pane, &theme, &metrics, area).is_some());
+        assert!(
+            the_silence_box_on(&pane, &theme, &metrics, area).is_some(),
+            "the premise failed: the quiet console never painted its sentence"
+        );
 
         pane.pty_output.dismiss_the_silence(pane.pty.ending());
 
@@ -5327,7 +5330,10 @@ mod tests {
         if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
             return;
         }
-        assert!(hold_a_paste_on(window.active_mut().panes_mut()[1]));
+        assert!(
+            hold_a_paste_on(window.active_mut().panes_mut()[1]),
+            "the premise failed: the second console did not hold its paste"
+        );
         let theme = window.theme;
         let at = the_notice_box(window.active().panes()[0], &theme, &metrics, rects[0]).center();
 
@@ -6201,7 +6207,10 @@ mod tests {
 
         // **The keyboard's door, which a paste also comes through.**
         let mut pane = pane_with("sleep 8", 0);
-        assert!(pane.taken_over.is_none());
+        assert!(
+            pane.taken_over.is_none(),
+            "the premise failed: the console was born already handed back"
+        );
         enqueue(&ctx, vec![egui::Event::Paste("hello".to_owned())]);
         let mut modifiers = egui::Modifiers::NONE;
         pane.send_keys(
@@ -6308,7 +6317,7 @@ mod tests {
                 .find(|pane| pane.name == newborn)
                 .expect("the console that was opened");
             for n in 0..80 {
-                opened.screen.advance(format!("linea {n}\r\n").as_bytes());
+                opened.screen.advance(format!("entry {n}\r\n").as_bytes());
             }
         }
         let read = |window: &mut Window, scrollback: bool| match ask_the_window(
@@ -6327,15 +6336,15 @@ mod tests {
         let visible = read(&mut window, false);
         let everything = read(&mut window, true);
         assert!(
-            visible.contains("linea 79"),
+            visible.contains("entry 79"),
             "the visible read lost the screen: {visible:?}"
         );
         assert!(
-            !visible.contains("linea 0"),
+            !visible.contains("entry 0"),
             "the visible read carried the history: {visible:?}"
         );
         assert!(
-            everything.contains("linea 0"),
+            everything.contains("entry 0"),
             "the scrollback read lost the history: {everything:?}"
         );
 
@@ -6711,10 +6720,13 @@ mod tests {
                 metrics,
             )
         });
-        assert!(matches!(
-            retired.recv_timeout(Duration::from_secs(1)),
-            Ok(panel_control::Answer::Retired { .. })
-        ));
+        assert!(
+            matches!(
+                retired.recv_timeout(Duration::from_secs(1)),
+                Ok(panel_control::Answer::Retired { .. })
+            ),
+            "the window did not answer the queued retirement"
+        );
         let origin = window
             .all_panes_mut()
             .find(|pane| pane.name == 0)
@@ -6724,10 +6736,13 @@ mod tests {
             .as_mut()
             .expect("the pane has its channel")
             .apply(&mut origin.panel_state, SystemTime::now());
-        assert!(matches!(
-            published.recv_timeout(Duration::from_secs(1)),
-            Ok(panel_control::Answer::Taken)
-        ));
+        assert!(
+            matches!(
+                published.recv_timeout(Duration::from_secs(1)),
+                Ok(panel_control::Answer::Taken)
+            ),
+            "the publication queued behind the retirement was not taken once it was answered"
+        );
         assert_eq!(
             origin
                 .panel_state
@@ -6735,7 +6750,8 @@ mod tests {
                 .expect("the next generation is visible")
                 .lines[0]
                 .text,
-            "new work"
+            "new work",
+            "the publication queued after the retirement is not the panel left on screen"
         );
     }
 
@@ -7226,7 +7242,10 @@ mod tests {
         wait_for_it_to_die(&pane);
 
         assert!(!pane.pump(), "five bytes do not exhaust the budget");
-        assert!(pane.screen.to_text().contains("hello"));
+        assert!(
+            pane.screen.to_text().contains("hello"),
+            "what the program wrote did not reach the grid"
+        );
 
         // A frame with nothing new cannot interpret again what came in the previous one. If the
         // buffer were not emptied at the start, the screen would show twice something the program
@@ -7255,15 +7274,18 @@ mod tests {
         // This is the budget doing its job: without it, the frame swallows the 400 KiB in one go
         // and the window stays still meanwhile, which is exactly what cannot happen.
         assert!(queue_left, "a dump of {DUMP} bytes fitted into one frame");
-        assert!(
-            pane.received.len() <= PUMP_BUDGET,
-            "the frame's buffer grew above the budget: {}",
-            pane.received.len()
+        assert_eq!(
+            pane.received.len(),
+            PUMP_BUDGET,
+            "the frame did not take exactly its budget out of a queue longer than it"
         );
         // And this is the premise that closing the window only when there is no queue left depends
         // on: the program has died already and still has output that has not been shown. Closing
         // here would eat the end, which is the part that was being looked at.
-        assert!(!pane.pty_output.is_alive());
+        assert!(
+            !pane.pty_output.is_alive(),
+            "the premise failed: the program was still alive with its output queued"
+        );
 
         let mut frames = 1;
         while queue_left {
@@ -7432,8 +7454,14 @@ mod tests {
             let its_panes = window.active().panes();
             (its_panes[0], its_panes[1])
         };
-        assert!(left_pane.screen.to_text().contains("left"));
-        assert!(right_pane.screen.to_text().contains("right"));
+        assert!(
+            left_pane.screen.to_text().contains("left"),
+            "the left console did not show what its own program wrote"
+        );
+        assert!(
+            right_pane.screen.to_text().contains("right"),
+            "the right console did not show what its own program wrote"
+        );
         assert!(
             !left_pane.screen.to_text().contains("right"),
             "what one console wrote appeared in the other"
@@ -7650,12 +7678,25 @@ mod tests {
             .collect();
 
         // The four are there, and with their value.
-        assert_eq!(of_the_child.get("TERM"), Some(&"xterm-256color"));
-        assert_eq!(of_the_child.get("COLORTERM"), Some(&"truecolor"));
-        assert_eq!(of_the_child.get("PANEL_ID"), Some(&panel.id()));
+        assert_eq!(
+            of_the_child.get("TERM"),
+            Some(&"xterm-256color"),
+            "the program did not see the terminal type it is launched with"
+        );
+        assert_eq!(
+            of_the_child.get("COLORTERM"),
+            Some(&"truecolor"),
+            "the program was not told it has true color"
+        );
+        assert_eq!(
+            of_the_child.get("PANEL_ID"),
+            Some(&panel.id()),
+            "the program did not see its own pane's identity"
+        );
         assert_eq!(
             of_the_child.get("PANEL_DIR").map(std::path::Path::new),
-            Some(panel.path())
+            Some(panel.path()),
+            "the program was not told where to publish its panel"
         );
 
         // And nothing else changes with respect to what this process already had. The comparison is
@@ -8610,8 +8651,14 @@ mod tests {
             pump.all_finished,
             "both of them died and the window did not close"
         );
-        assert!(window.active().panes()[0].screen.to_text().contains("one"));
-        assert!(window.active().panes()[1].screen.to_text().contains("two"));
+        assert!(
+            window.active().panes()[0].screen.to_text().contains("one"),
+            "the window closed and the first program's last output never reached its grid"
+        );
+        assert!(
+            window.active().panes()[1].screen.to_text().contains("two"),
+            "the window closed and the second program's last output never reached its grid"
+        );
     }
 
     #[test]
@@ -9163,13 +9210,24 @@ mod tests {
 
     #[test]
     fn a_dump_in_one_console_neither_stalls_nor_dirties_the_other() {
-        // AC10. The terminal's brake is **per console**: with one dumping, the other goes on
-        // delivering its own in the same frame. If the budget were shared, the quiet one would be
-        // left waiting behind the dump and the window would give the feeling of being hung.
+        // AC10. The terminal's brake is **per console**: while one dumps, the one beside it goes on
+        // delivering its own in the same frame. If the budget were shared, the second one would be
+        // left waiting behind the first one's dump and the window would give the feeling of being
+        // hung.
+        //
+        // **Both dump, and each with its own letter.** Both dumping is what makes the budget bind
+        // for the second one too: a console that only prints a short word stays under any ceiling,
+        // so a check on it passed whatever the budget rule was. And the budget is checked from
+        // **both sides**, because a budget split between the consoles also stays under the ceiling:
+        // every console with more queued than the budget takes exactly the budget, no less. A
+        // console that takes less than its program writes ends up stopping it rather than slowing
+        // it, which is the reason D13 never lowers it even for a console out of sight. What is
+        // checked is how much each one takes out of its queue, because that is what brakes the
+        // program; the letter is what tells whose output reached which grid.
         const DUMP: usize = 400_000;
         let mut window = window_with(
             &format!("head -c {DUMP} /dev/zero | tr '\\0' a"),
-            "printf quiet",
+            &format!("head -c {DUMP} /dev/zero | tr '\\0' b"),
         );
         for pane in window.active().panes() {
             wait_for_it_to_die(pane);
@@ -9181,21 +9239,32 @@ mod tests {
             pump.some_left_a_queue,
             "the dump fitted whole into one frame"
         );
-        // The one next to it delivered its own in that same frame, without waiting for the dump to
-        // end.
+        // The one next to it delivered its own in that same frame, without waiting for the first
+        // one's dump to end.
         assert!(
-            window.active().panes()[1]
-                .screen
-                .to_text()
-                .contains("quiet"),
-            "the quiet console was left waiting behind the dump"
+            window.active().panes()[1].screen.to_text().contains("bbbb"),
+            "the second console was left waiting behind the first one's dump"
         );
-        // And what is held back stays bounded per console: none of them goes over the budget.
-        for (which, pane) in window.active().panes().into_iter().enumerate() {
+        assert!(
+            window.active().panes()[0].screen.to_text().contains("aaaa"),
+            "the first console did not deliver its own dump"
+        );
+        // And neither grid holds the other program's letter.
+        for (which, foreign) in ['b', 'a'].into_iter().enumerate() {
             assert!(
-                pane.received.len() <= PUMP_BUDGET,
-                "console {which} went over the budget: {}",
-                pane.received.len()
+                !window.active().panes()[which]
+                    .screen
+                    .to_text()
+                    .contains(foreign),
+                "console {which} shows output that is not its own program's"
+            );
+        }
+        // What each one took this frame is exactly its own budget: not more, and not a share.
+        for (which, pane) in window.active().panes().into_iter().enumerate() {
+            assert_eq!(
+                pane.received.len(),
+                PUMP_BUDGET,
+                "console {which} did not take its whole budget and no more"
             );
         }
     }
@@ -9791,7 +9860,8 @@ mod tests {
         );
         assert_eq!(
             urls_opened_in(&mut window, &ctx, area, ctrl_click_at(at), 1),
-            ["https://example.test/painted"]
+            ["https://example.test/painted"],
+            "the click did not open exactly once the link painted under it"
         );
         assert!(
             window.active().panes()[0].screen.has_selection(),
@@ -9836,13 +9906,23 @@ mod tests {
             urls_opened_in(&mut window, &ctx, area, ctrl_click_at(at), 1).is_empty(),
             "a measured activation launched a real browser"
         );
-        assert_eq!(window.links.plain, 1);
+        assert_eq!(
+            window.links.plain, 1,
+            "the measured link was not counted as a plain one"
+        );
         assert!(
             window.links.found > 0,
             "the measured link had no painted region"
         );
-        assert!(window.injected_drags.as_ref().unwrap().links_at[0].is_some());
-        assert_eq!(window.injected_drags.as_ref().unwrap().with_effect, 1);
+        assert!(
+            window.injected_drags.as_ref().unwrap().links_at[0].is_some(),
+            "the painting did not hand the injector where the measured link was"
+        );
+        assert_eq!(
+            window.injected_drags.as_ref().unwrap().with_effect,
+            1,
+            "the measured activation was not counted as a gesture with effect"
+        );
     }
 
     /// **AC1 and AC8**, with the design's literal text, over a real program that asked for the mouse
@@ -9908,7 +9988,11 @@ mod tests {
         let links::Desktop::Recorded(opened) = &window.desktop else {
             unreachable!("the tests' window records")
         };
-        assert_eq!(opened, &["https://example.test/a_(b)"]);
+        assert_eq!(
+            opened,
+            &["https://example.test/a_(b)"],
+            "the ctrl-click did not open the bracketed url whole and once"
+        );
         assert!(
             window.active().panes()[0].keystrokes.is_empty(),
             "opening a link wrote something to the pane's shell"
@@ -10084,7 +10168,10 @@ mod tests {
                 frame: 10,
             };
             let on_the_link = area.min + egui::vec2(8.5 * metrics.width(), 0.5 * metrics.height());
-            assert!(painted.link_at(on_the_link, metrics, 11).is_some());
+            assert!(
+                painted.link_at(on_the_link, metrics, 11).is_some(),
+                "the snapshot of the frame just painted did not answer a click on its link"
+            );
             assert!(
                 painted.link_at(on_the_link, metrics, 12).is_none(),
                 "a snapshot two frames old answered a click, so pixels no longer on screen opened"
@@ -10124,7 +10211,8 @@ mod tests {
 
         assert_eq!(
             urls_opened_in(&mut window, &ctx, area, events, 1),
-            ["https://example.test/held"]
+            ["https://example.test/held"],
+            "the premise failed: the held ctrl-click did not open its link once"
         );
         one_frame_in(&mut window, &ctx, area, Vec::new());
         let pane = window.active().panes()[0].name;
@@ -10704,13 +10792,13 @@ mod tests {
         one_frame_with(&mut window, &ctx, click_at(egui::pos2(600.0, 8.0)));
 
         assert_eq!(window.active, 1, "the click did not switch tab");
-        let timings_of_the_second = window.tabs[1].panes()[0].measured.cols;
+        let columns_of_the_second = window.tabs[1].panes()[0].measured.cols;
         assert_ne!(
-            timings_of_the_second, with_the_first_ones_divider,
+            columns_of_the_second, with_the_first_ones_divider,
             "the new tab's console was measured with the previous one's divider"
         );
         assert!(
-            timings_of_the_second > with_the_first_ones_divider,
+            columns_of_the_second > with_the_first_ones_divider,
             "the second tab's left-hand one takes 80 % and came out narrower than the first's 20 %"
         );
     }
@@ -10882,7 +10970,7 @@ mod tests {
         window.tabs[1].move_divider(0, 0.8);
 
         one_frame_with(&mut window, &ctx, Vec::new());
-        let from_the_bottom = [
+        let measured_in_the_background = [
             window.tabs[1].panes()[0].measured,
             window.tabs[1].panes()[1].measured,
         ];
@@ -10894,7 +10982,7 @@ mod tests {
         one_frame_with(&mut window, &ctx, Vec::new());
 
         assert_eq!(
-            from_the_bottom,
+            measured_in_the_background,
             [
                 window.tabs[1].panes()[0].measured,
                 window.tabs[1].panes()[1].measured,
@@ -11043,12 +11131,12 @@ mod tests {
         window.tabs[2].move_divider(0, 0.8);
 
         one_frame_with(&mut window, &ctx, Vec::new());
-        let from_the_bottom: Vec<[Size; 2]> = window.tabs[1..]
+        let measured_in_the_background: Vec<[Size; 2]> = window.tabs[1..]
             .iter()
             .map(|tab| [tab.panes()[0].measured, tab.panes()[1].measured])
             .collect();
 
-        for (which, grids) in from_the_bottom.iter().enumerate() {
+        for (which, grids) in measured_in_the_background.iter().enumerate() {
             assert!(
                 !grids.contains(&INITIAL_GRID),
                 "tab {} kept the startup grid: it measured {grids:?}",
@@ -11059,7 +11147,7 @@ mod tests {
         // And each one has to measure from the background what it measures when it is seen.
         // Comparing only against the startup grid would let through any wrong size that was not
         // 24×80.
-        for (which, grids) in from_the_bottom.iter().enumerate() {
+        for (which, grids) in measured_in_the_background.iter().enumerate() {
             let tab = which + 1;
             window.active = tab;
             one_frame_with(&mut window, &ctx, Vec::new());
@@ -11571,13 +11659,21 @@ mod tests {
         // Without this gate the four-pane batch —what this milestone has to measure— cannot be
         // launched with nobody in front of it: splitting comes in through the framework's events.
         let four_in_a_square = opening_layout_of(Some("2x2"));
-        assert_eq!(four_in_a_square.how_many_panes(), 4);
+        assert_eq!(
+            four_in_a_square.how_many_panes(),
+            4,
+            "«2x2» was not read as a layout of four consoles"
+        );
         assert_eq!(four_in_a_square.rows, 2, "the rows were not read");
 
         // **And in a row is not the same as in a square**, even though it is four both times: in a
         // row each console keeps a quarter of the width and the panel does not fit.
         let four_in_a_row = opening_layout_of(Some("4x1"));
-        assert_eq!(four_in_a_row.how_many_panes(), 4);
+        assert_eq!(
+            four_in_a_row.how_many_panes(),
+            4,
+            "«4x1» was not read as a layout of four consoles"
+        );
         assert_eq!(four_in_a_row.rows, 1, "a row did not end up as a row");
 
         // What is not understood leaves the usual one, and a zero on either axis is not a layout:
@@ -11687,7 +11783,7 @@ mod tests {
         let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(806.0, 600.0));
         let tiling = tab.root.place(area, CELL_WIDTH);
 
-        assert_eq!(tiling.parts.len(), 4);
+        assert_eq!(tiling.parts.len(), 4, "four consoles did not come out");
         assert_eq!(tiling.dividers.len(), 3, "three dividers did not come out");
         for part in &tiling.parts {
             assert_eq!(
@@ -12315,7 +12411,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut pane = pane_with("sleep 30", 0);
         let mut modifiers = egui::Modifiers::NONE;
-        pane.screen.advance(b"hola mundo");
+        pane.screen.advance(b"good night");
         pane.screen.start_selection(Cell {
             row: 0,
             col: 0,
@@ -12366,7 +12462,7 @@ mod tests {
         // not change what was copied.
         let ctx = egui::Context::default();
         let mut pane = pane_with("sleep 30", 0);
-        pane.screen.advance(b"hola");
+        pane.screen.advance(b"good");
 
         assert_eq!(
             copy_at(&mut pane, &ctx),
@@ -12447,7 +12543,7 @@ mod tests {
             // these tests mark a row away from where the real window puts it.
             pane.measured = metrics.cells_in(console_of(*rect, metrics).size());
             pane.screen.resize(pane.measured);
-            pane.screen.advance(b"hola mundo");
+            pane.screen.advance(b"good night");
         }
         window
     }
@@ -12490,7 +12586,7 @@ mod tests {
 
         assert_eq!(
             selected_at(&window, 0).as_deref(),
-            Some("hola"),
+            Some("good"),
             "the drag did not mark the text it passed over"
         );
         assert_eq!(
@@ -12630,7 +12726,7 @@ mod tests {
 
         assert_eq!(
             selected_at(&window, 0).as_deref(),
-            Some("hola"),
+            Some("good"),
             "a press on the line the strip and the console share marked nothing: the strip took a \
              gesture aimed at the first row of text"
         );
@@ -12758,7 +12854,11 @@ mod tests {
             .place(area, metrics.width())
             .parts
             .clone();
-        assert_eq!(left.len(), 1);
+        assert_eq!(
+            left.len(),
+            1,
+            "closing from the strip did not leave a single console in the tab"
+        );
         assert_eq!(
             left[0].width(),
             area.width(),
@@ -13285,7 +13385,7 @@ mod tests {
             // The grid of the **whole pane**, which is what a run with no strip measures.
             pane.measured = metrics.cells_in(rect.size());
             pane.screen.resize(pane.measured);
-            pane.screen.advance(b"hola mundo");
+            pane.screen.advance(b"good night");
         }
         let request = names_in_order(&window);
 
@@ -13312,7 +13412,7 @@ mod tests {
 
         assert_eq!(
             selected_at(&window, 0).as_deref(),
-            Some("hola"),
+            Some("good"),
             "a measured run answered a press on its first row with the gesture that moves consoles"
         );
         assert_eq!(
@@ -13480,7 +13580,7 @@ mod tests {
 
             assert_eq!(
                 selected_at(&window, 0).as_deref(),
-                Some("hola"),
+                Some("good"),
                 "with {name} the drag did not mark: half a key of the chord already counts as the whole \
                  chord"
             );
@@ -13533,7 +13633,7 @@ mod tests {
         );
         assert_eq!(
             selected_at(&window, 0).as_deref(),
-            Some("hola"),
+            Some("good"),
             "the control never marked, so this run measured the harness and not the corner"
         );
 
@@ -13551,7 +13651,7 @@ mod tests {
         );
         assert_eq!(
             selected_at(&window, 1).as_deref(),
-            Some("hola"),
+            Some("good"),
             "the console away from the window's edge counted its columns from somewhere that is not \
              its own rectangle"
         );
@@ -13590,7 +13690,7 @@ mod tests {
             ),
         );
         let before = selected_at(&window, 0);
-        assert_eq!(before.as_deref(), Some("hola"), "nothing ever got marked");
+        assert_eq!(before.as_deref(), Some("good"), "nothing ever got marked");
 
         // And now a drag that STARTS over the panel's columns.
         let over_the_panel = inside_the_console(
@@ -13886,7 +13986,7 @@ mod tests {
 
         assert_eq!(
             selected_at(&window, 0).as_deref(),
-            Some("hola"),
+            Some("good"),
             "pressing the chord halfway through the drag stopped it marking: the gesture was re-read in \
              flight"
         );
@@ -16343,7 +16443,10 @@ mod tests {
         else {
             panic!("a family nobody has was published as found: {published:?}");
         };
-        assert_eq!(asked_for, "no family is called like this 4f7a2b");
+        assert_eq!(
+            asked_for, "no family is called like this 4f7a2b",
+            "the report names a family other than the one that was asked for"
+        );
         assert!(
             how_long > std::time::Duration::ZERO,
             "the failed search publishes no time at all, so what it cost falls into the start-up \
@@ -16381,7 +16484,10 @@ mod tests {
             Some(42.0),
             "without measurement the settings were not read"
         );
-        assert!(loaded.colors.background.is_some());
+        assert!(
+            loaded.colors.background.is_some(),
+            "without measurement the settings' background was not read"
+        );
         assert!(
             matches!(cost, measure::ReadingSettings::Applied { .. }),
             "the settings were applied and the report would not declare it: {cost:?}"
@@ -16444,7 +16550,7 @@ mod tests {
         one_frame_in(&mut window, &ctx, area_of(1200.0), Vec::new());
 
         let pane = &mut window.active_mut().panes_mut()[0];
-        pane.screen.advance(b"hola mundo");
+        pane.screen.advance(b"good night");
         pane.screen.start_selection(Cell {
             row: 0,
             col: 0,
@@ -16480,7 +16586,7 @@ mod tests {
         let mut window = window_with("sleep 30", "sleep 30");
         one_frame_in(&mut window, &ctx, area_of(1200.0), Vec::new());
         let pane = &mut window.active_mut().panes_mut()[0];
-        pane.screen.advance(b"hola mundo");
+        pane.screen.advance(b"good night");
         pane.screen.start_selection(Cell {
             row: 0,
             col: 0,
@@ -17311,7 +17417,10 @@ mod tests {
             panel_split.console, whole,
             "with no panel nothing is discounted"
         );
-        assert!(panel_split.panel.is_none());
+        assert!(
+            panel_split.panel.is_none(),
+            "a console with nothing published got a panel rectangle"
+        );
     }
 
     /// **The criterion that makes the discount worth anything.** That the rectangle is split is not
@@ -17526,8 +17635,16 @@ mod tests {
         );
         let tiling = tile(area, Orientation::Rows, &weights([1.0, 3.0]), 0.0);
 
-        assert_eq!(tiling.parts[0].height(), 100.0);
-        assert_eq!(tiling.parts[1].height(), 300.0);
+        assert_eq!(
+            tiling.parts[0].height(),
+            100.0,
+            "the light row did not take its quarter of the height"
+        );
+        assert_eq!(
+            tiling.parts[1].height(),
+            300.0,
+            "the heavy row did not take its three quarters of the height"
+        );
         // And the width is not touched: tiling in rows splits the height and leaves each one the
         // whole area from side to side. If the axis were swapped, this would be 100 and 300.
         for part in &tiling.parts {
@@ -17536,12 +17653,24 @@ mod tests {
                 area.width(),
                 "a row does not take up the whole width"
             );
-            assert_eq!(part.left(), area.left());
+            assert_eq!(
+                part.left(),
+                area.left(),
+                "a row does not start at the left edge"
+            );
         }
         // The divider of a tiling in rows is a horizontal line: whole width and thickness in
         // height.
-        assert_eq!(tiling.dividers[0].rect.height(), DIVIDER_THICKNESS);
-        assert_eq!(tiling.dividers[0].rect.width(), area.width());
+        assert_eq!(
+            tiling.dividers[0].rect.height(),
+            DIVIDER_THICKNESS,
+            "the divider between rows does not take its thickness in height"
+        );
+        assert_eq!(
+            tiling.dividers[0].rect.width(),
+            area.width(),
+            "the divider between rows does not run the whole width"
+        );
     }
 
     #[test]
@@ -17554,7 +17683,11 @@ mod tests {
         let three = [weight(1.0), weight(2.0), weight(1.0)];
         let tiling = tile(area, Orientation::Columns, &three, CELL_WIDTH);
 
-        assert_eq!(tiling.parts.len(), 3);
+        assert_eq!(
+            tiling.parts.len(),
+            3,
+            "three weights did not give three parts"
+        );
         assert_eq!(
             tiling.dividers.len(),
             2,
@@ -17562,14 +17695,22 @@ mod tests {
         );
 
         // Walk from left to right: part, divider, part, divider, part, with no jumps.
-        assert_eq!(tiling.parts[0].left(), area.left());
+        assert_eq!(
+            tiling.parts[0].left(),
+            area.left(),
+            "the first part does not start at the left edge"
+        );
         for (part, divider) in tiling.parts.iter().zip(&tiling.dividers) {
             assert_eq!(
                 part.right(),
                 divider.rect.left(),
                 "there is a gap before a divider"
             );
-            assert_eq!(divider.rect.width(), DIVIDER_THICKNESS);
+            assert_eq!(
+                divider.rect.width(),
+                DIVIDER_THICKNESS,
+                "a divider does not take exactly its thickness"
+            );
         }
         for (divider, next) in tiling.dividers.iter().zip(&tiling.parts[1..]) {
             assert_eq!(
@@ -17578,11 +17719,19 @@ mod tests {
                 "there is a gap after a divider"
             );
         }
-        assert_eq!(tiling.parts[2].right(), area.right());
+        assert_eq!(
+            tiling.parts[2].right(),
+            area.right(),
+            "the last part does not reach the right edge"
+        );
 
         // And the middle one weighs double, which is what distinguishes tiling by weight from
         // tiling into thirds.
-        assert_eq!(tiling.parts[1].width(), tiling.parts[0].width() * 2.0);
+        assert_eq!(
+            tiling.parts[1].width(),
+            tiling.parts[0].width() * 2.0,
+            "the middle part does not take double for weighing double"
+        );
     }
 
     #[test]
@@ -19705,10 +19854,10 @@ mod tests {
             "the console with the focus was not closed"
         );
         // **Strictly greater, and that is where the third half fits.** The two planted spans add up
-        // to exactly eleven seconds, so landing right on that figure means the close **itself** was
-        // not declared: the walk of the tree, killing the program, deleting the directory and
-        // rearming the watcher, all inside the interface pass and with no living console signing
-        // for it.
+        // to exactly `PARSED + ANNOTATED`, so landing right on that figure means the close
+        // **itself** was not declared: the walk of the tree, killing the program, deleting the
+        // directory and rearming the watcher, all inside the interface pass and with no living
+        // console signing for it.
         assert!(
             window.timed_separately > PARSED + ANNOTATED,
             "it declared {:?}, and what the departing console alone carried undeclared was worth \
@@ -20392,7 +20541,11 @@ mod tests {
             tab.focus, 4,
             "the focus did not store the second one's name"
         );
-        assert_eq!(tab.where_the_focus_is(), Some(1));
+        assert_eq!(
+            tab.where_the_focus_is(),
+            Some(1),
+            "the premise failed: the focus is not on the second place before reordering"
+        );
 
         // The two consoles are swapped inside the tree, which is what closing a neighbor will do.
         let Node::Branch { children, .. } = &mut tab.root else {
@@ -20418,7 +20571,11 @@ mod tests {
         let area = area_of(500.0);
         let tiling = tile(area, Orientation::Columns, &[weight(1.0)], CELL_WIDTH);
 
-        assert_eq!(tiling.parts.len(), 1);
+        assert_eq!(
+            tiling.parts.len(),
+            1,
+            "a single weight did not give a single part"
+        );
         assert!(
             tiling.dividers.is_empty(),
             "a lone part separates from nothing"
@@ -20442,7 +20599,11 @@ mod tests {
                 "{impossible} was accepted as a weight"
             );
         }
-        assert_eq!(Weight::new(0.5).map(Weight::value), Some(0.5));
+        assert_eq!(
+            Weight::new(0.5).map(Weight::value),
+            Some(0.5),
+            "a valid weight was refused or came back changed"
+        );
     }
 
     #[test]
@@ -20519,7 +20680,11 @@ mod tests {
             CELL_WIDTH,
         );
 
-        assert_eq!(tiling.parts[0].width(), tiling.parts[1].width());
+        assert_eq!(
+            tiling.parts[0].width(),
+            tiling.parts[1].width(),
+            "with no room for two minimums the divider did not plant itself in the center"
+        );
         assert!(tiling.parts[0].width() > 0.0, "the left one disappeared");
         assert!(tiling.parts[1].width() > 0.0, "the right one disappeared");
     }
@@ -21818,7 +21983,8 @@ mod tests {
 
         assert_eq!(
             window.active().panes()[0].panel_width,
-            panel::DEFAULT_WIDTH - 8
+            panel::DEFAULT_WIDTH - 8,
+            "dragging the border did not narrow the dragged pane's panel by eight columns"
         );
         assert_eq!(
             window.active().panes()[1].panel_width,
@@ -21978,7 +22144,11 @@ mod tests {
             .expect("there is a panel")
             .width();
 
-        assert_eq!(factory, panel::DEFAULT_WIDTH as f32 * cell);
+        assert_eq!(
+            factory,
+            panel::DEFAULT_WIDTH as f32 * cell,
+            "the premise failed: an untouched pane did not tile its panel at the factory width"
+        );
         assert_eq!(
             custom,
             12.0 * cell,
@@ -22356,7 +22526,10 @@ mod tests {
 
         drag_the_panel(&mut window, &ctx, area, 0, area.right() + 500.0);
 
-        assert!(window.active().panes()[0].folded);
+        assert!(
+            window.active().panes()[0].folded,
+            "dragging past the edge did not fold the dragged pane's panel"
+        );
         assert!(
             !window.active().panes()[1].folded,
             "folding one pane's panel also folded its sibling's"
@@ -22378,7 +22551,11 @@ mod tests {
         let cut_along = panel_cut(&window, 0, area);
         drag_the_panel(&mut window, &ctx, area, 0, cut_along + 9.0 * cell);
         let requested = window.active().panes()[0].panel_width;
-        assert_eq!(requested, panel::DEFAULT_WIDTH - 9);
+        assert_eq!(
+            requested,
+            panel::DEFAULT_WIDTH - 9,
+            "the premise failed: the drag did not narrow the panel by nine columns"
+        );
 
         drag_the_panel(&mut window, &ctx, area, 0, area.right() + 500.0);
 
@@ -23353,7 +23530,7 @@ mod tests {
         assert_eq!(gesture_of(Some("")), InjectedGesture::MovePane);
         assert_eq!(gesture_of(None), InjectedGesture::MovePane);
 
-        // The report's three words, exactly as the script expects them.
+        // The report's word for each of these four gestures, exactly as the script expects them.
         assert_eq!(
             InjectedGesture::ResizePanel.as_published(),
             "narrowing the panel"
@@ -23434,11 +23611,19 @@ mod tests {
             session::serialize(&window.describe()).expect("a live window can be described");
         let read_back = session::interpret(&written_text)
             .expect("what the window describes has to be readable back");
-        assert_eq!(read_back.leaves(), 5);
+        assert_eq!(
+            read_back.leaves(),
+            5,
+            "the layout read back lost consoles dragged to the stop"
+        );
         // And back to consoles, which is the whole path.
         let rounds =
             Window::materialize(&ctx, &read_back, "cat").expect("the consoles coming back do open");
-        assert_eq!(rounds.len(), 1);
+        assert_eq!(
+            rounds.len(),
+            1,
+            "the layout read back did not open as the one tab it was"
+        );
     }
 
     #[test]
@@ -23450,7 +23635,10 @@ mod tests {
         // while the format had a ceiling, that was another layout lost in silence on reopening.
         let mut window = window_of_siblings(Orientation::Columns, &[1.0e6, 1.0e6]);
 
-        assert!(window.active_mut().move_divider(0, 0.0));
+        assert!(
+            window.active_mut().move_divider(0, 0.0),
+            "the premise failed: the divider did not move"
+        );
 
         let weights = weights_of_the_root(&window);
         assert!(
@@ -23628,7 +23816,11 @@ mod tests {
         else {
             panic!("the tab coming back has to bring its branch");
         };
-        assert_eq!(*orientation, Orientation::Columns);
+        assert_eq!(
+            *orientation,
+            Orientation::Columns,
+            "the root's cut came back with its orientation turned"
+        );
         assert_eq!(
             children
                 .iter()
@@ -23646,7 +23838,11 @@ mod tests {
         else {
             panic!("the inner cut has to come back still being a cut");
         };
-        assert_eq!(*orientation, Orientation::Rows);
+        assert_eq!(
+            *orientation,
+            Orientation::Rows,
+            "the inner cut came back with its orientation turned"
+        );
         assert_eq!(
             children
                 .iter()
@@ -23711,7 +23907,11 @@ mod tests {
 
         let rounds = wrap_around(&window, &ctx);
 
-        assert_eq!(rounds.len(), 3);
+        assert_eq!(
+            rounds.len(),
+            3,
+            "the round trip did not bring back exactly the three tabs"
+        );
         let as_they_came_back: Vec<usize> = rounds
             .iter()
             .map(|tab| tab.panes()[0].panel_width)
@@ -23937,9 +24137,16 @@ mod tests {
             window.describe().tabs.as_slice(),
             "what is on disk is not the layout that is on screen"
         );
-        assert_eq!(window.saving.writes(), 1);
+        assert_eq!(
+            window.saving.writes(),
+            1,
+            "the expired deadline did not write the layout exactly once"
+        );
         // And the deadline is consumed: if it stayed set, it would write on every frame.
-        assert_eq!(window.persistence.save_due, None);
+        assert_eq!(
+            window.persistence.save_due, None,
+            "the deadline stayed armed after writing, so it would write on every frame"
+        );
 
         let _ = std::fs::remove_dir_all(&base);
     }
@@ -23949,7 +24156,7 @@ mod tests {
         // **Against the last thing written successfully, which is the second reference.** Without
         // it, every deadline would rewrite the same document, and with a drag that comes back to
         // its place it would write without anything having really changed.
-        let (mut window, base, _) = a_window_that_saves("dos-veces");
+        let (mut window, base, _) = a_window_that_saves("two-times");
 
         window.active_mut().move_divider(0, 0.25);
         window.check_whether_the_layout_moved();
@@ -24048,7 +24255,11 @@ mod tests {
             before,
             "a session that could not restore overwrote the layout it did not know how to open"
         );
-        assert_eq!(window.saving.writes(), 0);
+        assert_eq!(
+            window.saving.writes(),
+            0,
+            "a session that could not restore counted a write of its layout"
+        );
 
         let _ = std::fs::remove_dir_all(&base);
     }
@@ -24169,7 +24380,11 @@ mod tests {
         window.save_now();
 
         let read_back = session::read(&path).expect("on closing, what was pending was written");
-        assert_eq!(read_back.tabs(), window.describe().tabs.as_slice());
+        assert_eq!(
+            read_back.tabs(),
+            window.describe().tabs.as_slice(),
+            "on closing, the file kept a layout other than the one on screen"
+        );
 
         let _ = std::fs::remove_dir_all(&base);
     }
@@ -24395,15 +24610,27 @@ mod tests {
             .into_iter()
             .map(|pane| (pane.panel_width, pane.folded))
             .collect();
-        assert_eq!(first_part, vec![(52, false), (24, true)]);
+        assert_eq!(
+            first_part,
+            vec![(52, false), (24, true)],
+            "the first tab's consoles did not come back with each one's panel"
+        );
         let second: Vec<(usize, bool)> = window.tabs[1]
             .panes()
             .into_iter()
             .map(|pane| (pane.panel_width, pane.folded))
             .collect();
-        assert_eq!(second, vec![(36, false)]);
+        assert_eq!(
+            second,
+            vec![(36, false)],
+            "the second tab's console did not come back with its own panel"
+        );
         // And the proportions of the first one's tree, which is what decides the consoles' widths.
-        assert_eq!(weights_of_the_root(&window), vec![3.0, 1.0]);
+        assert_eq!(
+            weights_of_the_root(&window),
+            vec![3.0, 1.0],
+            "the first tab's tree did not come back with its proportions"
+        );
     }
 
     #[test]
@@ -24994,7 +25221,8 @@ mod tests {
                 window
                     .theme
                     .attention_color(panel_contract::Attention::Block, true)
-            )]
+            )],
+            "the active tab's card was not marked with the claim of its own pane"
         );
     }
 
@@ -25043,7 +25271,10 @@ mod tests {
         let [(_, painted_symbol, color)] = on_the_tab_bar.as_slice() else {
             panic!("there had to be exactly one claim on the bar");
         };
-        assert_eq!(painted_symbol, "?");
+        assert_eq!(
+            painted_symbol, "?",
+            "the card painted another claim than the waiting one its console published"
+        );
         assert_eq!(
             *color,
             window
@@ -25494,7 +25725,10 @@ mod tests {
             pane.screen.advance(format!("line {n}\r\n").as_bytes());
         }
         pane.screen.scroll_by(term_core::Scroll::ToTop);
-        assert!(pane.screen.view().scroll() > 0);
+        assert!(
+            pane.screen.view().scroll() > 0,
+            "the premise failed: the view did not move up into the scrollback"
+        );
 
         enqueue(&ctx, vec![egui::Event::Text("a".to_owned())]);
         pane.send_keys(
@@ -26590,7 +26824,7 @@ mod tests {
         );
         window.active_mut().panes_mut()[0]
             .screen
-            .advance(b"\x1b[Hhola mundo");
+            .advance(b"\x1b[Hgood night");
 
         drag_with_chord(
             &mut window,
@@ -26607,7 +26841,7 @@ mod tests {
 
         assert_eq!(
             selected_at(&window, 0).as_deref(),
-            Some("hola"),
+            Some("good"),
             "with Shift held the gesture went to the program instead of marking"
         );
     }
@@ -27024,7 +27258,11 @@ mod tests {
             vec![key_press(egui::Key::Home, egui::Modifiers::NONE)],
         );
         pane.send_keys(&ctx, Instant::now(), &mut modifiers, 1, &keymap, true);
-        assert_eq!(String::from_utf8_lossy(&pane.keystrokes), "\x1bOH");
+        assert_eq!(
+            String::from_utf8_lossy(&pane.keystrokes),
+            "\x1bOH",
+            "the program asked for application keys and Home kept the normal form"
+        );
 
         pane.keystrokes.clear();
         pane.screen.advance(b"\x1b[?1l");
@@ -27050,7 +27288,11 @@ mod tests {
         let area = area_of(1200.0);
         // The keyboard stays on the left one on purpose: if the wheel went to the focus, the test
         // would pass by moving the wrong console.
-        assert_eq!(window.active().focus, 0);
+        assert_eq!(
+            window.active().focus,
+            0,
+            "the premise failed: the keyboard did not start on the left console"
+        );
         for pane in window.active_mut().panes_mut() {
             for n in 0..80 {
                 pane.screen.advance(format!("line {n}\r\n").as_bytes());

@@ -863,7 +863,7 @@ impl crate::Pane {
                 // and that is what this block introduces. Before there were two parallel lists —one
                 // said whether the chord was ours and the other what it did— and letting them fall
                 // out of step already left an arrow «in the queue never reaching the program». With
-                // twelve configurable chords, the risk is multiplied by twelve.
+                // one configurable chord per action, the risk is multiplied by every action.
                 //
                 // **What is NOT unified is each action's condition.** That creating is no good
                 // repeated, or that switching tabs is only ours with more than one open, still
@@ -2608,21 +2608,21 @@ fn key_named(name: &str) -> Option<eframe::egui::Key> {
 /// **It is the single source of which chord belongs to the application**, and that is the reason it exists. Before
 /// they were **two parallel lists** —one said whether the chord was ours and the other what it did— and misaligning them already
 /// left an arrow «in the queue never reaching the program», with its comment written in place. With
-/// eleven configurable chords that risk multiplies by eleven.
+/// one configurable chord per action, that risk multiplies by every action.
 ///
 /// **What it does NOT unify is each action's condition**: that creating does not count repeated, or that switching
 /// tabs is only ours with more than one open, still hangs off the action that needs it. They are
 /// real and have to survive the chord changing.
 #[derive(Debug, Clone)]
 pub struct Keymap {
-    /// Chord → action pairs. **A vector and not a map**: they are eleven at most, and iterating eleven pairs of
-    /// booleans and an integer is faster than reducing the chord to a number. It is looked up once per keyboard
+    /// Chord → action pairs. **A vector and not a map**: there is at most one per [`Action`], and iterating that
+    /// few pairs of booleans and a key is faster than reducing the chord to a number. It is looked up once per keyboard
     /// event, which is the project's hottest path.
     table: Vec<(Chord, Action)>,
 }
 
 impl Default for Keymap {
-    /// The factory ones: the same usual thirteen minus paste, which does not arrive as a key.
+    /// The factory ones: the usual chords minus copy and paste, which do not arrive as keys.
     fn default() -> Self {
         use eframe::egui::Key;
         let with_the_chord = |key| Chord {

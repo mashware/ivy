@@ -641,15 +641,15 @@ impl InjectedDrags {
 
 /// Which gesture is injected when a batch asks for drags.
 ///
-/// **There are two and not one since F2.4**, because there are two dividers that get dragged and
-/// they do not cost the same: the one that tiles consoles —which reorders the tree on dropping— and
-/// the panel's, which only changes the width of one pane and redoes its layout on crossing each
-/// cell.
+/// **The second one came with F2.4**, because there are two dividers that get dragged and they do
+/// not cost the same: the one that tiles consoles —which reorders the tree on dropping— and the
+/// panel's, which only changes the width of one pane and redoes its layout on crossing each cell.
 ///
-/// **And three since there is scrollback**, because the two previous ones leave out the milestone's
+/// **And the third with the scrollback**, because the two previous ones leave out the milestone's
 /// worst case: the panel one changes the width of **one** console and the console one does not
 /// cross cells while it flies. The tree's divider is the only one that changes the width of **two**
-/// at once, and reflowing the text is paid per console.
+/// at once, and reflowing the text is paid per console. The later ones came with the milestones
+/// their variants name.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum InjectedGesture {
     /// Grab a console and drop it onto another: the F2.3 gesture.
@@ -679,7 +679,7 @@ pub(crate) enum InjectedGesture {
 impl InjectedGesture {
     /// What it is called in the report.
     ///
-    /// **It goes to the report because the three gestures do not cost the same**: the console one
+    /// **It goes to the report because the gestures do not cost the same**: the console one
     /// reorders the tree on dropping, the panel one redoes the layout of one on crossing each cell,
     /// and the one of the tree's divider reflows the text of two. Two batches of different kinds
     /// are not compared, and without this word in the header nobody would know which one they are
@@ -697,8 +697,9 @@ impl InjectedGesture {
     }
 }
 
-/// Which gesture the batch asks for: `panel` for the panel's border, `divider` for the one that
-/// tiles consoles, anything else the console one.
+/// Which gesture the batch asks for, by the word the match below reads — `panel` for the panel's
+/// border, `divider` for the one that tiles consoles, and one word for each of the others —
+/// anything else the console one.
 ///
 /// **What is not understood falls into the console one**, just like the other measurement
 /// variables: aborting the startup over a badly written word would be worse, and the report

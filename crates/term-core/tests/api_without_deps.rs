@@ -88,7 +88,7 @@ fn describe_cursor(shape: CursorShape) -> &'static str {
 #[test]
 fn the_view_is_consumed_whole_with_bespoke_types() {
     let mut screen = Screen::new(Size { rows: 4, cols: 20 });
-    screen.advance(b"\x1b[7;1;4mhola\x1b[0m");
+    screen.advance(b"\x1b[7;1;4mgood\x1b[0m");
 
     let view = screen.view();
 
@@ -164,7 +164,7 @@ fn the_history_is_requested_and_read_with_bespoke_types() {
 
     let mut screen = Screen::new(Size { rows: 4, cols: 20 });
     for n in 0..40 {
-        screen.advance(format!("linea {n}\r\n").as_bytes());
+        screen.advance(format!("entry {n}\r\n").as_bytes());
     }
 
     for amount in [
@@ -197,7 +197,7 @@ fn the_selection_is_requested_and_read_with_bespoke_types() {
     }
 
     let mut screen = Screen::new(Size { rows: 4, cols: 20 });
-    screen.advance(b"hola mundo");
+    screen.advance(b"good night");
 
     let from = Cell {
         row: 0,
@@ -218,7 +218,7 @@ fn the_selection_is_requested_and_read_with_bespoke_types() {
     let has: bool = screen.has_selection();
     let text: Option<String> = screen.selected_text();
     assert!(has);
-    assert_eq!(text.as_deref(), Some("hola"));
+    assert_eq!(text.as_deref(), Some("good"));
 
     // And the highlight reaches the snapshot as a boolean per cell, not as the range.
     let view = screen.view();

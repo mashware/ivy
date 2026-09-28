@@ -672,13 +672,13 @@ mod tests {
         // breaks.** What distinguishes a wrapped line from two lines is who put the ending: the
         // terminal or the program.
         let mut screen = Screen::new(Size { rows: 4, cols: 10 });
-        screen.advance(b"uno\r\ndos");
+        screen.advance(b"one\r\ntwo");
 
         select(&mut screen, (0, 0), (1, 2));
 
         assert_eq!(
             screen.selected_text().as_deref(),
-            Some("uno\ndos"),
+            Some("one\ntwo"),
             "two lines written by the program were glued into one"
         );
     }
@@ -689,13 +689,13 @@ mod tests {
         // grid is full of empty cells to the right of what was written; copying them turns any
         // paste into a line with a tail of spaces.
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
-        screen.advance(b"hola");
+        screen.advance(b"good");
 
         select(&mut screen, (0, 0), (0, 19));
 
         assert_eq!(
             screen.selected_text().as_deref(),
-            Some("hola"),
+            Some("good"),
             "the padding at the end of the line was copied"
         );
     }
@@ -788,7 +788,7 @@ mod tests {
         // copy has to ask the second: a bare click leaves the first set, and copying then
         // would return the cell under the pointer without anyone having selected it.
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
-        screen.advance(b"hola mundo");
+        screen.advance(b"good night");
 
         screen.start_selection(cell(0, 2, Half::Left));
         screen.extend_selection(cell(0, 2, Half::Left));
@@ -807,7 +807,7 @@ mod tests {
         // relays out, so the selection **survives** — and without this second half, "always clear"
         // would pass the test.
         let mut screen = Screen::new(Size { rows: 6, cols: 20 });
-        screen.advance(b"hola mundo");
+        screen.advance(b"good night");
         select(&mut screen, (0, 0), (0, 3));
         assert!(screen.has_selection(), "nothing ended up being selected");
 
@@ -830,7 +830,7 @@ mod tests {
         // `less`, `htop`— switches to the alternate one on startup, and a selection that survived would end up
         // highlighting cells of content that no longer exists.
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
-        screen.advance(b"hola mundo");
+        screen.advance(b"good night");
         select(&mut screen, (0, 0), (0, 3));
         assert!(screen.has_selection(), "nothing ended up being selected");
 
@@ -847,7 +847,7 @@ mod tests {
         // **The program cleared what was marked.** If the selection survived, it would keep highlighting
         // empty cells and copying them would return nothing — or worse, what the program writes there afterward.
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
-        screen.advance(b"hola mundo");
+        screen.advance(b"good night");
         select(&mut screen, (0, 0), (0, 3));
         assert!(screen.has_selection(), "nothing ended up being selected");
 
@@ -867,7 +867,7 @@ mod tests {
         // the coordinates untranslated it would give the one occupying that place in the active area today.
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         for n in 0..40 {
-            screen.advance(format!("linea {n}\r\n").as_bytes());
+            screen.advance(format!("entry {n}\r\n").as_bytes());
         }
         screen.scroll_by(Scroll::ToTop);
 
@@ -875,7 +875,7 @@ mod tests {
 
         assert_eq!(
             screen.selected_text().as_deref(),
-            Some("linea 0"),
+            Some("entry 0"),
             "selection went by active-area coordinates instead of by what is seen"
         );
     }
@@ -950,10 +950,10 @@ mod tests {
     fn the_plain_text_appears_without_escape_sequences() {
         let mut screen = Screen::new(Size::default());
 
-        screen.advance(b"\x1b[31mhola\x1b[0m");
+        screen.advance(b"\x1b[31mgood\x1b[0m");
 
         let text = screen.to_text();
-        assert!(text.starts_with("hola"), "unexpected text: {text:?}");
+        assert!(text.starts_with("good"), "unexpected text: {text:?}");
         assert!(
             !text.contains('\x1b'),
             "the dump must not carry raw escapes: {text:?}"
@@ -963,7 +963,7 @@ mod tests {
     #[test]
     fn resizing_leaves_the_requested_size_and_keeps_the_content() {
         let mut screen = Screen::new(Size::default());
-        screen.advance(b"hola");
+        screen.advance(b"good");
 
         screen.resize(Size {
             rows: 30,
@@ -978,7 +978,7 @@ mod tests {
             }
         );
         assert!(
-            screen.to_text().starts_with("hola"),
+            screen.to_text().starts_with("good"),
             "the content did not survive the resize: {:?}",
             screen.to_text()
         );
@@ -1139,7 +1139,7 @@ mod tests {
     #[test]
     fn the_cursor_comes_out_in_visible_coordinates() {
         let mut screen = Screen::new(Size::default());
-        screen.advance(b"hola");
+        screen.advance(b"good");
 
         let cursor = screen
             .view()
@@ -1184,7 +1184,7 @@ mod tests {
         // ships `{ Block, false }`, so leaving it alone means a blink nobody ever sees. **D37**.
         assert!(blinking_after(b""));
         assert!(
-            blinking_after(b"hola"),
+            blinking_after(b"good"),
             "and writing is not asking for anything"
         );
     }
@@ -1310,14 +1310,14 @@ mod tests {
         // Unlike querying the damage, this reader is not destructive. If it were, the
         // second frame of a repaint would come out blank.
         let mut screen = Screen::new(Size::default());
-        screen.advance(b"hola");
+        screen.advance(b"good");
 
         let first = screen.view();
         let second = screen.view();
 
         // Checking only that the two are equal would not be enough: if the reader returned an empty view
         // both times, the test would pass just the same. You have to see first that there is something to lose.
-        assert_eq!(first.cell(0, 0).expect("the cell is missing").c, 'h');
+        assert_eq!(first.cell(0, 0).expect("the cell is missing").c, 'g');
         assert_eq!(first, second);
     }
 
@@ -1344,16 +1344,16 @@ mod tests {
     fn what_scrolls_off_the_top_can_be_seen_again() {
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         for n in 0..20 {
-            screen.advance(format!("linea {n}\r\n").as_bytes());
+            screen.advance(format!("entry {n}\r\n").as_bytes());
         }
 
         // Without scrolling up, the first thing is gone: the screen is four rows.
-        assert!(!text_of(&screen.view()).contains("linea 0"));
+        assert!(!text_of(&screen.view()).contains("entry 0"));
 
         screen.scroll_by(Scroll::ToTop);
 
         assert!(
-            text_of(&screen.view()).contains("linea 0"),
+            text_of(&screen.view()).contains("entry 0"),
             "scrolling all the way up, the first line of the dump had to appear"
         );
     }
@@ -1366,7 +1366,7 @@ mod tests {
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         // Quite a bit more than fits, so the beginning must have fallen off.
         for n in 0..(SCROLLBACK + 500) {
-            screen.advance(format!("linea {n}\r\n").as_bytes());
+            screen.advance(format!("entry {n}\r\n").as_bytes());
         }
 
         screen.scroll_by(Scroll::ToTop);
@@ -1382,7 +1382,7 @@ mod tests {
         );
         let top = text_of(&screen.view());
         assert!(
-            !top.starts_with("linea 0"),
+            !top.starts_with("entry 0"),
             "more than fits was written, so the oldest had to have fallen off: {}",
             top.lines().next().unwrap_or("")
         );
@@ -1395,7 +1395,7 @@ mod tests {
     fn scrolling_up_through_the_history_the_cursor_stops_being_visible() {
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         for n in 0..20 {
-            screen.advance(format!("linea {n}\r\n").as_bytes());
+            screen.advance(format!("entry {n}\r\n").as_bytes());
         }
         assert!(
             screen.view().cursor().is_some(),
@@ -1417,7 +1417,7 @@ mod tests {
     fn the_snapshot_says_how_far_it_has_been_scrolled_up() {
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         for n in 0..20 {
-            screen.advance(format!("linea {n}\r\n").as_bytes());
+            screen.advance(format!("entry {n}\r\n").as_bytes());
         }
         assert_eq!(screen.view().scroll(), 0);
 
@@ -1434,13 +1434,13 @@ mod tests {
     fn what_keeps_coming_in_does_not_send_the_view_back_to_the_end() {
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         for n in 0..20 {
-            screen.advance(format!("linea {n}\r\n").as_bytes());
+            screen.advance(format!("entry {n}\r\n").as_bytes());
         }
         screen.scroll_by(Scroll::ToTop);
         let looking = text_of(&screen.view());
 
         for n in 20..40 {
-            screen.advance(format!("linea {n}\r\n").as_bytes());
+            screen.advance(format!("entry {n}\r\n").as_bytes());
         }
 
         assert_eq!(
@@ -1456,7 +1456,7 @@ mod tests {
     fn scrolling_all_the_way_down_returns_to_where_the_program_writes() {
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         for n in 0..20 {
-            screen.advance(format!("linea {n}\r\n").as_bytes());
+            screen.advance(format!("entry {n}\r\n").as_bytes());
         }
         let up_to_date = text_of(&screen.view());
         screen.scroll_by(Scroll::ToTop);
@@ -1477,27 +1477,27 @@ mod tests {
     fn the_scrollback_dump_keeps_the_lines_that_scrolled_off_the_top() {
         let mut screen = Screen::new(Size { rows: 3, cols: 20 });
         for n in 0..8 {
-            screen.advance(format!("linea {n}\r\n").as_bytes());
+            screen.advance(format!("entry {n}\r\n").as_bytes());
         }
 
         let active = screen.to_text();
         let everything = screen.scrollback_text();
 
         assert!(
-            !active.contains("linea 0"),
+            !active.contains("entry 0"),
             "the premise failed: nothing scrolled off"
         );
-        assert!(active.contains("linea 7"), "the last line is not on screen");
+        assert!(active.contains("entry 7"), "the last line is not on screen");
         assert!(
-            everything.contains("linea 0"),
+            everything.contains("entry 0"),
             "the scrollback lost what scrolled off the top"
         );
         assert!(
-            everything.contains("linea 7"),
+            everything.contains("entry 7"),
             "the scrollback lost the active area"
         );
         assert!(
-            everything.starts_with("linea 0"),
+            everything.starts_with("entry 0"),
             "the scrollback does not begin at the oldest line: {everything:?}"
         );
     }
@@ -1509,7 +1509,7 @@ mod tests {
     fn a_page_leaves_one_line_of_context() {
         let mut screen = Screen::new(Size { rows: 10, cols: 20 });
         for n in 0..50 {
-            screen.advance(format!("linea {n}\r\n").as_bytes());
+            screen.advance(format!("entry {n}\r\n").as_bytes());
         }
 
         screen.scroll_by(Scroll::Pages(1));
@@ -1528,7 +1528,7 @@ mod tests {
     fn the_text_dump_gives_the_active_area_even_while_looking_at_the_history() {
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         for n in 0..20 {
-            screen.advance(format!("linea {n}\r\n").as_bytes());
+            screen.advance(format!("entry {n}\r\n").as_bytes());
         }
         let active = screen.to_text();
 
@@ -1536,7 +1536,7 @@ mod tests {
 
         assert_eq!(screen.to_text(), active);
         assert!(
-            !text_of(&screen.view()).contains("linea 19"),
+            !text_of(&screen.view()).contains("entry 19"),
             "the test is not looking at the scrollback, so it compares nothing"
         );
     }
@@ -1801,9 +1801,9 @@ mod tests {
         // **The other half, and without it the one above is satisfied by putting in extra characters.** What the
         // program did not write cannot appear here.
         let mut screen = Screen::new(Size { rows: 2, cols: 10 });
-        screen.advance(b"hola");
+        screen.advance(b"good");
 
-        assert_eq!(screen.to_text(), "hola");
+        assert_eq!(screen.to_text(), "good");
     }
 
     #[test]

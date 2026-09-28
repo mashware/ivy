@@ -1305,7 +1305,7 @@ mod tests {
         let (tx, rx) = sync_channel(READS_IN_FLIGHT);
         let stop = AtomicBool::new(false);
 
-        let how = feed(Scripted::of(vec![Ok(b"hola".to_vec())]), &tx, &stop);
+        let how = feed(Scripted::of(vec![Ok(b"good".to_vec())]), &tx, &stop);
 
         assert_eq!(how, Ending::EndedWell);
         drop(tx);
@@ -1313,7 +1313,7 @@ mod tests {
         // buffer would satisfy a substring check with the four letters followed by 8 188 zero bytes,
         // and the only test in this crate that catches that today goes through a real
         // pseudoterminal.
-        assert_eq!(drain_until_closed(&rx), b"hola");
+        assert_eq!(drain_until_closed(&rx), b"good");
     }
 
     #[test]
@@ -1656,12 +1656,12 @@ mod tests {
     #[test]
     fn what_the_program_writes_arrives_over_the_channel() {
         let (_pty, channel) =
-            Pty::spawn("sh", &["-c", "printf hola"], Size::default()).expect("launch sh");
+            Pty::spawn("sh", &["-c", "printf good"], Size::default()).expect("launch sh");
 
         let output = drain_until_closed(&channel);
 
         assert!(
-            contains(&output, "hola"),
+            contains(&output, "good"),
             "the program's output did not arrive: {output:?}"
         );
     }

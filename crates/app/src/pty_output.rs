@@ -504,14 +504,14 @@ mod tests {
 
     #[test]
     fn what_the_program_writes_reaches_the_queue() {
-        let (_pty, output) = Pty::spawn("sh", &["-c", "printf hola"], Size { rows: 24, cols: 80 })
+        let (_pty, output) = Pty::spawn("sh", &["-c", "printf hello"], Size { rows: 24, cols: 80 })
             .expect("could not open the pseudoterminal");
         let pty_output = PtyOutput::new(output, || {});
 
         let mut received = Vec::new();
         let arrived = wait_for(|| {
             pty_output.pick_up(&mut received, usize::MAX, Silences::default());
-            received.windows(4).any(|v| v == b"hola")
+            received.windows(5).any(|v| v == b"hello")
         });
 
         assert!(
@@ -590,7 +590,7 @@ mod tests {
         let thread_wakeups = Arc::clone(&wakeups);
         let (_pty, output) = Pty::spawn(
             "sh",
-            &["-c", "printf algo; sleep 30"],
+            &["-c", "printf some; sleep 30"],
             Size { rows: 24, cols: 80 },
         )
         .expect("could not open the pseudoterminal");
@@ -611,12 +611,12 @@ mod tests {
 
     #[test]
     fn picking_up_leaves_the_queue_empty() {
-        let (_pty, output) = Pty::spawn("sh", &["-c", "printf uno"], Size { rows: 24, cols: 80 })
+        let (_pty, output) = Pty::spawn("sh", &["-c", "printf one"], Size { rows: 24, cols: 80 })
             .expect("could not open the pseudoterminal");
         let pty_output = PtyOutput::new(output, || {});
 
         // We wait for the program to finish before picking up. With a live program, the
-        // pseudoterminal could split "uno" into two deliveries and the test would fail one day out
+        // pseudoterminal could split "one" into two deliveries and the test would fail one day out
         // of many for a reason that has nothing to do with what it tests.
         assert!(wait_for(|| !pty_output.is_alive()));
 
@@ -790,7 +790,7 @@ mod tests {
         // Without it, the wait —which in a dump is more than a second— cannot be measured, and the
         // rest of the stretches are microseconds: the number would say the application goes
         // instantaneous exactly when it is seen lagging behind.
-        let (_pty, output) = Pty::spawn("sh", &["-c", "printf hola"], Size { rows: 24, cols: 80 })
+        let (_pty, output) = Pty::spawn("sh", &["-c", "printf hello"], Size { rows: 24, cols: 80 })
             .expect("could not open the pseudoterminal");
         let pty_output = PtyOutput::new(output, || {});
         assert!(wait_for(|| !pty_output.is_alive()));
@@ -857,17 +857,17 @@ mod tests {
     fn the_destination_keeps_what_it_already_had() {
         // The frame reuses its buffer and may call with remnants of the previous pass still
         // unprocessed. If picking up overwrote them, bytes already read from the program would be lost.
-        let (_pty, output) = Pty::spawn("sh", &["-c", "printf dos"], Size { rows: 24, cols: 80 })
+        let (_pty, output) = Pty::spawn("sh", &["-c", "printf two"], Size { rows: 24, cols: 80 })
             .expect("could not open the pseudoterminal");
         let pty_output = PtyOutput::new(output, || {});
 
-        let mut destination = b"antes".to_vec();
+        let mut destination = b"before".to_vec();
         assert!(wait_for(|| {
             pty_output.pick_up(&mut destination, usize::MAX, Silences::default());
-            destination.len() > b"antes".len()
+            destination.len() > b"before".len()
         }));
         assert!(
-            destination.starts_with(b"antes"),
+            destination.starts_with(b"before"),
             "what was already there was lost"
         );
     }
