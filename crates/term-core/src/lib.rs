@@ -483,6 +483,15 @@ impl Pty {
         size: Size,
         env: &[(&str, Option<&OsStr>)],
     ) -> Result<(Self, Receiver<Vec<u8>>)> {
+        // **An empty name is refused here, before the pseudoterminal exists.** `openpty` succeeds
+        // whatever the name is, so without this guard every descriptor below is opened for a program
+        // that cannot start, and portable-pty's PATH search then reports each PATH entry as «exists
+        // but is a directory» — a description of the search, not of the mistake. Whitespace counts
+        // as empty: it names no program either.
+        if program.trim().is_empty() {
+            return Err("no program to launch: the name is empty".into());
+        }
+
         let pair = native_pty_system().openpty(portable_pty::PtySize {
             rows: size.rows,
             cols: size.cols,
@@ -1651,6 +1660,21 @@ mod tests {
     fn a_nonexistent_program_gives_an_error_instead_of_a_panic() {
         let result = Pty::spawn("program-that-does-not-exist-anywhere", &[], Size::default());
         assert!(result.is_err());
+    }
+
+    /// An empty or blank name names no program, so it is refused **before any pseudoterminal is
+    /// opened** — and the error has to say the name is empty, or it reads as a complaint about PATH.
+    #[test]
+    fn an_empty_program_name_is_refused_with_an_error_that_names_it() {
+        for program in ["", "  "] {
+            let Err(error) = Pty::spawn(program, &[], Size::default()) else {
+                panic!("an empty program name ({program:?}) launched a program");
+            };
+            assert!(
+                error.to_string().contains("empty"),
+                "the error does not name the empty name: {error}"
+            );
+        }
     }
 
     #[test]
