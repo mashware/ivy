@@ -1,6 +1,6 @@
-<title>Maqueta — terminal con paneles de tarea</title>
+<title>Mockup — terminal with task panels</title>
 <style>
-  /* ---- Tokens: marco de la página (se adapta al tema del lector) ---- */
+  /* ---- Tokens: the page frame (follows the reader's theme) ---- */
   :root {
     --page-bg: #F1F2F4;
     --page-surface: #FFFFFF;
@@ -28,7 +28,7 @@
     --page-accent: #7587A6;
   }
 
-  /* ---- Tokens: la app. Paleta Twilight, la del terminal real ---- */
+  /* ---- Tokens: the app. Twilight palette, the real terminal's ---- */
   :root {
     --t-bg: #1E1E1E;
     --t-chrome: #262626;
@@ -78,7 +78,7 @@
   }
   .intro p { margin: 0; color: var(--page-ink-soft); font-size: 15px; }
 
-  /* ---- Controles ---- */
+  /* ---- Controls ---- */
   .controls {
     display: flex; flex-wrap: wrap; gap: 20px 32px; align-items: flex-end;
     padding: 16px 18px; border: 1px solid var(--page-line); border-radius: 10px;
@@ -102,7 +102,7 @@
   }
   .seg button:focus-visible { outline: 2px solid var(--page-accent); outline-offset: 2px; }
 
-  /* ---- La ventana de la app ---- */
+  /* ---- The app's window ---- */
   .stage { container-type: inline-size; }
   .win {
     background: var(--t-bg);
@@ -138,7 +138,7 @@
   .tab:focus-visible { outline: 2px solid var(--t-blue); outline-offset: -2px; }
   .tab.add { color: var(--t-dim); padding: 7px 12px; }
 
-  /* ---- Rejilla de divisiones ---- */
+  /* ---- Grid of splits ---- */
   .grid { flex: 1; display: grid; gap: 2px; background: var(--t-blue); padding: 2px 0 0; }
   .grid[data-n="1"] { grid-template-columns: 1fr; }
   .grid[data-n="2"] { grid-template-columns: 1fr 1fr; }
@@ -146,7 +146,7 @@
   .grid[data-n="3"] .split:first-child { grid-row: span 2; }
   .grid[data-n="4"] { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
 
-  /* ---- Una división: terminal + su panel ---- */
+  /* ---- One split: terminal + its panel ---- */
   .split { background: var(--t-bg); display: flex; min-width: 0; min-height: 0; overflow: hidden; }
   .split[data-pos="bottom"] { flex-direction: column; }
 
@@ -166,7 +166,7 @@
   @keyframes blink { 50% { opacity: 0; } }
   @media (prefers-reduced-motion: reduce) { .caret { animation: none; } }
 
-  /* ---- El panel de tarea ---- */
+  /* ---- The task panel ---- */
   .panel {
     flex: none; background: var(--t-panel); border-left: 1px solid #000;
     padding: 9px 10px; font-size: 11.5px; line-height: 1.5;
@@ -203,14 +203,14 @@
 
   .p-sep { height: 1px; background: #000; opacity: .5; flex: none; }
 
-  /* Indicador de actividad: trabajando vs esperándote */
+  /* Activity indicator: working vs waiting for you */
   .p-live { width: 7px; height: 7px; border-radius: 50%; flex: none; }
   .p-live.busy { background: var(--t-green); animation: pulse 1.6s ease-in-out infinite; }
   .p-live.idle { background: var(--t-dim); }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
   @media (prefers-reduced-motion: reduce) { .p-live.busy { animation: none; } }
 
-  /* Contexto y coste — lo único que solo el agente sabe */
+  /* Context and cost — the one thing only the agent knows */
   .p-ctx { display: flex; flex-direction: column; gap: 3px; flex: none; }
   .p-ctx .row2 { display: flex; justify-content: space-between; gap: 8px; font-size: 10.5px; }
   .p-ctx .lbl { color: var(--t-dim); }
@@ -220,14 +220,14 @@
   .p-bar.warn i { background: var(--t-yellow); }
   .p-bar.hot i { background: var(--t-orange); }
 
-  /* Salud de conexiones */
+  /* Connection health */
   .p-conns { display: flex; flex-wrap: wrap; gap: 4px 9px; font-size: 10.5px; flex: none; }
   .p-conn { display: flex; align-items: center; gap: 4px; color: var(--t-dim); }
   .p-conn i { width: 5px; height: 5px; border-radius: 50%; background: var(--t-green); }
   .p-conn.down { color: var(--t-orange); }
   .p-conn.down i { background: var(--t-orange); }
 
-  /* Plegado del panel */
+  /* Panel folding */
   .p-fold {
     background: none; border: none; cursor: pointer; flex: none;
     color: var(--t-dim); font-family: var(--mono); font-size: 12px; padding: 0 0 0 4px;
@@ -257,7 +257,7 @@
   .act.go { border-color: #4A5D45; color: var(--t-green); }
   .act.go:hover { background: #2A3327; }
 
-  /* ---- Notas ---- */
+  /* ---- Notes ---- */
   .notes { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
   .note {
     padding: 15px 17px; border: 1px solid var(--page-line); border-radius: 10px;
@@ -284,18 +284,18 @@
 
 <div class="wrap">
   <header class="intro">
-    <span class="eyebrow">Maqueta · datos de mentira</span>
-    <h1>Una pestaña, varias divisiones, cada una con su panel</h1>
+    <span class="eyebrow">Mockup · fake data</span>
+    <h1>One tab, several splits, each with its own panel</h1>
     <p>
-      No es la app: es su forma, para juzgar proporciones antes de escribir Rust.
-      Mueve los controles y mira dónde se rompe — cuánto sitio le queda al terminal,
-      si el panel sigue leyéndose con cuatro divisiones, si los botones estorban.
+      It is not the app: it is its shape, to judge proportions before writing Rust.
+      Move the controls and see where it breaks — how much room the terminal has left,
+      whether the panel still reads with four splits, whether the buttons get in the way.
     </p>
   </header>
 
-  <section class="controls" aria-label="Controles de la maqueta">
+  <section class="controls" aria-label="Mockup controls">
     <div class="ctl">
-      <span>Divisiones</span>
+      <span>Splits</span>
       <div class="seg" id="segN" role="group">
         <button data-v="1" aria-pressed="false">1</button>
         <button data-v="2" aria-pressed="false">2</button>
@@ -306,37 +306,37 @@
     <div class="ctl">
       <span>Panel</span>
       <div class="seg" id="segPos" role="group">
-        <button data-v="right" aria-pressed="true">A la derecha</button>
-        <button data-v="bottom" aria-pressed="false">Debajo</button>
+        <button data-v="right" aria-pressed="true">On the right</button>
+        <button data-v="bottom" aria-pressed="false">Below</button>
       </div>
     </div>
     <div class="ctl">
-      <span>Ancho del panel</span>
+      <span>Panel width</span>
       <div class="seg" id="segW" role="group">
-        <button data-v="narrow" aria-pressed="false">Estrecho</button>
-        <button data-v="mid" aria-pressed="true">Medio</button>
-        <button data-v="wide" aria-pressed="false">Ancho</button>
+        <button data-v="narrow" aria-pressed="false">Narrow</button>
+        <button data-v="mid" aria-pressed="true">Medium</button>
+        <button data-v="wide" aria-pressed="false">Wide</button>
       </div>
     </div>
     <div class="ctl">
-      <span>Botones de acción</span>
+      <span>Action buttons</span>
       <div class="seg" id="segAct" role="group">
-        <button data-v="1" aria-pressed="true">Con</button>
-        <button data-v="0" aria-pressed="false">Sin</button>
+        <button data-v="1" aria-pressed="true">On</button>
+        <button data-v="0" aria-pressed="false">Off</button>
       </div>
     </div>
     <div class="ctl">
-      <span>Paneles</span>
+      <span>Panels</span>
       <div class="seg" id="segHide" role="group">
-        <button data-v="0" aria-pressed="true">Ver</button>
-        <button data-v="1" aria-pressed="false">Ocultar</button>
+        <button data-v="0" aria-pressed="true">Show</button>
+        <button data-v="1" aria-pressed="false">Hide</button>
       </div>
     </div>
     <div class="ctl">
-      <span>Contexto y conexiones</span>
+      <span>Context and connections</span>
       <div class="seg" id="segMeta" role="group">
-        <button data-v="1" aria-pressed="true">Con</button>
-        <button data-v="0" aria-pressed="false">Sin</button>
+        <button data-v="1" aria-pressed="true">On</button>
+        <button data-v="0" aria-pressed="false">Off</button>
       </div>
     </div>
   </section>
@@ -345,7 +345,7 @@
     <div class="win">
       <div class="titlebar">
         <div class="wbtns"><span class="wbtn"></span><span class="wbtn"></span><span class="wbtn c"></span></div>
-        <div class="name">backend — 3 divisiones</div>
+        <div class="name">backend — 3 splits</div>
         <div style="width:53px"></div>
       </div>
 
@@ -362,28 +362,28 @@
 
   <section class="notes">
     <div class="note">
-      <h3>Qué mirar en el panel</h3>
-      <p>La columna de marcas a la izquierda es lo que permite escanear en vertical sin leer. Con cuatro divisiones y panel estrecho, comprueba si sigue funcionando o si hay que recortar líneas.</p>
+      <h3>What to look at in the panel</h3>
+      <p>The column of marks on the left is what lets you scan down without reading. With four splits and a narrow panel, check whether it still works or whether lines have to be cut.</p>
     </div>
     <div class="note">
-      <h3>Contexto, coste y conexiones</h3>
-      <p>Lo único que solo el agente puede saber. La barra se vuelve ámbar al 50% y naranja al 75%, para ver de un vistazo a cuál le queda poco antes de compactar. <code>MT-15863</code> va al 76% y tiene GitLab caído.</p>
+      <h3>Context, cost and connections</h3>
+      <p>The one thing only the agent can know. The bar turns amber at 50% and orange at 75%, to see at a glance which one is close to compacting. <code>MT-15863</code> is at 76% and has GitLab down.</p>
     </div>
     <div class="note">
-      <h3>Trabajando o esperándote</h3>
-      <p>El punto junto al ticket late cuando el agente está trabajando y se apaga cuando te espera. Con cuatro divisiones es lo que dice dónde mirar sin leer nada.</p>
+      <h3>Working or waiting for you</h3>
+      <p>The dot next to the ticket pulses while the agent is working and goes dark when it is waiting for you. With four splits it is what tells you where to look without reading anything.</p>
     </div>
     <div class="note">
-      <h3>Plegar por división</h3>
-      <p>El <code>▸</code> de cada panel lo reduce a una franja con solo el indicador. Prueba a plegar dos y dejar uno abierto: es el modo real cuando trabajas en uno y vigilas el resto.</p>
+      <h3>Folding per split</h3>
+      <p>Each panel's <code>▸</code> shrinks it to a strip with only the indicator. Try folding two and leaving one open: it is the real mode when you work in one and keep an eye on the rest.</p>
     </div>
     <div class="note">
-      <h3>Los botones son la parte nueva</h3>
-      <p>Cada uno escribe en el terminal de <em>su</em> división. El productor los declara en el fichero de estado con <code>send</code>; la app solo los pinta y los dispara.</p>
+      <h3>The buttons are the new part</h3>
+      <p>Each one writes into the terminal of <em>its own</em> split. The producer declares them in the state file with <code>send</code>; the app only paints them and fires them.</p>
     </div>
     <div class="note">
-      <h3>Lo que aún no se ve</h3>
-      <p>Arrastrar divisiones para recolocarlas, guardar y restaurar la disposición, y el supervisor. Primero conviene que esta forma convenza.</p>
+      <h3>What is not shown yet</h3>
+      <p>Dragging splits to rearrange them, saving and restoring the layout, and the supervisor. First this shape has to convince.</p>
     </div>
   </section>
 </div>
@@ -391,99 +391,99 @@
 <script>
   const WORKS = [
     {
-      tick: "MT-15865", meta: "feat·M", phase: "validate", ago: "ahora",
-      title: "Exponer estado y eventos de tracking de un hilo",
+      tick: "MT-15865", meta: "feat·M", phase: "validate", ago: "now",
+      title: "Expose a thread's tracking state and events",
       busy: true,
-      ctx: { tokens: "35.392", pct: 18, cost: "0,62" },
+      ctx: { tokens: "35,392", pct: 18, cost: "0.62" },
       conns: [{ n: "domain-memory", ok: true }, { n: "intelephense", ok: true }],
       rows: [
-        { m: "✓", k: "done",    r: "#1", t: "las dos fuentes de lectura por lote", l: "!9977" },
-        { m: "✓", k: "done",    r: "#2", t: "contadores por tipo de evento",       l: "!9984" },
-        { m: "▶", k: "current", r: "#3", t: "el mapeo a la forma del canal" },
-        { m: "·", k: "pending", r: "#4", t: "caso de uso · #5 documento · #6 ruta" },
+        { m: "✓", k: "done",    r: "#1", t: "the two batch read sources", l: "!9977" },
+        { m: "✓", k: "done",    r: "#2", t: "counters per event type",            l: "!9984" },
+        { m: "▶", k: "current", r: "#3", t: "the mapping to the channel's shape" },
+        { m: "·", k: "pending", r: "#4", t: "use case · #5 document · #6 route" },
         { m: "",  k: "",        r: "",   t: "" },
-        { m: "›", k: "info",    r: "Ahora",   t: "corriendo la suite funcional" },
-        { m: "·", k: "pending", r: "Después", t: "review y ship de la #3" },
-        { m: "⏸", k: "wait",    r: "Decide",  t: "confirmar alcance de la #3" }
+        { m: "›", k: "info",    r: "Now",     t: "running the functional suite" },
+        { m: "·", k: "pending", r: "Next",    t: "review and ship of #3" },
+        { m: "⏸", k: "wait",    r: "Decide",  t: "confirm the scope of #3" }
       ],
-      acts: [["Ver salida", ""], ["Continuar", "go"]],
+      acts: [["View output", ""], ["Continue", "go"]],
       term: [
         ["prompt", "→ backend git:(MT-15865) "],
-        ["", "● Ejecutando tests de ThreadTrackingEndpoint…"],
-        ["muted", "  PHPUnit 11.4 · 6 de 41 completados"],
+        ["", "● Running the ThreadTrackingEndpoint tests…"],
+        ["muted", "  PHPUnit 11.4 · 6 of 41 done"],
         ["", ""],
-        ["muted", "  ✓ devuelve 400 si falta message_ids"],
-        ["muted", "  ✓ tope de 50 identificadores"],
-        ["warn",  "  ✗ agrupa aperturas por destinatario"],
-        ["muted", "    esperado 3, recibido 2"],
+        ["muted", "  ✓ returns 400 when message_ids is missing"],
+        ["muted", "  ✓ caps at 50 identifiers"],
+        ["warn",  "  ✗ groups opens by recipient"],
+        ["muted", "    expected 3, got 2"],
         ["", ""],
         ["prompt", "→ "], ["caret", ""]
       ]
     },
     {
-      tick: "MT-15863", meta: "feat·M", phase: "ship", ago: "hace 4 min",
-      title: "El agente no sabe qué campo rechazó la validación",
+      tick: "MT-15863", meta: "feat·M", phase: "ship", ago: "4 min ago",
+      title: "The agent does not know which field failed validation",
       busy: true,
-      ctx: { tokens: "148.900", pct: 76, cost: "2,15" },
+      ctx: { tokens: "148,900", pct: 76, cost: "2.15" },
       conns: [{ n: "domain-memory", ok: true }, { n: "gitlab", ok: false }],
       rows: [
-        { m: "✓", k: "done",    r: "#1", t: "piezas compartidas", l: "!9951" },
-        { m: "✓", k: "done",    r: "#2", t: "mapa de códigos de error", l: "!9962" },
-        { m: "▶", k: "current", r: "#3", t: "detalle en la respuesta", l: "!9970" },
+        { m: "✓", k: "done",    r: "#1", t: "shared pieces", l: "!9951" },
+        { m: "✓", k: "done",    r: "#2", t: "error code map", l: "!9962" },
+        { m: "▶", k: "current", r: "#3", t: "detail in the response", l: "!9970" },
         { m: "",  k: "",        r: "",   t: "" },
-        { m: "›", k: "info",    r: "Ahora",   t: "esperando la pipeline" },
-        { m: "⚠", k: "block",   r: "Bloqueo", t: "mailsuite-mcp sin contrato" }
+        { m: "›", k: "info",    r: "Now",     t: "waiting for the pipeline" },
+        { m: "⚠", k: "block",   r: "Blocked", t: "mailsuite-mcp has no contract" }
       ],
-      acts: [["Ver pipeline", ""], ["Reintentar", ""]],
+      acts: [["View pipeline", ""], ["Retry", ""]],
       term: [
         ["prompt", "→ backend git:(MT-15863) "],
-        ["", "● Esperando la pipeline de !9970"],
+        ["", "● Waiting for the pipeline of !9970"],
         ["muted", "  build      ✓ 1m 12s"],
         ["muted", "  phpstan    ✓ 48s"],
-        ["", "  phpunit    ⣾ corriendo…"],
-        ["muted", "  deploy     · pendiente"],
+        ["", "  phpunit    ⣾ running…"],
+        ["muted", "  deploy     · pending"],
         ["", ""],
         ["prompt", "→ "], ["caret", ""]
       ]
     },
     {
-      tick: "MT-15849", meta: "feat·M", phase: "context", ago: "hace 2 h",
-      title: "Recordatorios: la única escritura sin cuota ni límite",
+      tick: "MT-15849", meta: "feat·M", phase: "context", ago: "2 h ago",
+      title: "Reminders: the only write with no quota and no limit",
       busy: false,
-      ctx: { tokens: "8.240", pct: 4, cost: "0,11" },
+      ctx: { tokens: "8,240", pct: 4, cost: "0.11" },
       conns: [{ n: "domain-memory", ok: true }],
       rows: [
-        { m: "▶", k: "current", r: "Ahora",   t: "leyendo el endpoint actual" },
-        { m: "·", k: "pending", r: "Después", t: "diseño y plan de MRs" },
+        { m: "▶", k: "current", r: "Now",     t: "reading the current endpoint" },
+        { m: "·", k: "pending", r: "Next",    t: "design and MR plan" },
         { m: "",  k: "",        r: "",   t: "" },
-        { m: "⏸", k: "wait",    r: "Decide", t: "¿cuota por canal o global?" }
+        { m: "⏸", k: "wait",    r: "Decide", t: "quota per channel or global?" }
       ],
-      acts: [["Abrir ticket", ""], ["Diseñar", "go"]],
+      acts: [["Open ticket", ""], ["Design", "go"]],
       term: [
         ["prompt", "→ backend git:(master) "],
-        ["", "● Leyendo ReminderController"],
-        ["muted", "  4 ficheros · 612 líneas"],
+        ["", "● Reading ReminderController"],
+        ["muted", "  4 files · 612 lines"],
         ["", ""],
-        ["muted", "  Sin QuotaGuard en la ruta de escritura."],
-        ["muted", "  El resto del canal sí lo aplica."],
+        ["muted", "  No QuotaGuard on the write path."],
+        ["muted", "  The rest of the channel does apply it."],
         ["", ""],
         ["prompt", "→ "], ["caret", ""]
       ]
     },
     {
-      tick: "MT-15847", meta: "bug·S", phase: "done", ago: "hace 1 d",
-      title: "El gate de plan del seguimiento por destinatario",
+      tick: "MT-15847", meta: "bug·S", phase: "done", ago: "1 d ago",
+      title: "The plan gate of per-recipient tracking",
       busy: false,
-      ctx: { tokens: "61.030", pct: 31, cost: "1,40" },
+      ctx: { tokens: "61,030", pct: 31, cost: "1.40" },
       conns: [{ n: "domain-memory", ok: true }],
       rows: [
-        { m: "✓", k: "done", r: "", t: "cerrado y archivado" },
-        { m: "✓", k: "done", r: "#1", t: "fix del gate", l: "!9942" }
+        { m: "✓", k: "done", r: "", t: "closed and archived" },
+        { m: "✓", k: "done", r: "#1", t: "fix the gate", l: "!9942" }
       ],
-      acts: [["Archivar", ""]],
+      acts: [["Archive", ""]],
       term: [
         ["prompt", "→ backend git:(master) "],
-        ["muted", "  trabajo cerrado"],
+        ["muted", "  work closed"],
         ["", ""],
         ["prompt", "→ "], ["caret", ""]
       ]
@@ -491,7 +491,7 @@
   ];
 
   const state = { n: 3, pos: "right", w: "mid", act: 1, hide: 0, meta: 1 };
-  const folded = new Set();   // índices de divisiones con el panel plegado
+  const folded = new Set();   // indices of the splits whose panel is folded
   const grid = document.getElementById("grid");
   const esc = s => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 
@@ -514,18 +514,18 @@
 
     const phaseColour = work.phase === "done" ? "var(--t-green)" : "var(--t-orange)";
 
-    // Contexto y coste: lo que solo el agente puede saber
+    // Context and cost: what only the agent can know
     const heat = work.ctx.pct >= 75 ? "hot" : work.ctx.pct >= 50 ? "warn" : "";
     const meta = state.meta ? `
       <div class="p-ctx">
         <div class="row2">
-          <span class="lbl">contexto</span>
+          <span class="lbl">context</span>
           <span class="val">${esc(work.ctx.tokens)} · ${work.ctx.pct}%</span>
         </div>
         <div class="p-bar ${heat}"><i style="width:${work.ctx.pct}%"></i></div>
         <div class="row2">
-          <span class="lbl">gastado</span>
-          <span class="val">${esc(work.ctx.cost)} €</span>
+          <span class="lbl">spent</span>
+          <span class="val">€${esc(work.ctx.cost)}</span>
         </div>
       </div>
       <div class="p-conns">${work.conns.map(c =>
@@ -535,16 +535,16 @@
     return `<aside class="panel">
       <div class="p-mini" aria-hidden="true">
         <span class="p-live ${work.busy ? "busy" : "idle"}"></span>
-        <button class="p-fold" title="Desplegar">◂</button>
+        <button class="p-fold" title="Unfold">◂</button>
       </div>
       <div class="p-head">
         <span class="p-live ${work.busy ? "busy" : "idle"}"
-              title="${work.busy ? "Trabajando" : "Esperándote"}"></span>
+              title="${work.busy ? "Working" : "Waiting for you"}"></span>
         <span class="p-tick">${esc(work.tick)}</span>
         <span class="p-meta">${esc(work.meta)}</span>
         <span class="p-phase" style="color:${phaseColour}">⏵ ${esc(work.phase)}</span>
         <span class="p-ago">${esc(work.ago)}</span>
-        <button class="p-fold" title="Plegar el panel">▸</button>
+        <button class="p-fold" title="Fold the panel">▸</button>
       </div>
       <div class="p-title">${esc(work.title)}</div>
       <div class="p-sep"></div>
@@ -568,7 +568,7 @@
          ${termHTML(w)}${panelHTML(w)}
        </section>`).join("");
     document.querySelector(".name").textContent =
-      `backend — ${state.n} ${state.n === 1 ? "división" : "divisiones"}`;
+      `backend — ${state.n} ${state.n === 1 ? "split" : "splits"}`;
   }
 
   function wire(id, key, cast) {
@@ -589,7 +589,7 @@
   wire("segHide", "hide", Number);
   wire("segMeta", "meta", Number);
 
-  // Plegar / desplegar el panel de una división concreta
+  // Fold / unfold the panel of one specific split
   grid.addEventListener("click", e => {
     const btn = e.target.closest(".p-fold");
     if (!btn) return;

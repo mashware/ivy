@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""Panel de estado en vivo para los trabajos de flow.
+"""Live status panel for flow's works.
 
-Lee .claude/work/<trabajo>/meta.json y repinta cuando algo cambia.
-No necesita hooks ni cambios en flow: los comandos de flow ya escriben
-meta.json en cada paso, y este panel solo observa el disco.
+Reads .claude/work/<work>/meta.json and repaints when something changes.
+It needs no hooks and no change to flow: flow's commands already write
+meta.json at every step, and this panel only watches the disk.
 
-Dos modos:
+Two modes:
 
-  flow-panel [ruta]            lista todos los trabajos abiertos del repo
-  flow-panel --focus [ruta]    solo el trabajo de la rama actual, con detalle
+  flow-panel [path]            lists every open work in the repo
+  flow-panel --focus [path]    only the work of the current branch, in detail
 
-El modo --focus está pensado para vivir como subdivisión del panel donde
-corre un agente: detecta la rama del directorio en el que se abre y muestra
-esa tarea y solo esa. Como flow crea un worktree por trabajo, cada agente
-acaba en un directorio distinto y cada subdivisión se sintoniza sola.
+The --focus mode is meant to live as a split of the pane where an agent
+runs: it detects the branch of the directory it is opened in and shows
+that task and that task only. Since flow creates one worktree per work,
+each agent ends up in a different directory and each split tunes itself.
 """
 
 import json
@@ -25,7 +25,7 @@ import sys
 import time
 import unicodedata
 
-# Paleta Twilight, la misma del terminal
+# Twilight palette, the same as the terminal's
 DIM = "\033[38;2;95;90;96m"
 FG = "\033[38;2;167;167;167m"
 ORANGE = "\033[38;2;207;106;76m"
@@ -37,7 +37,7 @@ BOLD = "\033[1m"
 RESET = "\033[0m"
 CLEAR = "\033[H\033[2J\033[3J"
 
-# Secuencia de fases por tipo de trabajo, según los comandos de flow
+# Phase sequence per work type, following flow's commands
 PHASES = {
     "feat": ["context", "brainstorm", "design", "plan", "build",
              "validate", "review", "ship"],
@@ -48,10 +48,10 @@ PHASES = {
 TERMINAL_PHASES = {"done", "abandoned"}
 
 
-# ─── utilidades de texto ──────────────────────────────────────────────────
+# ─── text utilities ───────────────────────────────────────────────────────
 
 def vis(text):
-    """Ancho visual: los símbolos anchos ocupan dos celdas."""
+    """Visual width: wide symbols take two cells."""
     n = 0
     for ch in text:
         if unicodedata.combining(ch):
@@ -74,7 +74,7 @@ def cut(text, width):
 
 
 def wrap(text, width, max_lines):
-    """Parte el texto por palabras. La última línea se trunca si no cabe."""
+    """Splits the text by words. The last line is truncated if it does not fit."""
     words = " ".join(str(text).split()).split(" ")
     lines, cur = [], ""
     for word in words:
@@ -85,7 +85,7 @@ def wrap(text, width, max_lines):
         if cur:
             lines.append(cur)
         if len(lines) == max_lines:
-            # no queda sitio: lo pendiente se resume en la última línea
+            # no room left: what remains is squeezed into the last line
             rest = " ".join(words[words.index(word):]) if word in words else word
             lines[-1] = cut(f"{lines[-1]} {rest}", width)
             return lines
@@ -96,7 +96,7 @@ def wrap(text, width, max_lines):
 
 
 def ago(iso):
-    """'hace 2 h' a partir de una fecha ISO8601."""
+    """'2 h ago' from an ISO8601 date."""
     if not iso:
         return ""
     try:
@@ -108,15 +108,15 @@ def ago(iso):
     except ValueError:
         return ""
     if secs < 90:
-        return "ahora"
+        return "now"
     if secs < 5400:
-        return f"hace {int(secs // 60)} min"
+        return f"{int(secs // 60)} min ago"
     if secs < 172800:
-        return f"hace {int(secs // 3600)} h"
-    return f"hace {int(secs // 86400)} d"
+        return f"{int(secs // 3600)} h ago"
+    return f"{int(secs // 86400)} d ago"
 
 
-# ─── localizar repo y trabajo ─────────────────────────────────────────────
+# ─── locating the repo and the work ───────────────────────────────────────
 
 def git(cwd, *args):
     try:
@@ -128,17 +128,17 @@ def git(cwd, *args):
 
 
 def find_repo(start):
-    """El checkout principal del repo.
+    """The repo's main checkout.
 
-    Desde un worktree hay que volver al principal: .claude/work está
-    ignorado por git, así que solo existe allí.
+    From a worktree we have to go back to the main one: .claude/work is
+    ignored by git, so it only exists there.
     """
     start = os.path.abspath(start)
     common = git(start, "rev-parse", "--path-format=absolute", "--git-common-dir")
     if common:
         return os.path.dirname(common)
 
-    # sin git: subimos buscando .claude/work
+    # no git: walk up looking for .claude/work
     path = start
     while True:
         if os.path.isdir(os.path.join(path, ".claude", "work")):
@@ -154,7 +154,7 @@ def current_branch(start):
 
 
 def work_dirs(repo):
-    """Carpetas de trabajo activas, ignorando el archivo histórico."""
+    """Active work folders, ignoring the archive."""
     base = os.path.join(repo, ".claude", "work")
     if not os.path.isdir(base):
         return []
@@ -177,14 +177,14 @@ def read_meta(path):
 
 
 def pick_work(repo, branch, wanted=None):
-    """Qué trabajo mostrar en modo foco, por orden de fiabilidad.
+    """Which work to show in focus mode, in order of reliability.
 
-    1. El que se pide explícitamente (--work o FLOW_WORK). Es el caso normal
-       cuando se trabaja desde el checkout principal, donde todos los paneles
-       comparten directorio y no hay nada que los distinga.
-    2. El de la rama actual, si coincide. Sirve cuando cada agente vive en
-       su propio worktree.
-    3. El tocado más recientemente, como último recurso.
+    1. The one asked for explicitly (--work or FLOW_WORK). It is the normal
+       case when working from the main checkout, where every panel shares
+       the directory and nothing tells them apart.
+    2. The one of the current branch, if it matches. It works when each
+       agent lives in its own worktree.
+    3. The most recently touched one, as a last resort.
     """
     wanted = (wanted or os.environ.get("FLOW_WORK", "")).strip()
     found = []
@@ -197,7 +197,7 @@ def pick_work(repo, branch, wanted=None):
         for path, meta in found:
             if wanted in (meta.get("ticket"), meta.get("slug")):
                 return path, meta
-        return None, None          # se pidió uno concreto y no existe
+        return None, None          # a specific one was asked for and it does not exist
 
     if branch:
         for path, meta in found:
@@ -212,7 +212,7 @@ def pick_work(repo, branch, wanted=None):
 
 
 def list_json(repo):
-    """Los trabajos abiertos, para que el selector de WezTerm los ofrezca."""
+    """The open works, for the WezTerm picker to offer."""
     out = []
     for path in work_dirs(repo):
         meta = read_meta(path)
@@ -230,7 +230,7 @@ def list_json(repo):
 
 
 def fingerprint(repo):
-    """Huella barata del estado en disco: si no cambia, no repintamos."""
+    """Cheap fingerprint of the state on disk: if it does not change, we do not repaint."""
     marks = []
     for path in work_dirs(repo):
         for f in ("meta.json", "panel.md", "panel.json"):
@@ -242,23 +242,23 @@ def fingerprint(repo):
     return tuple(marks)
 
 
-# ─── piezas de render ─────────────────────────────────────────────────────
+# ─── render pieces ────────────────────────────────────────────────────────
 
 def phase_track(meta, width, upto=None):
-    """Los pasos del flujo, adaptados al ancho disponible.
+    """The flow's steps, fitted to the available width.
 
-    En un panel estrecho no caben ocho nombres de fase, así que degradamos
-    en tres niveles: nombres completos → puntos + fase actual → contador.
+    Eight phase names do not fit in a narrow panel, so we degrade in three
+    levels: full names → dots + current phase → counter.
 
-    `upto` recorta la secuencia en esa fase (inclusive): con tren de MRs,
-    de ahí en adelante manda el recorrido de cada MR, no el del trabajo.
+    `upto` cuts the sequence at that phase (inclusive): with an MR train,
+    from there on each MR's own route rules, not the work's.
     """
     sequence, done, current = phase_sequence(meta)
 
     if upto and upto in sequence:
         sequence = sequence[:sequence.index(upto) + 1]
         if current not in sequence:
-            current = ""            # la fase actual vive ya en el tren
+            current = ""            # the current phase already lives in the train
 
     finished = current in TERMINAL_PHASES
 
@@ -291,31 +291,31 @@ def phase_track(meta, width, upto=None):
 
 
 def live_phase(meta, panel):
-    """La fase que se está ejecutando ahora, para mostrarla como texto.
+    """The phase running right now, to show it as text.
 
-    meta.json va una fase por detrás: flow solo avanza `phase` cuando la fase
-    cierra, así que mientras corre validate el fichero aún dice build. Si el
-    resumen trae su propia `phase`, esa es la buena para el texto.
+    meta.json runs one phase behind: flow only advances `phase` when the
+    phase closes, so while validate runs the file still says build. If the
+    summary carries its own `phase`, that is the right one for the text.
     """
     return (panel or {}).get("phase") or meta.get("phase", "?")
 
 
 def is_terminal(meta):
-    """Si el trabajo está cerrado. Siempre según meta: es estado real.
+    """Whether the work is closed. Always from meta: it is real state.
 
-    La fase del resumen dice qué se ejecuta, no si el trabajo terminó, y
-    puede traer valores fuera del ciclo (watch escribe "watching").
+    The summary's phase says what is running, not whether the work ended,
+    and it may carry values outside the cycle (watch writes "watching").
     """
     return meta.get("phase") in TERMINAL_PHASES
 
 
 def phase_sequence(meta, panel=None):
-    """Las fases de este trabajo, sin las opcionales que no se usaron."""
+    """This work's phases, without the optional ones that were not used."""
     done = set(meta.get("phases_done") or [])
     sequence = PHASES.get(meta.get("type"), PHASES["feat"])
 
-    # el ▶ marca la que corre; si el resumen trae una que no es del ciclo,
-    # se ignora y mandamos la de meta en vez de no marcar ninguna
+    # the ▶ marks the running one; if the summary carries one outside the
+    # cycle, it is ignored and meta's is used instead of marking none
     current = live_phase(meta, panel)
     if current not in sequence:
         current = meta.get("phase", "")
@@ -326,10 +326,10 @@ def phase_sequence(meta, panel=None):
 
 
 def phase_track_vertical(meta, width):
-    """Una fase por línea, con su nombre.
+    """One phase per line, with its name.
 
-    Cuando los nombres no caben en horizontal, gastar altura es mejor que
-    dejar al usuario adivinando qué significa cada círculo.
+    When the names do not fit horizontally, spending height is better than
+    leaving the user guessing what each circle means.
     """
     sequence, done, current = phase_sequence(meta)
     out = []
@@ -344,10 +344,10 @@ def phase_track_vertical(meta, width):
 
 
 def head_line(meta, width, panel=None):
-    """Cabecera del trabajo: ticket, tipo, fase y cuándo se tocó.
+    """The work's header: ticket, type, phase and when it was touched.
 
-    El texto de la fase sale del resumen si lo trae (va al día); el color,
-    siempre de meta, que es quien sabe si el trabajo está cerrado.
+    The phase text comes from the summary if it has one (it is up to date);
+    the colour always from meta, which is what knows whether the work is closed.
     """
     phase = live_phase(meta, panel)
     colour = GREEN if is_terminal(meta) else ORANGE
@@ -373,17 +373,17 @@ def head_line(meta, width, panel=None):
     return out
 
 
-# Fases por las que pasa cada MR del tren (las del trabajo, de build en
-# adelante). Un trabajo con tren repite este ciclo una vez por MR.
+# Phases each MR of the train goes through (the work's, from build
+# onwards). A work with a train repeats this cycle once per MR.
 MR_PHASES = ["build", "validate", "review", "ship"]
 
 
 def mr_state(meta):
-    """Estado del tren de MRs, o None si el trabajo no tiene.
+    """State of the MR train, or None if the work has none.
 
-    Una MR cuenta como cerrada si está marcada `merged` o si recorrió hasta
-    `ship`: en la práctica flow deja el estado en `in_progress` hasta que se
-    confirma el merge, y sin esto un tren medio hecho aparece como 0/N.
+    An MR counts as closed if it is marked `merged` or if it went as far as
+    `ship`: in practice flow leaves the state at `in_progress` until the
+    merge is confirmed, and without this a half-done train shows as 0/N.
     """
     mrs = meta.get("mrs") or []
     if not mrs:
@@ -408,7 +408,7 @@ def mr_state(meta):
 
 
 def mr_lines(meta, width, vertical):
-    """El tren: cuántas van, cuál se está haciendo y por dónde va esa."""
+    """The train: how many are done, which one is under way and where it is."""
     train = mr_state(meta)
     if not train:
         return []
@@ -419,7 +419,7 @@ def mr_lines(meta, width, vertical):
         for m in train["mrs"]
     )
     head = f"{train['closed']}/{train['total']}"
-    out = [f"  {DIM}tren{RESET} {dots} {PURPLE}{head}{RESET}"]
+    out = [f"  {DIM}train{RESET} {dots} {PURPLE}{head}{RESET}"]
 
     cur = train["current"]
     if not cur:
@@ -451,7 +451,7 @@ def mr_lines(meta, width, vertical):
     if real and est:
         pct = round(100 * real / est)
         warn = " ⚠" if pct > 150 else ""
-        out.append(f"      {DIM}{real}/{est} líneas ({pct}%){warn}{RESET}")
+        out.append(f"      {DIM}{real}/{est} lines ({pct}%){warn}{RESET}")
     return out
 
 
@@ -461,13 +461,13 @@ def repos_line(meta, width):
     if not pending:
         return []
     names = ", ".join(r.get("repo", "?") for r in pending)
-    prefix = vis("  ⚠ otros repos: ")
-    return [f"  {ORANGE}⚠{RESET} {DIM}otros repos:{RESET} "
+    prefix = vis("  ⚠ other repos: ")
+    return [f"  {ORANGE}⚠{RESET} {DIM}other repos:{RESET} "
             f"{cut(names, width - prefix)}"]
 
 
-# Estilos que puede pedir el JSON de presentación. Nombres semánticos, no
-# colores: así el panel sigue mandando sobre la paleta y el ancho.
+# Styles the presentation JSON may ask for. Semantic names, not colours:
+# that way the panel stays in charge of the palette and the width.
 STYLES = {
     "normal": FG,
     "dim": DIM,
@@ -483,7 +483,7 @@ URL_RE = re.compile(r"https?://[^\s<>\"]+")
 
 
 def url_label(url):
-    """Etiqueta corta para una URL, conservando lo que identifica al recurso."""
+    """Short label for a URL, keeping what identifies the resource."""
     for pattern, mark in ((r"/merge_requests/(\d+)", "!"),
                           (r"/pull/(\d+)", "#"),
                           (r"/issues/(\d+)", "#"),
@@ -497,18 +497,18 @@ def url_label(url):
 
 
 def linkify(text):
-    """Sustituye URLs por etiquetas cortas y devuelve el mapa para enlazarlas.
+    """Replaces URLs with short labels and returns the map to link them.
 
-    Una URL de GitLab son ~60 caracteres que en un panel estrecho envuelven a
-    tres líneas ilegibles. Mostramos `!9977 ↗` y dejamos la URL detrás, como
-    hipervínculo real del terminal (OSC 8): se ve corto y se abre con un clic.
+    A GitLab URL is ~60 characters, which in a narrow panel wrap into three
+    unreadable lines. We show `!9977 ↗` and keep the URL behind it, as a real
+    terminal hyperlink (OSC 8): it looks short and opens with one click.
     """
     links = {}
 
     def swap(m):
         url = m.group(0)
         label = url_label(url)
-        # si dos URLs comparten etiqueta, desambiguamos con un sufijo invisible
+        # if two URLs share a label, we disambiguate with an invisible suffix
         while label in links and links[label] != url:
             label += " "
         links[label] = url
@@ -518,7 +518,7 @@ def linkify(text):
 
 
 def apply_links(line, links):
-    """Envuelve las etiquetas ya colocadas en secuencias OSC 8 clicables."""
+    """Wraps the labels already in place in clickable OSC 8 sequences."""
     for label, url in links.items():
         if label in line:
             link = f"\033]8;;{url}\033\\{label}\033]8;;\033\\"
@@ -527,16 +527,16 @@ def apply_links(line, links):
 
 
 def read_panel_json(path):
-    """El resumen que escribe flow, si existe.
+    """The summary flow writes, if there is one.
 
-    Contrato: .claude/work/<trabajo>/panel.json
+    Contract: .claude/work/<work>/panel.json
       {
-        "updated_at": "<ISO8601>",          opcional pero recomendable
-        "header": true,                     opcional (por defecto true)
+        "updated_at": "<ISO8601>",          optional but advisable
+        "header": true,                     optional (true by default)
         "lines": [
-          "texto suelto",                   → estilo normal
-          {"text": "…", "style": "warn"},   → estilo con nombre
-          {"text": "…", "indent": 2}        → sangría opcional
+          "plain text",                     → normal style
+          {"text": "…", "style": "warn"},   → named style
+          {"text": "…", "indent": 2}        → optional indent
         ]
       }
     """
@@ -551,8 +551,8 @@ def read_panel_json(path):
     return data if isinstance(data, dict) and data.get("lines") else None
 
 
-# Marcas semánticas: quien escribe dice qué es cada línea, el panel decide
-# con qué símbolo se pinta y cómo se alinea la columna.
+# Semantic marks: whoever writes says what each line is, the panel decides
+# which symbol paints it and how the column aligns.
 MARKS = {
     "done":    ("✓", GREEN),
     "current": ("▶", ORANGE + BOLD),
@@ -564,11 +564,11 @@ MARKS = {
 
 
 def panel_json_lines(data, width, max_lines):
-    """Pinta las líneas del JSON, envolviéndolas al ancho del panel.
+    """Paints the JSON's lines, wrapping them to the panel's width.
 
-    Las líneas con `mark` forman una columna: símbolo, referencia alineada
-    y, si cabe, su enlace pegado a la derecha. Las que no lo llevan se
-    comportan como siempre, así que el formato viejo sigue valiendo.
+    Lines with a `mark` form a column: symbol, aligned reference and, if it
+    fits, its link pinned to the right. Those without one behave as always,
+    so the old format still holds.
     """
     items = []
     for item in data.get("lines", []):
@@ -577,9 +577,9 @@ def panel_json_lines(data, width, max_lines):
         elif isinstance(item, dict):
             items.append(item)
 
-    # Ancho de la columna de referencias, calculado por bloque (los bloques
-    # los separan las líneas en blanco). Así el tren de MRs alinea con el
-    # tren, y las etiquetas de abajo entre ellas, sin arrastrarse unas a otras.
+    # Width of the reference column, computed per block (blocks are
+    # separated by blank lines). That way the MR train aligns with the train,
+    # and the labels below among themselves, without dragging each other.
     ref_widths, block = {}, []
     for idx, i in enumerate(items):
         if not str(i.get("text", "")).strip() and not i.get("link"):
@@ -622,7 +622,7 @@ def panel_json_lines(data, width, max_lines):
         room = max(8, width - body_indent)
         wrapped = wrap(text, room, max_lines - len(out)) if text.strip() else [""]
 
-        # el enlace se pega a la derecha de la primera línea si hay hueco
+        # the link is pinned to the right of the first line if there is room
         label = url_label(link) if link else None
         if label and vis(wrapped[0]) + 2 + vis(label) <= room:
             gap = " " * (room - vis(wrapped[0]) - vis(label))
@@ -635,24 +635,24 @@ def panel_json_lines(data, width, max_lines):
         out.append(prefix_first + first)
         for l in wrapped[1:]:
             out.append(" " * body_indent + f"{colour}{apply_links(l, links)}{RESET}")
-        if label:                       # no cabía al lado: cuelga debajo
+        if label:                       # it did not fit beside it: hang it below
             out.append(" " * body_indent
                        + f"{DIM}\033]8;;{link}\033\\{label}\033]8;;\033\\{RESET}")
     return out[:max_lines]
 
 
 def staleness(data, meta):
-    """Aviso si el resumen lleva mucho sin refrescarse.
+    """Warning if the summary has gone long without a refresh.
 
-    Es la salvaguarda del modelo: flow escribe *antes* de cada tramo largo,
-    así que si muere a mitad el fichero sigue diciendo qué estaba haciendo y
-    es la antigüedad la que delata que ya no es verdad.
+    It is the model's safeguard: flow writes *before* each long stretch, so
+    if it dies halfway the file still says what it was doing, and it is the
+    age that gives away that it is no longer true.
 
-    Dos matices:
-    - En un trabajo cerrado (done/abandoned) un resumen viejo es correcto,
-      no sospechoso: no se va a mover nunca más.
-    - El umbral lo puede subir el propio resumen con `stale_after_minutes`,
-      para tramos que se sabe que van a durar (sondeo de CI, suites largas).
+    Two nuances:
+    - In a closed work (done/abandoned) an old summary is correct, not
+      suspicious: it will never move again.
+    - The summary itself can raise the threshold with `stale_after_minutes`,
+      for stretches known to take long (CI polling, long suites).
     """
     if (meta or {}).get("phase") in TERMINAL_PHASES:
         return None
@@ -676,7 +676,7 @@ def staleness(data, meta):
 
 
 def notes_lines(path, width, limit):
-    """Hueco libre: lo que el agente quiera contar va aquí."""
+    """Free space: whatever the agent wants to say goes here."""
     note = os.path.join(path, "panel.md")
     if not os.path.isfile(note):
         return []
@@ -696,15 +696,15 @@ def work_block(path, meta, width, notes=6, title_lines=2, phases_vertical=False,
                body_lines=40):
     lines = [""]
 
-    # Si flow ha dejado un resumen, manda él: conoce la semántica real del
-    # trabajo y no hay que deducirla desde fuera.
+    # If flow left a summary, it rules: it knows the work's real meaning
+    # and there is no need to deduce it from outside.
     data = read_panel_json(path)
     if data:
         if data.get("header", True):
             lines.extend(head_line(meta, width, data))
         old = staleness(data, meta)
         if old:
-            lines.append(f"{ORANGE}⚠ resumen sin refrescar · {old}{RESET}")
+            lines.append(f"{ORANGE}⚠ summary not refreshed · {old}{RESET}")
         lines.extend(panel_json_lines(data, width, body_lines))
         return lines
 
@@ -713,9 +713,9 @@ def work_block(path, meta, width, notes=6, title_lines=2, phases_vertical=False,
         lines.append(f"{FG}{l}{RESET}")
     train = mr_state(meta)
     if train:
-        # Con tren, las fases del trabajo se quedan en la preparación: de
-        # build en adelante el recorrido lo repite cada MR, y mezclarlas
-        # pinta en verde fases que esta MR aún no ha visto.
+        # With a train, the work's phases stop at the preparation: from
+        # build onwards each MR repeats the route, and mixing them paints
+        # green phases this MR has not seen yet.
         lines.append("  " + phase_track(meta, width - 2, upto="plan"))
     elif phases_vertical:
         lines.extend(phase_track_vertical(meta, width))
@@ -728,7 +728,7 @@ def work_block(path, meta, width, notes=6, title_lines=2, phases_vertical=False,
 
 
 def compact_line(meta, width, panel=None):
-    """Una sola línea: para los trabajos que no caben con detalle."""
+    """A single line: for the works that do not fit in detail."""
     phase = live_phase(meta, panel)
     colour = GREEN if is_terminal(meta) else ORANGE
     stamp = ago(meta.get("updated_at"))
@@ -742,11 +742,11 @@ def compact_line(meta, width, panel=None):
 
 
 def assemble(head_lines, blocks, height):
-    """Encaja los trabajos en el alto disponible.
+    """Fits the works into the available height.
 
-    Los más recientes van con detalle completo; el resto se reduce a una
-    línea. Así lo importante queda arriba y nada se sale por el borde
-    superior, que es lo que pasaba cuando el terminal hacía scroll solo.
+    The most recent ones go in full detail; the rest shrink to one line.
+    That way what matters stays on top and nothing spills over the top
+    edge, which is what happened when the terminal scrolled by itself.
     """
     budget = height - len(head_lines)
     n = len(blocks)
@@ -765,16 +765,16 @@ def assemble(head_lines, blocks, height):
             if i == detailed:
                 out.append("")
             if len(out) >= height:
-                out.append(f"{DIM}+{n - i} más{RESET}")
+                out.append(f"{DIM}+{n - i} more{RESET}")
                 break
             out.append(compact)
     return out[:height]
 
 
-# ─── los dos modos ────────────────────────────────────────────────────────
+# ─── the two modes ────────────────────────────────────────────────────────
 
 def render_list(repo, width, height):
-    """Todos los trabajos abiertos del repo."""
+    """Every open work in the repo."""
     name = os.path.basename(os.path.abspath(repo))
     head_lines = [
         f"{BOLD}{BLUE}FLOW{RESET} {DIM}·{RESET} {FG}{name}{RESET}",
@@ -785,8 +785,8 @@ def render_list(repo, width, height):
     if not dirs:
         return head_lines + [
             "",
-            f"{DIM}Sin trabajos activos en .claude/work/{RESET}",
-            f"{DIM}Empieza uno con /flow:feat:start{RESET}",
+            f"{DIM}No active works in .claude/work/{RESET}",
+            f"{DIM}Start one with /flow:feat:start{RESET}",
         ]
 
     works = []
@@ -799,7 +799,7 @@ def render_list(repo, width, height):
     for _, path, meta in works:
         if meta is None:
             bad = f"{ORANGE}⚠ {cut(os.path.basename(path), width - 2)}{RESET}"
-            blocks.append((["", bad, f"{DIM}meta.json ilegible{RESET}"], bad))
+            blocks.append((["", bad, f"{DIM}meta.json unreadable{RESET}"], bad))
         else:
             panel = read_panel_json(path)
             blocks.append((work_block(path, meta, width),
@@ -808,7 +808,7 @@ def render_list(repo, width, height):
 
 
 def render_focus(repo, width, height, cwd, wanted=None):
-    """Un solo trabajo, con todo el detalle que quepa."""
+    """A single work, with all the detail that fits."""
     branch = current_branch(cwd)
     path, meta = pick_work(repo, branch, wanted)
 
@@ -817,16 +817,16 @@ def render_focus(repo, width, height, cwd, wanted=None):
         out = [f"{BOLD}{BLUE}FLOW{RESET} {DIM}·{RESET} {FG}{name}{RESET}",
                f"{DIM}{'─' * width}{RESET}", ""]
         if wanted:
-            out.append(f"{DIM}No hay ningún trabajo{RESET}")
+            out.append(f"{DIM}There is no work{RESET}")
             out.append(f"{FG}{cut(wanted, width)}{RESET}")
         else:
-            out.append(f"{DIM}Sin trabajos abiertos{RESET}")
-            out.append(f"{DIM}en .claude/work/{RESET}")
+            out.append(f"{DIM}No open works{RESET}")
+            out.append(f"{DIM}in .claude/work/{RESET}")
         return out[:height]
 
-    # sin cabecera propia: el bloque ya trae el ticket, y en una subdivisión
-    # pequeña cada línea cuenta. En foco hay espacio: el título entero, las
-    # fases con su nombre si no caben a lo ancho, y las notas llenando el resto.
+    # no header of its own: the block already carries the ticket, and in a
+    # small split every line counts. In focus there is room: the whole title,
+    # the phases by name if they do not fit across, and the notes filling the rest.
     sequence, _, _ = phase_sequence(meta)
     horizontal = vis(" ".join("●" + p for p in sequence)) <= width - 2
     vertical = not horizontal and height >= len(sequence) + 6
@@ -853,21 +853,21 @@ def main():
     cwd = os.path.abspath(paths[0]) if paths else os.getcwd()
     repo = find_repo(cwd)
 
-    # modo consulta: el selector de WezTerm pregunta qué trabajos hay
+    # query mode: the WezTerm picker asks which works there are
     if "--json" in sys.argv[1:]:
         print(list_json(repo))
         return
 
     last = None
-    sys.stdout.write("\033[?25l")          # ocultar cursor
+    sys.stdout.write("\033[?25l")          # hide the cursor
     try:
         while True:
             size = shutil.get_terminal_size()
             state = (fingerprint(repo), size.columns, size.lines,
                      current_branch(cwd) if focus and not wanted else "")
             if state != last:
-                # un margen por lado: evita que el terminal parta líneas o
-                # haga scroll, que es lo que empujaba el contenido hacia arriba
+                # one cell of margin per side: it keeps the terminal from
+                # breaking lines or scrolling, which pushed the content upwards
                 width = max(20, size.columns - 1)
                 height = max(6, size.lines - 1)
                 lines = (render_focus(repo, width, height, cwd, wanted) if focus
@@ -879,7 +879,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        sys.stdout.write("\033[?25h")      # restaurar cursor
+        sys.stdout.write("\033[?25h")      # restore the cursor
         sys.stdout.flush()
 
 

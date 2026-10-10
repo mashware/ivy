@@ -50,6 +50,10 @@
 //!
 //! **What a green here means, exactly**: no comment line in the declared source and example files carries three
 //! different common Spanish words. It does **not** mean every comment is good English.
+//!
+//! **The prototypes are the one exception to both paragraphs above**: every line of the two files
+//! that are not markdown is judged, and with the accent half — their Spanish is labels, not
+//! sentences. [`prototype_spanish`] says why and what it still misses.
 
 mod common;
 
@@ -1481,6 +1485,154 @@ fn no_document_mixes_the_two_languages() {
         "{} line(s) of documents this milestone has already translated read as Spanish. Either the \
          prose was reverted, or new Spanish was written — the words the oracle found come first on \
          each line:\n{}",
+        reported.len(),
+        reported.join("\n")
+    );
+}
+
+// ── The prototypes, which no delivery of the milestone named ─────────────────────────────────────
+
+/// The two files of `prototypes/` that are not markdown, pulled in at compile time like [`SOURCES`].
+///
+/// **They were translated after the milestone closed, because nothing here read them.** `SOURCES`
+/// walks Rust comments and `DOCUMENTS` walks markdown, so a Python script and an HTML page carried
+/// their Spanish past every guard until the tree was swept by hand.
+const PROTOTYPES: &[(&str, &str)] = &[
+    (
+        "prototypes/flow-panel",
+        include_str!("../../../prototypes/flow-panel"),
+    ),
+    (
+        "prototypes/mockup-terminal.html",
+        include_str!("../../../prototypes/mockup-terminal.html"),
+    ),
+];
+
+/// The letters Spanish writes and English does not — the accented ones [`fold`] folds, plus the two
+/// inverted marks.
+const SPANISH_LETTERS: &[char] = &[
+    'á', 'é', 'í', 'ó', 'ú', 'ü', 'ñ', '¿', '¡', 'Á', 'É', 'Í', 'Ó', 'Ú', 'Ü', 'Ñ',
+];
+
+/// How many lines each prototype has to still give the walk. Measured as this guard lands:
+/// `flow-panel` 887, `mockup-terminal.html` 602. The walk has no filter, so the floor is not about
+/// detection: it is what fails when a file is emptied, or the loop stops yielding, and the guard
+/// goes on judging nothing clean.
+const PROTOTYPE_LINES_PER_FILE_AT_LEAST: usize = 500;
+
+/// Why a prototype line reads as Spanish, or `None`: the listed words it carries, then its accented
+/// letters.
+///
+/// **Every line is judged, not only the comments, and it takes a second check the siblings refuse.**
+/// A prototype's prose is mostly what it paints — labels, sample panels, «2 h ago» — and none of
+/// that is a comment, so [`comment_lines`] would read past it. And a label is one or two words: it
+/// scores one marker, so the oracle alone never calls it Spanish. The accented letters are the only
+/// thing that sees «líneas» or «Esperándote». The module header chose one oracle over two for
+/// comments, which are sentences; these lines are not.
+///
+/// **No islands**: [`ISLANDS`] are justified by lines of `src/`, and would excuse the same text here.
+///
+/// **What it still cannot see**: a short Spanish label with no accent («Ver salida», «hace 2 h»),
+/// asserted below as passing so this line cannot quietly stop being true.
+fn prototype_spanish(line: &str) -> Option<String> {
+    let words: BTreeSet<String> = fold(line)
+        .split(|c: char| !c.is_ascii_alphabetic())
+        .filter(|word| SPANISH_WORDS.contains(word))
+        .map(str::to_owned)
+        .collect();
+    let letters: String = line
+        .chars()
+        .filter(|c| SPANISH_LETTERS.contains(c))
+        .collect();
+    (words.len() >= MARKERS_TO_CALL_IT_SPANISH || !letters.is_empty()).then(|| {
+        format!(
+            "[{}] [{letters}]",
+            words.into_iter().collect::<Vec<_>>().join(" ")
+        )
+    })
+}
+
+#[test]
+fn the_prototype_oracle_answers_what_it_promises() {
+    for spanish in [
+        "# el panel que se abre cuando no hay trabajo",
+        r#"out.append(f"{real}/{est} líneas")"#,
+        r#"title="Esperándote""#,
+        "¿cuota por canal o global?",
+        "Pingüino",
+    ] {
+        assert!(
+            prototype_spanish(spanish).is_some(),
+            "«{spanish}» is Spanish and the prototype oracle let it through"
+        );
+    }
+    for passes in [
+        r#"acts: [["Ver salida", ""]],"#,
+        r#"return f"hace {int(secs // 60)} min""#,
+        r#"font-family: "JetBrains Mono", Consolas, monospace;"#,
+        "# the ▶ marks the running one — ⚠ ● ↗ ─",
+    ] {
+        assert!(
+            prototype_spanish(passes).is_none(),
+            "«{passes}» is asserted as passing — English, or the stated limit — and the oracle \
+             reported it: either the limit moved, and the doc of `prototype_spanish` has to say so, \
+             or it is flagging English"
+        );
+    }
+}
+
+/// Every file below `dir` that [`markdown_below`] does not take, named from the repo root — at any
+/// depth, and with the extension compared the way that walk compares it, so a file is judged by one
+/// list and never by both or neither.
+fn prototypes_on_disk(root: &Path, dir: &Path) -> BTreeSet<String> {
+    let mut found = BTreeSet::new();
+    for entry in std::fs::read_dir(dir).expect("prototypes/ is readable") {
+        let path = entry.expect("a readable entry").path();
+        if path.is_dir() {
+            found.extend(prototypes_on_disk(root, &path));
+        } else if !path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+        {
+            let relative = path.strip_prefix(root).expect("below prototypes/");
+            found.insert(format!("prototypes/{}", relative.to_string_lossy()));
+        }
+    }
+    found
+}
+
+#[test]
+fn no_line_of_the_prototypes_reads_as_spanish() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prototypes");
+    let on_disk = prototypes_on_disk(&root, &root);
+    let declared: BTreeSet<String> = PROTOTYPES
+        .iter()
+        .map(|(name, _)| (*name).to_owned())
+        .collect();
+    assert_eq!(
+        declared, on_disk,
+        "PROTOTYPES and the non-markdown files of prototypes/ disagree: a file nobody declared is \
+         read by no language guard"
+    );
+
+    let mut reported = Vec::new();
+    for (name, src) in PROTOTYPES {
+        assert!(
+            src.lines().count() >= PROTOTYPE_LINES_PER_FILE_AT_LEAST,
+            "«{name}» gave {} lines: either it emptied out, or the walk below judges it clean \
+             without having read it",
+            src.lines().count()
+        );
+        for (n, line) in src.lines().enumerate() {
+            if let Some(why) = prototype_spanish(line) {
+                reported.push(format!("{name}:{}  {why}  {}", n + 1, line.trim()));
+            }
+        }
+    }
+    assert!(
+        reported.is_empty(),
+        "{} line(s) of the prototypes read as Spanish — the listed words, then the accented \
+         letters, come first on each line:\n{}",
         reported.len(),
         reported.join("\n")
     );
