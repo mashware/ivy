@@ -39,6 +39,7 @@ pub(super) fn spills(view: &View, cell: &ViewCell, row: u16, column: u16) -> boo
             && next.bg == cell.bg
             && next.inverse == cell.inverse
             && next.selected == cell.selected
+            && next.matched == cell.matched
     });
     blank && !matches!(view.cursor(), Some(cursor) if (cursor.row, cursor.col) == (row, beside))
 }

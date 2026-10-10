@@ -80,13 +80,13 @@ impl Window {
         // previous one —which empties what the measurement had pending—, pumping —which fills what
         // was interpreted without recording it— and attending to the keyboard **before** the
         // painting. So what the console had just interpreted, and what rereading its panel cost,
-        // left with it undeclared. See [`Pane::take_what_this_frame_left`], which is where closing
+        // left with it undeclared. See [`what_this_frame_left`], which is where closing
         // a pane already solved it.
         let before = Instant::now();
         let its_cost: std::time::Duration = self.tabs[leaving]
             .panes_mut()
             .into_iter()
-            .map(Pane::take_what_this_frame_left)
+            .map(what_this_frame_left)
             .sum();
 
         // **Its channel counters are banked before it leaves**, or a tab closed mid-run takes what
@@ -172,8 +172,8 @@ impl Window {
         };
 
         // **What it had done in this frame is collected before dropping it.** See [`Closing`] and
-        // [`Pane::take_what_this_frame_left`].
-        let its_cost = leaving.take_what_this_frame_left();
+        // [`what_this_frame_left`].
+        let its_cost = what_this_frame_left(&mut leaving);
         // **And its channel counters, for the same reason and here rather than at report time.** A
         // console closed mid-run would otherwise take its `applied`/`refused`/`released` out of the
         // live set the report walks.
@@ -241,7 +241,7 @@ impl Window {
         // `timed_separately`, because it is the drain that runs inside the frame; adding it in both
         // places would subtract the same microseconds twice from the number the framework is judged
         // by (**D13**) — the opposite of the mistake declared in this file, and just as wrong.
-        let its_cost = leaving.take_what_this_frame_left();
+        let its_cost = what_this_frame_left(&mut leaving);
         if let Some(did) = leaving
             .control
             .as_ref()
@@ -287,7 +287,7 @@ impl Window {
                 .root
                 .close(name)
                 .expect("a validated retirement target remains in its tree");
-            pending_cost += leaving.take_what_this_frame_left();
+            pending_cost += what_this_frame_left(&mut leaving);
             if let Some(did) = leaving
                 .control
                 .as_ref()
@@ -329,4 +329,36 @@ impl Window {
         }
         Ok(())
     }
+}
+
+/// Takes **everything** this console has done in this frame and nobody has declared yet, for
+/// the one that is leaving and is not going to publish any mean.
+///
+/// **There are two places, and one alone is not enough.** The frame's real order decides it:
+/// `logic` first closes the previous frame —which empties what [`measure::Timings`] had
+/// pending— and **then** pumps, which is what leaves in `pending_measurement` what this console
+/// has just interpreted. The keyboard is attended at the start of the UI pass, **before the
+/// painting**, so when the closing chord arrives, what the measurement had pending is empty and
+/// what this frame interpreted is whole in `pending_measurement`: looking only at the first one
+/// declares **zero** right in the frame where a dumping console is closed, and those
+/// milliseconds are taken by «the rest of the frame», that is, the cost attributed to the UI
+/// framework. The other one can indeed hold something when egui repeats the pass, so both are
+/// picked up.
+///
+/// **It is a free function and not a method of `Pane`** because it is closing's work: it went out
+/// of the crate root to pay `lib.rs`'s ratchet (D28), and `impl Pane` with it.
+///
+/// **It records no mean**, for the same reason as [`measure::Timings::take_pending`]: this
+/// console is no longer going to publish spans, and closing it along the normal path would
+/// force inventing a frame cost that is not going to finish.
+fn what_this_frame_left(pane: &mut Pane) -> std::time::Duration {
+    let without_recording = pane
+        .pending_measurement
+        .take()
+        .map_or(std::time::Duration::ZERO, |(_, _, interpreted)| interpreted);
+
+    pane.timings.take_pending()
+        + without_recording
+        + std::mem::take(&mut pane.panel_reread_unpainted)
+        + std::mem::take(&mut pane.control_unpainted)
 }

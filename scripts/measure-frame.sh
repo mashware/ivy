@@ -370,7 +370,7 @@ if [ "${MEASURE_AS_CONSOLE:-}" = "1" ]; then
 fi
 
 # ── Batch mode ──────────────────────────────────────────────────────────────────
-BATCH=${1:?the batch is missing: A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y or Z}
+BATCH=${1:?the batch is missing: A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y or Z}
 MIB=${2:-44}
 OUTPUT="$ROOT/target/measurements"
 mkdir -p "$OUTPUT"
@@ -402,9 +402,10 @@ RESTORES=0
 # batch, and the guards read the same variable, so they judge the leaked load as the batch's own. A
 # `PATCHES=1` in the environment runs X as Y and publishes it under X's name; a `LARGE=1` pads S and
 # the file batches to the ceiling, and hides U and V from the leak guard that only fires without it.
-ACTIONS= CONTROL= HEADER= READS= PATCHES= LINKS= LARGE= CJK= EMOJI= PANEL_EMOJI=
+ACTIONS= CONTROL= HEADER= READS= PATCHES= LINKS= SEARCH= LARGE= CJK= EMOJI= PANEL_EMOJI=
 case "$BATCH" in
     A|B|C|D) TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console ;;
+    E)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=100000; GESTURE=search; SEARCH=1 ;; # two, and SEARCHING the left console's scrollback while both dump: its control is C, LEFT against LEFT, because the two consoles of one run already differ with no gesture (D61)
     F)       TABS=2; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console ;;   # the background one, still: none of them dumps
     G)       TABS=2; PANES=2x1; DUMPING=4; DRAGS=0; GESTURE=console ;;   # the background one, dumping like the front one
     H)       TABS=1; PANES=4x1; DUMPING=4; DRAGS=0; GESTURE=console ;;   # four in a row: the panel's worst case (#33)
@@ -426,7 +427,7 @@ case "$BATCH" in
     Y)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; CONTROL=1; LARGE=1; PATCHES=1 ;; # X, and patching it with U's ops: its control is X
     Z)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; PANEL_EMOJI=1 ;;  # two, and the only one whose PANELS carry emoji: the consoles dump ASCII, so its control is C
     W)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=100000; GESTURE=link; LINKS=1 ;; # two, and OPENING links of all three sources with the desktop hand-off suppressed: its nearest is C, but its consoles also rewrite two link rows and its panel paints a link label, so W − C is not the gesture alone
-    *) echo "unknown batch «$BATCH»: use A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y or Z" >&2; exit 2 ;;
+    *) echo "unknown batch «$BATCH»: use A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y or Z" >&2; exit 2 ;;
 esac
 # **Why the dragging batch asks for a hundred thousand gestures**: the number is deliberately above
 # what fits, because what is needed is for the gesture to last **from start to finish**. A batch that
@@ -882,7 +883,7 @@ seed() {
 case "$BATCH" in
     A) : ;;                       # no panel: nobody publishes anything
     B) seed quiet & ;;
-    C|D|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
+    C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
 esac
 
 echo "batch $BATCH · $TABS tab(s) of $PANES · $DUMPING of $DIRECTORIES consoles dumping $MIB MiB · window $WINDOW_SIZE · do not touch the machine until it closes" >&2
@@ -1391,7 +1392,9 @@ if [ "$DRAGS" != 0 ]; then
     # untouched if it was already at its limit. With a narrow window that happens to **all of them**:
     # the run injects a thousand gestures, changes nothing, and without this check it would be
     # published as «the gesture costs nothing».
-    if [ "$WITH_EFFECT" = 0 ]; then
+    # **The search's effect is not a layout change**, so its batch is held by its own line above —
+    # presses that found something and paintings that marked it — and not by this count.
+    if [ "$WITH_EFFECT" = 0 ] && [ "$GESTURE" != search ]; then
         invalidate "$INJECTED gestures ($WHICH_GESTURE) were injected and none of them changed \
 anything: the window is too narrow for the operation to be accepted, so this batch does not measure \
 the gesture"
@@ -1502,7 +1505,7 @@ fi
 #
 # **It is only demanded where the batch moves the layout.** In a still batch there is nothing to
 # save, and neither in the one that marks text, the one that sends the mouse to the program, the one
-# that presses a button on the panel **nor the one that opens links**: none of them touches the tree
+# that presses a button on the panel, **nor the one that opens links, nor the search**: none of them touches the tree
 # or the share-out, so
 # their runs do not attempt to save
 # even once and demanding it would invalidate them while being right for the wrong reason. That the
@@ -1510,7 +1513,7 @@ fi
 # layout» stopped being the same thing the moment there was a gesture that does not move it, and
 # since then every new gesture that does not move it comes in here.
 if [ "$DRAGS" != 0 ] && [ "$GESTURE" != mark ] && [ "$GESTURE" != mouse ] && [ "$GESTURE" != button ] \
-    && [ "$GESTURE" != link ]; then
+    && [ "$GESTURE" != link ] && [ "$GESTURE" != search ]; then
     ATTEMPTS=$(sed -n 's/^writing the layout to disk *([0-9]* writes of \([0-9]*\) attempts)$/\1/p' "$REPORT" | head -1)
     if [ -z "$ATTEMPTS" ]; then
         invalidate "drags were asked for and the report declares no attempt at saving the layout"
@@ -1525,6 +1528,38 @@ after the first pays for a write that cannot happen (D16, item 4), and the run m
     fi
     echo "attempts at saving the layout during the batch: $ATTEMPTS (none of them writes: a batch has \
 saving vetoed)" >&2
+fi
+
+# **The scrollback's search, read in both directions (D61).** Batch E must have pressed, found and
+# marked: a run whose query never matched would publish a walk that found nothing under the name of
+# searching, and one that never marked would publish the presses alone. Every other batch must have
+# done none of it — a search nobody asked for is work in its spans it does not claim. **And E must
+# have sent the program nothing**: the search keeps its keys, so a keystroke in the report means the
+# query or a press leaked to a shell, and the run measured typing as well.
+#
+# **An empty capture invalidates instead of becoming a zero**, for the links' reason above.
+SEARCH_LINE=$(grep -E "^search:" "$REPORT" | head -1)
+SEARCH_PRESSES=$(printf '%s' "$SEARCH_LINE" | sed -n 's/^search: *\([0-9]*\) presses, .*$/\1/p')
+SEARCH_FOUND=$(printf '%s' "$SEARCH_LINE" | sed -n 's/^search: *[0-9]* presses, \([0-9]*\) found .*$/\1/p')
+SEARCH_OPEN=$(printf '%s' "$SEARCH_LINE" | sed -n 's/^search:.* · \([0-9]*\) paintings with a search open, .*$/\1/p')
+SEARCH_MARKED=$(printf '%s' "$SEARCH_LINE" | sed -n 's/^search:.* paintings with a search open, \([0-9]*\) with matches marked .*$/\1/p')
+if [ -z "$SEARCH_PRESSES" ] || [ -z "$SEARCH_FOUND" ] || [ -z "$SEARCH_OPEN" ] || [ -z "$SEARCH_MARKED" ]; then
+    invalidate "the report's search line could not be read: «$SEARCH_LINE»"
+fi
+if [ "${SEARCH:-}" = 1 ]; then
+    if [ "$SEARCH_PRESSES" = 0 ] || [ "$SEARCH_FOUND" = 0 ] || [ "$SEARCH_MARKED" = 0 ]; then
+        invalidate "batch E did not press, find and mark: $SEARCH_LINE"
+    fi
+    if grep -q "^key in the frame → handed over to be written" "$REPORT"; then
+        invalidate "batch E sent keystrokes to a program: the search let its query or a press through, \
+so the run measured typing into a shell as well as searching"
+    fi
+fi
+# **The other direction reads the paintings with a search OPEN, not the ones that marked**: a search
+# opened on a query that matches nothing on screen marks no cell and still paints its row inside the
+# console's span — which is work the batch does not claim.
+if [ "${SEARCH:-}" != 1 ] && { [ "$SEARCH_PRESSES" != 0 ] || [ "$SEARCH_OPEN" != 0 ]; }; then
+    invalidate "this batch asks for no search and yet reports one: $SEARCH_LINE"
 fi
 
 # **That the layout came out of the FILE, in the batch that claims to measure that.** It is the guard

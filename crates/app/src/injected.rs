@@ -21,6 +21,7 @@ use crate::{
 use eframe::egui;
 
 mod links;
+mod search;
 
 /// How many drag gestures to inject, from what the variable said.
 ///
@@ -195,12 +196,6 @@ impl InjectedDrags {
         self.with_effect += 1;
     }
 
-    /// The same, with a total already counted. **And not a loop that calls the one above**: the
-    /// increments are not separate events, they are a sum that is already done.
-    pub(crate) fn several_more_with_effect(&mut self, how_many: usize) {
-        self.with_effect += how_many;
-    }
-
     /// Tells it how much a cell measures, from where the metric already exists. See [`Self::cell`].
     pub(crate) fn already_knows_the_cell(&mut self, cell: f32) {
         self.cell = Some(cell);
@@ -229,6 +224,7 @@ impl InjectedDrags {
             }
             InjectedGesture::PressAButton => self.press_a_button(frame_nr),
             InjectedGesture::ActivateLinks => self.activate_a_link(frame_nr),
+            InjectedGesture::Search => search::search_the_focused(self, frame_nr),
         }
     }
 
@@ -674,6 +670,9 @@ pub(crate) enum InjectedGesture {
     /// instead of having one of its own — a different travel would make the two batches impossible
     /// to compare, which is just what the gesture/control pair exists to allow.
     MouseToProgram,
+    /// Open a search on the focused console, type a query and step through its matches (**D61**).
+    /// The only gesture that types: every other one is the mouse's.
+    Search,
 }
 
 impl InjectedGesture {
@@ -693,6 +692,7 @@ impl InjectedGesture {
             Self::MouseToProgram => "handing the mouse to the program",
             Self::PressAButton => "pressing a button on the panel",
             Self::ActivateLinks => "opening links",
+            Self::Search => "searching the scrollback",
         }
     }
 }
@@ -713,6 +713,7 @@ pub(crate) fn gesture_of(value: Option<&str>) -> InjectedGesture {
         Some("mouse") => InjectedGesture::MouseToProgram,
         Some("button") => InjectedGesture::PressAButton,
         Some("link") => InjectedGesture::ActivateLinks,
+        Some("search") => InjectedGesture::Search,
         _ => InjectedGesture::MovePane,
     }
 }

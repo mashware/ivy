@@ -765,6 +765,11 @@ impl Tab {
         self.root.leaves_mut()
     }
 
+    /// The console called that, if it is still in this tab.
+    pub(crate) fn pane_called(&mut self, name: usize) -> Option<&mut Pane> {
+        self.panes_mut().into_iter().find(|pane| pane.name == name)
+    }
+
     /// What this tab's consoles claim most, if any of them claims anything.
     ///
     /// **It is the maximum, and the order is set by the type itself**: `wait` beats `block` and

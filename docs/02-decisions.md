@@ -7922,3 +7922,126 @@ precision.
 | Reusing `QuietConsole`'s sticky `dismissed` latch for the refusal too | An ending never reverses, so that latch is permanent by design. Refusals keep coming; a sticky latch would silence every later one |
 | A dismissal cleared by observing `refused` false (the first shape this delivery built) | A read that wrote, whose safety rested on a claim about threads nothing checked — and the flag stays up across a retry into a full queue, so the retry was refused in silence. Both reviews of this delivery found it. Keying the dismissal on the `refusals` count makes the question a pure read and gives each refusal its sentence |
 | Dismissing both reasons on any press on the shared box | When the output had ended *and* the queue was refusing, only the ended-output sentence was shown, and the press silenced a refusal nobody had seen. The built-in review found it; the press now dismisses the reason `notices::what_the_silence_is` says is on screen, the same function the sentence is chosen by |
+
+## D61 — Searching the scrollback: the focused console, literal text, and the match is the selection
+
+**Decided for [#177](https://github.com/mashware/agent-terminal/issues/177), F2.13.** `Ctrl+Shift+F`
+(`key.search`, and `none` hands it back to the program) opens a search **in the focused console**.
+What is typed builds the query, which is **literal text** — a `.` or a `(` means that character —
+with the engine's case rule: insensitive unless the query holds an uppercase letter. `Enter` walks
+toward older lines and `Shift+Enter` toward newer ones; each step scrolls to the match and **makes
+it the selection**, so `Ctrl+Shift+C` copies it through D22's four rules with nothing of its own.
+Every match on screen is marked in a colour of its own, **already while the query is typed**. A
+one-row line is painted **over** the console's last row with the query and how to leave; `Escape`,
+the chord again, or **any key that sends bytes to the program** closes it. While it is open the
+search keeps typed text, `Backspace`, `Ctrl+W`, `Ctrl+Backspace`, `Ctrl+U`, `Enter`, `Shift+Enter`,
+`Escape` and a paste — which goes into the query, with its control characters dropped so a copied
+line's newline does not make it unfindable — and nothing else. Modifiers riding on those keys are
+not looked at beyond the ones named: `Ctrl+Enter` is a step older, `Alt+Backspace` deletes a
+character.
+
+**Why.** Part I of Phase 2 promises search by name and WezTerm, Alacritty and Ghostty all answer
+the questions #177 left open the same way: per console, with every visible match marked and the
+current one distinct. This project measures itself against them (D19), so their answer is applied
+rather than re-asked.
+
+**The match is the selection because two mechanisms would disagree.** A separate «current match»
+would need its own copy path and its own place to remember where the next step starts. The
+selection already has both: the engine rotates it as output arrives and drops it when its lines
+leave the history, so the next press starts from the same text however much the program wrote in
+between, and nothing outside the engine holds a position that could go stale. The price is that a
+step replaces a selection somebody had made, which is what the reference terminals do too.
+
+**The step starts one cell past the current match.** The engine counts a match that sits exactly on
+the point it is handed, so starting on the match finds it again on every press. Alacritty steps past
+it the same way.
+
+**The line is painted over the console, never cut out of it.** Cutting a row would resize the
+program every time the search opens and shift every pointer-to-cell mapping by a row. To keep the
+line from covering what it found, the step scrolls the match off the last row when the view is not
+already at the bottom; when it is — nothing newer to scroll in — and the match the last press found
+is on the last line, the line is painted on the top row instead. Before any press has found a match,
+a selection made with the mouse does not move it.
+
+**Literal, not a pattern.** A pattern can build an automaton large enough that the engine gives up
+mid-walk after three cache clears and reports no match where there is one — and it says so only in
+a log. A query too large for the engine is refused and the line says so.
+
+**A press that finds nothing walks the whole history, and that walk is not split across frames —
+a limit accepted, written down the way D54 asks.**
+- **What it costs**: measured with `cargo run --release --example search -p term-core`, a history
+  of 3 549 lines of 180 columns and a query that is not there, two runs of twenty presses each way:
+  **a median of 11.8–13.6 ms, and a slowest press of 13.8–27.1 ms** (the raw output is kept with the
+  work that measured it). On top of a frame of two dumping consoles that is one or two late frames
+  at 60 Hz, **once per press**, never per frame.
+- **Who pays it**: the person pressing `Enter` on a query that is not in a full, wide console.
+  A match that exists is found sooner.
+- **Why it is not fixed**: splitting the walk means carrying an engine position across frames, and
+  those positions shift under new output — the stale point the selection-as-cursor exists to avoid.
+  The design's line was 4 ms; the measurement crossed it and the trade was taken knowingly.
+- **What would reopen it**: a press measured above one frame on the console's own batch (`E`), or a
+  ceiling of history raised past D21's.
+
+**Marking is per frame, so it is bounded.** It walks only what is on screen, plus the rest of a
+logical line a wrap carries across an edge — and never more than `MARKING_REACH` (a hundred) lines
+beyond the screen, following the wraps itself rather than asking the engine, whose own walk to a
+line's ends has no bound: one line wrapped across the whole history would otherwise be walked on
+every frame. Its cost is taken out of the console's painting span and published on the report's
+`search:` line, with how many paintings marked a match.
+
+**Measuring it closed a declared hole.** The keyboard's pass was left untimed because no batch
+typed; the search's batch (`E`) types, so on a frame somebody typed in the pass is now timed whole
+and subtracted from the rest of the frame (D13). A frame nobody typed in declares nothing, as
+before. That moves what every typing frame publishes as the framework's cost by the pass's own
+cost, and no batch published before `E` types.
+
+**What it does not do**, each on purpose: search every console at once, take regular expressions,
+remember earlier queries, or survive a restart. The line takes no clicks: a press on it marks the
+grid under it. The chord is checked on Linux only; macOS and Windows meet it in F2.7. **And a held
+paste answered with `Ctrl+Enter` while a search is open goes to the program and leaves the search
+open** — the pane's keyboard pass has no room left under D28's ratchet for the line that would close
+it, and the paste reaching the program is the outcome the person asked for either way.
+
+**Measured (batch `E` against its control `C`, 10 October 2026, same binary, runs interleaved E·C·E·C,
+1280×800, both consoles dumping 44 MiB, release, at `8afc00f`).** `compare` says the two runs of each
+batch can be averaged. The walk's own bound (`MARKING_REACH` followed rather than clamped) landed
+after these runs; it can only shorten the marking, and the load's lines wrap over two rows at most
+— far inside the reach — so on this load both shapes walk the same cells.
+
+| | E run 1 | E run 2 | C run 1 | C run 2 |
+|---|---|---|---|---|
+| presses (found) | 1 199 (239) | 2 094 (238) | 0 | 0 |
+| a press, mean · slowest | 51.5 µs · 377 µs | 87.7 µs · 409 µs | — | — |
+| paintings with a search open (with matches marked) | 1 499 (269) | 2 618 (268) | 0 | 0 |
+| marking, per painting | 59.7 µs | 64.5 µs | — | — |
+| left console, enqueueing the paint | 544 µs | 569 µs | 500 µs | 546 µs |
+| right console, enqueueing the paint | 414 µs | 423 µs | 430 µs | 464 µs |
+| frames | 1 796 | 3 139 | 455 | 464 |
+
+- **Most presses found nothing, and the report cannot say how much each kind cost.** The load
+  starts at the next multiple of thirty seconds (`host-load --at 30`) while the gesture starts at the
+  first frame, so presses ran on a console with no text yet — 80 % and 89 % of them found nothing.
+  The report publishes one mean over both kinds and does not split them, so **neither mean is the
+  cost of a press during a dump**, and the two runs' means (51.5 and 87.7 µs) cannot be decomposed
+  from these reports. What they do bound: **no press of either run took more than 409 µs**, far
+  under the 11.8–13.6 ms the bench example measures for a full history with no match.
+- **The marking is 60–65 µs a painting**, subtracted from the left console's painting and published
+  apart. The left console's enqueueing span — which keeps the search's row and the matches' fills —
+  reads 544–569 µs against C's 500–546: the ranges touch, so this is **no difference measurable from
+  two runs**, and the right console, which never searches, moves by as much between runs.
+- **Per-frame means do not compare between E and C**: E runs four to seven times more frames, because
+  injected keys keep the window awake (D15's annex has the same trap with drags). Its «rest of the
+  frame» is not published as a comparison.
+- **C's second run carries two keystrokes nobody's batch sent** — a key pressed during the run. They
+  are declared by the run's own report and change no figure above beyond its noise.
+
+| Discarded | Why |
+|---|---|
+| Opening a pager (`less`) over the scrollback in a split, as Kitty does | Part I promises search in the terminal, in place; `less` does not exist on Windows (D1); and the console's text would be written to a temporary file, which is a copy of the screen outside the window |
+| Searching every console at once | No reference terminal does it, and it needs a list of results nobody asked for |
+| A «current match» mark separate from the selection | Its own copy path and its own stored position, which goes stale when output arrives; the selection already has both |
+| Regular expressions | An oversized automaton makes the engine give up and report no match where there is one, saying so only in a log |
+| A row cut from the console for the line | Resizes the program on every open and shifts every pointer-to-cell mapping by a row |
+| The line moving to the top whenever a selected cell is on the last row | The step can usually keep the match off that row; moving the line is only the answer when the view cannot scroll further — and a mouse selection is not something the line has to avoid |
+| A cap on the query's length | A literal's automaton grows with its length far below the engine's limit, and the only way in is typing or a paste; the engine's own refusal is said instead |
+| Stepping to a match as you type | Each keystroke would pay the walk over the history — up to the figures above — while typing. Marking the matches on screen as you type is kept: it walks the screen and at most `MARKING_REACH` lines beyond it |

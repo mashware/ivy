@@ -756,6 +756,7 @@ impl crate::Pane {
         let mut requests = Vec::new();
         let mut scrolls: Vec<Scroll> = Vec::new();
         let mut to_the_clipboard: Option<String> = None;
+        let mut search = crate::search::Steps::new(self.search.is_open());
 
         // The events that go to the program **are consumed**, not read and left, and that is load-
         // bearing today: egui's own end of pass reads the same queue for its quit shortcut and its
@@ -854,7 +855,10 @@ impl crate::Pane {
                 if let egui::Event::Paste(text) = event
                     && chord.shift
                 {
-                    paste_or_hold(text, bracketed, &mut self.keystrokes, &mut self.held);
+                    // Into the query while a search is open, which is what a paste means there.
+                    if !search.took_a_paste(text) {
+                        paste_or_hold(text, bracketed, &mut self.keystrokes, &mut self.held);
+                    }
                     paste_seen = true;
                     return false;
                 }
@@ -957,6 +961,7 @@ impl crate::Pane {
                                 scrolled.push(Scroll::ToTop);
                             }
                             Action::ScrollToBottom => scrolled.push(Scroll::ToBottom),
+                            Action::Search if !repeat => search.toggle(),
                             // The repetition of creating, closing, splitting or copying falls here:
                             // it is swallowed without doing anything, which is the point of the
                             // guard.
@@ -967,8 +972,12 @@ impl crate::Pane {
                     }
                 }
 
+                if search.took(event, chord) {
+                    return false;
+                }
                 match bytes(event, cursor_keys) {
                     Some(bytes) => {
+                        search.the_program_got_bytes();
                         self.keystrokes.extend_from_slice(&bytes);
                         false
                     }
@@ -989,6 +998,7 @@ impl crate::Pane {
         for how_much in scrolls {
             self.screen.scroll_by(how_much);
         }
+        crate::search::apply(&mut self.search, &mut self.screen, search);
 
         // **And the clipboard, also outside**, but for another reason: writing to it is asking
         // something of the context, and inside the closure the context has its input borrowed.
@@ -2424,7 +2434,7 @@ mod tests {
 
 /// What the application does when someone presses a chord of its own.
 ///
-/// **Eleven, and they are the ones that exist today.** It is not an open list on purpose: each one has its condition and
+/// **Twelve, and they are the ones that exist today.** It is not an open list on purpose: each one has its condition and
 /// its effect written where they happen, and an action with no effect would be a name that can be
 /// configured and does nothing.
 ///
@@ -2448,6 +2458,7 @@ pub enum Action {
     ScrollPageDown,
     ScrollToTop,
     ScrollToBottom,
+    Search,
 }
 
 impl Action {
@@ -2465,6 +2476,7 @@ impl Action {
             Self::ScrollPageDown => "scroll-page-down",
             Self::ScrollToTop => "scroll-to-top",
             Self::ScrollToBottom => "scroll-to-bottom",
+            Self::Search => "search",
         }
     }
 
@@ -2476,8 +2488,8 @@ impl Action {
     }
 }
 
-/// The eleven, to iterate over them.
-pub const ALL: [Action; 11] = [
+/// The twelve, to iterate over them.
+pub const ALL: [Action; 12] = [
     Action::SplitRight,
     Action::SplitDown,
     Action::ClosePane,
@@ -2489,6 +2501,7 @@ pub const ALL: [Action; 11] = [
     Action::ScrollPageDown,
     Action::ScrollToTop,
     Action::ScrollToBottom,
+    Action::Search,
 ];
 
 /// A chord: the modifier keys needed, and the key.
@@ -2653,6 +2666,8 @@ impl Default for Keymap {
                 (scrollback(Key::PageDown), Action::ScrollPageDown),
                 (scrollback(Key::Home), Action::ScrollToTop),
                 (scrollback(Key::End), Action::ScrollToBottom),
+                // WezTerm's and Alacritty's chord for the same thing (D61).
+                (with_the_chord(Key::F), Action::Search),
             ],
         }
     }
@@ -2718,6 +2733,7 @@ mod keymap_tests {
             ("scroll-page-down", "shift+pagedown", Action::ScrollPageDown),
             ("scroll-to-top", "shift+home", Action::ScrollToTop),
             ("scroll-to-bottom", "shift+end", Action::ScrollToBottom),
+            ("search", "ctrl+shift+f", Action::Search),
         ];
         assert_eq!(
             published.len(),
@@ -2746,7 +2762,7 @@ mod keymap_tests {
     }
 
     #[test]
-    fn the_eleven_factory_ones_are_the_same_as_always() {
+    fn the_factory_ones_are_the_same_as_always() {
         // **It is what makes this change break no one.** The factory chords are the ones the
         // terminal had before they could be configured, and a table born with others would
         // change them for everyone all at once without anyone asking.
@@ -2776,6 +2792,7 @@ mod keymap_tests {
             (scrollback(Key::PageDown), Action::ScrollPageDown),
             (scrollback(Key::Home), Action::ScrollToTop),
             (scrollback(Key::End), Action::ScrollToBottom),
+            (with_the_chord(Key::F), Action::Search),
         ];
 
         for (chord, expected) in factory {
@@ -3089,12 +3106,12 @@ mod keymap_tests {
         }
     }
 
-    /// **The eleven names live twice**: here and in the configuration document, written by hand
+    /// **The names live twice**: here and in the configuration document, written by hand
     /// in both places. Nothing compared them, so renaming one left a
     /// configuration file published with a key the application rejects — and no test noticed.
     ///
     /// The document is read at compile time instead of repeating the list: a test that
-    /// copied the eleven names fixes itself when someone translates them on both sides and
+    /// copied the names fixes itself when someone translates them on both sides and
     /// forgets the document, which is exactly the failure it comes to catch.
     ///
     /// **And it is the other direction of [`the_document_publishes_exactly_the_shortcuts_the_code_has`],
@@ -3102,12 +3119,12 @@ mod keymap_tests {
     /// comment says so— and with that catches **the code** deviating from what is published. But being a copy,
     /// a change in the document without touching the code leaves it green: measured. This one reads the document
     /// for real, so it catches that half. Both are needed, and that is why neither is redundant.
-    /// **The eleven names live twice**: here and in the configuration document, written by hand
+    /// **The names live twice**: here and in the configuration document, written by hand
     /// in both places. Nothing compared them, so renaming one left a
     /// configuration file published with a key the application rejects — and no test noticed.
     ///
     /// The document is read at compile time instead of repeating the list: a test that
-    /// copied the eleven names fixes itself when someone translates them on both sides and
+    /// copied the names fixes itself when someone translates them on both sides and
     /// forgets the document, which is exactly the failure it comes to catch.
     ///
     /// **And it is the other direction of [`the_document_publishes_exactly_the_shortcuts_the_code_has`],
@@ -3117,7 +3134,7 @@ mod keymap_tests {
     /// for real, so it catches that half. Both are needed, and that is why neither is redundant.
     /// **Each chord the document publishes is really interpreted.**
     ///
-    /// It is the gap that remained between the other two guards: those tie down the eleven **names** and the key
+    /// It is the gap that remained between the other two guards: those tie down the **names** and the key
     /// table, and leave out the prose —the key spellings, the list of modifier keys and the
     /// «By default» column—, which is where this project's historical mismatch came from: the document promised
     /// `shift+prior` and the code rejected it, and no one saw it until a person contrasted the two
@@ -3151,10 +3168,10 @@ mod keymap_tests {
             .filter(|token| **token == token.to_lowercase())
             .collect();
         // Without a floor, a document that stopped writing chords in backticks would leave this
-        // test passing by being empty. Today it publishes fourteen.
+        // test passing by being empty. Today it publishes fifteen.
         assert_eq!(
             published.len(),
-            14,
+            15,
             "the document publishes {} chords in lowercase: either it changed shape, or this walk stopped \
              finding them and the test is not looking at anything — {published:?}",
             published.len()

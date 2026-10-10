@@ -406,8 +406,14 @@ fn colors_of(cell: &ViewCell, theme: &Theme) -> (Color32, Color32) {
     // **It goes after inverse video and not before**, so on an already-inverted cell the highlight
     // returns it to its original colors. That is correct and what is expected: selecting over `vim`'s
     // cursor shows it like the rest of the text instead of leaving it indistinguishable.
+    //
+    // **A search's match is the one cell painted with colours of its own**: the palette's yellow
+    // behind the window's background, which is what the reference terminals use to say «here». The
+    // current match is also the selection, and the selection wins, so it stands out from the rest.
     if cell.selected {
         (background, foreground)
+    } else if cell.matched {
+        (theme.background(), theme.color(TermColor::Indexed(3)))
     } else {
         (foreground, background)
     }
@@ -980,7 +986,8 @@ pub(crate) fn paint_pane(
     // **The engine's bit is asked for here and not in the window's walk**, because reading it costs
     // one call and reading it through a `View` would cost a snapshot of the whole grid. It says what
     // the program wants, never what gets drawn: `paint_cursor` answers that.
-    let view = pane.screen.view();
+    let mut view = pane.screen.view();
+    let marking = pane.search.mark(&pane.screen, &mut view);
     let blinking = paint_a_console_view(
         &ui.painter_at(panel_split.console),
         &view,
@@ -998,6 +1005,10 @@ pub(crate) fn paint_pane(
         panel_split.console,
         blink.keys,
     );
+    if let Some(search) = pane.search.open.as_ref() {
+        let painter = ui.painter_at(panel_split.console);
+        crate::search::paint_the_row(&painter, search, &view, theme, metrics, panel_split.console);
+    }
     let painted = crate::links::PaintedConsole {
         view,
         area: panel_split.console,
@@ -1014,7 +1025,10 @@ pub(crate) fn paint_pane(
     // texture invalidates nothing. Without this subtraction, «queueing the painting» would also
     // measure what decoding a PNG and scaling it down cost.
     let in_the_console = discoverer.color_cost();
-    let queued = before.elapsed().saturating_sub(in_the_console.spent);
+    let queued = before
+        .elapsed()
+        .saturating_sub(in_the_console.spent)
+        .saturating_sub(marking.unwrap_or_default());
 
     let before_painting_it = std::time::Instant::now();
     let mut buttons = std::time::Duration::ZERO;
@@ -1075,6 +1089,7 @@ pub(crate) fn paint_pane(
     // **And it is handed back to the window rather than put into the round below**, because the
     // round is only closed on a frame this console produced output in: see
     // [`crate::PaneOutcome::strip_cost`].
+    let search = pane.search.cost();
     let strip_cost = chrome
         .header()
         .map(|header| crate::header::paint(&ui.painter_at(header), header, theme, metrics, button));
@@ -1116,6 +1131,7 @@ pub(crate) fn paint_pane(
         color,
         blinking,
         strip_cost,
+        search,
     }
 }
 
@@ -1189,6 +1205,66 @@ mod tests {
         assert_ne!(
             selected_background, background,
             "the highlighted cell's background is the same as before: the selection would not be seen"
+        );
+    }
+
+    #[test]
+    fn a_search_s_matches_have_colours_of_their_own_and_the_current_one_is_the_selection() {
+        let theme = Theme::default();
+        let plain = ViewCell {
+            fg: TermColor::Indexed(1),
+            bg: TermColor::Indexed(4),
+            ..ViewCell::default()
+        };
+        let matched = ViewCell {
+            matched: true,
+            ..plain
+        };
+        let current = ViewCell {
+            selected: true,
+            ..matched
+        };
+
+        assert_eq!(
+            colors_of(&matched, &theme),
+            (theme.background(), theme.color(TermColor::Indexed(3)))
+        );
+        assert_ne!(colors_of(&matched, &theme), colors_of(&plain, &theme));
+        assert_eq!(
+            colors_of(&current, &theme),
+            colors_of(
+                &ViewCell {
+                    selected: true,
+                    ..plain
+                },
+                &theme
+            ),
+            "the current match is not painted as the selection, so it does not stand out from the rest"
+        );
+    }
+
+    /// **What reaches the queue, not what the colour rule decides**: a match painted with the
+    /// window's own background would pass the rule's test and leave nothing on screen.
+    #[test]
+    fn every_match_on_screen_reaches_the_painting_and_its_neighbours_do_not() {
+        let mut screen = Screen::new(Size { rows: 2, cols: 12 });
+        screen.advance(b"a needle b");
+        let mut view = screen.view();
+        let mut search = term_core::Search::literal("needle").expect("a literal builds");
+        screen.mark_matches(&mut view, &mut search);
+        let yellow = Theme::default().color(TermColor::Indexed(3));
+
+        let (rectangles, _) = rectangles_of_view(&view);
+        let painted_columns: Vec<f32> = rectangles
+            .iter()
+            .filter(|rect| rect.fill == yellow)
+            .map(|rect| rect.rect.left())
+            .collect();
+
+        assert_eq!(
+            painted_columns,
+            (2..8).map(|col| col as f32 * 10.0).collect::<Vec<_>>(),
+            "the match's cells are not the ones painted in its colour"
         );
     }
 
@@ -1532,10 +1608,14 @@ mod tests {
     /// It exists beside [`shapes_of`] rather than widening it: the rectangles are what the block
     /// elements come out as, and their color and size are the assertion — which counting cannot carry.
     fn rectangles_of(screen: &Screen) -> (Vec<eframe::egui::epaint::RectShape>, usize) {
+        rectangles_of_view(&screen.view())
+    }
+
+    /// The same, over a snapshot the test has already marked — a search's matches, for instance.
+    fn rectangles_of_view(view: &term_core::View) -> (Vec<eframe::egui::epaint::RectShape>, usize) {
         let ctx = Context::default();
         ctx.run_ui(eframe::egui::RawInput::default(), |_| {})
             .drop_without_applying_deltas();
-        let view = screen.view();
         let mut discoverer = crate::fonts::Discoverer::default();
         let output = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
             let painter = ui.ctx().layer_painter(eframe::egui::LayerId::new(
@@ -1544,7 +1624,7 @@ mod tests {
             ));
             paint(
                 &painter,
-                &view,
+                view,
                 &Theme::default(),
                 &metrics(10.0, 20.0),
                 Pos2::ZERO,

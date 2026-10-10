@@ -64,6 +64,10 @@ const MODULES: &[(&str, &str)] = &[
         "src/injected/links.rs",
         include_str!("../src/injected/links.rs"),
     ),
+    (
+        "src/injected/search.rs",
+        include_str!("../src/injected/search.rs"),
+    ),
     ("src/links.rs", include_str!("../src/links.rs")),
     (
         "src/links/console.rs",
@@ -120,6 +124,7 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/pointer/links.rs"),
     ),
     ("src/report.rs", include_str!("../src/report.rs")),
+    ("src/search.rs", include_str!("../src/search.rs")),
     ("src/tab_bar.rs", include_str!("../src/tab_bar.rs")),
     ("src/tiling.rs", include_str!("../src/tiling.rs")),
     ("src/tree.rs", include_str!("../src/tree.rs")),
@@ -169,7 +174,7 @@ const IMPL_CEILING: usize = 300;
 const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
     (
         "src/lib.rs",
-        775,
+        768,
         "the window's core, and the file nobody ever split. D28 has the order its pieces come out \
          in; it cannot come under the ceiling in one change because 16 953 lines of tests reach \
          into its private items. **It came in at 3 119; the bench's injected gestures were the \
@@ -293,21 +298,40 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
          last document written became fields of `Persistence`, and only their two declarations \
          counted here — both constructors sit where this guard does not count. **784 - 2 leaves \
          782**. **Watcher rearming then followed pane closing into `closing.rs`: eight production \
-         lines left the core and one new call remained, so 782 + 1 - 8 leaves 775.**",
+         lines left the core and one new call remained, so 782 + 1 - 8 leaves 775.** **Then the piece \
+         went out ahead of the delivery that needs the room**: collecting what a closing console's \
+         frame left undeclared is closing's work, so it went to `closing.rs` as a free function — \
+         out of this file and out of `impl Pane` at once — **10 production lines**, before the \
+         scrollback's search spends any here. **775 - 10 leaves 765.** The search then \
+         spent **eight**: its `mod`, the field a console keeps its search in, the one a pane's outcome \
+         hands the search's cost through, the window's tally, the line that hands it over, and the \
+         three that time the keyboard's pass on a frame somebody typed in — and paid **five** more \
+         here, finding a console by name moving to `Tab` and walking every console becoming one \
+         line. **765 + 8 - 5 leaves 768.**",
     ),
     (
         "impl Window",
         1782,
         "the window's own behaviour. D28's order moved its methods out of `lib.rs` into \
          satellite blocks in twelve modules, which shrank the file and not the type. Recorded on 28 September \
-         2026, the day the guard first summed a type's blocks.",
+         2026, the day the guard first summed a type's blocks. **The scrollback's search spent five \
+         here** — three timing the keyboard's pass on a frame somebody typed in, which closed a \
+         declared hole, the report's `search:` field and the tally's seed when a window opens; \
+         handing each painting's cost over sits in `impl eframe::App`, which this count does not \
+         read — **and paid five**: finding a console by name moved to `Tab`, and walking every \
+         console became one line. **1782 + 5 - 5 leaves 1782.**",
     ),
     (
         "impl Pane",
         591,
         "a console with its panel, its keys and its mouse. On the day it was recorded it was six \
          blocks in six files: the keyboard and mouse passes (157 each), how a pane is opened (112) \
-         and how it gets its panel (120), and 45 more in `lib.rs` and `control.rs`.",
+         and how it gets its panel (120), and 45 more in `lib.rs` and `control.rs`. **The search \
+         paid for its own lines here before spending them**: collecting a closing console's \
+         leftovers became a free function of `closing.rs`, 10 lines out, and the keyboard pass \
+         spent ten — nine asking the search about each key, one seeding a new pane's search \
+         record — with the rules themselves in `search.rs`, outside the type. **591 - 10 + 10 \
+         leaves 591.**",
     ),
     (
         "impl PanelState",
@@ -318,9 +342,12 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
     ),
     (
         "impl InjectedDrags",
-        334,
+        332,
         "the bench's injected gestures. On the day it was recorded its link gestures sat in a \
-         child module (45 lines) that had gone there to pay the block ceiling.",
+         child module (45 lines) that had gone there to pay the block ceiling. **The search gesture \
+         went to a child module as a free function**, so the type paid one line for its arm in the \
+         dispatch, and a three-line method with a single caller went back to being the addition it \
+         wrapped. **334 + 1 - 3 leaves 332.**",
     ),
     (
         "impl Node",

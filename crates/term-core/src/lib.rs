@@ -29,9 +29,11 @@ mod nonblocking;
 #[cfg(any(test, feature = "testing"))]
 pub mod received;
 mod screen;
+mod search;
 mod view;
 
 pub use screen::{Cell, Half, MouseReporting, SCROLLBACK, Screen, Scroll};
+pub use search::{Refused, Search, Toward};
 pub use view::{
     CellWidth, CombiningSpan, Cursor, CursorShape, Link, LinkSource, TermColor, Underline, View,
     ViewCell,

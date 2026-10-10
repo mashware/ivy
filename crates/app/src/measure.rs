@@ -59,8 +59,8 @@ mod header;
 /// `measure::header` outside this file is the function below and never the module.
 pub use header::{
     Blinking, Buttons, CONSOLE_NAME, ChoosingTheFont, Control, Discovery, Drags, Links,
-    Rasterizing, ReadingSettings, Reflow, Restoring, Saving, SessionHeader, SizeInPoints, Strips,
-    TabBar, header, side,
+    Rasterizing, ReadingSettings, Reflow, Restoring, Saving, Searching, SessionHeader,
+    SizeInPoints, Strips, TabBar, header, side,
 };
 
 /// How many samples are kept of each number.
@@ -707,6 +707,7 @@ mod tests {
                 links: Links::default(),
                 control: Control::default(),
                 strips: Strips::default(),
+                search: Searching::default(),
             },
         )
         .expect("writing to memory does not fail");
@@ -782,6 +783,7 @@ mod tests {
                 links: Links::default(),
                 control: Control::default(),
                 strips: Strips::default(),
+                search: Searching::default(),
             },
         )
         .expect("writing to memory does not fail");
@@ -891,6 +893,7 @@ mod tests {
                 links: Links::default(),
                 control: Control::default(),
                 strips: Strips::default(),
+                search: Searching::default(),
             },
         )
         .expect("writing to memory does not fail");
@@ -1979,6 +1982,7 @@ mod tests {
                     links: Links::default(),
                     control: Control::default(),
                     strips: Strips::default(),
+                    search: Searching::default(),
                 },
             )
             .expect("writing to memory does not fail");
@@ -1997,7 +2001,15 @@ mod tests {
         let mut rasterizing = Rasterizing::default();
         rasterizing.record(ms(1), 15, 1);
 
+        // A console that was typed into: batch E's guard reads its keystroke line, which only a
+        // console's own table writes.
+        let mut typed_into = Timings::default();
+        typed_into.record_outbound(ms(1));
+
         let mut window_spans = Vec::new();
+        typed_into
+            .publish_spans(&mut window_spans)
+            .expect("writing to memory does not fail");
         saving
             .publish(&mut window_spans)
             .expect("writing to memory does not fail");

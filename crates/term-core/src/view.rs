@@ -221,6 +221,12 @@ pub struct ViewCell {
     /// would be rewriting what the dependency already upholds, and with them wrong the selection looks broken
     /// exactly where there is emoji.
     pub selected: bool,
+    /// This cell is inside a match of the search open on this console (D61).
+    ///
+    /// A snapshot from [`Screen::view`](crate::Screen::view) leaves it `false`, and in this crate
+    /// only [`Screen::mark_matches`](crate::Screen::mark_matches) sets it — so a console with no
+    /// search open pays nothing for it.
+    pub matched: bool,
 }
 
 impl Default for ViewCell {
@@ -239,6 +245,7 @@ impl Default for ViewCell {
             strikeout: false,
             hidden: false,
             selected: false,
+            matched: false,
         }
     }
 }
@@ -428,6 +435,17 @@ impl View {
     /// All the cells, in reading order.
     pub fn cells(&self) -> &[ViewCell] {
         &self.cells
+    }
+
+    /// Marks one visible cell as inside a search's match. Out of the grid, nothing.
+    pub(crate) fn mark_matched(&mut self, row: usize, col: usize) {
+        let cols = self.size.cols as usize;
+        if row < self.size.rows as usize
+            && col < cols
+            && let Some(cell) = self.cells.get_mut(row * cols + col)
+        {
+            cell.matched = true;
+        }
     }
 
     /// Resolves the link painted under one visible cell.
@@ -774,6 +792,7 @@ pub(crate) fn cell_from(
             strikeout: flags.contains(Flags::STRIKEOUT),
             hidden: flags.contains(Flags::HIDDEN),
             selected,
+            matched: false,
         }
     }
 }

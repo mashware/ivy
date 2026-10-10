@@ -108,6 +108,7 @@ fn the_view_is_consumed_whole_with_bespoke_types() {
             strikeout,
             hidden,
             selected,
+            matched,
         } = *cell;
 
         assert!(!describe(fg).is_empty());
@@ -123,7 +124,9 @@ fn the_view_is_consumed_whole_with_bespoke_types() {
             "this screen is ASCII: no cell should bring anything attached"
         );
         let _ = combining;
-        let _ = (c, inverse, bold, dim, italic, strikeout, hidden, selected);
+        let _ = (
+            c, inverse, bold, dim, italic, strikeout, hidden, selected, matched,
+        );
     }
 
     assert!(

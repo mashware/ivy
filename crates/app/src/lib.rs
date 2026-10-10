@@ -50,6 +50,7 @@ pub mod panel;
 mod pointer;
 pub mod pty_output;
 mod report;
+mod search;
 pub mod session;
 pub mod settings;
 mod tab_bar;
@@ -204,6 +205,8 @@ struct PaneOutcome {
     /// say that apart from a frame that had none — which is precisely the pair the measurement
     /// script throws a run away for.
     strip_cost: Option<std::time::Duration>,
+    /// What searching this console cost on this painting. See [`search::Cost`].
+    search: search::Cost,
 }
 
 /// The environment variable that says how many tabs to open with.
@@ -814,6 +817,8 @@ struct Pane {
     /// nothing reaches the program until somebody answers. Holding rather than warning is the whole
     /// point — once the line closes, the shell has already run the truncated command.
     held: Option<keyboard::HeldPaste>,
+    /// The search open on this console, and what searching it cost. See [`search::OnThisConsole`].
+    search: search::OnThisConsole,
     /// The size the last UI pass measured.
     ///
     /// It is measured where there is a rectangle —`ui`— and applied where the effects live
@@ -951,35 +956,6 @@ impl Pane {
         pickup.left_a_queue
     }
 
-    /// Takes **everything** this console has done in this frame and nobody has declared yet, for
-    /// the one that is leaving and is not going to publish any mean.
-    ///
-    /// **There are two places, and one alone is not enough.** The frame's real order decides it:
-    /// `logic` first closes the previous frame —which empties what [`measure::Timings`] had
-    /// pending— and **then** pumps, which is what leaves in `pending_measurement` what this console
-    /// has just interpreted. The keyboard is attended at the start of the UI pass, **before the
-    /// painting**, so when the closing chord arrives, what the measurement had pending is empty and
-    /// what this frame interpreted is whole in `pending_measurement`: looking only at the first one
-    /// declares **zero** right in the frame where a dumping console is closed, and those
-    /// milliseconds are taken by «the rest of the frame», that is, the cost attributed to the UI
-    /// framework. The other one can indeed hold something when egui repeats the pass, so both are
-    /// picked up.
-    ///
-    /// **It records no mean**, for the same reason as [`measure::Timings::take_pending`]: this
-    /// console is no longer going to publish spans, and closing it along the normal path would
-    /// force inventing a frame cost that is not going to finish.
-    fn take_what_this_frame_left(&mut self) -> std::time::Duration {
-        let without_recording = self
-            .pending_measurement
-            .take()
-            .map_or(std::time::Duration::ZERO, |(_, _, interpreted)| interpreted);
-
-        self.timings.take_pending()
-            + without_recording
-            + std::mem::take(&mut self.panel_reread_unpainted)
-            + std::mem::take(&mut self.control_unpainted)
-    }
-
     /// Whether the program finished **well** and nothing of its own is left to show.
     ///
     /// **It waits for the queue to be empty**: dying does not erase what the program wrote before
@@ -1029,6 +1005,8 @@ struct Window {
     /// What it costs to rasterize the color glyphs, so that it does not end up inside the
     /// painting's span.
     color: measure::Rasterizing,
+    /// What searching the consoles' scrollback cost this run. See [`measure::Searching`].
+    searching: measure::Searching,
     theme: Theme,
     /// Which chord does what.
     ///
@@ -1344,10 +1322,7 @@ impl Window {
 
     /// The console of the active tab that is called that, if it is still there.
     pub(crate) fn pane_called(&mut self, name: usize) -> Option<&mut Pane> {
-        self.active_mut()
-            .panes_mut()
-            .into_iter()
-            .find(|pane| pane.name == name)
+        self.active_mut().pane_called(name)
     }
 
     fn active_mut(&mut self) -> &mut Tab {
@@ -1366,9 +1341,7 @@ impl Window {
     }
 
     fn all_panes_mut(&mut self) -> impl Iterator<Item = &mut Pane> {
-        self.tabs
-            .iter_mut()
-            .flat_map(|tab| tab.panes_mut().into_iter())
+        self.tabs.iter_mut().flat_map(Tab::panes_mut)
     }
 
     /// Arms the watcher over the directories of the consoles that have one.
@@ -1580,31 +1553,32 @@ impl Window {
     /// It lives apart from the painting for the same reason as [`Self::handle_the_mouse`]: sending
     /// it to both would write the same key into two programs, which is exactly what «without
     /// stepping on each other» forbids, and inside the interface pass that decision cannot be
-    /// checked without opening a window. **A known measurement hole, and declared here instead of
-    /// covered up.** Nothing that is done here is timed —translating the batch of events into
-    /// bytes, and since this milestone also taking the view back down—, so it is published inside
-    /// «the rest of the frame», that is, as framework cost. **Today it contaminates no published
-    /// figure because in the batches nobody types**: they are mouse gestures and dumps. The day a
-    /// batch writes —and one that measures the selection or the mouse to the program will— it has
-    /// to be closed, and closing it means splitting this function the way `handle_the_mouse` is
-    /// split, so that the timed region is the whole call and shrinking it stops being moving a
-    /// line.
+    /// checked without opening a window.
     ///
-    /// **The blinking cursor's anchor added one pass over this frame's events, and it goes in the
-    /// same hole.** It is one `matches!` per event and the batches that inject gestures do pay it —
-    /// so «nobody types» no longer describes the whole of what happens here, even though it still
-    /// describes what reaches a program. Named rather than left to the subtraction (**D13**): the
-    /// hole this docblock already declares is now one line wider, and the day it is closed this pass
-    /// is inside the region that gets timed.
+    /// **On a pass somebody typed in, the pass is timed whole and subtracted from the frame
+    /// (D13).** It used to be a declared hole — «in the batches nobody types» — and the
+    /// scrollback's search is the batch that types: a press of `Enter` walks the history right
+    /// here, so leaving it untimed would publish that walk as the interface framework's cost. The
+    /// press is also published on its own line of the report (D61); only this whole pass is
+    /// subtracted, so it is never subtracted twice.
+    ///
+    /// **A pass nobody typed in declares nothing, and that is the hole that is left, said rather
+    /// than hidden.** It clones the keymap and walks an event list with no press, text or paste in
+    /// it — key releases and modifier changes, at most — and declaring it on every frame would hand
+    /// every other declaring path's test a non-zero it did not earn. «Typed» is the blinking cursor's
+    /// question (`keyboard::somebody_typed`): a press, a text or a paste. A copy on its own is not
+    /// in it, and stays in the hole. The cursor's anchor is read before the clock starts.
     fn send_keys_to_the_focused(&mut self, ctx: &egui::Context) -> Vec<WindowRequest> {
         // **The phase goes back to the start whenever a key is pressed**, so the cursor is lit the
         // instant you type instead of at whatever point of the cycle you caught it — and typing
         // continuously never leaves it half-drawn. **It is asked BEFORE the keys are handed over**:
         // sending them consumes the frame's events, so read afterwards this always sees an empty
         // list and the anchor never moves. Measured — the test for it failed exactly that way.
-        if ctx.input(keyboard::somebody_typed) {
+        let typed = ctx.input(keyboard::somebody_typed);
+        if typed {
             self.blink.saw_a_key();
         }
+        let before = Instant::now();
         let started = self.frame_started;
         // The seed is taken out and put back because the pane and the field are two borrows of the
         // same owner, and the compiler does not let both be held at once.
@@ -1633,6 +1607,8 @@ impl Window {
                 )
             })
             .unwrap_or_default();
+        // Declared on a pass somebody typed in, and only then: see this function's docblock.
+        self.timed_separately += before.elapsed() * u32::from(typed);
         self.modifiers = modifiers;
         requests
     }
@@ -2192,6 +2168,7 @@ impl eframe::App for Window {
             // frames: see [`measure::Strips`].
             self.strips
                 .a_strip_was_painted(&mut self.timed_separately, pane_outcome.strip_cost);
+            (pane_outcome.search).hand_over(&mut self.searching, &mut self.timed_separately);
             // **Summed over every pane and every frame, not per frame.** What the report answers is
             // «did this run draw any button at all», which is what makes a batch's zero mean the
             // seeding failed rather than that one frame happened to be short.
@@ -2258,7 +2235,8 @@ impl eframe::App for Window {
             // See [`InjectedDrags::cell`].
             injected_drags.already_knows_the_cell(metrics.width());
             self.last_painted = painted;
-            injected_drags.several_more_with_effect(with_effect);
+            // The sum of this frame's panes, already counted: one addition, not one per pane.
+            injected_drags.with_effect += with_effect;
         }
 
         // The ones not painted have nowhere else to find out their size: this is the only half of
@@ -7091,6 +7069,7 @@ mod tests {
             received: Vec::new(),
             keystrokes: Vec::new(),
             held: None,
+            search: search::OnThisConsole::default(),
             measured: INITIAL_GRID,
         }
     }
@@ -7142,6 +7121,7 @@ mod tests {
             discoverer: fonts::Discoverer::default(),
             discovery: measure::Discovery::default(),
             color: measure::Rasterizing::default(),
+            searching: measure::Searching::default(),
             buttons: measure::Buttons::default(),
             links: measure::Links::default(),
             desktop: links::Desktop::Recorded(Vec::new()),
@@ -10539,15 +10519,27 @@ mod tests {
         // that is where the chord is served. Nobody declared them: the «rest of the frame» kept
         // them, and that number is the one that says how much the interface framework costs — the
         // figure D3 decides with whether egui holds up. Launching two processes is not egui's cost.
+        //
+        // **Against a frame somebody also typed in, and not against zero.** Walking the tree and the
+        // keyboard's own pass both declare on such a frame (D61), so «not zero» would stay green
+        // with the launches undeclared; two `fork`/`exec` are of another order than either.
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
 
+        one_frame_with(&mut window, &ctx, chord_with(egui::Key::Z));
+        let without_launching = window.timed_separately;
+        assert!(
+            !without_launching.is_zero(),
+            "a typed frame declared nothing, so the comparison is worthless"
+        );
         one_frame_with(&mut window, &ctx, chord_with(egui::Key::T));
 
         assert_eq!(window.tabs.len(), 2, "the tab was not opened");
         assert!(
-            !window.timed_separately.is_zero(),
-            "opening a tab declared nothing: the two fork/exec are published as the framework's cost"
+            window.timed_separately > without_launching * 5,
+            "opening a tab declared {:?}, of the same order as the {without_launching:?} of a frame that \
+             launched nothing: the two fork/exec are published as the framework's cost",
+            window.timed_separately
         );
     }
 
@@ -25745,6 +25737,283 @@ mod tests {
             0,
             "it was typed into and the view stayed up top: what is written would not be seen"
         );
+    }
+
+    /// The keys of one pass handed to a pane, with the window's own shortcuts.
+    fn keys_to(
+        pane: &mut Pane,
+        ctx: &egui::Context,
+        keymap: &keyboard::Keymap,
+        events: Vec<egui::Event>,
+    ) {
+        let mut modifiers = egui::Modifiers::NONE;
+        enqueue(ctx, events);
+        pane.send_keys(ctx, Instant::now(), &mut modifiers, 1, keymap, true);
+    }
+
+    fn search_chord() -> Vec<egui::Event> {
+        key_with(egui::Key::F, egui::Modifiers::CTRL | egui::Modifiers::SHIFT)
+    }
+
+    /// **AC7, the half that keeps a console from being typed into by accident.** Every key the
+    /// search uses is in one batch, so a single one leaking would leave bytes behind — and what is
+    /// asserted is the bytes this pass hands the program, which is what `send_keys` writes.
+    #[test]
+    fn an_open_search_keeps_its_own_keys_from_the_program() {
+        let ctx = egui::Context::default();
+        let mut pane = pane_with("sleep 30", 0);
+        let keymap = keyboard::Keymap::default();
+        pane.screen.advance(b"the needle\r\n");
+
+        let mut batch = search_chord();
+        batch.push(egui::Event::Text("needle".to_owned()));
+        batch.extend(key_with(egui::Key::Backspace, egui::Modifiers::NONE));
+        batch.push(egui::Event::Text("e x".to_owned()));
+        batch.extend(key_with(egui::Key::W, egui::Modifiers::CTRL));
+        batch.extend(key_with(egui::Key::Backspace, egui::Modifiers::CTRL));
+        batch.extend(key_with(egui::Key::U, egui::Modifiers::CTRL));
+        // The desktop turns the paste chord into a paste before it is a key, so only the change of
+        // modifiers and the paste itself arrive.
+        batch.push(egui::Event::ModifiersChanged(
+            egui::Modifiers::CTRL | egui::Modifiers::SHIFT,
+        ));
+        batch.push(egui::Event::Paste("needle".to_owned()));
+        batch.extend(key_with(egui::Key::Enter, egui::Modifiers::NONE));
+        batch.extend(key_with(egui::Key::Enter, egui::Modifiers::SHIFT));
+        keys_to(&mut pane, &ctx, &keymap, batch);
+
+        assert!(
+            pane.keystrokes.is_empty(),
+            "the search's own keys reached the program: {:?}",
+            String::from_utf8_lossy(&pane.keystrokes)
+        );
+        assert_eq!(
+            pane.screen.selected_text().as_deref(),
+            Some("needle"),
+            "the paste did not land in the query, or Enter did not search with it"
+        );
+
+        keys_to(
+            &mut pane,
+            &ctx,
+            &keymap,
+            key_with(egui::Key::Escape, egui::Modifiers::NONE),
+        );
+        assert!(
+            pane.keystrokes.is_empty(),
+            "the Escape that closes the search reached the program"
+        );
+        keys_to(
+            &mut pane,
+            &ctx,
+            &keymap,
+            vec![egui::Event::Text("x".to_owned())],
+        );
+        assert_eq!(
+            pane.keystrokes, b"x",
+            "after closing the search, typing did not reach the program"
+        );
+    }
+
+    /// **AC7, the half that keeps the search from deafening a console**: a key that is not the
+    /// search's is the program's, and getting there closes the search.
+    #[test]
+    fn a_key_meant_for_the_program_reaches_it_and_closes_the_search() {
+        let ctx = egui::Context::default();
+        let mut pane = pane_with("sleep 30", 0);
+        let keymap = keyboard::Keymap::default();
+
+        let mut batch = search_chord();
+        batch.extend(key_with(egui::Key::C, egui::Modifiers::CTRL));
+        keys_to(&mut pane, &ctx, &keymap, batch);
+        assert_eq!(
+            pane.keystrokes,
+            [0x03],
+            "the interrupt did not reach the program"
+        );
+
+        keys_to(
+            &mut pane,
+            &ctx,
+            &keymap,
+            vec![egui::Event::Text("x".to_owned())],
+        );
+        assert_eq!(
+            pane.keystrokes, b"x",
+            "the search stayed open after a key went to the program"
+        );
+    }
+
+    /// **AC8**: with the shortcut handed back, its chord is the program's `Ctrl+F`, and no search
+    /// opens to swallow what follows.
+    #[test]
+    fn with_the_search_shortcut_handed_back_its_chord_reaches_the_program() {
+        let ctx = egui::Context::default();
+        let mut pane = pane_with("sleep 30", 0);
+        let mut keymap = keyboard::Keymap::default();
+        keymap.bind(keyboard::Action::Search, None);
+
+        let mut batch = search_chord();
+        batch.push(egui::Event::Text("x".to_owned()));
+        keys_to(&mut pane, &ctx, &keymap, batch);
+
+        assert_eq!(pane.keystrokes, b"\x06x");
+    }
+
+    /// **The bench's search gesture, run through real frames, never types into the console.** It is
+    /// what batch E's own guard checks after a run, brought into the suite: the first run of the
+    /// batch was thrown away because the gesture never released its keys, egui turned every later
+    /// chord into a repeat, and the query and the presses went to the program. Frames and not
+    /// `send_keys` alone, because the repeat is decided where egui begins a pass.
+    #[test]
+    fn the_bench_s_search_gesture_never_types_into_the_console() {
+        let ctx = egui::Context::default();
+        let mut window = window_with("sleep 30", "sleep 30");
+        let mut gesture = injected::InjectedDrags::new(3, injected::InjectedGesture::Search)
+            .expect("three gestures were asked for");
+        let typed_into = window
+            .active()
+            .where_the_focus_is()
+            .expect("a focused console");
+        // A history to scroll into, so the gesture's last step has something to bring back from.
+        for n in 0..200 {
+            window.active_mut().panes_mut()[typed_into]
+                .screen
+                .advance(format!("module {n}\r\n").as_bytes());
+        }
+
+        for frame in 0..40 {
+            let events = gesture.events(&[], frame);
+            one_frame_with(&mut window, &ctx, events);
+            assert!(
+                window.active().panes()[typed_into].keystrokes.is_empty(),
+                "frame {frame} of the gesture sent the console {:?}",
+                String::from_utf8_lossy(&window.active().panes()[typed_into].keystrokes)
+            );
+        }
+
+        assert_eq!(gesture.completed, 3, "the gestures did not run to the end");
+        assert_eq!(
+            window.active().panes()[typed_into].screen.view().scroll(),
+            0,
+            "the gesture left the console scrolled into the history, painting rows its control never paints"
+        );
+        assert_eq!(
+            window.searching.presses, 24,
+            "not every gesture opened the search: its presses did not reach it"
+        );
+    }
+
+    /// **The keyboard's pass is declared on a frame somebody typed in, and only then (D61, D13).**
+    /// Both halves, because each mutation is the other's: declared on every frame inflates every
+    /// other declaring test with a non-zero it did not earn, and declared on none publishes a
+    /// press's walk over the history as the framework's cost.
+    #[test]
+    fn the_keyboard_pass_is_declared_when_somebody_typed_and_only_then() {
+        let ctx = egui::Context::default();
+        let mut window = window_with("sleep 30", "sleep 30");
+
+        enqueue(&ctx, Vec::new());
+        window.send_keys_to_the_focused(&ctx);
+        assert!(
+            window.timed_separately.is_zero(),
+            "a pass nobody typed in declared {:?}",
+            window.timed_separately
+        );
+
+        let at = window
+            .active()
+            .where_the_focus_is()
+            .expect("a focused console");
+        let pane = &mut window.active_mut().panes_mut()[at];
+        for n in 0..3_000 {
+            pane.screen.advance(format!("line {n}\r\n").as_bytes());
+        }
+        let mut steps = search::Steps::new(false);
+        steps.toggle();
+        assert!(steps.took(&egui::Event::Text("absent".into()), egui::Modifiers::NONE));
+        search::apply(&mut pane.search, &mut pane.screen, steps);
+
+        enqueue(&ctx, key_with(egui::Key::Enter, egui::Modifiers::NONE));
+        window.send_keys_to_the_focused(&ctx);
+
+        let pressing = window.active_mut().panes_mut()[at].search.cost().presses;
+        assert_eq!(pressing.count, 1, "the premise: Enter walked the history");
+        assert!(
+            window.timed_separately >= pressing.total,
+            "the pass declared {:?} and its press alone took {:?}: the walk is published as the \
+             framework's cost",
+            window.timed_separately,
+            pressing.total
+        );
+    }
+
+    /// What one painting of this pane hands the window about searching it.
+    fn search_cost_of_painting(pane: &mut Pane) -> search::Cost {
+        let ctx = egui::Context::default();
+        let mut cost = None;
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            let metrics =
+                CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE));
+            let outcome = painter::paint_pane(
+                ui,
+                pane,
+                area_of(800.0),
+                &Theme::default(),
+                &metrics,
+                &mut fonts::Discoverer::default(),
+                painter::HowToPaint {
+                    blink: painter::Blink {
+                        ceiling: Some(false),
+                        since_a_key: std::time::Duration::ZERO,
+                        keys: painter::Keys::Here,
+                    },
+                    headers: header::Headers::PAINTED,
+                    button: header::Button::in_a_tab_of(&[egui::Rect::NOTHING]),
+                    measure_links: false,
+                },
+            );
+            cost = Some(outcome.search);
+        })
+        .drop_without_applying_deltas();
+        cost.expect("the pane was painted")
+    }
+
+    /// **AC11, and the half of D13 a run cannot show**: a console with no search open hands the
+    /// window no marking at all, and one with a search open hands it what marking cost and how many
+    /// cells it marked — which is what the window subtracts and what the bench's guard reads.
+    #[test]
+    fn only_a_console_with_a_search_open_pays_for_marking() {
+        let mut pane = pane_with("sleep 30", 0);
+        pane.screen.advance(b"the needle\r\n");
+
+        assert!(
+            search_cost_of_painting(&mut pane).marking.is_none(),
+            "a console with no search open declared a marking"
+        );
+
+        let mut steps = search::Steps::new(false);
+        steps.toggle();
+        assert!(steps.took(&egui::Event::Text("needle".into()), egui::Modifiers::NONE));
+        search::apply(&mut pane.search, &mut pane.screen, steps);
+        let marking = search_cost_of_painting(&mut pane)
+            .marking
+            .expect("a console with a search open declared no marking");
+        assert_eq!(marking.cells, 6, "the visible match was not the one marked");
+    }
+
+    /// **AC9**: opening the search changes nothing the program or the pointer measure from. The
+    /// row is painted over the console, and a row cut out of it would resize the program.
+    #[test]
+    fn opening_the_search_does_not_resize_the_console() {
+        let mut pane = pane_with("sleep 30", 0);
+        one_frame_over(&mut pane);
+        let closed = pane.measured;
+
+        pane.search.open = Some(search::Mode::default());
+        one_frame_over(&mut pane);
+
+        assert_eq!(pane.measured, closed);
     }
 
     /// A window of two consoles where the left one **asks for the mouse** and shows what it

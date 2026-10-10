@@ -3,14 +3,16 @@
 use alacritty_terminal::Term;
 use alacritty_terminal::event::VoidListener;
 use alacritty_terminal::grid::{Dimensions, Grid, Scroll as GridScroll};
-use alacritty_terminal::index::{Column, Line, Point, Side};
+use alacritty_terminal::index::{Boundary, Column, Direction, Line, Point, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::Config;
 use alacritty_terminal::term::TermMode;
 use alacritty_terminal::term::cell::Flags;
+use alacritty_terminal::term::search::RegexIter;
 use alacritty_terminal::vte::ansi::{CursorShape as AlacrittyShape, CursorStyle, Processor};
 
 use crate::Size;
+use crate::search::{Search, Toward};
 use crate::view::{self, CellWidth, Cursor, Osc8Span, View, ViewCell, ViewMetadata};
 
 /// Dimensions in the vocabulary of `alacritty_terminal`.
@@ -195,6 +197,11 @@ impl Scroll {
 /// - **Up to 14.4 MiB per console** with the scrollback full at 180 columns, and there is no ceiling on
 ///   splits (**D14**).
 pub const SCROLLBACK: usize = 3_500;
+
+/// How many lines beyond the screen marking a search's matches may walk, to finish a match a wrap
+/// carries across the edge. A hundred lines of a wide console is a few times the screen, far past
+/// any match a person types, and a bound on what a frame can pay. See [`Screen::mark_matches`].
+pub const MARKING_REACH: usize = 100;
 
 impl Screen {
     /// Creates an empty screen of the given size.
@@ -545,6 +552,144 @@ impl Screen {
         self.term.selection_to_string()
     }
 
+    /// Marks **every match of `search` on screen** in a snapshot [`view`](Screen::view) took, and
+    /// says how many cells it marked.
+    ///
+    /// **A step after `view` and not a flag on it**, so a console with no search open pays nothing,
+    /// and so whoever paints can time this walk apart from taking the snapshot (D13, D61).
+    ///
+    /// **The walk starts at the beginning of the logical line the top row belongs to and ends at the
+    /// end of the one the bottom row belongs to**, so a match that a wrap carries across the top or
+    /// bottom edge is marked on the part that shows — **but never more than [`MARKING_REACH`] lines
+    /// beyond the screen.** A single line wrapped across the whole history (minified JSON, a dump
+    /// with no newline) would otherwise make every frame walk all of it, which is the per-frame cost
+    /// D61 says the search does not have.
+    pub fn mark_matches(&self, view: &mut View, search: &mut Search) -> usize {
+        let grid = self.term.grid();
+        let rows = grid.screen_lines() as i32;
+        let offset = grid.display_offset() as i32;
+        debug_assert!(
+            view.size() == self.size() && view.scroll() == offset as usize,
+            "the snapshot is not this screen's as it is now, so its cells are not where the walk marks"
+        );
+        let (start, end) = self.marking_bounds();
+        let mut marked = 0;
+        for found in RegexIter::new(start, end, Direction::Right, &self.term, &mut search.regex) {
+            let mut point = *found.start();
+            loop {
+                let row = point.line.0 + offset;
+                if row >= rows {
+                    break;
+                }
+                if row >= 0 {
+                    view.mark_matched(row as usize, point.column.0);
+                    marked += 1;
+                }
+                if point >= *found.end() {
+                    break;
+                }
+                point = point.add(&self.term, Boundary::None, 1);
+            }
+        }
+        marked
+    }
+
+    /// Where marking walks: from the start of the logical line the top row belongs to, to the end
+    /// of the one the bottom row belongs to — **following the wraps itself, and stopping
+    /// [`MARKING_REACH`] lines beyond the screen.** The engine's own search for a line's ends
+    /// follows a wrap to its end whatever its length, so clamping its answer would still pay its
+    /// walk; this one never takes the step past the reach.
+    fn marking_bounds(&self) -> (Point, Point) {
+        let grid = self.term.grid();
+        let rows = grid.screen_lines() as i32;
+        let offset = grid.display_offset() as i32;
+        let oldest = Line(-(grid.history_size() as i32));
+        let newest = Line(rows - 1);
+        let last = grid.last_column();
+        let wraps = |line: Line| grid[line][last].flags.contains(Flags::WRAPLINE);
+
+        let top = Line(-offset);
+        let mut start = top;
+        while start > oldest && start > top - MARKING_REACH && wraps(start - 1) {
+            start -= 1;
+        }
+        let bottom = Line(rows - 1 - offset);
+        let mut end = bottom;
+        while end < newest && end < bottom + MARKING_REACH && wraps(end) {
+            end += 1;
+        }
+        (Point::new(start, Column(0)), Point::new(end, last))
+    }
+
+    /// Goes to the next match of `search` that way, scrolls to it and **makes it the selection**.
+    ///
+    /// **The match is the selection on purpose**: copying it then goes through the same four rules
+    /// as anything else copied (D22), with nothing of its own to get wrong. It also answers where
+    /// the next step starts — from the selection, which the engine rotates as output arrives and
+    /// drops when its lines leave the history — so no position is kept anywhere else to go stale.
+    ///
+    /// **The step starts one cell past the current match.** The engine counts a match that sits
+    /// exactly on the point it is handed, so starting on the match itself would find it again, on
+    /// every press, for ever. With nothing selected it starts at the edge of what is being looked
+    /// at, so the first press finds what is nearest to the person's eyes.
+    ///
+    /// **When the view is not already at the bottom, the match is kept off the last row**, which is
+    /// where the search's own line is painted over the console. At the bottom there is nothing
+    /// newer to scroll in, and the painter moves its line instead.
+    ///
+    /// Returns whether there was a match. **When there was none nothing moves**: neither the
+    /// selection somebody had nor where they were looking.
+    pub fn find(&mut self, search: &mut Search, toward: Toward) -> bool {
+        let rows = self.term.grid().screen_lines() as i32;
+        let offset = self.term.grid().display_offset() as i32;
+        let current = self
+            .term
+            .selection
+            .as_ref()
+            .and_then(|selection| selection.to_range(&self.term));
+        let (direction, side, origin) = match (toward, current) {
+            (Toward::Older, Some(range)) => (
+                Direction::Left,
+                Side::Left,
+                range.start.sub(&self.term, Boundary::None, 1),
+            ),
+            (Toward::Newer, Some(range)) => (
+                Direction::Right,
+                Side::Right,
+                range.end.add(&self.term, Boundary::None, 1),
+            ),
+            (Toward::Older, None) => (
+                Direction::Left,
+                Side::Left,
+                Point::new(Line(rows - 1 - offset), self.term.grid().last_column()),
+            ),
+            (Toward::Newer, None) => (
+                Direction::Right,
+                Side::Right,
+                Point::new(Line(-offset), Column(0)),
+            ),
+        };
+
+        let Some(found) = self
+            .term
+            .search_next(&mut search.regex, origin, direction, side, None)
+        else {
+            return false;
+        };
+        let (start, end) = (*found.start(), *found.end());
+        let mut selection = Selection::new(SelectionType::Simple, start, Side::Left);
+        selection.update(end, Side::Right);
+        self.term.selection = Some(selection);
+
+        self.term.scroll_to_point(end);
+        self.term.scroll_to_point(start);
+        let offset = self.term.grid().display_offset() as i32;
+        if end.line.0 == rows - 1 - offset && offset > 0 {
+            self.term.scroll_display(GridScroll::Delta(-1));
+        }
+        true
+    }
+
     /// Brings a visible cell into the engine's coordinate system.
     fn engine_point(&self, cell: Cell) -> Point {
         let scroll = self.term.grid().display_offset() as i32;
@@ -640,6 +785,29 @@ fn a_text_line(grid: &Grid<alacritty_terminal::term::cell::Cell>, row: i32) -> S
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn marking_never_walks_further_than_its_reach_beyond_the_screen() {
+        // One line wrapped across far more rows than the reach, with the screen in its middle: the
+        // walk would otherwise follow it to both ends on every frame.
+        let mut screen = Screen::new(Size { rows: 4, cols: 10 });
+        screen.advance("x".repeat(10 * 400).as_bytes());
+        screen.scroll_by(Scroll::Lines(200));
+        let top = -(screen.view().scroll() as i32);
+
+        let (start, end) = screen.marking_bounds();
+
+        assert_eq!(
+            start.line.0,
+            top - super::MARKING_REACH as i32,
+            "the walk up passed its reach"
+        );
+        assert_eq!(
+            end.line.0,
+            top + 3 + super::MARKING_REACH as i32,
+            "the walk down passed its reach"
+        );
+    }
     use super::*;
     use crate::{CellWidth, CursorShape, TermColor, Underline};
 

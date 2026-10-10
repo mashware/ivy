@@ -136,6 +136,7 @@ const MODULES: &[(&str, &str)] = &[
     ("app/src/opening.rs", include_str!("../src/opening.rs")),
     ("app/src/pointer.rs", include_str!("../src/pointer.rs")),
     ("app/src/report.rs", include_str!("../src/report.rs")),
+    ("app/src/search.rs", include_str!("../src/search.rs")),
     ("app/src/tab_bar.rs", include_str!("../src/tab_bar.rs")),
     ("app/src/tiling.rs", include_str!("../src/tiling.rs")),
     ("app/src/tree.rs", include_str!("../src/tree.rs")),
@@ -153,6 +154,10 @@ const MODULES: &[(&str, &str)] = &[
     (
         "app/src/injected/links.rs",
         include_str!("../src/injected/links.rs"),
+    ),
+    (
+        "app/src/injected/search.rs",
+        include_str!("../src/injected/search.rs"),
     ),
     (
         "app/src/panel/color.rs",
@@ -197,6 +202,14 @@ const MODULES: &[(&str, &str)] = &[
     (
         "term-core/src/view.rs",
         include_str!("../../term-core/src/view.rs"),
+    ),
+    (
+        "term-core/src/search.rs",
+        include_str!("../../term-core/src/search.rs"),
+    ),
+    (
+        "term-core/examples/search.rs",
+        include_str!("../../term-core/examples/search.rs"),
     ),
     (
         "term-core/src/received.rs",

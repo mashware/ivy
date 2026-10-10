@@ -100,6 +100,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         include_str!("../src/injected/links.rs"),
         11,
     ),
+    (
+        "src/injected/search.rs",
+        include_str!("../src/injected/search.rs"),
+        13,
+    ),
     ("src/links.rs", include_str!("../src/links.rs"), 46),
     (
         "src/links/console.rs",
@@ -175,6 +180,7 @@ const SOURCES: &[(&str, &str, usize)] = &[
         28,
     ),
     ("src/report.rs", include_str!("../src/report.rs"), 238),
+    ("src/search.rs", include_str!("../src/search.rs"), 48),
     ("src/tab_bar.rs", include_str!("../src/tab_bar.rs"), 171),
     (
         "src/tests/markdown.rs",

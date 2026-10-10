@@ -123,7 +123,7 @@ the terminal is open.
 
 ## The shortcuts
 
-The terminal's eleven shortcuts are changed with `key.` and the name of what they do:
+The terminal's twelve shortcuts are changed with `key.` and the name of what they do:
 
 ```
 key.split-right = ctrl+shift+e
@@ -140,6 +140,7 @@ key.close-pane = none
 | `previous-tab` · `next-tab` | moves between tabs | `ctrl+shift+←` · `ctrl+shift+→` |
 | `scroll-page-up` · `scroll-page-down` | goes up and down the scrollback | `shift+pageup` · `shift+pagedown` |
 | `scroll-to-top` · `scroll-to-bottom` | goes to the ends of the scrollback | `shift+home` · `shift+end` |
+| `search` | searches the focused console's scrollback; pressed again, closes the search | `ctrl+shift+f` |
 
 **A chord is written with `+`**, in any order and regardless of case: `ctrl+shift+e`, `shift+prior`,
 `alt+f4`. `ctrl`, `shift` and `alt` are valid, and **at least one is required**: without one you

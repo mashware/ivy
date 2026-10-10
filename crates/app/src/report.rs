@@ -254,6 +254,7 @@ impl Window {
                 // none, and a run that drew some without asking, are both thrown away by
                 // `scripts/measure-frame.sh`, and neither is visible from the other half.
                 strips: self.strips.published(self.headers),
+                search: self.searching,
                 // **Summed here, at the end, out of each pane's own count, plus what the panes that
                 // already closed banked on the window.** The channel is drained from two places —
                 // the painting and the sweep over the consoles nobody looks at — and a counter each

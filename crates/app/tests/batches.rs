@@ -36,6 +36,7 @@ const DECLARED: &[(&str, &str)] = &[
     ("PATCHES", "documents"),
     ("LARGE", "documents"),
     ("LINKS", "links"),
+    ("SEARCH", "search"),
 ];
 
 /// Whether the script has a conditional on this test that ends up invalidating the run.
@@ -156,6 +157,46 @@ fn batch_w_demands_every_source_and_an_opened_link_per_gesture() {
             "[ \"$GESTURE\" = link ] && [ \"$((LINK_PLAIN + LINK_OSC + LINK_PANEL))\" -lt \"$INJECTED\" ]"
         ),
         "nothing invalidates a batch W run whose gestures mostly opened nothing"
+    );
+}
+
+/// **Batch E's own direction has to name every count, and its leak guard has to exist.**
+///
+/// The pair of the loop above is satisfied by any condition on `SEARCH = 1` that invalidates — and
+/// batch E has two: the counts, and the keystrokes that must not reach a program. Deleting the
+/// first left every test green, because the second still matched. So each count is held by name, and
+/// the leak guard on its own.
+#[test]
+fn batch_e_demands_presses_found_and_marked_and_no_keystroke() {
+    let lines: Vec<&str> = MEASURE.lines().collect();
+    let direction = lines
+        .windows(2)
+        .find(|pair| {
+            pair[0].contains("if [ \"${SEARCH:-}\" = 1 ]; then") && pair[1].contains("$SEARCH_")
+        })
+        .map(|pair| pair[1])
+        .expect("batch E's own direction is not in the script");
+    // The exact condition and not each count on its own: with `&&` in place of `||` every count
+    // is still named, and a run that found nothing is published.
+    assert!(
+        direction.contains(
+            "[ \"$SEARCH_PRESSES\" = 0 ] || [ \"$SEARCH_FOUND\" = 0 ] || [ \"$SEARCH_MARKED\" = 0 ]"
+        ),
+        "batch E can publish a run in which one of its counts is zero: «{direction}»"
+    );
+    // And the other direction reads the paintings with a search OPEN: a search on a query that
+    // matches nothing marks no cell and still paints inside the console's span.
+    assert!(
+        invalidates_on(
+            "[ \"${SEARCH:-}\" != 1 ] && { [ \"$SEARCH_PRESSES\" != 0 ] || [ \"$SEARCH_OPEN\" != 0 ]; }"
+        ),
+        "a batch that asks for no search can open one that marks nothing and keep its good name"
+    );
+    assert!(
+        invalidates_on(
+            "if grep -q \"^key in the frame → handed over to be written\" \"$REPORT\"; then"
+        ),
+        "nothing invalidates a batch E run whose query or presses reached a program"
     );
 }
 
@@ -282,6 +323,17 @@ fn every_word_the_scripts_patterns_anchor_on_is_one_the_report_writes() {
         (" drawn.*$", " drawn whole,"),
         (" pressed.*$", " pressed\""),
         (" applied.*$", " applied,"),
+        (" presses, ", " presses, "),
+        (" found .*$", " found ·"),
+        (
+            " paintings with a search open, ",
+            " paintings with a search open, ",
+        ),
+        (" with matches marked .*$", " with matches marked ·"),
+        (
+            " paintings with a search open, .*$",
+            " paintings with a search open, ",
+        ),
     ];
 
     for (in_the_script, in_the_report) in ANCHORS {

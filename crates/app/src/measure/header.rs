@@ -540,6 +540,36 @@ pub struct SessionHeader {
     pub control: Control,
     /// What the strips over the consoles cost, and whether this run painted any.
     pub strips: Strips,
+    /// What searching a console's scrollback cost (D61).
+    pub search: Searching,
+}
+
+/// What searching a console's scrollback cost this run.
+///
+/// **Two costs and two places, and neither may land in the framework's figure (D13).** A press of
+/// `Enter` walks the history in the keyboard's pass, which the window times whole; marking the
+/// matches on screen runs inside a console's painting and is taken out of that span. Both are
+/// published here so the subtraction can be audited, and the script reads the counts in both
+/// directions: the search batch must have pressed, found and marked, and every other batch must have
+/// done none of the three.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Searching {
+    /// Presses of `Enter` or `Shift+Enter` that walked the history.
+    pub presses: usize,
+    /// How many of them found a match.
+    pub found: usize,
+    /// What all the presses cost together.
+    pub pressing: Duration,
+    /// The slowest of them, which is the stall a person can feel.
+    pub slowest: Duration,
+    /// Paintings of a console with a search open, **passes and not frames**: egui can paint a frame
+    /// twice, and both passes mark.
+    pub paintings: usize,
+    /// How many of those paintings marked at least one match, which is what the search batch has to
+    /// show it did. A painting with a search open and nothing to mark is not one of them.
+    pub markings: usize,
+    /// What marking cost, every painting with a search open together.
+    pub marking: Duration,
 }
 
 /// What the panel's control channel did this run.
@@ -798,6 +828,7 @@ pub fn header(
         links,
         control,
         strips,
+        search,
     } = session;
     let profile = if cfg!(debug_assertions) {
         "debug — the number that counts is the one from --release"
@@ -997,6 +1028,28 @@ pub fn header(
         a,
         "links:        {} sources found · {} plain · {} OSC 8 · {} panel activations",
         links.found, links.plain, links.osc8, links.panel
+    )?;
+    // **Always, and every count on one line**, for the buttons' reason: the search's batch must have
+    // pressed, found and marked, and every other batch must have pressed nothing and opened no
+    // search — so the script reads the presses both ways, and each painting count one way each.
+    writeln!(
+        a,
+        "search:       {} presses, {} found · {:?} each, {:?} the slowest (in the keyboard's pass, \
+         subtracted from its frame) · {} paintings with a search open, {} with matches marked · {:?} \
+         each painting with a search open (subtracted from the console's painting)",
+        search.presses,
+        search.found,
+        search
+            .pressing
+            .checked_div(search.presses as u32)
+            .unwrap_or_default(),
+        search.slowest,
+        search.paintings,
+        search.markings,
+        search
+            .marking
+            .checked_div(search.paintings as u32)
+            .unwrap_or_default(),
     )?;
     // **Always, and all three on one line.** The first is read in both directions by the script; the
     // other two are published because a batch cannot promise them — a refusal needs a second source
