@@ -166,7 +166,12 @@ impl Scroll {
             Self::Lines(count) => GridScroll::Delta(count),
             // A page is the whole screen minus one line, which is what any
             // pager does: it leaves one of context so as not to lose the thread between screen and screen.
-            Self::Pages(count) => GridScroll::Delta(count * (rows.saturating_sub(1)) as i32),
+            // **At least one line** —on a console one row tall that rule would give a page of zero and
+            // the keys would do nothing— and **saturating**, because the count comes from the user and
+            // `Pages(i32::MAX)` has to reach the top of the history instead of overflowing the product.
+            Self::Pages(count) => {
+                GridScroll::Delta(count.saturating_mul(rows.saturating_sub(1).max(1) as i32))
+            }
             Self::ToTop => GridScroll::Top,
             Self::ToBottom => GridScroll::Bottom,
         }
@@ -1518,6 +1523,46 @@ mod tests {
             screen.view().scroll(),
             9,
             "a page of ten rows has to scroll up nine lines, not ten"
+        );
+    }
+
+    /// On a console a single row tall the screen-minus-one rule floors at one line: without the floor
+    /// a page would be zero lines and page-up/page-down would do nothing even with history behind them.
+    #[test]
+    fn a_page_on_a_one_row_console_moves_one_line() {
+        let mut screen = Screen::new(Size { rows: 1, cols: 20 });
+        for n in 0..50 {
+            screen.advance(format!("entry {n}\r\n").as_bytes());
+        }
+
+        screen.scroll_by(Scroll::Pages(1));
+
+        assert_eq!(
+            screen.view().scroll(),
+            1,
+            "a page on a one-row console has to move one line, not zero"
+        );
+    }
+
+    /// The page count is whatever the user sent, so the product saturates: `Pages(i32::MAX)` used to
+    /// overflow the multiplication and panic in debug builds. It now reaches the top, like `ToTop`.
+    #[test]
+    fn a_huge_page_count_saturates_at_the_top() {
+        let mut screen = Screen::new(Size { rows: 10, cols: 20 });
+        let mut top = Screen::new(Size { rows: 10, cols: 20 });
+        for n in 0..50 {
+            let line = format!("entry {n}\r\n");
+            screen.advance(line.as_bytes());
+            top.advance(line.as_bytes());
+        }
+
+        screen.scroll_by(Scroll::Pages(i32::MAX));
+        top.scroll_by(Scroll::ToTop);
+
+        assert_eq!(
+            screen.view().scroll(),
+            top.view().scroll(),
+            "a huge page count has to end at the top of the history, not overflow"
         );
     }
 
