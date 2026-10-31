@@ -2277,6 +2277,7 @@ mod tests {
         // getting to open any window or touch anything on the machine.
         let batch = |letter: &str| {
             let out = std::process::Command::new("timeout")
+                .env_remove("CARGO_TARGET_DIR")
                 .arg("20")
                 .arg("sh")
                 .arg(&script)

@@ -198,9 +198,16 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-APP="$ROOT/target/release/app"
-LOAD="$ROOT/target/release/host-load"
-PUBLISHER="$ROOT/target/release/examples/publish"
+CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$ROOT/target}
+# Consoles can start in another directory, so preserve a relative override's original base.
+case "$CARGO_TARGET_DIR" in
+    /*) ;;
+    *) CARGO_TARGET_DIR="$PWD/$CARGO_TARGET_DIR" ;;
+esac
+export CARGO_TARGET_DIR
+APP="$CARGO_TARGET_DIR/release/app"
+LOAD="$CARGO_TARGET_DIR/release/host-load"
+PUBLISHER="$CARGO_TARGET_DIR/release/examples/publish"
 
 # **The reference size, in points.** Any of them will do as long as it is the same across every
 # batch compared with each other; this one was chosen for fitting comfortably on the screen where
@@ -455,17 +462,17 @@ mkdir -p "$RUNS"
 # **The publisher is on this list and the build line names it**, because a missing example is not an
 # error anybody sees: backgrounding it succeeds, the job exits, and the batch burns a whole window
 # before invalidating over something else entirely.
-NEEDED="$APP $LOAD"
+set -- "$APP" "$LOAD"
 BUILD_WITH="cargo build --release -p app -p host-load"
 if [ "${CONTROL:-}" = 1 ]; then
-    NEEDED="$NEEDED $PUBLISHER"
+    set -- "$@" "$PUBLISHER"
     # **`--example` is target selection, not an addition to the packages named.** Spelled on one
     # line as `-p app -p host-load --example publish -p panel-control`, cargo builds the example and
     # none of the packages' default binaries: whoever runs the printed line on a clean tree gets the
     # publisher and the next preflight fails on `$APP`. Two invocations, so both halves happen.
     BUILD_WITH="$BUILD_WITH && cargo build --release -p panel-control --example publish"
 fi
-for binary in $NEEDED; do
+for binary do
     [ -x "$binary" ] || { echo "$binary is missing — build with: $BUILD_WITH" >&2; exit 1; }
 done
 
