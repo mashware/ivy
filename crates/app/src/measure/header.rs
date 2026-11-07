@@ -953,7 +953,7 @@ pub fn header(
     match &chosen_font {
         ChoosingTheFont::NotAsked => writeln!(
             a,
-            "chosen font:  none (no family was asked for, so the machine was not enumerated)"
+            "chosen font:  none (no family was asked for at startup; no startup family enumeration)"
         )?,
         ChoosingTheFont::Found { family, how_long } => writeln!(
             a,

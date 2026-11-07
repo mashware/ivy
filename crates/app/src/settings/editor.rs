@@ -5,6 +5,8 @@ use std::{
     path::PathBuf,
     time::{Duration, Instant},
 };
+mod probe;
+pub(crate) mod runtime;
 mod script;
 mod timing;
 mod view;
@@ -16,6 +18,7 @@ pub(crate) struct Editor {
     entry_rect: Option<egui::Rect>,
     font_rect: Option<egui::Rect>,
     script: Option<script::Script>,
+    probe: Option<probe::Probe>,
     measuring: bool,
     regime: &'static str,
     font_requests: usize,
@@ -27,18 +30,21 @@ pub(crate) struct Editor {
     blocked_frame: Option<u64>,
     held_pointer: bool,
     timing: Timing,
+    application: runtime::Application,
 }
 
 impl Editor {
     pub fn resolved(entry: super::Entry, mode: Option<&str>) -> Self {
         let measuring = matches!(entry, super::Entry::Measuring);
         Self {
-            enabled: !measuring || matches!(mode, Some("closed" | "open" | "fonts")),
+            enabled: !measuring || matches!(mode, Some("closed" | "open" | "fonts" | "apply")),
             measuring,
+            probe: (measuring && mode == Some("apply")).then(probe::Probe::default),
             regime: match mode {
                 Some("closed") => "closed",
                 Some("open") => "open",
                 Some("fonts") => "fonts",
+                Some("apply") => "apply",
                 _ => "historical",
             },
             script: if measuring {
@@ -79,27 +85,33 @@ impl Editor {
         self.timing.record_work(2, started.elapsed());
     }
 
-    pub(super) fn save(&mut self) {
-        let started = Instant::now();
-        if let Some(draft) = &self.draft {
-            if !draft.errors().is_empty() {
-                return;
-            }
-            if let Some(store) = &mut self.store {
-                match store.save(&draft.text()) {
-                    Ok(()) => {
-                        self.message =
-                            "Saved. Restart agent-terminal to apply these changes.".into()
-                    }
-                    Err(error) => self.message = error,
-                }
-            }
+    pub(super) fn save(&mut self, fonts: &mut crate::fonts::Discoverer) {
+        runtime::save(self, fonts);
+    }
+
+    pub(super) fn save_in_frame(
+        &mut self,
+        fonts: &mut crate::fonts::Discoverer,
+        ctx: &egui::Context,
+    ) {
+        let frame = ctx.cumulative_frame_nr();
+        if self.application.saved_frame != Some(frame) {
+            self.application.saved_frame = Some(frame);
+            self.save(fonts);
         }
-        self.timing.record_work(2, started.elapsed());
+    }
+
+    pub(crate) fn remember_family(&mut self, settings: &super::Settings) {
+        self.application.family = settings.font.clone();
     }
 
     /// Runs before console input. A closing frame and its held release remain owned.
-    pub fn show(&mut self, ui: &mut egui::Ui, discoverer: &mut crate::fonts::Discoverer) -> bool {
+    pub fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        discoverer: &mut crate::fonts::Discoverer,
+        gear: egui::Rect,
+    ) -> bool {
         if !self.enabled {
             return false;
         }
@@ -107,19 +119,36 @@ impl Editor {
         let ctx = ui.ctx().clone();
         let frame = ctx.cumulative_frame_nr();
         let was_open = self.is_open();
-        let row = egui::Rect::from_min_size(
-            ui.max_rect().min,
-            egui::vec2(ui.max_rect().width(), 28.0_f32.min(ui.max_rect().height())),
-        );
-        let over_row = ctx.input(|i| i.pointer.interact_pos().is_some_and(|p| row.contains(p)));
-        let mut opening = false;
-        ui.scope_builder(egui::UiBuilder::new().max_rect(row), |ui| {
-            ui.horizontal(|ui| {
-                let response = ui.add(egui::Button::new("Settings").sense(egui::Sense::CLICK));
-                self.entry_rect = Some(response.rect);
-                opening = response.clicked();
-            });
-        });
+        let over_row = ctx.input(|i| i.pointer.interact_pos().is_some_and(|p| gear.contains(p)));
+        let response = ui
+            .interact(gear, ui.id().with("settings-gear"), egui::Sense::CLICK)
+            .on_hover_text("Settings");
+        self.entry_rect = Some(gear);
+        let opening = response.clicked();
+        let painter = ui.painter_at(gear);
+        painter.rect_filled(gear, 0.0, egui::Color32::from_rgb(35, 41, 52));
+        let ink = if opening || response.hovered() {
+            egui::Color32::from_rgb(173, 195, 255)
+        } else {
+            egui::Color32::from_rgb(153, 163, 182)
+        };
+        let radius = (gear.width().min(gear.height()) * 0.24).min(8.0);
+        let stroke = egui::Stroke::new(1.6, ink);
+        painter.circle_stroke(gear.center(), radius * 0.7, stroke);
+        painter.circle_stroke(gear.center(), radius * 0.26, stroke);
+        for tooth in 0..8 {
+            let direction = egui::vec2(
+                (tooth as f32 * std::f32::consts::TAU / 8.0).cos(),
+                (tooth as f32 * std::f32::consts::TAU / 8.0).sin(),
+            );
+            painter.line_segment(
+                [
+                    gear.center() + direction * radius * 0.7,
+                    gear.center() + direction * radius,
+                ],
+                stroke,
+            );
+        }
         self.timing.record_work(0, started.elapsed());
         if opening {
             if self.measuring {
@@ -164,11 +193,12 @@ impl Editor {
         self.draft.is_some()
     }
 
-    pub fn console_area(&self, mut area: egui::Rect) -> egui::Rect {
-        if self.enabled {
-            area.min.y += 28.0_f32.min(area.height());
-        }
-        area
+    pub(crate) fn chrome_visible(&self) -> bool {
+        self.enabled
+    }
+
+    pub(crate) fn record_geometry(&mut self, cost: Duration) {
+        self.timing.record_work(7, cost);
     }
 
     pub fn close_frame(&mut self) {
@@ -183,6 +213,18 @@ impl Editor {
             "settings UI: visible={}, measurement={}",
             self.enabled, self.measuring
         )?;
+        writeln!(
+            to,
+            "settings chrome: {}",
+            if self.enabled {
+                "compact-tab-strip"
+            } else {
+                "historical"
+            }
+        )?;
+        if let Some(probe) = &self.probe {
+            probe.publish(to)?;
+        }
         writeln!(
             to,
             "settings mode: {}",
@@ -200,6 +242,7 @@ impl Editor {
             self.fonts.as_ref().map_or(0, Vec::len)
         )?;
         writeln!(to, "settings font requests: {}", self.font_requests)?;
+        runtime::publish(&self.application, to)?;
         self.timing.publish(to)
     }
 }
@@ -208,12 +251,18 @@ impl Editor {
 pub(crate) fn before_keys(
     window: &mut crate::Window,
     ui: &mut egui::Ui,
+    metrics: &crate::painter::CellMetrics,
 ) -> Vec<crate::WindowRequest> {
     if !window.settings_editor.enabled {
         return window.send_keys_to_the_focused(ui.ctx());
     }
     let started = Instant::now();
-    let owned = window.settings_editor.show(ui, &mut window.discoverer);
+    let gear = crate::tab_bar::geometry(window, ui.max_rect(), metrics)
+        .gear
+        .expect("enabled settings has a gear");
+    let owned = window
+        .settings_editor
+        .show(ui, &mut window.discoverer, gear);
     let measured = window.settings_editor.timing.work;
     if owned {
         let ctx = ui.ctx();
@@ -294,7 +343,7 @@ mod tests {
                 }],
                 ..Default::default()
             },
-            |ui| assert!(editor.show(ui, &mut fonts)),
+            |ui| assert!(editor.show(ui, &mut fonts, ui.max_rect())),
         );
         output.drop_without_applying_deltas();
         assert!(!editor.is_open());
@@ -330,7 +379,7 @@ mod tests {
             .unwrap()
             .value = "20".into();
         fs::write(&path, "size=19").unwrap();
-        editor.save();
+        editor.save(&mut crate::fonts::Discoverer::default());
         assert!(editor.message.contains("changed outside"));
         assert!(!editor.message.contains("Saved."));
         assert!(editor.is_open());
@@ -370,7 +419,7 @@ mod tests {
                 }],
                 ..Default::default()
             },
-            |ui| assert!(editor.show(ui, &mut fonts)),
+            |ui| assert!(editor.show(ui, &mut fonts, ui.max_rect())),
         )
         .drop_without_applying_deltas();
         assert!(editor.draft.is_none() && editor.store.is_none() && editor.fonts.is_none());
@@ -390,10 +439,10 @@ mod tests {
             "21"
         );
         assert!(editor.message.is_empty() && editor.fonts.is_none() && editor.store.is_some());
-        editor.save();
+        editor.save(&mut crate::fonts::Discoverer::default());
         assert!(editor.message.starts_with("Saved."));
         fs::write(&path, "size=22").unwrap();
-        editor.save();
+        editor.save(&mut crate::fonts::Discoverer::default());
         assert!(editor.message.contains("changed outside"));
         fs::remove_file(path).unwrap();
     }
@@ -411,8 +460,8 @@ mod tests {
         editor.open(Some(path.clone()));
         editor.draft.as_mut().unwrap().defaults();
         assert_eq!(fs::read_to_string(&path).unwrap(), source);
-        editor.save();
-        assert!(editor.message.contains("Restart agent-terminal"));
+        editor.save(&mut crate::fonts::Discoverer::default());
+        assert!(editor.message.contains("Applying settings"));
         assert_eq!(
             fs::read_to_string(&path).unwrap(),
             "# retain\nversion=1\nfuture=yes\n"
@@ -443,7 +492,7 @@ mod tests {
             .find(|f| f.key == "size")
             .unwrap()
             .value = "97".into();
-        editor.save();
+        editor.save(&mut crate::fonts::Discoverer::default());
         assert_eq!(fs::read_to_string(&path).unwrap(), "size=18");
         assert!(!editor.message.contains("Saved."));
         assert!(editor.is_open());
@@ -451,7 +500,7 @@ mod tests {
         editor.open(Some(path.clone()));
         assert!(editor.store.is_none());
         editor.draft.as_mut().unwrap().defaults();
-        editor.save();
+        editor.save(&mut crate::fonts::Discoverer::default());
         assert_eq!(fs::read_to_string(&path).unwrap(), "version=999");
         assert!(!editor.message.contains("Saved."));
         fs::remove_file(path).unwrap();

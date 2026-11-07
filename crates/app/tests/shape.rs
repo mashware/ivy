@@ -48,6 +48,39 @@ use std::path::Path;
 /// guard with no file to look at reads exactly like a clean one.
 const MODULES: &[(&str, &str)] = &[
     (
+        "src/settings/editor/probe.rs",
+        include_str!("../src/settings/editor/probe.rs"),
+    ),
+    (
+        "src/settings/editor/view/tests.rs",
+        include_str!("../src/settings/editor/view/tests.rs"),
+    ),
+    (
+        "src/settings/editor/view/colors.rs",
+        include_str!("../src/settings/editor/view/colors.rs"),
+    ),
+    (
+        "src/settings/editor/view/appearance.rs",
+        include_str!("../src/settings/editor/view/appearance.rs"),
+    ),
+    (
+        "src/tests/settings_chrome.rs",
+        include_str!("../src/tests/settings_chrome.rs"),
+    ),
+    (
+        "src/tab_bar/chrome.rs",
+        include_str!("../src/tab_bar/chrome.rs"),
+    ),
+    ("src/panel/cache.rs", include_str!("../src/panel/cache.rs")),
+    (
+        "src/settings/editor/runtime.rs",
+        include_str!("../src/settings/editor/runtime.rs"),
+    ),
+    (
+        "src/fonts/selection.rs",
+        include_str!("../src/fonts/selection.rs"),
+    ),
+    (
         "src/settings/editor/script.rs",
         include_str!("../src/settings/editor/script.rs"),
     ),
@@ -227,7 +260,7 @@ const IMPL_CEILING: usize = 300;
 const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
     (
         "src/lib.rs",
-        693,
+        687,
         "the window's core, and the file nobody ever split. D28 has the order its pieces come out \
          in; it cannot come under the ceiling in one change because 16 953 lines of tests reach \
          into its private items. **It came in at 3 119; the bench's injected gestures were the \
@@ -360,7 +393,7 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
          hands the search's cost through, the window's tally, the line that hands it over, and the \
          three that time the keyboard's pass on a frame somebody typed in — and paid **five** more \
          here, finding a console by name moving to `Tab` and walking every console becoming one \
-         line. **765 + 8 - 5 leaves 768.** Pane controls move splitting out and add the header input hook; the measured module now has 725 production lines. Settings then moves startup font resolution to fonts/startup.rs and adds its global entry wiring, leaving 693 including the measurement injector hook.",
+         line. **765 + 8 - 5 leaves 768.** Pane controls move splitting out and add the header input hook; the measured module now has 725 production lines. Settings then moves startup font resolution to fonts/startup.rs and adds its global entry wiring, leaving 693 including the measurement injector hook. Runtime font handoff now belongs to editor/runtime.rs, leaving688. Shared strip partitioning leaves687.",
     ),
     (
         "impl Window",
@@ -388,10 +421,10 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
     ),
     (
         "impl PanelState",
-        378,
+        363,
         "what a pane holds of its panel. On the day it was recorded it was split over `panel.rs` \
          and its child modules for the document, links, driving and the pane, to pay the block \
-         ceiling.",
+         ceiling. Cache construction now belongs to the resolved-colour cache and leaves363.",
     ),
     (
         "impl InjectedDrags",

@@ -2025,6 +2025,10 @@ mod tests {
 
         vec![
             (
+                "transient settings application",
+                crate::settings::editor::runtime::reference_apply_report(),
+            ),
+            (
                 "header with the configuration vetoed",
                 header_with_everything(ReadingSettings::Vetoed),
             ),

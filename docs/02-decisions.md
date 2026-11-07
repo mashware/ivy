@@ -8104,6 +8104,8 @@ an open menu or continuous clicking, and these figures do not claim that cost.
 
 ## D63 — Graphical settings stage the shared file and apply on restart
 
+**The restart-only Save boundary is superseded by D64 when #324 is delivered.** The staged editing, shared-file preservation and historical measurements below remain their original record.
+
 **7 November 2026 — F2.15, [#322](https://github.com/mashware/agent-terminal/issues/322).** Settings
 belongs to the whole window, so its entry is global and visible with one tab. Its dialog groups
 appearance, cursor and shortcuts, while every console keeps its existing pump budget.
@@ -8183,3 +8185,97 @@ spans above are used directly. The report pairs are `214328/214334` (C), `214404
 `214504/214536` (open) and `214606/214636` (fonts), under `target/measurements` with their batch
 prefixes. One final publisher write races directory removal at shutdown in the last run; both
 panels had already published and the report passes every witness guard. No failed run is used.
+
+
+## D64 — Saved settings replace the complete runtime configuration
+
+**7 November 2026 — [#324](https://github.com/mashware/agent-terminal/issues/324).** The user approved
+the Compact Settings proposal and asked to remove the restart required by D63. The global gear
+shares the tab strip, including a single-tab window; the system titlebar remains native.
+
+**Save is the application boundary.** Opening, editing and Cancel change neither the active settings
+nor the file. Restore defaults stages removal. Save resolves the complete document against factory
+defaults, prepares any changed font assets, persists through the existing Store and only then commits
+the prepared runtime settings. A failed validation, new-font preparation or persistence leaves both
+file and active settings unchanged. The non-cooperating editor race in D63 remains an explicit limit.
+No second settings store or automatic watcher is introduced.
+
+**Omission means reset, not retention.** Palette/theme, font size, cursor ceiling, copying and a fresh
+default keymap are resolved as at startup; applying only present overrides leaves old values active
+when somebody removes them. Changing or clearing the selected family must likewise replace the old
+choice. An unchanged family request reuses its current active result, including an existing startup
+fallback, so changing a colour cannot become an unrelated failed font lookup.
+
+**Prepared fonts do not become active before Save.** A newly selected missing/unreadable family
+blocks persistence with a visible error. After persistence, keep the chosen assets pending through
+that pass's ordinary fallback discovery; queue the final combined definitions last so another writer
+cannot overwrite the selection. Commit the selected family, coverage/readiness and complete settings
+at the next begin-pass, before measuring cells. Keep fallback faces and unresolved characters; reset
+old-family coverage. Request repaint through the next logic round so quiet visible and hidden panes
+receive their new grids. Programs, identities, histories, panels and pump budgets survive.
+
+**Presentation and evidence remain explicit.** Categories, theme samples, colour swatches and a
+collapsed ANSI palette replace the raw form. Draft controls do not apply to running consoles. New
+preparation/commit work has named spans; work performed inside egui outside an app stopwatch is not
+claimed as an isolated app duration. Compact and historical chrome regimes cannot be averaged as if
+their geometry were identical. Config-free apply probes retain the configuration I/O veto and never
+claim to measure persistence; actual desktop checks use temporary settings.
+
+**Discarded alternatives.** Retaining restart-only application contradicts the approved scope.
+Overlaying changed fields cannot restore omitted defaults. Broad startup reconstruction couples
+one-time resources to updates unnecessarily; rebuilding consoles would additionally destroy running
+programs. Applying before persistence violates Cancel/failure semantics, while fallible file/font
+work after persistence can leave a saved but unusable configuration. A custom titlebar, external-file
+watcher, new keys and a parallel settings store are outside this delivery.
+
+
+### Measured — compact Settings and transient application
+
+**8 November 2026.** Release tree `621e679`, binary SHA-256
+`23fa8fcdd7434fd28bc2d233de78645fe2b339175e30ccf03cee0483c03aae4e`.
+Two runs each of `scripts/measure-frame.sh C 44`, `settings-closed 44`, `settings-open 44`,
+`settings-fonts 44` and `settings-apply 44` (the apply run sets
+`MEASURE_SETTINGS_FAMILY='DejaVu Sans Mono'`), on a 1280×800-point Xvfb display using software
+rendering and `glow`. All ten runs are valid and all five same-variant pairs pass `compare`.
+These are virtual-display performance results; native desktop functionality was confirmed
+separately by the user, with a screenshot.
+
+Ranges below are the two separately declared per-frame means; enumeration occurs once.
+The entry is the gear; card painting remains in the existing tab-bar span. Editor work excludes
+its separately timed validation and enumeration children. No whole-frame subtraction across
+historical and compact chrome regimes is used.
+
+| Regime | Entry | Editor | Family enumeration | Chrome partition |
+|---|---|---|---|---|
+| Historical C | 0 | 0 | 0 | 0.096–0.139 µs |
+| Closed | 12.626–15.783 µs | 0 | 0 | 0.095–0.099 µs |
+| Open | 14.495–14.749 µs | 325.587–328.407 µs | 0 | 0.087–0.118 µs |
+| Font selector | 13.479–14.385 µs | 324.118–333.801 µs | 29.214–32.239 ms, once | 0.097–0.100 µs |
+
+Each selector run accepts two requests and enumerates once. It does not open the complete family
+dropdown, so full-inventory rendering is not measured. Opening alone enumerates none.
+
+The transient apply probe uses two tabs/four consoles and the explicitly requested canonical
+family **DejaVu Sans Mono**. Each run observes four changed kernel-independent screen grids,
+six settings commits, three font-bearing commits, three queued definitions, four preparation
+attempts and one intended missing-family failure. Colour, changed size, active family,
+unchanged-family reuse, reset and repeated selection all have positive effect witnesses.
+The measurement blink ceiling remains off and persistence remains vetoed throughout.
+
+| Direct preparation attempt | Range across the two runs |
+|---|---|
+| Missing family, including the first collection discovery | 29.445–31.281 ms |
+| First selected face, collection already warm | 0.863–1.004 ms |
+| Clear selected face | 0.370–0.601 µs |
+| Repeated selected face | 0.180–0.192 ms |
+
+These attempt durations are **subsets** of the named preparation span, not additional frame
+costs. That span also includes definition requests and totals 30.528–32.524 ms over the whole
+sequence. The six runtime-commit frames average 2.219–3.221 µs; probe observation averages
+11.860–12.803 µs per frame and is measurement-only work. Internal font-engine activation is not
+assigned an invented isolated duration. No Save-I/O latency or speedup over D63 is claimed.
+
+Reports under `target/measurements`: C `000616/000635`, closed `000705/000736`, open
+`000806/000837`, fonts `000907/000937`, apply `001008/001035` (each with its batch prefix).
+The comparator additionally requires matching nonempty effective families for apply reports,
+even when grids match; missing-family reports cannot justify an average.

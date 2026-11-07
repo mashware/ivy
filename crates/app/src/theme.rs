@@ -30,7 +30,7 @@ const CUBE_LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
 const DROP_TARGET_ALPHA: u8 = 40;
 
 /// The theme: what screen color corresponds to each color a program asks for.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Theme {
     /// The sixteen named entries. From 0 to 7 the normal ones, from 8 to 15 the bright ones.
     palette: [Color32; 16],

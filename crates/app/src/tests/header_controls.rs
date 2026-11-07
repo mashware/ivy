@@ -669,7 +669,7 @@ mod tests {
         window.settings_editor = settings::editor::Editor::resolved(settings::Entry::Normal, None);
         let large = area_of(1280.0);
         let metrics = warmed(&mut window, &ctx, large);
-        let content = window.settings_editor.console_area(large);
+        let content = crate::tab_bar::geometry(&window, large, &metrics).consoles;
         let before = parts(&window, content, &metrics);
         let strip = header::set_the_header_aside(before[1], &metrics, window.headers)
             .0
@@ -681,8 +681,11 @@ mod tests {
                 let area =
                     egui::Rect::from_min_size(large.min, egui::vec2(large.width(), *h as f32));
                 let full = parts(&window, area, &metrics)[1];
-                let reduced =
-                    parts(&window, window.settings_editor.console_area(area), &metrics)[1];
+                let reduced = parts(
+                    &window,
+                    crate::tab_bar::geometry(&window, area, &metrics).consoles,
+                    &metrics,
+                )[1];
                 tiling::can_split(full, Orientation::Rows, &metrics, window.headers)
                     && !tiling::can_split(reduced, Orientation::Rows, &metrics, window.headers)
             })
@@ -703,7 +706,9 @@ mod tests {
             window.active().panes().len(),
             2,
             "cached menu split below the actual minimum after resize; viewport height={height}, actual={}",
-            window.settings_editor.console_area(small).height()
+            crate::tab_bar::geometry(&window, small, &metrics)
+                .consoles
+                .height()
         );
     }
 }

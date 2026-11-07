@@ -1,7 +1,6 @@
 //! Pane creation shared by shortcuts and the header controls.
 
 use crate::painter::CellMetrics;
-use crate::tab_bar::set_the_tab_bar_aside;
 use crate::tiling::{Orientation, Side, can_split};
 use crate::{Pane, Window};
 use eframe::egui;
@@ -64,7 +63,7 @@ pub(super) fn split(
 ) {
     // The bar is set aside with the tabs there are **now**: if the same batch of events has
     // just created one, the height left for the consoles is already a different one.
-    let (_, area) = set_the_tab_bar_aside(whole_window, window.tabs.len(), metrics);
+    let area = crate::tab_bar::geometry(window, whole_window, metrics).consoles;
     let target_area = window
         .active()
         .panes()

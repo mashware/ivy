@@ -20,6 +20,44 @@ mod tests {
         ]
     }
     #[test]
+    fn replacing_settings_restores_defaults_and_their_effects() {
+        let ctx = egui::Context::default();
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+        let area = area_of(1280.0);
+        let source = "size=22\ncursor.blink=off\nkey.copy=none\nbackground=#010203\n";
+        let mut configured = settings::interpret(source).unwrap().0;
+        configured.shortcuts = keyboard::ALL.iter().map(|a| (*a, None)).collect();
+        configured.apply_to(&mut window);
+        one_frame_in(&mut window, &ctx, area, Vec::new());
+        let configured_columns = window.active().panes()[0].measured.cols;
+        assert!(!window.copy_enabled);
+        assert_eq!(window.blink.ceiling, Some(false));
+        assert_eq!(window.theme.background(), egui::Color32::from_rgb(1, 2, 3));
+        assert!(
+            keyboard::ALL
+                .iter()
+                .all(|a| window.keymap.chord_for(*a).is_none())
+        );
+
+        settings::Settings::default().apply_to(&mut window);
+        one_frame_in(&mut window, &ctx, area, Vec::new());
+        assert_eq!(window.font_size, DEFAULT_FONT_SIZE);
+        assert!(window.active().panes()[0].measured.cols > configured_columns);
+        assert!(window.copy_enabled);
+        assert_eq!(window.blink.ceiling, None);
+        assert_eq!(
+            window.theme.background(),
+            theme::Theme::default().background()
+        );
+        let defaults = keyboard::Keymap::default();
+        for action in keyboard::ALL {
+            assert_eq!(window.keymap.chord_for(action), defaults.chord_for(action));
+        }
+        // The restored table must route a real chord, not merely contain the factory entry.
+        one_frame_in(&mut window, &ctx, area, chord_with(egui::Key::T));
+        assert_eq!(window.tabs.len(), 2);
+    }
+    #[test]
     fn global_entry_is_available_and_typing_stays_out_of_the_console() {
         for tabs in [1, 2] {
             let mut window = window_of_tabs((0..tabs).map(|_| ["sleep 30", "sleep 30"]));
@@ -132,7 +170,7 @@ mod tests {
             window.settings_editor =
                 settings::editor::Editor::resolved(settings::Entry::Measuring, Some(mode));
             let ctx = egui::Context::default();
-            let area = area_of(1280.0);
+            let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0));
             for _ in 0..6 {
                 let mut raw = egui::RawInput::default();
                 settings::editor::inject(&mut window, &mut raw);

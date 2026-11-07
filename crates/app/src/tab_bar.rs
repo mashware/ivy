@@ -5,9 +5,9 @@
 //! elsewhere — the claim a tab carries is its panes' ([`crate::tree::Tab::attention`]), and the
 //! symbols and colors are the panel's.
 //!
-//! **With a single tab there is no bar**, and [`set_the_tab_bar_aside`] is where that is decided: the
-//! grid then is identical to the one before tabs existed, which is what makes the measurements from
-//! either side of **D13** comparable at all.
+//! The interactive strip includes a Settings gear even with one tab. Historical measurement
+//! mode retains the old single-tab geometry through [`set_the_tab_bar_aside`]. The shared
+//! [`chrome::Geometry`] partitions cards, the gear and consoles for painting and input.
 //!
 //! **The bar is painted last in the frame**, and that is an invariant rather than an ordering
 //! preference: the panels are not re-read until the end of the pass, so painting it earlier left
@@ -17,6 +17,9 @@
 //! earlier delivery in this train pointed at [`tab_rect`] and [`set_the_tab_bar_aside`] as geometry
 //! that belonged in [`crate::tiling`]; they are geometry, but they are **this strip's** geometry, and
 //! `tiling` is the module that knows no console and no tab.
+
+mod chrome;
+pub(crate) use chrome::{geometry, partition};
 
 use crate::painter::CellMetrics;
 use crate::{Window, WindowRequest, panel};

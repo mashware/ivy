@@ -249,24 +249,43 @@ check_settings_report() {
     ENTRY_FRAMES=$(sed -n 's/^settings entry: frames=\([0-9]*\),.*/\1/p' "$REPORT" | head -1)
     EDITOR_FRAMES=$(sed -n 's/^settings editor: frames=\([0-9]*\),.*/\1/p' "$REPORT" | head -1)
     FONT_FRAMES=$(sed -n 's/^settings font enumeration: frames=\([0-9]*\),.*/\1/p' "$REPORT" | head -1)
+    CHROME=$(sed -n 's/^settings chrome: //p' "$REPORT" | head -1)
     MODE=$(sed -n 's/^settings mode: //p' "$REPORT" | head -1)
     if [ -n "${SETTINGS:-}" ]; then
+        [ "$CHROME" = compact-tab-strip ] || invalidate "settings variant did not declare compact tab-strip chrome"
         [ "$MODE" = "$SETTINGS" ] || invalidate "settings mode does not match its variant"
         case "$SETTINGS_LINE" in
             'settings UI: visible=true, measurement=true') : ;;
             *) invalidate "settings variant did not declare its visible entry and measurement gate" ;;
         esac
         [ "${ENTRY_FRAMES:-0}" -gt 0 ] || invalidate "settings entry painted no witnessed frames"
-        if [ "$SETTINGS" = closed ]; then
+        CHROME_FRAMES=$(sed -n 's/^settings chrome layout: frames=\([0-9]*\),.*/\1/p' "$REPORT" | head -1)
+        [ "${CHROME_FRAMES:-0}" -gt 0 ] || invalidate "settings chrome layout declared no frames"
+        if [ "$SETTINGS" = closed ] || [ "$SETTINGS" = apply ]; then
             [ "${EDITOR_FRAMES:-0}" = 0 ] || invalidate "closed settings variant opened the editor"
         else
             [ "${EDITOR_FRAMES:-0}" -gt 0 ] || invalidate "settings variant did not open its editor"
         fi
     else
+        [ "$CHROME" = historical ] || invalidate "historical batch changed its settings chrome"
         [ "$MODE" = historical ] || invalidate "historical batch changed its settings mode"
         [ "${EDITOR_FRAMES:-missing}" = 0 ] || invalidate "historical batch opened the settings editor"
         [ "$SETTINGS_LINE" = 'settings UI: visible=false, measurement=true' ] || invalidate "historical batch changed its settings UI regime"
         [ "${ENTRY_FRAMES:-missing}" = 0 ] || invalidate "historical batch painted the settings entry"
+    fi
+    if [ "${SETTINGS:-}" = apply ]; then
+        PREPARATION_FRAMES=$(sed -n 's/^settings preparation: frames=\([0-9]*\),.*/\1/p' "$REPORT" | head -1)
+        COMMIT_FRAMES=$(sed -n 's/^settings runtime commit: frames=\([0-9]*\),.*/\1/p' "$REPORT" | head -1)
+        OBSERVATION_FRAMES=$(sed -n 's/^settings probe observation: frames=\([0-9]*\),.*/\1/p' "$REPORT" | head -1)
+        for COUNT in "$PREPARATION_FRAMES" "$COMMIT_FRAMES" "$OBSERVATION_FRAMES"; do
+            [ "${COUNT:-0}" -gt 0 ] || invalidate "apply probe omitted preparation, commit or observation frames"
+        done
+        grep -q '^blink: *0 frame[(]s[)] painted with a blinking cursor [(]switched off, as every measured run has it[)]$' "$REPORT" || invalidate "apply probe changed the measurement blink veto"
+        grep -q '^settings probe family: Some[(]....*[)]$' "$REPORT" || invalidate "apply probe did not name its effective family"
+        grep -q '^settings persistence: vetoed$' "$REPORT" || invalidate "apply probe did not veto persistence"
+        grep -q '^settings probe: baseline=4, changed=4, observed=4$' "$REPORT" || invalidate "apply probe did not witness all four changed console grids"
+        grep -q '^settings probe effects: color=true, font=true, unchanged=true, reset=true, warm=true, failure=true$' "$REPORT" || invalidate "apply probe did not witness all application stages"
+        grep -Eq '^settings runtime: prepared=4, failed=1, font requests=3, font activations=3, commits=6$' "$REPORT" || invalidate "apply probe did not complete all six commits"
     fi
     REQUESTS=$(sed -n 's/^settings font requests: \([0-9]*\)$/\1/p' "$REPORT" | head -1)
     if [ "${SETTINGS:-}" = fonts ]; then
@@ -328,6 +347,8 @@ if [ "${MEASURE_AS_CONSOLE:-}" != "1" ] && [ "${1:-}" = compare ]; then
     # are compared.
     geometry() {
         sed -n \
+            -e 's/^settings probe family: */settings probe family /p' \
+            -e 's/^settings chrome: */settings chrome /p' \
             -e 's/^settings UI: */settings /p' \
             -e 's/^settings mode: */settings mode /p' \
             -e 's/^tabs: */tabs /p' \
@@ -335,6 +356,12 @@ if [ "${MEASURE_AS_CONSOLE:-}" != "1" ] && [ "${1:-}" = compare ]; then
             -e 's/^restored: *\([0-9]*\) consoles .*$/restored \1/p' \
             "$1"
     }
+    for report in "$2" "$3"; do
+        if grep -qx 'settings mode: apply' "$report" && ! grep -Eq '^settings probe family: Some\(".+"\)$' "$report"; then
+            echo "$report has no effective family for its settings-apply probe; it cannot be averaged" >&2
+            exit 1
+        fi
+    done
     first=$(geometry "$2")
     second=$(geometry "$3")
     if [ "$first" = "$second" ] && alike "$(size_of "$2")" "$(size_of "$3")"; then
@@ -454,6 +481,7 @@ RESTORES=0
 # the file batches to the ceiling, and hides U and V from the leak guard that only fires without it.
 ACTIONS= CONTROL= HEADER= READS= PATCHES= LINKS= SEARCH= LARGE= CJK= EMOJI= PANEL_EMOJI= SETTINGS=
 case "$BATCH" in
+    settings-apply) TABS=2; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; SETTINGS=apply ;;
     settings-closed|settings-open|settings-fonts) TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; SETTINGS=${BATCH#settings-} ;;
     A|B|C|D) TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console ;;
     E)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=100000; GESTURE=search; SEARCH=1 ;; # two, and SEARCHING the left console's scrollback while both dump: its control is C, LEFT against LEFT, because the two consoles of one run already differ with no gesture (D61)
@@ -934,7 +962,7 @@ seed() {
 case "$BATCH" in
     A) : ;;                       # no panel: nobody publishes anything
     B) seed quiet & ;;
-    settings-closed|settings-open|settings-fonts|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
+    settings-apply|settings-closed|settings-open|settings-fonts|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
 esac
 
 echo "batch $BATCH · $TABS tab(s) of $PANES · $DUMPING of $DIRECTORIES consoles dumping $MIB MiB · window $WINDOW_SIZE · do not touch the machine until it closes" >&2

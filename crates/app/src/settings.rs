@@ -547,11 +547,12 @@ impl Settings {
     /// calls, and none of them configures anything.
     pub(crate) fn apply_to(&self, window: &mut crate::Window) {
         window.theme = self.resolved_theme();
-        // **What the file does not ask for stays as it is**, which is what makes it possible to
-        // configure just one color without inheriting along the way a font size nobody wrote.
-        window.font_size = self.font_size.unwrap_or(window.font_size);
-        window.copy_enabled = self.copy.unwrap_or(window.copy_enabled);
-        window.blink.ceiling = self.blink.or(window.blink.ceiling);
+        // A complete document replaces the preceding configuration. Omitting an override must
+        // restore the same defaults as a fresh startup, including shortcuts previously unbound.
+        window.font_size = self.font_size.unwrap_or(crate::DEFAULT_FONT_SIZE);
+        window.copy_enabled = self.copy.unwrap_or(true);
+        window.blink.ceiling = self.blink;
+        window.keymap = crate::keyboard::Keymap::default();
         // **They are applied in the order they were written, and that is why they arrive as a
         // list.** «The last one wins» can only be decided that way, and it is what makes pasting
         // one set of shortcuts on top of another do what is expected.
@@ -2139,7 +2140,23 @@ mod tests {
         /// artifact to satisfy a test, which is the tail wagging the dog.
         const DRAWN_RULE: char = '\u{2500}';
 
-        const SOURCES: [(&str, &str); 21] = [
+        const SOURCES: [(&str, &str); 25] = [
+            (
+                "settings/editor/probe.rs",
+                include_str!("settings/editor/probe.rs"),
+            ),
+            (
+                "settings/editor/runtime.rs",
+                include_str!("settings/editor/runtime.rs"),
+            ),
+            (
+                "settings/editor/view/appearance.rs",
+                include_str!("settings/editor/view/appearance.rs"),
+            ),
+            (
+                "settings/editor/view/colors.rs",
+                include_str!("settings/editor/view/colors.rs"),
+            ),
             ("settings/document.rs", include_str!("settings/document.rs")),
             ("settings/store.rs", include_str!("settings/store.rs")),
             ("settings/editor.rs", include_str!("settings/editor.rs")),

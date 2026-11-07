@@ -2,11 +2,11 @@
 use std::{io::Write, time::Duration};
 #[derive(Default)]
 pub(super) struct Timing {
-    pending: [Option<Duration>; 5],
-    frames: [usize; 5],
-    totals: [Duration; 5],
+    pending: [Option<Duration>; 9],
+    frames: [usize; 9],
+    totals: [Duration; 9],
     pub work: Duration,
-    series: [crate::measure::Series; 5],
+    series: [crate::measure::Series; 9],
 }
 impl Timing {
     pub fn record_work(&mut self, index: usize, cost: Duration) {
@@ -29,6 +29,10 @@ impl Timing {
             "config I/O and validation",
             "font enumeration",
             "input ownership",
+            "preparation",
+            "runtime commit",
+            "chrome layout",
+            "probe observation",
         ]
         .iter()
         .enumerate()

@@ -8,13 +8,15 @@ you left the windows; this one can be written by hand or through Settings.
 
 ## Graphical settings
 
-The global **Settings** button is available even with a single tab. Appearance contains the installed
-font selector, size, named theme and all twenty-two colour overrides. Cursor and Shortcuts contain
-the existing blink override, action bindings and separate copy switch.
+The global **Settings gear** sits at the right of the tab strip, including a single-tab window.
+The system titlebar keeps its native controls. The compact dialog groups Appearance, Cursor and
+Shortcuts, with theme samples, colour swatches and an expandable sixteen-colour ANSI palette.
+Appearance contains the installed-font selector, size, named theme and all twenty-two overrides;
+Cursor and Shortcuts contain the existing blink override, action bindings and separate copy switch.
 
-**Saved changes apply after restarting agent-terminal.** Opening Settings and Cancel change neither
-the running terminal nor the file. Restore defaults stages removal of the supported overrides;
-only Save writes them. Blank fields inherit the built-in default; `none` unbinds an action. Explicit
+**Saved changes apply without restarting agent-terminal or its programs.** Opening Settings, editing
+and Cancel change neither the running terminal nor the file. Restore defaults stages removal of
+the supported overrides; only Save writes and applies them. Blank fields inherit the built-in default; `none` unbinds an action. Explicit
 colours still override the selected theme. The cursor override retains its focus rules and its
 fifteen-second inactivity stop.
 
@@ -31,9 +33,21 @@ cross-editor transaction. Symbolic links and unreadable, non-text, oversized or 
 files cannot be saved graphically; they need attention outside the screen.
 
 The installed-font list is loaded only on explicit request. Merely opening Settings neither searches
-fonts nor applies a font. Consoles, including those in background tabs, keep running. Historical
-measurement batches omit the global row; explicit `settings-closed`, `settings-open` and
-`settings-fonts` variants declare it and keep configuration I/O vetoed.
+fonts nor applies a font. Save prepares a newly selected font before writing; a missing or unreadable
+new family leaves the file, draft and active settings intact. An unchanged family does not trigger
+another lookup, including a startup request that already fell back to the built-in fonts.
+
+Consoles, including those in background tabs, keep their programs, histories, identities and panels.
+Font and size changes update their grids through the ordinary resize path. Removing an override
+restores its factory behaviour; the old active value is not retained. Manual changes to the file
+are still read on the next startup: this is not an external-file watcher.
+
+Historical measurement batches retain their previous geometry. Explicit settings variants declare
+the compact tab-strip regime and keep configuration I/O vetoed; reports from different chrome
+regimes cannot be averaged. The config-free `settings-apply` variant uses four consoles to witness
+colour, size, selected-family changes, unchanged-family reuse, reset and a failed preparation. Set
+`MEASURE_SETTINGS_FAMILY` explicitly to an installed family for that probe; it performs no Save and
+its costs are not measurements of configuration persistence.
 
 ## How it is written
 

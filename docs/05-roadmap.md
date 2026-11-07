@@ -317,7 +317,7 @@ using the strip that already moves a console rather than adding another row.
 
 ### F2.15 — Graphical settings
 
-**Implementation: [#322](https://github.com/mashware/agent-terminal/issues/322).** A global Settings row opens a staged dialog; all saved changes apply after restarting. Functional desktop checks are verified on Linux. **Follow-up: refine the visual design of Settings using the real-desktop feedback.** See [D63](02-decisions.md) and [configuration](08-configuration.md).
+**Initial implementation: [#322](https://github.com/mashware/agent-terminal/issues/322).** The first staged dialog applied saved changes after restarting, with functional desktop checks verified on Linux. **Visual/live-application follow-up: [#324](https://github.com/mashware/agent-terminal/issues/324).** A compact dialog opens from a gear at the right of the shared tab strip, including one tab; the system titlebar remains native. Save applies the supported settings without restarting running programs. See [D63/D64](02-decisions.md) and [configuration](08-configuration.md).
 
 **Requested on 7 November 2026, in the same phase as F2.14.** Give the person a settings screen for
 what is already configurable, accessible from a **global window control even with a single tab**.

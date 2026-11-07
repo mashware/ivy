@@ -22,6 +22,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 mod buttons;
+mod cache;
+use cache::PanelLayout;
 mod color;
 mod document;
 mod driving;
@@ -344,16 +346,6 @@ struct PaintedButton {
     area: Rect,
 }
 
-/// A layout and the two things it depends on: if either changes, it has to be redone.
-struct PanelLayout {
-    width: usize,
-    /// **The line the app puts in enters the cache key.** A panel that ages changes what has to be
-    /// painted without its file having been touched, so a cache that only looked at the width would keep
-    /// showing the layout from when the panel was fresh — and the warning would never appear.
-    warning: Option<String>,
-    rows: Vec<Row>,
-}
-
 impl PanelState {
     /// Reads the panel again if its file has changed.
     ///
@@ -573,24 +565,9 @@ impl PanelState {
         // —which is in it— and its class only changes on re-reading the file, which throws away the whole
         // layout. Putting it in would be a term no test can knock down. Whoever changes the criterion of
         // «backed» and detaches it from the warning has to add it here.
-        let still_valid =
-            matches!(&self.layout, Some(done) if done.width == width && done.warning == warning);
+        let still_valid = matches!(&self.layout, Some(done) if done.width == width && done.warning == warning && done.theme == *theme);
         if !still_valid {
-            let mut rows = lay_out(
-                self.last_good.as_deref(),
-                id,
-                width,
-                theme,
-                warning.as_deref(),
-                attention,
-                self.holder.as_ref().map(|held| held.source.as_str()),
-            );
-            color::flag(&mut rows);
-            self.layout = Some(PanelLayout {
-                rows,
-                width,
-                warning,
-            });
+            self.layout = Some(PanelLayout::new(self, id, width, theme, warning, attention));
         }
         self.layout
             .as_ref()
@@ -2941,6 +2918,44 @@ mod tests {
         assert_ne!(
             first, narrow,
             "with another width it has to be wrapped again"
+        );
+    }
+
+    #[test]
+    fn changing_theme_recolours_cached_rows_without_republishing() {
+        let dir = PanelDir::create().expect("create the directory");
+        publish(
+            &dir,
+            r#"{"header":false,"lines":["unchanged producer text"]}"#,
+        );
+        let mut state = PanelState::default();
+        state.refresh(dir.path());
+        let document = state.last_good.clone().unwrap();
+        let before = state
+            .lay_out_if_needed("a1b2", 40, &Theme::default(), None, None)
+            .unwrap()
+            .0
+            .to_vec();
+        let changed = Theme::from_colors(&crate::settings::Colors {
+            foreground: Some(Color32::from_rgb(19, 71, 113)),
+            ..Default::default()
+        });
+        let (rows, reused) = state
+            .lay_out_if_needed("a1b2", 40, &changed, None, None)
+            .unwrap();
+        assert!(!reused);
+        assert_ne!(before, rows);
+        let row = rows
+            .iter()
+            .find(|r| r.text.contains("unchanged producer text"))
+            .expect("producer text is present");
+        assert_eq!(row.color, Color32::from_rgb(19, 71, 113));
+        assert!(Arc::ptr_eq(&document, state.last_good.as_ref().unwrap()));
+        assert!(
+            state
+                .lay_out_if_needed("a1b2", 40, &changed, None, None)
+                .unwrap()
+                .1
         );
     }
 

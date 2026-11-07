@@ -26,8 +26,10 @@ use eframe::egui;
 use fontique::{Collection, CollectionOptions, GenericFamily, SourceCache};
 use skrifa::MetadataProvider as _;
 mod atlas;
+mod selection;
 mod startup;
 use atlas::*;
+pub(crate) use selection::{PreparedSelection, SelectionError};
 pub(crate) use startup::choose_the_font;
 use unicode_properties::emoji::{
     EmojiStatus, UnicodeEmoji, is_emoji_presentation_selector, is_text_presentation_selector,
@@ -635,40 +637,6 @@ impl Discoverer {
         names
     }
 
-    /// Paints with the family whoever configures asked for **by its name**.
-    ///
-    /// **It is only called when the file names one, and that is what keeps D24 standing.** Resolving a
-    /// name forces building the system collection — between 17.3 and 23.2 ms, the very cost D24
-    /// decided never to pay at start-up. Whoever configures no font never reaches this line and their
-    /// start-up is the one of always, bit for bit.
-    ///
-    /// **It runs before the first frame**, like restoring the layout: `set_fonts` takes effect on the
-    /// next pass, and there has been no pass yet.
-    ///
-    /// The name is matched **the way `fontique` matches it**, which lowercases both sides
-    /// (`family_name.rs`, `NameKey::from_str`), so `jetbrains mono` finds `JetBrains Mono`.
-    pub fn use_the_family(&mut self, name: &str, ctx: &egui::Context) -> Chosen {
-        let found = self.look_for_the_family(name);
-        // **The file cache is emptied right away, and it is not optional**: it keeps a live `Blob` for
-        // each font file the search got to open, and what is really needed has already been copied.
-        // Same reason as in `resolve`.
-        self.sources.prune(0, true);
-        let (family, data) = match found {
-            Ok(face) => face,
-            Err(why) => return why,
-        };
-        self.chosen = Some(SystemFace {
-            family: format!("{CHOSEN_PREFIX}{family}"),
-            data,
-            // **Not for the icons.** Those are the one place where the installed font rules over
-            // everything, and it is the font that carries the drawing that has to win there — not the
-            // one somebody picked to read code with.
-            for_icons: false,
-        });
-        self.hand_over_the_faces(ctx);
-        Chosen::Registered(family)
-    }
-
     /// Whether the machine's fonts have been enumerated at all.
     ///
     /// **It exists so the laziness can be asserted on, and that is not a detour**: what D24 decided is
@@ -676,45 +644,6 @@ impl Discoverer {
     /// paying it and not is whether this collection exists.
     pub fn has_searched_the_machine(&self) -> bool {
         self.collection.is_some()
-    }
-
-    /// The face of that family the text engine can open, or **why there is none**.
-    ///
-    /// **The failure carries its reason and that is the whole point of the signature.** A bare
-    /// `Option` here made three different endings —no fonts at all, no such family, a family whose
-    /// files cannot be opened— arrive as the same `None`, and the terminal then told whoever
-    /// configured it that their name was wrong in all three.
-    fn look_for_the_family(&mut self, name: &str) -> Result<(String, Arc<egui::FontData>), Chosen> {
-        if !self.ensure_the_collection() {
-            return Err(Chosen::NoFontsOnTheMachine);
-        }
-        let collection = self
-            .collection
-            .as_mut()
-            .ok_or(Chosen::NoFontsOnTheMachine)?;
-        let id = collection.family_id(name).ok_or(Chosen::NotInstalled)?;
-        // **The name is taken from the collection and not from what was typed**, so what the report
-        // declares is the family that is really being painted with: asking for `jetbrains mono` and
-        // publishing that lowercase name would have the report saying something the machine does not.
-        let (real_name, mut faces) = collection
-            .family(id)
-            .map(|family| (family.name().to_owned(), family.fonts().to_vec()))
-            .ok_or(Chosen::NotInstalled)?;
-        regular_first(&mut faces);
-        let sources = &mut self.sources;
-        let face = faces.into_iter().find_map(|face| {
-            let blob = sources.get(face.source())?;
-            // Same check and for the same reason as in `first_that_covers`: bytes epaint cannot parse
-            // are a `panic!` **inside its pass**, and these are files from outside.
-            skrifa::FontRef::from_index(blob.data(), face.index()).ok()?;
-            let mut data = egui::FontData::from_owned(blob.data().to_vec());
-            data.index = face.index();
-            Some(Arc::new(data))
-        });
-        // **The family is here and none of its files can be opened.** It is a different answer from
-        // «it is not installed» and it has to stay different: whoever gets the wrong one reinstalls a
-        // font that was already there and reads the very same line again.
-        face.map(|data| (real_name, data)).ok_or(Chosen::Unusable)
     }
 
     /// Looks for who covers that character and adds its face to the list. `true` if it added one.
@@ -843,26 +772,7 @@ impl Discoverer {
     /// characters** and the monospaced one for everything else. The per-character order egui does not give, the
     /// painter gives, since it already traverses cell by cell.
     fn hand_over_the_faces(&self, ctx: &egui::Context) {
-        let mut definitions = egui::FontDefinitions::default();
-        let factory = definitions
-            .families
-            .get(&egui::FontFamily::Monospace)
-            .cloned()
-            .unwrap_or_default();
-
-        definitions
-            .families
-            .insert(egui::FontFamily::Monospace, self.monospaced(&factory));
-        definitions.families.insert(
-            egui::FontFamily::Name(ICON_FAMILY.into()),
-            self.icon_ones(&factory),
-        );
-        for face in self.every_face() {
-            definitions
-                .font_data
-                .insert(face.family.clone(), Arc::clone(&face.data));
-        }
-        ctx.set_fonts(definitions);
+        selection::queue_definitions(self.chosen.as_ref(), &self.faces, ctx);
     }
 
     /// Every face this discoverer holds: the chosen one first, then the ones it found by itself.
@@ -888,13 +798,9 @@ impl Discoverer {
     /// consumes. Asserting instead on the drawing that comes out does not distinguish the cases — registering a face
     /// remakes the atlas and **all** the glyphs change place, so the comparison passes the same with the
     /// defect in and out. Mutating it exposed it.
+    #[cfg(test)]
     fn monospaced(&self, factory: &[String]) -> Vec<String> {
-        self.chosen
-            .iter()
-            .map(|c| c.family.clone())
-            .chain(factory.iter().cloned())
-            .chain(self.faces.iter().map(|c| c.family.clone()))
-            .collect()
+        selection::monospaced(self.chosen.as_ref(), &self.faces, factory)
     }
 
     /// The icon family: **the system ones first, and the factory ones behind as a net**.
@@ -908,12 +814,9 @@ impl Discoverer {
     /// **It walks the same list as [`Discoverer::monospaced`]**, chosen one included, so that the
     /// only thing deciding who paints an icon is `for_icons` and not which of the two lists a face
     /// happened to be stored in.
+    #[cfg(test)]
     fn icon_ones(&self, factory: &[String]) -> Vec<String> {
-        self.every_face()
-            .filter(|c| c.for_icons)
-            .map(|c| c.family.clone())
-            .chain(factory.iter().cloned())
-            .collect()
+        selection::icon_ones(self.chosen.as_ref(), &self.faces, factory)
     }
 }
 
@@ -1002,6 +905,25 @@ fn first_that_covers(
         }
     }
     None
+}
+
+#[cfg(test)]
+pub(crate) fn fixture_discoverer() -> Discoverer {
+    let mut collection = Collection::new(CollectionOptions {
+        system_fonts: false,
+        ..Default::default()
+    });
+    for (name, face) in egui::FontDefinitions::default().font_data {
+        if name == "Hack" || name == "Ubuntu-Light" {
+            let registered =
+                collection.register_fonts(fontique::Blob::new(Arc::new(face.font.to_vec())), None);
+            assert!(!registered.is_empty(), "fixture must register: {name}");
+        }
+    }
+    Discoverer {
+        collection: Some(collection),
+        ..Default::default()
+    }
 }
 
 #[cfg(test)]

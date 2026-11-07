@@ -846,7 +846,12 @@ fn graphical_settings_reports_require_the_requested_effects() {
                    fonts: usize,
                    families: usize| {
         let regime = if mode.is_empty() { "historical" } else { mode };
-        fs::write(&report,format!("settings UI: visible={visible}, measurement=true\nsettings mode: {regime}\nsettings entry: frames={entry}, total=1ms\nsettings editor: frames={editor}, total=1ms\nsettings font enumeration: frames={fonts}, total=1ms\nsettings installed families: {families}\nsettings font requests: {}\n", if fonts>0 {2} else {0})).unwrap();
+        let chrome = if mode.is_empty() {
+            "historical"
+        } else {
+            "compact-tab-strip"
+        };
+        fs::write(&report,format!("settings chrome: {chrome}\nsettings UI: visible={visible}, measurement=true\nsettings mode: {regime}\nsettings entry: frames={entry}, total=1ms\nsettings chrome layout: frames={entry}, total=1ms\nsettings editor: frames={editor}, total=1ms\nsettings font enumeration: frames={fonts}, total=1ms\nsettings installed families: {families}\nsettings font requests: {}\n", if fonts>0 {2} else {0})).unwrap();
         Command::new("sh")
             .arg("-c")
             .arg(&shell)
@@ -868,6 +873,42 @@ fn graphical_settings_reports_require_the_requested_effects() {
     assert!(accepts("fonts", true, 10, 9, 1, 20));
     assert!(!accepts("fonts", true, 10, 9, 0, 20));
     assert!(!accepts("fonts", true, 10, 9, 1, 0));
+    // A transient application is accepted only when persistence stayed vetoed and
+    // every console reached its changed grid and all six runtime commits completed.
+    assert!(!accepts("apply", true, 10, 0, 0, 0));
+    let valid = fs::read_to_string(&report).unwrap()
+        + "blink: 0 frame(s) painted with a blinking cursor (switched off, as every measured run has it)\nsettings probe family: Some(\"Ubuntu\")\nsettings preparation: frames=1, total=1ms\nsettings runtime commit: frames=1, total=1ms\nsettings probe observation: frames=1, total=1ms\nsettings persistence: vetoed\nsettings probe: baseline=4, changed=4, observed=4\nsettings probe effects: color=true, font=true, unchanged=true, reset=true, warm=true, failure=true\nsettings runtime: prepared=4, failed=1, font requests=3, font activations=3, commits=6\n";
+    let run = |text: &str| {
+        fs::write(&report, text).unwrap();
+        Command::new("sh")
+            .arg("-c")
+            .arg(&shell)
+            .env("REPORT", &report)
+            .env("SETTINGS", "apply")
+            .status()
+            .unwrap()
+            .success()
+    };
+    assert!(run(&valid));
+    assert!(!run(&valid.replace(
+        "switched off, as every measured run has it",
+        "the program decides, and it blinks unless it says otherwise"
+    )));
+    assert!(!run(
+        &valid.replace("font activations=3", "font activations=2")
+    ));
+    for span in ["preparation", "runtime commit", "probe observation"] {
+        assert!(!run(&valid.replace(
+            &format!("settings {span}: frames=1"),
+            &format!("settings {span}: frames=0")
+        )));
+    }
+    assert!(!run(&valid.replace("changed=4", "changed=3")));
+    assert!(!run(&valid.replace("commits=6", "commits=5")));
+    assert!(!run(
+        &valid.replace("persistence: vetoed", "persistence: saved")
+    ));
+    assert!(!run(&valid.replace("reset=true", "reset=false")));
     fs::remove_dir_all(dir).unwrap();
 }
 
@@ -889,9 +930,9 @@ fn settings_variants_are_not_averaged_across_modes() {
     fs::create_dir_all(&dir).unwrap();
     let first = dir.join("first");
     let second = dir.join("second");
-    let header = |mode: &str| {
+    let header = |mode: &str, chrome: &str| {
         format!(
-            "window: 1280×800 points\ntabs: 1\n  pane 0: 50×41 (left)\nsettings UI: visible=true, measurement=true\nsettings mode: {mode}\n"
+            "window: 1280×800 points\ntabs: 1\n  pane 0: 50×41 (left)\nsettings UI: visible=true, measurement=true\nsettings mode: {mode}\nsettings chrome: {chrome}\n"
         )
     };
     let script =
@@ -908,10 +949,48 @@ fn settings_variants_are_not_averaged_across_modes() {
             .status
             .success()
     };
-    fs::write(&first, header("closed")).unwrap();
-    fs::write(&second, header("closed")).unwrap();
+    fs::write(&first, header("closed", "compact-tab-strip")).unwrap();
+    fs::write(&second, header("closed", "compact-tab-strip")).unwrap();
     assert!(comparable());
-    fs::write(&second, header("open")).unwrap();
+    fs::write(&second, header("closed", "historical")).unwrap();
     assert!(!comparable());
+    fs::write(&second, header("open", "compact-tab-strip")).unwrap();
+    assert!(!comparable());
+    let common = header("apply", "compact-tab-strip");
+    for suffix in [
+        "",
+        "settings probe family: None\n",
+        "settings probe family: Some(\"\")\n",
+    ] {
+        fs::write(&first, common.clone() + suffix).unwrap();
+        fs::write(&second, common.clone() + suffix).unwrap();
+        assert!(
+            !comparable(),
+            "missing or empty family cannot justify equal-grid averaging"
+        );
+    }
+    fs::write(
+        &first,
+        common.clone() + "settings probe family: Some(\"Ubuntu\")\n",
+    )
+    .unwrap();
+    fs::write(&second, &common).unwrap();
+    assert!(!comparable(), "one missing family cannot justify averaging");
+    fs::write(
+        &first,
+        common.clone() + "settings probe family: Some(\"Ubuntu\")\n",
+    )
+    .unwrap();
+    fs::write(
+        &second,
+        common.clone() + "settings probe family: Some(\"Ubuntu\")\n",
+    )
+    .unwrap();
+    assert!(comparable());
+    fs::write(&second, common + "settings probe family: Some(\"Hack\")\n").unwrap();
+    assert!(
+        !comparable(),
+        "equal grids with different fonts cannot be averaged"
+    );
     fs::remove_dir_all(dir).unwrap();
 }

@@ -76,6 +76,7 @@ pub mod watcher;
 use fonts::choose_the_font;
 use opening::WindowRequest;
 use pointer::{DragIntent, WheelInput, WheelOutcome};
+#[cfg(test)]
 use tab_bar::set_the_tab_bar_aside;
 use tiling::{DIVIDER_THICKNESS, Orientation};
 #[cfg(test)]
@@ -667,6 +668,7 @@ pub fn run() -> eframe::Result {
                 entry,
                 std::env::var("MEASURE_SETTINGS").ok().as_deref(),
             );
+            window.settings_editor.remember_family(&settings);
             // **The font goes apart from the rest of the settings, and it is not tidiness.** The
             // others put a value on the window; this one talks to the text engine and **costs
             // between 17.3 and 23.2 ms** (**D24**) because resolving a name forces enumerating the
@@ -1782,12 +1784,13 @@ impl eframe::App for Window {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        settings::editor::runtime::begin_pass(self, ui.ctx());
         let metrics = CellMetrics::measure(ui.ctx(), egui::FontId::monospace(self.font_size));
 
         // Settings claims its input before the console dispatcher. Its named work is discounted
         // from frame accounting; outbound latency still includes this earlier application work.
-        let requests = settings::editor::before_keys(self, ui);
-        let area = self.settings_editor.console_area(ui.max_rect());
+        let requests = settings::editor::before_keys(self, ui, &metrics);
+        let area = ui.max_rect();
 
         // **The order is applied before tiling**, so that what gets painted in this same frame is
         // already the new tab. Applying it at the end would leave a frame showing the previous one,
@@ -1806,7 +1809,7 @@ impl eframe::App for Window {
         if header_owns_pointer {
             ui.disable();
         }
-        let (tab_bar, area) = set_the_tab_bar_aside(area, self.tabs.len(), &metrics);
+        let (tab_bar, area) = tab_bar::partition(self, area, &metrics);
 
         // **Everything that changes tab goes before tiling**, and this is what a defect cost: the
         // tiling comes out of the active tab's fraction, so attending to the click afterwards left
@@ -1837,14 +1840,7 @@ impl eframe::App for Window {
         // It goes to `timed_separately` **and** to its own span of the report: without the
         // subtraction, these milliseconds would be published as the framework's cost, which is the
         // figure **D3** judges it with.
-        let searching = Instant::now();
-        let round = self.discoverer.resolve(ui.ctx());
-        if round.did_work() {
-            let how_much = searching.elapsed();
-            self.timed_separately += how_much;
-            self.discovery
-                .record(how_much, round.searched, round.registered);
-        }
+        settings::editor::runtime::resolve_fonts(self, ui.ctx());
 
         let travel = Instant::now();
         let tiling_of = |window: &Self| window.active().root.place(area, metrics.width());
@@ -2306,6 +2302,7 @@ mod tests {
     }
     mod header_controls;
     pub(crate) mod markdown;
+    mod settings_chrome;
     mod settings_editor;
 
     // **The tests reach further into the two modules than the code above does**, and this is
@@ -6998,7 +6995,7 @@ mod tests {
     /// them is part of F2.1, in a later step— and without this there would be no way to check what
     /// this step promises: that a console in a tab nobody is looking at keeps draining. The first
     /// of the list is left active.
-    fn window_of_tabs<'a>(programs: impl IntoIterator<Item = [&'a str; 2]>) -> Window {
+    pub(crate) fn window_of_tabs<'a>(programs: impl IntoIterator<Item = [&'a str; 2]>) -> Window {
         let tabs: Vec<_> = programs
             .into_iter()
             .enumerate()
@@ -9592,7 +9589,7 @@ mod tests {
     /// **It has existed ever since there are gestures whose result depends on the size**: splitting
     /// a pane is refused when it does not fit, so the same press has to do two different things in
     /// two different windows, and with a fixed area only one of the two can be tested.
-    fn one_frame_in(
+    pub(crate) fn one_frame_in(
         window: &mut Window,
         ctx: &egui::Context,
         area: egui::Rect,
@@ -16814,7 +16811,7 @@ mod tests {
     const CELL_WIDTH: f32 = 8.0;
 
     /// An area of the requested width, with whatever height it takes to be a valid rectangle.
-    fn area_of(width: f32) -> egui::Rect {
+    pub(crate) fn area_of(width: f32) -> egui::Rect {
         egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(width, 300.0))
     }
 

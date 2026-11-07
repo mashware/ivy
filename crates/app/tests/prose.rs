@@ -76,6 +76,51 @@ use std::path::Path;
 /// entry down.
 const SOURCES: &[(&str, &str, usize)] = &[
     (
+        "src/settings/editor/probe.rs",
+        include_str!("../src/settings/editor/probe.rs"),
+        1,
+    ),
+    (
+        "src/settings/editor/view/tests.rs",
+        include_str!("../src/settings/editor/view/tests.rs"),
+        1,
+    ),
+    (
+        "src/settings/editor/view/colors.rs",
+        include_str!("../src/settings/editor/view/colors.rs"),
+        1,
+    ),
+    (
+        "src/settings/editor/view/appearance.rs",
+        include_str!("../src/settings/editor/view/appearance.rs"),
+        1,
+    ),
+    (
+        "src/tests/settings_chrome.rs",
+        include_str!("../src/tests/settings_chrome.rs"),
+        1,
+    ),
+    (
+        "src/tab_bar/chrome.rs",
+        include_str!("../src/tab_bar/chrome.rs"),
+        3,
+    ),
+    (
+        "src/panel/cache.rs",
+        include_str!("../src/panel/cache.rs"),
+        5,
+    ),
+    (
+        "src/settings/editor/runtime.rs",
+        include_str!("../src/settings/editor/runtime.rs"),
+        7,
+    ),
+    (
+        "src/fonts/selection.rs",
+        include_str!("../src/fonts/selection.rs"),
+        42,
+    ),
+    (
         "src/settings/editor/script.rs",
         include_str!("../src/settings/editor/script.rs"),
         2,
@@ -179,7 +224,7 @@ const SOURCES: &[(&str, &str, usize)] = &[
         579,
     ),
     ("src/session.rs", include_str!("../src/session.rs"), 737),
-    ("src/fonts.rs", include_str!("../src/fonts.rs"), 840),
+    ("src/fonts.rs", include_str!("../src/fonts.rs"), 834),
     (
         "src/fonts/atlas.rs",
         include_str!("../src/fonts/atlas.rs"),

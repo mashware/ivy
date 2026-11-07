@@ -198,8 +198,8 @@ fn apply(
     ctx: &egui::Context,
     metrics: &CellMetrics,
 ) -> bool {
-    let content = window.settings_editor.console_area(ctx.viewport_rect());
-    let (_, area) = crate::tab_bar::set_the_tab_bar_aside(content, window.tabs.len(), metrics);
+    let content = ctx.viewport_rect();
+    let area = crate::tab_bar::geometry(window, content, metrics).consoles;
     let panes = window.active().panes();
     let Some(at) = panes.iter().position(|pane| pane.name == name) else {
         return false;

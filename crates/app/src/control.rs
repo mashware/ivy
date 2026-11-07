@@ -26,7 +26,6 @@ use panel_control::{Answer, Channel, Delivery, ReadDocument, Side as WireSide, W
 use crate::measure::Control;
 use crate::painter::CellMetrics;
 use crate::panel::{PanelState, Retirement};
-use crate::tab_bar::set_the_tab_bar_aside;
 use crate::tiling::{Side, can_split};
 use crate::{Pane, Window, the_users_shell};
 
@@ -717,7 +716,7 @@ impl Window {
         } = *on_screen;
         let side = the_side(side);
         let cut_along = side.cut_along();
-        let (_, area) = set_the_tab_bar_aside(whole_window, self.tabs.len(), metrics);
+        let area = crate::tab_bar::geometry(self, whole_window, metrics).consoles;
         let gone = || "the console that asked is gone".to_owned();
 
         let tab_index = self
