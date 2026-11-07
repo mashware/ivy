@@ -40,6 +40,7 @@ use eframe::egui;
 use std::time::{Duration, Instant, SystemTime};
 use term_core::Cell;
 
+mod header;
 pub(crate) mod links;
 
 /// What the mouse's pass over the consoles leaves for the rest of the frame.
@@ -255,6 +256,9 @@ impl Window {
         // 36 columns apart. It does not claim to be the only clock in the pass: answering a
         // standing question takes one of its own, and works from unrefreshed state on purpose.
         let now = SystemTime::now();
+        if let Some(outcome) = header::intercept(self, ui, rects, metrics, &names, now) {
+            return outcome;
+        }
         // **Read once, beside the clock and for the same reason.** Both say how a pane's rectangle
         // is shared out, and a pass that resolved two gestures against two different answers would
         // measure them against rectangles a row apart.

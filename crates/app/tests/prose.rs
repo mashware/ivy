@@ -146,6 +146,36 @@ const SOURCES: &[(&str, &str, usize)] = &[
         135,
     ),
     ("src/header.rs", include_str!("../src/header.rs"), 224),
+    (
+        "src/pointer/header.rs",
+        include_str!("../src/pointer/header.rs"),
+        1,
+    ),
+    (
+        "src/header/actions.rs",
+        include_str!("../src/header/actions.rs"),
+        1,
+    ),
+    (
+        "src/header/controls.rs",
+        include_str!("../src/header/controls.rs"),
+        1,
+    ),
+    (
+        "src/header/menu.rs",
+        include_str!("../src/header/menu.rs"),
+        1,
+    ),
+    (
+        "src/header/splitting.rs",
+        include_str!("../src/header/splitting.rs"),
+        1,
+    ),
+    (
+        "src/tests/header_controls.rs",
+        include_str!("../src/tests/header_controls.rs"),
+        1,
+    ),
     ("src/settings.rs", include_str!("../src/settings.rs"), 599),
     ("src/keyboard.rs", include_str!("../src/keyboard.rs"), 985),
     ("src/painter.rs", include_str!("../src/painter.rs"), 829),

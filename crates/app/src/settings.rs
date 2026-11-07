@@ -2135,10 +2135,13 @@ mod tests {
         /// artifact to satisfy a test, which is the tail wagging the dog.
         const DRAWN_RULE: char = '\u{2500}';
 
-        const SOURCES: [(&str, &str); 12] = [
+        const SOURCES: [(&str, &str); 15] = [
             ("session.rs", include_str!("session.rs")),
             ("watcher.rs", include_str!("watcher.rs")),
             ("lib.rs", include_str!("lib.rs")),
+            ("header/splitting.rs", include_str!("header/splitting.rs")),
+            ("header/controls.rs", include_str!("header/controls.rs")),
+            ("header/menu.rs", include_str!("header/menu.rs")),
             // **They arrived because this walk noticed them leaving**, twice now. D28 took the
             // bench's injected gestures out of `lib.rs` and six sentence-shaped literals went with
             // them; the tiling and the tree left next and took thirteen more, dropping the walk to

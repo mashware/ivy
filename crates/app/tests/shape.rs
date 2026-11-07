@@ -49,6 +49,27 @@ use std::path::Path;
 const MODULES: &[(&str, &str)] = &[
     ("src/lib.rs", include_str!("../src/lib.rs")),
     (
+        "src/pointer/header.rs",
+        include_str!("../src/pointer/header.rs"),
+    ),
+    (
+        "src/header/actions.rs",
+        include_str!("../src/header/actions.rs"),
+    ),
+    (
+        "src/header/controls.rs",
+        include_str!("../src/header/controls.rs"),
+    ),
+    ("src/header/menu.rs", include_str!("../src/header/menu.rs")),
+    (
+        "src/header/splitting.rs",
+        include_str!("../src/header/splitting.rs"),
+    ),
+    (
+        "src/tests/header_controls.rs",
+        include_str!("../src/tests/header_controls.rs"),
+    ),
+    (
         "src/tests/markdown.rs",
         include_str!("../src/tests/markdown.rs"),
     ),
@@ -174,7 +195,7 @@ const IMPL_CEILING: usize = 300;
 const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
     (
         "src/lib.rs",
-        768,
+        725,
         "the window's core, and the file nobody ever split. D28 has the order its pieces come out \
          in; it cannot come under the ceiling in one change because 16 953 lines of tests reach \
          into its private items. **It came in at 3 119; the bench's injected gestures were the \
@@ -307,11 +328,11 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
          hands the search's cost through, the window's tally, the line that hands it over, and the \
          three that time the keyboard's pass on a frame somebody typed in — and paid **five** more \
          here, finding a console by name moving to `Tab` and walking every console becoming one \
-         line. **765 + 8 - 5 leaves 768.**",
+         line. **765 + 8 - 5 leaves 768.** Pane controls move splitting out and add the header input hook; the measured module now has 725 production lines.",
     ),
     (
         "impl Window",
-        1782,
+        1764,
         "the window's own behaviour. D28's order moved its methods out of `lib.rs` into \
          satellite blocks in twelve modules, which shrank the file and not the type. Recorded on 28 September \
          2026, the day the guard first summed a type's blocks. **The scrollback's search spent five \
@@ -319,7 +340,7 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
          declared hole, the report's `search:` field and the tally's seed when a window opens; \
          handing each painting's cost over sits in `impl eframe::App`, which this count does not \
          read — **and paid five**: finding a console by name moved to `Tab`, and walking every \
-         console became one line. **1782 + 5 - 5 leaves 1782.**",
+         console became one line. **1782 + 5 - 5 leaves 1782.** Header operations now use free functions around pane identity; the measured Window implementation has 1764 lines.",
     ),
     (
         "impl Pane",

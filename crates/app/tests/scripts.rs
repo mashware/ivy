@@ -90,6 +90,30 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/panel/pane.rs"),
     ),
     ("app/src/header.rs", include_str!("../src/header.rs")),
+    (
+        "app/src/pointer/header.rs",
+        include_str!("../src/pointer/header.rs"),
+    ),
+    (
+        "app/src/header/actions.rs",
+        include_str!("../src/header/actions.rs"),
+    ),
+    (
+        "app/src/header/controls.rs",
+        include_str!("../src/header/controls.rs"),
+    ),
+    (
+        "app/src/header/menu.rs",
+        include_str!("../src/header/menu.rs"),
+    ),
+    (
+        "app/src/header/splitting.rs",
+        include_str!("../src/header/splitting.rs"),
+    ),
+    (
+        "app/src/tests/header_controls.rs",
+        include_str!("../src/tests/header_controls.rs"),
+    ),
     ("app/src/injected.rs", include_str!("../src/injected.rs")),
     ("app/src/panel.rs", include_str!("../src/panel.rs")),
     (

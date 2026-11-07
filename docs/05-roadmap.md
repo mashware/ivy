@@ -50,6 +50,10 @@ inside so you can click inside `vim`.
 **And that it can be read outside of here**: the terminal speaks **English** — its configuration
 keys, its messages and its code.
 
+**And the everyday controls are visible:** each console's drag strip offers splitting beside it,
+splitting below it, showing or hiding its information panel, and closing the console. A global
+settings screen lets you change appearance, cursor behaviour and shortcuts without editing a file.
+
 **What is missing:** the panel is still read-only. It tells you things, you cannot do anything from
 it.
 
@@ -120,7 +124,7 @@ way. If it is never done, nothing extra will have been built to get there. That 
 
 This table tracks the phases described below. Only its named sections are delivery milestones;
 `Loose ends` and `Ideas with no phase` stay outside the delivery sequence. States are `pending`,
-`in progress` and `done`. Phase 2 remains open until F2.7 is delivered. Phase 3 was deliberately
+`in progress` and `done`. Phase 2 remains open until F2.7, F2.14 and F2.15 are delivered. Phase 3 was deliberately
 built before Phase 2 closed (#226); its completion does not close F2.7.
 
 | Phase | State | Depends on |
@@ -288,6 +292,55 @@ What turns the prototype into something used daily.
 | **F2.12** | done | [#122](https://github.com/mashware/agent-terminal/issues/122) | **The whole repository in English** — **closed on 5 September 2026**. — the project's own code, the comments, the tests and the documents have been **in Spanish since the first commit**, and that decision **is not written down anywhere**, which is what let it grow. It moves everything to English, configuration keys and messages included, **with no backwards compatibility**: nobody has this terminal installed, so there is no file out there whose anything has to be respected, and it is the only window in which it comes free. Commits, branches and PRs move to English **from now on**, without waiting for the milestone. **It is run first of what is left of the phase** — see below. [#122](https://github.com/mashware/agent-terminal/issues/122), **D27** |
 | **F2.11** | done | [#234](https://github.com/mashware/agent-terminal/issues/234) | **A header per pane** — Tilix style: the handle to drag it by, its close button, and at a glance which one has the focus — **closed on 18 September 2026**. Five deliveries; it comes out of **D20**, where it was discarded **as part of F2.6** for the price it puts on every published batch, and the milestone paid that price rather than argue it away: the strip in [D45](02-decisions.md), gated off every measured run and switched on for a batch of its own, and the close button — with no confirmation, absent on a pane with no sibling — in [D46](02-decisions.md). **The third of the original three things had already landed, outside the milestone** ([#209](https://github.com/mashware/agent-terminal/issues/209), **D36**): only the console being typed into fills its cursor, and a window that lost the desktop's focus outlines every one of them. In the annexes: two runs of batch `T` against its control `C` on merged `main` put the strip at **between 524 ns and 1.03 µs per frame** — under a thousandth of 1 % of the 60 Hz slot — with `T`'s grid one column narrower than `C`'s, declared rather than subtracted |
 | **F2.13** | done | [#177](https://github.com/mashware/agent-terminal/issues/177) | **Search in the scrollback** — **closed on 11 October 2026**. One delivery ([#177](https://github.com/mashware/agent-terminal/issues/177)); everything it decided is in [D61](02-decisions.md): `Ctrl+Shift+F` searches **the focused console** for literal text, `Enter` and `Shift+Enter` step through the history, **the match is the selection** — so copying it goes through **D22**'s rules with nothing of its own — and every match on screen is marked while the query is typed. The line it paints sits **over** the console, never cut out of it, so opening a search resizes nothing. A press that finds nothing walks the whole history once (11.8–13.6 ms at its median, accepted and written down); marking is per frame and bounded. Measured with a batch of its own, **`E`**, against `C`: the marking is **60–65 µs a painting** and the left console's paint span shows no difference from the control measurable from two runs. Closing the measurement also closed a declared hole: the keyboard's pass is now timed on every frame somebody types in |
+| **F2.14** | done | [#320](https://github.com/mashware/agent-terminal/issues/320) | **Visible pane controls** — extend the existing drag strip with split-right, split-down and information-panel visibility controls on the left, and the existing close control on the right. Keep a usable drag handle between them. Scope and acceptance criteria below |
+| **F2.15** | pending |  | **Graphical settings** — a global settings screen for the options already supported by the configuration file, grouped into appearance, cursor and shortcuts. Scope and acceptance criteria below |
+
+### F2.14 — Visible pane controls
+
+**Requested on 7 November 2026.** Make the existing pane operations discoverable with the mouse,
+using the strip that already moves a console rather than adding another row.
+
+- Recommended order on the left: **split right**, **split down**, **show/hide information panel**.
+  Use layout icons and tooltips that say where the new console appears; “vertical” and “horizontal”
+  alone are ambiguous. Keep **close on the far right**, separated from the frequent operations.
+- The space between the groups remains the drag handle. Pressing a control never starts a drag or
+  sends input to the program. Each control acts on **its own console**, including an unfocused one.
+- Splitting uses the existing minimum-size rules and is visibly unavailable when it cannot fit.
+  Toggling the panel restores its previous width and preserves its document and producer connection;
+  panel visibility remains part of the saved layout.
+- Keep **D46**'s existing close behaviour: the last console in a tab has no close button. At narrow
+  widths, define a compact presentation that keeps the controls reachable and leaves a usable drag
+  handle; controls must never overlap or turn a drag into a close.
+- Verify both split directions, toggling twice, dragging, closing and an unfocused target, including
+  narrow panes and layout restoration. Extend the header's own measurement batch and declare the
+  added work without changing the published control batches' regime (**D45**).
+
+### F2.15 — Graphical settings
+
+**Requested on 7 November 2026, in the same phase as F2.14.** Give the person a settings screen for
+what is already configurable, accessible from a **global window control even with a single tab**.
+It belongs to the terminal as a whole, so it does not take a fifth slot in every pane's strip.
+
+- **Appearance:** installed font family, font size, built-in theme and individual colour overrides.
+  **Cursor:** follow the program, always blink or never blink. **Shortcuts:** the existing bindings,
+  their conflicts, handing a chord back to the program, and the separate copy switch.
+- Recommend explicit **Save** and **Cancel**, with a way to restore defaults. Invalid values are
+  explained beside the field before saving. Opening or cancelling settings changes nothing; show
+  which saved changes apply immediately and which require restarting the terminal. Settle that
+  boundary during design rather than implying that file reload already exists.
+- Use the existing **plain-text `config` file**, documented in [08-configuration.md](08-configuration.md),
+  as the shared configuration for the screen and hand editing (**D26**). `layout.json` still stores
+  only the arrangement; `panel.json` still belongs to the state producer. No second settings store.
+- Design saving before implementation: preserve comments and unrelated entries, detect edits made
+  outside the screen, and report a failed save without claiming success or losing the previous file.
+  The UI must preserve the existing theme/override rules and shortcut limitations.
+- Verify persistence after restart, cancellation, defaults, validation, external edits and save
+  failure. Opening settings must not stop the consoles; font discovery stays lazy, and the existing
+  settings veto under measurement remains in force. Any new timed work is declared.
+
+These two milestones are separate deliveries. Their addition does not close F2.7 or change
+the completed scope of F2.11 and F2.10. Their order relative to portability is left for scheduling;
+macOS and Windows validation remains required.
 
 **Where this list comes from, since D19.** The bar to clear before publishing is that of a WezTerm,
 Ghostty or Kitty user — **not** that of an Orca user. That is what puts F2.9 and F2.10 into the

@@ -331,6 +331,7 @@ impl Window {
             presses_for_the_program: Vec::new(),
             last_cell_reported: None,
             last_frame_with_buttons: None,
+            header_input: crate::header::actions::Input::default(),
             link_press_in_progress: None,
             drag_in_progress: None,
             last_painted: Vec::new(),

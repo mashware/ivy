@@ -8045,3 +8045,58 @@ after these runs; it can only shorten the marking, and the load's lines wrap ove
 | The line moving to the top whenever a selected cell is on the last row | The step can usually keep the match off that row; moving the line is only the answer when the view cannot scroll further — and a mouse selection is not something the line has to avoid |
 | A cap on the query's length | A literal's automaton grows with its length far below the engine's limit, and the only way in is typing or a paste; the engine's own refusal is said instead |
 | Stepping to a match as you type | Each keystroke would pay the walk over the history — up to the figures above — while typing. Marking the matches on screen as you type is kept: it walks the screen and at most `MARKING_REACH` lines beyond it |
+
+
+## D62 — Pane controls share the strip's geometry and own their entire gesture
+
+**Decision.** The existing strip gains Split right, Split down and Show/Hide information panel
+on the left; close stays on the right and the centred grip keeps its space. The controls act on
+their pane by name. Splitting successfully focuses the newborn; toggling leaves focus where it was.
+An unavailable split is visibly disabled using the same minimum-size rule execution checks.
+
+**Why a press needs an owner until release.** D46 could rely on a closed widget disappearing before
+egui starts its drag. A panel toggle leaves that widget alive, and a held control press would
+become a pane move on a later frame. The header retains ownership through release, including a
+quick press and release in one frame. Releases for earlier program gestures still reach their owner.
+
+**Narrow panes use a compact actions menu.** Resizing can shrink an existing pane below the split
+minimum. Before three buttons would reach the grip, one menu button replaces them. If even that
+button cannot coexist with the grip, a right-click on the strip opens the same menu. Menu actions
+retain their pane name, and menu clicks, dismissal and navigation keys do not also reach the
+program underneath. The last console still has no close button (D46).
+
+**Hiding is presentation, not retirement.** Toggle changes only the pane's saved folding value;
+its width, producer connection and document remain. Availability follows existing panel visibility,
+including a warning-only panel: a failed read must not make a visible panel impossible to hide.
+
+**What was discarded.** A second row would take another line from every console. Squeezing all
+buttons at narrow widths would overlap the grip or destructive target. A permanent menu would hide
+frequent actions at ordinary widths. Temporarily focusing a pane to invoke its shortcut would move
+the keyboard even when the operation fails. Separate painting and hit geometry would let the two
+locations disagree. New visibility fields would duplicate what the saved layout already carries.
+
+**Measurement.** D45's opt-in and published control grids remain. Header control geometry,
+painting and hover work belong to the header span; pointer decisions and their mutations belong to
+the already-timed mouse pass. A split invoked there does not also subtract the shortcut's timing.
+The compact menu's painting is part of the header span; its key handling is timed separately.
+No cost claim is made until the measurement runs are valid and recorded.
+
+
+### Measured — 7 November 2026: the strip with its controls
+
+Two valid T runs against two C controls, all from release binary `0393cb4`, one tab, two consoles,
+44 MiB per console and a 1280×800-point window. The environment was Xvfb with
+`LIBGL_ALWAYS_SOFTWARE=1`; these are software-renderer measurements, not a comparison with the
+hardware-rendered figures in D45. The comparator accepted both same-batch pairs.
+
+| Batch/report | Grid per console | Header cost per frame, both strips |
+|---|---|---|
+| T / batch-T-190839.txt | 48×43 | 9.671µs |
+| T / batch-T-190934.txt | 48×43 | 10.652µs |
+| C / batch-C-190903.txt | 50×43 | Not painted (measurement gate) |
+| C / batch-C-191003.txt | 50×43 | Not painted (measurement gate) |
+
+T includes both strips, their three control icons, availability geometry and hover registration.
+C paints no strip. T and C have different grids, so subtracting their whole-frame means would not
+isolate the controls. The menu and clicks were exercised functionally; this batch does not measure
+an open menu or continuous clicking, and these figures do not claim that cost.

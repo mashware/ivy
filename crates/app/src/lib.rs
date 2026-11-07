@@ -76,7 +76,9 @@ pub mod watcher;
 use opening::WindowRequest;
 use pointer::{DragIntent, WheelInput, WheelOutcome};
 use tab_bar::set_the_tab_bar_aside;
-use tiling::{DIVIDER_THICKNESS, Orientation, Side, can_split};
+use tiling::{DIVIDER_THICKNESS, Orientation};
+#[cfg(test)]
+use tiling::{Side, can_split};
 use tree::Tab;
 
 use eframe::egui;
@@ -1128,6 +1130,7 @@ struct Window {
     /// there: the geometry, the painting and the pointer all read this one value, so there is no
     /// regime where a row is reserved and not drawn. See [`header::Headers`].
     headers: header::Headers,
+    header_input: header::actions::Input,
     /// The previous frame's mirror. **The deadline is armed against it**, so the deadline is
     /// rearmed **when something changes** and not when something is unwritten: without this, a
     /// non-writable directory would leave the difference in place and **the window would never go
@@ -1569,6 +1572,9 @@ impl Window {
     /// question (`keyboard::somebody_typed`): a press, a text or a paste. A copy on its own is not
     /// in it, and stays in the hole. The cursor's anchor is read before the clock starts.
     fn send_keys_to_the_focused(&mut self, ctx: &egui::Context) -> Vec<WindowRequest> {
+        if header::menu::keys(self, ctx) {
+            return Vec::new();
+        }
         // **The phase goes back to the start whenever a key is pressed**, so the cursor is lit the
         // instant you type instead of at whatever point of the cycle you caught it — and typing
         // continuously never leaves it half-drawn. **It is asked BEFORE the keys are handed over**:
@@ -1611,127 +1617,6 @@ impl Window {
         self.timed_separately += before.elapsed() * u32::from(typed);
         self.modifiers = modifiers;
         requests
-    }
-
-    /// Splits in two the pane that has the keyboard, and gives focus to the one that is born.
-    ///
-    /// **Focus passes to the new one because splitting is opening a console**, and whoever opens a
-    /// console wants to write in it; it is the same thing creating a tab does by putting it in
-    /// front. Staying on the old one would force a click to use what has just been asked for.
-    ///
-    /// **If it does not fit, nothing is split and nothing is spent**: not a name, not a `fork`. A
-    /// child below the minimum is not a smaller console, it is a useless console — and without
-    /// being able to close it yet (#7), leaving it there would be worse than not opening it.
-    ///
-    /// **What it costs is declared in full**, and they are two things no pane is going to declare:
-    /// the tree walk to find out where the focused one falls, and the new program's `fork`/`exec`.
-    /// Without this, the frame's cost is shared out by subtraction and both would end up published
-    /// as interface framework cost — the figure D3 judges it with.
-    fn split_the_focused(
-        &mut self,
-        cut_along: Orientation,
-        ctx: &egui::Context,
-        whole_window: egui::Rect,
-        metrics: &CellMetrics,
-    ) {
-        let before = Instant::now();
-        // The bar is set aside with the tabs there are **now**: if the same batch of events has
-        // just created one, the height left for the consoles is already a different one.
-        let (_, area) = set_the_tab_bar_aside(whole_window, self.tabs.len(), metrics);
-        let focused_area = self.active().where_the_focus_is().map(|at| {
-            // The leaves and their rectangles are matched by position: the two walks go in the same
-            // order, which is the invariant the whole painting already rests on.
-            self.active().root.place(area, metrics.width()).parts[at]
-        });
-        self.timed_separately += before.elapsed();
-
-        // With no live focus there is nothing to split. It cannot happen today —focus only moves to
-        // a pane that exists— and that is why no case is invented: it leaves the way typing with no
-        // focus leaves.
-        let Some(its_area) = focused_area else {
-            return;
-        };
-        if !can_split(its_area, cut_along, metrics, self.headers) {
-            // **It is said out loud, because the chord has swallowed the key and nothing has
-            // happened.** Without this line, in a narrow window the shortcut reads as broken: it
-            // neither splits, nor reaches the program inside, nor leaves a trace of why. It is the
-            // same as the sibling path already does —the console that could not be opened—, and for
-            // now it is all that can be done: saying it on screen would need a way of warning that
-            // this phase does not have.
-            eprintln!(
-                "it is not split: the pane cannot give both children their minimum. Make the window bigger \
-                 or move the divider"
-            );
-            return;
-        }
-
-        let before = Instant::now();
-        let name = self.next_pane_name;
-        let opened = Pane::new_counting_reads(ctx, name, self.control.read_activity());
-        // **The name is spent even if the program never gets to start**, just as when opening a
-        // tab: whatever is opened afterwards must not be called the same as what never got to
-        // exist, because the report may already have named the failed attempt on the error output.
-        self.next_pane_name += 1;
-
-        // **The stopwatch is not closed before the graft, and that line was drawn in the wrong
-        // place.** Putting the leaf into the tree and rearming the watcher are the two
-        // **expensive** parts of splitting —the second rebuilds the watcher over the panes of every
-        // tab and makes them reread their `panel.json`—, and they happen inside the interface pass
-        // without any pane declaring them. Closing it here, that work fell into «the rest of the
-        // frame», which is what this project calls the interface framework cost: the figure D3
-        // decides with.
-        self.graft_the_new_one(opened, cut_along, ctx);
-        self.timed_separately += before.elapsed();
-    }
-
-    /// Puts the console that has just been opened next to the focused one, or leaves the window as
-    /// it was if it could not be opened.
-    ///
-    /// **It receives the attempt already made instead of making it**, just like
-    /// [`Window::bring_to_front`] with the tabs and for the same reason: opening a console only
-    /// fails when the system gives no more pseudoterminals or descriptors, and that cannot be
-    /// provoked from a test without touching the whole process. Splitting it here is what makes it
-    /// possible to assert what the case promises — that a failure leaves no half pane, does not
-    /// move the focus and rearms nothing.
-    fn graft_the_new_one(
-        &mut self,
-        opened: term_core::Result<Pane>,
-        cut_along: Orientation,
-        ctx: &egui::Context,
-    ) {
-        let new = match opened {
-            Ok(new) => new,
-            Err(failure) => {
-                eprintln!("the pane could not be split ({failure})");
-                return;
-            }
-        };
-
-        // **The name focus will go to is taken from the console being grafted**, and not from a
-        // parameter saying which one it is. The two would be worth the same as long as the caller
-        // took them from the same place, but the day they come apart the focus would point at a
-        // pane that does not exist: the keys would reach no console at all —they would be lost in
-        // silence—, the highlight would not be painted, and the next splitting chord would find
-        // nothing to split.
-        let name = new.name;
-        let focus = self.active().focus;
-        let tab = self.active_mut();
-        if let Some(leftover) = tab.root.split(focus, Side::behind(cut_along), new) {
-            // **It cannot happen**: the caller has just found the focus among the leaves of this
-            // very tab, and nothing has touched the tree in between. It is said out loud instead of
-            // kept quiet because the console really did get opened, and on dropping it here its
-            // program dies and its directory disappears: without this line, a shell opened and
-            // closed in the same frame would leave no trace at all.
-            drop(leftover);
-            eprintln!("the focused pane was not found when splitting; nothing has been split");
-            return;
-        }
-
-        tab.focus = name;
-        // Without rearming, the watcher knows nothing about the directory of the one that has just
-        // been born and its panel would stay frozen with nothing saying so. It is the same as
-        // opening a tab does.
-        self.rearm_the_watcher(ctx);
     }
 
     /// Opens a tab with its two consoles and leaves it in front.
@@ -1963,6 +1848,10 @@ impl eframe::App for Window {
         // tabs there are and which a close can change.
         self.answer_the_windows_requests(ui.ctx(), ui.max_rect(), &metrics);
 
+        let header_owns_pointer = header::menu::pointer_blocked(self, ui.ctx());
+        if header_owns_pointer {
+            ui.disable();
+        }
         let (tab_bar, area) = set_the_tab_bar_aside(ui.max_rect(), self.tabs.len(), &metrics);
 
         // **Everything that changes tab goes before tiling**, and this is what a defect cost: the
@@ -1971,7 +1860,7 @@ impl eframe::App for Window {
         // out of those rectangles comes `measured`, so the two pseudoterminals of the just-opened
         // tab were given a wrong grid and corrected it on the following frame — a double
         // readjustment, visible in any full-screen program.
-        if let Some(tab_bar) = tab_bar {
+        if let Some(tab_bar) = tab_bar.filter(|_| !header_owns_pointer) {
             self.handle_tab_bar_clicks(ui, tab_bar, &metrics);
         }
 
@@ -2278,6 +2167,7 @@ impl eframe::App for Window {
 
         // It has already been painted, so whatever is still pending belongs to a console that was
         // not painted.
+        header::menu::paint(self, ui.ctx(), &metrics);
         self.close_the_unpainted_rounds();
 
         // **The mirror is compared here, at the end of the interface pass, and not in the logic
@@ -2397,6 +2287,7 @@ impl Window {
 
 #[cfg(test)]
 mod tests {
+    mod header_controls;
     pub(crate) mod markdown;
 
     // **The tests reach further into the two modules than the code above does**, and this is
@@ -7173,6 +7064,7 @@ mod tests {
             presses_for_the_program: Vec::new(),
             last_cell_reported: None,
             last_frame_with_buttons: None,
+            header_input: header::actions::Input::default(),
             link_press_in_progress: None,
             drag_in_progress: None,
             last_painted: Vec::new(),
@@ -24487,8 +24379,10 @@ mod tests {
             !set_aside.is_zero(),
             "writing set nothing aside, so there is nothing to subtract"
         );
-        // And now let the frame close and really subtract it.
-        let cost = std::time::Duration::from_millis(50);
+        // The frame's synthetic cost contains the measured write plus a known residue. A fixed
+        // total made this assertion depend on the filesystem completing within fifty milliseconds:
+        // under load the measured span exceeded it and the expected subtraction underflowed.
+        let framework_cost = std::time::Duration::from_millis(7);
         window.active_mut().panes_mut()[0]
             .timings
             .record_round(measure::Spans::of_a_round(
@@ -24499,12 +24393,13 @@ mod tests {
                 std::time::Duration::ZERO,
             ));
         let mirror = window.mirror_this_frame;
+        let cost = set_aside + mirror + framework_cost;
 
         window.close_the_frame(cost);
 
         assert_eq!(
             window.rest_of_frame.mean(),
-            cost - set_aside - mirror,
+            framework_cost,
             "what writing cost was not subtracted from the rest"
         );
         assert!(
@@ -26547,9 +26442,8 @@ mod tests {
         let strip = header::set_the_header_aside(rects[0], &metrics, window.headers)
             .0
             .expect("the pane carries a strip");
-        // Away from the right-hand end, where the button that closes the console is: this test is
-        // about the band, and closing it would take the program with it.
-        let on_the_strip = egui::pos2(strip.left() + metrics.width(), strip.center().y);
+        // The centre remains the drag handle; the left now carries pane controls.
+        let on_the_strip = strip.center();
         assert!(
             !header::button_within(strip, &metrics, header::Button::in_a_tab_of(&rects))
                 .is_some_and(|target| target.holds(on_the_strip)),

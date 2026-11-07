@@ -30,6 +30,11 @@
 use crate::painter::CellMetrics;
 use eframe::egui;
 
+pub(crate) mod actions;
+pub(crate) mod controls;
+pub(crate) mod menu;
+mod splitting;
+
 /// Whether this session paints a strip over each console.
 ///
 /// **A type and not a `bool`, for the reason the four call sites give**: `can_split(area, rows,

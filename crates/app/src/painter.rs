@@ -1090,9 +1090,25 @@ pub(crate) fn paint_pane(
     // round is only closed on a frame this console produced output in: see
     // [`crate::PaneOutcome::strip_cost`].
     let search = pane.search.cost();
-    let strip_cost = chrome
-        .header()
-        .map(|header| crate::header::paint(&ui.painter_at(header), header, theme, metrics, button));
+    let strip_cost = chrome.header().map(|header| {
+        let started = std::time::Instant::now();
+        let _ = crate::header::paint(&ui.painter_at(header), header, theme, metrics, button);
+        let close =
+            crate::header::button_within(header, metrics, button).map(|target| target.rect());
+        let enabled = [
+            crate::tiling::can_split(rect, crate::tiling::Orientation::Columns, metrics, headers),
+            crate::tiling::can_split(rect, crate::tiling::Orientation::Rows, metrics, headers),
+            pane.panel_state.is_visible(now),
+        ];
+        crate::header::controls::Controls::within(header, metrics, close).paint(
+            ui,
+            theme,
+            enabled,
+            pane.folded,
+            ui.id().with(("header-controls", pane.name)),
+        );
+        started.elapsed()
+    });
     // **The border is only reported if there is a grip behind it.** With the panel clipped
     // below the grip the gesture registers no control at all —so as not to steal the point from
     // the tree's divider—, and reporting the border anyway made the injected gesture press
