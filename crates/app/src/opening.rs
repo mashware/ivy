@@ -103,6 +103,9 @@ impl Pane {
             }
         };
 
+        #[cfg(test)]
+        crate::tests::completed_operation(crate::tests::OperationWork::Launch);
+
         let waker = ctx.clone();
         let pty_output = PtyOutput::new(output, move || waker.request_repaint());
         let (panel_state, control) = panel::pane::state_and_control(ctx, panel.as_ref(), reads);
@@ -332,6 +335,7 @@ impl Window {
             last_cell_reported: None,
             last_frame_with_buttons: None,
             header_input: crate::header::actions::Input::default(),
+            settings_editor: crate::settings::editor::Editor::default(),
             link_press_in_progress: None,
             drag_in_progress: None,
             last_painted: Vec::new(),

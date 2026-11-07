@@ -2674,6 +2674,14 @@ impl Default for Keymap {
 }
 
 impl Keymap {
+    /// The current chord for an action, including the factory bindings shown by Settings.
+    pub(crate) fn chord_for(&self, action: Action) -> Option<Chord> {
+        self.table
+            .iter()
+            .find(|(_, candidate)| *candidate == action)
+            .map(|(chord, _)| *chord)
+    }
+
     /// Which action that chord does, if any.
     ///
     /// **A chord that is not in the table is NOT the application's**, and its bytes go down to the program

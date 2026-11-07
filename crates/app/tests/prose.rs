@@ -75,6 +75,46 @@ use std::path::Path;
 /// moved the measurement bench's injected gestures out into `src/injected.rs`, which is the next
 /// entry down.
 const SOURCES: &[(&str, &str, usize)] = &[
+    (
+        "src/settings/editor/script.rs",
+        include_str!("../src/settings/editor/script.rs"),
+        2,
+    ),
+    (
+        "src/tests/settings_editor.rs",
+        include_str!("../src/tests/settings_editor.rs"),
+        1,
+    ),
+    (
+        "src/fonts/startup.rs",
+        include_str!("../src/fonts/startup.rs"),
+        15,
+    ),
+    (
+        "src/settings/editor.rs",
+        include_str!("../src/settings/editor.rs"),
+        3,
+    ),
+    (
+        "src/settings/editor/view.rs",
+        include_str!("../src/settings/editor/view.rs"),
+        1,
+    ),
+    (
+        "src/settings/editor/timing.rs",
+        include_str!("../src/settings/editor/timing.rs"),
+        1,
+    ),
+    (
+        "src/settings/document.rs",
+        include_str!("../src/settings/document.rs"),
+        3,
+    ),
+    (
+        "src/settings/store.rs",
+        include_str!("../src/settings/store.rs"),
+        2,
+    ),
     ("src/lib.rs", include_str!("../src/lib.rs"), 6_207),
     ("src/alarms.rs", include_str!("../src/alarms.rs"), 136),
     ("src/closing.rs", include_str!("../src/closing.rs"), 115),
@@ -269,7 +309,9 @@ const SOURCES: &[(&str, &str, usize)] = &[
 /// deleted declared file a compile error. [`rust_sources`] walks only to find the opposite mistake:
 /// a real file nobody declared. It never supplies the text being judged, so a path cannot disappear
 /// from the guard merely because the directory walk did not return it.
-const COMMENT_LINES_AT_LEAST: usize = 15_160;
+// Re-measured at 19,488 by the existing walker after replacing obsolete wall-clock ratio
+// explanations with the scoped-clock rationale; the feature's original 19,500 included those.
+const COMMENT_LINES_AT_LEAST: usize = 19_488;
 
 /// How many **different** listed words a line needs before it is called Spanish.
 ///

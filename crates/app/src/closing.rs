@@ -34,6 +34,8 @@ impl Window {
         for pane in self.all_panes() {
             pane.to_reread.raise();
         }
+        #[cfg(test)]
+        crate::tests::completed_operation(crate::tests::OperationWork::Rearm);
     }
 
     /// Banks a closing pane's channel counters on the window, **before it is dropped**.

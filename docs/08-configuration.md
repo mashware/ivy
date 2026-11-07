@@ -2,9 +2,38 @@
 
 Where it goes: **`$XDG_CONFIG_HOME/agent-terminal/config`** — or `~/.config/agent-terminal/config` if
 you do not have that variable set. Next to `layout.json`, which is where the terminal saves only how
-you left the windows; this one you write yourself.
+you left the windows; this one can be written by hand or through Settings.
 
 **If it does not exist, the terminal opens exactly as always.** You do not have to create it.
+
+## Graphical settings
+
+The global **Settings** button is available even with a single tab. Appearance contains the installed
+font selector, size, named theme and all twenty-two colour overrides. Cursor and Shortcuts contain
+the existing blink override, action bindings and separate copy switch.
+
+**Saved changes apply after restarting agent-terminal.** Opening Settings and Cancel change neither
+the running terminal nor the file. Restore defaults stages removal of the supported overrides;
+only Save writes them. Blank fields inherit the built-in default; `none` unbinds an action. Explicit
+colours still override the selected theme. The cursor override retains its focus rules and its
+fifteen-second inactivity stop.
+
+New or blank files saved through Settings declare `version=1`. Existing version lines are retained.
+Save explains invalid values and conflicting bindings before writing. Comments, unrelated entries,
+unchanged supported entries, a byte-order mark and retained line endings survive. Changed keys are
+rewritten consistently, including equivalent spellings; restoring a key removes its earlier
+assignments as well. Existing line warnings are shown without making unrelated settings unusable.
+
+If the file changed outside Settings, Save refuses and retains the draft: Cancel and reopen to load
+the new file. A write or replacement failure leaves the old configuration in place. Comparison
+cannot lock out an arbitrary editor writing between the final check and replacement; this is not a
+cross-editor transaction. Symbolic links and unreadable, non-text, oversized or unsupported-version
+files cannot be saved graphically; they need attention outside the screen.
+
+The installed-font list is loaded only on explicit request. Merely opening Settings neither searches
+fonts nor applies a font. Consoles, including those in background tabs, keep running. Historical
+measurement batches omit the global row; explicit `settings-closed`, `settings-open` and
+`settings-fonts` variants declare it and keep configuration I/O vetoed.
 
 ## How it is written
 

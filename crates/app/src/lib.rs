@@ -73,6 +73,7 @@ pub mod watcher;
 // meaning the other one. Named, that same day is a duplicate definition and the build stops. It
 // also gives the reader the one thing the glob takes away — the list of what this file still needs
 // back. For the list of what left, the order is in **D28**, not here.
+use fonts::choose_the_font;
 use opening::WindowRequest;
 use pointer::{DragIntent, WheelInput, WheelOutcome};
 use tab_bar::set_the_tab_bar_aside;
@@ -248,7 +249,7 @@ const SIZE_VARIABLE: &str = "MEASURE_SIZE";
 /// —the one the tree milestone has to measure— cannot be launched with nobody in front of it.
 ///
 /// **It opens the layout instead of splitting four times**, which is what the two columns of always
-/// already do: the tab is born with its tree and nobody consults the floor of [`can_split`] at
+/// already do: the tab is born with its tree and nobody consults the floor of [`tiling::can_split`] at
 /// startup. Whoever asks for a layout that does not fit in their window will see consoles one
 /// column wide, just as happens today with a tiny window.
 const PANES_VARIABLE: &str = "MEASURE_PANES";
@@ -487,61 +488,6 @@ enum OpenWith {
     Restored(session::Validated),
 }
 
-/// Hands the text engine the family the settings ask for, and says what the report has to publish.
-///
-/// **Nothing is asked of the machine when they ask for nothing, and that is the whole of D24.**
-/// Resolving a name forces enumerating every font installed —between 17.3 and 23.2 ms— which is the
-/// cost D24 decided never to pay at start-up. The `None` branch here is what keeps that decision
-/// standing, and it is the branch every start-up without a settings file takes.
-///
-/// **It is a function of its own and not four lines inside the window's constructor**, because
-/// inside that closure no test can reach it: the laziness would rest on reading the code.
-fn choose_the_font(
-    family: Option<&str>,
-    discoverer: &mut fonts::Discoverer,
-    ctx: &egui::Context,
-) -> measure::ChoosingTheFont {
-    let Some(asked_for) = family else {
-        return measure::ChoosingTheFont::NotAsked;
-    };
-    let started = Instant::now();
-    let chosen = discoverer.use_the_family(asked_for, ctx);
-    let how_long = started.elapsed();
-    let asked_for = asked_for.to_owned();
-    match chosen {
-        fonts::Chosen::Registered(family) => measure::ChoosingTheFont::Found { family, how_long },
-        // **Each one is said with its own cause, and that is not politeness.** From outside the three
-        // look identical —the window opens exactly as always— and each sends whoever reads it
-        // somewhere different: to fix what they typed, to fix what is installed, or nowhere at all.
-        fonts::Chosen::NotInstalled => {
-            eprintln!(
-                "agent-terminal: the font '{asked_for}' is not installed on this machine. Painting \
-                 with the built-in ones."
-            );
-            measure::ChoosingTheFont::Missing {
-                asked_for,
-                how_long,
-            }
-        }
-        fonts::Chosen::Unusable => {
-            eprintln!(
-                "agent-terminal: the font '{asked_for}' is installed and none of its files can be \
-                 read. Painting with the built-in ones."
-            );
-            measure::ChoosingTheFont::Unusable {
-                asked_for,
-                how_long,
-            }
-        }
-        // **Nothing is said here**: whoever found out there are no system fonts already said so, and
-        // a second line blaming the name would send the reader to fix a name that is fine.
-        fonts::Chosen::NoFontsOnTheMachine => measure::ChoosingTheFont::Missing {
-            asked_for,
-            how_long,
-        },
-    }
-}
-
 /// The decision, with the given values: **what a measurement batch asks for beats what was saved**.
 ///
 /// **The precedence is written down because without it a run measures a layout nobody asked it
@@ -711,12 +657,16 @@ pub fn run() -> eframe::Result {
             // the restoring span: taking it right inside would force passing it through three
             // constructors with thirty-three calls among tests, and none of them configures
             // anything.
-            window.apply_the_settings(&settings);
+            settings.apply_to(&mut window);
             // **The strip is switched off by the same gate that vetoes the settings file**, and a
             // batch opts back into it with a knob of its own: a header takes a row from every
             // console, so a measured run that painted one would publish a grid no published batch
             // was measured with. See [`header::Headers::resolved`].
             window.headers = header::Headers::resolved(entry, wants_headers);
+            window.settings_editor = settings::editor::Editor::resolved(
+                entry,
+                std::env::var("MEASURE_SETTINGS").ok().as_deref(),
+            );
             // **The font goes apart from the rest of the settings, and it is not tidiness.** The
             // others put a value on the window; this one talks to the text engine and **costs
             // between 17.3 and 23.2 ms** (**D24**) because resolving a name forces enumerating the
@@ -1131,6 +1081,7 @@ struct Window {
     /// regime where a row is reserved and not drawn. See [`header::Headers`].
     headers: header::Headers,
     header_input: header::actions::Input,
+    settings_editor: settings::editor::Editor,
     /// The previous frame's mirror. **The deadline is armed against it**, so the deadline is
     /// rearmed **when something changes** and not when something is unwritten: without this, a
     /// non-writable directory would leave the difference in place and **the window would never go
@@ -1631,6 +1582,8 @@ impl Window {
         // them: the one that pays for them is the tab that does not exist yet. Without this,
         // launching two processes is published as interface framework cost.
         let before = Instant::now();
+        #[cfg(test)]
+        let before = tests::OperationClock::start(before);
         // **A tab opened with the chord is born with the usual two columns**, and not with the
         // layout the measurement gate might have asked for: that variable says how **the window**
         // opens, and whoever presses the chord has not asked for four consoles. That a batch's tabs
@@ -1698,6 +1651,7 @@ impl eframe::App for Window {
     /// **With no drags asked for it does absolutely nothing**, it does not even look at the clock:
     /// it is the path of whoever uses the application.
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        settings::editor::inject(self, raw_input);
         let Some(injected_drags) = self.injected_drags.as_mut() else {
             return;
         };
@@ -1830,29 +1784,29 @@ impl eframe::App for Window {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let metrics = CellMetrics::measure(ui.ctx(), egui::FontId::monospace(self.font_size));
 
-        // The keyboard goes before everything else **and that order matters for the number, not for
-        // the behavior**: the way-out stopwatch is closed inside `send_keys`, so any work that
-        // sneaks in ahead of it —even reading a rectangle— gets added to it.
-        let requests = self.send_keys_to_the_focused(ui.ctx());
+        // Settings claims its input before the console dispatcher. Its named work is discounted
+        // from frame accounting; outbound latency still includes this earlier application work.
+        let requests = settings::editor::before_keys(self, ui);
+        let area = self.settings_editor.console_area(ui.max_rect());
 
         // **The order is applied before tiling**, so that what gets painted in this same frame is
         // already the new tab. Applying it at the end would leave a frame showing the previous one,
         // which with the window at rest is the last one painted.
         for request in requests {
-            self.apply(request, ui.ctx(), ui.max_rect(), &metrics);
+            self.apply(request, ui.ctx(), area, &metrics);
         }
 
         // **What the open connections asked of the tree, answered here** because this is where a
         // split's geometry exists. It goes after the keys —so a chord and a request in the same
         // frame cannot fight over the tree— and before the tab bar, whose height depends on how many
         // tabs there are and which a close can change.
-        self.answer_the_windows_requests(ui.ctx(), ui.max_rect(), &metrics);
+        self.answer_the_windows_requests(ui.ctx(), area, &metrics);
 
         let header_owns_pointer = header::menu::pointer_blocked(self, ui.ctx());
         if header_owns_pointer {
             ui.disable();
         }
-        let (tab_bar, area) = set_the_tab_bar_aside(ui.max_rect(), self.tabs.len(), &metrics);
+        let (tab_bar, area) = set_the_tab_bar_aside(area, self.tabs.len(), &metrics);
 
         // **Everything that changes tab goes before tiling**, and this is what a defect cost: the
         // tiling comes out of the active tab's fraction, so attending to the click afterwards left
@@ -2287,8 +2241,72 @@ impl Window {
 
 #[cfg(test)]
 mod tests {
+    // Only declaration witnesses activate this thread-local clock. Real operations still run;
+    // completed launches and watcher rearms advance distinct units inside their stopwatch.
+    // Logical units test complete accounting, not performance; release binaries contain none.
+    // Reader/watcher threads cannot advance this clock, and other tests retain their real clock.
+    // The guard restores its previous state on panic as well as success.
+    // Exact accumulator deltas catch both omitted declarations and narrowed span boundaries.
+    // Independent chord witnesses cover dispatch; these tests isolate its cost declaration.
+    std::thread_local! {
+        static OPERATION_TIME: std::cell::Cell<Option<std::time::Duration>> = const { std::cell::Cell::new(None) };
+    }
+
+    pub(crate) enum OperationWork {
+        Launch,
+        Rearm,
+    }
+
+    pub(crate) fn completed_operation(work: OperationWork) {
+        OPERATION_TIME.with(|time| {
+            if let Some(now) = time.get() {
+                let units = match work {
+                    OperationWork::Launch => 1,
+                    OperationWork::Rearm => 10,
+                };
+                time.set(Some(now + std::time::Duration::from_secs(units)));
+            }
+        });
+    }
+
+    struct OperationClockGuard(Option<std::time::Duration>);
+
+    impl OperationClockGuard {
+        fn enter() -> Self {
+            Self(OPERATION_TIME.with(|time| time.replace(Some(std::time::Duration::ZERO))))
+        }
+    }
+
+    impl Drop for OperationClockGuard {
+        fn drop(&mut self) {
+            OPERATION_TIME.with(|time| time.set(self.0));
+        }
+    }
+
+    pub(crate) struct OperationClock {
+        real: std::time::Instant,
+        logical: Option<std::time::Duration>,
+    }
+
+    impl OperationClock {
+        pub(crate) fn start(real: std::time::Instant) -> Self {
+            Self {
+                real,
+                logical: OPERATION_TIME.with(|time| time.get()),
+            }
+        }
+
+        pub(crate) fn elapsed(&self) -> std::time::Duration {
+            match self.logical {
+                Some(start) => OPERATION_TIME
+                    .with(|time| time.get().expect("the scoped clock is still active") - start),
+                None => self.real.elapsed(),
+            }
+        }
+    }
     mod header_controls;
     pub(crate) mod markdown;
+    mod settings_editor;
 
     // **The tests reach further into the two modules than the code above does**, and this is
     // where that is said. They build tilings and weights directly to assert the arithmetic;
@@ -7065,6 +7083,7 @@ mod tests {
             last_cell_reported: None,
             last_frame_with_buttons: None,
             header_input: header::actions::Input::default(),
+            settings_editor: settings::editor::Editor::default(),
             link_press_in_progress: None,
             drag_in_progress: None,
             last_painted: Vec::new(),
@@ -9422,7 +9441,7 @@ mod tests {
             .expect("the documented theme settings are valid");
         assert_eq!(warnings.total(), 0);
         let mut window = window_with("sleep 30", "sleep 30");
-        window.apply_the_settings(&settings);
+        settings.apply_to(&mut window);
 
         assert_eq!(
             window.theme.background(),
@@ -9463,10 +9482,11 @@ mod tests {
             "out of the box the chord must not reach the program"
         );
 
-        window.apply_the_settings(&settings::Settings {
+        (settings::Settings {
             shortcuts: vec![(keyboard::Action::SplitRight, None)],
             ..Default::default()
-        });
+        })
+        .apply_to(&mut window);
 
         enqueue(&ctx, chord_with(egui::Key::D));
         assert_eq!(
@@ -9487,7 +9507,7 @@ mod tests {
         // splits, and the one left free reaches the program inside.
         let ctx = egui::Context::default();
         let mut window = window_with("sleep 30", "sleep 30");
-        window.apply_the_settings(&settings::Settings {
+        (settings::Settings {
             shortcuts: vec![(
                 keyboard::Action::SplitRight,
                 Some(keyboard::Chord {
@@ -9498,7 +9518,8 @@ mod tests {
                 }),
             )],
             ..Default::default()
-        });
+        })
+        .apply_to(&mut window);
 
         enqueue(&ctx, chord_with(egui::Key::E));
         assert_eq!(
@@ -10407,31 +10428,21 @@ mod tests {
 
     #[test]
     fn opening_a_tab_declares_what_launching_its_two_programs_costs() {
-        // Opening a tab is **two `fork`/`exec`**, and they happen inside the interface pass because
-        // that is where the chord is served. Nobody declared them: the «rest of the frame» kept
-        // them, and that number is the one that says how much the interface framework costs — the
-        // figure D3 decides with whether egui holds up. Launching two processes is not egui's cost.
-        //
-        // **Against a frame somebody also typed in, and not against zero.** Walking the tree and the
-        // keyboard's own pass both declare on such a frame (D61), so «not zero» would stay green
-        // with the launches undeclared; two `fork`/`exec` are of another order than either.
+        // Both real launches and bringing the tab forward belong inside the declaration.
+        // Activation rearms all watchers, work no individual pane can declare on its own.
+        // Distinct units expose whether launch, rearm, or the entire addition was omitted.
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+        let _clock = OperationClockGuard::enter();
+        let before = window.timed_separately;
 
-        one_frame_with(&mut window, &ctx, chord_with(egui::Key::Z));
-        let without_launching = window.timed_separately;
-        assert!(
-            !without_launching.is_zero(),
-            "a typed frame declared nothing, so the comparison is worthless"
-        );
-        one_frame_with(&mut window, &ctx, chord_with(egui::Key::T));
+        window.create_a_tab(&ctx);
 
-        assert_eq!(window.tabs.len(), 2, "the tab was not opened");
-        assert!(
-            window.timed_separately > without_launching * 5,
-            "opening a tab declared {:?}, of the same order as the {without_launching:?} of a frame that \
-             launched nothing: the two fork/exec are published as the framework's cost",
-            window.timed_separately
+        assert_eq!(window.tabs.len(), 2, "the real tab was not opened");
+        assert_eq!(
+            window.timed_separately - before,
+            Duration::from_secs(12),
+            "the declaration must include both completed launches and the watcher rearm"
         );
     }
 
@@ -16427,10 +16438,11 @@ mod tests {
         // line that applies it, the whole suite stayed green.
         let ctx = egui::Context::default();
         let mut window = window_with("sleep 30", "sleep 30");
-        window.apply_the_settings(&settings::Settings {
+        (settings::Settings {
             copy: Some(false),
             ..Default::default()
-        });
+        })
+        .apply_to(&mut window);
         one_frame_in(&mut window, &ctx, area_of(1200.0), Vec::new());
 
         let pane = &mut window.active_mut().panes_mut()[0];
@@ -16515,10 +16527,11 @@ mod tests {
 
         let grid_with = |font_size: Option<f32>| {
             let mut window = window_with("sleep 30", "sleep 30");
-            window.apply_the_settings(&settings::Settings {
+            (settings::Settings {
                 font_size,
                 ..Default::default()
-            });
+            })
+            .apply_to(&mut window);
             ui_pass(
                 &mut window,
                 &ctx,
@@ -18974,39 +18987,27 @@ mod tests {
 
     #[test]
     fn splitting_declares_what_launching_the_program_of_the_newborn_costs() {
-        // AC11. Splitting is a `fork`/`exec` inside the interface pass —it is where the chord is
-        // attended to— and no pane is going to declare it: the one that pays for it does not exist
-        // yet. Without declaring it, the subtraction attributes it to the interface framework,
-        // which is the figure D3 decides with.
-        //
-        // **It is compared against an identical frame with no split, and not against zero.**
-        // Walking the tree adds up here too, so a «it is not zero» would be green even if the
-        // `fork` were not declared. What separates the two is of another order: microseconds of
-        // walking against milliseconds of launching a process.
+        // AC11: the unborn console cannot declare its fork/exec, so the window must.
+        // Grafting and watcher rearming belong inside the same span as the real launch.
+        // Leave enough room for the split, then assert its complete declared logical cost.
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
-        let area = area_of_cells(100.0);
+        let _clock = OperationClockGuard::enter();
+        let before = window.timed_separately;
 
-        one_frame_in(&mut window, &ctx, area, Vec::new());
-        let only_the_walk = window.timed_separately;
-        assert!(
-            !only_the_walk.is_zero(),
-            "a frame with no split did not declare even the walk, so the comparison is worthless"
-        );
-
-        one_frame_in(&mut window, &ctx, area, chord_with(egui::Key::D));
-        let with_the_partition = window.timed_separately - only_the_walk;
+        with_metrics(|metrics| {
+            window.split_the_focused(Orientation::Columns, &ctx, area_of_cells(100.0), metrics);
+        });
 
         assert_eq!(
             window.active().panes().len(),
             3,
-            "no split happened, so the measurement is not of what it says it is"
+            "the real pane was not split"
         );
-        assert!(
-            with_the_partition > only_the_walk * 5,
-            "the frame that splits declared {with_the_partition:?}, of the same order as the \
-             {only_the_walk:?} of walking the tree: the fork/exec is not being declared and is \
-             published as framework cost"
+        assert_eq!(
+            window.timed_separately - before,
+            Duration::from_secs(11),
+            "the declaration must include the completed launch and the watcher rearm"
         );
     }
 
@@ -20217,17 +20218,9 @@ mod tests {
         );
     }
 
-    // **That opening and closing a tab declare what rearming the watcher costs IS LEFT UNTIED, and
-    // it is said.** The fix is there —the stopwatch of the two operations encloses the rearm, just
-    // as in splitting and in closing a pane—, but **no test demonstrates it**, and that was checked
-    // instead of assumed: one was written that compares what is declared against the operation's
-    // wall clock, and **the two mutations that take the rearm out of the stopwatch left it green**.
-    // The reason is one of magnitudes: in this suite a rearm costs the same —microseconds— as the
-    // gap between the test's clock, which is outside the operation, and the application's, which is
-    // inside. Signal and noise of the same order cannot be told apart, and a test that does not
-    // fall when what it claims to cover is broken covers nothing. What is tied down is the other
-    // half of the fix, the one of the three places:
-    // `closing_a_tab_does_not_take_away_what_its_consoles_had_done_on_this_frame`.
+    // Opening a tab and splitting now use a scoped logical-clock witness for the complete
+    // launch/rearm boundary. Closing a tab still has no equivalent rearm-boundary witness;
+    // its retained pane costs are covered below independently of wall-clock magnitudes.
 
     #[test]
     fn the_report_distinguishes_a_dead_focus_from_a_pane_with_no_side() {
@@ -21341,15 +21334,16 @@ mod tests {
     fn the_settings_line_reaches_the_window_and_not_only_the_parser() {
         // **Mutated, and it stayed green**: deleting the line that copies the parsed key onto the
         // window left `cursor.blink` parsed, warned about, published in the manual — and connected
-        // to nothing. Nothing walked `apply_the_settings` for this field. The window here is asked
+        // to nothing. Nothing walked `apply_to` for this field. The window here is asked
         // through the same door the file comes in by.
         let ctx = egui::Context::default();
         let mut window = window_whose_cursor_is_its_own("sleep 30", "sleep 30");
         focus_on(window.active_mut(), 0);
-        window.apply_the_settings(&settings::Settings {
+        (settings::Settings {
             blink: Some(false),
             ..Default::default()
-        });
+        })
+        .apply_to(&mut window);
 
         let mut settled = Duration::ZERO;
         for _ in 0..4 {

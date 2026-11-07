@@ -20,6 +20,14 @@ pub(crate) struct Input {
     pub(super) pending: Option<(usize, Action)>,
 }
 
+impl Input {
+    pub(crate) fn block_for_settings(&mut self, frame: u64) {
+        self.menu = None;
+        self.pending = None;
+        self.blocked_frame = Some(frame);
+    }
+}
+
 pub(crate) fn enabled(
     window: &Window,
     name: usize,
@@ -190,8 +198,8 @@ fn apply(
     ctx: &egui::Context,
     metrics: &CellMetrics,
 ) -> bool {
-    let (_, area) =
-        crate::tab_bar::set_the_tab_bar_aside(ctx.viewport_rect(), window.tabs.len(), metrics);
+    let content = window.settings_editor.console_area(ctx.viewport_rect());
+    let (_, area) = crate::tab_bar::set_the_tab_bar_aside(content, window.tabs.len(), metrics);
     let panes = window.active().panes();
     let Some(at) = panes.iter().position(|pane| pane.name == name) else {
         return false;
@@ -208,7 +216,7 @@ fn apply(
             } else {
                 Orientation::Rows
             };
-            super::splitting::split(window, name, direction, ctx, ctx.viewport_rect(), metrics);
+            super::splitting::split(window, name, direction, ctx, content, metrics);
             window.active().panes().len() != before
         }
         Action::TogglePanel => {

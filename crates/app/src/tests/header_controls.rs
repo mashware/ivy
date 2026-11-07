@@ -662,4 +662,48 @@ mod tests {
         assert!(!back[0].panes()[0].folded);
         assert_eq!(back[0].panes()[1].panel_width, 27);
     }
+    #[test]
+    fn a_cached_menu_split_rechecks_the_settings_reduced_height() {
+        let ctx = egui::Context::default();
+        let mut window = window_with("sleep 30", "sleep 30");
+        window.settings_editor = settings::editor::Editor::resolved(settings::Entry::Normal, None);
+        let large = area_of(1280.0);
+        let metrics = warmed(&mut window, &ctx, large);
+        let content = window.settings_editor.console_area(large);
+        let before = parts(&window, content, &metrics);
+        let strip = header::set_the_header_aside(before[1], &metrics, window.headers)
+            .0
+            .unwrap();
+        one_frame_in(&mut window, &ctx, large, right_click(strip.center()));
+        assert!(header::menu::pointer_blocked(&window, &ctx));
+        let height = (40..400)
+            .find(|h| {
+                let area =
+                    egui::Rect::from_min_size(large.min, egui::vec2(large.width(), *h as f32));
+                let full = parts(&window, area, &metrics)[1];
+                let reduced =
+                    parts(&window, window.settings_editor.console_area(area), &metrics)[1];
+                tiling::can_split(full, Orientation::Rows, &metrics, window.headers)
+                    && !tiling::can_split(reduced, Orientation::Rows, &metrics, window.headers)
+            })
+            .unwrap();
+        let small = egui::Rect::from_min_size(large.min, egui::vec2(large.width(), height as f32));
+        let events = [egui::Key::ArrowDown, egui::Key::Enter]
+            .into_iter()
+            .map(|key| egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            })
+            .collect();
+        one_frame_in(&mut window, &ctx, small, events);
+        assert_eq!(
+            window.active().panes().len(),
+            2,
+            "cached menu split below the actual minimum after resize; viewport height={height}, actual={}",
+            window.settings_editor.console_area(small).height()
+        );
+    }
 }

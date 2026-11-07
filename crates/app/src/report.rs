@@ -175,6 +175,7 @@ impl Window {
         // in under the clock's resolution is a frame that had one, and skipping it would make the
         // count the script reads answer a question nobody asked — see [`measure::Strips`].
         self.strips.close_the_frame();
+        self.settings_editor.close_frame();
 
         // **And the raw-input hook's is declared here, AFTER emptying.** See
         // [`Window::spent_injecting`]: it ran after the frame being closed had finished, so it
@@ -370,6 +371,7 @@ impl Window {
         // **The two saving spans go after the rest, and each with a row of its own.** They are
         // discounted from that rest —they go into the window's accumulator—, so without these rows
         // the number would exist and **nobody could audit it**.
+        self.settings_editor.publish(to)?;
         self.saving.publish(to)?;
         // **And discovery the same: its row goes after the rest because it too is discounted from
         // it.** It is the most expensive span this project adds outside a console, so without

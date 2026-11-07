@@ -13,7 +13,8 @@
 //!
 //! **With one exception, and it is asked for out loud.** A settings file that names a family —`font =
 //! JetBrains Mono`— has that name resolved **at start-up**, before the first frame, and resolving a
-//! name is exactly the enumeration above. That is the whole of the exception: the file has to say it.
+//! name is exactly the enumeration above. The settings editor also enumerates on an explicit
+//! installed-font selector request; merely opening Settings does not enumerate.
 //! A file that names no family, or no file at all, never reaches [`Discoverer::use_the_family`] and
 //! the start-up is the one described in the paragraph above, bit for bit. The report declares which
 //! of the two happened, so a measurement run that paid it cannot be mistaken for one that did not.
@@ -25,7 +26,9 @@ use eframe::egui;
 use fontique::{Collection, CollectionOptions, GenericFamily, SourceCache};
 use skrifa::MetadataProvider as _;
 mod atlas;
+mod startup;
 use atlas::*;
+pub(crate) use startup::choose_the_font;
 use unicode_properties::emoji::{
     EmojiStatus, UnicodeEmoji, is_emoji_presentation_selector, is_text_presentation_selector,
 };
@@ -613,6 +616,23 @@ impl Discoverer {
             ctx.request_repaint();
         }
         round
+    }
+
+    /// Enumerates names only when the settings selector is explicitly requested.
+    pub(crate) fn installed_families(&mut self) -> Vec<String> {
+        if !self.ensure_the_collection() {
+            return Vec::new();
+        }
+        let mut names: Vec<String> = self
+            .collection
+            .as_mut()
+            .expect("collection was ensured")
+            .family_names()
+            .map(str::to_owned)
+            .collect();
+        names.sort_unstable();
+        names.dedup();
+        names
     }
 
     /// Paints with the family whoever configures asked for **by its name**.

@@ -16,6 +16,8 @@ impl Window {
         metrics: &CellMetrics,
     ) {
         let before = Instant::now();
+        #[cfg(test)]
+        let before = crate::tests::OperationClock::start(before);
         split(
             self,
             self.active().focus,

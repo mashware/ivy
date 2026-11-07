@@ -812,3 +812,106 @@ fn the_batch_with_emoji_in_its_panels_is_held_to_the_colour_guard() {
         "a batch painting no emoji that rasterized some is not invalidated"
     );
 }
+
+/// Execute the shipped validator: deleting a direction changes the observed exit status.
+#[test]
+fn graphical_settings_reports_require_the_requested_effects() {
+    use std::{
+        fs,
+        process::Command,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    let dir = std::env::temp_dir().join(format!(
+        "settings-report-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let report = dir.join("report");
+    let function = MEASURE
+        .split("# Graphical settings report validation (also exercised with synthetic reports).\n")
+        .nth(1)
+        .unwrap()
+        .split("# End graphical settings report validation.")
+        .next()
+        .unwrap();
+    let shell = format!("set -eu\n{function}\ninvalidate() {{ exit 7; }}\ncheck_settings_report\n");
+    let accepts = |mode: &str,
+                   visible: bool,
+                   entry: usize,
+                   editor: usize,
+                   fonts: usize,
+                   families: usize| {
+        let regime = if mode.is_empty() { "historical" } else { mode };
+        fs::write(&report,format!("settings UI: visible={visible}, measurement=true\nsettings mode: {regime}\nsettings entry: frames={entry}, total=1ms\nsettings editor: frames={editor}, total=1ms\nsettings font enumeration: frames={fonts}, total=1ms\nsettings installed families: {families}\nsettings font requests: {}\n", if fonts>0 {2} else {0})).unwrap();
+        Command::new("sh")
+            .arg("-c")
+            .arg(&shell)
+            .env("REPORT", &report)
+            .env("SETTINGS", mode)
+            .status()
+            .unwrap()
+            .success()
+    };
+    assert!(accepts("", false, 0, 0, 0, 0));
+    assert!(!accepts("", true, 1, 0, 0, 0));
+    assert!(!accepts("", false, 0, 1, 0, 0));
+    assert!(accepts("closed", true, 10, 0, 0, 0));
+    assert!(!accepts("closed", true, 0, 0, 0, 0));
+    assert!(!accepts("closed", true, 10, 1, 0, 0));
+    assert!(accepts("open", true, 10, 9, 0, 0));
+    assert!(!accepts("open", true, 10, 0, 0, 0));
+    assert!(!accepts("open", true, 10, 9, 1, 10));
+    assert!(accepts("fonts", true, 10, 9, 1, 20));
+    assert!(!accepts("fonts", true, 10, 9, 0, 20));
+    assert!(!accepts("fonts", true, 10, 9, 1, 0));
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn settings_variants_are_not_averaged_across_modes() {
+    use std::{
+        fs,
+        process::Command,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    let dir = std::env::temp_dir().join(format!(
+        "settings-compare-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let first = dir.join("first");
+    let second = dir.join("second");
+    let header = |mode: &str| {
+        format!(
+            "window: 1280×800 points\ntabs: 1\n  pane 0: 50×41 (left)\nsettings UI: visible=true, measurement=true\nsettings mode: {mode}\n"
+        )
+    };
+    let script =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/measure-frame.sh");
+    let comparable = || {
+        Command::new("sh")
+            .arg(&script)
+            .arg("compare")
+            .arg(&first)
+            .arg(&second)
+            .env_remove("MEASURE_AS_CONSOLE")
+            .output()
+            .unwrap()
+            .status
+            .success()
+    };
+    fs::write(&first, header("closed")).unwrap();
+    fs::write(&second, header("closed")).unwrap();
+    assert!(comparable());
+    fs::write(&second, header("open")).unwrap();
+    assert!(!comparable());
+    fs::remove_dir_all(dir).unwrap();
+}

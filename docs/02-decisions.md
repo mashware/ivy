@@ -8100,3 +8100,86 @@ T includes both strips, their three control icons, availability geometry and hov
 C paints no strip. T and C have different grids, so subtracting their whole-frame means would not
 isolate the controls. The menu and clicks were exercised functionally; this batch does not measure
 an open menu or continuous clicking, and these figures do not claim that cost.
+
+
+## D63 — Graphical settings stage the shared file and apply on restart
+
+**7 November 2026 — F2.15, [#322](https://github.com/mashware/agent-terminal/issues/322).** Settings
+belongs to the whole window, so its entry is global and visible with one tab. Its dialog groups
+appearance, cursor and shortcuts, while every console keeps its existing pump budget.
+
+**One boundary for every setting.** Open reads a draft of the saved configuration. Cancel discards
+it, Restore defaults stages removal, and Save validates and writes. Every saved change applies at
+restart, stated before and after saving. Startup merges settings and registers fonts before the
+first frame; reusing that path avoids inventing partial live reset and font-activation rules.
+
+**The plain-text file remains shared with hand editing.** Patch only edited semantic keys, removing
+all their assignments before writing a single replacement. Unsetting/defaults remove aliases and
+invalid assignments too, so an older value cannot reappear. Preserve comments, unrelated lines,
+untouched entries and retained line endings. Reuse the startup parser's values and chord rules;
+show conflicts instead of silently displacing a binding. Copy remains its independent switch.
+
+New or blank saved configurations declare `version=1`; existing version declarations survive.
+
+**A failed Save is not success.** Snapshot comparison detects observed external edits; a sibling
+exclusive temporary file is flushed and replaced only after rechecking. Failure preserves the old
+file and retains the draft. Existing permissions survive. Non-regular files, symlinks and whole-file
+vetoes disable graphical saving, rather than silently overwriting unknown contents or a link.
+An arbitrary editor can still write between comparison and rename; no atomic compare-and-swap
+across unrelated editors is claimed.
+
+**Input belongs to the dialog before terminal dispatch.** Ownership covers opening and closing
+frames, repeated passes and a held pointer's release. Releases of earlier program-owned presses
+remain routable through the existing header interception. The entry does not take keyboard focus
+from the shell; typing Tab then Enter in a console must remain terminal input. Header actions recheck
+the same content rectangle as shortcuts after resize; a cached enabled menu item is not a witness
+of the space available now.
+
+**Work is named.** Entry, editor, configuration I/O/validation, font enumeration and input ownership
+accumulate across passes and close once per frame; child spans are excluded from parent spans and
+the combined work is discounted once. The global row is an explicit exception to D13's single-tab
+geometry; historical batches keep their old regime. Dedicated settings variants witness the shipped
+visible entry, the open dialog and first/repeated font-selector requests at matched geometry. They
+never lift the user's config veto. Font selection enumerates only on request and registers nothing
+until startup. Real desktop validation remains separate from headless interaction and software-renderer
+measurements.
+
+**Discarded alternatives.** Per-pane settings buttons repeat a global action in every pane. A hidden
+shortcut alone fails one-tab discoverability. A separate workspace adds navigation. Full live
+application needs a resettable settings/font lifecycle; mixed application makes Save ambiguous.
+Rewriting the entire file loses human text, appending cannot restore inherited values, and a second
+store disagrees with hand editing. Advisory locks do not coordinate arbitrary text editors;
+platform-specific compare-and-swap would add portability work without changing that editor contract.
+
+
+### Measured — declared settings work
+
+**7 November 2026.** Release binary SHA-256
+`e93dcd07ddad140f7b09a61554f8de17545a9ebb6547c968f4746d7721af3fb1`, built from the
+`e944242` tree. Two runs each of `scripts/measure-frame.sh C 44`, `settings-closed 44`,
+`settings-open 44` and `settings-fonts 44`, on the same machine and a 1280×800-point Xvfb display
+with software rendering (`glow`). Every pair passes the script's `compare` command; none is
+marked invalid. These are virtual-display measurements, not desktop keyboard/clipboard evidence.
+
+The table gives **the range of the two reported per-frame means** for each separately declared
+span; discovery has one sample per run. The editor excludes its separately named children.
+
+| Regime | Global entry | Editor | Config I/O / validation | Font enumeration | Input ownership |
+|---|---|---|---|---|---|
+| Historical `C` | 0 | 0 | 0 | 0 | 0 |
+| `settings-closed` | 34.015–34.626 µs | 0 | 0 | 0 | 0.564–0.713 µs |
+| `settings-open` | 37.467–43.963 µs | 291.510–307.002 µs | 5.608–6.227 µs | 0 | 1.640–1.816 µs |
+| `settings-fonts` | 41.489–41.529 µs | 312.000–312.513 µs | 6.224–6.419 µs | 29.098–30.386 ms, once | 1.763–1.805 µs |
+
+Each fonts run accepts **two explicit requests and enumerates once**, retaining 259 family names;
+opening the dialog alone discovers none. This script does not expand the family dropdown, so the
+cost of painting the complete inventory is **not measured**. Save and real configuration reads are
+also not measured: the configuration veto remains active. Explicit Open/Save/discovery have no
+latency bound established here.
+
+The historical control has 50×43 console grids; all settings variants have 48×43. The new global
+row changes geometry, so whole-frame subtraction against `C` cannot isolate its cost. The named
+spans above are used directly. The report pairs are `214328/214334` (C), `214404/214435` (closed),
+`214504/214536` (open) and `214606/214636` (fonts), under `target/measurements` with their batch
+prefixes. One final publisher write races directory removal at shutdown in the last run; both
+panels had already published and the report passes every witness guard. No failed run is used.

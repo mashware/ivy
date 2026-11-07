@@ -21,6 +21,10 @@
 //! cannot happen: the worst case is one line. And it admits comments, without which a configuration
 //! file does not explain itself.
 
+pub(crate) mod document;
+pub(crate) mod editor;
+pub(crate) mod store;
+
 use std::path::{Path, PathBuf};
 
 use eframe::egui::Color32;
@@ -531,7 +535,7 @@ pub fn interpret(text: &str) -> Result<(Settings, Warnings), ConfigProblem> {
     Ok((settings, warnings))
 }
 
-impl crate::Window {
+impl Settings {
     /// Puts on the window whatever whoever uses it configured, **except the font**.
     ///
     /// The family named in the file is applied by [`crate::choose_the_font`] instead, and it is not tidiness:
@@ -541,18 +545,18 @@ impl crate::Window {
     /// **It goes here and not in the constructor**, just like the injected drags and the restoring
     /// span: taking it inside would force passing it through three constructors with dozens of
     /// calls, and none of them configures anything.
-    pub(crate) fn apply_the_settings(&mut self, settings: &Settings) {
-        self.theme = settings.resolved_theme();
+    pub(crate) fn apply_to(&self, window: &mut crate::Window) {
+        window.theme = self.resolved_theme();
         // **What the file does not ask for stays as it is**, which is what makes it possible to
         // configure just one color without inheriting along the way a font size nobody wrote.
-        self.font_size = settings.font_size.unwrap_or(self.font_size);
-        self.copy_enabled = settings.copy.unwrap_or(self.copy_enabled);
-        self.blink.ceiling = settings.blink.or(self.blink.ceiling);
+        window.font_size = self.font_size.unwrap_or(window.font_size);
+        window.copy_enabled = self.copy.unwrap_or(window.copy_enabled);
+        window.blink.ceiling = self.blink.or(window.blink.ceiling);
         // **They are applied in the order they were written, and that is why they arrive as a
         // list.** «The last one wins» can only be decided that way, and it is what makes pasting
         // one set of shortcuts on top of another do what is expected.
-        for (action, chord) in &settings.shortcuts {
-            if let Some(displaced) = self.keymap.bind(*action, *chord) {
+        for (action, chord) in &self.shortcuts {
+            if let Some(displaced) = window.keymap.bind(*action, *chord) {
                 // **The clash is said out loud, not resolved in silence.** Without this, whoever
                 // reassigns a chord that already had an owner loses the other shortcut without
                 // noticing, and finds out the day they need it.
@@ -2135,7 +2139,19 @@ mod tests {
         /// artifact to satisfy a test, which is the tail wagging the dog.
         const DRAWN_RULE: char = '\u{2500}';
 
-        const SOURCES: [(&str, &str); 15] = [
+        const SOURCES: [(&str, &str); 21] = [
+            ("settings/document.rs", include_str!("settings/document.rs")),
+            ("settings/store.rs", include_str!("settings/store.rs")),
+            ("settings/editor.rs", include_str!("settings/editor.rs")),
+            (
+                "settings/editor/view.rs",
+                include_str!("settings/editor/view.rs"),
+            ),
+            (
+                "settings/editor/timing.rs",
+                include_str!("settings/editor/timing.rs"),
+            ),
+            ("fonts/startup.rs", include_str!("fonts/startup.rs")),
             ("session.rs", include_str!("session.rs")),
             ("watcher.rs", include_str!("watcher.rs")),
             ("lib.rs", include_str!("lib.rs")),

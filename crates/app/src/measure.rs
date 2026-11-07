@@ -72,7 +72,7 @@ const SAMPLES: usize = 4096;
 
 /// A series of times, with what is needed to summarize it.
 #[derive(Default)]
-struct Series {
+pub(crate) struct Series {
     samples: VecDeque<Duration>,
     /// How many have been taken in total, including the ones no longer kept. Without this, a report
     /// of 4,096 samples over a session of a million would look like the whole session.
@@ -80,7 +80,7 @@ struct Series {
 }
 
 impl Series {
-    fn record(&mut self, how_long: Duration) {
+    pub(crate) fn record(&mut self, how_long: Duration) {
         self.total += 1;
         // A double-ended queue, and not a vector: pulling the oldest sample from the front of a
         // vector shifts the other four thousand, **inside the frame the instrument is measuring**.
@@ -2007,6 +2007,9 @@ mod tests {
         typed_into.record_outbound(ms(1));
 
         let mut window_spans = Vec::new();
+        crate::settings::editor::Editor::resolved(crate::settings::Entry::Measuring, None)
+            .publish(&mut window_spans)
+            .expect("writing to memory does not fail");
         typed_into
             .publish_spans(&mut window_spans)
             .expect("writing to memory does not fail");

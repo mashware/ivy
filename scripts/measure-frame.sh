@@ -191,6 +191,8 @@
 # pane has its own budget. With 44 MiB that gives ≥352, of the order of the 11 August batch. What
 # does grow with the tabs is the frame, because they all pump into the same one.
 #
+# Settings variants: settings-closed, settings-open and settings-fonts reuse C’s load.
+# Their global row has identical geometry; historical C keeps the row vetoed.
 # EVERY BATCH IS RUN TWICE and the mean of the two is published, which is what the annex does. It is
 # not for precision: two runs that do not look alike give away a contaminated one, and a single run
 # cannot be audited. What this script does NOT reproduce is the wake-up figure the annex cites: that
@@ -241,6 +243,45 @@ alike() {
     }'
 }
 
+# Graphical settings report validation (also exercised with synthetic reports).
+check_settings_report() {
+    SETTINGS_LINE=$(sed -n '/^settings UI:/p' "$REPORT" | head -1)
+    ENTRY_FRAMES=$(sed -n 's/^settings entry: frames=\([0-9]*\),.*/\1/p' "$REPORT" | head -1)
+    EDITOR_FRAMES=$(sed -n 's/^settings editor: frames=\([0-9]*\),.*/\1/p' "$REPORT" | head -1)
+    FONT_FRAMES=$(sed -n 's/^settings font enumeration: frames=\([0-9]*\),.*/\1/p' "$REPORT" | head -1)
+    MODE=$(sed -n 's/^settings mode: //p' "$REPORT" | head -1)
+    if [ -n "${SETTINGS:-}" ]; then
+        [ "$MODE" = "$SETTINGS" ] || invalidate "settings mode does not match its variant"
+        case "$SETTINGS_LINE" in
+            'settings UI: visible=true, measurement=true') : ;;
+            *) invalidate "settings variant did not declare its visible entry and measurement gate" ;;
+        esac
+        [ "${ENTRY_FRAMES:-0}" -gt 0 ] || invalidate "settings entry painted no witnessed frames"
+        if [ "$SETTINGS" = closed ]; then
+            [ "${EDITOR_FRAMES:-0}" = 0 ] || invalidate "closed settings variant opened the editor"
+        else
+            [ "${EDITOR_FRAMES:-0}" -gt 0 ] || invalidate "settings variant did not open its editor"
+        fi
+    else
+        [ "$MODE" = historical ] || invalidate "historical batch changed its settings mode"
+        [ "${EDITOR_FRAMES:-missing}" = 0 ] || invalidate "historical batch opened the settings editor"
+        [ "$SETTINGS_LINE" = 'settings UI: visible=false, measurement=true' ] || invalidate "historical batch changed its settings UI regime"
+        [ "${ENTRY_FRAMES:-missing}" = 0 ] || invalidate "historical batch painted the settings entry"
+    fi
+    REQUESTS=$(sed -n 's/^settings font requests: \([0-9]*\)$/\1/p' "$REPORT" | head -1)
+    if [ "${SETTINGS:-}" = fonts ]; then
+        [ "${REQUESTS:-0}" -ge 2 ] || invalidate "font variant did not witness first and repeated selector requests"
+        [ "${FONT_FRAMES:-0}" -gt 0 ] || invalidate "font-selector variant did not enumerate fonts"
+        FAMILIES=$(sed -n 's/^settings installed families: \([0-9]*\)$/\1/p' "$REPORT" | head -1)
+        [ "${FAMILIES:-0}" -gt 0 ] || invalidate "font selector found no installed families"
+    else
+        [ "${REQUESTS:-missing}" = 0 ] || invalidate "font selector request leaked into another variant"
+        [ "${FONT_FRAMES:-missing}" = 0 ] || invalidate "font enumeration leaked into a variant that did not request it"
+    fi
+    
+}
+# End graphical settings report validation.
+
 # ── Compare mode ────────────────────────────────────────────────────────────────
 # **The guard this script claimed to have from F2.1 and did not.** The annex publishes the mean of
 # two runs, and averaging two runs with different grids gives a number that describes neither of
@@ -287,6 +328,8 @@ if [ "${MEASURE_AS_CONSOLE:-}" != "1" ] && [ "${1:-}" = compare ]; then
     # are compared.
     geometry() {
         sed -n \
+            -e 's/^settings UI: */settings /p' \
+            -e 's/^settings mode: */settings mode /p' \
             -e 's/^tabs: */tabs /p' \
             -e 's/^  pane [0-9]*: */pane /p' \
             -e 's/^restored: *\([0-9]*\) consoles .*$/restored \1/p' \
@@ -409,8 +452,9 @@ RESTORES=0
 # batch, and the guards read the same variable, so they judge the leaked load as the batch's own. A
 # `PATCHES=1` in the environment runs X as Y and publishes it under X's name; a `LARGE=1` pads S and
 # the file batches to the ceiling, and hides U and V from the leak guard that only fires without it.
-ACTIONS= CONTROL= HEADER= READS= PATCHES= LINKS= SEARCH= LARGE= CJK= EMOJI= PANEL_EMOJI=
+ACTIONS= CONTROL= HEADER= READS= PATCHES= LINKS= SEARCH= LARGE= CJK= EMOJI= PANEL_EMOJI= SETTINGS=
 case "$BATCH" in
+    settings-closed|settings-open|settings-fonts) TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; SETTINGS=${BATCH#settings-} ;;
     A|B|C|D) TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console ;;
     E)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=100000; GESTURE=search; SEARCH=1 ;; # two, and SEARCHING the left console's scrollback while both dump: its control is C, LEFT against LEFT, because the two consoles of one run already differ with no gesture (D61)
     F)       TABS=2; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console ;;   # the background one, still: none of them dumps
@@ -890,7 +934,7 @@ seed() {
 case "$BATCH" in
     A) : ;;                       # no panel: nobody publishes anything
     B) seed quiet & ;;
-    C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
+    settings-closed|settings-open|settings-fonts|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
 esac
 
 echo "batch $BATCH · $TABS tab(s) of $PANES · $DUMPING of $DIRECTORIES consoles dumping $MIB MiB · window $WINDOW_SIZE · do not touch the machine until it closes" >&2
@@ -923,6 +967,11 @@ export MEASURE_AS_CONSOLE=1 MEASURE_MIB="$MIB" MEASURE_BATCH="$BATCH" \
 # every run would paint one everywhere. It is unset for the same reason `MEASURE_TABS` is below: one
 # the user had exported by hand would otherwise reach the application and put a row under every
 # console of a batch that is compared against runs with none.
+if [ -n "${SETTINGS:-}" ]; then
+    export MEASURE_SETTINGS="$SETTINGS"
+else
+    unset MEASURE_SETTINGS
+fi
 if [ "${HEADER:-}" = 1 ]; then
     export MEASURE_HEADER=1
 else
@@ -997,7 +1046,7 @@ fi
 
 # **The font-discovery guard, and it reads both ways like the ones above.** Batch P is the only one
 # that dumps in Japanese, and therefore the only one that walks the path of searching the machine
-# for fonts. Without this number, a run in which the load never got out — or in which the machine
+# for missing-glyph fonts. The explicit settings selector has a separate enumeration witness. Without this number, a run in which the load never got out — or in which the machine
 # had no CJK fonts — would publish the discovery section **empty** and it would read as «searching
 # for fonts costs nothing», which is the same deceit the witness prevents with the panels.
 #
@@ -1280,6 +1329,9 @@ console of this run is a row per pane shorter than the batches it is compared ag
 describes a window none of them was measured with"
     fi
 fi
+
+# Settings-specific witnesses, independent of the existing config veto.
+check_settings_report
 
 # **The settings guard, and this one invalidates on two counts.** Ever since the terminal reads a
 # settings file, a run that read the measurer's own would have **another grid** — the font size
