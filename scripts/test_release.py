@@ -62,6 +62,32 @@ class ReleaseTest(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("unsupported workspace release version", result.stderr)
 
+    def test_package_builder_enforces_release_version_boundary(self):
+        binaries = self.root / "binaries"
+        binaries.mkdir()
+        for value, accepted in (
+            ("0.1.0-rc10", False), ("0.1.0-alpha01", False),
+            ("0.1.0-alpha.01", False), ("01.1.0", False),
+            ("0.1.0+metadata", False), ("0.1.0", True),
+            ("0.1.0-alpha.0", True), ("0.1.0-beta.2", True),
+            ("0.1.0-rc.10", True),
+        ):
+            with self.subTest(version=value):
+                result = subprocess.run(
+                    ["bash", str(SCRIPT.with_name("package-linux.sh")),
+                     "--binary-dir", str(binaries), "--output-dir", str(self.root / "dist"),
+                     "--version", value],
+                    capture_output=True, text=True,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                if accepted:
+                    # Reaching the missing-input check proves the version was accepted.
+                    self.assertIn("Missing executable:", result.stderr)
+                    self.assertNotIn("Unsupported release version:", result.stderr)
+                else:
+                    self.assertIn(f"Unsupported release version: {value}", result.stderr)
+                    self.assertNotIn("Missing executable:", result.stderr)
+
 
     def test_supported_versions_preserve_debian_upgrade_order(self):
         convert = run_path(str(SCRIPT))["deb_version"]
