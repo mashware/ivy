@@ -27,8 +27,8 @@ pub(super) fn show(draft: &mut Document, ui: &mut egui::Ui, errors: &[(String, S
         .map(|t| t.theme())
         .unwrap_or_default();
     ui.horizontal_wrapped(|ui| {
-        ui.strong("Terminal colours");
-        if ui.small_button("Use theme colours").clicked() {
+        ui.weak("Change individual colors without replacing the theme.");
+        if ui.small_button("Reset colors to theme").clicked() {
             for field in &mut draft.fields {
                 if BASE.iter().any(|(key, _)| *key == field.key) || field.key.starts_with("color.")
                 {
@@ -37,7 +37,6 @@ pub(super) fn show(draft: &mut Document, ui: &mut egui::Ui, errors: &[(String, S
             }
         }
     });
-    ui.weak("Swatches inherit the theme. Edit a colour to override it.");
     let columns = if ui.available_width() >= 450.0 { 6 } else { 3 };
     egui::Grid::new("settings-base-colours")
         .num_columns(columns)
@@ -107,33 +106,42 @@ fn swatch(
                     &field.value
                 }
             ));
-            egui::Popup::menu(&response).show(|ui| {
-                ui.set_width(235.0);
-                ui.strong(format!("{title} colour"));
-                ui.weak(if field.value.is_empty() {
-                    "Inherited from theme"
-                } else {
-                    "Explicit override"
+            egui::Popup::menu(&response)
+                .frame(
+                    egui::Frame::new()
+                        .fill(egui::Color32::from_rgb(35, 41, 54))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(70, 81, 106)))
+                        .corner_radius(9)
+                        .inner_margin(10),
+                )
+                .show(|ui| {
+                    super::settings_style(ui);
+                    ui.set_width(235.0);
+                    ui.strong(format!("{title} colour"));
+                    ui.weak(if field.value.is_empty() {
+                        "Inherited from theme"
+                    } else {
+                        "Explicit override"
+                    });
+                    let mut picked = color;
+                    if egui::color_picker::color_picker_color32(
+                        ui,
+                        &mut picked,
+                        egui::color_picker::Alpha::Opaque,
+                    ) {
+                        field.value = hex(picked);
+                    }
+                    ui.add(
+                        egui::TextEdit::singleline(&mut field.value)
+                            .hint_text(hex(inherited))
+                            .desired_width(125.0),
+                    );
+                    ui.weak("Exact #rrggbb; blank inherits the theme.");
+                    if ui.button("Reset to theme").clicked() {
+                        field.value.clear();
+                    }
+                    field_errors(ui, &field.key, errors);
                 });
-                let mut picked = color;
-                if egui::color_picker::color_picker_color32(
-                    ui,
-                    &mut picked,
-                    egui::color_picker::Alpha::Opaque,
-                ) {
-                    field.value = hex(picked);
-                }
-                ui.add(
-                    egui::TextEdit::singleline(&mut field.value)
-                        .hint_text(hex(inherited))
-                        .desired_width(125.0),
-                );
-                ui.weak("Exact #rrggbb; blank inherits the theme.");
-                if ui.button("Reset to theme").clicked() {
-                    field.value.clear();
-                }
-                field_errors(ui, &field.key, errors);
-            });
             ui.label(egui::RichText::new(title).size(11.0));
             ui.weak(
                 egui::RichText::new(if field.value.is_empty() {

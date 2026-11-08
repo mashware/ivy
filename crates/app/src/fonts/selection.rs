@@ -27,7 +27,12 @@ pub(crate) struct PreparedSelection {
 impl PreparedSelection {
     /// Queue last in the saving pass, after fallback discovery has registered its faces.
     pub(crate) fn queue(&self, discoverer: &Discoverer, ctx: &egui::Context) {
-        queue_definitions(self.chosen.as_ref(), &discoverer.faces, ctx);
+        queue_definitions(
+            self.chosen.as_ref(),
+            &discoverer.faces,
+            discoverer.preview.as_ref(),
+            ctx,
+        );
     }
 
     /// Commit only after the queued definitions became effective at the next begin-pass.
@@ -118,6 +123,7 @@ pub(super) fn look_for_the_family(
 pub(super) fn queue_definitions(
     chosen: Option<&SystemFace>,
     faces: &[SystemFace],
+    preview: Option<&SystemFace>,
     ctx: &egui::Context,
 ) {
     let mut definitions = egui::FontDefinitions::default();
@@ -126,15 +132,19 @@ pub(super) fn queue_definitions(
         .get(&egui::FontFamily::Monospace)
         .cloned()
         .unwrap_or_default();
-    let monospaced = monospaced(chosen, faces, &factory);
+    let terminal_chain = monospaced(chosen, faces, &factory);
     let icons = icon_ones(chosen, faces, &factory);
     definitions
         .families
-        .insert(egui::FontFamily::Monospace, monospaced);
+        .insert(egui::FontFamily::Monospace, terminal_chain);
     definitions
         .families
         .insert(egui::FontFamily::Name(ICON_FAMILY.into()), icons);
-    for face in chosen.into_iter().chain(faces) {
+    definitions.families.insert(
+        egui::FontFamily::Name("settings-font-preview".into()),
+        monospaced(preview, faces, &factory),
+    );
+    for face in chosen.into_iter().chain(faces).chain(preview) {
         definitions
             .font_data
             .insert(face.family.clone(), Arc::clone(&face.data));
@@ -143,6 +153,57 @@ pub(super) fn queue_definitions(
 }
 
 impl Discoverer {
+    /// Register only the specimen family; active terminal selection and discovery stay untouched.
+    /// Merely opening Settings can reuse the active face, but never loads a different family.
+    pub(crate) fn preview_font(
+        &mut self,
+        name: Option<&str>,
+        ctx: &egui::Context,
+        allow_load: bool,
+    ) -> Result<egui::FontFamily, SelectionError> {
+        let face = match name {
+            Some(name) => {
+                let active = self.chosen.as_ref().filter(|face| {
+                    face.family
+                        .strip_prefix(CHOSEN_PREFIX)
+                        .is_some_and(|active| active.eq_ignore_ascii_case(name))
+                });
+                let selected = if let Some(active) = active {
+                    Some(SystemFace {
+                        family: active.family.clone(),
+                        data: Arc::clone(&active.data),
+                        for_icons: false,
+                    })
+                } else if allow_load {
+                    PreparedSelection::prepare(self, Some(name))?.chosen
+                } else {
+                    None
+                };
+                selected.map(|face| SystemFace {
+                    family: "settings-preview-face".into(),
+                    data: face.data,
+                    for_icons: false,
+                })
+            }
+            None => None,
+        };
+        self.preview = face;
+        queue_definitions(
+            self.chosen.as_ref(),
+            &self.faces,
+            self.preview.as_ref(),
+            ctx,
+        );
+        Ok(egui::FontFamily::Name("settings-font-preview".into()))
+    }
+
+    /// Discard only draft assets and recompose from the current live selection, never a snapshot.
+    pub(crate) fn clear_preview(&mut self, ctx: &egui::Context) {
+        if self.preview.take().is_some() {
+            queue_definitions(self.chosen.as_ref(), &self.faces, None, ctx);
+        }
+    }
+
     /// Paints with the family whoever configures asked for **by its name**.
     ///
     /// **It is only called when the file names one, and that is what keeps D24 standing.** Resolving a
@@ -225,6 +286,36 @@ mod tests {
                 .size()
         });
         (metrics, bounds)
+    }
+
+    #[test]
+    fn draft_preview_survives_recomposition_and_clear_preserves_the_latest_live_font() {
+        let ctx = egui::Context::default();
+        pass(&ctx);
+        let mut fonts = fixture_discoverer();
+        fonts.use_the_family("Hack", &ctx);
+        pass(&ctx);
+        let live = appearance(&ctx, 'M', egui::FontFamily::Monospace);
+        let preview = fonts.preview_font(Some("Ubuntu"), &ctx, true).unwrap();
+        pass(&ctx);
+        let sample = appearance(&ctx, 'M', preview.clone());
+        assert_ne!(sample, live);
+        assert_eq!(appearance(&ctx, 'M', egui::FontFamily::Monospace), live);
+        fonts.hand_over_the_faces(&ctx);
+        pass(&ctx);
+        assert_eq!(appearance(&ctx, 'M', preview.clone()), sample);
+        assert_eq!(appearance(&ctx, 'M', egui::FontFamily::Monospace), live);
+        let pending = PreparedSelection::prepare(&mut fonts, Some("Ubuntu")).unwrap();
+        pending.queue(&fonts, &ctx);
+        pass(&ctx);
+        pending.activate(&mut fonts);
+        let latest = appearance(&ctx, 'M', egui::FontFamily::Monospace);
+        assert_ne!(latest, live);
+        assert_eq!(appearance(&ctx, 'M', preview), sample);
+        fonts.clear_preview(&ctx);
+        pass(&ctx);
+        assert!(fonts.preview.is_none());
+        assert_eq!(appearance(&ctx, 'M', egui::FontFamily::Monospace), latest);
     }
 
     #[test]

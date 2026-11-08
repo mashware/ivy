@@ -76,6 +76,26 @@ use std::path::Path;
 /// entry down.
 const SOURCES: &[(&str, &str, usize)] = &[
     (
+        "src/settings/editor/view/footer.rs",
+        include_str!("../src/settings/editor/view/footer.rs"),
+        1,
+    ),
+    (
+        "src/settings/editor/view/typography.rs",
+        include_str!("../src/settings/editor/view/typography.rs"),
+        1,
+    ),
+    (
+        "src/settings/editor/view/tests/usability.rs",
+        include_str!("../src/settings/editor/view/tests/usability.rs"),
+        1,
+    ),
+    (
+        "src/settings/editor/view/tests/layout.rs",
+        include_str!("../src/settings/editor/view/tests/layout.rs"),
+        1,
+    ),
+    (
         "src/tab_bar/interaction.rs",
         include_str!("../src/tab_bar/interaction.rs"),
         1,
@@ -1652,6 +1672,11 @@ fn no_document_mixes_the_two_languages() {
 /// their Spanish past every guard until the tree was swept by hand.
 // Per-file floors preserve coverage without imposing the older prototypes' size on the 88-line chrome demo.
 const PROTOTYPES: &[(&str, &str, usize)] = &[
+    (
+        "prototypes/settings-appearance.html",
+        include_str!("../../../prototypes/settings-appearance.html"),
+        80,
+    ),
     (
         "prototypes/chrome-demo/index.html",
         include_str!("../../../prototypes/chrome-demo/index.html"),

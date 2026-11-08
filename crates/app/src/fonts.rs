@@ -273,6 +273,8 @@ pub struct Discoverer {
     /// terminal registers **on its own**, hunting for a character nobody asked about. This one was
     /// asked for out loud, it is one, and it is the whole point of the setting.
     chosen: Option<SystemFace>,
+    /// Draft-only face; it never participates in the terminal or icon family chains.
+    preview: Option<SystemFace>,
     /// The system collection, **created the first time it is needed and not before**. It is what makes
     /// discovery lazy: as long as only characters that the factory fonts cover appear,
     /// this is never built and nothing is paid.
@@ -772,7 +774,12 @@ impl Discoverer {
     /// characters** and the monospaced one for everything else. The per-character order egui does not give, the
     /// painter gives, since it already traverses cell by cell.
     fn hand_over_the_faces(&self, ctx: &egui::Context) {
-        selection::queue_definitions(self.chosen.as_ref(), &self.faces, ctx);
+        selection::queue_definitions(
+            self.chosen.as_ref(),
+            &self.faces,
+            self.preview.as_ref(),
+            ctx,
+        );
     }
 
     /// Every face this discoverer holds: the chosen one first, then the ones it found by itself.

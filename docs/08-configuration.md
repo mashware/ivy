@@ -9,13 +9,25 @@ you left the windows; this one can be written by hand or through Settings.
 ## Graphical settings
 
 The global application menu in the integrated titlebar opens **Preferences**, including with a single tab.
-The compact dialog groups Appearance, Cursor and
-Shortcuts, with one console-and-panel theme preview, colour swatches and an expandable sixteen-colour ANSI palette.
-Use **Change** beside the selected theme to open a searchable, scrollable catalog. Filter it with
-**All**, **Dark** or **Light**, and choose with the mouse or arrow keys. Browsing updates only the
-draft and preview; Escape closes the picker before it closes Settings.
-Appearance contains the installed-font selector, size, named theme and all twenty-two overrides;
-Cursor and Shortcuts contain the existing blink override, action bindings and separate copy switch.
+The dialog groups Appearance, Cursor and Shortcuts,
+with sidebar navigation on wide windows and horizontal navigation on compact ones.
+
+Appearance groups **Theme & colors** together: the theme selector and a compact console-and-panel
+preview sit side by side when there is room. The selector shows how many colors are customized,
+because explicit colors remain applied above the selected theme. Open **Customize colors** to edit
+or reset the six surface colors and expandable sixteen-color ANSI palette. Invalid color values
+remain identified even when this group is folded. **Typography** follows with the lazily loaded
+installed-font selector, size and text sample. The sample uses the selected font and point size
+without changing the running consoles. Within the font list, Up/Down selects and scrolls to a family;
+Enter dismisses the list without saving. Cursor and Shortcuts retain their existing controls.
+
+Open the theme selector to search the offline catalog or filter it with **All**, **Dark** or
+**Light**. Choose with the mouse or arrow keys; browsing updates only the draft and preview.
+Escape dismisses an open theme, font or color popup before closing Settings.
+
+The footer stays separate from scrolling content, with **Save and close** as its primary action,
+**Save changes** as its secondary action, and Cancel and Restore defaults alongside them. Notices
+and validation errors occupy a bounded area so they do not push saving outside the window.
 
 **Saved changes apply without restarting agent-terminal or its programs.** Opening Settings, editing
 and Cancel change neither the running terminal nor the file. Restore defaults stages removal of

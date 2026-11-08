@@ -22,6 +22,7 @@ pub(crate) struct Editor {
     measuring: bool,
     regime: &'static str,
     font_requests: usize,
+    pub(super) preview: view::typography::PreviewState,
     pub(super) draft: Option<Document>,
     pub(super) store: Option<Store>,
     pub(super) message: String,
@@ -34,7 +35,6 @@ pub(crate) struct Editor {
     held_pointer: bool,
     timing: Timing,
     application: runtime::Application,
-    theme: crate::theme::Theme,
 }
 
 impl Editor {
@@ -73,6 +73,7 @@ impl Editor {
     fn open(&mut self, path: Option<PathBuf>) {
         let started = Instant::now();
         self.message.clear();
+        self.preview = Default::default();
         self.picker_open = false;
         self.picker_query.clear();
         self.picker_filter = 0;
@@ -281,7 +282,6 @@ pub(crate) fn before_keys(
         return window.send_keys_to_the_focused(ui.ctx());
     }
     let started = Instant::now();
-    window.settings_editor.theme = window.theme;
     let gear = crate::tab_bar::geometry(window, ui.max_rect(), metrics)
         .gear
         .expect("enabled settings has a gear");

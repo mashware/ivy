@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Settings — Appearance proposal</title>
+<style>
+:root{color-scheme:dark;--page:#0e1117;--surface:#191d26;--raised:#222734;--field:#202531;--line:#303644;--text:#e6e9f1;--muted:#929bae;--accent:#a9bfff;--accent-ink:#16264d;--radius:8px;font-family:Inter,"Ubuntu Sans",system-ui,sans-serif;font-size:14px}
+*{box-sizing:border-box}body{margin:0;min-height:100svh;background:radial-gradient(ellipse at 50% 0,#202838 0,transparent 65%),var(--page);color:var(--text);display:grid;place-items:center;padding:36px 24px}button,input,summary{font:inherit}button,summary{cursor:pointer}button{color:inherit}button:focus-visible,summary:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:4px}button{border:1px solid transparent;background:none;border-radius:6px;white-space:nowrap}svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}.window{width:min(100%,1000px);height:min(756px,calc(100svh - 72px));min-height:min(540px,calc(100svh - 72px));background:var(--surface);border:1px solid #363d4c;border-radius:14px;box-shadow:0 30px 90px #0008;display:grid;grid-template-columns:184px minmax(0,1fr);overflow:hidden}.sidebar{padding:28px 14px;border-right:1px solid var(--line);background:#171b23;display:flex;flex-direction:column}.sidebar h1{font-size:18px;letter-spacing:-.3px;font-weight:600;margin:2px 14px 32px}.nav-item{display:flex;align-items:center;gap:11px;padding:11px 13px;border-radius:7px;color:var(--muted);font-weight:500;margin-bottom:5px}.nav-item.active{background:#a9bfff16;color:#c4d2ff}.nav-item.active svg{color:var(--accent)}.sidebar-bottom{margin-top:auto;padding:16px 14px 0;font-size:11px;color:#697386;letter-spacing:.02em}.main{display:flex;flex-direction:column;min-width:0;min-height:0}.heading{padding:29px 30px 23px;display:flex;justify-content:space-between;align-items:flex-start;gap:16px}.heading h2{font-size:24px;font-weight:600;letter-spacing:-.7px;margin:0 0 7px}.heading p{margin:0;color:var(--muted);line-height:1.5;font-size:13px}.close{display:grid;place-items:center;width:30px;height:30px;color:var(--muted);margin-top:-3px}.close:hover{background:var(--raised);color:var(--text)}.close svg{width:16px;height:16px}.content{overflow:auto;padding:0 30px 24px;scrollbar-width:thin;scrollbar-color:#424b60 transparent;flex:1}.section-title{font-size:14px;font-weight:600;letter-spacing:.01em;margin:0 0 16px}.theme-layout{display:grid;grid-template-columns:minmax(180px,.85fr) minmax(245px,1.15fr);gap:24px;align-items:start}.field-label{font-size:12px;display:block;color:var(--muted);margin-bottom:8px}.theme-control{position:relative}.theme-control>summary{display:flex;justify-content:space-between;align-items:center;gap:12px;list-style:none;background:var(--field);border:1px solid #3b455b;border-radius:7px;min-height:40px;padding:10px 12px;font-weight:500}.theme-control>summary::-webkit-details-marker{display:none}.chevron{width:14px;height:14px;color:var(--muted)}.custom-status{display:flex;align-items:center;gap:7px;color:#c5cce0;margin:11px 0 0;font-size:12px}.status-dot{width:5px;height:5px;border-radius:50%;background:#c4a76e}.small-note{font-size:12px;line-height:1.55;color:var(--muted);margin:9px 0 0;max-width:230px}.theme-menu{position:absolute;top:48px;left:0;width:300px;background:#232936;border:1px solid #46516a;border-radius:9px;padding:10px;box-shadow:0 16px 40px #0008;z-index:3}.search{display:flex;align-items:center;gap:9px;background:#171c25;border:1px solid var(--line);padding:9px 10px;border-radius:6px;color:var(--muted);font-size:12px}.search svg{width:14px;height:14px}.filters{display:flex;gap:4px;padding:10px 0 7px}.filters span{padding:4px 9px;font-size:11px;color:var(--muted);border-radius:4px}.filters .selected{background:#a9bfff20;color:#c4d2ff}.theme-list{max-height:218px;overflow:auto}.theme-option{padding:9px 8px;font-size:12px;display:flex;align-items:center;justify-content:space-between;border-radius:5px}.theme-option.current{background:#a9bfff15;color:#c8d6ff}.dots{display:flex;gap:4px}.dots i{height:7px;width:7px;border-radius:2px;background:var(--c)}.preview{border:1px solid #3b4053;border-radius:8px;overflow:hidden;align-self:stretch;min-height:150px}.preview-top{height:27px;background:#252938;display:flex;align-items:center;gap:6px;padding:0 11px;color:#97a0b7;font-size:10px}.preview-top svg{width:12px;height:12px}.preview-body{display:grid;grid-template-columns:1.6fr 1fr;min-height:121px;font:11px/1.9 "Ubuntu Sans Mono",ui-monospace,monospace}.console-sample{background:#22243a;padding:11px 12px;color:#c0caf5;overflow:hidden;white-space:nowrap}.prompt{color:#7aa2f7}.success{color:#9ece6a}.panel-sample{background:#15161e;padding:12px 10px;color:#b0b9d3;border-left:1px solid #31364a}.panel-label{font-family:inherit;letter-spacing:.09em;font-size:9px;text-transform:uppercase;color:#8992ab}.panel-title{font-weight:500;margin-top:2px;color:#d4dcf6}.panel-progress{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:10px;color:#7aa2f7}.panel-progress i{width:5px;height:5px;background:#7aa2f7;border-radius:50%}.customize{margin-top:18px}.customize>summary{display:flex;align-items:center;gap:8px;list-style:none;padding:12px 0;color:#c3cada;font-size:12px;border-top:1px solid var(--line)}.customize>summary::-webkit-details-marker{display:none}.customize>summary svg{width:13px;height:13px;transition:transform .15s}.customize[open]>summary svg{transform:rotate(90deg)}.override-count{font-size:10px;padding:3px 6px;border:1px solid #5b513d;color:#d6be8e;border-radius:4px;margin-left:3px}.custom-chips{margin-left:auto;display:flex;gap:4px}.custom-chips i{width:10px;height:10px;background:var(--c);border-radius:2px;border:1px solid #ffffff16}.custom-body{padding:8px 0 0}.custom-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:15px}.custom-header p{font-size:12px;color:var(--muted);margin:0;line-height:1.5}.text-button{font-size:12px;color:#b9cbff;padding:4px 0}.color-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px}.color-box{height:30px;background:var(--c);border:1px solid #ffffff26;border-radius:5px;margin-bottom:7px}.color-label{font-size:11px;color:#c6cdde}.color-source{font-size:10px;color:#838da2;margin-top:4px}.color-source.custom{color:#d6be8e}.ansi{border-top:1px solid var(--line);padding-top:13px;margin-top:17px}.ansi summary{font-size:12px;color:var(--muted)}.ansi-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:7px;margin-top:13px}.ansi-grid i{display:block;height:22px;border-radius:4px;background:var(--c)}.typography{border-top:1px solid var(--line);margin-top:13px;padding-top:23px}.type-controls{display:grid;grid-template-columns:minmax(180px,1fr) 113px auto;align-items:end;gap:12px}.control{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;height:38px;background:var(--field);border:1px solid #363e50;border-radius:6px;font-size:13px}.control .unit{color:var(--muted);font-size:12px}.reset-font{font-size:12px;color:var(--muted);height:38px;padding:0 3px}.font-specimen{margin-top:15px;background:#151923;border:1px solid #282f3f;border-radius:7px;padding:13px 14px;font:12px/1.7 "Ubuntu Sans Mono",ui-monospace,monospace;color:#b2bad0;overflow:hidden;white-space:nowrap}.font-specimen span{color:#727d94;margin-left:16px}.footer{flex-shrink:0;border-top:1px solid var(--line);padding:15px 24px 16px;background:#191d26}.footer-row{display:flex;align-items:center;justify-content:space-between;gap:14px}.restore{font-size:12px;color:var(--muted);padding:9px 5px}.actions{display:flex;gap:8px;align-items:center}.actions button{height:36px;padding:0 13px;font-size:12px;font-weight:500}.cancel{color:#aab3c6}.save{border-color:#414b61;background:#242b39}.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}.actions button:hover{filter:brightness(1.1)}.footer-note{font-size:11px;color:#818ca2;margin:10px 5px 0;display:flex;gap:7px;align-items:center}.footer-note .status-dot{background:#99acd5;width:4px;height:4px}.outside-caption{position:fixed;bottom:13px;color:#606c83;font-size:10px;letter-spacing:.04em;left:0;right:0;text-align:center;pointer-events:none}
+@media(max-width:780px){body{padding:18px 12px}.window{grid-template-columns:150px minmax(0,1fr);height:calc(100svh - 36px);min-height:min(420px,calc(100svh - 36px))}.sidebar{padding:24px 10px}.sidebar h1{margin-left:10px}.heading{padding:24px 22px 22px}.content{padding:0 22px 22px}.theme-layout{grid-template-columns:1fr;gap:15px}.small-note{max-width:none}.preview{min-height:126px}.preview-body{min-height:99px}.type-controls{grid-template-columns:minmax(120px,1fr) 90px}.reset-font{display:none}.color-grid{grid-template-columns:repeat(3,1fr)}.custom-chips{display:none}.footer{padding:14px 17px}.footer-row{flex-wrap:wrap}.actions{margin-left:auto}.outside-caption{display:none}}
+@media(max-width:540px){body{padding:0;place-items:stretch}.window{border-radius:0;border:0;width:100%;height:100svh;min-height:0;grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}.sidebar{padding:15px 16px 11px;border-right:0;border-bottom:1px solid var(--line);display:flex;flex-direction:row;align-items:center;gap:4px}.sidebar h1{display:none}.nav-item{font-size:12px;padding:9px 10px;margin:0;gap:7px}.nav-item svg{width:15px;height:15px}.sidebar-bottom{display:none}.heading{padding:21px 20px 18px}.heading h2{font-size:22px}.content{padding:0 20px 22px}.footer{padding:12px 15px}.footer-row{gap:8px}.restore{font-size:11px}.actions{gap:5px}.actions button{padding:0 10px;font-size:11px;height:35px}.footer-note{font-size:10px;margin-top:8px}.theme-menu{width:min(300px,calc(100vw - 40px))}.font-specimen span{display:none}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<main class="window" aria-label="Settings appearance design proposal">
+  <aside class="sidebar">
+    <h1>Settings</h1>
+    <div class="nav-item active" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 0 0 16Z" fill="currentColor" stroke="none"/></svg>Appearance</div>
+    <div class="nav-item"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 3 11 9-6 1-3 6Z"/></svg>Cursor</div>
+    <div class="nav-item"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="3"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/></svg>Shortcuts</div>
+    <div class="sidebar-bottom">agent-terminal</div>
+  </aside>
+  <section class="main">
+    <header class="heading">
+      <div><h2>Appearance</h2><p>Your theme, colors and type.</p></div>
+      <button class="close" aria-label="Close Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"/></svg></button>
+    </header>
+    <div class="content">
+      <section aria-labelledby="theme-title">
+        <h3 id="theme-title" class="section-title">Theme &amp; colors</h3>
+        <div class="theme-layout">
+          <div>
+            <span class="field-label">Color theme</span>
+            <details class="theme-control">
+              <summary>Tokyo Night <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></summary>
+              <div class="theme-menu">
+                <div class="search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg>Search themes…</div>
+                <div class="filters"><span class="selected">All</span><span>Dark</span><span>Light</span></div>
+                <div class="theme-list">
+                  <div class="theme-option current">Tokyo Night <span class="dots"><i style="--c:#f7768e"></i><i style="--c:#9ece6a"></i><i style="--c:#7aa2f7"></i></span></div>
+                  <div class="theme-option">Gruvbox Dark <span class="dots"><i style="--c:#cc241d"></i><i style="--c:#98971a"></i><i style="--c:#458588"></i></span></div>
+                  <div class="theme-option">Catppuccin Mocha <span class="dots"><i style="--c:#f38ba8"></i><i style="--c:#a6e3a1"></i><i style="--c:#89b4fa"></i></span></div>
+                  <div class="theme-option">Catppuccin Latte <span class="dots"><i style="--c:#d20f39"></i><i style="--c:#40a02b"></i><i style="--c:#1e66f5"></i></span></div>
+                  <div class="theme-option">Nord <span class="dots"><i style="--c:#bf616a"></i><i style="--c:#a3be8c"></i><i style="--c:#81a1c1"></i></span></div>
+                  <div class="theme-option">GitHub Dark Default</div>
+                  <div class="theme-option">GitHub Light Default</div>
+                  <div class="theme-option">Ros&eacute; Pine</div>
+                  <div class="theme-option">Ros&eacute; Pine Dawn</div>
+                  <div class="theme-option">Ros&eacute; Pine Moon</div>
+                </div>
+              </div>
+            </details>
+            <p class="custom-status"><span class="status-dot"></span>1 color customized</p>
+            <p class="small-note">Your color changes are applied on top of this theme.</p>
+          </div>
+          <div class="preview" aria-label="Console and status panel color preview">
+            <div class="preview-top"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 7 5 5-5 5M13 17h6"/></svg>Preview</div>
+            <div class="preview-body">
+              <div class="console-sample"><span class="prompt">~/workspace</span><br>$ cargo test<br><span class="success">All checks passed</span></div>
+              <div class="panel-sample"><div class="panel-label">Status</div><div class="panel-title">Run checks</div><div class="panel-progress"><i></i>In progress</div></div>
+            </div>
+          </div>
+        </div>
+        <details class="customize">
+          <summary><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>Customize colors <span class="override-count">1 override</span><span class="custom-chips" aria-hidden="true"><i style="--c:#22243a"></i><i style="--c:#c0caf5"></i><i style="--c:#7aa2f7"></i><i style="--c:#f7768e"></i><i style="--c:#9ece6a"></i></span></summary>
+          <div class="custom-body">
+            <div class="custom-header"><p>Change individual colors without replacing the theme.</p><button class="text-button">Reset colors to theme</button></div>
+            <div class="color-grid">
+              <div><div class="color-box" style="--c:#22243a"></div><div class="color-label">Background</div><div class="color-source custom">Custom · #22243A</div></div>
+              <div><div class="color-box" style="--c:#c0caf5"></div><div class="color-label">Text</div><div class="color-source">From theme</div></div>
+              <div><div class="color-box" style="--c:#c0caf5"></div><div class="color-label">Cursor</div><div class="color-source">From theme</div></div>
+              <div><div class="color-box" style="--c:#414868"></div><div class="color-label">Divider</div><div class="color-source">From theme</div></div>
+              <div><div class="color-box" style="--c:#7aa2f7"></div><div class="color-label">Focus</div><div class="color-source">From theme</div></div>
+              <div><div class="color-box" style="--c:#15161e"></div><div class="color-label">Panel</div><div class="color-source">From theme</div></div>
+            </div>
+            <details class="ansi"><summary>ANSI palette · 16 colors</summary><div class="ansi-grid" aria-label="Sixteen ANSI color samples"><i style="--c:#15161e"></i><i style="--c:#f7768e"></i><i style="--c:#9ece6a"></i><i style="--c:#e0af68"></i><i style="--c:#7aa2f7"></i><i style="--c:#bb9af7"></i><i style="--c:#7dcfff"></i><i style="--c:#a9b1d6"></i><i style="--c:#414868"></i><i style="--c:#f7768e"></i><i style="--c:#9ece6a"></i><i style="--c:#e0af68"></i><i style="--c:#7aa2f7"></i><i style="--c:#9d7cd8"></i><i style="--c:#7dcfff"></i><i style="--c:#c0caf5"></i></div></details>
+          </div>
+        </details>
+      </section>
+      <section class="typography" aria-labelledby="type-title">
+        <h3 id="type-title" class="section-title">Typography</h3>
+        <div class="type-controls">
+          <div><span class="field-label">Font family</span><div class="control">Ubuntu Sans Mono <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></div></div>
+          <div><span class="field-label">Size</span><div class="control">14.7 <span class="unit">pt</span></div></div>
+          <button class="reset-font">Reset</button>
+        </div>
+        <div class="font-specimen">Aa Bb Cc 0123456789 <span>&gt; ~/workspace</span></div>
+      </section>
+    </div>
+    <footer class="footer">
+      <div class="footer-row"><button class="restore">Restore defaults</button><div class="actions"><button class="cancel">Cancel</button><button class="save">Save changes</button><button class="primary">Save and close</button></div></div>
+      <p class="footer-note"><span class="status-dot"></span>Changes apply when saved. Your running programs stay open.</p>
+    </footer>
+  </section>
+</main>
+<div class="outside-caption">APPEARANCE · LAYOUT STUDY 01</div>
+</body>
+</html>

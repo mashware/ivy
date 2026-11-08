@@ -22,9 +22,18 @@ fn paint(
     size: egui::Vec2,
     events: Vec<egui::Event>,
 ) -> Vec<(String, egui::Rect)> {
+    scene(editor, ctx, size, events).0
+}
+fn scene(
+    editor: &mut Editor,
+    ctx: &egui::Context,
+    size: egui::Vec2,
+    events: Vec<egui::Event>,
+) -> (Vec<(String, egui::Rect)>, Vec<egui::epaint::ClippedShape>) {
     let mut fonts = crate::fonts::Discoverer::default();
     let output = ctx.run_ui(
         egui::RawInput {
+            time: Some(ctx.cumulative_frame_nr() as f64),
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
             events,
             ..Default::default()
@@ -35,8 +44,9 @@ fn paint(
     for shape in &output.shapes {
         text_shapes(&shape.shape, &mut text);
     }
+    let shapes = output.shapes.clone();
     output.drop_without_applying_deltas();
-    text
+    (text, shapes)
 }
 fn click(pos: egui::Pos2) -> Vec<egui::Event> {
     vec![
@@ -89,14 +99,24 @@ fn draft_theme(editor: &Editor) -> &str {
         .unwrap()
         .value
 }
+fn theme_button(editor: &Editor) -> String {
+    let title = crate::theme::NamedTheme::from_written(draft_theme(editor))
+        .map_or("Built-in theme (inherit)", |t| t.title());
+    title.to_owned()
+}
 fn click_label(editor: &mut Editor, ctx: &egui::Context, label: &str) {
     let size = egui::vec2(1100.0, 850.0);
+    let label = if label == "Change" {
+        theme_button(editor)
+    } else {
+        label.to_owned()
+    };
     paint(editor, ctx, size, vec![]);
     let text = paint(editor, ctx, size, vec![]);
     let at = text
         .iter()
-        .find(|(s, _)| s == label)
-        .unwrap_or_else(|| panic!("missing {label}"))
+        .find(|(s, _)| s == &label)
+        .unwrap_or_else(|| panic!("missing {label}: {text:?}"))
         .1
         .center();
     paint(editor, ctx, size, click(at));
@@ -196,7 +216,7 @@ fn actual_save_and_close_applies_pending_theme_to_surviving_consoles() {
 
 fn replace_search(editor: &mut Editor, ctx: &egui::Context, value: &str) {
     let label = if editor.picker_query.is_empty() {
-        "Search themes".to_owned()
+        "Search themes...".to_owned()
     } else {
         editor.picker_query.clone()
     };
@@ -313,7 +333,7 @@ fn opening_appearance_keeps_every_override_inherited_and_fonts_lazy() {
     let size = egui::vec2(1100.0, 850.0);
     paint(&mut editor, &ctx, size, vec![]);
     let text = paint(&mut editor, &ctx, size, vec![]);
-    for label in ["Change", "Built-in theme (inherit)"] {
+    for label in ["Built-in theme (inherit)", "Theme & colors", "Typography"] {
         assert!(text.iter().any(|(s, _)| s == label), "missing {label}");
     }
     assert!(
@@ -368,7 +388,12 @@ fn clicking_theme_sample_changes_only_the_draft() {
     let size = egui::vec2(1100.0, 850.0);
     paint(&mut editor, &ctx, size, vec![]);
     let text = paint(&mut editor, &ctx, size, vec![]);
-    let change = text.iter().find(|(s, _)| s == "Change").unwrap().1.center();
+    let change = text
+        .iter()
+        .find(|(s, _)| s == &theme_button(&editor))
+        .unwrap()
+        .1
+        .center();
     paint(&mut editor, &ctx, size, click(change));
     let text = paint(&mut editor, &ctx, size, vec![]);
     let center = text
@@ -407,7 +432,10 @@ fn wide_dialog_keeps_heading_and_footer_inside_the_window_across_passes() {
             "Restore defaults",
         ] {
             let matching: Vec<_> = text.iter().filter(|(s, _)| s == label).collect();
-            assert!(!matching.is_empty(), "pass {pass}: missing {label}");
+            assert!(
+                !matching.is_empty(),
+                "pass {pass}: missing {label}: {text:?}"
+            );
             for (_, rect) in matching {
                 assert!(
                     rect.min.x >= 0.0
@@ -425,12 +453,13 @@ fn wide_dialog_keeps_heading_and_footer_inside_the_window_across_passes() {
 fn escape_closes_picker_before_settings() {
     let mut editor = Editor {
         draft: Some(Document::new(String::new())),
-        picker_open: true,
         ..Default::default()
     };
     let ctx = egui::Context::default();
     let size = egui::vec2(1100.0, 850.0);
     paint(&mut editor, &ctx, size, vec![]);
+    click_label(&mut editor, &ctx, "Change");
+    assert!(egui::Popup::is_any_open(&ctx));
     let escape = || {
         vec![egui::Event::Key {
             key: egui::Key::Escape,
@@ -441,7 +470,7 @@ fn escape_closes_picker_before_settings() {
         }]
     };
     paint(&mut editor, &ctx, size, escape());
-    assert!(!editor.picker_open);
+    assert!(!egui::Popup::is_any_open(&ctx));
     assert!(editor.draft.is_some());
     paint(
         &mut editor,
@@ -469,7 +498,12 @@ fn filtered_arrow_navigation_starts_at_first_result() {
     let size = egui::vec2(1100.0, 850.0);
     paint(&mut editor, &ctx, size, vec![]);
     let text = paint(&mut editor, &ctx, size, vec![]);
-    let change = text.iter().find(|(s, _)| s == "Change").unwrap().1.center();
+    let change = text
+        .iter()
+        .find(|(s, _)| s == &theme_button(&editor))
+        .unwrap()
+        .1
+        .center();
     paint(&mut editor, &ctx, size, click(change));
     editor.picker_query = "tokyo".into();
     paint(&mut editor, &ctx, size, vec![]);
@@ -498,3 +532,7 @@ fn filtered_arrow_navigation_starts_at_first_result() {
         "tokyonight"
     );
 }
+
+mod layout;
+
+mod usability;

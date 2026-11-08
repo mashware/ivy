@@ -8328,3 +8328,48 @@ Pane labels are explicit inert user data, never inferred from a TUI or used as p
 Native window gestures use viewport commands and explicit edge/corner resize targets. Platform behavior requires real desktop checks, and unverified platforms remain unverified. Historical measurement regimes keep their geometry and native decorations; integrated chrome is opt-in for measurement and its work has a named nonoverlapping span. No performance claim is made from source inspection or headless tests.
 
 Discarded: rebuilding the tree for zoom (loses restoration), reducing hidden pump budgets (blocks programs), deriving names/state from output (D6), separate hard-coded chrome colors (ignores configuration), and relabelling historical measurements as integrated chrome (D13).
+
+## D67 — Appearance groups a theme with its overrides and keeps saving in a fixed footer
+
+**Decided for [#331](https://github.com/mashware/agent-terminal/issues/331)** after the user approved
+`prototypes/settings-appearance.html`. Theme selection and explicit terminal colors are one visual
+group. The selected theme shows how many colors are customized; the editable colors stay behind
+Customize colors, with the ANSI palette still expandable inside it. The effective console/panel
+sample sits beside the selector at wide widths and stacks at compact widths. Typography follows.
+
+**Why.** The previous screen presented a theme and its color overrides as unrelated sections. A
+custom purple background survived selecting Tokyo Night, correctly under D59, but the screen did
+not make the relationship clear. Its sample consumed space needed by controls, and the bottom
+helper text could be clipped. The approved design establishes one hierarchy and bounded proportions.
+
+The main-column footer reserves space for its actions and bounded notices before assigning height
+to scrollable settings content. Save and close is primary; Save changes remains secondary and keeps
+the dialog open. Both retain D64/D65's existing transaction and failure behavior. Navigation adapts
+to compact widths; font discovery remains lazy. This is presentation, not a configuration change.
+
+| Discarded | Why |
+|---|---|
+| Separate Theme and Terminal colors sections | Hides that explicit colors override the selected base. |
+| Clear overrides automatically when choosing a theme | Would erase personal choices; D59 remains unchanged. |
+| Large full-width preview and permanently expanded swatches | Pushes routine font controls out of view. |
+| Footer and notices sized after an unconstrained content row | Long content or errors can place save controls outside the viewport. |
+| New appearance direction during implementation | The concrete HTML hierarchy and proportions were explicitly selected by the user. |
+
+**Typography preview after the native review.** A specimen that stays at one built-in face and
+size cannot show what choosing a font does. It now uses the valid draft point size and an isolated
+font family. Opening Settings reuses the active face without enumerating the machine; an explicit
+font selection prepares and caches the specimen face. The terminal's live family and icon chain
+remain unchanged until Save. Every definitions rebuild includes current live faces and the preview,
+so fallback discovery or a pending save cannot erase either. Cancel drops only specimen assets and
+recomposes current definitions; it never restores an old snapshot. Font-list arrows change the draft
+and keep its row visible; Enter closes that list without saving.
+
+Rejected: activating the terminal's font to draw a draft sample (breaks Cancel), restoring a captured
+font-definition snapshot (loses later discoveries), and reloading the font file on every frame
+(unnecessary I/O). The native review also chose readable15-point body text, aligned40-point font/size
+controls, a compact20-point override badge, and padded cursor/shortcut controls.
+
+**Integration with D66.** The shared chrome dialogs, window controls and pane controls retain their
+effective-Theme-derived style. The separately approved Settings presentation keeps its neutral editor
+palette, including its popups, so selecting a console theme does not silently replace the approved
+Settings design. The console/panel preview still shows the draft theme and explicit overrides.
