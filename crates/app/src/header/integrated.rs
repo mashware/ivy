@@ -23,10 +23,7 @@ pub(crate) fn paint_strip(
 ) -> std::time::Duration {
     let started = std::time::Instant::now();
     if strip.integrated {
-        let label = pane
-            .label
-            .clone()
-            .unwrap_or_else(|| format!("Console {}", pane.name + 1));
+        let label = crate::pane_view::display_label(pane);
         paint(
             ui,
             strip.header,

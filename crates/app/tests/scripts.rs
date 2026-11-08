@@ -367,6 +367,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../../term-core/src/screen.rs"),
     ),
     (
+        "term-core/src/screen/title.rs",
+        include_str!("../../term-core/src/screen/title.rs"),
+    ),
+    (
         "term-core/src/view.rs",
         include_str!("../../term-core/src/view.rs"),
     ),

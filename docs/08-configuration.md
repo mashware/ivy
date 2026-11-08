@@ -6,6 +6,55 @@ you left the windows; this one can be written by hand or through Settings.
 
 **If it does not exist, the terminal opens exactly as always.** You do not have to create it.
 
+## Pane names and agent session titles
+
+A console without a manual name follows the **terminal title published by its program**. Its
+header and Overview use the same name. A shell or another program can publish a title too; the
+terminal does not infer which agent or session is running. Client prefixes and shortened names
+are kept as published.
+
+Double-click the console's name, or open its context menu and choose **Rename**, to set a manual
+name. A nonblank manual name takes priority over later program titles and survives reopening the
+application. Choose **Use terminal title**, or save an empty name, to resume following the latest
+title. Cancel preserves the previous choice. Tab names stay manual.
+
+Automatic titles are not saved: reopening the terminal starts fresh programs and waits for them
+to publish their own titles. Before any title arrives, the name is `Console N`. An empty or invalid
+latest title returns to that fallback. Titles are trimmed and limited to 128 Unicode scalars;
+control characters are refused. An observed title is text only, never a command or an identity.
+
+### Client setup
+
+The client must publish its session name in its terminal title. Agent-terminal does not change
+client settings or read private session files to obtain a name.
+
+- **Codex:** run `/title` and include the **thread** item. To keep only that item, the documented
+  configuration is `[tui]` with `terminal_title = ["thread"]` in Codex's own `config.toml`.
+  The documented default includes the spinner and project instead, so it need not show the session
+  name. Use `/rename` to name the chat. See [Codex commands](https://learn.chatgpt.com/docs/developer-commands)
+  and the [configuration sample](https://learn.chatgpt.com/docs/config-file/config-sample).
+- **Claude Code:** the documented `terminalTitleFromRename` default is `true`, so `/rename` or
+  `--name` can supply the terminal title. With that setting disabled, the title remains generated;
+  with `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1`, title updates are disabled entirely. See
+  [Claude Code settings](https://code.claude.com/docs/en/settings-reference#terminaltitlefromrename).
+- **OpenCode:** enable terminal-title updates in the client. Current CLI documentation calls the
+  setting `terminal.title`; check the documentation matching your installed version. The client
+  can publish a prefix such as `OC |` and shorten long titles, which agent-terminal keeps intact.
+  See [OpenCode terminal settings](https://opencode.ai/docs/cli/config#terminal) and its
+  [title publication code](https://github.com/anomalyco/opencode/blob/dev/packages/tui/src/app.tsx).
+
+These sources describe client capabilities, not proof that every installed version has been
+tested. Launch, rename, resume and switch behavior must be checked with the client version in use.
+If a client does not publish a usable title, use a manual pane name.
+
+### Reset and lifecycle limits
+
+The last published title remains until another title or an explicit title-reset event replaces
+it, or the console is recreated. A silent client exit does not identify a session ending. The
+pinned terminal engine also clears its internal title on RIS (full terminal reset) without
+publishing a title-reset event, so that reset alone does not clear the observed name. A shell
+that publishes its own title can replace the agent's title on returning to its prompt.
+
 ## Graphical settings
 
 The global application menu in the integrated titlebar opens **Preferences**, including with a single tab.

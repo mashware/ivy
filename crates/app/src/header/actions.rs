@@ -111,7 +111,7 @@ pub(crate) fn pointer(
             let tab = window.active().name;
             let initial = window
                 .pane_called(name)
-                .and_then(|p| p.label.clone())
+                .map(|p| crate::pane_view::display_label(p).into_owned())
                 .unwrap_or_else(|| format!("Console {}", name + 1));
             window.pane_view.begin_rename(tab, name, initial);
             window.header_input.held = None;
@@ -207,7 +207,7 @@ pub(crate) fn pointer(
                     super::integrated::Target::Label => {
                         let initial = window
                             .pane_called(name)
-                            .and_then(|p| p.label.clone())
+                            .map(|p| crate::pane_view::display_label(p).into_owned())
                             .unwrap_or_else(|| format!("Console {}", name + 1));
                         window.pane_view.begin_rename(tab, name, initial);
                         false

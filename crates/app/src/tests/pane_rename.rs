@@ -68,6 +68,12 @@ mod tests {
         let mut window = window_with("sleep 30", "sleep 30");
         window.chrome.enable();
         window.headers = window.headers.integrated(true);
+        let pane_name = window.active().focus;
+        window
+            .pane_called(pane_name)
+            .unwrap()
+            .screen
+            .advance(b"\x1b]2;Session name\x07");
         let area = area_of(1280.0);
         one_frame_in(&mut window, &ctx, area, vec![]);
         let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
@@ -104,7 +110,192 @@ mod tests {
             }
         }
         assert!(window.pane_view.is_renaming());
+        draw(&mut window, &ctx, vec![key(egui::Key::Enter)]);
+        let shapes = draw(&mut window, &ctx, vec![]);
+        assert_eq!(
+            window.pane_called(pane_name).unwrap().label.as_deref(),
+            Some("Session name")
+        );
+        assert!(the_text_queued_up(&shapes, "Session name"));
+        assert!(!the_text_queued_up(&shapes, "Console 1"));
         assert!(window.all_panes_mut().all(|p| p.keystrokes.is_empty()));
+    }
+
+    fn draw(
+        window: &mut Window,
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+    ) -> Vec<egui::epaint::ClippedShape> {
+        ui_pass(
+            window,
+            ctx,
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 1100.0)),
+            egui::RawInput {
+                events,
+                ..Default::default()
+            },
+        )
+    }
+
+    fn key(key: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    fn text_center(shapes: &[egui::epaint::ClippedShape], text: &str) -> egui::Pos2 {
+        fn find(shape: &egui::Shape, text: &str) -> Option<egui::Pos2> {
+            match shape {
+                egui::Shape::Text(t) if t.galley.text() == text => {
+                    Some(t.pos + t.galley.size() / 2.0)
+                }
+                egui::Shape::Vec(shapes) => shapes.iter().find_map(|s| find(s, text)),
+                _ => None,
+            }
+        }
+        shapes
+            .iter()
+            .find_map(|s| find(&s.shape, text))
+            .expect("the requested control is painted")
+    }
+
+    #[test]
+    fn terminal_titles_reach_headers_and_overview_including_background_panes() {
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        let names = ["OC | Feature", "Review", "Background", "Fourth"];
+        for (pane, title) in window.all_panes_mut().zip(names) {
+            pane.screen
+                .advance(format!("\x1b]2;{title}\x07").as_bytes());
+        }
+        let ctx = egui::Context::default();
+        let shapes = draw(&mut window, &ctx, vec![]);
+        assert!(the_text_queued_up(&shapes, "OC | Feature"));
+        assert!(the_text_queued_up(&shapes, "Review"));
+        let active = window.active().focus;
+        window
+            .pane_called(active)
+            .unwrap()
+            .screen
+            .advance(b"\x1b]2;Ship next\x07");
+        let shapes = draw(&mut window, &ctx, vec![]);
+        assert!(the_text_queued_up(&shapes, "Ship next"));
+        assert!(!the_text_queued_up(&shapes, "OC | Feature"));
+        let shapes = draw(&mut window, &ctx, chord_with(egui::Key::O));
+        for title in ["Ship next", names[1], names[2], names[3]] {
+            assert!(
+                the_text_queued_up(&shapes, title),
+                "Overview omitted {title}"
+            );
+        }
+        window.tabs[1].panes_mut()[0]
+            .screen
+            .advance(b"\x1b]2;Renamed background\x07");
+        let shapes = draw(&mut window, &ctx, vec![]);
+        assert!(the_text_queued_up(&shapes, "Renamed background"));
+        draw(&mut window, &ctx, vec![key(egui::Key::Escape)]);
+        let pane = window.active().focus;
+        window
+            .pane_called(pane)
+            .unwrap()
+            .screen
+            .advance(b"\x1b]2;\x07");
+        let shapes = draw(&mut window, &ctx, vec![]);
+        assert!(the_text_queued_up(&shapes, "Console 1"));
+        assert!(!the_text_queued_up(&shapes, "OC | Feature"));
+    }
+
+    #[test]
+    fn terminal_title_override_and_return_action_own_input_and_preserve_manual_names_only() {
+        let received = term_core::received::Received::new("terminal-title-rename");
+        let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        received.wait_until_ready(Duration::from_secs(5));
+        let ctx = egui::Context::default();
+        let tab = window.active().name;
+        let name = window.active().focus;
+        window
+            .pane_called(name)
+            .unwrap()
+            .screen
+            .advance(b"\x1b]2;Session\x07");
+        draw(&mut window, &ctx, vec![]);
+        window.pane_view.begin_rename(tab, name, String::new());
+        draw(&mut window, &ctx, vec![]);
+        draw(&mut window, &ctx, vec![egui::Event::Text("Manual".into())]);
+        draw(&mut window, &ctx, vec![key(egui::Key::Enter)]);
+        window
+            .pane_called(name)
+            .unwrap()
+            .screen
+            .advance(b"\x1b]2;New session\x07");
+        let shapes = draw(&mut window, &ctx, vec![]);
+        assert!(the_text_queued_up(&shapes, "Manual"));
+        assert!(!the_text_queued_up(&shapes, "New session"));
+        let restored = wrap_around(&window, &ctx);
+        assert_eq!(pane_view::display_label(restored[0].panes()[0]), "Manual");
+        assert_eq!(restored[0].panes()[0].screen.terminal_title(), None);
+        drop(restored);
+
+        window.pane_view.begin_rename(tab, name, "Manual".into());
+        draw(&mut window, &ctx, vec![]);
+        draw(&mut window, &ctx, vec![key(egui::Key::Escape)]);
+        assert_eq!(
+            pane_view::display_label(window.pane_called(name).unwrap()),
+            "Manual"
+        );
+        window.pane_view.begin_rename(tab, name, "Manual".into());
+        draw(&mut window, &ctx, vec![]);
+        let shapes = draw(&mut window, &ctx, vec![]);
+        let at = text_center(&shapes, "Use terminal title");
+        draw(&mut window, &ctx, click_at(at));
+        let shapes = draw(&mut window, &ctx, vec![]);
+        assert!(!window.pane_view.is_renaming());
+        assert!(the_text_queued_up(&shapes, "New session"));
+        assert_eq!(window.pane_called(name).unwrap().label, None);
+        let restored = wrap_around(&window, &ctx);
+        assert_eq!(
+            pane_view::display_label(restored[0].panes()[0]),
+            "Console 1"
+        );
+        assert_eq!(restored[0].panes()[0].label, None);
+        draw(&mut window, &ctx, vec![egui::Event::Text("after".into())]);
+        assert_eq!(received.wait_for(5, Duration::from_secs(5)), b"after");
+    }
+
+    #[test]
+    fn terminal_title_blank_manual_labels_and_empty_save_follow_the_latest_title() {
+        let mut window = window_with("sleep 30", "sleep 30");
+        let ctx = egui::Context::default();
+        let name = window.active().focus;
+        let tab = window.active().name;
+        for label in ["", "   "] {
+            window.pane_called(name).unwrap().label = Some(label.into());
+            let mut restored = wrap_around(&window, &ctx);
+            let pane = &mut restored[0].panes_mut()[0];
+            pane.screen.advance(b"\x1b]2;Live name\x07");
+            assert_eq!(pane_view::display_label(pane), "Live name");
+        }
+        window.pane_called(name).unwrap().label = Some("Manual".into());
+        window
+            .pane_called(name)
+            .unwrap()
+            .screen
+            .advance(b"\x1b]2;Live name\x07");
+        window.pane_view.begin_rename(tab, name, String::new());
+        draw(&mut window, &ctx, vec![]);
+        draw(&mut window, &ctx, vec![key(egui::Key::Enter)]);
+        assert_eq!(window.pane_called(name).unwrap().label, None);
+        assert_eq!(
+            pane_view::display_label(window.pane_called(name).unwrap()),
+            "Live name"
+        );
     }
 
     #[test]

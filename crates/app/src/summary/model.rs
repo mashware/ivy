@@ -15,7 +15,7 @@ pub(super) fn project(window: &Window, now: SystemTime) -> Vec<Entry> {
         for pane in tab.panes() {
             entries.push(Entry {
                 pane: pane.name,
-                console_label: display(pane.label.as_deref(), "Console", pane.name),
+                console_label: crate::pane_view::display_label(pane).into_owned(),
                 tab_label: display(tab.label.as_deref(), "Tab", tab.name),
                 snapshot: crate::panel::summary::snapshot(&pane.panel_state, now),
             });

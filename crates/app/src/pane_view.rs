@@ -6,6 +6,15 @@ use eframe::egui;
 
 use crate::tiling::Tiling;
 
+pub(crate) fn display_label(pane: &crate::Pane) -> std::borrow::Cow<'_, str> {
+    pane.label
+        .as_deref()
+        .filter(|label| !label.trim().is_empty())
+        .or_else(|| pane.screen.terminal_title())
+        .map(std::borrow::Cow::Borrowed)
+        .unwrap_or_else(|| format!("Console {}", pane.name + 1).into())
+}
+
 #[derive(Clone, Copy)]
 enum RenameTarget {
     Pane { tab: usize, pane: usize },
@@ -252,7 +261,7 @@ pub(crate) fn before_keys(
             Some(0) => {
                 let initial = window
                     .pane_called(pane)
-                    .and_then(|p| p.label.clone())
+                    .map(|p| display_label(p).into_owned())
                     .unwrap_or_else(|| format!("Console {}", pane + 1));
                 window.pane_view.begin_rename(tab, pane, initial);
             }
@@ -323,6 +332,7 @@ pub(crate) fn before_keys(
     };
     let mut save = false;
     let mut cancel = false;
+    let mut follow_title = false;
     let theme = window.theme;
     let title = match target {
         RenameTarget::Pane { .. } => "Rename console",
@@ -347,6 +357,9 @@ pub(crate) fn before_keys(
                 .insert(egui::TextStyle::Button, egui::FontId::proportional(12.0));
             ui.label(egui::RichText::new(title).size(16.0));
             ui.add_space(12.0);
+            if matches!(target, RenameTarget::Pane { .. }) {
+                ui.label("A manual name overrides the terminal title. Leave empty to follow it.");
+            }
             let response = ui.add(
                 egui::TextEdit::singleline(&mut draft)
                     .font(egui::FontId::proportional(13.0))
@@ -362,13 +375,16 @@ pub(crate) fn before_keys(
             ui.horizontal(|ui| {
                 save = ui.button("Save").clicked();
                 cancel = ui.button("Cancel").clicked();
+                if matches!(target, RenameTarget::Pane { .. }) {
+                    follow_title = ui.button("Use terminal title").clicked();
+                }
             });
             save |= ui.input(|i| i.key_pressed(egui::Key::Enter));
             cancel |= ui.input(|i| i.key_pressed(egui::Key::Escape));
         });
-    if save && crate::session::valid_label(&draft) {
+    if follow_title || save && crate::session::valid_label(&draft) {
         let label = draft.trim();
-        let label = (!label.is_empty()).then(|| label.to_owned());
+        let label = (!follow_title && !label.is_empty()).then(|| label.to_owned());
         match target {
             RenameTarget::Pane { tab, pane } => {
                 if let Some(pane) = window

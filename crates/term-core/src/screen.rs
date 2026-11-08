@@ -1,7 +1,6 @@
 //! The terminal state: bytes are interpreted and settle into a grid.
 
 use alacritty_terminal::Term;
-use alacritty_terminal::event::VoidListener;
 use alacritty_terminal::grid::{Dimensions, Grid, Scroll as GridScroll};
 use alacritty_terminal::index::{Boundary, Column, Direction, Line, Point, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
@@ -14,6 +13,8 @@ use alacritty_terminal::vte::ansi::{CursorShape as AlacrittyShape, CursorStyle, 
 use crate::Size;
 use crate::search::{Search, Toward};
 use crate::view::{self, CellWidth, Cursor, Osc8Span, View, ViewCell, ViewMetadata};
+
+mod title;
 
 /// Dimensions in the vocabulary of `alacritty_terminal`.
 ///
@@ -55,8 +56,10 @@ impl From<Size> for Dims {
 /// is the difference with letting a thread update it on its own: whoever paints controls how much work
 /// it does per pass, which is what lets a huge dump not swallow it whole in one go.
 pub struct Screen {
-    term: Term<VoidListener>,
+    term: Term<title::Listener>,
     parser: Processor,
+    titles: title::Listener,
+    terminal_title: Option<String>,
 }
 
 /// A cell of the **visible** grid, and which half of it is being talked about.
@@ -221,9 +224,12 @@ impl Screen {
             ..Config::default()
         };
 
+        let titles = title::Listener::default();
         Self {
-            term: Term::new(config, &Dims::from(size), VoidListener),
+            term: Term::new(config, &Dims::from(size), titles.clone()),
             parser: Processor::new(),
+            titles,
+            terminal_title: None,
         }
     }
 
@@ -246,6 +252,17 @@ impl Screen {
     /// it correct for the PTY to deliver partial reads.
     pub fn advance(&mut self, bytes: &[u8]) {
         self.parser.advance(&mut self.term, bytes);
+        if let Some(update) = self.titles.take() {
+            self.terminal_title = update;
+        }
+    }
+
+    /// The latest usable title explicitly published by this screen's program.
+    ///
+    /// This is transient terminal metadata, not an authenticated session identity. The parser's
+    /// title events update it; a silent process exit does not clear it.
+    pub fn terminal_title(&self) -> Option<&str> {
+        self.terminal_title.as_deref()
     }
 
     /// Changes the grid's size and reflows its content.

@@ -8413,3 +8413,43 @@ Overview's projection, input and paint-enqueue work is named in the frame report
 exactly once, including repeated passes. New matched open/closed batches declare their chrome
 regime and witness the view's actual effects; they do not change historical batches. No performance
 number is claimed before valid repeated measurements exist. Cross-platform proof remains F2.7.
+
+## D69 — A pane without a manual name follows its program's terminal title
+
+**Decided for [#334](https://github.com/mashware/agent-terminal/issues/334).** The user wants pane
+names to follow agent session names and explicitly accepted the terminal title each client publishes,
+including its prefixes and shortening. This is the new signal extending D66's manual-only display
+labels: standard OSC title metadata is an explicit declaration, not meaning extracted from a TUI.
+
+An existing nonblank manual label wins. Without one, the pane uses its latest usable terminal title, then
+`Console N` when no title is available. The header and Overview use the same rule. Naming a pane
+manually selects the override; clearing it or choosing **Use terminal title** resumes following.
+Only manual labels are saved. A restored console starts with a fresh title, because the application
+starts a new program rather than resuming the previous agent session.
+
+The existing VT parser supplies title and reset events. Received titles are inert text, trimmed,
+limited to 128 Unicode scalars and refused when they carry control characters. An empty or unusable
+latest title clears the automatic value. Nothing changes stable pane identity, attention, commands,
+tab names, provider credentials or provider settings. Other programs, including a shell, can publish
+titles too; this is no claim that a title authenticates an agent or a session.
+
+Codex needs its terminal title to include the thread; Claude Code can publish its renamed session;
+OpenCode can decorate and shorten it. Client configuration and actual version compatibility are
+documented and tested separately. A silent exit or a terminal reset that produces no library title
+event cannot establish that a session ended: the last observed title remains until replaced or the
+console is recreated. In particular, the pinned engine's RIS handler clears its private title without
+emitting `ResetTitle`; this change does not infer a reset from an unrelated event.
+
+**Discarded, with reasons:**
+- Reading screen painting or private session files: it would reconstruct meaning from a client
+  implementation, contrary to D6, and couple naming to each client's internal storage.
+- Client-specific adapters or model-authored names for this delivery: the user accepted standard
+  terminal titles, and an agent may neither know the canonical name nor observe an external rename.
+- A new persisted follow-mode flag: the existing optional manual label already supplies the choice.
+- Saving observed titles: a newly launched shell would inherit the name of a session it did not resume.
+- Stripping client prefixes or guessing process lifecycle: a terminal title is the literal value the
+  producer chose; transforming it would introduce client-specific semantics that the terminal lacks.
+
+Title events are coalesced into one latest-update slot and consumed within the existing parser
+span. Name resolution belongs inside the existing chrome and Overview spans. There is no new pump,
+watcher or lower budget for hidden panes, and no new performance claim without valid measurement.
