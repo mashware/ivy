@@ -8,23 +8,22 @@ import re
 import sys
 import tomllib
 
-SEMVER = re.compile(
+RELEASE_VERSION = re.compile(
     r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
-    r"(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?"
+    r"(?:-(alpha|beta|rc)\.(0|[1-9][0-9]*))?"
 )
 
 
 def version(cargo):
     with cargo.open("rb") as source:
         value = tomllib.load(source)["workspace"]["package"]["version"]
-    match = SEMVER.fullmatch(value)
-    if not match or (match[4] and any(p.isdigit() and len(p) > 1 and p[0] == "0" for p in match[4].split("."))):
-        raise ValueError(f"invalid workspace SemVer: {value}")
+    if not RELEASE_VERSION.fullmatch(value):
+        raise ValueError(f"unsupported workspace release version: {value}")
     return value
 
 
 def deb_version(value):
-    match = SEMVER.fullmatch(value)
+    match = RELEASE_VERSION.fullmatch(value)
     return value.replace("-", "~", 1) if match and match[4] else value
 
 

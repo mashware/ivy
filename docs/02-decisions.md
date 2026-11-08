@@ -8741,3 +8741,8 @@ signature. No signing identity, certificate purchase, provider key or updater is
   credential/cost decision, while explicitly experimental packages enable the native testing.
 - Treating package creation as portability completion: the Windows listener deliberately rejects
   control connections until F2.7, and desktop integration cannot be proved by compilation alone.
+
+Release versions admit stable `MAJOR.MINOR.PATCH` and numbered `alpha.N`, `beta.N`, `rc.N`
+prereleases only. A direct hyphen-to-tilde conversion of all SemVer labels was discarded: Debian
+orders `rc10` after `rc2`, whereas SemVer orders these lexical identifiers the other way, and Debian
+equates `alpha01` with `alpha1`. The supported numbered subset preserves ordering and identity.

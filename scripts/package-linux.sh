@@ -19,17 +19,10 @@ while (($#)); do
     shift 2
 done
 [[ -n $binary_dir && -n $output_dir && -n $version ]] || usage
-# Cargo versions are SemVer; build metadata is not part of release identities.
-[[ $version =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]] || {
-    echo "Invalid release version: $version" >&2; exit 1;
+# Numbered prereleases preserve both SemVer and Debian ordering.
+[[ $version =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?$ ]] || {
+    echo "Unsupported release version: $version" >&2; exit 1;
 }
-if [[ $version == *-* ]]; then
-    prerelease=${version#*-}
-    IFS=. read -r -a identifiers <<< "$prerelease"
-    for identifier in "${identifiers[@]}"; do
-        [[ ! $identifier =~ ^0[0-9]+$ ]] || { echo "Invalid release version: $version" >&2; exit 1; }
-    done
-fi
 deb_version=${version/-/\~}
 dpkg --validate-version "$deb_version"
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)

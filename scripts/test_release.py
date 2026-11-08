@@ -1,6 +1,7 @@
 import hashlib
 import json
 from pathlib import Path
+from runpy import run_path
 import subprocess
 import tempfile
 import unittest
@@ -51,7 +52,7 @@ class ReleaseTest(unittest.TestCase):
         self.assertFalse((self.root / "SHA256SUMS").exists())
 
     def test_invalid_semver_is_rejected(self):
-        for value in ("0.1.0-alpha.01", "0.1.0+metadata", "01.1.0"):
+        for value in ("0.1.0-alpha.01", "0.1.0+metadata", "01.1.0", "0.1.0-rc10", "0.1.0-alpha01"):
             with self.subTest(version=value):
                 self.cargo.write_text(f'[workspace.package]\nversion = "{value}"\n')
                 result = subprocess.run(
@@ -59,7 +60,23 @@ class ReleaseTest(unittest.TestCase):
                     capture_output=True, text=True,
                 )
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("invalid workspace SemVer", result.stderr)
+                self.assertIn("unsupported workspace release version", result.stderr)
+
+
+    def test_supported_versions_preserve_debian_upgrade_order(self):
+        convert = run_path(str(SCRIPT))["deb_version"]
+        versions = [
+            "0.1.0-alpha.0", "0.1.0-alpha.1", "0.1.0-alpha.2", "0.1.0-alpha.10",
+            "0.1.0-beta.0", "0.1.0-beta.2", "0.1.0-rc.0", "0.1.0-rc.2",
+            "0.1.0-rc.10", "0.1.0", "0.1.1-alpha.0", "0.1.1", "1.0.0",
+        ]
+        for older, newer in zip(versions, versions[1:]):
+            with self.subTest(older=older, newer=newer):
+                result = subprocess.run(
+                    ["dpkg", "--compare-versions", convert(older), "lt", convert(newer)],
+                    capture_output=True, text=True,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
 
 
 

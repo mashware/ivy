@@ -12,12 +12,12 @@ directory. Verify them there, then install the package shown in that release:
 
 ```sh
 sha256sum --check SHA256SUMS
-sudo apt install ./ivy_0.1.0_amd64.deb
+sudo apt install ./ivy_0.1.0~alpha.1_amd64.deb
 ivy
 ```
 
-The filename above illustrates workspace version `0.1.0`; use the actual release filename.
-A version such as `0.1.0-alpha.1` becomes `ivy_0.1.0~alpha.1_amd64.deb`. Checksums detect changed
+The filename above illustrates workspace version `0.1.0-alpha.1`; use the actual release filename.
+The prerelease separator becomes `~` in the Debian package version. Checksums detect changed
 or mismatched downloads; they are not a publisher signature.
 
 You can also open **Ivy** from the applications menu. The package installs the application and
@@ -61,7 +61,7 @@ sudo apt install build-essential pkg-config libssl-dev libxkbcommon-dev dpkg-dev
 cargo build --locked --release -p app -p panel-control --bins
 version=$(python3 scripts/release.py version)
 scripts/package-linux.sh --binary-dir target/release --output-dir dist --version "$version"
-scripts/test-linux-package.sh "dist/ivy_${version/-/~}_amd64.deb" "$version"
+scripts/test-linux-package.sh dist/*.deb "$version"
 python3 scripts/release.py generate --directory dist --commit "$(git rev-parse HEAD)" --built-on ubuntu-24.04
 (cd dist && sha256sum --check SHA256SUMS)
 ```
@@ -72,9 +72,11 @@ The package builder inspects the actual ELF binaries, computes their linked-libr
 and declares the graphics/window/font libraries that are opened dynamically. A graphics-capable
 X11 or Wayland desktop is still required to use the terminal.
 
-Release versions use `MAJOR.MINOR.PATCH` with an optional SemVer prerelease suffix. SemVer build
-metadata (`+...`) is deliberately unsupported by these first release scripts, because package
-identities must remain unambiguous across the initial formats.
+Release versions use `MAJOR.MINOR.PATCH`, optionally followed by `-alpha.N`, `-beta.N` or `-rc.N`,
+where `N` is a nonnegative integer without leading zeroes. Other prerelease labels and SemVer build
+metadata (`+...`) are unsupported. This subset keeps SemVer and Debian ordering consistent:
+`alpha.2` precedes `alpha.10`; labels such as `rc10` and `alpha01` would not preserve that ordering
+or uniqueness under a direct Debian conversion.
 
 ## Isolated installation checks
 
