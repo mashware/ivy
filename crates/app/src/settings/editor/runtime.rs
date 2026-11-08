@@ -480,6 +480,91 @@ mod tests {
         })
     }
     #[test]
+    fn ligatures_save_cancel_and_reset_preserve_programs_grid_and_lazy_fonts() {
+        let file = File::new("# retain\nsize=14\n");
+        let ctx = egui::Context::default();
+        let mut window = window(&file);
+        window.discoverer = crate::fonts::Discoverer::default();
+        window.tabs[0]
+            .panes_mut()
+            .into_iter()
+            .next()
+            .unwrap()
+            .screen
+            .advance(b"a!=b=>c");
+        frame(&mut window, &ctx);
+        frame(&mut window, &ctx);
+        let before: Vec<_> = window
+            .all_panes()
+            .map(|p| (p.name, p.screen.size()))
+            .collect();
+        assert!(!window.ligatures);
+        assert_eq!(window.discoverer.ligature_cost().eligible_runs, 0);
+        set(&mut window, "font.ligatures", "on");
+        frame(&mut window, &ctx);
+        assert!(!window.ligatures, "a draft must not affect live drawing");
+        assert_eq!(file.read(), "# retain\nsize=14\n");
+        save(&mut window);
+        assert!(!window.ligatures, "Save waits for the coherent begin-pass");
+        frame(&mut window, &ctx);
+        frame(&mut window, &ctx);
+        assert!(window.ligatures, "Save must enable live ligature drawing");
+        assert!(
+            window.discoverer.ligature_cost().eligible_runs > 0,
+            "the saved preference must reach actual console painting"
+        );
+        assert!(
+            window.discoverer.ligature_cost().fallback_runs > 0,
+            "no chosen font must retain normal drawing without discovery"
+        );
+        assert!(file.read().contains("font.ligatures = on"));
+        assert!(!window.discoverer.has_searched_the_machine());
+        assert_eq!(window.settings_editor.application.prepared, 0);
+        assert_eq!(window.settings_editor.application.font_activations, 0);
+        set(&mut window, "font.ligatures", "off");
+        one_frame_in(
+            &mut window,
+            &ctx,
+            area_of(1200.0),
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        frame(&mut window, &ctx);
+        assert!(!window.settings_editor.is_open());
+        assert!(window.ligatures, "Cancel must retain saved live drawing");
+        assert!(file.read().contains("font.ligatures = on"));
+        window.settings_editor.open(Some(file.0.clone()));
+        window.settings_editor.draft.as_mut().unwrap().defaults();
+        assert!(window.ligatures, "reset is staged until Save");
+        save(&mut window);
+        frame(&mut window, &ctx);
+        frame(&mut window, &ctx);
+        assert!(!window.ligatures, "reset must disable live drawing");
+        assert_eq!(file.read(), "# retain\n");
+        let after_reset = window.discoverer.ligature_cost().eligible_runs;
+        frame(&mut window, &ctx);
+        assert_eq!(
+            window.discoverer.ligature_cost().eligible_runs,
+            after_reset,
+            "off must stop ligature processing in the painter"
+        );
+        assert!(!window.discoverer.has_searched_the_machine());
+        assert_eq!(
+            before,
+            window
+                .all_panes()
+                .map(|p| (p.name, p.screen.size()))
+                .collect::<Vec<_>>()
+        );
+        assert!(window.all_panes().all(|p| p.pty.ending().is_none()));
+    }
+
+    #[test]
     fn repeated_save_in_the_same_frame_preserves_success_and_next_frame_checks_conflicts() {
         let file = File::new("size=14\n");
         let ctx = egui::Context::default();

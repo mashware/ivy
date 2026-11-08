@@ -453,8 +453,28 @@ fn typography_reset_and_cursor_shortcuts_remain_native_and_staged() {
     );
     assert!(editor.fonts.is_none());
     assert_eq!(editor.font_requests, 0);
+    assert!(text.iter().any(|(s, _)| s == "Programming ligatures"));
+    click_label(&mut editor, &ctx, "Programming ligatures");
+    assert!(
+        editor
+            .draft
+            .as_ref()
+            .unwrap()
+            .text()
+            .contains("font.ligatures = on")
+    );
+    assert!(editor.fonts.is_none());
+    assert_eq!(editor.font_requests, 0);
     click_label(&mut editor, &ctx, "Reset");
-    for key in ["font", "size"] {
+    assert!(
+        !editor
+            .draft
+            .as_ref()
+            .unwrap()
+            .text()
+            .contains("font.ligatures")
+    );
+    for key in ["font", "size", "font.ligatures"] {
         assert!(
             editor
                 .draft

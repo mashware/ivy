@@ -131,6 +131,17 @@ pub fn build_load(target_bytes: usize) -> Vec<u8> {
     load
 }
 
+/// Dedicated ASCII programming scene; historical byte streams remain unchanged.
+pub fn build_load_ligatures(target_bytes: usize) -> Vec<u8> {
+    let mut load = Vec::with_capacity(target_bytes + 128);
+    while load.len() < target_bytes {
+        load.extend_from_slice(
+            b"\x1b[32ma!=b => c==d === e !== f <= g >= h -> i :: j && k || l\x1b[0m\n",
+        );
+    }
+    load
+}
+
 /// The characters the CJK load writes with, and why these ones.
 ///
 /// **They cover the three blocks the fonts milestone pursues** —kanji, hiragana and hangul— plus a
@@ -759,5 +770,21 @@ mod tests {
             let a = aggregate(vec![run(1_048_576, seconds, 100.0, true)]);
             assert_eq!(a.included.len(), 1, "with seconds = {seconds}");
         }
+    }
+}
+
+#[cfg(test)]
+mod ligature_tests {
+    #[test]
+    fn programming_scene_is_repeatable_ascii_with_supported_sequences() {
+        let load = super::build_load_ligatures(8192);
+        assert!(load.len() >= 8192);
+        assert!(load.is_ascii());
+        assert_eq!(load, super::build_load_ligatures(8192));
+        let text = String::from_utf8(load).unwrap();
+        for sequence in ["!=", "=>", "==", "==="] {
+            assert!(text.contains(sequence));
+        }
+        assert!(text.ends_with('\n'));
     }
 }

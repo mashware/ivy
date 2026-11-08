@@ -76,6 +76,32 @@ use std::path::Path;
 /// entry down.
 const SOURCES: &[(&str, &str, usize)] = &[
     (
+        "src/painter/pane.rs",
+        include_str!("../src/painter/pane.rs"),
+        129,
+    ),
+    ("src/ligatures.rs", include_str!("../src/ligatures.rs"), 6),
+    (
+        "src/ligature_tests.rs",
+        include_str!("../src/ligature_tests.rs"),
+        0,
+    ),
+    (
+        "src/fonts/ligatures.rs",
+        include_str!("../src/fonts/ligatures.rs"),
+        4,
+    ),
+    (
+        "src/painter/ligatures.rs",
+        include_str!("../src/painter/ligatures.rs"),
+        5,
+    ),
+    (
+        "src/painter/ligatures/tests.rs",
+        include_str!("../src/painter/ligatures/tests.rs"),
+        2,
+    ),
+    (
         "src/console_input.rs",
         include_str!("../src/console_input.rs"),
         1,
@@ -347,7 +373,7 @@ const SOURCES: &[(&str, &str, usize)] = &[
     ),
     ("src/settings.rs", include_str!("../src/settings.rs"), 599),
     ("src/keyboard.rs", include_str!("../src/keyboard.rs"), 985),
-    ("src/painter.rs", include_str!("../src/painter.rs"), 829),
+    ("src/painter.rs", include_str!("../src/painter.rs"), 746),
     (
         "src/painter/notices.rs",
         include_str!("../src/painter/notices.rs"),

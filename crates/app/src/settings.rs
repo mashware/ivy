@@ -234,6 +234,8 @@ pub struct Settings {
     /// people type and is published contract; `font_size` is what the rest of the code calls this
     /// number. The translation happens **once**, where the key is parsed, and not on every jump.
     pub font_size: Option<f32>,
+    /// Use the selected compatible font's programming ligatures; absent means off.
+    pub ligatures: Option<bool>,
     /// The shortcuts the file changes: the action and its new chord, or `None` to unbind it.
     ///
     /// **A list and not an already resolved table**, because order matters: «the last one wins» can only be
@@ -556,6 +558,7 @@ impl Settings {
         // restore the same defaults as a fresh startup, including shortcuts previously unbound.
         window.font_size = self.font_size.unwrap_or(crate::DEFAULT_FONT_SIZE);
         window.copy_enabled = self.copy.unwrap_or(true);
+        window.ligatures = self.ligatures.unwrap_or(false);
         window.blink.ceiling = self.blink;
         window.keymap = crate::keyboard::Keymap::default();
         // **They are applied in the order they were written, and that is why they arrive as a
@@ -617,11 +620,11 @@ fn apply(settings: &mut Settings, key: &str, value: &str) -> Result<(), Missing>
     }
     // **Before the colour table on purpose**: `cursor` on its own is the colour, and `cursor.blink`
     // would otherwise fall through to `strip_prefix("color.")` and come back as an unknown key.
-    if key == "cursor.blink" {
+    if matches!(key, "cursor.blink" | "font.ligatures") {
         // **«on» and «off», and not the «none» the shortcuts use.** There it means «hand the chord
         // back to the program»; here the program is exactly who is being overruled, so the same word
         // would mean the opposite thing in two lines of the same file.
-        settings.blink = Some(match value {
+        let enabled = Some(match value {
             _ if value.eq_ignore_ascii_case("on") => true,
             _ if value.eq_ignore_ascii_case("off") => false,
             _ => {
@@ -631,6 +634,11 @@ fn apply(settings: &mut Settings, key: &str, value: &str) -> Result<(), Missing>
                 });
             }
         });
+        if key == "font.ligatures" {
+            settings.ligatures = enabled;
+        } else {
+            settings.blink = enabled;
+        }
         return Ok(());
     }
     if key == "font" {
@@ -733,6 +741,25 @@ mod tests {
     /// What parsing a text that is understood in full returns.
     fn parsed(text: &str) -> (Settings, Warnings) {
         interpret(text).expect("the test text should not bring down the whole file")
+    }
+
+    #[test]
+    fn ligatures_accept_on_off_and_warn_without_losing_other_settings() {
+        for (value, expected) in [("on", true), ("ON", true), ("off", false), ("Off", false)] {
+            let (settings, warnings) = parsed(&format!("font.ligatures = {value}"));
+            assert_eq!(settings.ligatures, Some(expected));
+            assert_eq!(warnings.total(), 0);
+        }
+        assert_eq!(parsed("").0.ligatures, None);
+        let (settings, warnings) =
+            parsed("font.ligatures=on\nfont.ligatures=maybe\nsize=19\nfont.ligatures=off");
+        assert_eq!(settings.ligatures, Some(false));
+        assert_eq!(settings.font_size, Some(19.0));
+        assert!(warnings.kept().iter().any(|warning| warning.line == 2
+            && matches!(&warning.missing, Missing::InvalidValue { key, value }
+                if key == "font.ligatures" && value == "maybe")));
+        assert!(warnings.kept().iter().any(|warning| warning.line == 4
+            && matches!(&warning.missing, Missing::Repeated(key) if key == "font.ligatures")));
     }
 
     #[test]
@@ -1665,10 +1692,10 @@ mod tests {
             .collect();
         // **Without a floor this test passes by being empty**, which is how a guard that reads another
         // file dies: someone changes the table's header, the walk does not hook, and nothing is
-        // left to check. Eleven is what the table publishes today.
+        // left to check. Twelve is what the table publishes today.
         assert_eq!(
             published.len(),
-            11,
+            12,
             "the document's key table gave {} rows: either the document changed shape, or this \
              walk stopped finding it and the test is not looking at anything — {published:?}",
             published.len()
@@ -1715,7 +1742,7 @@ mod tests {
         // blocks, this test passes by being empty.
         assert_eq!(
             examples.len(),
-            13,
+            15,
             "the document's example blocks gave {} configuration lines: either the document \
              changed shape, or this walk stopped finding them — {examples:?}",
             examples.len()

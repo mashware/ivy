@@ -26,6 +26,11 @@ use eframe::egui;
 use fontique::{Collection, CollectionOptions, GenericFamily, SourceCache};
 use skrifa::MetadataProvider as _;
 mod atlas;
+mod ligatures;
+pub use ligatures::LigatureCost;
+pub(crate) use ligatures::{
+    ligature_covers, ligature_family, record_ligatures, use_measurement_face,
+};
 mod selection;
 mod startup;
 use atlas::*;
@@ -256,6 +261,7 @@ struct SystemFace {
 /// it appeared — and that is exactly the character a broken program spits in a loop. It comes from **D24**.
 #[derive(Default)]
 pub struct Discoverer {
+    ligature_cost: LigatureCost,
     /// The ones already tried: covered **and** not covered.
     settled: std::collections::HashSet<char>,
     /// The ones the painter has seen and not yet looked for. Ordered so that two runs with the

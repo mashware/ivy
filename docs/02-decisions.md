@@ -2274,7 +2274,7 @@ on this having users.
 | **Being able to configure it** — font, size, colors, shortcuts | **had no milestone until today → F2.10** |
 | That the mouse reaches the program inside (`vim`, `htop`) | inside **F2.6**, now explicit |
 | Clickable links (OSC 8) | pending, not disqualifying |
-| Ligatures, Kitty's graphics protocol | **out**, and it is declared |
+| Ligatures, Kitty's graphics protocol | **out** at this decision; optional programming ligatures were later requested in #335 (D70). Kitty's graphics protocol remains out |
 | Latency and cost per frame | measured and published — **D3**, D13, D14, D15 |
 
 **The three that had no place in any phase, and the reason they appear on changing league:**
@@ -8453,3 +8453,104 @@ emitting `ResetTitle`; this change does not infer a reset from an unrelated even
 Title events are coalesced into one latest-update slot and consumed within the existing parser
 span. Name resolution belongs inside the existing chrome and Overview spans. There is no new pump,
 watcher or lower budget for hidden panes, and no new performance claim without valid measurement.
+
+
+## D70 — Optional programming ligatures reuse the font shaper without changing terminal cells
+
+**Design for [#335](https://github.com/mashware/agent-terminal/issues/335), 8 November 2026.** The user
+explicitly requested programming ligatures after discussing the terminal's adoption priorities. That
+is the new signal revisiting D19's exclusion for this feature alone; it neither changes the scope
+of a completed Phase 2 milestone nor introduces Kitty's graphics protocol.
+
+`font.ligatures = on` enables the option; `off` or absence keeps it disabled. Preferences uses the
+same configuration key and existing Save/Cancel/live-application transaction. A compatible explicitly
+selected monospaced font supplies the actual drawing. The terminal does not replace source text
+with Unicode approximations or select another font on the user's behalf.
+
+The console painter shapes bounded same-style printable ASCII runs through epaint's existing
+harfrust path and font atlas. A private single-face family uses the already selected font bytes and
+collection index, so fallback cannot mix advances inside one shaped run. The normal per-cell path
+remains responsible for other characters and incompatible font metrics. Enabling the preference
+alone does not enumerate system fonts.
+
+Equivalent canonical selections reuse the existing selected-face allocation during preparation.
+Installed aliases can have different requested names but resolve to the same face bytes/index;
+epaint deliberately skips equal definitions, so creating a new allocation would make the readiness
+identity check refuse a face the engine correctly kept active. Equality is checked once during
+selection, never per painted row. A regression prepares the same canonical fixture twice and
+asserts that actual shaped drawing continues; a separate transition test covers genuinely changed
+font definitions.
+
+The source cells remain authoritative for columns, rows, copy, search, selection and cursor
+position. Run boundaries include rows, spaces, color/style changes, selection/search highlights
+and the cursor cell. Moving a cursor or changing a highlight may therefore separate a ligature
+into its original characters. That is an explicit presentation rule, not a source-text change.
+
+**The grid remains D34's.** Its cell step is still floored to device pixels. For an eligible
+monospaced face, the whole shaped run mesh is transformed by the constant horizontal ratio
+`cell_width / natural_character_advance`; vertical metrics and all relative glyph-component offsets
+are preserved. The ratio is never inferred by stretching arbitrary text to a target width. Coverage,
+fixed isolated advances and the unwrapped row's expected total advance are checked before this
+path is used. Normal font-engine floating/raster rounding can be bounded, but a tolerance cannot
+grow with run length and disguise drift. Actual ligature-font images at fractional sizes/scales
+must prove that the chosen mapping delivers visible ligatures and retains column alignment;
+fallback is not evidence that a supported-font acceptance criterion passed.
+
+Epaint's cached galleys are shared. The transformed mesh lives in an owned cloned galley with consistent horizontal bounds and row
+placement, submitted as an ordinary text shape. Texel UVs remain unnormalized until epaint's final
+tessellation, because later layouts in the same frame may grow the atlas. No cached shared layout
+is mutated. There is
+no separate text atlas or app-level text cache. Font, size and scale changes use the current layout.
+The optional path's processing is declared as a subset of painting, so it is never subtracted twice
+from the framework residual. A matched on/off scene supplies the font and witnesses shaped runs;
+historical control batches retain their configuration veto and geometry.
+
+**Discarded, with the reason:**
+- Natural-width row drawing: its fractional advance accumulates against the terminal's floored step.
+- Reconstructing source clusters from public glyph counts: contextual and repeated-character
+  substitutions do not expose enough identity; the whole-run transform needs none of it.
+- Forking epaint to expose cluster metadata: solves that unnecessary intermediate reconstruction.
+- Another monochrome rasterizer and atlas: duplicates facilities the selected engine already has.
+- Unicode substitutions for `!=` or `=>`: change the characters and cannot represent font features.
+- Always-on shaping, implicit font replacement or eager font discovery: ignores the optional nature
+  of the request and the user's selected font.
+
+This records the design, not a measured performance claim. Delivery requires the real-font visual,
+source-text, grid, runtime-settings and controlled-measurement checks defined in the work's design.
+
+
+### Measured — controlled ligature on/off scene, 8 November 2026
+
+Four valid post-extraction renderer-build `scripts/measure-frame.sh ligatures-on|ligatures-off 44` runs used the same pinned
+JetBrains Mono v2.304 Regular face, 14.7 points, scale 1, two consoles of **42 × 43** cells in a
+1280 × 800 window, and the same ASCII programming load of 44 MiB per console. Both same-mode
+pairs passed `scripts/measure-frame.sh compare`; on and off are deliberately distinct regimes and
+are not averaged together.
+
+**Environment:** Linux, Xvfb display, glow with Mesa software rendering (`LIBGL_ALWAYS_SOFTWARE=1`,
+`GALLIUM_DRIVER=llvmpipe`). These are new-batch comparisons in that environment; they do not compare
+with the historical native GPU series and prove no desktop input-to-pixel latency.
+
+| Report | Mode | Left console: mean enqueuing paint | Right console: mean enqueuing paint | Shaped runs | Included ligature work, entire run |
+|---|---|---|---|---|---|
+| `batch-ligatures-off-200710.txt` | off | 383.417 µs | 341.116 µs | 0 | 0.000 µs |
+| `batch-ligatures-off-200735.txt` | off | 374.803 µs | 336.898 µs | 0 | 0.000 µs |
+| `batch-ligatures-on-200805.txt` | on | 612.016 µs | 526.465 µs | 164,152 | 298,366.326 µs |
+| `batch-ligatures-on-200834.txt` | on | 682.318 µs | 520.697 µs | 164,632 | 317,042.714 µs |
+
+The per-console numbers are the existing **enqueuing paint** span, not the complete frame. The
+last column is cumulative work already inside painting and is not subtracted a second time.
+The on runs report zero fallback runs; the off runs report zero eligible runs, shaped runs and
+vertices. This scene therefore exercises the new path while showing that the disabled path pays
+no shaping work. Font read/validation/registration is reported separately before the first frame;
+cold and steady shaping distributions are **not** separately measured.
+
+One earlier off run was automatically marked `.INVALID` because `XDG_RUNTIME_DIR` was absent and
+the panel publisher could not find its directories. It is excluded. Valid runs used the runtime
+directory expected by the existing measurement script and retained every publication/configuration
+and geometry guard.
+
+
+The later equal-alias preparation correction is outside this scene's explicit-font registration
+path; these reports cover the same unchanged renderer. Alias handoff is covered by its real-font
+regression and the full suite, not by a claimed timing for selecting an alias.

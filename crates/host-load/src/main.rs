@@ -13,8 +13,8 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use host_load::{
-    CHUNK, Excluded, Run, aggregate, build_load, build_load_cjk, build_load_color, pace_delay,
-    start_instant,
+    CHUNK, Excluded, Run, aggregate, build_load, build_load_cjk, build_load_color,
+    build_load_ligatures, pace_delay, start_instant,
 };
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -31,6 +31,7 @@ host-load — measures how long a terminal takes to drain a fixed load
 
   --mib N       size of the load in MiB (default 22)
   --cjk         writes in Japanese, Chinese and Korean instead of ASCII
+  --ligatures   writes the controlled ASCII programming scene
   --emoji       sprinkles the load with emojis, with and without a presentation selector
   --at S        start at the next multiple of S seconds (default 30; 0 = now)
   --rate M      target sustained throughput in MiB/s (default, as fast as it allows)
@@ -71,6 +72,7 @@ struct Options {
     /// Whether the load is written in CJK. Only the font-discovery batch asks for it.
     cjk: bool,
     emoji: bool,
+    ligatures: bool,
     at: u64,
     rate: Option<f64>,
     tag: String,
@@ -83,6 +85,7 @@ fn parse_args(args: &[String]) -> Result<Options, Error> {
         mib: DEFAULT_MIB,
         cjk: false,
         emoji: false,
+        ligatures: false,
         at: DEFAULT_AT,
         rate: None,
         tag: "no-tag".to_string(),
@@ -110,6 +113,7 @@ fn parse_args(args: &[String]) -> Result<Options, Error> {
             "--mib" => o.mib = value(i)?.parse()?,
             "--cjk" => o.cjk = true,
             "--emoji" => o.emoji = true,
+            "--ligatures" => o.ligatures = true,
             "--at" => o.at = value(i)?.parse()?,
             "--rate" => o.rate = Some(value(i)?.parse()?),
             "--tag" => o.tag = value(i)?.clone(),
@@ -117,7 +121,11 @@ fn parse_args(args: &[String]) -> Result<Options, Error> {
             "--dump" => o.dump = Some(value(i)?.into()),
             other => return Err(format!("unknown option «{other}»\n\n{USAGE}").into()),
         }
-        i += 2;
+        i += if matches!(args[i].as_str(), "--cjk" | "--emoji" | "--ligatures") {
+            1
+        } else {
+            2
+        };
     }
     Ok(o)
 }
@@ -144,15 +152,22 @@ fn run(args: &[String]) -> Result<(), Error> {
     // **And the two flags together mean nothing**, so it is rejected instead of silently choosing
     // one: a batch launched with both would publish the cost of one language believing it measures
     // the other.
-    let load = match (o.cjk, o.emoji) {
-        (true, true) => {
-            return Err(
-                "--cjk and --emoji measure different things: you have to choose one".into(),
-            );
+    if o.ligatures && (o.cjk || o.emoji) {
+        return Err("--ligatures cannot be mixed with --cjk or --emoji".into());
+    }
+    let load = if o.ligatures {
+        build_load_ligatures(bytes)
+    } else {
+        match (o.cjk, o.emoji) {
+            (true, true) => {
+                return Err(
+                    "--cjk and --emoji measure different things: you have to choose one".into(),
+                );
+            }
+            (true, false) => build_load_cjk(bytes),
+            (false, true) => build_load_color(bytes),
+            (false, false) => build_load(bytes),
         }
-        (true, false) => build_load_cjk(bytes),
-        (false, true) => build_load_color(bytes),
-        (false, false) => build_load(bytes),
     };
 
     if let Some(path) = o.dump {
@@ -300,4 +315,31 @@ fn report(args: &[String]) -> Result<(), Error> {
         ),
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ligature_flag_does_not_consume_the_next_option() {
+        let args = ["--ligatures", "--mib", "3", "--at", "0"].map(str::to_owned);
+        let parsed = parse_args(&args).unwrap();
+        assert!(parsed.ligatures);
+        assert_eq!(parsed.mib, 3);
+        assert_eq!(parsed.at, 0);
+    }
+
+    #[test]
+    fn ligature_scene_refuses_other_load_modes() {
+        for flag in ["--emoji", "--cjk"] {
+            let args = ["--ligatures", flag, "--mib", "0"].map(str::to_owned);
+            assert!(
+                run(&args)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("cannot be mixed")
+            );
+        }
+    }
 }

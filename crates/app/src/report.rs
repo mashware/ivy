@@ -384,6 +384,7 @@ impl Window {
         // **And the color one goes last, for the same reason as the three above**: it is subtracted
         // from the painting span, so without this row the number would exist and nobody could audit
         // it.
+        crate::ligatures::publish(self, to)?;
         self.color.publish(to)
     }
 

@@ -44,6 +44,7 @@ pub mod fonts;
 mod header;
 mod injected;
 pub mod keyboard;
+mod ligatures;
 mod links;
 pub mod measure;
 pub mod mouse;
@@ -78,6 +79,7 @@ pub mod watcher;
 // meaning the other one. Named, that same day is a duplicate definition and the build stops. It
 // also gives the reader the one thing the glob takes away — the list of what this file still needs
 // back. For the list of what left, the order is in **D28**, not here.
+#[cfg(test)]
 use fonts::choose_the_font;
 #[cfg(test)]
 use opening::window_size;
@@ -634,12 +636,7 @@ pub fn run() -> eframe::Result {
             // others put a value on the window; this one talks to the text engine and **costs
             // between 17.3 and 23.2 ms** (**D24**) because resolving a name forces enumerating the
             // machine. It needs the context, which only exists here.
-            window.chosen_font = choose_the_font(
-                settings.font.as_deref(),
-                &mut window.discoverer,
-                &cc.egui_ctx,
-            );
-            window.reading_settings = what_it_cost;
+            ligatures::configure(&mut window, &settings, &cc.egui_ctx, what_it_cost);
             Ok(Box::new(window))
         }),
     )
@@ -936,6 +933,8 @@ struct Window {
     /// `Ctrl+Shift+C` does not arrive as a key, it arrives already turned into a request to copy.
     /// The same as pasting.
     copy_enabled: bool,
+    ligatures: bool,
+    ligature_measurement: Option<ligatures::Measurement>,
     /// Everything a blinking cursor needs the window to remember between frames.
     ///
     /// **One field for three things**, because this file cannot grow (**D28**) and because the three
@@ -1787,6 +1786,7 @@ impl eframe::App for Window {
                 // and the list being walked is the answer: one rectangle per console of the active
                 // tab. See [`header::Button::in_a_tab_of`].
                 painter::HowToPaint::of(blink.on(keys), headers, &rects)
+                    .ligatures(self.ligatures)
                     .integrated(integrated)
                     .maximized(maximized)
                     .measuring_links(measuring_links),
@@ -6858,6 +6858,8 @@ mod tests {
             theme: Theme::default(),
             keymap: keyboard::Keymap::default(),
             copy_enabled: true,
+            ligatures: false,
+            ligature_measurement: None,
             blink: alarms::BlinkState::default(),
             font_size: DEFAULT_FONT_SIZE,
             rest_of_frame: RestOfFrame::default(),
@@ -15895,6 +15897,7 @@ mod tests {
                     headers: header::Headers::PAINTED,
                     button: header::Button::in_a_tab_of(&[egui::Rect::NOTHING]),
                     measure_links: false,
+                    ligatures: false,
                 },
             );
             if outcome.color.rasterized + outcome.color.failed > 0 {
@@ -16423,6 +16426,7 @@ mod tests {
                         headers: header::Headers::PAINTED,
                         button: header::Button::in_a_tab_of(&rects),
                         measure_links: false,
+                        ligatures: false,
                     },
                 );
                 expected[which] = grid_of(rect, &metrics);
@@ -16690,6 +16694,7 @@ mod tests {
                     headers: header::Headers::PAINTED,
                     button: header::Button::in_a_tab_of(&[egui::Rect::NOTHING]),
                     measure_links: false,
+                    ligatures: false,
                 },
             );
         })
@@ -17053,6 +17058,7 @@ mod tests {
                     headers: header::Headers::PAINTED,
                     button: header::Button::in_a_tab_of(&[egui::Rect::NOTHING]),
                     measure_links: false,
+                    ligatures: false,
                 },
             );
         })
@@ -17106,6 +17112,7 @@ mod tests {
                     headers: header::Headers::PAINTED,
                     button: header::Button::in_a_tab_of(&[egui::Rect::NOTHING]),
                     measure_links: false,
+                    ligatures: false,
                 },
             );
             declared = Some(outcome.color);
@@ -17179,6 +17186,7 @@ mod tests {
                     headers: header::Headers::PAINTED,
                     button: header::Button::in_a_tab_of(&[egui::Rect::NOTHING]),
                     measure_links: false,
+                    ligatures: false,
                 },
             );
             with_panel = pane.measured;
@@ -17234,6 +17242,7 @@ mod tests {
                     headers: header::Headers::PAINTED,
                     button: header::Button::in_a_tab_of(&[egui::Rect::NOTHING]),
                     measure_links: false,
+                    ligatures: false,
                 },
             );
             cut_along = pane
@@ -25705,6 +25714,7 @@ mod tests {
                     headers: header::Headers::PAINTED,
                     button: header::Button::in_a_tab_of(&[egui::Rect::NOTHING]),
                     measure_links: false,
+                    ligatures: false,
                 },
             );
             cost = Some(outcome.search);
@@ -27614,3 +27624,6 @@ mod tests {
         output.drop_without_applying_deltas();
     }
 }
+
+#[cfg(test)]
+mod ligature_tests;

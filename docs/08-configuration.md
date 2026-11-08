@@ -148,6 +148,7 @@ It is the same thing Kitty and Ghostty do.
 | `theme` | a built-in set of all twenty-two colours; see the catalog below |
 | `size` | the font size, in points |
 | `font` | the font family it paints with, by its name |
+| `font.ligatures` | programming ligatures from the selected compatible font: `on` or `off`; omitted means `off` |
 | `cursor.blink` | whether the cursor blinks: `on` always, `off` never. Leave the line out and the program inside decides, over a default of «yes» |
 
 Colours are written **`#rrggbb`**, in hexadecimal, and it makes no difference whether in upper or
@@ -182,6 +183,23 @@ full-screen editor that wanted a still cursor and the shell you come back to has
 until something asks otherwise — `reset` puts it back, and so does anything that restores the
 terminal's defaults. That is what every other terminal does too, and `cursor.blink = on` is the line
 that makes the question go away for good.
+
+### Programming ligatures
+
+```ini
+font = JetBrains Mono
+font.ligatures = on
+```
+
+Programming ligatures use a compatible selected monospaced font to join sequences such as `!=`,
+`=>` and `===`. They start **off**. Set `font.ligatures = off` or remove the line to restore
+independent characters. Missing or incompatible fonts keep normal drawing. Enabling this option
+does not search for, install or select a font.
+
+Preferences exposes **Programming ligatures** under Typography. Save applies and persists the
+option without restarting programs; Cancel discards the draft, and reset restores off. Copy and
+search retain the original characters, and terminal columns stay fixed. Selection, search and
+cursor boundaries may separate a ligature into its characters.
 
 ### The font, by its name
 

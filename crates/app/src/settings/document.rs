@@ -35,6 +35,7 @@ fn canonical(key: &str) -> Option<String> {
     }
     [
         "font",
+        "font.ligatures",
         "size",
         "theme",
         "cursor.blink",
@@ -53,6 +54,7 @@ impl Document {
     pub fn new(source: String) -> Self {
         let mut keys: Vec<String> = [
             "font",
+            "font.ligatures",
             "size",
             "theme",
             "cursor.blink",
@@ -83,13 +85,14 @@ impl Document {
                 && let Some(key) = canonical(key)
                 && let Some(field) = fields.iter_mut().find(|f| f.key == key)
             {
-                let displayed = if matches!(key.as_str(), "theme" | "cursor.blink")
-                    || (key.starts_with("key.") && value.eq_ignore_ascii_case("none"))
-                {
-                    value.to_ascii_lowercase()
-                } else {
-                    value.to_owned()
-                };
+                let displayed =
+                    if matches!(key.as_str(), "theme" | "cursor.blink" | "font.ligatures")
+                        || (key.starts_with("key.") && value.eq_ignore_ascii_case("none"))
+                    {
+                        value.to_ascii_lowercase()
+                    } else {
+                        value.to_owned()
+                    };
                 field.value = displayed.clone();
                 field.original = displayed;
             }
@@ -215,6 +218,40 @@ mod tests {
     fn set(doc: &mut Document, key: &str, value: &str) {
         doc.fields.iter_mut().find(|f| f.key == key).unwrap().value = value.into();
     }
+    #[test]
+    fn ligature_edits_preserve_comments_unknown_keys_and_restore_the_off_default() {
+        let source =
+            "# keep\r\nfont.ligatures=ON\r\nfont.ligatures=invalid\r\nfuture=yes\r\nsize=19\r\n";
+        let mut doc = Document::new(source.into());
+        assert_eq!(doc.text(), source);
+        assert_eq!(
+            doc.fields
+                .iter()
+                .find(|f| f.key == "font.ligatures")
+                .unwrap()
+                .value,
+            "on"
+        );
+        set(&mut doc, "font.ligatures", "off");
+        let text = doc.text();
+        assert_eq!(
+            text,
+            "# keep\r\nfuture=yes\r\nsize=19\r\nfont.ligatures = off\r\n"
+        );
+        assert_eq!(
+            super::super::interpret(&text).unwrap().0.ligatures,
+            Some(false)
+        );
+        set(&mut doc, "font.ligatures", "maybe");
+        assert!(doc.errors().iter().any(|(key, _)| key == "font.ligatures"));
+        doc.defaults();
+        assert_eq!(doc.text(), "# keep\r\nfuture=yes\r\n");
+        assert_eq!(
+            super::super::interpret(&doc.text()).unwrap().0.ligatures,
+            None
+        );
+    }
+
     #[test]
     fn unchanged_bytes_and_dirty_aliases_are_distinct() {
         let source =

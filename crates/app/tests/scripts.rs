@@ -303,6 +303,27 @@ const MODULES: &[(&str, &str)] = &[
     ("app/src/opening.rs", include_str!("../src/opening.rs")),
     ("app/src/pointer.rs", include_str!("../src/pointer.rs")),
     ("app/src/report.rs", include_str!("../src/report.rs")),
+    ("app/src/ligatures.rs", include_str!("../src/ligatures.rs")),
+    (
+        "app/src/fonts/ligatures.rs",
+        include_str!("../src/fonts/ligatures.rs"),
+    ),
+    (
+        "app/src/painter/ligatures.rs",
+        include_str!("../src/painter/ligatures.rs"),
+    ),
+    (
+        "app/src/painter/ligatures/tests.rs",
+        include_str!("../src/painter/ligatures/tests.rs"),
+    ),
+    (
+        "app/src/painter/pane.rs",
+        include_str!("../src/painter/pane.rs"),
+    ),
+    (
+        "app/src/ligature_tests.rs",
+        include_str!("../src/ligature_tests.rs"),
+    ),
     ("app/src/search.rs", include_str!("../src/search.rs")),
     ("app/src/tab_bar.rs", include_str!("../src/tab_bar.rs")),
     ("app/src/tiling.rs", include_str!("../src/tiling.rs")),

@@ -220,95 +220,7 @@ impl Window {
         size: Option<egui::Vec2>,
         control: control::WindowActivity,
     ) -> term_core::Result<Self> {
-        let next_name = tabs.len();
-        // **Counted from the list and not from the parameter**, for the same reason explained below
-        // for the tab name: they are two sources for the same datum, and with two you can take the
-        // wrong one.
-        let next_pane_name = tabs.iter().map(|tab| tab.panes().len()).sum();
-
-        let mut window = Self {
-            // **Over the panes of every tab, not just the first.** A background tab left unwatched
-            // would not reread its panel until someone looked at it, which is exactly the opposite
-            // of what this milestone promises.
-            watcher: Self::watch(ctx, tabs.iter().flat_map(|tab| tab.panes().into_iter())),
-            tabs,
-            active: 0,
-            modifiers: egui::Modifiers::NONE,
-            discoverer: fonts::Discoverer::default(),
-            discovery: measure::Discovery::default(),
-            color: measure::Rasterizing::default(),
-            searching: measure::Searching::default(),
-            theme: Theme::default(),
-            keymap: keyboard::Keymap::default(),
-            copy_enabled: true,
-            blink: alarms::BlinkState::default(),
-            font_size: DEFAULT_FONT_SIZE,
-            rest_of_frame: RestOfFrame::default(),
-            frame_started: Instant::now(),
-            last_closed_frame: 0,
-            timed_separately: std::time::Duration::ZERO,
-            tab_bar_this_frame: std::time::Duration::ZERO,
-            tab_bar_cost: measure::TabBar::default(),
-            strips: crate::report::Strips::default(),
-            buttons: measure::Buttons::default(),
-            links: measure::Links::default(),
-            desktop: crate::links::Desktop::System,
-            control,
-            reflow: measure::Reflow::default(),
-            persistence: session::Persistence::at(None),
-            restoring: None,
-            reading_settings: measure::ReadingSettings::default(),
-            chosen_font: measure::ChoosingTheFont::default(),
-            last_seen: None,
-            mirror_this_frame: std::time::Duration::ZERO,
-            saving: measure::Saving::default(),
-            // **No input at all, and whoever measures is the one who puts it there.** It used to be
-            // one more parameter of this constructor, and the review threw it out with an argument
-            // the tests themselves already proved: nobody but a batch sets it, and in exchange the
-            // signature ended in two consecutive `Option`s filled with two bare `None`s in more
-            // than thirty calls — two slots that do not say which is which.
-            injected_drags: None,
-            spent_injecting: std::time::Duration::ZERO,
-            // **Painted unless whoever opens the window says otherwise**, which is what
-            // [`crate::run`] does for a measurement batch: a constructor that decided it by reading
-            // the environment would make every test depend on what the session that launched it
-            // exported.
-            headers: crate::header::Headers::PAINTED,
-            chord_of_the_last_press: egui::Modifiers::NONE,
-            where_the_last_press_fell: None,
-            the_press_went_to_the_program: false,
-            presses_for_the_program: Vec::new(),
-            last_cell_reported: None,
-            last_frame_with_buttons: None,
-            header_input: crate::header::actions::Input::default(),
-            settings_editor: crate::settings::editor::Editor::default(),
-            chrome: crate::chrome::Chrome::default(),
-            pane_view: crate::pane_view::State::default(),
-            summary: crate::summary::State::default(),
-            link_press_in_progress: None,
-            drag_in_progress: None,
-            last_painted: Vec::new(),
-            // **From the length of the list and not from the `panes` parameter, even though here
-            // they are worth the same.** They are two sources for the same datum, and with two you
-            // can take the wrong one: putting a zero or the wrong parameter makes the next tab that
-            // opens **be called the same as one that already exists**, and the report publish two
-            // blocks of numbers under the same label. Checked by mutating it, and no test catches
-            // it: this constructor launches real consoles reading `SHELL`. Since restoring exists
-            // **a test does catch it**: the one that opens with two saved tabs asserts both
-            // counters. Deriving it from the list is what leaves nothing to confuse.
-            next_name,
-            next_pane_name,
-            some_closed_by_hand: false,
-            // Until the first frame there is no window to measure. A zero is what is really known,
-            // and the report is only published once some console got to interpret something — that
-            // is, after several frames.
-            window_size: egui::Vec2::ZERO,
-            requested_size: size.map(|how_much| RequestedSize {
-                how_much,
-                attempts: FRAMES_INSISTING_ON_SIZE,
-            }),
-            opened_by_agents: control::OpenedByAgents::default(),
-        };
+        let mut window = initial_window(ctx, tabs, size, control);
 
         // **The window is described once when it is born, and with that the deadline does not arm
         // itself.** Without this, the first frame's mirror differs from «nothing» and every session
@@ -319,6 +231,106 @@ impl Window {
         window.last_seen = Some(window.describe());
 
         Ok(window)
+    }
+}
+
+/// Initial state shared by fresh and restored windows; the caller records the first layout mirror.
+fn initial_window(
+    ctx: &egui::Context,
+    tabs: Vec<Tab>,
+    size: Option<egui::Vec2>,
+    control: control::WindowActivity,
+) -> Window {
+    let next_name = tabs.len();
+    // **Counted from the list and not from the parameter**, for the same reason explained below
+    // for the tab name: they are two sources for the same datum, and with two you can take the
+    // wrong one.
+    let next_pane_name = tabs.iter().map(|tab| tab.panes().len()).sum();
+
+    Window {
+        // **Over the panes of every tab, not just the first.** A background tab left unwatched
+        // would not reread its panel until someone looked at it, which is exactly the opposite
+        // of what this milestone promises.
+        watcher: Window::watch(ctx, tabs.iter().flat_map(|tab| tab.panes().into_iter())),
+        tabs,
+        active: 0,
+        modifiers: egui::Modifiers::NONE,
+        discoverer: fonts::Discoverer::default(),
+        discovery: measure::Discovery::default(),
+        color: measure::Rasterizing::default(),
+        searching: measure::Searching::default(),
+        theme: Theme::default(),
+        keymap: keyboard::Keymap::default(),
+        copy_enabled: true,
+        ligatures: false,
+        ligature_measurement: None,
+        blink: alarms::BlinkState::default(),
+        font_size: DEFAULT_FONT_SIZE,
+        rest_of_frame: RestOfFrame::default(),
+        frame_started: Instant::now(),
+        last_closed_frame: 0,
+        timed_separately: std::time::Duration::ZERO,
+        tab_bar_this_frame: std::time::Duration::ZERO,
+        tab_bar_cost: measure::TabBar::default(),
+        strips: crate::report::Strips::default(),
+        buttons: measure::Buttons::default(),
+        links: measure::Links::default(),
+        desktop: crate::links::Desktop::System,
+        control,
+        reflow: measure::Reflow::default(),
+        persistence: session::Persistence::at(None),
+        restoring: None,
+        reading_settings: measure::ReadingSettings::default(),
+        chosen_font: measure::ChoosingTheFont::default(),
+        last_seen: None,
+        mirror_this_frame: std::time::Duration::ZERO,
+        saving: measure::Saving::default(),
+        // **No input at all, and whoever measures is the one who puts it there.** It used to be
+        // one more parameter of this constructor, and the review threw it out with an argument
+        // the tests themselves already proved: nobody but a batch sets it, and in exchange the
+        // signature ended in two consecutive `Option`s filled with two bare `None`s in more
+        // than thirty calls — two slots that do not say which is which.
+        injected_drags: None,
+        spent_injecting: std::time::Duration::ZERO,
+        // **Painted unless whoever opens the window says otherwise**, which is what
+        // [`crate::run`] does for a measurement batch: a constructor that decided it by reading
+        // the environment would make every test depend on what the session that launched it
+        // exported.
+        headers: crate::header::Headers::PAINTED,
+        chord_of_the_last_press: egui::Modifiers::NONE,
+        where_the_last_press_fell: None,
+        the_press_went_to_the_program: false,
+        presses_for_the_program: Vec::new(),
+        last_cell_reported: None,
+        last_frame_with_buttons: None,
+        header_input: crate::header::actions::Input::default(),
+        settings_editor: crate::settings::editor::Editor::default(),
+        chrome: crate::chrome::Chrome::default(),
+        pane_view: crate::pane_view::State::default(),
+        summary: crate::summary::State::default(),
+        link_press_in_progress: None,
+        drag_in_progress: None,
+        last_painted: Vec::new(),
+        // **From the length of the list and not from the `panes` parameter, even though here
+        // they are worth the same.** They are two sources for the same datum, and with two you
+        // can take the wrong one: putting a zero or the wrong parameter makes the next tab that
+        // opens **be called the same as one that already exists**, and the report publish two
+        // blocks of numbers under the same label. Checked by mutating it, and no test catches
+        // it: this constructor launches real consoles reading `SHELL`. Since restoring exists
+        // **a test does catch it**: the one that opens with two saved tabs asserts both
+        // counters. Deriving it from the list is what leaves nothing to confuse.
+        next_name,
+        next_pane_name,
+        some_closed_by_hand: false,
+        // Until the first frame there is no window to measure. A zero is what is really known,
+        // and the report is only published once some console got to interpret something — that
+        // is, after several frames.
+        window_size: egui::Vec2::ZERO,
+        requested_size: size.map(|how_much| RequestedSize {
+            how_much,
+            attempts: FRAMES_INSISTING_ON_SIZE,
+        }),
+        opened_by_agents: control::OpenedByAgents::default(),
     }
 }
 

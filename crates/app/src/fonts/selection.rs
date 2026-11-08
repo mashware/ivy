@@ -64,9 +64,17 @@ impl PreparedSelection {
         let found = look_for_the_family(discoverer, name);
         discoverer.sources.prune(0, true);
         let (family, data) = found?;
+        let family = format!("{CHOSEN_PREFIX}{family}");
+        // Egui keeps its existing allocations when definitions are equal. Aliases can resolve to
+        // the same canonical face, so keep that allocation ready without comparing bytes per row.
+        let data = discoverer
+            .chosen
+            .as_ref()
+            .filter(|face| face.family == family && face.data == data)
+            .map_or(data, |face| Arc::clone(&face.data));
         Ok(Self {
             chosen: Some(SystemFace {
-                family: format!("{CHOSEN_PREFIX}{family}"),
+                family,
                 data,
                 for_icons: false,
             }),
@@ -144,6 +152,12 @@ pub(super) fn queue_definitions(
         egui::FontFamily::Name("settings-font-preview".into()),
         monospaced(preview, faces, &factory),
     );
+    if let Some(face) = chosen {
+        definitions.families.insert(
+            egui::FontFamily::Name(super::ligatures::FAMILY.into()),
+            vec![face.family.clone()],
+        );
+    }
     for face in chosen.into_iter().chain(faces).chain(preview) {
         definitions
             .font_data
@@ -286,6 +300,59 @@ mod tests {
                 .size()
         });
         (metrics, bounds)
+    }
+
+    #[test]
+    fn equivalent_preparation_preserves_real_shaping_when_the_engine_reuses_definitions() {
+        let ctx = egui::Context::default();
+        let mut collection = Collection::new(CollectionOptions {
+            system_fonts: false,
+            ..Default::default()
+        });
+        collection.register_fonts(
+            fontique::Blob::new(Arc::new(
+                include_bytes!("../../tests/fixtures/ligatures/JetBrainsMono-Regular.ttf").to_vec(),
+            )),
+            None,
+        );
+        let mut discoverer = Discoverer {
+            collection: Some(collection),
+            ..Default::default()
+        };
+        let mut screen = term_core::Screen::new(term_core::Size { rows: 1, cols: 24 });
+        screen.advance(b"!= => ===\x1b[?25l");
+        // Different requested aliases resolve here to the same canonical face and fresh bytes.
+        // Prepare twice to pin that handoff independently of the host's installed aliases.
+        for _ in 0..2 {
+            let prepared =
+                PreparedSelection::prepare(&mut discoverer, Some("JetBrains Mono")).unwrap();
+            prepared.queue(&discoverer, &ctx);
+            pass(&ctx);
+            prepared.activate(&mut discoverer);
+            let before = discoverer.ligature_cost();
+            let output = ctx.run_ui(Default::default(), |ui| {
+                let metrics =
+                    crate::painter::CellMetrics::measure(&ctx, egui::FontId::monospace(14.7));
+                crate::painter::paint_with_ligatures(
+                    ui.painter(),
+                    &screen.view(),
+                    &crate::theme::Theme::default(),
+                    &metrics,
+                    egui::Pos2::ZERO,
+                    &mut discoverer,
+                    crate::painter::CursorInk::Outline,
+                    true,
+                );
+            });
+            output.drop_without_applying_deltas();
+            let after = discoverer.ligature_cost();
+            assert_eq!(
+                after.shaped_runs - before.shaped_runs,
+                3,
+                "equivalent canonical selection stopped drawing real shaped runs"
+            );
+            assert_eq!(after.fallback_runs, before.fallback_runs);
+        }
     }
 
     #[test]

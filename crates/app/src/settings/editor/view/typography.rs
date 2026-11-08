@@ -209,7 +209,7 @@ pub(super) fn show(
             .inner
         {
             for field in &mut draft.fields {
-                if matches!(field.key.as_str(), "font" | "size") {
+                if matches!(field.key.as_str(), "font" | "size" | "font.ligatures") {
                     field.value.clear();
                 }
             }
@@ -218,6 +218,18 @@ pub(super) fn show(
     });
     field_errors(ui, "font", errors);
     field_errors(ui, "size", errors);
+    ui.add_space(8.0);
+    let ligatures = draft
+        .fields
+        .iter_mut()
+        .find(|field| field.key == "font.ligatures")
+        .unwrap();
+    let mut enabled = ligatures.value == "on";
+    if ui.checkbox(&mut enabled, "Programming ligatures").changed() {
+        ligatures.value = if enabled { "on" } else { "off" }.into();
+    }
+    ui.weak("Requires a compatible selected monospaced font. Off by default.");
+    field_errors(ui, "font.ligatures", errors);
     let name = draft
         .fields
         .iter()

@@ -2039,6 +2039,10 @@ mod tests {
 
         vec![
             (
+                "explicit ligature measurement startup",
+                crate::ligatures::reference_report(),
+            ),
+            (
                 "transient settings application",
                 crate::settings::editor::runtime::reference_apply_report(),
             ),

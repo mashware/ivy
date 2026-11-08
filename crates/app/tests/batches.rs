@@ -432,6 +432,10 @@ fn run_the_guards_as(name: &str, knobs: &[&str], report: &str, status: u8) -> (S
         .env_clear()
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
         .env("REPORT", &path)
+        .env(
+            "ROOT",
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."),
+        )
         .output()
         .expect("sh could not be run");
     let invalid = dir.join("report.txt.INVALID").exists();
@@ -1255,4 +1259,103 @@ fn overview_controls_publish_identical_panel_documents() {
             "matched controls must paint identical producer content"
         );
     }
+}
+
+#[test]
+fn ligature_validator_rejects_false_witnesses_and_malformed_controls() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let checked = std::process::Command::new("python3")
+        .arg("-c")
+        .arg(r#"
+import runpy, sys
+validate = runpy.run_path(sys.argv[1])['validate']
+scene = 'Ligature scene: programming-ascii-v1 font=JetBrainsMono-v2.304-Regular size=14.7 scale=1.25 mode='
+startup = 'Ligature startup: 12.300 us (explicit font read, validation and registration; before first frame)\n'
+work = 'Ligature work: 20.000 us (included in painting; never subtracted twice)\n'
+effects = 'Ligature effects: eligible_runs=12 shaped_runs=10 fallback_runs=2 vertices=160\n'
+on = scene + 'on\n' + startup + work + effects
+off = scene + 'off\n' + startup + work.replace('20.000','0.000') + 'Ligature effects: eligible_runs=0 shaped_runs=0 fallback_runs=0 vertices=0\n'
+validate(on, 'on')
+validate(off, 'off')
+validate(on, 'auto')
+validate('', 'none')
+mutants = [
+    (on.replace('shaped_runs=10', 'shaped_runs=0'), 'on'),
+    (on.replace('vertices=160', 'vertices=0'), 'on'),
+    (on.replace('eligible_runs=12', 'eligible_runs=11'), 'on'),
+    (on.replace('size=14.7', 'size=14'), 'on'),
+    (on.replace('scale=1.25', 'scale=0'), 'on'),
+    (on.replace('JetBrainsMono-v2.304-Regular', 'system-font'), 'on'),
+    (on.replace('included in painting; never subtracted twice', 'subtracted'), 'on'),
+    (on.replace('Ligature effects:', 'missing:'), 'on'),
+    (on + effects, 'on'),
+    (off.replace('0.000 us', '1.000 us'), 'off'),
+    (off.replace('shaped_runs=0', 'shaped_runs=1'), 'off'),
+    (off.replace('fallback_runs=0', 'fallback_runs=1'), 'off'),
+    (off.replace('eligible_runs=0', 'eligible_runs=1'), 'off'),
+    (off, 'on'), (on, 'off'), (on, 'none'), ('', 'on'),
+]
+for report, mode in mutants:
+    try:
+        validate(report, mode)
+    except ValueError:
+        continue
+    raise AssertionError('validator accepted a broken witness: ' + report)
+"#)
+        .arg(root.join("scripts/measure-ligatures.py"))
+        .output()
+        .expect("run Python ligature report validator");
+    assert!(
+        checked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+}
+
+#[test]
+fn ligature_comparison_requires_matching_mode_font_size_and_scale() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let dir = std::env::temp_dir().join(format!("ligature-compare-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let first = dir.join("first.txt");
+    let second = dir.join("second.txt");
+    let report = "window: 1280 × 800 points\ntabs: 1\n  pane 0: 40 × 40\n\
+        Ligature scene: programming-ascii-v1 font=JetBrainsMono-v2.304-Regular size=14.7 scale=1 mode=on\n\
+        Ligature startup: 1.000 us (explicit font read, validation and registration; before first frame)\n\
+        Ligature work: 2.000 us (included in painting; never subtracted twice)\n\
+        Ligature effects: eligible_runs=2 shaped_runs=2 fallback_runs=0 vertices=32\n";
+    std::fs::write(&first, report).unwrap();
+    let compare = |other: &str| {
+        std::fs::write(&second, other).unwrap();
+        std::process::Command::new("sh")
+            .arg(root.join("scripts/measure-frame.sh"))
+            .arg("compare")
+            .arg(&first)
+            .arg(&second)
+            .env_remove("MEASURE_AS_CONSOLE")
+            .output()
+            .unwrap()
+            .status
+            .success()
+    };
+    assert!(compare(report));
+    for different in [
+        report.replace("scale=1 ", "scale=1.25 "),
+        report.replace("size=14.7", "size=17.3"),
+        report.replace("JetBrainsMono-v2.304-Regular", "another-font"),
+        report
+            .replace("mode=on", "mode=off")
+            .replace("2.000 us", "0.000 us")
+            .replace(
+                "eligible_runs=2 shaped_runs=2",
+                "eligible_runs=0 shaped_runs=0",
+            )
+            .replace("vertices=32", "vertices=0"),
+    ] {
+        assert!(
+            !compare(&different),
+            "incompatible ligature runs were averaged"
+        );
+    }
+    std::fs::remove_dir_all(dir).unwrap();
 }

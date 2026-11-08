@@ -197,6 +197,8 @@
 # matched integrated chrome, geometry, ASCII loads and ordinary panel publications.
 # Open variants must navigate to a different live focus; deadlines are reported but
 # not required because the dumping load does not isolate an idle deadline wake.
+# Ligature variants: ligatures-on/off use the same pinned font, fractional size,
+# geometry, ASCII programming scene and load; only the runtime switch differs.
 # Settings variants: settings-closed, settings-open and settings-fonts reuse C’s load.
 # Their global row has identical geometry; historical C keeps the row vetoed.
 # EVERY BATCH IS RUN TWICE and the mean of the two is published, which is what the annex does. It is
@@ -403,6 +405,7 @@ if [ "${MEASURE_AS_CONSOLE:-}" != "1" ] && [ "${1:-}" = compare ]; then
     # are compared.
     geometry() {
         sed -n \
+            -e 's/^Ligature scene: */Ligature scene /p' \
             -e 's/^settings probe family: */settings probe family /p' \
             -e 's/^chrome regime: */chrome regime /p' \
             -e 's/^integrated chrome: enabled=\([^,]*\),.*/integrated chrome \1/p' \
@@ -419,6 +422,11 @@ if [ "${MEASURE_AS_CONSOLE:-}" != "1" ] && [ "${1:-}" = compare ]; then
         if grep -qx 'settings mode: apply' "$report" && ! grep -Eq '^settings probe family: Some\(".+"\)$' "$report"; then
             echo "$report has no effective family for its settings-apply probe; it cannot be averaged" >&2
             exit 1
+        fi
+    done
+    for report in "$2" "$3"; do
+        if grep -q '^Ligature scene:' "$report"; then
+            python3 "$ROOT/scripts/measure-ligatures.py" "$report" auto || exit 1
         fi
     done
     first=$(geometry "$2")
@@ -502,6 +510,9 @@ if [ "${MEASURE_AS_CONSOLE:-}" = "1" ]; then
     if [ "${MEASURE_EMOJI:-}" = 1 ]; then
         exec "$LOAD" run --mib "${MEASURE_MIB:-44}" --at 30 --tag "${MEASURE_BATCH:-x}" --emoji
     fi
+    if [ -n "${MEASURE_LIGATURES:-}" ]; then
+        exec "$LOAD" run --mib "${MEASURE_MIB:-44}" --at 30 --tag "${MEASURE_BATCH:-x}" --ligatures
+    fi
     exec "$LOAD" run --mib "${MEASURE_MIB:-44}" --at 30 --tag "${MEASURE_BATCH:-x}"
 fi
 
@@ -538,8 +549,9 @@ RESTORES=0
 # batch, and the guards read the same variable, so they judge the leaked load as the batch's own. A
 # `PATCHES=1` in the environment runs X as Y and publishes it under X's name; a `LARGE=1` pads S and
 # the file batches to the ceiling, and hides U and V from the leak guard that only fires without it.
-ACTIONS= CONTROL= HEADER= READS= PATCHES= LINKS= SEARCH= LARGE= CJK= EMOJI= PANEL_EMOJI= SETTINGS= INTEGRATED_CHROME= OVERVIEW=
+LIGATURES= ACTIONS= CONTROL= HEADER= READS= PATCHES= LINKS= SEARCH= LARGE= CJK= EMOJI= PANEL_EMOJI= SETTINGS= INTEGRATED_CHROME= OVERVIEW=
 case "$BATCH" in
+    ligatures-on|ligatures-off) TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; LIGATURES=${BATCH#ligatures-} ;;
     overview-4-closed|overview-4-open) TABS=2; PANES=2x1; DUMPING=4; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=1; OVERVIEW=${BATCH##*-} ;;
     overview-16-closed|overview-16-open) TABS=8; PANES=2x1; DUMPING=16; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=1; OVERVIEW=${BATCH##*-} ;;
     chrome|chrome-zoom) TABS=2; PANES=2x1; DUMPING=4; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=${BATCH#chrome}; INTEGRATED_CHROME=${INTEGRATED_CHROME#-}; INTEGRATED_CHROME=${INTEGRATED_CHROME:-1} ;;
@@ -1027,7 +1039,7 @@ seed() {
 case "$BATCH" in
     A) : ;;                       # no panel: nobody publishes anything
     B) seed quiet & ;;
-    overview-4-closed|overview-4-open|overview-16-closed|overview-16-open|chrome|chrome-zoom|settings-apply|settings-closed|settings-open|settings-fonts|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
+    ligatures-on|ligatures-off|overview-4-closed|overview-4-open|overview-16-closed|overview-16-open|chrome|chrome-zoom|settings-apply|settings-closed|settings-open|settings-fonts|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
 esac
 
 echo "batch $BATCH · $TABS tab(s) of $PANES · $DUMPING of $DIRECTORIES consoles dumping $MIB MiB · window $WINDOW_SIZE · do not touch the machine until it closes" >&2
@@ -1060,6 +1072,17 @@ export MEASURE_AS_CONSOLE=1 MEASURE_MIB="$MIB" MEASURE_BATCH="$BATCH" \
 # every run would paint one everywhere. It is unset for the same reason `MEASURE_TABS` is below: one
 # the user had exported by hand would otherwise reach the application and put a row under every
 # console of a batch that is compared against runs with none.
+if [ -n "$LIGATURES" ]; then
+    export MEASURE_LIGATURES="$LIGATURES"
+    export MEASURE_LIGATURE_FONT="$ROOT/crates/app/tests/fixtures/ligatures/JetBrainsMono-Regular.ttf"
+    python3 - "$MEASURE_LIGATURE_FONT" <<'PYFONT'
+import hashlib, sys
+from pathlib import Path
+assert hashlib.sha256(Path(sys.argv[1]).read_bytes()).hexdigest() == "a0bf60ef0f83c5ed4d7a75d45838548b1f6873372dfac88f71804491898d138f", "ligature fixture differs from the pinned release"
+PYFONT
+else
+    unset MEASURE_LIGATURES MEASURE_LIGATURE_FONT
+fi
 if [ -n "$OVERVIEW" ]; then
     export MEASURE_OVERVIEW="$OVERVIEW"
 else
@@ -1145,6 +1168,10 @@ invalidate() {
 # for the line it could not read — true, and it hides the crash that took the line away.
 if [ "$STATUS" != 0 ]; then
     invalidate "the application finished with status $STATUS; what it said is in the .err next to it"
+fi
+
+if ! python3 "$ROOT/scripts/measure-ligatures.py" "$REPORT" "${LIGATURES:-none}"; then
+    invalidate "ligature work, effects or scene do not match the requested batch"
 fi
 
 # **The font-discovery guard, and it reads both ways like the ones above.** Batch P is the only one
