@@ -2459,6 +2459,7 @@ pub enum Action {
     ScrollToTop,
     ScrollToBottom,
     Search,
+    Overview,
 }
 
 impl Action {
@@ -2477,6 +2478,7 @@ impl Action {
             Self::ScrollToTop => "scroll-to-top",
             Self::ScrollToBottom => "scroll-to-bottom",
             Self::Search => "search",
+            Self::Overview => "overview",
         }
     }
 
@@ -2488,8 +2490,8 @@ impl Action {
     }
 }
 
-/// The twelve, to iterate over them.
-pub const ALL: [Action; 12] = [
+/// The configurable actions, to iterate over them.
+pub const ALL: [Action; 13] = [
     Action::SplitRight,
     Action::SplitDown,
     Action::ClosePane,
@@ -2502,6 +2504,7 @@ pub const ALL: [Action; 12] = [
     Action::ScrollToTop,
     Action::ScrollToBottom,
     Action::Search,
+    Action::Overview,
 ];
 
 /// A chord: the modifier keys needed, and the key.
@@ -2668,6 +2671,7 @@ impl Default for Keymap {
                 (scrollback(Key::End), Action::ScrollToBottom),
                 // WezTerm's and Alacritty's chord for the same thing (D61).
                 (with_the_chord(Key::F), Action::Search),
+                (with_the_chord(Key::O), Action::Overview),
             ],
         }
     }
@@ -2742,6 +2746,7 @@ mod keymap_tests {
             ("scroll-to-top", "shift+home", Action::ScrollToTop),
             ("scroll-to-bottom", "shift+end", Action::ScrollToBottom),
             ("search", "ctrl+shift+f", Action::Search),
+            ("overview", "ctrl+shift+o", Action::Overview),
         ];
         assert_eq!(
             published.len(),
@@ -2801,6 +2806,7 @@ mod keymap_tests {
             (scrollback(Key::Home), Action::ScrollToTop),
             (scrollback(Key::End), Action::ScrollToBottom),
             (with_the_chord(Key::F), Action::Search),
+            (with_the_chord(Key::O), Action::Overview),
         ];
 
         for (chord, expected) in factory {
@@ -3176,10 +3182,10 @@ mod keymap_tests {
             .filter(|token| **token == token.to_lowercase())
             .collect();
         // Without a floor, a document that stopped writing chords in backticks would leave this
-        // test passing by being empty. Today it publishes fifteen.
+        // test passing by being empty. Today it publishes sixteen.
         assert_eq!(
             published.len(),
-            15,
+            16,
             "the document publishes {} chords in lowercase: either it changed shape, or this walk stopped \
              finding them and the test is not looking at anything — {published:?}",
             published.len()

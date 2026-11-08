@@ -22,6 +22,10 @@ pub(crate) struct State {
 }
 
 impl State {
+    pub(crate) fn is_modal(&self) -> bool {
+        self.rename.is_some() || self.menu.is_some() || self.awaiting_release
+    }
+
     pub(crate) fn is_renaming(&self) -> bool {
         self.rename.is_some()
     }

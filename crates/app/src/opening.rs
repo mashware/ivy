@@ -284,6 +284,7 @@ impl Window {
             settings_editor: crate::settings::editor::Editor::default(),
             chrome: crate::chrome::Chrome::default(),
             pane_view: crate::pane_view::State::default(),
+            summary: crate::summary::State::default(),
             link_press_in_progress: None,
             drag_in_progress: None,
             last_painted: Vec::new(),

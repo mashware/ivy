@@ -36,6 +36,7 @@
 mod alarms;
 mod chrome;
 mod closing;
+mod console_input;
 pub(crate) mod control;
 mod pane_view;
 use panel::pane::{identity_of, panel_or_none};
@@ -55,6 +56,7 @@ mod report;
 mod search;
 pub mod session;
 pub mod settings;
+mod summary;
 mod tab_bar;
 pub mod theme;
 mod tiling;
@@ -305,12 +307,13 @@ fn any_measurement_variable(is_set: impl Fn(&str) -> bool) -> bool {
     MEASUREMENT_VARIABLES.iter().any(|which| is_set(which))
 }
 
-const MEASUREMENT_VARIABLES: [&str; 5] = [
+const MEASUREMENT_VARIABLES: [&str; 6] = [
     TABS_VARIABLE,
     PANES_VARIABLE,
     SIZE_VARIABLE,
     DRAGS_VARIABLE,
     GESTURE_VARIABLE,
+    "MEASURE_OVERVIEW",
 ];
 
 /// How many cells the panel's border is pushed **on every drag frame** of the injected gesture.
@@ -622,6 +625,11 @@ pub fn run() -> eframe::Result {
                 std::env::var("MEASURE_SETTINGS").ok().as_deref(),
             );
             window.settings_editor.remember_family(&settings);
+            summary::probe::configure(
+                &mut window,
+                measuring,
+                std::env::var("MEASURE_OVERVIEW").ok().as_deref(),
+            );
             // **The font goes apart from the rest of the settings, and it is not tidiness.** The
             // others put a value on the window; this one talks to the text engine and **costs
             // between 17.3 and 23.2 ms** (**D24**) because resolving a name forces enumerating the
@@ -1041,6 +1049,7 @@ struct Window {
     settings_editor: settings::editor::Editor,
     chrome: chrome::Chrome,
     pane_view: pane_view::State,
+    summary: summary::State,
     /// The previous frame's mirror. **The deadline is armed against it**, so the deadline is
     /// rearmed **when something changes** and not when something is unwritten: without this, a
     /// non-writable directory would leave the difference in place and **the window would never go
@@ -1375,74 +1384,6 @@ impl Window {
         pump
     }
 
-    /// Sends what was typed in this pass to **one single** console, the one that has the focus.
-    ///
-    /// It lives apart from the painting for the same reason as [`Self::handle_the_mouse`]: sending
-    /// it to both would write the same key into two programs, which is exactly what «without
-    /// stepping on each other» forbids, and inside the interface pass that decision cannot be
-    /// checked without opening a window.
-    ///
-    /// **On a pass somebody typed in, the pass is timed whole and subtracted from the frame
-    /// (D13).** It used to be a declared hole — «in the batches nobody types» — and the
-    /// scrollback's search is the batch that types: a press of `Enter` walks the history right
-    /// here, so leaving it untimed would publish that walk as the interface framework's cost. The
-    /// press is also published on its own line of the report (D61); only this whole pass is
-    /// subtracted, so it is never subtracted twice.
-    ///
-    /// **A pass nobody typed in declares nothing, and that is the hole that is left, said rather
-    /// than hidden.** It clones the keymap and walks an event list with no press, text or paste in
-    /// it — key releases and modifier changes, at most — and declaring it on every frame would hand
-    /// every other declaring path's test a non-zero it did not earn. «Typed» is the blinking cursor's
-    /// question (`keyboard::somebody_typed`): a press, a text or a paste. A copy on its own is not
-    /// in it, and stays in the hole. The cursor's anchor is read before the clock starts.
-    fn send_keys_to_the_focused(&mut self, ctx: &egui::Context) -> Vec<WindowRequest> {
-        if header::menu::keys(self, ctx) {
-            return Vec::new();
-        }
-        // **The phase goes back to the start whenever a key is pressed**, so the cursor is lit the
-        // instant you type instead of at whatever point of the cycle you caught it — and typing
-        // continuously never leaves it half-drawn. **It is asked BEFORE the keys are handed over**:
-        // sending them consumes the frame's events, so read afterwards this always sees an empty
-        // list and the anchor never moves. Measured — the test for it failed exactly that way.
-        let typed = ctx.input(keyboard::somebody_typed);
-        if typed {
-            self.blink.saw_a_key();
-        }
-        let before = Instant::now();
-        let started = self.frame_started;
-        // The seed is taken out and put back because the pane and the field are two borrows of the
-        // same owner, and the compiler does not let both be held at once.
-        let mut modifiers = self.modifiers;
-        let tabs_open = self.tabs.len();
-        // **The table is cloned, and it is cheap: at most one pair per `keyboard::Action`.**
-        // The borrow is the same problem as the modifiers above —the pane and the field are two
-        // borrows of the same owner— and here it is solved the same way, without leaving the table
-        // somewhere nobody would look for it.
-        let keymap = self.keymap.clone();
-        let to_copy = self.copy_enabled;
-        let tab = self.active_mut();
-        // **The focused one is looked up by its name**, and if it does not turn up nobody is typed
-        // to: writing into «the first one there is» would send the keys to a program the user is
-        // not looking at, which is worse than losing them.
-        let at = tab.where_the_focus_is();
-        let requests = at
-            .map(|at| {
-                tab.panes_mut()[at].send_keys(
-                    ctx,
-                    started,
-                    &mut modifiers,
-                    tabs_open,
-                    &keymap,
-                    to_copy,
-                )
-            })
-            .unwrap_or_default();
-        // Declared on a pass somebody typed in, and only then: see this function's docblock.
-        self.timed_separately += before.elapsed() * u32::from(typed);
-        self.modifiers = modifiers;
-        requests
-    }
-
     /// Opens a tab with its two consoles and leaves it in front.
     ///
     /// **If any console cannot be opened, the tab is not created**: it is said out loud on the
@@ -1491,6 +1432,7 @@ impl eframe::App for Window {
     /// it is the path of whoever uses the application.
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         settings::editor::inject(self, raw_input);
+        summary::probe::inject(self, raw_input, ctx);
         let Some(injected_drags) = self.injected_drags.as_mut() else {
             return;
         };
@@ -1626,13 +1568,15 @@ impl eframe::App for Window {
 
         // Settings claims its input before the console dispatcher. Its named work is discounted
         // from frame accounting; outbound latency still includes this earlier application work.
-        let pane_owned = pane_view::before_keys(self, ui, &metrics);
+        let mut overview_owned = summary::before_keys(self, ui, &metrics);
+        let pane_owned = !overview_owned && pane_view::before_keys(self, ui, &metrics);
         if pane_owned {
             ui.disable();
         }
         let chrome_owned = chrome::before_keys(self, ui, &metrics);
         self.timed_separately += self.chrome.take_cost();
-        let requests = if pane_owned {
+        overview_owned |= summary::blocked(self, ui.ctx());
+        let requests = if pane_owned || overview_owned {
             Vec::new()
         } else {
             settings::editor::before_keys(self, ui, &metrics)
@@ -1653,8 +1597,10 @@ impl eframe::App for Window {
         self.answer_the_windows_requests(ui.ctx(), area, &metrics);
 
         pane_view::reconcile(self);
-        let header_owns_pointer =
-            pane_owned || chrome_owned || header::menu::pointer_blocked(self, ui.ctx());
+        let header_owns_pointer = overview_owned
+            || pane_owned
+            || chrome_owned
+            || header::menu::pointer_blocked(self, ui.ctx());
         if header_owns_pointer {
             ui.disable();
         }
@@ -1972,6 +1918,7 @@ impl eframe::App for Window {
 
         // It has already been painted, so whatever is still pending belongs to a console that was
         // not painted.
+        summary::paint(self, ui, area);
         header::menu::paint(self, ui.ctx(), &metrics);
         self.close_the_unpainted_rounds();
 
@@ -2158,6 +2105,8 @@ mod tests {
     mod header_controls;
     mod integrated_chrome;
     pub(crate) mod markdown;
+    #[path = "overview.rs"]
+    mod overview;
     mod pane_rename;
     mod settings_chrome;
     mod settings_editor;
@@ -6943,6 +6892,7 @@ mod tests {
             settings_editor: settings::editor::Editor::default(),
             chrome: chrome::Chrome::default(),
             pane_view: pane_view::State::default(),
+            summary: summary::State::default(),
             link_press_in_progress: None,
             drag_in_progress: None,
             last_painted: Vec::new(),
@@ -16103,7 +16053,7 @@ mod tests {
     }
 
     #[test]
-    fn the_five_measurement_variables_are_the_ones_the_script_exports() {
+    fn the_measurement_variables_are_the_ones_the_script_exports() {
         // **Two vetoes hang from this list**: that a batch does not tread on the layout of whoever
         // measures, and that it does not read their settings. Written out by hand where they are
         // read, **adding a sixth and forgetting to put it in there was caught by nobody** — not the
@@ -16120,7 +16070,8 @@ mod tests {
                 "MEASURE_PANES",
                 "MEASURE_SIZE",
                 "MEASURE_DRAGS",
-                "MEASURE_GESTURE"
+                "MEASURE_GESTURE",
+                "MEASURE_OVERVIEW"
             ],
             "the list the vetoes of a measurement batch hang from is no longer the one the script exports"
         );

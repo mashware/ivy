@@ -48,6 +48,39 @@ use std::path::Path;
 /// guard with no file to look at reads exactly like a clean one.
 const MODULES: &[(&str, &str)] = &[
     (
+        "src/console_input.rs",
+        include_str!("../src/console_input.rs"),
+    ),
+    ("src/summary.rs", include_str!("../src/summary.rs")),
+    (
+        "src/summary/input.rs",
+        include_str!("../src/summary/input.rs"),
+    ),
+    (
+        "src/summary/model.rs",
+        include_str!("../src/summary/model.rs"),
+    ),
+    (
+        "src/summary/view.rs",
+        include_str!("../src/summary/view.rs"),
+    ),
+    (
+        "src/summary/probe.rs",
+        include_str!("../src/summary/probe.rs"),
+    ),
+    (
+        "src/panel/summary.rs",
+        include_str!("../src/panel/summary.rs"),
+    ),
+    (
+        "src/measure/overview.rs",
+        include_str!("../src/measure/overview.rs"),
+    ),
+    (
+        "src/tests/overview.rs",
+        include_str!("../src/tests/overview.rs"),
+    ),
+    (
         "src/settings/editor/view/footer.rs",
         include_str!("../src/settings/editor/view/footer.rs"),
     ),
@@ -299,7 +332,7 @@ const IMPL_CEILING: usize = 300;
 const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
     (
         "src/lib.rs",
-        666,
+        649,
         "the window's core, and the file nobody ever split. D28 has the order its pieces come out \
          in; it cannot come under the ceiling in one change because 16 953 lines of tests reach \
          into its private items. **It came in at 3 119; the bench's injected gestures were the \
@@ -432,11 +465,11 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
          hands the search's cost through, the window's tally, the line that hands it over, and the \
          three that time the keyboard's pass on a frame somebody typed in — and paid **five** more \
          here, finding a console by name moving to `Tab` and walking every console becoming one \
-         line. **765 + 8 - 5 leaves 768.** Pane controls move splitting out and add the header input hook; the measured module now has 725 production lines. Settings then moves startup font resolution to fonts/startup.rs and adds its global entry wiring, leaving 693 including the measurement injector hook. Runtime font handoff now belongs to editor/runtime.rs, leaving688. Shared strip partitioning leaves687. Integrated chrome moves hidden-view geometry and startup size parsing out, leaving685. Fresh tab creation now belongs to opening.rs and the measured module is666.",
+         line. **765 + 8 - 5 leaves 768.** Pane controls move splitting out and add the header input hook; the measured module now has 725 production lines. Settings then moves startup font resolution to fonts/startup.rs and adds its global entry wiring, leaving 693 including the measurement injector hook. Runtime font handoff now belongs to editor/runtime.rs, leaving688. Shared strip partitioning leaves687. Integrated chrome moves hidden-view geometry and startup size parsing out, leaving685. Fresh tab creation now belongs to opening.rs and the measured module is666. Overview extracts console routing and leaves649.",
     ),
     (
         "impl Window",
-        1695,
+        1680,
         "the window's own behaviour. D28's order moved its methods out of `lib.rs` into \
          satellite blocks in twelve modules, which shrank the file and not the type. Recorded on 28 September \
          2026, the day the guard first summed a type's blocks. **The scrollback's search spent five \
@@ -444,7 +477,7 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
          declared hole, the report's `search:` field and the tally's seed when a window opens; \
          handing each painting's cost over sits in `impl eframe::App`, which this count does not \
          read — **and paid five**: finding a console by name moved to `Tab`, and walking every \
-         console became one line. **1782 + 5 - 5 leaves 1782.** Header operations now use free functions around pane identity; the measured Window implementation has 1764 lines. Applying configuration now belongs to Settings, paying for editor construction and reporting; the measured total is 1750. Integrated chrome keeps tab interaction and card rendering in free functions, leaving1705 including explicitly timed hidden-view geometry. Moving fresh tab creation to opening.rs pays for the new controls and leaves1695.",
+         console became one line. **1782 + 5 - 5 leaves 1782.** Header operations now use free functions around pane identity; the measured Window implementation has 1764 lines. Applying configuration now belongs to Settings, paying for editor construction and reporting; the measured total is 1750. Integrated chrome keeps tab interaction and card rendering in free functions, leaving1705 including explicitly timed hidden-view geometry. Moving fresh tab creation to opening.rs pays for the new controls and leaves1695. Overview extracts console routing and pure deadline selection, leaving1680.",
     ),
     (
         "impl Pane",

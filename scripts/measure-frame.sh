@@ -193,6 +193,10 @@
 # Integrated chrome variants: chrome and chrome-zoom use two tabs of two consoles.
 # Both paint pane headers. The zoom variant starts with a transient zoom;
 # neither changes historical batches.
+# Overview variants: overview-4-closed/open and overview-16-closed/open use
+# matched integrated chrome, geometry, ASCII loads and ordinary panel publications.
+# Open variants must navigate to a different live focus; deadlines are reported but
+# not required because the dumping load does not isolate an idle deadline wake.
 # Settings variants: settings-closed, settings-open and settings-fonts reuse C’s load.
 # Their global row has identical geometry; historical C keeps the row vetoed.
 # EVERY BATCH IS RUN TWICE and the mean of the two is published, which is what the annex does. It is
@@ -303,6 +307,24 @@ check_settings_report() {
 }
 # End graphical settings report validation.
 
+# Overview report validation (also exercised with synthetic reports).
+check_overview_report() {
+    EXPECTED_OVERVIEW=${OVERVIEW:-historical}
+    OVERVIEW_MODE=$(sed -n 's/^overview mode: //p' "$REPORT" | head -1)
+    [ "$OVERVIEW_MODE" = "$EXPECTED_OVERVIEW" ] || invalidate "Overview mode does not match its variant"
+    OVERVIEW_WORK=$(sed -n 's/^overview application: frames=\([0-9]*\),.*/\1/p' "$REPORT" | head -1)
+    OVERVIEW_COUNTS=$(sed -n 's/^overview witnesses: open=\([0-9]*\), projected=\([0-9]*\), painted=\([0-9]*\), navigation=\([0-9]*\), focus=\([0-9]*\), deadlines=\([0-9]*\)$/\1 \2 \3 \4 \5 \6/p' "$REPORT" | head -1)
+    [ -n "$OVERVIEW_WORK" ] && [ -n "$OVERVIEW_COUNTS" ] || invalidate "Overview report omitted its work or witnesses"
+    set -- $OVERVIEW_COUNTS
+    if [ "$EXPECTED_OVERVIEW" = open ]; then
+        [ "$OVERVIEW_WORK" -gt 0 ] && [ "$1" -gt 0 ] && [ "$2" -ge "$DIRECTORIES" ] && [ "$3" -gt 0 ] && [ "$4" -gt 0 ] && [ "$5" -gt 0 ] || invalidate "open Overview variant omitted actual open, row, navigation or focus effects"
+        [ "$5" -le "$4" ] || invalidate "Overview focus changes exceed accepted navigation"
+    else
+        [ "$OVERVIEW_COUNTS" = '0 0 0 0 0 0' ] || invalidate "Overview activity leaked into a closed or historical variant"
+    fi
+}
+# End Overview report validation.
+
 # Integrated chrome report validation (also exercised with synthetic reports).
 check_chrome_report() {
 # A missing witness cannot be interpreted as zero work. Historical runs must also prove
@@ -387,6 +409,7 @@ if [ "${MEASURE_AS_CONSOLE:-}" != "1" ] && [ "${1:-}" = compare ]; then
             -e 's/^settings chrome: */settings chrome /p' \
             -e 's/^settings UI: */settings /p' \
             -e 's/^settings mode: */settings mode /p' \
+            -e 's/^overview mode: */overview mode /p' \
             -e 's/^tabs: */tabs /p' \
             -e 's/^  pane [0-9]*: */pane /p' \
             -e 's/^restored: *\([0-9]*\) consoles .*$/restored \1/p' \
@@ -515,8 +538,10 @@ RESTORES=0
 # batch, and the guards read the same variable, so they judge the leaked load as the batch's own. A
 # `PATCHES=1` in the environment runs X as Y and publishes it under X's name; a `LARGE=1` pads S and
 # the file batches to the ceiling, and hides U and V from the leak guard that only fires without it.
-ACTIONS= CONTROL= HEADER= READS= PATCHES= LINKS= SEARCH= LARGE= CJK= EMOJI= PANEL_EMOJI= SETTINGS= INTEGRATED_CHROME=
+ACTIONS= CONTROL= HEADER= READS= PATCHES= LINKS= SEARCH= LARGE= CJK= EMOJI= PANEL_EMOJI= SETTINGS= INTEGRATED_CHROME= OVERVIEW=
 case "$BATCH" in
+    overview-4-closed|overview-4-open) TABS=2; PANES=2x1; DUMPING=4; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=1; OVERVIEW=${BATCH##*-} ;;
+    overview-16-closed|overview-16-open) TABS=8; PANES=2x1; DUMPING=16; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=1; OVERVIEW=${BATCH##*-} ;;
     chrome|chrome-zoom) TABS=2; PANES=2x1; DUMPING=4; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=${BATCH#chrome}; INTEGRATED_CHROME=${INTEGRATED_CHROME#-}; INTEGRATED_CHROME=${INTEGRATED_CHROME:-1} ;;
     settings-apply) TABS=2; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; SETTINGS=apply ;;
     settings-closed|settings-open|settings-fonts) TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; SETTINGS=${BATCH#settings-} ;;
@@ -703,6 +728,9 @@ fi
 # its own would be measuring a different panel from its control — `C` is `S`'s control — and nothing
 # but this one function keeps two copies from drifting.
 document_body() {  # document_body <which of the consoles> <turn> [the key on the note line]
+    # Open and closed controls publish identical text, including its width and wrapping.
+    document_batch=$BATCH
+    case "$BATCH" in overview-*) document_batch=${BATCH%-*} ;; esac
     # **An address on one line, and only where it is asked for.** A key is never painted and the
     # parse only stores it, so this changes nothing about what a panel costs to draw — but it does
     # change the bytes, and a batch compared against another has to publish the same ones. Only the
@@ -778,10 +806,10 @@ document_body() {  # document_body <which of the consoles> <turn> [the key on th
     fi
     cat <<JSON
 {"v":1,"stale_after_minutes":600,"attention":"$attention",$actions"lines":[
-  {"text":"${e1}Batch $BATCH · publication $2","style":"title"},
+  {"text":"${e1}Batch $document_batch · publication $2","style":"title"},
   "",
   {"ref":"load","text":"${e2}$MIB MiB per console, TUI-style dump","mark":"current"},
-  {"ref":"panel","text":"${e3}regime $BATCH — this is what is being measured","mark":"info"},
+  {"ref":"panel","text":"${e3}regime $document_batch — this is what is being measured","mark":"info"},
   {$note_key"ref":"note","text":"${e4}the layout is redone on every good re-read","mark":"info"},
   "",
   {"text":"six lines and a warning: the size of a real working panel","mark":"done"$panel_link}$filler
@@ -999,7 +1027,7 @@ seed() {
 case "$BATCH" in
     A) : ;;                       # no panel: nobody publishes anything
     B) seed quiet & ;;
-    chrome|chrome-zoom|settings-apply|settings-closed|settings-open|settings-fonts|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
+    overview-4-closed|overview-4-open|overview-16-closed|overview-16-open|chrome|chrome-zoom|settings-apply|settings-closed|settings-open|settings-fonts|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
 esac
 
 echo "batch $BATCH · $TABS tab(s) of $PANES · $DUMPING of $DIRECTORIES consoles dumping $MIB MiB · window $WINDOW_SIZE · do not touch the machine until it closes" >&2
@@ -1032,6 +1060,11 @@ export MEASURE_AS_CONSOLE=1 MEASURE_MIB="$MIB" MEASURE_BATCH="$BATCH" \
 # every run would paint one everywhere. It is unset for the same reason `MEASURE_TABS` is below: one
 # the user had exported by hand would otherwise reach the application and put a row under every
 # console of a batch that is compared against runs with none.
+if [ -n "$OVERVIEW" ]; then
+    export MEASURE_OVERVIEW="$OVERVIEW"
+else
+    unset MEASURE_OVERVIEW
+fi
 if [ -n "$INTEGRATED_CHROME" ]; then
     export MEASURE_CHROME="$INTEGRATED_CHROME"
 else
@@ -1410,6 +1443,7 @@ check_header_report
 check_settings_report
 
 check_chrome_report
+check_overview_report
 
 # **The settings guard, and this one invalidates on two counts.** Ever since the terminal reads a
 # settings file, a run that read the measurer's own would have **another grid** — the font size

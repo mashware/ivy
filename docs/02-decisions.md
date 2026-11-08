@@ -8373,3 +8373,43 @@ controls, a compact20-point override badge, and padded cursor/shortcut controls.
 effective-Theme-derived style. The separately approved Settings presentation keeps its neutral editor
 palette, including its popups, so selecting a console theme does not silently replace the approved
 Settings design. The console/panel preview still shows the draft theme and explicit overrides.
+
+## D68 — Overview projects live panes and preserves console geometry
+
+**Decided.** Overview is a read-only window screen over the console area. Each live pane appears
+once, identified by its existing stable name and its current tab. Its display name is the name
+already used by the console strip. The first three nonempty producer lines are shown literally;
+neither the phase nor body marks are used to infer a task's state (D6/D18).
+
+Ordering reuses AttentionState: wait before block before done, a backed claim before an unbacked
+claim of the same class, then current tab and tree order. A missing attention value says no claim;
+a missing document says no published state. Existing warnings and the done silence exception apply.
+Freshness deadlines include background and folded panes while Overview is visible because their
+warnings are then visible too; closing it restores the existing narrow alarm scope.
+
+**Input belongs to the screen for the entire opening and closing frame.** Selection and pointer
+activation retain stable pane names through list reordering. Activation resolves the pane's current
+tab, restores a maximized arrangement when necessary and focuses that pane; a vanished target never
+redirects to its former neighbour. The screen exposes no producer actions or active links. Settings
+and Overview cannot open over one another; opening or closing Overview changes no PTY geometry,
+panel ownership, search, selection or saved layout. Every console keeps its full pump budget.
+
+The global control and configurable `key.overview = ctrl+shift+o` open the same view; `none` gives
+the chord back to the program when the view is closed. Fixed-height scroll rows have bounded slots
+for names, phase, warnings and three excerpt lines so long valid metadata cannot expand one row
+over its neighbours. The active runtime theme supplies all colours.
+
+**What was discarded, and why:**
+- A separate task registry or queued-task board: the existing pane is the identity and state unit;
+  queuing work without a console is outside Phase 4.
+- A drawer or tab-card enhancement alone: the roadmap promises a global screen and the panel body
+  explains what a claim is about; a tab's single maximum cannot show every console.
+- Replacing the console layout: hiding it beneath a screen preserves its current grids, refresh
+  paths and measurements instead of resizing running programs just to inspect their state.
+- A second watcher, polling loop or summary cache: existing panel state, watcher and deadlines
+  already provide the required transitions.
+
+Overview's projection, input and paint-enqueue work is named in the frame report and subtracted
+exactly once, including repeated passes. New matched open/closed batches declare their chrome
+regime and witness the view's actual effects; they do not change historical batches. No performance
+number is claimed before valid repeated measurements exist. Cross-platform proof remains F2.7.

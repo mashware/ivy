@@ -29,6 +29,7 @@ mod document;
 mod driving;
 mod links;
 pub(crate) mod pane;
+pub(crate) mod summary;
 use buttons::buttons_drawn;
 pub(crate) use document::Reader as DocumentReader;
 use driving::RetirementState;

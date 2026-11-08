@@ -1115,3 +1115,144 @@ fn integrated_chrome_batches_require_painted_pane_headers() {
     assert!(accepts("header: 0 frame(s) with a strip painted\n", ""));
     fs::remove_file(report).unwrap();
 }
+
+#[test]
+fn overview_guards_require_real_navigation_and_reject_closed_activity() {
+    use std::{fs, process::Command};
+    let report = std::env::temp_dir().join(format!("overview-guards-{}", std::process::id()));
+    let function = MEASURE
+        .split("# Overview report validation (also exercised with synthetic reports).\n")
+        .nth(1)
+        .unwrap()
+        .split("# End Overview report validation.")
+        .next()
+        .unwrap();
+    let shell = format!("set -eu\n{function}\ninvalidate() {{ exit 7; }}\ncheck_overview_report\n");
+    let accepts = |mode: &str, contents: &str| {
+        fs::write(&report, contents).unwrap();
+        Command::new("sh")
+            .arg("-c")
+            .arg(&shell)
+            .env("REPORT", &report)
+            .env("OVERVIEW", mode)
+            .env("DIRECTORIES", "4")
+            .status()
+            .unwrap()
+            .success()
+    };
+    let closed = "overview mode: closed\noverview application: frames=1, total=1ms\noverview witnesses: open=0, projected=0, painted=0, navigation=0, focus=0, deadlines=0\n";
+    assert!(accepts("closed", closed));
+    assert!(accepts(
+        "",
+        &closed.replace("mode: closed", "mode: historical")
+    ));
+    for witness in [
+        "open",
+        "projected",
+        "painted",
+        "navigation",
+        "focus",
+        "deadlines",
+    ] {
+        let leaked = closed.replace(&format!("{witness}=0"), &format!("{witness}=1"));
+        assert!(!accepts("closed", &leaked), "closed accepted {witness}");
+        assert!(
+            !accepts("", &leaked.replace("mode: closed", "mode: historical")),
+            "historical accepted {witness}"
+        );
+    }
+    let open = "overview mode: open\noverview application: frames=9, total=1ms\noverview witnesses: open=8, projected=32, painted=24, navigation=2, focus=1, deadlines=0\n";
+    assert!(accepts("open", open));
+    for (from, to) in [
+        ("frames=9", "frames=0"),
+        ("open=8", "open=0"),
+        ("projected=32", "projected=3"),
+        ("painted=24", "painted=0"),
+        ("navigation=2", "navigation=0"),
+        ("focus=1", "focus=0"),
+        ("focus=1", "focus=3"),
+    ] {
+        assert!(
+            !accepts("open", &open.replace(from, to)),
+            "accepted missing effect {from}"
+        );
+    }
+    assert!(!accepts(
+        "open",
+        &open.replace("navigation=2", "navigation=unknown")
+    ));
+    assert!(!accepts("open", closed));
+    assert!(!accepts("closed", open));
+    fs::remove_file(report).unwrap();
+}
+
+#[test]
+fn overview_variants_are_only_averaged_with_their_own_mode() {
+    use std::{fs, process::Command};
+    let directory = std::env::temp_dir().join(format!("overview-compare-{}", std::process::id()));
+    fs::create_dir_all(&directory).unwrap();
+    let first = directory.join("first");
+    let second = directory.join("second");
+    let header = |mode: &str| {
+        format!("window: 1280×800 points\ntabs: 2\n  pane 0: 50×41 (left)\noverview mode: {mode}\n")
+    };
+    let script =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/measure-frame.sh");
+    let comparable = || {
+        Command::new("sh")
+            .arg(&script)
+            .arg("compare")
+            .arg(&first)
+            .arg(&second)
+            .env_remove("MEASURE_AS_CONSOLE")
+            .output()
+            .unwrap()
+            .status
+            .success()
+    };
+    fs::write(&first, header("open")).unwrap();
+    fs::write(&second, header("open")).unwrap();
+    assert!(comparable());
+    for mode in ["closed", "historical"] {
+        fs::write(&second, header(mode)).unwrap();
+        assert!(!comparable(), "Overview open averaged with {mode}");
+    }
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn overview_controls_publish_identical_panel_documents() {
+    use std::process::Command;
+    let function = MEASURE
+        .split("\ndocument_body() {")
+        .nth(1)
+        .unwrap()
+        .split("\n# **How many filler lines")
+        .next()
+        .unwrap();
+    let shell = format!("set -eu\ndocument_body() {{{function}\ndocument_body 1 7\n");
+    for panes in [4, 16] {
+        let document = |mode: &str| {
+            let output = Command::new("sh")
+                .arg("-c")
+                .arg(&shell)
+                .env_clear()
+                .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+                .env("BATCH", format!("overview-{panes}-{mode}"))
+                .env("MIB", "44")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            output.stdout
+        };
+        assert_eq!(
+            document("closed"),
+            document("open"),
+            "matched controls must paint identical producer content"
+        );
+    }
+}

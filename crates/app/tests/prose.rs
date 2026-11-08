@@ -76,6 +76,47 @@ use std::path::Path;
 /// entry down.
 const SOURCES: &[(&str, &str, usize)] = &[
     (
+        "src/console_input.rs",
+        include_str!("../src/console_input.rs"),
+        1,
+    ),
+    ("src/summary.rs", include_str!("../src/summary.rs"), 1),
+    (
+        "src/summary/input.rs",
+        include_str!("../src/summary/input.rs"),
+        1,
+    ),
+    (
+        "src/summary/model.rs",
+        include_str!("../src/summary/model.rs"),
+        1,
+    ),
+    (
+        "src/summary/view.rs",
+        include_str!("../src/summary/view.rs"),
+        1,
+    ),
+    (
+        "src/summary/probe.rs",
+        include_str!("../src/summary/probe.rs"),
+        1,
+    ),
+    (
+        "src/panel/summary.rs",
+        include_str!("../src/panel/summary.rs"),
+        1,
+    ),
+    (
+        "src/measure/overview.rs",
+        include_str!("../src/measure/overview.rs"),
+        1,
+    ),
+    (
+        "src/tests/overview.rs",
+        include_str!("../src/tests/overview.rs"),
+        1,
+    ),
+    (
         "src/settings/editor/view/footer.rs",
         include_str!("../src/settings/editor/view/footer.rs"),
         1,
@@ -204,7 +245,7 @@ const SOURCES: &[(&str, &str, usize)] = &[
         2,
     ),
     ("src/lib.rs", include_str!("../src/lib.rs"), 6_207),
-    ("src/alarms.rs", include_str!("../src/alarms.rs"), 136),
+    ("src/alarms.rs", include_str!("../src/alarms.rs"), 133),
     ("src/closing.rs", include_str!("../src/closing.rs"), 115),
     ("src/control.rs", include_str!("../src/control.rs"), 362),
     (

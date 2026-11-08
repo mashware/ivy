@@ -207,7 +207,7 @@ are completed locally as recorded in D65.
 
 ## The shortcuts
 
-The terminal's twelve shortcuts are changed with `key.` and the name of what they do:
+The terminal's thirteen shortcuts are changed with `key.` and the name of what they do:
 
 ```
 key.split-right = ctrl+shift+e
@@ -225,6 +225,7 @@ key.close-pane = none
 | `scroll-page-up` · `scroll-page-down` | goes up and down the scrollback | `shift+pageup` · `shift+pagedown` |
 | `scroll-to-top` · `scroll-to-bottom` | goes to the ends of the scrollback | `shift+home` · `shift+end` |
 | `search` | searches the focused console's scrollback; pressed again, closes the search | `ctrl+shift+f` |
+| `overview` | opens or closes the global task summary | `ctrl+shift+o` |
 
 **A chord is written with `+`**, in any order and regardless of case: `ctrl+shift+e`, `shift+prior`,
 `alt+f4`. `ctrl`, `shift` and `alt` are valid, and **at least one is required**: without one you
@@ -343,3 +344,29 @@ Double-click its label, or right-click its header and choose Rename. Double-clic
 to rename that tab. Both labels are optional inert layout metadata saved with the layout. Maximizing a
 console temporarily hides its siblings; restoring reveals their original order and proportions.
 Hidden programs keep running. Right-clicking a header retains its console action menu without an overflow button.
+
+
+## Global task Overview
+
+The global **Overview** control shows every console in every tab, including a console hidden by
+maximization or a folded information panel. The default shortcut is **Ctrl+Shift+O**:
+
+```text
+key.overview = ctrl+shift+o
+```
+
+Like other bindings, it can be changed or disabled with `key.overview = none`, which returns the
+chord to the program when Overview is closed. The Shortcuts section in Settings edits the same key.
+
+Entries put producer-declared waiting work before blocked work, then finished work, then consoles
+with no declared claim. Each entry shows its console and tab names, literal phase, up to three
+nonempty lines of the panel and any warning about old or unreadable state. A missing claim means
+**No attention requested**, not proof that the program is working; a console with no document says
+**No published state**. When no console has a document, the screen says **No task state has been
+published yet** and still lists all consoles.
+
+Click an entry, or use Up/Down/Home/End and Enter, to open its console. A hidden target restores its
+tab's arrangement before taking focus. Escape, Close or the Overview control returns to the console.
+Opening and closing the screen preserves console dimensions, programs, history and panel ownership.
+All programs continue running. Producer actions and links are inert here; return to the console to
+use them. Settings and Overview open separately so a settings draft is not discarded.

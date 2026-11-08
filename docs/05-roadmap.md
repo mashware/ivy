@@ -133,7 +133,7 @@ built before Phase 2 closed (#226); its completion does not close F2.7.
 | Phase 1 — Minimal prototype | done | Phase 0 — Done |
 | Phase 2 — A real host | pending | Phase 1 — Minimal prototype |
 | Phase 3 — Bidirectional | done | Phase 1 — Minimal prototype |
-| Phase 4 — Summary view | pending | Phase 3 — Bidirectional |
+| Phase 4 — Summary view | done | Phase 3 — Bidirectional |
 | Phase 5 — Supervisor | pending | Phase 4 — Summary view |
 
 Phases 4 and 5 remain headlines, with no actionable items until their work is defined. Their

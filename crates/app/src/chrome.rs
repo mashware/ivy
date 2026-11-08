@@ -95,6 +95,7 @@ enum Action {
     SplitDown,
     NewTab,
     Search,
+    Overview,
     Menu,
     Preferences,
     Shortcuts,
@@ -160,6 +161,12 @@ fn button(ui: &egui::Ui, rect: Rect, label: &str, hint: &str, bg: Color32, fg: C
         "Search console" => {
             p.circle_stroke(at(-1.5, -1.5), 6.5 * scale, stroke);
             line((4.0, 4.0), (9.0, 9.0));
+        }
+        "Overview" => {
+            outline((-9.0, -8.0), (9.0, 8.0), 2.0);
+            for y in [-4.0, 0.0, 4.0] {
+                line((-5.0, y), (5.0, y));
+            }
         }
         "Menu" => {
             for y in [-6.0, 0.0, 6.0] {
@@ -254,6 +261,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         ("−", "Minimize window", Action::Minimize),
         ("☰", "Menu", Action::Menu),
         ("⌕", "Search console", Action::Search),
+        ("≡", "Overview", Action::Overview),
     ];
     let skip = if cfg!(target_os = "macos") { 3 } else { 0 };
     for (i, (label, hint, cmd)) in right.into_iter().skip(skip).enumerate() {
@@ -297,7 +305,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         - if compact {
             40.0
         } else {
-            6.0 + (5 - skip) as f32 * width
+            6.0 + (6 - skip) as f32 * width
         };
     let drag = Rect::from_min_max(
         egui::pos2(left_end, row.top()),
@@ -348,6 +356,12 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         ("Preferences", Action::Preferences, None, true),
         ("Keyboard shortcuts", Action::Shortcuts, None, false),
         (
+            "Overview",
+            Action::Overview,
+            Some(crate::keyboard::Action::Overview),
+            true,
+        ),
+        (
             "Search console",
             Action::Search,
             Some(crate::keyboard::Action::Search),
@@ -357,7 +371,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         ("Maximize window", Action::Maximize, None, false),
         ("Close window", Action::Close, None, false),
     ];
-    let menu_entries = &menu_entries[..if compact { 10 } else { 6 }];
+    let menu_entries = &menu_entries[..if compact { 11 } else { 7 }];
     let menu_height = 12.0
         + menu_entries.len() as f32 * 30.0
         + menu_entries.iter().filter(|entry| entry.3).count() as f32 * 9.0;
@@ -478,7 +492,14 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     }
     let elapsed = started.elapsed();
     window.chrome.record_work(elapsed);
-    if window.settings_editor.is_open() || !ui.is_enabled() {
+    if window.settings_editor.is_open()
+        || !ui.is_enabled()
+        || (crate::summary::blocked(window, &ctx)
+            && !matches!(
+                action,
+                Some(Action::Overview | Action::Minimize | Action::Maximize | Action::Close)
+            ))
+    {
         return owned;
     }
     if action.is_some() && !matches!(action, Some(Action::Menu)) {
@@ -519,6 +540,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
                 crate::search::apply(&mut pane.search, &mut pane.screen, steps);
             }
         }
+        Some(Action::Overview) => crate::summary::toggle(window, &ctx),
         Some(Action::Menu) => window.chrome.menu = !window.chrome.menu,
         Some(Action::Preferences) => {
             window.chrome.menu = false;

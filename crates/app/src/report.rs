@@ -177,6 +177,7 @@ impl Window {
         self.strips.close_the_frame();
         self.settings_editor.close_frame();
         self.chrome.close_frame();
+        self.summary.timing.close_frame();
 
         // **And the raw-input hook's is declared here, AFTER emptying.** See
         // [`Window::spent_injecting`]: it ran after the frame being closed had finished, so it
@@ -374,6 +375,7 @@ impl Window {
         // the number would exist and **nobody could audit it**.
         self.settings_editor.publish(to)?;
         self.chrome.publish(to)?;
+        self.summary.timing.publish(to)?;
         self.saving.publish(to)?;
         // **And discovery the same: its row goes after the rest because it too is discounted from
         // it.** It is the most expensive span this project adds outside a console, so without
