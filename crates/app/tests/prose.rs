@@ -1444,6 +1444,10 @@ const DOCUMENTS: &[(&str, &str)] = &[
         "docs/09-prose-glossary.md",
         include_str!("../../../docs/09-prose-glossary.md"),
     ),
+    (
+        "docs/10-installation.md",
+        include_str!("../../../docs/10-installation.md"),
+    ),
     ("README.md", include_str!("../../../README.md")),
     (
         "prototypes/README.md",

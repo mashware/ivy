@@ -48,7 +48,9 @@ still a regular terminal.
 These instructions are for a Linux desktop. Reopening Ivy restores the layout and starts fresh
 programs; it does not resume running agent sessions.
 
-Build Ivy from source. You need:
+Packaged downloads are not published yet. The first Linux packaging delivery provides a `.deb`
+builder and an explicit prerelease workflow; see the [installation and release guide](docs/10-installation.md).
+To build from source, you need:
 
 - Git and [Rust installed through rustup](https://rustup.rs/). The repository selects its pinned
   toolchain from [`rust-toolchain.toml`](rust-toolchain.toml).
