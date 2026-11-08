@@ -73,21 +73,7 @@ impl Chrome {
     }
 }
 
-pub(crate) fn viewport(builder: egui::ViewportBuilder, enabled: bool) -> egui::ViewportBuilder {
-    if !enabled {
-        return builder;
-    }
-    #[cfg(target_os = "macos")]
-    {
-        builder
-            .with_fullsize_content_view(true)
-            .with_titlebar_shown(false)
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        builder.with_decorations(false)
-    }
-}
+pub(crate) use crate::opening::chrome_viewport as viewport;
 
 mod branding;
 pub(crate) use branding::{install_logo, native_options};
@@ -101,6 +87,7 @@ enum Action {
     Overview,
     Menu,
     Preferences,
+    Viewer(bool),
     Shortcuts,
     TogglePanel,
     Minimize,
@@ -352,6 +339,8 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         ("Toggle information panel", Action::TogglePanel, None, false),
         ("Preferences", Action::Preferences, None, true),
         ("Keyboard shortcuts", Action::Shortcuts, None, false),
+        ("Markdown viewer", Action::Viewer(true), None, true),
+        ("Git diff viewer", Action::Viewer(false), None, false),
         (
             "Overview",
             Action::Overview,
@@ -368,7 +357,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         ("Maximize window", Action::Maximize, None, false),
         ("Close window", Action::Close, None, false),
     ];
-    let menu_entries = &menu_entries[..if compact { 11 } else { 7 }];
+    let menu_entries = &menu_entries[..if compact { 13 } else { 9 }];
     let menu_height = 12.0
         + menu_entries.len() as f32 * 30.0
         + menu_entries.iter().filter(|entry| entry.3).count() as f32 * 9.0;
@@ -507,6 +496,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         action,
         Some(
             Action::Search
+                | Action::Viewer(_)
                 | Action::TogglePanel
                 | Action::Minimize
                 | Action::Maximize
@@ -544,6 +534,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
             window.settings_editor.open_from_chrome();
         }
         Some(Action::Shortcuts) => window.settings_editor.open_shortcuts_from_chrome(),
+        Some(Action::Viewer(markdown)) => crate::viewer::open(window, markdown),
         Some(Action::TogglePanel) => {
             let focus = window.active().focus;
             if let Some(pane) = window

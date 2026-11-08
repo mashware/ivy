@@ -75,6 +75,59 @@ use std::path::Path;
 /// to.
 const MODULES: &[(&str, &str)] = &[
     (
+        "app/src/viewer/origin.rs",
+        include_str!("../src/viewer/origin.rs"),
+    ),
+    (
+        "app/src/viewer/delivery.rs",
+        include_str!("../src/viewer/delivery.rs"),
+    ),
+    (
+        "app/src/viewer/diff.rs",
+        include_str!("../src/viewer/diff.rs"),
+    ),
+    (
+        "app/src/viewer/review.rs",
+        include_str!("../src/viewer/review.rs"),
+    ),
+    (
+        "app/src/viewer/review/message.rs",
+        include_str!("../src/viewer/review/message.rs"),
+    ),
+    (
+        "app/src/links/local.rs",
+        include_str!("../src/links/local.rs"),
+    ),
+    (
+        "term-core/src/screen/directory.rs",
+        include_str!("../../term-core/src/screen/directory.rs"),
+    ),
+    (
+        "term-core/src/view/local.rs",
+        include_str!("../../term-core/src/view/local.rs"),
+    ),
+    (
+        "app/src/viewer/interaction_tests.rs",
+        include_str!("../src/viewer/interaction_tests.rs"),
+    ),
+    ("app/src/viewer.rs", include_str!("../src/viewer.rs")),
+    (
+        "app/src/viewer/load.rs",
+        include_str!("../src/viewer/load.rs"),
+    ),
+    (
+        "app/src/viewer/markdown.rs",
+        include_str!("../src/viewer/markdown.rs"),
+    ),
+    (
+        "app/src/viewer/tests.rs",
+        include_str!("../src/viewer/tests.rs"),
+    ),
+    (
+        "app/src/viewer/view.rs",
+        include_str!("../src/viewer/view.rs"),
+    ),
+    (
         "app/src/console_input.rs",
         include_str!("../src/console_input.rs"),
     ),

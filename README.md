@@ -9,6 +9,7 @@
 <p align="center">
   <a href="#get-started">Get started</a> ·
   <a href="#publish-your-first-panel">Try a panel</a> ·
+  <a href="#read-plans-and-review-changes">Read and review</a> ·
   <a href="docs/08-configuration.md">Configuration</a> ·
   <a href="docs/05-roadmap.md">Roadmap</a>
 </p>
@@ -37,6 +38,8 @@ still a regular terminal.
 | **A panel for each task** | Read the current step, notes, blockers and any other information its producer publishes. Resize or fold the panel away. |
 | **Attention across the workspace** | Producers declare when they need you, are blocked or have finished. Tab indicators and Overview bring those claims together. |
 | **Actions and MCP** | Producers can offer buttons with visible commands. Connected agents can publish and update panels, and open auxiliary consoles. |
+| **Markdown previews** | Ctrl-click a local Markdown path to read formatted plans and notes in a floating viewer that updates on save. |
+| **Git review beside the work** | Open a console's repository, compare changes in unified or side-by-side mode, and send reviewed comments back to that console. |
 | **Everyday terminal controls** | Copy and paste, scrollback search, text selection, clickable web links and mouse support for terminal programs. |
 | **A workspace of your own** | Restore tabs, pane layout and panel widths; follow program-published pane titles or set manual names. |
 | **Appearance and preferences** | Bundled themes, installed fonts, color emoji, optional programming ligatures, cursor settings and configurable shortcuts. |
@@ -122,6 +125,43 @@ into an auxiliary console revokes the agent's read and close handle. See the
 [architecture](docs/03-architecture.md) and [contract](docs/04-panel-contract.md) for connection
 and ownership rules.
 
+## Read plans and review changes
+
+Read the plan or inspect changes while your consoles keep running. Both viewers float above the
+panes, attached to the right edge. Drag the left edge to resize, expand the viewer, or close it;
+the console layout stays in place.
+
+### Markdown previews
+
+Hold **Ctrl** and click a local `.md` path printed by an agent or shell. Ivy opens the document
+inside the terminal, with headings, lists, tables and code. Saving the file updates the preview
+without reopening it. You can also choose **Markdown viewer** from the application menu.
+
+![Ivy showing a formatted Markdown plan in a floating viewer above running consoles](docs/images/ivy-markdown.png)
+
+*Ivy's Markdown viewer rendered with example session data and the Tokyo Night theme.*
+
+### Git review from each console
+
+Click the **branch icon** in a console's header (**Review changes**). The review opens that
+console's local repository, even when another console has keyboard focus; no repository path
+form is needed.
+
+Choose **Local changes**, **Unstaged changes**, **Staged changes**, or **Against base**. Browse
+changed files and hunks, switch between **Unified** and **Side by side**, and use line numbers
+to anchor review comments. Local changes include untracked regular files.
+
+![Ivy showing changed files, line numbers and a unified Git diff in its floating review viewer](docs/images/ivy-git-review.png)
+
+*Ivy's Git review rendered with example repository changes and the Tokyo Night theme.*
+
+Add a comment from a line, then choose **Preview comments** to read the complete message before
+inserting it into the console that opened the review. Inserting does not press Enter: submit it
+there when you are ready. The review does not stage, discard or commit changes.
+
+See [viewer configuration and limits](docs/08-configuration.md#markdown-and-git-diff-viewers)
+for directory discovery, supported files and platform behavior.
+
 ## Controls at a glance
 
 | Action | Default control |
@@ -136,7 +176,8 @@ and ownership rules.
 | Open Overview | `Ctrl+Shift+O` |
 | Scroll a page | `Shift+PageUp` / `Shift+PageDown` |
 | Scroll to top / bottom | `Shift+Home` / `Shift+End` |
-| Open a console web link | `Ctrl` + click |
+| Open a console web link or local Markdown path | `Ctrl` + click |
+| Review a console's Git changes | Branch icon in that console's header |
 
 The title bars also expose controls with the mouse. Double-click a pane name to rename it.
 Resize a panel by dragging its border; drag it closed to give the space back to the console.

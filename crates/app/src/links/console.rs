@@ -45,6 +45,26 @@ impl PaintedConsole {
         self.view.link_at(row as u16, column as u16)
     }
 
+    pub(crate) fn local_at(
+        &self,
+        point: Pos2,
+        metrics: &CellMetrics,
+        frame: u64,
+    ) -> Option<super::LocalTarget> {
+        if !self.is_current(frame) || !self.area.contains(point) {
+            return None;
+        }
+        let offset = point - self.area.min;
+        let col = offset.x / metrics.width();
+        let row = offset.y / metrics.height();
+        let size = self.view.size();
+        if col < 0.0 || row < 0.0 || col >= f32::from(size.cols) || row >= f32::from(size.rows) {
+            return None;
+        }
+        let target = self.view.local_path_at(row as u16, col as u16)?;
+        super::LocalTarget::parse(&target, self.view.working_directory())
+    }
+
     /// Shows the exact target under a Ctrl-hovering pointer, before the click that would open it.
     ///
     /// An OSC 8 label may say anything, so this is the one place its destination is visible. It
@@ -57,6 +77,20 @@ impl PaintedConsole {
         let Some(pointer) = pointer.filter(|_| opens_a_console_link(chord)) else {
             return;
         };
+        if let Some(target) = self.local_at(pointer, metrics, self.frame) {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            egui::Tooltip::always_open(
+                ui.ctx().clone(),
+                ui.layer_id(),
+                egui::Id::new(("local-link", &target.path)),
+                Rect::from_min_size(pointer, vec2(metrics.width(), metrics.height())),
+            )
+            .at_pointer()
+            .show(|ui| {
+                ui.label(target.path.display().to_string());
+            });
+            return;
+        }
         let Some(link) = self.link_at(pointer, metrics, self.frame) else {
             return;
         };

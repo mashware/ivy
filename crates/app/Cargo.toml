@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 eframe.workspace = true
+pulldown-cmark = { version = "0.13", default-features = false }
 term-core = { path = "../term-core" }
 panel-contract = { path = "../panel-contract" }
 

@@ -1,6 +1,8 @@
 //! The one boundary between producer-controlled text and the desktop's URL opener.
 
 mod console;
+mod local;
+pub(crate) use local::LocalTarget;
 
 pub(crate) use console::{ForTheBench, PaintedConsole};
 

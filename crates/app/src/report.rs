@@ -175,9 +175,7 @@ impl Window {
         // in under the clock's resolution is a frame that had one, and skipping it would make the
         // count the script reads answer a question nobody asked — see [`measure::Strips`].
         self.strips.close_the_frame();
-        self.settings_editor.close_frame();
-        self.chrome.close_frame();
-        self.summary.timing.close_frame();
+        close_views(self);
 
         // **And the raw-input hook's is declared here, AFTER emptying.** See
         // [`Window::spent_injecting`]: it ran after the frame being closed had finished, so it
@@ -375,6 +373,7 @@ impl Window {
         // the number would exist and **nobody could audit it**.
         self.settings_editor.publish(to)?;
         self.chrome.publish(to)?;
+        self.viewer.publish(to)?;
         self.summary.timing.publish(to)?;
         self.saving.publish(to)?;
         // **And discovery the same: its row goes after the rest because it too is discounted from
@@ -438,4 +437,11 @@ impl Window {
             }
         }
     }
+}
+
+fn close_views(window: &mut Window) {
+    window.settings_editor.close_frame();
+    window.chrome.close_frame();
+    window.viewer.close_frame();
+    window.summary.timing.close_frame();
 }

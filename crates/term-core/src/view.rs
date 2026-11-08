@@ -8,6 +8,8 @@
 //! keeps no reference to the screen. That allows reading it while the screen keeps
 //! advancing, and it is what lets whoever paints hold on to their own during a frame.
 
+mod local;
+
 use crate::Size;
 
 /// A color exactly as the program declared it, **unresolved**.
@@ -307,6 +309,7 @@ pub(crate) struct ViewMetadata {
     pub(crate) row_wraps: Vec<bool>,
     pub(crate) continued_from_above: bool,
     pub(crate) osc8: Vec<Osc8Span>,
+    pub(crate) working_directory: Option<std::path::PathBuf>,
 }
 
 /// A snapshot of the visible grid.
@@ -333,6 +336,7 @@ pub struct View {
     continued_from_above: bool,
     /// Semantic links present in the snapshot, stored once per contiguous run rather than per cell.
     osc8: Vec<Osc8Span>,
+    working_directory: Option<std::path::PathBuf>,
     /// Where the cursor is, **if it is visible at all**.
     ///
     /// **It is optional since there is history, and it is not prudence**: scrolling up through the history the
@@ -368,6 +372,7 @@ impl View {
             row_wraps: metadata.row_wraps,
             continued_from_above: metadata.continued_from_above,
             osc8: metadata.osc8,
+            working_directory: metadata.working_directory,
             cursor,
             scroll,
         }
@@ -453,6 +458,10 @@ impl View {
     /// OSC 8 wins over a URL-shaped label. Plain URLs are reconstructed only for the clicked
     /// logical line, joining rows only where the terminal marked a wrap. A candidate that touches a
     /// clipped edge is refused because the snapshot cannot prove that its whole target was painted.
+    pub fn working_directory(&self) -> Option<&std::path::Path> {
+        self.working_directory.as_deref()
+    }
+
     pub fn link_at(&self, row: u16, col: u16) -> Option<Link> {
         if row >= self.size.rows || col >= self.size.cols {
             return None;
@@ -811,6 +820,7 @@ mod tests {
                 row_wraps: vec![false],
                 continued_from_above: false,
                 osc8: Vec::new(),
+                working_directory: None,
             },
             None,
             0,
@@ -848,6 +858,7 @@ mod tests {
                 row_wraps,
                 continued_from_above,
                 osc8: Vec::new(),
+                working_directory: None,
             },
             None,
             0,
@@ -910,5 +921,15 @@ mod tests {
             None,
             "the snapshot activated a target whose ending had not been painted"
         );
+    }
+    #[test]
+    fn local_candidate_spans_wrapped_painted_rows() {
+        let view = text_view(&["docs/long-", "name.md:7 "], vec![true, false], false);
+        assert_eq!(
+            view.local_path_at(1, 2).as_deref(),
+            Some("docs/long-name.md:7")
+        );
+        let clipped = text_view(&["docs/long-", "name.md:7x"], vec![true, true], false);
+        assert_eq!(clipped.local_path_at(0, 2), None);
     }
 }

@@ -631,6 +631,36 @@ impl Pty {
         ))
     }
 
+    /// The foreground program's current directory on Linux, while the owned child is alive.
+    pub fn working_directory(&mut self) -> Option<std::path::PathBuf> {
+        #[cfg(target_os = "linux")]
+        {
+            let child = self.child.as_mut()?;
+            if !matches!(child.try_wait(), Ok(None)) {
+                return None;
+            }
+            let pid = self
+                .master
+                .process_group_leader()
+                .filter(|pid| *pid > 0)
+                .or_else(|| {
+                    child
+                        .process_id()
+                        .and_then(|pid| libc::pid_t::try_from(pid).ok())
+                        .filter(|pid| *pid > 0)
+                })?;
+            let path = std::fs::read_link(format!("/proc/{pid}/cwd")).ok();
+            if !matches!(child.try_wait(), Ok(None)) {
+                return None;
+            }
+            path
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            None
+        }
+    }
+
     /// Tells the program that the terminal has changed size.
     ///
     /// It is the half that makes the program inside find out and repaint. The other half —reflowing
@@ -1168,6 +1198,36 @@ mod tests {
     use super::*;
     use std::sync::mpsc::RecvTimeoutError;
     use std::time::{Duration, Instant};
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn working_directory_follows_live_pty_child_and_stops_after_exit() {
+        let (mut pty, output) = Pty::spawn(
+            "sh",
+            &["-c", "cd /tmp && printf READY && read line"],
+            Size { rows: 24, cols: 80 },
+        )
+        .unwrap();
+        let mut received = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !contains(&received, "READY") {
+            assert!(Instant::now() < deadline);
+            received.extend(
+                output
+                    .recv_timeout(Duration::from_millis(100))
+                    .unwrap_or_default(),
+            );
+        }
+        assert_eq!(
+            pty.working_directory().as_deref(),
+            Some(std::path::Path::new("/tmp"))
+        );
+        pty.write(b"\n").unwrap();
+        while pty.working_directory().is_some() {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
 
     /// A generous margin: what is checked is that the channel ends up closing, not how fast it does
     /// so. Any bounded wait serves as long as it is not infinite.

@@ -212,6 +212,11 @@ pub(crate) fn pointer(
                         window.pane_view.begin_rename(tab, name, initial);
                         false
                     }
+                    super::integrated::Target::Review => {
+                        crate::viewer::open_diff_for_pane(window, name);
+                        ui.ctx().request_repaint();
+                        false
+                    }
                     super::integrated::Target::Panel => {
                         if let Some(pane) = window.pane_called(name)
                             && pane.panel_state.is_visible(SystemTime::now())

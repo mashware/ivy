@@ -60,6 +60,20 @@ const FINISHED_CRATES: &[&str] = &["panel-contract", "host-load", "term-core", "
 /// A crate whose every file ends up here is **not** thereby ready for [`FINISHED_CRATES`]: that list
 /// is the stronger claim, and this one cannot add up to it.
 const GLOSSARY_CLEAN_FILES: &[&str] = &[
+    "app/src/viewer/diff.rs",
+    "app/src/viewer/review.rs",
+    "app/src/viewer/review/message.rs",
+    "app/src/links/local.rs",
+    "term-core/src/screen/directory.rs",
+    "term-core/src/view/local.rs",
+    "app/src/viewer/origin.rs",
+    "app/src/viewer/delivery.rs",
+    "app/src/viewer.rs",
+    "app/src/viewer/load.rs",
+    "app/src/viewer/markdown.rs",
+    "app/src/viewer/tests.rs",
+    "app/src/viewer/view.rs",
+    "app/src/viewer/interaction_tests.rs",
     "app/src/painter/pane.rs",
     "app/src/ligatures.rs",
     "app/src/ligature_tests.rs",
@@ -218,6 +232,20 @@ const GLOSSARY_PENDING_FILES: &[&str] = &[
 /// What *can* be enforced here is a **file** name, and [`no_retired_file_name_is_still_cited`] reads
 /// this file for exactly that — it found two.
 const CITATIONS_CHECKED: &[(&str, &str)] = &[
+    ("app/src/viewer/diff.rs", "app"),
+    ("app/src/viewer/review.rs", "app"),
+    ("app/src/viewer/review/message.rs", "app"),
+    ("app/src/links/local.rs", "app"),
+    ("term-core/src/screen/directory.rs", "term-core"),
+    ("term-core/src/view/local.rs", "term-core"),
+    ("app/src/viewer/origin.rs", "app"),
+    ("app/src/viewer/delivery.rs", "app"),
+    ("app/src/viewer.rs", "app"),
+    ("app/src/viewer/load.rs", "app"),
+    ("app/src/viewer/markdown.rs", "app"),
+    ("app/src/viewer/tests.rs", "app"),
+    ("app/src/viewer/view.rs", "app"),
+    ("app/src/viewer/interaction_tests.rs", "app"),
     ("app/src/painter/pane.rs", "app"),
     ("app/src/ligatures.rs", "app"),
     ("app/src/ligature_tests.rs", "app"),

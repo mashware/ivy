@@ -437,3 +437,53 @@ tab's arrangement before taking focus. Escape, Close or the Overview control ret
 Opening and closing the screen preserves console dimensions, programs, history and panel ownership.
 All programs continue running. Producer actions and links are inert here; return to the console to
 use them. Settings and Overview open separately so a settings draft is not discarded.
+
+## Markdown and Git diff viewers
+
+Ctrl-click a local `.md` path printed by a console to open Markdown inside the terminal.
+OSC 8 `file://` links use the same viewer. Relative paths resolve against the directory explicitly
+published by that console using OSC 7; without one, the viewer asks for an absolute path.
+Only empty authorities, localhost and the verified local hostname are accepted as local.
+For a shell without OSC 7 integration, print the directory before printing a relative path:
+
+```sh
+printf '\033]7;file://%s%s\007' "$(hostname)" "$PWD"
+```
+
+Each console header has a **Review changes** control beside its information-panel and maximize
+controls. Its context menu offers the same action when the header is narrow. It opens the clicked
+console's repository directly, including when another console has keyboard focus. No repository
+path form is shown. On Linux, when the console has not published OSC 7 metadata, the current
+foreground program's working directory is read from the operating system. An explicitly invalid or
+remote OSC 7 directory does not fall back to an unrelated local directory. On other platforms the
+console must publish a usable local OSC 7 directory. If its directory cannot be read, the review
+shows that fact instead of choosing another console's repository.
+
+The global application menu retains **Markdown viewer** and **Git diff viewer**; the latter uses
+the focused console. Markdown can also be opened using its file input.
+The viewer floats above all console partitions, anchored to the right. Drag its left edge to resize,
+use **Expand**/**Restore**, or dismiss it with **Close** or Escape while it owns keyboard focus.
+Opening and resizing it preserves every console's grid. Clicking a console returns typing there.
+
+Markdown displays headings, lists, tables, code and inline formatting. It refreshes every second
+while open, including atomic file replacement; background refresh keeps the document in place.
+Links, image descriptions and HTML remain inert. Documents must be UTF-8 regular files of at most
+1 MiB; a single rendered paragraph, code line or table row must fit within 16 KiB. Failed reloads
+show their error and preserve the last good document.
+
+Git offers **Local** (tracked worktree against HEAD plus untracked regular files), **Unstaged**
+(worktree against index), **Staged** (index against HEAD), and **Against base** (worktree against a
+verified commit reference). The latter three cover tracked files. Choose files, unified or side-by-side
+view, and previous/next hunk. Line numbers identify the old and new sides. Binary and skipped new files
+have notices. Choose **Refresh** after further edits; it is disabled while review comments are pending.
+The review is read-only: no staging, discarding or committing.
+
+Use a line's **+** to add a comment. **Preview comments** shows the complete message, including
+repository, comparison, source console and file/side/line references. **Insert into console** pastes
+that message into the pinned originating console without adding Enter; review and submit it there.
+The action refuses a closed origin or a console without multiline paste support and keeps the draft.
+Clear or send comments before changing repository, comparison or origin.
+
+Git output and included new-file contents share a 4 MiB limit. Each Git command has a five-second
+timeout; errors appear in the viewer. Paths, modes, comments and width are transient and have no
+configuration keys.

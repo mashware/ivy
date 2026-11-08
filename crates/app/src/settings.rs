@@ -2172,7 +2172,19 @@ mod tests {
         /// artifact to satisfy a test, which is the tail wagging the dog.
         const DRAWN_RULE: char = '\u{2500}';
 
-        const SOURCES: [(&str, &str); 30] = [
+        const SOURCES: [(&str, &str); 39] = [
+            ("viewer/origin.rs", include_str!("viewer/origin.rs")),
+            ("viewer/delivery.rs", include_str!("viewer/delivery.rs")),
+            ("viewer/diff.rs", include_str!("viewer/diff.rs")),
+            ("viewer/review.rs", include_str!("viewer/review.rs")),
+            (
+                "viewer/review/message.rs",
+                include_str!("viewer/review/message.rs"),
+            ),
+            ("viewer.rs", include_str!("viewer.rs")),
+            ("viewer/view.rs", include_str!("viewer/view.rs")),
+            ("viewer/load.rs", include_str!("viewer/load.rs")),
+            ("viewer/markdown.rs", include_str!("viewer/markdown.rs")),
             ("chrome/branding.rs", include_str!("chrome/branding.rs")),
             ("chrome.rs", include_str!("chrome.rs")),
             ("pane_view.rs", include_str!("pane_view.rs")),

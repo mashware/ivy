@@ -76,6 +76,62 @@ use std::path::Path;
 /// entry down.
 const SOURCES: &[(&str, &str, usize)] = &[
     (
+        "src/viewer/origin.rs",
+        include_str!("../src/viewer/origin.rs"),
+        0,
+    ),
+    (
+        "src/viewer/delivery.rs",
+        include_str!("../src/viewer/delivery.rs"),
+        0,
+    ),
+    (
+        "src/viewer/diff.rs",
+        include_str!("../src/viewer/diff.rs"),
+        0,
+    ),
+    (
+        "src/viewer/review.rs",
+        include_str!("../src/viewer/review.rs"),
+        0,
+    ),
+    (
+        "src/viewer/review/message.rs",
+        include_str!("../src/viewer/review/message.rs"),
+        0,
+    ),
+    (
+        "src/links/local.rs",
+        include_str!("../src/links/local.rs"),
+        0,
+    ),
+    ("src/viewer.rs", include_str!("../src/viewer.rs"), 0),
+    (
+        "src/viewer/load.rs",
+        include_str!("../src/viewer/load.rs"),
+        0,
+    ),
+    (
+        "src/viewer/markdown.rs",
+        include_str!("../src/viewer/markdown.rs"),
+        0,
+    ),
+    (
+        "src/viewer/tests.rs",
+        include_str!("../src/viewer/tests.rs"),
+        0,
+    ),
+    (
+        "src/viewer/view.rs",
+        include_str!("../src/viewer/view.rs"),
+        0,
+    ),
+    (
+        "src/viewer/interaction_tests.rs",
+        include_str!("../src/viewer/interaction_tests.rs"),
+        0,
+    ),
+    (
         "src/painter/pane.rs",
         include_str!("../src/painter/pane.rs"),
         129,

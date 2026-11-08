@@ -241,6 +241,9 @@ pub(crate) fn before_keys(
                         action = Some(5 + index);
                     }
                 }
+                if ui.button("Review changes").clicked() {
+                    action = Some(7);
+                }
                 if ui.button("Toggle information panel").clicked() {
                     action = Some(1);
                 }
@@ -281,6 +284,9 @@ pub(crate) fn before_keys(
                 if let Err(error) = window.close_a_pane_called(pane, ui.ctx()) {
                     eprintln!("the button could not close its console: {error}");
                 }
+            }
+            Some(7) => {
+                crate::viewer::open_diff_for_pane(window, pane);
             }
             Some(index @ (5 | 6)) => {
                 window.pane_view.clear(tab);

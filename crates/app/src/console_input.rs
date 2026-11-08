@@ -5,7 +5,7 @@ use std::time::Instant;
 
 /// Sends what was typed in this pass to **one single** console, the one that has the focus.
 ///
-/// It lives apart from the painting for the same reason as [`Self::handle_the_mouse`]: sending
+/// It lives apart from the painting for the same reason as [`Window::handle_the_mouse`]: sending
 /// it to both would write the same key into two programs, which is exactly what «without
 /// stepping on each other» forbids, and inside the interface pass that decision cannot be
 /// checked without opening a window.

@@ -1,5 +1,7 @@
 //! The terminal state: bytes are interpreted and settle into a grid.
 
+mod directory;
+
 use alacritty_terminal::Term;
 use alacritty_terminal::grid::{Dimensions, Grid, Scroll as GridScroll};
 use alacritty_terminal::index::{Boundary, Column, Direction, Line, Point, Side};
@@ -60,6 +62,7 @@ pub struct Screen {
     parser: Processor,
     titles: title::Listener,
     terminal_title: Option<String>,
+    directory: directory::Directory,
 }
 
 /// A cell of the **visible** grid, and which half of it is being talked about.
@@ -230,6 +233,7 @@ impl Screen {
             parser: Processor::new(),
             titles,
             terminal_title: None,
+            directory: directory::Directory::default(),
         }
     }
 
@@ -251,6 +255,7 @@ impl Screen {
     /// sequence split across two deliveries produces the same result as a whole one. It is what makes
     /// it correct for the PTY to deliver partial reads.
     pub fn advance(&mut self, bytes: &[u8]) {
+        self.directory.advance(bytes);
         self.parser.advance(&mut self.term, bytes);
         if let Some(update) = self.titles.take() {
             self.terminal_title = update;
@@ -261,6 +266,20 @@ impl Screen {
     ///
     /// This is transient terminal metadata, not an authenticated session identity. The parser's
     /// title events update it; a silent process exit does not clear it.
+    /// Whether a file URI authority names this machine.
+    pub fn is_local_file_host(host: &str) -> bool {
+        directory::is_local_host(host.as_bytes())
+    }
+
+    /// Whether this screen has received an OSC 7 directory report, including an unusable one.
+    pub fn working_directory_reported(&self) -> bool {
+        self.directory.reported()
+    }
+
+    pub fn working_directory(&self) -> Option<&std::path::Path> {
+        self.directory.path()
+    }
+
     pub fn terminal_title(&self) -> Option<&str> {
         self.terminal_title.as_deref()
     }
@@ -501,6 +520,7 @@ impl Screen {
                 row_wraps,
                 continued_from_above,
                 osc8,
+                working_directory: self.working_directory().map(std::path::Path::to_path_buf),
             },
             cursor,
             contents.display_offset,

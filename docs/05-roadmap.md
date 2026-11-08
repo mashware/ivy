@@ -106,6 +106,18 @@ nobody has reviewed it», «this one is running low on context».
 **Why it is far off and it does not matter:** it needs no new piece, it is Phase 3 used a different
 way. If it is never done, nothing extra will have been built to get there. That is on purpose.
 
+## Document views — «Read beside the consoles»
+
+**What you see:** an optional view to the right of the consoles, opened from the application menu.
+
+**What you can do:** read a Markdown file with formatting while an agent works beside it and see
+its saved changes without reopening. Or choose a Git repository and inspect its staged or unstaged
+differences, with added and removed lines distinguished. Resize the view or close it without
+restarting any console. The sources are chosen explicitly and both views are read-only.
+
+This is a standalone addition requested after the terminal's core workflow; it does not change
+what completing any of the five phases means. Installable plugins are outside this addition.
+
 ## Where the cut is
 
 | | |
@@ -447,6 +459,15 @@ use the same channel. If it is never done, nothing has been lost.
 > speaking MCP like any other. See [02-decisions.md](02-decisions.md) → D4.
 
 ---
+
+## Document views — Standalone addition
+
+- [ ] **V1 — Markdown and Git review viewers** ([#337](https://github.com/mashware/agent-terminal/issues/337)).
+  A transient floating overlay opens explicit paths, including local Markdown paths clicked in a
+  console. Markdown refreshes on save. Git presents files and hunks in unified or split form, with
+  local and base comparisons. Review comments are previewed before insertion into the pinned origin
+  console. D72 records input isolation, bounded loading and the remaining contract. Native desktop
+  validation remains distinct from headless proofs.
 
 ## Loose ends
 

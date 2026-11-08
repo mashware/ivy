@@ -62,6 +62,7 @@ mod tab_bar;
 pub mod theme;
 mod tiling;
 mod tree;
+mod viewer;
 mod visibility;
 pub mod watcher;
 
@@ -1049,6 +1050,7 @@ struct Window {
     chrome: chrome::Chrome,
     pane_view: pane_view::State,
     summary: summary::State,
+    viewer: viewer::State,
     /// The previous frame's mirror. **The deadline is armed against it**, so the deadline is
     /// rearmed **when something changes** and not when something is unwritten: without this, a
     /// non-writable directory would leave the difference in place and **the window would never go
@@ -1575,11 +1577,8 @@ impl eframe::App for Window {
         let chrome_owned = chrome::before_keys(self, ui, &metrics);
         self.timed_separately += self.chrome.take_cost();
         overview_owned |= summary::blocked(self, ui.ctx());
-        let requests = if pane_owned || overview_owned {
-            Vec::new()
-        } else {
-            settings::editor::before_keys(self, ui, &metrics)
-        };
+        let (viewer_owned, requests) =
+            viewer::keys(self, ui, &metrics, pane_owned || overview_owned);
         let area = ui.max_rect();
 
         // **The order is applied before tiling**, so that what gets painted in this same frame is
@@ -1596,7 +1595,8 @@ impl eframe::App for Window {
         self.answer_the_windows_requests(ui.ctx(), area, &metrics);
 
         pane_view::reconcile(self);
-        let header_owns_pointer = overview_owned
+        let header_owns_pointer = viewer_owned
+            || overview_owned
             || pane_owned
             || chrome_owned
             || header::menu::pointer_blocked(self, ui.ctx());
@@ -6895,6 +6895,7 @@ mod tests {
             chrome: chrome::Chrome::default(),
             pane_view: pane_view::State::default(),
             summary: summary::State::default(),
+            viewer: viewer::State::default(),
             link_press_in_progress: None,
             drag_in_progress: None,
             last_painted: Vec::new(),

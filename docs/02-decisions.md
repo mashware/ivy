@@ -8455,6 +8455,7 @@ span. Name resolution belongs inside the existing chrome and Overview spans. The
 watcher or lower budget for hidden panes, and no new performance claim without valid measurement.
 
 
+
 ## D70 — Optional programming ligatures reuse the font shaper without changing terminal cells
 
 **Design for [#335](https://github.com/mashware/agent-terminal/issues/335), 8 November 2026.** The user
@@ -8578,3 +8579,40 @@ viewport icon alone proves.
 - Loading or rasterizing SVG inside the frame: the approved PNG can be embedded and decoded once,
   without adding an SVG renderer or disk access to the painting path.
 - Replacing any controls with branding: window and console actions keep their existing geometry.
+
+## D72 — Document viewers overlay the consoles and never become consoles
+
+**8 November 2026 — #337.** Markdown and Git changes open in a transient, resizable floating
+view above the consoles. The console tree and its running programs retain their geometry and identity.
+The user chooses the source explicitly: a local Markdown path, or the review control of a console.
+Git opens that console's working directory without a path form. The directory comes from its OSC 7
+metadata, or on Linux from its live foreground process when no directory has been published. An
+explicit unusable/remote directory is never replaced with another console's or the app's directory.
+The terminal does not infer task state. The viewer has no PTY, producer identity, attention claim or MCP endpoint.
+It is not persisted. The view owns its gestures and keyboard input until focus returns to a console;
+its dismissal consumes the input that closed it. Viewer frame work is named and discounted from the
+framework remainder.
+
+Markdown renders headings, lists, tables and code as native widgets and refreshes when its selected
+file changes. HTML and embedded assets are inert. Loading is bounded and runs off the window thread;
+errors and oversized content are visible rather than silently truncated.
+
+Git presents files and hunks in unified or side-by-side form. Local changes compare tracked content
+with HEAD and include untracked files; a user-selected base provides another comparison. Git runs
+without a shell, pager, external diff, text conversion or fsmonitor, with optional locks disabled and
+its ownership checks intact. File and process limits are enforced away from the UI thread. Untracked
+symlinks are not read.
+
+Review comments can be drafted against the displayed changes. A preview shows the complete text
+before insertion into the console that opened the review, pinned by identity; insertion requires an
+explicit user action. A missing origin is reported instead of silently choosing another console.
+
+Discarded: general plugin runtime (no second extension contract needed for two built-in readers),
+new console types (would entangle PTY identity, session restore and MCP controls), webview HTML
+(unneeded scripting/network surface), shell-composed Git commands (paths are data), and automatic
+repository guessing from task text, other consoles or the app's working directory (the user chooses
+the source console explicitly).
+
+Native desktop behaviour remains a separate verification from headless input and rendering tests;
+no performance figure is claimed from source inspection.
+

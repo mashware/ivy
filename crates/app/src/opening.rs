@@ -308,6 +308,7 @@ fn initial_window(
         chrome: crate::chrome::Chrome::default(),
         pane_view: crate::pane_view::State::default(),
         summary: crate::summary::State::default(),
+        viewer: crate::viewer::State::default(),
         link_press_in_progress: None,
         drag_in_progress: None,
         last_painted: Vec::new(),
@@ -567,4 +568,23 @@ pub(crate) fn create_a_tab(window: &mut Window, ctx: &egui::Context) {
     // carries.
     window.bring_to_front(opened, ctx);
     window.timed_separately += before.elapsed();
+}
+
+pub(crate) fn chrome_viewport(
+    builder: egui::ViewportBuilder,
+    enabled: bool,
+) -> egui::ViewportBuilder {
+    if !enabled {
+        return builder;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        builder
+            .with_fullsize_content_view(true)
+            .with_titlebar_shown(false)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        builder.with_decorations(false)
+    }
 }

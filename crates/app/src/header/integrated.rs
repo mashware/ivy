@@ -76,6 +76,7 @@ pub(crate) fn paint_strip(
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Target {
     Label,
+    Review,
     Panel,
     Zoom,
     Close,
@@ -84,16 +85,16 @@ pub(crate) enum Target {
 fn targets(strip: egui::Rect, _m: &CellMetrics, can_close: bool) -> Vec<(Target, egui::Rect)> {
     let width = 25.0;
     let right = (strip.right() - super::CORNER_LEFT_TO_THE_GRAB).max(strip.left());
-    let count = if can_close { 3 } else { 2 };
+    let count = if can_close { 4 } else { 3 };
     let left = right - count as f32 * width;
-    if left < strip.left() {
+    if left - strip.left() < 30.0 {
         return vec![(Target::Label, strip)];
     }
     let mut out = vec![(
         Target::Label,
         egui::Rect::from_min_max(strip.min, egui::pos2(left, strip.bottom())),
     )];
-    for (i, target) in [Target::Panel, Target::Zoom, Target::Close]
+    for (i, target) in [Target::Review, Target::Panel, Target::Zoom, Target::Close]
         .into_iter()
         .filter(|target| *target != Target::Close || can_close)
         .enumerate()
@@ -150,6 +151,7 @@ fn paint(
     for (target, rect) in targets(strip, m, can_close) {
         let tooltip = match target {
             Target::Label => "Double-click to rename",
+            Target::Review => "Review changes",
             Target::Panel if folded => "Show information panel",
             Target::Panel => "Hide information panel",
             Target::Zoom if zoomed => "Restore console",
@@ -220,6 +222,14 @@ fn paint_icon(
         );
     };
     match target {
+        Target::Review => {
+            line(at(-5.0, -5.0), at(-5.0, 5.0));
+            line(at(5.0, -5.0), at(5.0, -1.0));
+            line(at(5.0, -1.0), at(-5.0, 3.0));
+            for p in [at(-5.0, -6.0), at(-5.0, 6.0), at(5.0, -6.0)] {
+                painter.circle_filled(p, 2.0 * scale, color);
+            }
+        }
         Target::Panel => {
             outline(at(-9.0, -8.0), at(9.0, 8.0));
             line(at(3.0, -8.0), at(3.0, 8.0));
@@ -270,6 +280,7 @@ mod tests {
                 targets.iter().map(|(t, _)| *t as u8).collect::<Vec<_>>(),
                 vec![
                     Target::Label as u8,
+                    Target::Review as u8,
                     Target::Panel as u8,
                     Target::Zoom as u8,
                     Target::Close as u8

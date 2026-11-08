@@ -32,6 +32,41 @@ pub(super) fn has_primary(queue: &[ButtonPress], pressed: bool) -> bool {
         .any(|button| button.pressed == pressed && button.button == egui::PointerButton::Primary)
 }
 
+fn end_link_gesture(gesture: &mut Option<LinkGesture>, frame: u64) {
+    if gesture.is_some_and(|gesture| gesture.released_in.is_some_and(|at| at != frame)) {
+        *gesture = None;
+    }
+}
+
+fn open_local_press(
+    window: &mut Window,
+    metrics: &CellMetrics,
+    frame: u64,
+    queue: &mut Vec<ButtonPress>,
+    which: usize,
+) -> bool {
+    let button = queue[which];
+    let local = window.active().panes().into_iter().find_map(|pane| {
+        let painted = pane.painted_console.as_ref()?;
+        painted
+            .local_at(button.at, metrics, frame)
+            .map(|target| (pane.name, target))
+    });
+    let Some((pane, target)) = local else {
+        return false;
+    };
+    crate::viewer::open_markdown_target(window, pane, target.path, target.line);
+    let released = has_primary(&queue[which + 1..], false);
+    queue.remove(which);
+    window.link_press_in_progress = Some(LinkGesture {
+        pane,
+        opened_in: frame,
+        released_in: released.then_some(frame),
+    });
+    window.the_press_went_to_the_program = false;
+    true
+}
+
 impl Window {
     /// Whether the bench is running the link gesture, which suppresses the desktop hand-off.
     pub(crate) fn measuring_links(&self) -> bool {
@@ -49,12 +84,7 @@ impl Window {
 
     /// Lets go of a link gesture whose release belonged to an earlier frame.
     pub(super) fn a_link_gesture_ended(&mut self, frame: u64) {
-        if self
-            .link_press_in_progress
-            .is_some_and(|gesture| gesture.released_in.is_some_and(|at| at != frame))
-        {
-            self.link_press_in_progress = None;
-        }
+        end_link_gesture(&mut self.link_press_in_progress, frame);
     }
 
     /// Marks the link gesture in progress as released in this frame, unless it was opened in it:
@@ -90,10 +120,14 @@ impl Window {
                 continue;
             }
 
-            let panel_click = button.chord.is_none();
-            let console_click = opens_a_console_link(button.chord);
-            if !panel_click && !console_click {
+            if !button.chord.is_none() && !opens_a_console_link(button.chord) {
                 which += 1;
+                continue;
+            }
+
+            if opens_a_console_link(button.chord)
+                && open_local_press(self, metrics, frame, &mut queue, which)
+            {
                 continue;
             }
 
@@ -105,7 +139,7 @@ impl Window {
                     .painted_console
                     .as_ref()
                     .filter(|painted| painted.is_current(frame))?;
-                let (target, origin) = if panel_click {
+                let (target, origin) = if button.chord.is_none() {
                     pane.panel_state
                         .link_at(button.at)
                         .map(|target| (target.to_owned(), Origin::Panel))
