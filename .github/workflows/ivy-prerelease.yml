@@ -1,0 +1,117 @@
+name: Ivy Linux package
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the selected version tag as an unsigned Linux-only prerelease
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ivy-package-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Validate selected tag for publication
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: |
+          test "$REF_TYPE" = tag
+          test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+          python3 scripts/release.py version --tag "$REF_NAME"
+      - name: Install Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential libxkbcommon-dev libssl-dev pkg-config dpkg-dev binutils desktop-file-utils
+      - name: Build pinned workspace binaries
+        run: cargo build --locked --release -p app -p panel-control --bins
+      - name: Package and record checksums
+        env:
+          COMMIT: ${{ github.sha }}
+        run: |
+          version=$(python3 scripts/release.py version)
+          scripts/package-linux.sh --binary-dir target/release --output-dir dist --version "$version"
+          scripts/test-linux-package.sh "dist/ivy_${version/-/~}_amd64.deb" "$version"
+          python3 -m unittest scripts/test_release.py -v
+          python3 scripts/release.py generate --directory dist --commit "$COMMIT" --built-on ubuntu-24.04
+          (cd dist && sha256sum --check SHA256SUMS)
+      - name: Upload package and metadata
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ivy-linux-x86_64
+          path: dist/
+          if-no-files-found: error
+
+  install:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        ubuntu: ['24.04', '26.04']
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: ivy-linux-x86_64
+          path: dist
+      - name: Install, upgrade and remove in a disposable Ubuntu container
+        env:
+          UBUNTU_VERSION: ${{ matrix.ubuntu }}
+        run: |
+          docker run --rm --env IVY_DISPOSABLE_CONTAINER=yes \
+            --mount "type=bind,src=$PWD/packaging/linux,dst=/checks,readonly" \
+            --mount "type=bind,src=$PWD/dist,dst=/dist,readonly" \
+            "ubuntu:$UBUNTU_VERSION" bash -euc '
+              set -- /dist/*.deb
+              test "$#" -eq 1
+              package=$1
+              apt-get update -qq
+              DEBIAN_FRONTEND=noninteractive apt-get install -y "$package"
+              dpkg -r ivy-terminal
+              /checks/test-install.sh "$package"
+            '
+
+  publish:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
+    needs: [build, install]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: ivy-linux-x86_64
+          path: dist
+      - name: Validate and publish complete draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -eu
+          test "$REF_TYPE" = tag
+          test "$(git rev-parse HEAD)" = "$COMMIT"
+          (cd dist && sha256sum --check SHA256SUMS)
+          python3 scripts/release.py generate --directory dist --commit "$COMMIT" --built-on ubuntu-24.04 --tag "$TAG"
+          (cd dist && sha256sum --check SHA256SUMS)
+          if gh release view "$TAG" --json id >/dev/null 2>&1; then
+            echo 'A release already exists for this tag; inspect it instead of overwriting it.' >&2
+            exit 1
+          fi
+          gh release create "$TAG" dist/*.deb dist/release-manifest.json dist/SHA256SUMS --verify-tag --draft --prerelease --title "$TAG" --notes "Unsigned experimental Linux x86_64 build."
+          gh release edit "$TAG" --draft=false --prerelease
