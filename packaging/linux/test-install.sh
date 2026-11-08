@@ -36,6 +36,7 @@ dpkg -i "$package"
 [[ $(dpkg-query -W -f='${Version}' ivy-terminal) == "$version" ]]
 check_data
 check_commands
+"$(dirname "$(realpath "$0")")/test-runtime.sh"
 dpkg -r ivy-terminal
 check_data
 [[ ! -e /usr/bin/ivy && ! -e /usr/bin/panel-mcp ]]

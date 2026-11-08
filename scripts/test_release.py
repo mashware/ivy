@@ -79,6 +79,33 @@ class ReleaseTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
 
 
+    def test_remote_tag_must_still_name_the_approved_commit(self):
+        local = self.root / "checkout"
+        remote = self.root / "remote.git"
+
+        def git(*args):
+            return subprocess.check_output(
+                ["git", "-c", "user.name=Package test", "-c", "user.email=test@example.invalid",
+                 "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgSign=false", *args],
+                stderr=subprocess.DEVNULL, text=True,
+            ).strip()
+
+        git("init", "--quiet", "--object-format=sha1", str(local))
+        git("-C", str(local), "commit", "--quiet", "--allow-empty", "-m", "first")
+        first = git("-C", str(local), "rev-parse", "HEAD")
+        git("-C", str(local), "tag", "--no-sign", "-a", "v0.1.0-alpha.1", "-m", "alpha")
+        git("-C", str(local), "commit", "--quiet", "--allow-empty", "-m", "second")
+        second = git("-C", str(local), "rev-parse", "HEAD")
+        git("clone", "--quiet", "--bare", str(local), str(remote))
+        git("-C", str(local), "remote", "add", "origin", str(remote))
+        command = ["bash", str(SCRIPT.with_name("verify-release-tag.sh")), "v0.1.0-alpha.1", first]
+        self.assertEqual(subprocess.run(command, cwd=local, capture_output=True).returncode, 0)
+        git("--git-dir", str(remote), "update-ref", "refs/tags/v0.1.0-alpha.1", second)
+        self.assertNotEqual(subprocess.run(command, cwd=local, capture_output=True).returncode, 0)
+        git("--git-dir", str(remote), "update-ref", "-d", "refs/tags/v0.1.0-alpha.1")
+        self.assertNotEqual(subprocess.run(command, cwd=local, capture_output=True).returncode, 0)
+
+
 
 if __name__ == "__main__":
     unittest.main()

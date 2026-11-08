@@ -91,9 +91,11 @@ python3 -m unittest scripts/test_release.py -v
 
 `packaging/linux/test-install.sh` is an **installation test for disposable containers only**. It
 requires root and `IVY_DISPOSABLE_CONTAINER=yes`, installs an older fixture package, upgrades to
-the candidate, removes it, and checks that user configuration/layout survive. Never run it as
+the candidate, removes it, and checks that user configuration/layout survive. Before removal, its runtime helper launches the
+installed terminal under Xvfb and exercises the installed MCP bridge, including publication/readback
+from that console. These synthetic checks remain headless evidence. Never run it as
 an ordinary test on a workstation; use a clean Ubuntu 24.04 or 26.04 container with the package's
-dependencies installed.
+dependencies installed, plus Python 3, Xvfb, xauth and xdotool.
 
 Archive inspection, container installation and headless application launches are separate from
 real-desktop tests. They cannot prove desktop keyboard, clipboard, launcher icon association,
@@ -113,7 +115,9 @@ on that tag with `publish=true`. The workflow rejects a tag/version mismatch, bu
 Linux package, requires both Ubuntu installation checks, and uses a dependent publication job. It creates a draft prerelease, uploads all
 assets, then makes that complete draft visible. A failed build publishes nothing; a failed upload
 leaves an unpublished draft to inspect. Existing release assets must not be overwritten silently.
-If publication fails, inspect the draft before retrying; there is no automatic replacement path.
+Before creating the draft and before publishing it, the current remote tag must still resolve to
+the approved commit; a moved or removed tag stops publication. If publication fails, inspect the
+draft before retrying; there is no automatic replacement path.
 
 The workflow uses read-only repository access for builds and write access only in its manual
 publication job. It does not use signing credentials. Release metadata records the workspace
