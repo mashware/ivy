@@ -1,12 +1,10 @@
-# agent-terminal
+# Ivy
 
-> **Code name.** Parked on purpose: the product has been redefined twice while this was being
-> written, and a name for something that is still moving sounds wrong whatever it does. It gets
-> picked up again with the prototype in front of us. Renaming is
-> `mv ~/Mashware/agent-terminal ~/Mashware/<name>` plus a find and replace in `docs/`.
->
-> The umbrella brand already exists: **Zabri** (`~/Mashware/zabri.io`). This would be one of its
-> products, alongside `rule-engine`.
+<img src="resources/branding/ivy.svg" alt="Ivy logo" width="128" />
+
+**Ivy** is the public product name of this terminal ([#339](https://github.com/mashware/agent-terminal/issues/339)).
+The repository and configuration directory retain `agent-terminal` so existing settings and saved
+layouts keep working. The [identity assets](resources/branding/) contain the approved logo.
 
 An **agent-hosting terminal**: tabs, panes, and in each pane a console with its own status panel
 fed by an open contract.

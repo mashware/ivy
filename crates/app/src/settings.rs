@@ -2172,7 +2172,8 @@ mod tests {
         /// artifact to satisfy a test, which is the tail wagging the dog.
         const DRAWN_RULE: char = '\u{2500}';
 
-        const SOURCES: [(&str, &str); 29] = [
+        const SOURCES: [(&str, &str); 30] = [
+            ("chrome/branding.rs", include_str!("chrome/branding.rs")),
             ("chrome.rs", include_str!("chrome.rs")),
             ("pane_view.rs", include_str!("pane_view.rs")),
             (

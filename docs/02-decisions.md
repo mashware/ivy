@@ -8554,3 +8554,27 @@ and geometry guard.
 The later equal-alias preparation correction is outside this scene's explicit-font registration
 path; these reports cover the same unchanged renderer. Alias handoff is covered by its real-font
 regression and the full suite, not by a claimed timing for selecting an alias.
+
+
+## D71 — Ivy is the public product name
+
+**Decided for [#339](https://github.com/mashware/agent-terminal/issues/339).** The project owner
+selected **Ivy** and approved the green-to-teal logo with three hanging leaves. Keep that SVG as
+the editable source and embed a transparent PNG rendering for the application title bar and native
+window icon. The integrated title bar shows the logo beside the name, without moving its controls
+or taking space from the consoles. Decode the PNG and create its texture before the first frame;
+paint enqueueing stays inside the existing integrated-chrome timing span.
+
+The repository, binary and Cargo package names, panel contract, and `agent-terminal` configuration
+and layout paths retain their identifiers. A public name must not reset a person's terminal or
+break existing scripts. Native task-switcher and launcher icon support belongs to the platform:
+X11 and Windows accept the window icon, while Wayland needs desktop-entry integration and macOS
+needs an application bundle for the Dock. Packaging those is separate work, not something a
+viewport icon alone proves.
+
+**Discarded, with reasons:**
+- A global replacement of `agent-terminal`: it would mix public branding with persisted paths,
+  shell integration and historical measurements, requiring an unrelated migration.
+- Loading or rasterizing SVG inside the frame: the approved PNG can be embedded and decoded once,
+  without adding an SVG renderer or disk access to the painting path.
+- Replacing any controls with branding: window and console actions keep their existing geometry.

@@ -135,6 +135,10 @@ const MODULES: &[(&str, &str)] = &[
         "app/src/tests/pane_rename.rs",
         include_str!("../src/tests/pane_rename.rs"),
     ),
+    (
+        "app/src/chrome/branding.rs",
+        include_str!("../src/chrome/branding.rs"),
+    ),
     ("app/src/chrome.rs", include_str!("../src/chrome.rs")),
     (
         "app/src/header/integrated.rs",

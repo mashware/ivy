@@ -104,7 +104,7 @@ use theme::Theme;
 use watcher::{Flag, Watcher};
 
 /// The name the window presents itself to the desktop with.
-const APP_NAME: &str = "agent-terminal";
+const APP_NAME: &str = "Ivy";
 
 /// The program that is launched when the environment does not say which.
 ///
@@ -569,8 +569,7 @@ pub fn run() -> eframe::Result {
     let (settings, what_it_cost) = settings::to_use(entry, settings::path().as_deref());
 
     let integrated = !measuring || std::env::var_os("MEASURE_CHROME").is_some();
-    let mut options = eframe::NativeOptions::default();
-    options.viewport = chrome::viewport(options.viewport, integrated);
+    let mut options = chrome::native_options(integrated);
     // **The size is only asked for if somebody asked for it**, and that is why there is no default
     // size here: without the variable, `NativeOptions::default()` carries no `inner_size` and the
     // desktop decides, which is the behavior of always. Restoring **does not touch this**: the
@@ -592,6 +591,7 @@ pub fn run() -> eframe::Result {
         APP_NAME,
         options,
         Box::new(move |cc| {
+            chrome::install_logo(&cc.egui_ctx);
             let mut window = Window::opening(
                 &cc.egui_ctx,
                 with_what,

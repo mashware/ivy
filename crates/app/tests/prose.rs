@@ -177,6 +177,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         include_str!("../src/tests/pane_rename.rs"),
         1,
     ),
+    (
+        "src/chrome/branding.rs",
+        include_str!("../src/chrome/branding.rs"),
+        1,
+    ),
     ("src/chrome.rs", include_str!("../src/chrome.rs"), 1),
     (
         "src/header/integrated.rs",

@@ -48,6 +48,50 @@ mod tests {
     }
 
     #[test]
+    fn ivy_identity_is_painted_in_the_real_title_bar_without_covering_controls() {
+        let ctx = egui::Context::default();
+        chrome::install_logo(&ctx);
+        let texture = ctx.data(|data| {
+            data.get_temp::<egui::TextureHandle>(egui::Id::new("ivy-logo"))
+                .unwrap()
+                .id()
+        });
+        let mut window = window_with("sleep 30", "sleep 30");
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        for (width, visible) in [(1400.0, true), (480.0, true), (240.0, true), (100.0, false)] {
+            let area = area_of(width);
+            let shapes = frame(&mut window, &ctx, area, vec![]);
+            assert_eq!(has_text(&shapes, "Ivy"), visible);
+            assert!(!has_text(&shapes, "agent-terminal"));
+            let logos: Vec<_> = shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Mesh(mesh) if mesh.texture_id == texture => Some(mesh),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(logos.len(), usize::from(visible));
+            for mesh in logos {
+                let bounds = mesh.calc_bounds();
+                assert!(bounds.top() >= area.top());
+                assert!(bounds.bottom() <= area.top() + chrome::HEIGHT);
+                let left = if cfg!(target_os = "macos") { 78.0 } else { 6.0 };
+                let right = if width < 300.0 {
+                    40.0
+                } else if cfg!(target_os = "macos") {
+                    108.0
+                } else {
+                    210.0
+                };
+                let left = left + if width < 300.0 { 0.0 } else { 116.0 };
+                assert!(bounds.left() >= area.left() + left);
+                assert!(bounds.right() <= area.right() - right);
+            }
+        }
+    }
+
+    #[test]
     fn maximizing_an_unfocused_console_restores_the_original_weighted_tree() {
         let ctx = egui::Context::default();
         let mut window = window_with("sleep 30", "sleep 30");

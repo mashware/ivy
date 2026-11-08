@@ -89,6 +89,9 @@ pub(crate) fn viewport(builder: egui::ViewportBuilder, enabled: bool) -> egui::V
     }
 }
 
+mod branding;
+pub(crate) use branding::{install_logo, native_options};
+
 #[derive(Clone, Copy)]
 enum Action {
     SplitRight,
@@ -312,13 +315,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         egui::pos2(right_start.max(left_end), row.bottom()),
     );
     if drag.width() > 75.0 {
-        ui.painter_at(drag).text(
-            drag.center(),
-            Align2::CENTER_CENTER,
-            "agent-terminal",
-            FontId::proportional(13.0),
-            fg,
-        );
+        branding::paint_identity(ui, drag, fg);
     }
     if drag.is_positive() {
         let response = ui.interact(drag, ui.id().with("chrome-drag"), Sense::click_and_drag());
