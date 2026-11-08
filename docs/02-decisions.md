@@ -8279,3 +8279,38 @@ Reports under `target/measurements`: C `000616/000635`, closed `000705/000736`, 
 `000806/000837`, fonts `000907/000937`, apply `001008/001035` (each with its batch prefix).
 The comparator additionally requires matching nonempty effective families for apply reports,
 even when grids match; missing-family reports cannot justify an average.
+
+## D65 — Theme browsing stays in the settings draft; palettes are converted before shipping
+
+**Decided for [#327](https://github.com/mashware/agent-terminal/issues/327).** A named theme remains a
+base for all twenty-two colors, with explicit overrides above it (D59). The catalog is still part of
+the binary. Additional terminal palettes are converted from a pinned external source during
+development, with their original license notices and attribution shipped alongside them. The
+application reads no theme files and contacts no theme service at startup or while browsing.
+
+**Why now.** The two-card gallery in Settings does not scale to a useful collection. A compact
+selected name and one console-and-panel sample keep Appearance the same size when the catalog grows;
+a bounded searchable picker provides All, Dark and Light filters. Keyboard and mouse selection
+change only the existing draft. The preview resolves that base plus each valid explicit color
+setting, so a person's overrides are visible before saving, even if an unrelated setting is invalid.
+The factory/inherit choice remains available. Escape dismisses the picker before Settings.
+
+**Color provenance.** The external sixteen ANSI colors, background, foreground and cursor remain
+those of the pinned source. The application-only colors are local choices: the divider moves the
+background 25% toward foreground, the panel moves it 5% toward foreground, and focus uses ANSI blue.
+These rules apply to the added palettes; the two previously shipped themes keep their exact colors.
+
+**Save and close shares the existing transaction.** Save changes keeps Settings open. Save and
+close dismisses it only after validation, font preparation and persistence succeed; failures keep
+the draft and error visible. The save operation returns its actual outcome, including across egui's
+multiple passes in one frame. The saved pending runtime update survives dismissal and applies through
+D64's existing begin-pass boundary without restarting any console.
+
+| Discarded | Why |
+|---|---|
+| A permanently expanded gallery | Its height grows with the catalog and pushes everyday font/color controls away. |
+| A dropdown containing only names | It hides the palette and makes discovering unfamiliar themes harder. |
+| Runtime theme imports or a plugin ecosystem | Search paths, file errors and downloaded executable plugins are not needed for this offline collection; imports remain a separate product step. |
+| Changing the running terminal while browsing | Cancel must discard the draft; browsing must not affect running consoles. |
+| Clearing overrides on theme selection | A base selection must not silently erase personal colors (D59). |
+| Inferring save success from the notice text | Notices describe outcomes; the actual transaction result must decide whether Settings closes. |

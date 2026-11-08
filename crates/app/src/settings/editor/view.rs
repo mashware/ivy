@@ -30,9 +30,16 @@ pub(super) fn show(
         && !popup_was_open
         && !egui::Popup::is_any_open(ctx)
     {
-        close = true;
+        if editor.picker_open {
+            editor.picker_open = false;
+        } else {
+            close = true;
+        }
     }
     if close {
+        editor.picker_open = false;
+        editor.picker_query.clear();
+        editor.picker_filter = 0;
         editor.draft = None;
         editor.store = None;
         editor.fonts = None;
@@ -194,6 +201,13 @@ fn footer(
             .clicked()
         {
             editor.save_in_frame(discoverer, ui.ctx());
+        }
+        if ui
+            .add_enabled(can_save, egui::Button::new("Save and close"))
+            .clicked()
+            && editor.save_in_frame(discoverer, ui.ctx())
+        {
+            *close = true;
         }
     });
     ui.weak("Changes apply on Save. Running programs stay open.");

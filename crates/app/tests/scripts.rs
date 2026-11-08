@@ -224,6 +224,10 @@ const MODULES: &[(&str, &str)] = &[
     ),
     ("app/src/watcher.rs", include_str!("../src/watcher.rs")),
     ("app/src/theme.rs", include_str!("../src/theme.rs")),
+    (
+        "app/src/theme/catalog.rs",
+        include_str!("../src/theme/catalog.rs"),
+    ),
     ("app/src/mouse.rs", include_str!("../src/mouse.rs")),
     ("app/src/opening.rs", include_str!("../src/opening.rs")),
     ("app/src/pointer.rs", include_str!("../src/pointer.rs")),

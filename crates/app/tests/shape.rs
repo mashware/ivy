@@ -202,6 +202,10 @@ const MODULES: &[(&str, &str)] = &[
     ("src/pty_output.rs", include_str!("../src/pty_output.rs")),
     ("src/watcher.rs", include_str!("../src/watcher.rs")),
     ("src/theme.rs", include_str!("../src/theme.rs")),
+    (
+        "src/theme/catalog.rs",
+        include_str!("../src/theme/catalog.rs"),
+    ),
     ("src/mouse.rs", include_str!("../src/mouse.rs")),
     ("src/opening.rs", include_str!("../src/opening.rs")),
     ("src/pointer.rs", include_str!("../src/pointer.rs")),

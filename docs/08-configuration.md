@@ -10,7 +10,10 @@ you left the windows; this one can be written by hand or through Settings.
 
 The global **Settings gear** sits at the right of the tab strip, including a single-tab window.
 The system titlebar keeps its native controls. The compact dialog groups Appearance, Cursor and
-Shortcuts, with theme samples, colour swatches and an expandable sixteen-colour ANSI palette.
+Shortcuts, with one console-and-panel theme preview, colour swatches and an expandable sixteen-colour ANSI palette.
+Use **Change** beside the selected theme to open a searchable, scrollable catalog. Filter it with
+**All**, **Dark** or **Light**, and choose with the mouse or arrow keys. Browsing updates only the
+draft and preview; Escape closes the picker before it closes Settings.
 Appearance contains the installed-font selector, size, named theme and all twenty-two overrides;
 Cursor and Shortcuts contain the existing blink override, action bindings and separate copy switch.
 
@@ -19,6 +22,10 @@ and Cancel change neither the running terminal nor the file. Restore defaults st
 the supported overrides; only Save writes and applies them. Blank fields inherit the built-in default; `none` unbinds an action. Explicit
 colours still override the selected theme. The cursor override retains its focus rules and its
 fifteen-second inactivity stop.
+
+**Save changes** writes and applies the draft while keeping Settings open. **Save and close** uses
+the same save operation and dismisses Settings after success. An invalid value, unavailable font,
+external-file conflict or write failure keeps the dialog and draft open with an explanation.
 
 New or blank files saved through Settings declare `version=1`. Existing version lines are retained.
 Save explains invalid values and conflicting bindings before writing. Comments, unrelated entries,
@@ -77,7 +84,7 @@ It is the same thing Kitty and Ghostty do.
 | `divider` | the line that separates two consoles |
 | `focus` | what marks out the console that has the keyboard |
 | `panel` | the status panel's background |
-| `theme` | a built-in set of all twenty-two colours: `tokyonight` or `gruvbox-dark` |
+| `theme` | a built-in set of all twenty-two colours; see the catalog below |
 | `size` | the font size, in points |
 | `font` | the font family it paints with, by its name |
 | `cursor.blink` | whether the cursor blinks: `on` always, `off` never. Leave the line out and the program inside decides, over a default of «yes» |
@@ -153,16 +160,38 @@ theme = tokyonight
 color.4 = #010203
 ```
 
-`tokyonight` uses the Night variant; `gruvbox-dark` uses the dark, medium-contrast palette. Names
+The bundled catalog contains the following themes:
+
+| Configuration name | Theme | Appearance |
+|---|---|---|
+| `tokyonight` | Tokyo Night (Night) | Dark |
+| `gruvbox-dark` | Gruvbox Dark (medium contrast) | Dark |
+| `catppuccin-mocha` | Catppuccin Mocha | Dark |
+| `catppuccin-latte` | Catppuccin Latte | Light |
+| `nord` | Nord | Dark |
+| `github-dark-default` | GitHub Dark Default | Dark |
+| `github-light-default` | GitHub Light Default | Light |
+| `rose-pine` | Rose Pine | Dark |
+| `rose-pine-dawn` | Rose Pine Dawn | Light |
+| `rose-pine-moon` | Rose Pine Moon | Dark |
+
+The factory/inherit choice omits the theme line. Names
 ignore letter case. Each theme supplies all twenty-two colours. A colour you write yourself replaces
 that one colour in the theme, whether its line comes before or after `theme`.
 
 If you write `theme` more than once, the last valid name wins and the terminal reports the repeated
-key. An unknown name is reported with its line number and the two available names; other valid lines
+key. An unknown name is reported with its line number and the available names; other valid lines
 still apply. With no `theme` line, the current built-in appearance remains the base.
 
-The catalog is part of the binary. It reads no theme files and does not reload a changed config while
-the terminal is open.
+The catalog is part of the binary and works offline. External terminal palettes are converted during
+development from a pinned source revision, with attribution and original license notices in the
+repository. The terminal reads no theme files or online catalogs. External changes to the config
+file are read at startup; saving through Settings applies the draft immediately.
+
+The preview includes explicit color overrides, just as the running terminal will. **Use theme
+colours** clears those staged overrides when you want the complete selected palette. Added external
+palettes supply the ANSI colors, background, foreground and cursor; divider, focus and panel colors
+are completed locally as recorded in D65.
 
 ## The shortcuts
 

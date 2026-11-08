@@ -27,6 +27,9 @@ pub(crate) struct Editor {
     pub(super) message: String,
     pub(super) fonts: Option<Vec<String>>,
     pub(super) section: usize,
+    pub(super) picker_open: bool,
+    pub(super) picker_query: String,
+    pub(super) picker_filter: usize,
     blocked_frame: Option<u64>,
     held_pointer: bool,
     timing: Timing,
@@ -59,6 +62,9 @@ impl Editor {
     fn open(&mut self, path: Option<PathBuf>) {
         let started = Instant::now();
         self.message.clear();
+        self.picker_open = false;
+        self.picker_query.clear();
+        self.picker_filter = 0;
         self.fonts = None;
         self.store = None;
         match path
@@ -85,20 +91,24 @@ impl Editor {
         self.timing.record_work(2, started.elapsed());
     }
 
-    pub(super) fn save(&mut self, fonts: &mut crate::fonts::Discoverer) {
-        runtime::save(self, fonts);
+    pub(super) fn save(&mut self, fonts: &mut crate::fonts::Discoverer) -> bool {
+        runtime::save(self, fonts)
     }
 
     pub(super) fn save_in_frame(
         &mut self,
         fonts: &mut crate::fonts::Discoverer,
         ctx: &egui::Context,
-    ) {
+    ) -> bool {
         let frame = ctx.cumulative_frame_nr();
-        if self.application.saved_frame != Some(frame) {
-            self.application.saved_frame = Some(frame);
-            self.save(fonts);
+        if let Some((saved_frame, outcome)) = self.application.saved_frame
+            && saved_frame == frame
+        {
+            return outcome;
         }
+        let outcome = self.save(fonts);
+        self.application.saved_frame = Some((frame, outcome));
+        outcome
     }
 
     pub(crate) fn remember_family(&mut self, settings: &super::Settings) {

@@ -159,8 +159,13 @@ impl std::fmt::Display for Warning {
             }
             Missing::UnknownTheme(value) => write!(
                 f,
-                "'{}' is not a known theme; choose 'tokyonight' or 'gruvbox-dark'",
-                trimmed(value)
+                "'{}' is not a known theme; choose one of: {}",
+                trimmed(value),
+                crate::theme::NamedTheme::ALL
+                    .iter()
+                    .map(|theme| theme.id())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ),
             Missing::Repeated(key) => write!(f, "'{key}' was already set above; this one wins"),
             Missing::OnlyTurnsOff(key) => write!(
@@ -1544,7 +1549,7 @@ mod tests {
         assert_eq!(warnings.total(), 2);
         assert_eq!(
             warnings.kept()[0].to_string(),
-            "line 2: 'unknown' is not a known theme; choose 'tokyonight' or 'gruvbox-dark'"
+            "line 2: 'unknown' is not a known theme; choose one of: tokyonight, gruvbox-dark, catppuccin-mocha, catppuccin-latte, nord, github-dark-default, github-light-default, rose-pine, rose-pine-dawn, rose-pine-moon"
         );
         assert_eq!(
             warnings.kept()[1].to_string(),

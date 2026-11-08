@@ -8,7 +8,7 @@ use std::time::Instant;
 pub(super) struct Application {
     pub family: Option<String>,
     pending: Option<Pending>,
-    pub saved_frame: Option<u64>,
+    pub saved_frame: Option<(u64, bool)>,
     prepared: usize,
     failed: usize,
     queued: usize,
@@ -30,7 +30,7 @@ fn same_family(a: Option<&str>, b: Option<&str>) -> bool {
     }
 }
 
-pub(super) fn save(editor: &mut Editor, fonts: &mut crate::fonts::Discoverer) {
+pub(super) fn save(editor: &mut Editor, fonts: &mut crate::fonts::Discoverer) -> bool {
     let started = Instant::now();
     let children_before = editor.timing.work;
     let result = prepare_and_save(editor, fonts);
@@ -38,8 +38,12 @@ pub(super) fn save(editor: &mut Editor, fonts: &mut crate::fonts::Discoverer) {
     editor
         .timing
         .record_work(2, started.elapsed().saturating_sub(children));
-    if let Err(error) = result {
-        editor.message = error;
+    match result {
+        Ok(()) => true,
+        Err(error) => {
+            editor.message = error;
+            false
+        }
     }
 }
 
@@ -510,6 +514,27 @@ mod tests {
         frame(&mut window, &ctx);
         assert_eq!(window.font_size, 24.0);
         assert_eq!(window.settings_editor.application.committed, 1);
+    }
+    #[test]
+    fn failed_save_remains_failed_during_the_same_frame() {
+        let file = File::new("size=14\n");
+        let ctx = egui::Context::default();
+        let mut window = window(&file);
+        frame(&mut window, &ctx);
+        set(&mut window, "size", "invalid");
+        assert!(
+            !window
+                .settings_editor
+                .save_in_frame(&mut window.discoverer, &ctx)
+        );
+        set(&mut window, "size", "24");
+        assert!(
+            !window
+                .settings_editor
+                .save_in_frame(&mut window.discoverer, &ctx)
+        );
+        assert_eq!(file.read(), "size=14\n");
+        assert!(window.settings_editor.draft.is_some());
     }
     #[test]
     fn closing_after_saved_font_discards_later_edits_but_keeps_pending_activation() {

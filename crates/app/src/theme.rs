@@ -5,6 +5,8 @@
 //! palette be asked of the parser: its own is empty save for what the program sets through escape
 //! sequences, and an application that resolves there comes out black.
 
+mod catalog;
+
 use eframe::egui::Color32;
 use panel_contract::{Attention, Mark, Style};
 use term_core::TermColor;
@@ -53,20 +55,96 @@ pub struct Theme {
 pub enum NamedTheme {
     TokyoNight,
     GruvboxDark,
+    CatppuccinMocha,
+    CatppuccinLatte,
+    Nord,
+    GithubDarkDefault,
+    GithubLightDefault,
+    RosePine,
+    RosePineDawn,
+    RosePineMoon,
 }
 
 impl NamedTheme {
-    pub fn from_written(value: &str) -> Option<Self> {
-        if value.eq_ignore_ascii_case("tokyonight") {
-            Some(Self::TokyoNight)
-        } else if value.eq_ignore_ascii_case("gruvbox-dark") {
-            Some(Self::GruvboxDark)
-        } else {
-            None
+    pub const ALL: &'static [Self] = &[
+        Self::TokyoNight,
+        Self::GruvboxDark,
+        Self::CatppuccinMocha,
+        Self::CatppuccinLatte,
+        Self::Nord,
+        Self::GithubDarkDefault,
+        Self::GithubLightDefault,
+        Self::RosePine,
+        Self::RosePineDawn,
+        Self::RosePineMoon,
+    ];
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::TokyoNight => "tokyonight",
+            Self::GruvboxDark => "gruvbox-dark",
+            Self::CatppuccinMocha => "catppuccin-mocha",
+            Self::CatppuccinLatte => "catppuccin-latte",
+            Self::Nord => "nord",
+            Self::GithubDarkDefault => "github-dark-default",
+            Self::GithubLightDefault => "github-light-default",
+            Self::RosePine => "rose-pine",
+            Self::RosePineDawn => "rose-pine-dawn",
+            Self::RosePineMoon => "rose-pine-moon",
         }
     }
 
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::TokyoNight => "Tokyo Night",
+            Self::GruvboxDark => "Gruvbox Dark",
+            Self::CatppuccinMocha => "Catppuccin Mocha",
+            Self::CatppuccinLatte => "Catppuccin Latte",
+            Self::Nord => "Nord",
+            Self::GithubDarkDefault => "GitHub Dark Default",
+            Self::GithubLightDefault => "GitHub Light Default",
+            Self::RosePine => "Rosé Pine",
+            Self::RosePineDawn => "Rosé Pine Dawn",
+            Self::RosePineMoon => "Rosé Pine Moon",
+        }
+    }
+
+    pub fn is_dark(self) -> bool {
+        !matches!(
+            self,
+            Self::CatppuccinLatte | Self::GithubLightDefault | Self::RosePineDawn
+        )
+    }
+
+    pub fn from_written(value: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|theme| theme.id().eq_ignore_ascii_case(value))
+    }
+
     pub fn theme(self) -> Theme {
+        if let Some((palette, background, foreground, cursor)) = catalog::palette(self) {
+            let color =
+                |rgb: u32| Color32::from_rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8);
+            let mix = |percent: u32| {
+                let channel = |shift: u32| -> u32 {
+                    let bg = (background >> shift) & 255u32;
+                    let fg = (foreground >> shift) & 255u32;
+                    (bg * (100 - percent) + fg * percent + 50) / 100
+                };
+                (channel(16) << 16) | (channel(8) << 8) | channel(0)
+            };
+            return Theme {
+                palette: palette.map(color),
+                background: color(background),
+                foreground: color(foreground),
+                cursor: color(cursor),
+                divider: color(mix(25)),
+                focus: color(palette[4]),
+                panel_background: color(mix(5)),
+            };
+        }
         // The sixteen terminal entries follow Tokyo Night Night and Gruvbox dark medium.
         // The six application colors below are chosen for this terminal's own surfaces.
         let (palette, background, foreground, cursor, divider, focus, panel) = match self {
@@ -94,6 +172,7 @@ impl NamedTheme {
                 0x83a598,
                 0x1d2021,
             ),
+            _ => unreachable!("external palettes are handled above"),
         };
         let color = |rgb: u32| Color32::from_rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8);
         Theme {
@@ -408,6 +487,116 @@ fn mix(a: Color32, b: Color32, p: f32) -> Color32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn bundled_catalog_has_unique_stable_names_and_exact_source_colors() {
+        use super::{NamedTheme, catalog};
+        use std::collections::HashSet;
+        let mut ids = HashSet::new();
+        assert_eq!(NamedTheme::ALL.len(), 10);
+        for &theme in NamedTheme::ALL {
+            assert!(ids.insert(theme.id()));
+            assert_eq!(
+                NamedTheme::from_written(&theme.id().to_ascii_uppercase()),
+                Some(theme)
+            );
+            assert!(!theme.title().is_empty());
+            if let Some((colors, bg, fg, cursor)) = catalog::palette(theme) {
+                let actual = theme.theme();
+                let rgb = |value: u32| {
+                    eframe::egui::Color32::from_rgb(
+                        (value >> 16) as u8,
+                        (value >> 8) as u8,
+                        value as u8,
+                    )
+                };
+                assert_eq!(actual.palette, colors.map(rgb));
+                assert_eq!(
+                    (actual.background, actual.foreground, actual.cursor),
+                    (rgb(bg), rgb(fg), rgb(cursor))
+                );
+                assert_eq!(actual.focus, rgb(colors[4]));
+            }
+        }
+        assert_eq!(
+            NamedTheme::CatppuccinMocha.theme().background,
+            eframe::egui::Color32::from_rgb(0x1e, 0x1e, 0x2e)
+        );
+        assert!(!NamedTheme::RosePineDawn.is_dark());
+        assert!(NamedTheme::RosePineMoon.is_dark());
+    }
+
+    #[test]
+    fn generated_palettes_match_pinned_sources() {
+        let fixtures = [
+            (
+                NamedTheme::CatppuccinMocha,
+                include_str!("../../../resources/themes/Catppuccin Mocha.json"),
+            ),
+            (
+                NamedTheme::CatppuccinLatte,
+                include_str!("../../../resources/themes/Catppuccin Latte.json"),
+            ),
+            (
+                NamedTheme::Nord,
+                include_str!("../../../resources/themes/Nord.json"),
+            ),
+            (
+                NamedTheme::GithubDarkDefault,
+                include_str!("../../../resources/themes/GitHub Dark Default.json"),
+            ),
+            (
+                NamedTheme::GithubLightDefault,
+                include_str!("../../../resources/themes/GitHub Light Default.json"),
+            ),
+            (
+                NamedTheme::RosePine,
+                include_str!("../../../resources/themes/Rose Pine.json"),
+            ),
+            (
+                NamedTheme::RosePineDawn,
+                include_str!("../../../resources/themes/Rose Pine Dawn.json"),
+            ),
+            (
+                NamedTheme::RosePineMoon,
+                include_str!("../../../resources/themes/Rose Pine Moon.json"),
+            ),
+        ];
+        let keys = [
+            "black",
+            "red",
+            "green",
+            "yellow",
+            "blue",
+            "purple",
+            "cyan",
+            "white",
+            "brightBlack",
+            "brightRed",
+            "brightGreen",
+            "brightYellow",
+            "brightBlue",
+            "brightPurple",
+            "brightCyan",
+            "brightWhite",
+            "background",
+            "foreground",
+            "cursorColor",
+        ];
+        for (theme, source) in fixtures {
+            let json: serde_json::Value = serde_json::from_str(source).unwrap();
+            let (palette, bg, fg, cursor) = catalog::palette(theme).unwrap();
+            let actual: Vec<_> = palette.into_iter().chain([bg, fg, cursor]).collect();
+            let expected: Vec<_> = keys
+                .iter()
+                .map(|key| {
+                    u32::from_str_radix(json[*key].as_str().unwrap().trim_start_matches('#'), 16)
+                        .unwrap()
+                })
+                .collect();
+            assert_eq!(actual, expected, "{}", theme.id());
+        }
+    }
+
     use super::*;
 
     fn theme() -> Theme {
