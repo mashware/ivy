@@ -55,6 +55,28 @@ pinned terminal engine also clears its internal title on RIS (full terminal rese
 publishing a title-reset event, so that reset alone does not clear the observed name. A shell
 that publishes its own title can replace the agent's title on returning to its prompt.
 
+## Connect agents
+
+The **Connect agents** icon in the global title bar opens a setup guide. It is highlighted when no
+console has a published panel. Once any console publishes a valid panel through MCP or `panel.json`,
+the icon returns to its normal color. The same guide is available from the application menu.
+
+Choose **Copy setup prompt** and paste it into the AI client running inside Ivy. The prompt asks
+that client to check its inherited console identity, find the bridge, preserve its existing MCP
+configuration, register the local stdio server if needed, and publish a test panel. It includes the
+expected bridge path as JSON-encoded data. If the client needs a reconnect or restart to load new
+tools, it explains that remaining step instead of claiming success.
+
+**Manual setup and diagnostics** expands the published-panel and live-publisher counts, expected
+bridge path, last file check and manual instructions. **Check bridge again** refreshes the check;
+a missing sibling file does not mean the bridge is not installed somewhere else. Ivy only copies
+text: it does not run these commands or edit the client's settings.
+
+Tool discovery and publication are distinct: a client can know the tools without publishing a panel.
+An empty console or ordinary shell is not an installation error. Close the guide with **×** at the top right or
+Escape. Its clicks and keys, including those used to close it, do not reach the console. Opening the
+guide changes no running programs or terminal sizes.
+
 ## Graphical settings
 
 The global application menu in the integrated titlebar opens **Preferences**, including with a single tab.

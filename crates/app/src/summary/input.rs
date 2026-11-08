@@ -61,7 +61,7 @@ pub(super) fn close(window: &mut Window, ctx: &egui::Context) {
     ctx.request_repaint();
 }
 
-fn cancel_gestures(window: &mut Window, ctx: &egui::Context) {
+pub(crate) fn cancel_gestures(window: &mut Window, ctx: &egui::Context) {
     window
         .header_input
         .block_for_settings(ctx.cumulative_frame_nr());

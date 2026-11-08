@@ -26,6 +26,10 @@ pub(crate) fn snapshot(state: &PanelState, now: SystemTime) -> Snapshot {
     }
 }
 
+pub(crate) fn has_document(state: &PanelState) -> bool {
+    !state.is_retired() && state.last_good.is_some()
+}
+
 pub(crate) fn body_symbol(mark: panel_contract::Mark) -> char {
     super::symbol(mark)
 }

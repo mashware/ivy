@@ -592,7 +592,7 @@ pub fn run() -> eframe::Result {
         APP_NAME,
         options,
         Box::new(move |cc| {
-            chrome::install_logo(&cc.egui_ctx);
+            chrome::prepare(&cc.egui_ctx);
             let mut window = Window::opening(
                 &cc.egui_ctx,
                 with_what,
@@ -1564,7 +1564,7 @@ impl eframe::App for Window {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        settings::editor::runtime::begin_pass(self, ui.ctx());
+        chrome::begin_pass(self, ui);
         let metrics = CellMetrics::measure(ui.ctx(), egui::FontId::monospace(self.font_size));
 
         // Settings claims its input before the console dispatcher. Its named work is discounted
@@ -1918,7 +1918,7 @@ impl eframe::App for Window {
 
         // It has already been painted, so whatever is still pending belongs to a console that was
         // not painted.
-        summary::paint(self, ui, area);
+        chrome::after_panels(self, ui, area);
         header::menu::paint(self, ui.ctx(), &metrics);
         self.close_the_unpainted_rounds();
 

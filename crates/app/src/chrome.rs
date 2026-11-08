@@ -10,6 +10,7 @@ pub(crate) struct Chrome {
     enabled: bool,
     zoom_probe: bool,
     menu: bool,
+    guide: connection::Guide,
     held: bool,
     blocked_frame: Option<u64>,
     cost: Duration,
@@ -33,6 +34,9 @@ impl Chrome {
     }
     pub(crate) fn enabled(&self) -> bool {
         self.enabled
+    }
+    pub(crate) fn guide_blocked(&self, ctx: &egui::Context) -> bool {
+        self.guide.blocked(ctx)
     }
     pub(crate) fn record_work(&mut self, cost: Duration) {
         self.cost += cost;
@@ -76,7 +80,9 @@ impl Chrome {
 pub(crate) use crate::opening::chrome_viewport as viewport;
 
 mod branding;
-pub(crate) use branding::{install_logo, native_options};
+mod connection;
+pub(crate) use branding::native_options;
+pub(crate) use connection::{after_panels, begin_pass, prepare};
 
 #[derive(Clone, Copy)]
 enum Action {
@@ -85,6 +91,7 @@ enum Action {
     NewTab,
     Search,
     Overview,
+    Connect,
     Menu,
     Preferences,
     Viewer(bool),
@@ -163,6 +170,7 @@ fn button(ui: &egui::Ui, rect: Rect, label: &str, hint: &str, bg: Color32, fg: C
                 line((-7.0, y), (7.0, y));
             }
         }
+        "Connect agents" => connection::paint_icon(&p, rect, fg, false),
         "Close window" => {
             line((-6.0, -6.0), (6.0, 6.0));
             line((6.0, -6.0), (-6.0, 6.0));
@@ -252,6 +260,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         ("☰", "Menu", Action::Menu),
         ("⌕", "Search console", Action::Search),
         ("≡", "Overview", Action::Overview),
+        ("", "Connect agents", Action::Connect),
     ];
     let skip = if cfg!(target_os = "macos") { 3 } else { 0 };
     for (i, (label, hint, cmd)) in right.into_iter().skip(skip).enumerate() {
@@ -290,12 +299,13 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
             action = Some(Action::Menu);
         }
     }
+    connection::compact_button(window, ui, row);
     let left_end = row.left() + left_offset + if compact { 0.0 } else { 3.0 * width + 14.0 };
     let right_start = row.right()
         - if compact {
-            40.0
+            connection::compact_reserve(row)
         } else {
-            6.0 + (6 - skip) as f32 * width
+            6.0 + (7 - skip) as f32 * width
         };
     let drag = Rect::from_min_max(
         egui::pos2(left_end, row.top()),
@@ -317,6 +327,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         action = None;
         ctx.request_repaint();
     }
+    connection::open_requested(window, &ctx, &mut action);
     let menu_entries = [
         (
             "New tab",
@@ -347,6 +358,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
             Some(crate::keyboard::Action::Overview),
             true,
         ),
+        ("Connect agents", Action::Connect, None, true),
         (
             "Search console",
             Action::Search,
@@ -357,7 +369,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         ("Maximize window", Action::Maximize, None, false),
         ("Close window", Action::Close, None, false),
     ];
-    let menu_entries = &menu_entries[..if compact { 13 } else { 9 }];
+    let menu_entries = &menu_entries[..if compact { 14 } else { 10 }];
     let menu_height = 12.0
         + menu_entries.len() as f32 * 30.0
         + menu_entries.iter().filter(|entry| entry.3).count() as f32 * 9.0;
@@ -457,7 +469,8 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     {
         window.chrome.menu = false;
     }
-    let owned = menu_owned
+    let owned = window.chrome.guide.blocked(&ctx)
+        || menu_owned
         || ((over || edge.is_some()) && gesture)
         || window.chrome.held
         || window.chrome.blocked_frame == Some(frame);
@@ -501,6 +514,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
                 | Action::Minimize
                 | Action::Maximize
                 | Action::Close
+                | Action::Connect
         )
     );
     match action {
@@ -528,6 +542,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
             }
         }
         Some(Action::Overview) => crate::summary::toggle(window, &ctx),
+        Some(Action::Connect) => connection::open(window, &ctx),
         Some(Action::Menu) => window.chrome.menu = !window.chrome.menu,
         Some(Action::Preferences) => {
             window.chrome.menu = false;

@@ -66,7 +66,7 @@ impl State {
     }
 }
 
-pub(crate) use input::{before_keys, blocked, toggle};
+pub(crate) use input::{before_keys, blocked, cancel_gestures, toggle};
 
 /// Runs only after active and background panel refresh, preserving normal PTY geometry.
 pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, area: egui::Rect) {

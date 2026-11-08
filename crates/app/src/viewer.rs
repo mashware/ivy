@@ -238,6 +238,7 @@ pub(crate) fn keys(
     metrics: &crate::painter::CellMetrics,
     blocked: bool,
 ) -> (bool, Vec<crate::WindowRequest>) {
+    let blocked = blocked || window.chrome.guide_blocked(ui.ctx());
     window.viewer.context = Some(ui.ctx().clone());
     let owned = !blocked && before_keys(window, ui, metrics);
     delivery::deliver(window, ui.ctx());

@@ -8616,3 +8616,36 @@ the source console explicitly).
 Native desktop behaviour remains a separate verification from headless input and rendering tests;
 no performance figure is claimed from source inspection.
 
+## D73 — Connection help is global and reports observed publication
+
+**Selected by the project owner.** A **Connect agents** icon in the integrated title bar opens an
+in-application setup guide. It is highlighted while no console has an accepted, non-retired panel,
+and remains available without highlighting once any console publishes. File and control-channel
+producers count equally. The menu provides the same entry, including compact windows.
+
+The primary action copies a setup prompt for the user's AI client inside Ivy. It asks that client
+to find the bridge, preserve existing settings, register local stdio if necessary, and verify by
+publishing a panel. It explicitly handles a required client restart without claiming success.
+The expected executable path is JSON-encoded data; per-console identity is never persisted.
+Manual setup and diagnostics remain collapsed until requested. They explain the separate bridge,
+client registration, inherited environment, tool discovery and instructions to publish progress. It reports accepted panels and
+live publishing holds, never whether an arbitrary client is installed or configured. Checking the
+bridge only reports whether its expected sibling file was found at startup or on an explicit
+recheck; a binary installed elsewhere is not declared absent. Commands, paths and agent instructions
+can be copied, but nothing is installed, executed or written into client configuration by the guide.
+
+Opening, closing and copying in the guide own their input before console dispatch, including the
+closing frame and a held mouse release. The guide is exclusive with Settings, Overview and pane
+rename dialogs. Consoles keep running with their original grids, histories and pump budgets. The
+indicator is painted after active and background panels refresh so a quiet first publication updates
+it in the same pass. Its projection, painting and guide work belong to the existing integrated-chrome
+span; historical measurement mode adds no guide. No performance result is claimed here.
+
+**Discarded, with reasons:**
+- An alarm saying MCP is not installed because no connection exists: a configured client may not
+  have called a pane tool, a file producer needs no MCP, and a regular shell needs no panel.
+- Reading third-party client files or terminal output to discover configuration: those sources do
+  not declare producer state to Ivy and would add client-specific inference, contrary to D6.
+- A warning inside every empty console: the owner selected one global indicator with a guide.
+- Automatic client configuration or command execution: this delivery explains the existing setup
+  and lets the person copy explicit text; changing external settings is separate behavior.

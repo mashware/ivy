@@ -17,13 +17,8 @@ pub(super) fn show(
 ) {
     let mut close = false;
     let popup_was_open = egui::Popup::is_any_open(ctx);
-    let frame = egui::Frame::new()
-        .fill(egui::Color32::from_rgb(25, 29, 38))
-        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(48, 55, 68)))
-        .corner_radius(14)
-        .inner_margin(0);
     egui::Modal::new(egui::Id::new("terminal-settings"))
-        .frame(frame)
+        .frame(modal_frame())
         .show(ctx, |ui| {
             settings_style(ui);
             form(editor, ui, discoverer, &mut close);
@@ -110,7 +105,15 @@ mod theme_tests {
     }
 }
 
-fn settings_style(ui: &mut egui::Ui) {
+pub(crate) fn modal_frame() -> egui::Frame {
+    egui::Frame::new()
+        .fill(egui::Color32::from_rgb(25, 29, 38))
+        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(48, 55, 68)))
+        .corner_radius(14)
+        .inner_margin(0)
+}
+
+pub(crate) fn settings_style(ui: &mut egui::Ui) {
     let style = ui.style_mut();
     style.visuals = egui::Visuals::dark();
     style.visuals.override_text_color = Some(egui::Color32::from_rgb(233, 237, 245));

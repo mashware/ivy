@@ -47,10 +47,350 @@ mod tests {
         )
     }
 
+    fn connection_button(area: egui::Rect) -> egui::Pos2 {
+        let from_right = if area.width() < 300.0 {
+            57.0
+        } else if cfg!(target_os = "macos") {
+            125.0
+        } else {
+            227.0
+        };
+        egui::pos2(area.right() - from_right, area.top() + 24.5)
+    }
+
+    fn connection_highlight(shapes: &[egui::epaint::ClippedShape], area: egui::Rect) -> bool {
+        let dot = connection_button(area) + egui::vec2(8.0, -8.0);
+        shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Circle(c) if c.center.distance(dot) < 0.1 && c.radius == 3.0))
+    }
+
+    fn open_connection_guide(
+        window: &mut Window,
+        ctx: &egui::Context,
+        area: egui::Rect,
+    ) -> Vec<egui::epaint::ClippedShape> {
+        frame(window, ctx, area, vec![]);
+        frame(window, ctx, area, click_at(connection_button(area)));
+        frame(window, ctx, area, vec![]);
+        frame(window, ctx, area, vec![])
+    }
+
+    #[test]
+    fn connection_guide_opens_from_wide_and_compact_title_bars_and_close_is_reachable() {
+        for width in [1400.0, 240.0] {
+            let ctx = egui::Context::default();
+            chrome::prepare(&ctx);
+            let mut window = window_with("sleep 30", "sleep 30");
+            window.chrome.enable();
+            window.headers = window.headers.integrated(true);
+            window.viewer.open_markdown();
+            let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 420.0));
+            let shapes = frame(&mut window, &ctx, area, vec![]);
+            assert!(connection_highlight(&shapes, area));
+            let shapes = open_connection_guide(&mut window, &ctx, area);
+            assert!(has_text(&shapes, "Connect agents"));
+            assert!(
+                !has_text(&shapes, "Markdown viewer"),
+                "viewer overlaps the modal"
+            );
+            assert!(has_text(&shapes, "No panels published yet"));
+            let heading = text_center(&shapes, "Connect agents");
+            let close = shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Text(t) if t.galley.text() == "×" => {
+                        Some(t.pos + t.galley.size() / 2.0)
+                    }
+                    _ => None,
+                })
+                .min_by(|a, b| (a.y - heading.y).abs().total_cmp(&(b.y - heading.y).abs()))
+                .expect("guide has a close icon");
+            assert!(area.contains(close), "guide close control left the window");
+            assert!(
+                close.x > heading.x,
+                "close icon is not to the right of the heading"
+            );
+            frame(&mut window, &ctx, area, click_at(close));
+            let shapes = frame(&mut window, &ctx, area, vec![]);
+            assert!(!has_text(&shapes, "No panels published yet"));
+            assert!(
+                has_text(&shapes, "Markdown viewer"),
+                "viewer did not resume after closure"
+            );
+        }
+    }
+
+    #[test]
+    fn connection_indicator_sees_a_first_file_publication_in_the_same_pass_even_in_a_background_tab()
+     {
+        for tab in [0, 1] {
+            let ctx = egui::Context::default();
+            ctx.global_style_mut(|style| style.animation_time = 0.0);
+            let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
+            window.chrome.enable();
+            window.headers = window.headers.integrated(true);
+            let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1800.0));
+            assert!(connection_highlight(
+                &frame(&mut window, &ctx, area, vec![]),
+                area
+            ));
+            let pane = &mut window.tabs[tab].panes_mut()[0];
+            pane.panel = Some(PanelDir::create().unwrap());
+            publish_at(pane, r#"{"lines":["A file producer needs no MCP"]}"#);
+            pane.to_reread.raise();
+            let shapes = frame(&mut window, &ctx, area, vec![]);
+            assert!(
+                !connection_highlight(&shapes, area),
+                "first publication left a stale setup highlight"
+            );
+            let shapes = open_connection_guide(&mut window, &ctx, area);
+            assert!(has_text(&shapes, "A panel has been published"));
+            assert!(!has_text(&shapes, "Live publishing connections: 0"));
+            let at = text_center(&shapes, "Manual setup and diagnostics");
+            frame(&mut window, &ctx, area, vec![egui::Event::PointerMoved(at)]);
+            frame(&mut window, &ctx, area, click_at(at));
+            let time = ctx.input(|input| input.time) + 1.0;
+            ui_pass(
+                &mut window,
+                &ctx,
+                area,
+                egui::RawInput {
+                    time: Some(time),
+                    ..Default::default()
+                },
+            );
+            let shapes = ui_pass(
+                &mut window,
+                &ctx,
+                area,
+                egui::RawInput {
+                    time: Some(time + 1.0),
+                    ..Default::default()
+                },
+            );
+            assert!(has_text(&shapes, "Panels published: 1 of 4 consoles"));
+            assert!(has_text(&shapes, "Live publishing connections: 0"));
+        }
+    }
+
+    #[test]
+    fn connection_indicator_follows_committed_producer_publication_and_retirement() {
+        let ctx = egui::Context::default();
+        let mut window = window_with("sleep 30", "sleep 30");
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        let area = area_of(1400.0);
+        assert!(connection_highlight(
+            &frame(&mut window, &ctx, area, vec![]),
+            area
+        ));
+        window.active_mut().panes_mut()[0]
+            .panel_state
+            .deliver(
+                7,
+                "example",
+                panel_contract::parse_document(r#"{"lines":["Published over the channel"]}"#)
+                    .unwrap(),
+                SystemTime::now(),
+            )
+            .unwrap();
+        assert!(!connection_highlight(
+            &frame(&mut window, &ctx, area, vec![]),
+            area
+        ));
+        let shapes = open_connection_guide(&mut window, &ctx, area);
+        assert!(has_text(&shapes, "A panel has been published"));
+        let escape = egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(&mut window, &ctx, area, vec![escape]);
+        let dir = PanelDir::create().unwrap();
+        window.active_mut().panes_mut()[0]
+            .panel_state
+            .retire(
+                7,
+                panel::PanelState::retirement_baseline(dir.path()).unwrap(),
+                panel::Retirement {
+                    closed: 0,
+                    preserved: 0,
+                },
+            )
+            .unwrap();
+        assert!(connection_highlight(
+            &frame(&mut window, &ctx, area, vec![]),
+            area
+        ));
+    }
+
+    #[test]
+    fn connection_guide_and_its_closing_frame_deliver_no_keys_or_paste_to_the_program() {
+        let ctx = egui::Context::default();
+        let received = term_core::received::Received::new("connection-guide");
+        let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        received.wait_until_ready(Duration::from_secs(5));
+        let area = area_of(1400.0);
+        frame(&mut window, &ctx, area, vec![]);
+        let grids: Vec<_> = window.active().panes().iter().map(|p| p.measured).collect();
+        open_connection_guide(&mut window, &ctx, area);
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![
+                egui::Event::Text("NEVER".into()),
+                egui::Event::Paste("PASTE".into()),
+            ],
+        );
+        let held_at = egui::pos2(50.0, 150.0);
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![
+                egui::Event::PointerMoved(held_at),
+                egui::Event::PointerButton {
+                    pos: held_at,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        let escape = egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![
+                escape,
+                egui::Event::Text("TAIL".into()),
+                egui::Event::Paste("CLOSING".into()),
+            ],
+        );
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![
+                egui::Event::PointerButton {
+                    pos: held_at,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::Paste("RELEASE".into()),
+            ],
+        );
+        assert_eq!(
+            window
+                .active()
+                .panes()
+                .iter()
+                .map(|p| p.measured)
+                .collect::<Vec<_>>(),
+            grids
+        );
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::Text("AFTER".into())],
+        );
+        assert_eq!(received.wait_for(5, Duration::from_secs(5)), b"AFTER");
+    }
+
+    #[test]
+    fn connection_guide_copies_setup_prompt_with_local_path_without_typing_it() {
+        fn button_fill(shapes: &[egui::epaint::ClippedShape], at: egui::Pos2) -> egui::Color32 {
+            shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(rect) if rect.rect.contains(at) => Some(rect),
+                    _ => None,
+                })
+                .min_by(|a, b| a.rect.area().total_cmp(&b.rect.area()))
+                .expect("copy button painted")
+                .fill
+        }
+        let ctx = egui::Context::default();
+        chrome::prepare(&ctx);
+        let received = term_core::received::Received::new("connection-copy");
+        let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        received.wait_until_ready(Duration::from_secs(5));
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1800.0));
+        let shapes = open_connection_guide(&mut window, &ctx, area);
+        assert!(!has_text(&shapes, "1. Locate the MCP bridge"));
+        let at = text_center(&shapes, "Copy setup prompt");
+        let idle = button_fill(&shapes, at);
+        frame(&mut window, &ctx, area, vec![egui::Event::PointerMoved(at)]);
+        let shapes = frame(&mut window, &ctx, area, vec![]);
+        let hovered = button_fill(&shapes, at);
+        assert_ne!(idle, hovered, "copy button gives no hover feedback");
+        let shapes = frame(&mut window, &ctx, area, click_at(at)[..2].to_vec());
+        let pressed = button_fill(&shapes, at);
+        assert_ne!(pressed, hovered, "copy button gives no pressed feedback");
+        let mut native = eframe::Frame::_new_kittest();
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(area),
+                events: click_at(at)[2..].to_vec(),
+                ..Default::default()
+            },
+            |ui| eframe::App::ui(&mut window, ui, &mut native),
+        );
+        let expected = std::env::current_exe()
+            .unwrap()
+            .with_file_name(if cfg!(windows) {
+                "panel-mcp.exe"
+            } else {
+                "panel-mcp"
+            });
+        assert!(output.platform_output.commands.iter().any(|command| matches!(command, egui::OutputCommand::CopyText(text) if text.contains(&serde_json::to_string(&expected.to_string_lossy()).unwrap())
+            && text.contains("local stdio MCP server named ivy")
+            && text.contains("Never hard-code")
+            && text.contains("PANEL_ID and PANEL_DIR")
+            && text.contains("reconnecting or restarting")
+            && text.contains("panel_get and panel_set")
+            && text.contains("Report success only after the tool calls succeed"))));
+        assert!(
+            has_text(&output.shapes, "Copied"),
+            "copy has no visible confirmation"
+        );
+        output.drop_without_applying_deltas();
+        let escape = egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(&mut window, &ctx, area, vec![escape]);
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::Text("SAFE".into())],
+        );
+        assert_eq!(received.wait_for(4, Duration::from_secs(5)), b"SAFE");
+    }
+
     #[test]
     fn ivy_identity_is_painted_in_the_real_title_bar_without_covering_controls() {
         let ctx = egui::Context::default();
-        chrome::install_logo(&ctx);
+        chrome::prepare(&ctx);
         let texture = ctx.data(|data| {
             data.get_temp::<egui::TextureHandle>(egui::Id::new("ivy-logo"))
                 .unwrap()
@@ -616,6 +956,7 @@ mod tests {
         let shapes = frame(&mut window, &ctx, area, vec![]);
         let at = text_center(&shapes, "Keyboard shortcuts");
         frame(&mut window, &ctx, area, click_at(at));
+        frame(&mut window, &ctx, area, vec![]);
         let shapes = frame(&mut window, &ctx, area, vec![]);
         assert!(window.settings_editor.is_open());
         assert!(

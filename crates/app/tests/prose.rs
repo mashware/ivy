@@ -238,6 +238,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         include_str!("../src/chrome/branding.rs"),
         1,
     ),
+    (
+        "src/chrome/connection.rs",
+        include_str!("../src/chrome/connection.rs"),
+        1,
+    ),
     ("src/chrome.rs", include_str!("../src/chrome.rs"), 1),
     (
         "src/header/integrated.rs",

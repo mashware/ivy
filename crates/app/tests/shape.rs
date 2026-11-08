@@ -145,6 +145,10 @@ const MODULES: &[(&str, &str)] = &[
         "src/chrome/branding.rs",
         include_str!("../src/chrome/branding.rs"),
     ),
+    (
+        "src/chrome/connection.rs",
+        include_str!("../src/chrome/connection.rs"),
+    ),
     ("src/chrome.rs", include_str!("../src/chrome.rs")),
     (
         "src/header/integrated.rs",

@@ -10,8 +10,7 @@
   <a href="#get-started">Get started</a> ·
   <a href="#publish-your-first-panel">Try a panel</a> ·
   <a href="#read-plans-and-review-changes">Read and review</a> ·
-  <a href="docs/08-configuration.md">Configuration</a> ·
-  <a href="docs/05-roadmap.md">Roadmap</a>
+  <a href="docs/08-configuration.md">Configuration</a>
 </p>
 
 Run your usual shells and coding agents in tabs and movable panes. Give each task a status panel
@@ -46,12 +45,10 @@ still a regular terminal.
 
 ## Get started
 
-**Ivy is in active development.** Linux is the current daily-use platform. macOS and Windows are
-targets; their first native build and validation are still tracked in the
-[roadmap](docs/05-roadmap.md). Reopening restores the layout and starts fresh programs; it does not
-resume running agent sessions.
+These instructions are for a Linux desktop. Reopening Ivy restores the layout and starts fresh
+programs; it does not resume running agent sessions.
 
-Build from source; packaged downloads are not available yet. You need:
+Build Ivy from source. You need:
 
 - Git and [Rust installed through rustup](https://rustup.rs/). The repository selects its pinned
   toolchain from [`rust-toolchain.toml`](rust-toolchain.toml).
@@ -110,14 +107,36 @@ program in that console before you click it. See the
 
 ### Connect an MCP producer
 
-Build the stdio MCP bridge:
+Open **Connect agents** in Ivy's title bar or application menu and choose **Copy setup prompt**.
+Paste it into your AI client inside Ivy to let it configure the connection and publish a test panel.
+Manual setup and bridge diagnostics are available in the same guide. Its indicator highlights while no console has published a panel;
+it does not claim to detect how your AI client is configured.
+
+The terminal and its MCP bridge are separate executables: `app` opens Ivy, and `panel-mcp` connects
+an agent's MCP client to its console. Running or building `app` alone does not build the bridge,
+install it on your `PATH`, or register it with any agent client.
+
+Build both executables:
 
 ```sh
-cargo build --locked -p panel-control --bin panel-mcp --release
+cargo build --locked --workspace --release
 ```
 
-Configure your agent's MCP client to launch the resulting `target/release/panel-mcp` binary using
-its absolute path. Start the agent inside Ivy so the bridge inherits that console's environment.
+1. Configure your agent's MCP client to launch `target/release/panel-mcp` using its absolute path.
+   Each client has its own MCP configuration; Ivy does not edit it automatically.
+2. Start that agent inside an Ivy console. Its MCP bridge inherits the console's `PANEL_ID` and
+   `PANEL_DIR`, and uses them to reach the local endpoint when a panel or console tool is called.
+   Do not hard-code a pane's directory in the client configuration: every console has its own.
+3. The client starts the bridge and discovers its tools through MCP. The tool descriptions and
+   parameter schemas tell the model how to call them.
+4. Instruct the agent to publish its progress and attention changes. Tool discovery makes the
+   operations available; it does not schedule status updates on the agent's behalf.
+
+For example, add this instruction to the agent's session or project instructions:
+
+> Use Ivy's panel tools to publish your current task and update it when the phase or attention changes.
+> Set attention to `wait` when you need my answer, `block` when an external dependency stops the
+> task, and `done` when the work is finished. Omit attention during ordinary progress.
 
 It exposes `panel_set`, `panel_get`, `panel_patch` and `panel_retire`, plus `split_open`,
 `split_read` and `split_close` for auxiliary consoles owned by that connection. A person's input
@@ -230,7 +249,6 @@ For a bug, include your platform, build revision and steps to reproduce it.
 | Document | Contents |
 |---|---|
 | [Vision](docs/01-vision.md) | The problem Ivy addresses and who it is for |
-| [Roadmap](docs/05-roadmap.md) | Delivered work, planned milestones and platform validation |
 | [Configuration](docs/08-configuration.md) | Preferences, themes, fonts, shortcuts and pane names |
 | [Panel contract](docs/04-panel-contract.md) | Publish status, attention, links and action buttons |
 | [Architecture](docs/03-architecture.md) | Components, transports and ownership boundaries |
