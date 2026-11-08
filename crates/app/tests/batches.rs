@@ -994,3 +994,124 @@ fn settings_variants_are_not_averaged_across_modes() {
     );
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn integrated_chrome_witness_and_regimes_are_checked() {
+    use std::{
+        fs,
+        process::Command,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    let dir = std::env::temp_dir().join(format!(
+        "chrome-report-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let first = dir.join("first");
+    let second = dir.join("second");
+    let function = MEASURE
+        .split("# Integrated chrome report validation (also exercised with synthetic reports).\n")
+        .nth(1)
+        .unwrap()
+        .split("# End integrated chrome report validation.")
+        .next()
+        .unwrap();
+    let shell = format!("set -eu\n{function}\ninvalidate() {{ exit 7; }}\ncheck_chrome_report\n");
+    let accepts = |mode: &str,
+                   regime: &str,
+                   enabled: &str,
+                   frames: &str,
+                   visible: usize,
+                   hidden: usize| {
+        fs::write(&first, format!("chrome regime: {regime}\nintegrated chrome: enabled={enabled}, frames={frames}, total=1ms\nchrome view: visible={visible}, hidden={hidden}\n")).unwrap();
+        Command::new("sh")
+            .arg("-c")
+            .arg(&shell)
+            .env("REPORT", &first)
+            .env("INTEGRATED_CHROME", mode)
+            .status()
+            .unwrap()
+            .success()
+    };
+    assert!(accepts("", "historical", "false", "0", 0, 0));
+    assert!(!accepts("", "historical", "true", "1", 0, 0));
+    assert!(accepts("1", "integrated", "true", "1", 2, 0));
+    assert!(!accepts("1", "integrated", "true", "0", 2, 0));
+    assert!(!accepts("1", "historated", "true", "1", 2, 0));
+    assert!(!accepts("1", "integrated", "false", "0", 2, 0));
+    assert!(accepts("zoom", "integrated-zoom", "true", "1", 1, 1));
+    assert!(!accepts("zoom", "integrated", "true", "1", 1, 1));
+    assert!(!accepts("zoom", "integrated-zoom", "true", "", 1, 1));
+    assert!(!accepts("zoom", "integrated-zoom", "true", "1", 2, 0));
+    assert!(!accepts("1", "integrated", "true", "1", 1, 1));
+    let header = |regime: &str| {
+        format!(
+            "window: 1280×800 points\ntabs: 1\n  pane 0: 50×41 (left)\nchrome regime: {regime}\nintegrated chrome: enabled=true, frames=1, total=1ms\n"
+        )
+    };
+    let script =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/measure-frame.sh");
+    let comparable = || {
+        Command::new("sh")
+            .arg(&script)
+            .arg("compare")
+            .arg(&first)
+            .arg(&second)
+            .env_remove("MEASURE_AS_CONSOLE")
+            .output()
+            .unwrap()
+            .status
+            .success()
+    };
+    fs::write(&first, header("integrated")).unwrap();
+    fs::write(&second, header("integrated")).unwrap();
+    assert!(comparable());
+    fs::write(&second, header("integrated-zoom")).unwrap();
+    assert!(!comparable());
+    fs::write(&second, header("historical")).unwrap();
+    assert!(!comparable());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn integrated_chrome_batches_require_painted_pane_headers() {
+    use std::{fs, process::Command};
+    let row = MEASURE
+        .lines()
+        .find(|line| line.trim_start().starts_with("chrome|chrome-zoom)"))
+        .expect("integrated batches are declared");
+    assert!(
+        row.contains("HEADER=1"),
+        "both integrated variants must request pane headers"
+    );
+    let function = MEASURE
+        .split("# Header report validation (also exercised with synthetic reports).\n")
+        .nth(1)
+        .unwrap()
+        .split("# End header report validation.")
+        .next()
+        .unwrap();
+    let shell = format!("set -eu\n{function}\ninvalidate() {{ exit 7; }}\ncheck_header_report\n");
+    let report = std::env::temp_dir().join(format!("chrome-headers-{}", std::process::id()));
+    let accepts = |contents: &str, header: &str| {
+        fs::write(&report, contents).unwrap();
+        Command::new("sh")
+            .arg("-c")
+            .arg(&shell)
+            .env("REPORT", &report)
+            .env("HEADER", header)
+            .status()
+            .unwrap()
+            .success()
+    };
+    assert!(accepts("header: 2 frame(s) with a strip painted\n", "1"));
+    assert!(!accepts("header: 0 frame(s) with a strip painted\n", "1"));
+    assert!(!accepts("unrelated: 1\n", "1"));
+    assert!(!accepts("header: 2 frame(s) with a strip painted\n", ""));
+    assert!(accepts("header: 0 frame(s) with a strip painted\n", ""));
+    fs::remove_file(report).unwrap();
+}

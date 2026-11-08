@@ -38,7 +38,7 @@ impl Pane {
         name: usize,
         reads: control::ReadActivity,
     ) -> term_core::Result<Self> {
-        Self::with_panel_counting_reads(
+        launch_pane(
             ctx,
             program,
             &[],
@@ -55,7 +55,7 @@ impl Pane {
         name: usize,
         reads: control::ReadActivity,
     ) -> term_core::Result<Self> {
-        Self::with_panel_counting_reads(
+        launch_pane(
             ctx,
             program,
             args,
@@ -73,7 +73,7 @@ impl Pane {
         panel: Option<PanelDir>,
         name: usize,
     ) -> term_core::Result<Self> {
-        Self::with_panel_counting_reads(
+        launch_pane(
             ctx,
             program,
             args,
@@ -81,60 +81,6 @@ impl Pane {
             name,
             control::ReadActivity::default(),
         )
-    }
-
-    fn with_panel_counting_reads(
-        ctx: &egui::Context,
-        program: &str,
-        args: &[String],
-        panel: Option<PanelDir>,
-        name: usize,
-        reads: control::ReadActivity,
-    ) -> term_core::Result<Self> {
-        let identity = identity_of(panel.as_ref());
-        let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
-        let (pty, output) = match Pty::spawn_with_env(program, &borrowed, INITIAL_GRID, &identity) {
-            Ok(spawned) => spawned,
-            Err(failure) => {
-                eprintln!(
-                    "'{program}' could not be launched ({failure}); opening {FALLBACK_SHELL}"
-                );
-                Pty::spawn_with_env(FALLBACK_SHELL, &[], INITIAL_GRID, &identity)?
-            }
-        };
-
-        #[cfg(test)]
-        crate::tests::completed_operation(crate::tests::OperationWork::Launch);
-
-        let waker = ctx.clone();
-        let pty_output = PtyOutput::new(output, move || waker.request_repaint());
-        let (panel_state, control) = panel::pane::state_and_control(ctx, panel.as_ref(), reads);
-
-        Ok(Self {
-            name,
-            pty,
-            pty_output,
-            panel,
-            control,
-            panel_state,
-            to_reread: Flag::raised(),
-            screen: Screen::new(INITIAL_GRID),
-            painted_console: None,
-            received: Vec::new(),
-            keystrokes: Vec::new(),
-            held: None,
-            search: crate::search::OnThisConsole::default(),
-            measured: INITIAL_GRID,
-            timings: Timings::default(),
-            pending_measurement: None,
-            panel_reread_unpainted: std::time::Duration::ZERO,
-            control_unpainted: std::time::Duration::ZERO,
-            reflowed: std::time::Duration::ZERO,
-            pending_wheel: WheelInput::default(),
-            panel_width: panel::DEFAULT_WIDTH,
-            folded: false,
-            taken_over: None,
-        })
     }
 }
 
@@ -336,6 +282,8 @@ impl Window {
             last_frame_with_buttons: None,
             header_input: crate::header::actions::Input::default(),
             settings_editor: crate::settings::editor::Editor::default(),
+            chrome: crate::chrome::Chrome::default(),
+            pane_view: crate::pane_view::State::default(),
             link_press_in_progress: None,
             drag_in_progress: None,
             last_painted: Vec::new(),
@@ -430,6 +378,10 @@ impl Window {
         whole_window: egui::Rect,
         metrics: &CellMetrics,
     ) {
+        if matches!(request, WindowRequest::Split(_) | WindowRequest::ClosePane) {
+            let tab = self.active().name;
+            self.pane_view.clear(tab);
+        }
         match request {
             // The wrap-around comes from `rem_euclid`, which unlike the usual remainder **does not
             // return negatives**: from the first one backwards you reach the last, with no separate
@@ -448,4 +400,158 @@ impl Window {
 
         ctx.request_repaint();
     }
+}
+
+/// What size to open the window with, from what the variable said.
+///
+/// **Nothing instead of a default size**: with no variable nothing is asked for and the desktop
+/// decides, which is what it does today and what it has to go on doing for whoever uses the
+/// application.
+///
+/// **A value that is not understood is ignored just as if it were not there**, as in
+/// [`how_many_tabs`]: aborting the startup over a badly written variable would be worse, and
+/// whoever measures finds out as soon as they compare the size they asked for with the one the
+/// report publishes. What is not a number, what is not finite and what is not positive are rejected
+/// — a width of zero leaves a window with nothing inside and a `NaN` propagates to all the
+/// painting.
+pub(crate) fn window_size(value: Option<&str>) -> Option<egui::Vec2> {
+    let (width, height) = value?.split_once('x')?;
+    let width: f32 = width.trim().parse().ok()?;
+    let height: f32 = height.trim().parse().ok()?;
+
+    (width.is_finite() && width > 0.0 && height.is_finite() && height > 0.0)
+        .then_some(egui::vec2(width, height))
+}
+
+/// What the environment variable says, already resolved.
+pub(crate) fn size_at_startup() -> Option<egui::Vec2> {
+    window_size(std::env::var(SIZE_VARIABLE).ok().as_deref())
+}
+
+/// Opens the PTY, output bridge and producer endpoint as one pane.
+fn launch_pane(
+    ctx: &egui::Context,
+    program: &str,
+    args: &[String],
+    panel: Option<PanelDir>,
+    name: usize,
+    reads: control::ReadActivity,
+) -> term_core::Result<Pane> {
+    let identity = identity_of(panel.as_ref());
+    let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+    let (pty, output) = match Pty::spawn_with_env(program, &borrowed, INITIAL_GRID, &identity) {
+        Ok(spawned) => spawned,
+        Err(failure) => {
+            eprintln!("'{program}' could not be launched ({failure}); opening {FALLBACK_SHELL}");
+            Pty::spawn_with_env(FALLBACK_SHELL, &[], INITIAL_GRID, &identity)?
+        }
+    };
+
+    #[cfg(test)]
+    crate::tests::completed_operation(crate::tests::OperationWork::Launch);
+
+    let waker = ctx.clone();
+    let pty_output = PtyOutput::new(output, move || waker.request_repaint());
+    let (panel_state, control) = panel::pane::state_and_control(ctx, panel.as_ref(), reads);
+
+    Ok(Pane {
+        name,
+        label: None,
+        pty,
+        pty_output,
+        panel,
+        control,
+        panel_state,
+        to_reread: Flag::raised(),
+        screen: Screen::new(INITIAL_GRID),
+        painted_console: None,
+        received: Vec::new(),
+        keystrokes: Vec::new(),
+        held: None,
+        search: crate::search::OnThisConsole::default(),
+        measured: INITIAL_GRID,
+        timings: Timings::default(),
+        pending_measurement: None,
+        panel_reread_unpainted: std::time::Duration::ZERO,
+        control_unpainted: std::time::Duration::ZERO,
+        reflowed: std::time::Duration::ZERO,
+        pending_wheel: WheelInput::default(),
+        panel_width: panel::DEFAULT_WIDTH,
+        folded: false,
+        taken_over: None,
+    })
+}
+
+/// Which layout the environment variable asks for, if it asks for a valid one.
+///
+/// **A value that is not understood leaves the one of always**, just as in [`how_many_tabs`]:
+/// whoever measures finds out as soon as they see two consoles where they asked for four, and
+/// aborting the startup over a badly written variable would be worse. A zero in either of the two
+/// axes is not a layout: there would be no console at all.
+pub(crate) fn opening_layout_of(value: Option<&str>) -> OpeningLayout {
+    let requested = value.and_then(|value| {
+        let (columns, rows) = value.split_once('x')?;
+
+        OpeningLayout::new(columns.trim().parse().ok()?, rows.trim().parse().ok()?)
+    });
+
+    requested.unwrap_or(OpeningLayout::DEFAULT)
+}
+
+/// How many tabs the window opens with, from what the variable said.
+///
+/// **Never fewer than one**, and that floor is not caution: the list of tabs cannot be empty —the
+/// window always shows one— and a zero would leave every access indexing out of range on the first
+/// frame. A value that is not a number is ignored just as if it were not there: whoever measures
+/// finds out on seeing a single tab, and aborting the startup over a badly written variable would
+/// be worse.
+///
+/// **It receives the value and does not read it, and a review decided that.** Reading it here would
+/// force the tests to call `std::env::set_var`, whose contract is over **all** the environment: any
+/// concurrent read is undefined behavior, not only the one of this key. And in this suite there
+/// are plenty of them — `Pane::new` reads `SHELL`, and `portable_pty` walks `std::env::vars_os()`
+/// when building **every** console—, with the tests running in threads at the same time. The only
+/// line left uncovered is [`run`]'s, for the same reason as `on_exit`'s.
+pub(crate) fn how_many_tabs(value: Option<&str>) -> usize {
+    value
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(1)
+        .max(1)
+}
+
+/// Launch a fresh tab and declare launch plus watcher activation as one operation.
+pub(crate) fn create_a_tab(window: &mut Window, ctx: &egui::Context) {
+    // Launching the console and activating its watchers are declared together.
+    // Every new tab starts with one console; window restore and measurement layouts
+    // retain the shape they were explicitly given.
+    let before = Instant::now();
+    #[cfg(test)]
+    let before = tests::OperationClock::start(before);
+    let with_what = OpeningLayout {
+        columns: 1,
+        rows: 1,
+    };
+    let opened = Tab::new_counting_reads(
+        ctx,
+        window.next_name,
+        window.next_pane_name,
+        &with_what,
+        window.control.read_activity(),
+    );
+    // **The names are spent even if the opening fails**, so that they are never reused: if the
+    // failed attempt left a line on the error output, whatever is opened afterwards must not be
+    // called the same as what never got to exist. It holds for the tab and for its console
+    // for the same reason, so both counters are advanced in the same place.
+    window.next_name += 1;
+    window.next_pane_name += with_what.how_many_panes();
+
+    // **The stopwatch is closed after putting the tab in front, and that line was drawn in the
+    // wrong place.** Putting it in front **rearms the watcher**, which rebuilds the watching
+    // over the panes of every tab and makes them reread their `panel.json`: it is the expensive
+    // half of opening a tab, and no pane declares it. Closing the stopwatch earlier, that work
+    // fell into «the rest of the frame» — the name this project gives to the interface
+    // framework cost, which is the figure D3 decides with. It is the same fix splitting already
+    // carries.
+    window.bring_to_front(opened, ctx);
+    window.timed_separately += before.elapsed();
 }

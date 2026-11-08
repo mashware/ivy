@@ -8,8 +8,8 @@ you left the windows; this one can be written by hand or through Settings.
 
 ## Graphical settings
 
-The global **Settings gear** sits at the right of the tab strip, including a single-tab window.
-The system titlebar keeps its native controls. The compact dialog groups Appearance, Cursor and
+The global application menu in the integrated titlebar opens **Preferences**, including with a single tab.
+The compact dialog groups Appearance, Cursor and
 Shortcuts, with one console-and-panel theme preview, colour swatches and an expandable sixteen-colour ANSI palette.
 Use **Change** beside the selected theme to open a searchable, scrollable catalog. Filter it with
 **All**, **Dark** or **Light**, and choose with the mouse or arrow keys. Browsing updates only the
@@ -312,3 +312,22 @@ file goes on being applied.
 desktop uses for every other window, and nobody has asked for another number. **What shape the cursor
 is** either: that belongs to the program inside, which is the arrangement every terminal has.
 Reloading the file without closing the terminal is left for later, and the reason is written down.
+
+## Integrated window controls
+
+The integrated titlebar and console headers use the active theme and explicit colour overrides.
+Their surfaces derive from `background` and `panel`, their text from `foreground`, their separators
+from `divider`, and active/hover marks from `focus`. Changing the named theme or saving colour
+overrides updates these controls along with the consoles. No independent fixed chrome palette is
+kept. Existing terminal foreground/background and ANSI colour behaviour is unchanged.
+
+New tabs open one console. The application menu groups tab creation, splitting, the focused
+console's information-panel toggle, Preferences and Keyboard shortcuts. Shortcut hints reflect
+the current bindings and disappear when a chord is disabled. Interface labels keep their own
+compact proportional type independently of the terminal font size.
+
+Each console header includes its information-panel toggle, maximize/restore, close controls.
+Double-click its label, or right-click its header and choose Rename. Double-click or right-click a tab label
+to rename that tab. Both labels are optional inert layout metadata saved with the layout. Maximizing a
+console temporarily hides its siblings; restoring reveals their original order and proportions.
+Hidden programs keep running. Right-clicking a header retains its console action menu without an overflow button.

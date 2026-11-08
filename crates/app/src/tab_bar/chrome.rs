@@ -35,6 +35,17 @@ impl Geometry {
 
 /// Shared window partition without adding layout policy to the window's behaviour.
 pub(crate) fn geometry(window: &Window, area: egui::Rect, metrics: &CellMetrics) -> Geometry {
+    if window.chrome.enabled() {
+        let top = (area.top() + crate::chrome::HEIGHT).min(area.bottom());
+        let (_, rest) = area.split_top_bottom_at_y(top);
+        let bottom = (rest.top() + 39.0).min(rest.bottom());
+        let (cards, consoles) = rest.split_top_bottom_at_y(bottom);
+        return Geometry {
+            cards: Some(cards),
+            gear: Some(egui::Rect::NOTHING),
+            consoles,
+        };
+    }
     Geometry::within(
         area,
         window.tabs.len(),

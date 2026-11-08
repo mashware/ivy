@@ -669,6 +669,8 @@ pub(crate) struct Closing {
 /// force putting [`crate::Window::handle_the_mouse`] and [`Tab::drag_the_divider`] inside the painting,
 /// and those were taken out precisely so they could be checked without opening any window.
 pub(crate) struct Tab {
+    /// User-set display label, separate from the stable identity.
+    pub(crate) label: Option<String>,
     /// How its consoles are tiled. See [`Node`].
     ///
     /// **It replaces the array of two and the loose fraction that used to be here.** That array
@@ -751,6 +753,7 @@ impl Tab {
 
         Self {
             root: in_layout(panes, layout.rows),
+            label: None,
             focus,
             name,
         }
@@ -1006,29 +1009,34 @@ impl From<session::StoredOrientation> for Orientation {
     }
 }
 
+/// Converts a live node to inert session metadata.
+fn describe_node(node: &Node) -> session::StoredNode {
+    match node {
+        Node::Leaf(pane) => session::StoredNode::Leaf(session::StoredLeaf {
+            panel_width: pane.panel_width,
+            folded: pane.folded,
+            label: pane.label.clone(),
+        }),
+        Node::Branch {
+            orientation,
+            children,
+        } => session::StoredNode::Branch {
+            orientation: (*orientation).into(),
+            children: children
+                .iter()
+                .map(|child| session::StoredChild {
+                    weight: child.weight.value(),
+                    node: child.node.describe(),
+                })
+                .collect(),
+        },
+    }
+}
+
 impl Node {
     /// How this node is described so that it can be built again.
-    ///
     pub(crate) fn describe(&self) -> session::StoredNode {
-        match self {
-            Self::Leaf(pane) => session::StoredNode::Leaf(session::StoredLeaf {
-                panel_width: pane.panel_width,
-                folded: pane.folded,
-            }),
-            Self::Branch {
-                orientation,
-                children,
-            } => session::StoredNode::Branch {
-                orientation: (*orientation).into(),
-                children: children
-                    .iter()
-                    .map(|child| session::StoredChild {
-                        weight: child.weight.value(),
-                        node: child.node.describe(),
-                    })
-                    .collect(),
-            },
-        }
+        describe_node(self)
     }
 
     /// The tree that description describes, **opening one console per leaf**.
@@ -1062,6 +1070,7 @@ impl Node {
                 // what comes back from the disk is always a state a gesture could have left.
                 pane.panel_width = leaf.panel_width.max(panel::DRAG_FLOOR);
                 pane.folded = leaf.folded;
+                pane.label = leaf.label.clone();
                 Ok(Self::Leaf(pane))
             }
             session::StoredNode::Branch {
@@ -1102,6 +1111,7 @@ impl Tab {
     pub(crate) fn describe(&self) -> session::StoredTab {
         session::StoredTab {
             root: self.root.describe(),
+            label: self.label.clone(),
         }
     }
 
@@ -1125,6 +1135,11 @@ impl Tab {
             .ok_or("a restored tab with no console in it")?
             .name;
 
-        Ok(Self { root, focus, name })
+        Ok(Self {
+            root,
+            focus,
+            name,
+            label: saved.label.clone(),
+        })
     }
 }

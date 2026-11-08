@@ -19,6 +19,7 @@
 //! `tiling` is the module that knows no console and no tab.
 
 mod chrome;
+mod interaction;
 pub(crate) use chrome::{geometry, partition};
 
 use crate::painter::CellMetrics;
@@ -50,6 +51,9 @@ pub(crate) struct TabBarOutcome {
 /// behind it**: its outside callers are the pane-floor test and a shared helper, both of which sit
 /// with the window builders in `lib.rs`'s test module. See that item's note.
 pub(crate) const TAB_BAR_MARGIN: f32 = 4.0;
+
+// Keep space for both an attention claim and a readable number beside the close target.
+const CLOSE_MIN_WIDTH: f32 = 65.0;
 
 /// Sets aside the bar's place at the top, and returns what is left to the consoles.
 ///
@@ -121,6 +125,26 @@ pub(crate) fn tab_rect(tab_bar: egui::Rect, which: usize, how_many: usize) -> eg
     )
 }
 
+fn compact_tab_rect(bar: egui::Rect, which: usize, count: usize) -> egui::Rect {
+    let available = (bar.width() - 72.0).max(0.0);
+    let width = (available / count.max(1) as f32).min(190.0);
+    let x = bar.left() + 10.0 + width * which as f32;
+    egui::Rect::from_min_max(
+        egui::pos2(x.min(bar.right()), (bar.top() + 5.0).min(bar.bottom())),
+        egui::pos2((x + (width - 3.0).max(0.0)).min(bar.right()), bar.bottom()),
+    )
+}
+
+/// One padded target shared by the add-tab glyph and its pointer interaction.
+fn add_tab_rect(bar: egui::Rect, count: usize) -> egui::Rect {
+    let last = compact_tab_rect(bar, count.saturating_sub(1), count);
+    let left = (last.right() + 12.0).min(bar.right());
+    egui::Rect::from_min_max(
+        egui::pos2(left, (bar.top() + 5.0).min(bar.bottom())),
+        egui::pos2((left + 40.0).min(bar.right()), bar.bottom()),
+    )
+}
+
 impl Window {
     /// Changes tab when a tab card is clicked.
     ///
@@ -134,6 +158,10 @@ impl Window {
         tab_bar: egui::Rect,
         metrics: &CellMetrics,
     ) {
+        if self.chrome.enabled() {
+            interaction::handle(self, ui, tab_bar, metrics);
+            return;
+        }
         for which_tab in 0..self.tabs.len() {
             let id = ui.id().with(("tab", which_tab));
             if ui
@@ -191,75 +219,185 @@ impl Window {
         metrics: &CellMetrics,
         now: SystemTime,
     ) -> TabBarOutcome {
-        let started = Instant::now();
-        let mut marked = 0;
-        ui.painter_at(tab_bar)
-            .rect_filled(tab_bar, 0.0, self.theme.background());
+        paint_cards(self, ui, tab_bar, metrics, now)
+    }
+}
 
-        for which_tab in 0..self.tabs.len() {
-            let tab_area = tab_rect(tab_bar, which_tab, self.tabs.len());
-            let painter = ui.painter_at(tab_area);
-            let is_the_active_one = which_tab == self.active;
+/// Paint cards and claims under one stopwatch, shared by both chrome regimes.
+fn paint_cards(
+    window: &Window,
+    ui: &egui::Ui,
+    tab_bar: egui::Rect,
+    metrics: &CellMetrics,
+    now: SystemTime,
+) -> TabBarOutcome {
+    let started = Instant::now();
+    let mut marked = 0;
+    ui.painter_at(tab_bar).rect_filled(
+        tab_bar,
+        0.0,
+        if window.chrome.enabled() {
+            window.theme.panel_background()
+        } else {
+            window.theme.background()
+        },
+    );
 
-            // The active one is filled with the same color that marks the console with focus: both
-            // say «the keyboard goes here», at two different scales, and giving them two colors
-            // would say they are two states with nothing to do with each other.
-            if is_the_active_one {
-                painter.rect_filled(tab_area, 0.0, self.theme.focus());
-            }
+    for which_tab in 0..window.tabs.len() {
+        let tab_area = if window.chrome.enabled() {
+            compact_tab_rect(tab_bar, which_tab, window.tabs.len())
+        } else {
+            tab_rect(tab_bar, which_tab, window.tabs.len())
+        };
+        let attention = window.tabs[which_tab].attention(now);
+        let painter = ui.painter_at(tab_area);
+        let is_the_active_one = which_tab == window.active;
 
-            painter.text(
-                tab_area.center(),
-                egui::Align2::CENTER_CENTER,
-                // The number is passed **without converting it to text**: `Painter::text` takes an
-                // `impl ToString` and calls `to_string` inside, so giving it a ready-made `String`
-                // clones it and allocates twice per tab and per frame.
-                which_tab + 1,
-                metrics.font(),
-                if is_the_active_one {
-                    self.theme.background()
-                } else {
-                    self.theme.foreground()
-                },
-            );
-
-            // **The active one is marked too.** In the tab you are looking at the claim can come
-            // from the pane next door, and not marking it would be one more conditional rule to
-            // maintain.
-            if let Some(attention) = self.tabs[which_tab].attention(now) {
-                // **The symbol is painted over the bar's background, in the active card too.**
-                // That card is filled with the focus color, and on top of it these colors **cannot
-                // be seen**: measured, the blocking red gives 1.01 of contrast and the dimmed
-                // yellow 1.02 — that is, the same color as far as reading it goes. The number
-                // beside it is already inverted for this very reason, but inverting the symbol
-                // would be no good: **its color is the class**, and changing it would say something
-                // else. What is changed is what lies behind.
-                if is_the_active_one {
-                    painter.rect_filled(
-                        egui::Rect::from_min_size(
-                            tab_area.left_top(),
-                            egui::vec2(2.0 * TAB_BAR_MARGIN + metrics.width(), tab_area.height()),
-                        ),
-                        0.0,
-                        self.theme.background(),
-                    );
-                }
-                painter.text(
-                    egui::pos2(tab_area.left() + TAB_BAR_MARGIN, tab_area.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    panel::attention_symbol(attention.class),
-                    metrics.font(),
-                    self.theme
-                        .attention_color(attention.class, attention.backed),
+        // Integrated tabs use a subtle theme-derived surface and an accent underline.
+        // The historical regime keeps the original focus-color fill.
+        if is_the_active_one {
+            if window.chrome.enabled() {
+                painter.rect_filled(
+                    tab_area,
+                    egui::CornerRadius {
+                        nw: 5,
+                        ne: 5,
+                        sw: 0,
+                        se: 0,
+                    },
+                    window.theme.chrome_surface(),
                 );
-                marked += 1;
+                let underline = egui::Rect::from_min_max(
+                    egui::pos2(
+                        tab_area.left(),
+                        (tab_area.bottom() - 2.0).max(tab_area.top()),
+                    ),
+                    tab_area.right_bottom(),
+                );
+                painter.rect_filled(underline, 0.0, window.theme.focus());
+            } else {
+                painter.rect_filled(tab_area, 0.0, window.theme.focus());
             }
         }
 
-        TabBarOutcome {
-            cost: started.elapsed(),
-            marked,
+        let can_close = window.tabs.len() > 1 && tab_area.width() >= CLOSE_MIN_WIDTH;
+        let label_painter = if window.chrome.enabled() {
+            painter.with_clip_rect(egui::Rect::from_min_max(
+                tab_area.min,
+                egui::pos2(
+                    (tab_area.right() - if can_close { 25.0 } else { 0.0 }).max(tab_area.left()),
+                    tab_area.bottom(),
+                ),
+            ))
+        } else {
+            painter.clone()
+        };
+        label_painter.text(
+            if window.chrome.enabled() {
+                tab_area.left_center()
+                    + egui::vec2(
+                        if tab_area.width() < 90.0 && attention.is_none() {
+                            4.0
+                        } else {
+                            25.0
+                        },
+                        0.0,
+                    )
+            } else {
+                tab_area.center()
+            },
+            if window.chrome.enabled() {
+                egui::Align2::LEFT_CENTER
+            } else {
+                egui::Align2::CENTER_CENTER
+            },
+            if window.chrome.enabled() {
+                window.tabs[which_tab].label.clone().unwrap_or_else(|| {
+                    let number = window.tabs[which_tab].name + 1;
+                    if tab_area.width() < 100.0 {
+                        number.to_string()
+                    } else {
+                        format!("Terminal {number}")
+                    }
+                })
+            } else {
+                (which_tab + 1).to_string()
+            },
+            if window.chrome.enabled() {
+                egui::FontId::proportional(12.0)
+            } else {
+                metrics.font()
+            },
+            if is_the_active_one && !window.chrome.enabled() {
+                window.theme.background()
+            } else {
+                window.theme.foreground()
+            },
+        );
+        if window.chrome.enabled() && window.tabs.len() > 1 && tab_area.width() >= CLOSE_MIN_WIDTH {
+            painter.text(
+                egui::pos2(tab_area.right() - 12.0, tab_area.center().y),
+                egui::Align2::CENTER_CENTER,
+                "×",
+                egui::FontId::proportional(16.0),
+                window.theme.foreground(),
+            );
         }
+
+        // **The active one is marked too.** In the tab you are looking at the claim can come
+        // from the pane next door, and not marking it would be one more conditional rule to
+        // maintain.
+        if let Some(attention) = attention {
+            // In the historical regime, the symbol is painted over the bar's background.
+            // That card is filled with the focus color, and on top of it these colors **cannot
+            // be seen**: measured, the blocking red gives 1.01 of contrast and the dimmed
+            // yellow 1.02 — that is, the same color as far as reading it goes. The number
+            // beside it is already inverted for this very reason, but inverting the symbol
+            // would be no good: **its color is the class**, and changing it would say something
+            // else. What is changed is what lies behind.
+            if is_the_active_one && !window.chrome.enabled() {
+                painter.rect_filled(
+                    egui::Rect::from_min_size(
+                        tab_area.left_top(),
+                        egui::vec2(2.0 * TAB_BAR_MARGIN + metrics.width(), tab_area.height()),
+                    ),
+                    0.0,
+                    window.theme.background(),
+                );
+            }
+            painter.text(
+                egui::pos2(tab_area.left() + TAB_BAR_MARGIN, tab_area.center().y),
+                egui::Align2::LEFT_CENTER,
+                panel::attention_symbol(attention.class),
+                if window.chrome.enabled() {
+                    egui::FontId::proportional(12.0)
+                } else {
+                    metrics.font()
+                },
+                window
+                    .theme
+                    .attention_color(attention.class, attention.backed),
+            );
+            marked += 1;
+        }
+    }
+
+    if window.chrome.enabled() && !window.tabs.is_empty() {
+        let add = add_tab_rect(tab_bar, window.tabs.len());
+        if add.width() >= 20.0 {
+            ui.painter_at(tab_bar).text(
+                add.center(),
+                egui::Align2::CENTER_CENTER,
+                "+",
+                egui::FontId::proportional(16.0),
+                window.theme.foreground(),
+            );
+        }
+    }
+
+    TabBarOutcome {
+        cost: started.elapsed(),
+        marked,
     }
 }
 

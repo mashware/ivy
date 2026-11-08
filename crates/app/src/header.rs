@@ -32,8 +32,10 @@ use eframe::egui;
 
 pub(crate) mod actions;
 pub(crate) mod controls;
+pub(crate) mod integrated;
 pub(crate) mod menu;
 mod splitting;
+pub(crate) use splitting::split as split_named;
 
 /// Whether this session paints a strip over each console.
 ///
@@ -43,15 +45,24 @@ mod splitting;
 /// along: that one says which door the session came in through, this one says what was decided
 /// because of it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct Headers(bool);
+pub(crate) struct Headers(bool, bool);
 
 impl Headers {
     /// What a session gets unless the gate takes it away — every ordinary one, and the one measured
     /// batch that asks for strips on purpose. The tests build with it.
-    pub(crate) const PAINTED: Self = Self(true);
+    pub(crate) const PAINTED: Self = Self(true, false);
 
     /// A measured run that did not ask for them, which is every batch but `T`.
-    pub(crate) const NOT_PAINTED: Self = Self(false);
+    pub(crate) const NOT_PAINTED: Self = Self(false, false);
+
+    pub(crate) fn integrated(self, enabled: bool) -> Self {
+        Self(self.0, enabled && self.0)
+    }
+
+    /// Space reserved on both sides of an integrated pane, including its outline.
+    pub(crate) fn pane_inset(self) -> f32 {
+        if self.1 { 2.5 } else { 0.0 }
+    }
 
     /// The decision, taken once from the environment the session was launched with.
     ///
@@ -176,7 +187,7 @@ impl Button {
         Self(consoles.len() > 1)
     }
 
-    fn is_drawn(self) -> bool {
+    pub(crate) fn is_drawn(self) -> bool {
         self.0
     }
 }
@@ -260,7 +271,11 @@ pub(crate) fn height(metrics: &CellMetrics, headers: Headers) -> f32 {
     if !headers.are_painted() {
         return 0.0;
     }
-    metrics.height() + 2.0 * MARGIN
+    if headers.1 {
+        (metrics.height() + 2.0 * MARGIN).max(33.0)
+    } else {
+        metrics.height() + 2.0 * MARGIN
+    }
 }
 
 /// Sets aside the strip's place at the top of a pane, and returns what is left below it.
@@ -386,6 +401,16 @@ mod tests {
             22.0,
             "the strip's height stopped being the cell's plus its margins, and every console's grid \
              moves with it"
+        );
+    }
+
+    #[test]
+    fn integrated_height_reserves_the_demo_spacing_without_changing_legacy() {
+        assert_eq!(height(&metrics(), Headers::PAINTED.integrated(true)), 33.0);
+        assert_eq!(height(&metrics(), Headers::PAINTED), 22.0);
+        assert_eq!(
+            height(&metrics(), Headers::NOT_PAINTED.integrated(true)),
+            0.0
         );
     }
 

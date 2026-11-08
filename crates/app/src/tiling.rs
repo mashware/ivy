@@ -492,18 +492,34 @@ pub(crate) fn can_split(
     metrics: &CellMetrics,
     headers: crate::header::Headers,
 ) -> bool {
-    let minimum = match cut_along {
-        Orientation::Columns => panel::MINIMUM_CONSOLE * metrics.width(),
-        // **The strip counts towards the minimum, and it has to count here.** Each daughter gets one
-        // of its own, so a pane that fits two consoles of three rows no longer fits them once each
-        // owes a strip as well: without this the split is allowed and both consoles come out below
-        // the floor this function exists to keep.
-        Orientation::Rows => {
-            MINIMUM_ROWS * metrics.height() + crate::header::height(metrics, headers)
-        }
-    };
+    let minimum = 2.0 * headers.pane_inset()
+        + match cut_along {
+            Orientation::Columns => panel::MINIMUM_CONSOLE * metrics.width(),
+            // **The strip counts towards the minimum, and it has to count here.** Each daughter gets one
+            // of its own, so a pane that fits two consoles of three rows no longer fits them once each
+            // owes a strip as well: without this the split is allowed and both consoles come out below
+            // the floor this function exists to keep.
+            Orientation::Rows => {
+                MINIMUM_ROWS * metrics.height() + crate::header::height(metrics, headers)
+            }
+        };
 
     cut_along.length_of(pane_area) >= 2.0 * minimum + DIVIDER_THICKNESS
+}
+
+/// Check a rectangle already inset for painting, as used by pointer and header menus.
+pub(crate) fn can_split_content(
+    content: egui::Rect,
+    cut_along: Orientation,
+    metrics: &CellMetrics,
+    headers: crate::header::Headers,
+) -> bool {
+    can_split(
+        content.expand(headers.pane_inset()),
+        cut_along,
+        metrics,
+        headers,
+    )
 }
 
 /// The weights a branch of `how_many` children is born with.

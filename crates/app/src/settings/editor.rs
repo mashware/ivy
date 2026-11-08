@@ -9,7 +9,7 @@ mod probe;
 pub(crate) mod runtime;
 mod script;
 mod timing;
-mod view;
+pub(crate) mod view;
 use timing::Timing;
 
 #[derive(Default)]
@@ -34,9 +34,20 @@ pub(crate) struct Editor {
     held_pointer: bool,
     timing: Timing,
     application: runtime::Application,
+    theme: crate::theme::Theme,
 }
 
 impl Editor {
+    pub(crate) fn open_from_chrome(&mut self) {
+        if self.enabled && !self.is_open() {
+            self.open(super::path());
+        }
+    }
+    /// Open the same editor on its keyboard bindings page.
+    pub(crate) fn open_shortcuts_from_chrome(&mut self) {
+        self.open_from_chrome();
+        self.section = 2;
+    }
     pub fn resolved(entry: super::Entry, mode: Option<&str>) -> Self {
         let measuring = matches!(entry, super::Entry::Measuring);
         Self {
@@ -130,34 +141,37 @@ impl Editor {
         let frame = ctx.cumulative_frame_nr();
         let was_open = self.is_open();
         let over_row = ctx.input(|i| i.pointer.interact_pos().is_some_and(|p| gear.contains(p)));
-        let response = ui
-            .interact(gear, ui.id().with("settings-gear"), egui::Sense::CLICK)
-            .on_hover_text("Settings");
-        self.entry_rect = Some(gear);
-        let opening = response.clicked();
-        let painter = ui.painter_at(gear);
-        painter.rect_filled(gear, 0.0, egui::Color32::from_rgb(35, 41, 52));
-        let ink = if opening || response.hovered() {
-            egui::Color32::from_rgb(173, 195, 255)
-        } else {
-            egui::Color32::from_rgb(153, 163, 182)
-        };
-        let radius = (gear.width().min(gear.height()) * 0.24).min(8.0);
-        let stroke = egui::Stroke::new(1.6, ink);
-        painter.circle_stroke(gear.center(), radius * 0.7, stroke);
-        painter.circle_stroke(gear.center(), radius * 0.26, stroke);
-        for tooth in 0..8 {
-            let direction = egui::vec2(
-                (tooth as f32 * std::f32::consts::TAU / 8.0).cos(),
-                (tooth as f32 * std::f32::consts::TAU / 8.0).sin(),
-            );
-            painter.line_segment(
-                [
-                    gear.center() + direction * radius * 0.7,
-                    gear.center() + direction * radius,
-                ],
-                stroke,
-            );
+        let mut opening = false;
+        if gear.is_positive() {
+            let response = ui
+                .interact(gear, ui.id().with("settings-gear"), egui::Sense::CLICK)
+                .on_hover_text("Settings");
+            self.entry_rect = Some(gear);
+            opening = response.clicked();
+            let painter = ui.painter_at(gear);
+            painter.rect_filled(gear, 0.0, egui::Color32::from_rgb(35, 41, 52));
+            let ink = if opening || response.hovered() {
+                egui::Color32::from_rgb(173, 195, 255)
+            } else {
+                egui::Color32::from_rgb(153, 163, 182)
+            };
+            let radius = (gear.width().min(gear.height()) * 0.24).min(8.0);
+            let stroke = egui::Stroke::new(1.6, ink);
+            painter.circle_stroke(gear.center(), radius * 0.7, stroke);
+            painter.circle_stroke(gear.center(), radius * 0.26, stroke);
+            for tooth in 0..8 {
+                let direction = egui::vec2(
+                    (tooth as f32 * std::f32::consts::TAU / 8.0).cos(),
+                    (tooth as f32 * std::f32::consts::TAU / 8.0).sin(),
+                );
+                painter.line_segment(
+                    [
+                        gear.center() + direction * radius * 0.7,
+                        gear.center() + direction * radius,
+                    ],
+                    stroke,
+                );
+            }
         }
         self.timing.record_work(0, started.elapsed());
         if opening {
@@ -267,6 +281,7 @@ pub(crate) fn before_keys(
         return window.send_keys_to_the_focused(ui.ctx());
     }
     let started = Instant::now();
+    window.settings_editor.theme = window.theme;
     let gear = crate::tab_bar::geometry(window, ui.max_rect(), metrics)
         .gear
         .expect("enabled settings has a gear");

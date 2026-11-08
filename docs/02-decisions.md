@@ -8314,3 +8314,17 @@ D64's existing begin-pass boundary without restarting any console.
 | Changing the running terminal while browsing | Cancel must discard the draft; browsing must not affect running consoles. |
 | Clearing overrides on theme selection | A base selection must not silently erase personal colors (D59). |
 | Inferring save success from the notice text | Notices describe outcomes; the actual transaction result must decide whether Settings closes. |
+
+## D66 — Integrated, theme-derived window chrome and transient pane maximization
+
+**8 November 2026 — #326.** The user approved the interactive HTML prototype: one global titlebar carries split-right/down, new tab, search and the application menu; tabs sit below; each pane carries an explicit label, information-panel toggle, maximize/restore and close. This approval is the new signal superseding D64's exclusion of custom titlebars.
+
+Every chrome surface and ink derives from the effective configured Theme after named-template selection and explicit overrides. Live Save updates chrome alongside terminal colors. Copied prototype RGB literals and an independent chrome theme are discarded because they would ignore the user's settings.
+
+Maximization is a transient view of a stable pane identity. The weighted tree and saved geometry remain unchanged; restoring reveals the original order and proportions. All consoles retain full pump budgets. Hidden siblings use their original tree geometry for resizing and panel refresh; they are not painted into collapsed rectangles. A zoom target becomes the keyboard target. Structural operations reconcile transient view state.
+
+Pane labels are explicit inert user data, never inferred from a TUI or used as process arguments. Optional bounded label metadata extends the v2 session format without changing geometry or process launch; old readers may discard labels on saving. No live process identity is persisted.
+
+Native window gestures use viewport commands and explicit edge/corner resize targets. Platform behavior requires real desktop checks, and unverified platforms remain unverified. Historical measurement regimes keep their geometry and native decorations; integrated chrome is opt-in for measurement and its work has a named nonoverlapping span. No performance claim is made from source inspection or headless tests.
+
+Discarded: rebuilding the tree for zoom (loses restoration), reducing hidden pump budgets (blocks programs), deriving names/state from output (D6), separate hard-coded chrome colors (ignores configuration), and relabelling historical measurements as integrated chrome (D13).

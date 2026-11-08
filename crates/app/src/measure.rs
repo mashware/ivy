@@ -2007,6 +2007,15 @@ mod tests {
         typed_into.record_outbound(ms(1));
 
         let mut window_spans = Vec::new();
+        // Use the real producer so the script's chrome witnesses are tied to its output.
+        let mut chrome = crate::chrome::Chrome::default();
+        chrome.enable();
+        chrome.set_zoom_probe(true);
+        chrome.record_view(1, 1);
+        chrome.close_frame();
+        chrome
+            .publish(&mut window_spans)
+            .expect("writing to memory does not fail");
         crate::settings::editor::Editor::resolved(crate::settings::Entry::Measuring, None)
             .publish(&mut window_spans)
             .expect("writing to memory does not fail");

@@ -636,6 +636,8 @@ impl Keys {
 /// console has the keyboard, and the button depends on how many consoles the tab being painted has.
 #[derive(Clone, Copy)]
 pub(crate) struct HowToPaint {
+    pub(crate) integrated: bool,
+    pub(crate) maximized: Option<usize>,
     /// Whether this console's cursor is lit, and for how much longer.
     pub(crate) blink: Blink,
     /// Whether a strip is painted over it. See [`crate::header::Headers`].
@@ -664,6 +666,8 @@ impl HowToPaint {
         consoles: &[eframe::egui::Rect],
     ) -> Self {
         Self {
+            integrated: false,
+            maximized: None,
             blink,
             headers,
             button: crate::header::Button::in_a_tab_of(consoles),
@@ -673,6 +677,15 @@ impl HowToPaint {
 
     pub(crate) fn measuring_links(mut self, yes: bool) -> Self {
         self.measure_links = yes;
+        self
+    }
+
+    pub(crate) fn integrated(mut self, yes: bool) -> Self {
+        self.integrated = yes;
+        self
+    }
+    pub(crate) fn maximized(mut self, pane: Option<usize>) -> Self {
+        self.maximized = pane;
         self
     }
 }
@@ -920,6 +933,8 @@ pub(crate) fn paint_pane(
     how: HowToPaint,
 ) -> crate::PaneOutcome {
     let HowToPaint {
+        integrated,
+        maximized,
         blink,
         headers,
         button,
@@ -1091,23 +1106,21 @@ pub(crate) fn paint_pane(
     // [`crate::PaneOutcome::strip_cost`].
     let search = pane.search.cost();
     let strip_cost = chrome.header().map(|header| {
-        let started = std::time::Instant::now();
-        let _ = crate::header::paint(&ui.painter_at(header), header, theme, metrics, button);
-        let close =
-            crate::header::button_within(header, metrics, button).map(|target| target.rect());
-        let enabled = [
-            crate::tiling::can_split(rect, crate::tiling::Orientation::Columns, metrics, headers),
-            crate::tiling::can_split(rect, crate::tiling::Orientation::Rows, metrics, headers),
-            pane.panel_state.is_visible(now),
-        ];
-        crate::header::controls::Controls::within(header, metrics, close).paint(
+        crate::header::integrated::paint_strip(
             ui,
+            pane,
+            metrics,
             theme,
-            enabled,
-            pane.folded,
-            ui.id().with(("header-controls", pane.name)),
-        );
-        started.elapsed()
+            crate::header::integrated::Strip {
+                rect,
+                header,
+                headers,
+                button,
+                integrated,
+                maximized,
+                now,
+            },
+        )
     });
     // **The border is only reported if there is a grip behind it.** With the panel clipped
     // below the grip the gesture registers no control at all —so as not to steal the point from

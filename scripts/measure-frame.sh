@@ -36,12 +36,11 @@
 #                    section reads as «it costs nothing» — and the other way round too, if a batch
 #                    that is not this one searched for any.
 #
-#                T = the two consoles with a STRIP over each of them. It is the ONLY batch that
-#                    paints one: every other run has it switched off by the measurement gate, which
-#                    is what keeps the eighteen published batches comparable with each other. Its
+#                T = the two consoles with a STRIP over each of them. It is the only historical batch
+#                    that paints one; the integrated chrome variants also request strips. Its
 #                    control is C — same consoles, same load, and the only difference is the band.
-#                    **Its grid is not the grid of any other batch**: a strip takes a row off every
-#                    console, so T's own report is the only place that number can be read, and the
+#                    **Its grid differs from the historical batches without strips**: a strip takes a row
+#                    off every console, and the
 #                    guard below throws the run away in both directions — a batch that asks for
 #                    strips and painted none, and any batch that painted one without asking.
 #
@@ -191,6 +190,9 @@
 # pane has its own budget. With 44 MiB that gives ≥352, of the order of the 11 August batch. What
 # does grow with the tabs is the frame, because they all pump into the same one.
 #
+# Integrated chrome variants: chrome and chrome-zoom use two tabs of two consoles.
+# Both paint pane headers. The zoom variant starts with a transient zoom;
+# neither changes historical batches.
 # Settings variants: settings-closed, settings-open and settings-fonts reuse C’s load.
 # Their global row has identical geometry; historical C keeps the row vetoed.
 # EVERY BATCH IS RUN TWICE and the mean of the two is published, which is what the annex does. It is
@@ -301,6 +303,38 @@ check_settings_report() {
 }
 # End graphical settings report validation.
 
+# Integrated chrome report validation (also exercised with synthetic reports).
+check_chrome_report() {
+# A missing witness cannot be interpreted as zero work. Historical runs must also prove
+# the integrated titlebar did not accidentally reach their geometry.
+CHROME_LINE=$(sed -n '/^integrated chrome: /p' "$REPORT" | head -1)
+CHROME_ENABLED=$(printf '%s\n' "$CHROME_LINE" | sed -n 's/^integrated chrome: enabled=\([^,]*\), frames=[0-9]*, total=.*/\1/p')
+CHROME_FRAMES=$(printf '%s\n' "$CHROME_LINE" | sed -n 's/^integrated chrome: enabled=[^,]*, frames=\([0-9]*\), total=.*/\1/p')
+CHROME_VIEW=$(sed -n '/^chrome view: /p' "$REPORT" | head -1)
+CHROME_VISIBLE=$(printf '%s\n' "$CHROME_VIEW" | sed -n 's/^chrome view: visible=\([0-9]*\), hidden=[0-9]*$/\1/p')
+CHROME_HIDDEN=$(printf '%s\n' "$CHROME_VIEW" | sed -n 's/^chrome view: visible=[0-9]*, hidden=\([0-9]*\)$/\1/p')
+CHROME_REGIME=$(sed -n 's/^chrome regime: //p' "$REPORT" | head -1)
+if [ -n "$INTEGRATED_CHROME" ]; then
+    EXPECTED_REGIME=integrated
+    [ "$INTEGRATED_CHROME" != zoom ] || EXPECTED_REGIME=integrated-zoom
+    [ "$CHROME_REGIME" = "$EXPECTED_REGIME" ] || invalidate "integrated chrome variant declared the wrong titlebar regime: $CHROME_REGIME"
+    [ "$CHROME_ENABLED" = true ] && [ "${CHROME_FRAMES:-0}" -gt 0 ] || invalidate "integrated chrome variant did not paint its titlebar: $CHROME_LINE"
+    if [ "$INTEGRATED_CHROME" = zoom ]; then
+        [ "${CHROME_VISIBLE:-0}" = 1 ] && [ "${CHROME_HIDDEN:-0}" -gt 0 ] || invalidate "zoom did not hide its sibling console: $CHROME_VIEW"
+    else
+        [ "${CHROME_VISIBLE:-0}" = 2 ] && [ "${CHROME_HIDDEN:-missing}" = 0 ] || invalidate "integrated chrome did not show both consoles: $CHROME_VIEW"
+    fi
+else
+    [ "$CHROME_REGIME" = historical ] || invalidate "historical batch changed its titlebar regime: $CHROME_REGIME"
+    [ "$CHROME_ENABLED" = false ] && [ "${CHROME_FRAMES:-missing}" = 0 ] || invalidate "historical batch changed its integrated chrome regime: $CHROME_LINE"
+fi
+
+}
+# End integrated chrome report validation.
+
+
+
+
 # ── Compare mode ────────────────────────────────────────────────────────────────
 # **The guard this script claimed to have from F2.1 and did not.** The annex publishes the mean of
 # two runs, and averaging two runs with different grids gives a number that describes neither of
@@ -348,6 +382,8 @@ if [ "${MEASURE_AS_CONSOLE:-}" != "1" ] && [ "${1:-}" = compare ]; then
     geometry() {
         sed -n \
             -e 's/^settings probe family: */settings probe family /p' \
+            -e 's/^chrome regime: */chrome regime /p' \
+            -e 's/^integrated chrome: enabled=\([^,]*\),.*/integrated chrome \1/p' \
             -e 's/^settings chrome: */settings chrome /p' \
             -e 's/^settings UI: */settings /p' \
             -e 's/^settings mode: */settings mode /p' \
@@ -479,8 +515,9 @@ RESTORES=0
 # batch, and the guards read the same variable, so they judge the leaked load as the batch's own. A
 # `PATCHES=1` in the environment runs X as Y and publishes it under X's name; a `LARGE=1` pads S and
 # the file batches to the ceiling, and hides U and V from the leak guard that only fires without it.
-ACTIONS= CONTROL= HEADER= READS= PATCHES= LINKS= SEARCH= LARGE= CJK= EMOJI= PANEL_EMOJI= SETTINGS=
+ACTIONS= CONTROL= HEADER= READS= PATCHES= LINKS= SEARCH= LARGE= CJK= EMOJI= PANEL_EMOJI= SETTINGS= INTEGRATED_CHROME=
 case "$BATCH" in
+    chrome|chrome-zoom) TABS=2; PANES=2x1; DUMPING=4; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=${BATCH#chrome}; INTEGRATED_CHROME=${INTEGRATED_CHROME#-}; INTEGRATED_CHROME=${INTEGRATED_CHROME:-1} ;;
     settings-apply) TABS=2; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; SETTINGS=apply ;;
     settings-closed|settings-open|settings-fonts) TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; SETTINGS=${BATCH#settings-} ;;
     A|B|C|D) TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console ;;
@@ -962,7 +999,7 @@ seed() {
 case "$BATCH" in
     A) : ;;                       # no panel: nobody publishes anything
     B) seed quiet & ;;
-    settings-apply|settings-closed|settings-open|settings-fonts|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
+    chrome|chrome-zoom|settings-apply|settings-closed|settings-open|settings-fonts|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
 esac
 
 echo "batch $BATCH · $TABS tab(s) of $PANES · $DUMPING of $DIRECTORIES consoles dumping $MIB MiB · window $WINDOW_SIZE · do not touch the machine until it closes" >&2
@@ -995,6 +1032,11 @@ export MEASURE_AS_CONSOLE=1 MEASURE_MIB="$MIB" MEASURE_BATCH="$BATCH" \
 # every run would paint one everywhere. It is unset for the same reason `MEASURE_TABS` is below: one
 # the user had exported by hand would otherwise reach the application and put a row under every
 # console of a batch that is compared against runs with none.
+if [ -n "$INTEGRATED_CHROME" ]; then
+    export MEASURE_CHROME="$INTEGRATED_CHROME"
+else
+    unset MEASURE_CHROME
+fi
 if [ -n "${SETTINGS:-}" ]; then
     export MEASURE_SETTINGS="$SETTINGS"
 else
@@ -1338,6 +1380,8 @@ fi
 # renamed, nothing is printed, and every guard below never runs. The first version of this block was
 # written that way and its own missing-line case was the one that triggered it. `sed -n …p` exits 0
 # with no output, so the empty case reaches the `if` instead of ending the run.
+# Header report validation (also exercised with synthetic reports).
+check_header_report() {
 HEADER_LINE=$(grep -E "^header:" "$REPORT" | head -1)
 if [ -z "$HEADER_LINE" ]; then
     invalidate "the report does not declare whether a strip was painted over the consoles. Without \
@@ -1358,8 +1402,14 @@ describes a window none of them was measured with"
     fi
 fi
 
+}
+# End header report validation.
+check_header_report
+
 # Settings-specific witnesses, independent of the existing config veto.
 check_settings_report
+
+check_chrome_report
 
 # **The settings guard, and this one invalidates on two counts.** Ever since the terminal reads a
 # settings file, a run that read the measurer's own would have **another grid** — the font size

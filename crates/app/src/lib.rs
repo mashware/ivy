@@ -34,8 +34,10 @@
 //! there would resend the last key pressed thousands of times per second during a dump.
 
 mod alarms;
+mod chrome;
 mod closing;
 pub(crate) mod control;
+mod pane_view;
 use panel::pane::{identity_of, panel_or_none};
 pub mod fonts;
 mod header;
@@ -57,6 +59,7 @@ mod tab_bar;
 pub mod theme;
 mod tiling;
 mod tree;
+mod visibility;
 pub mod watcher;
 
 // **Brought back by name, and the names are the point.** The four modules named below came out of
@@ -74,7 +77,9 @@ pub mod watcher;
 // also gives the reader the one thing the glob takes away — the list of what this file still needs
 // back. For the list of what left, the order is in **D28**, not here.
 use fonts::choose_the_font;
-use opening::WindowRequest;
+#[cfg(test)]
+use opening::window_size;
+use opening::{WindowRequest, how_many_tabs, opening_layout_of, size_at_startup};
 use pointer::{DragIntent, WheelInput, WheelOutcome};
 #[cfg(test)]
 use tab_bar::set_the_tab_bar_aside;
@@ -464,22 +469,6 @@ impl OpeningLayout {
     }
 }
 
-/// Which layout the environment variable asks for, if it asks for a valid one.
-///
-/// **A value that is not understood leaves the one of always**, just as in [`how_many_tabs`]:
-/// whoever measures finds out as soon as they see two consoles where they asked for four, and
-/// aborting the startup over a badly written variable would be worse. A zero in either of the two
-/// axes is not a layout: there would be no console at all.
-fn opening_layout_of(value: Option<&str>) -> OpeningLayout {
-    let requested = value.and_then(|value| {
-        let (columns, rows) = value.split_once('x')?;
-
-        OpeningLayout::new(columns.trim().parse().ok()?, rows.trim().parse().ok()?)
-    });
-
-    requested.unwrap_or(OpeningLayout::DEFAULT)
-}
-
 /// What the window opens with: what the measurement asks for, or what was saved, or the factory
 /// one.
 enum OpenWith {
@@ -520,53 +509,6 @@ fn open_with(
         Some(validated) => OpenWith::Restored(validated),
         None => factory,
     }
-}
-
-/// How many tabs the window opens with, from what the variable said.
-///
-/// **Never fewer than one**, and that floor is not caution: the list of tabs cannot be empty —the
-/// window always shows one— and a zero would leave every access indexing out of range on the first
-/// frame. A value that is not a number is ignored just as if it were not there: whoever measures
-/// finds out on seeing a single tab, and aborting the startup over a badly written variable would
-/// be worse.
-///
-/// **It receives the value and does not read it, and a review decided that.** Reading it here would
-/// force the tests to call `std::env::set_var`, whose contract is over **all** the environment: any
-/// concurrent read is undefined behavior, not only the one of this key. And in this suite there
-/// are plenty of them — `Pane::new` reads `SHELL`, and `portable_pty` walks `std::env::vars_os()`
-/// when building **every** console—, with the tests running in threads at the same time. The only
-/// line left uncovered is [`run`]'s, for the same reason as `on_exit`'s.
-fn how_many_tabs(value: Option<&str>) -> usize {
-    value
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(1)
-        .max(1)
-}
-
-/// What size to open the window with, from what the variable said.
-///
-/// **Nothing instead of a default size**: with no variable nothing is asked for and the desktop
-/// decides, which is what it does today and what it has to go on doing for whoever uses the
-/// application.
-///
-/// **A value that is not understood is ignored just as if it were not there**, as in
-/// [`how_many_tabs`]: aborting the startup over a badly written variable would be worse, and
-/// whoever measures finds out as soon as they compare the size they asked for with the one the
-/// report publishes. What is not a number, what is not finite and what is not positive are rejected
-/// — a width of zero leaves a window with nothing inside and a `NaN` propagates to all the
-/// painting.
-fn window_size(value: Option<&str>) -> Option<egui::Vec2> {
-    let (width, height) = value?.split_once('x')?;
-    let width: f32 = width.trim().parse().ok()?;
-    let height: f32 = height.trim().parse().ok()?;
-
-    (width.is_finite() && width > 0.0 && height.is_finite() && height > 0.0)
-        .then_some(egui::vec2(width, height))
-}
-
-/// What the environment variable says, already resolved.
-fn size_at_startup() -> Option<egui::Vec2> {
-    window_size(std::env::var(SIZE_VARIABLE).ok().as_deref())
 }
 
 /// Opens the window and does not come back until it is closed.
@@ -621,7 +563,9 @@ pub fn run() -> eframe::Result {
     };
     let (settings, what_it_cost) = settings::to_use(entry, settings::path().as_deref());
 
+    let integrated = !measuring || std::env::var_os("MEASURE_CHROME").is_some();
     let mut options = eframe::NativeOptions::default();
+    options.viewport = chrome::viewport(options.viewport, integrated);
     // **The size is only asked for if somebody asked for it**, and that is why there is no default
     // size here: without the variable, `NativeOptions::default()` carries no `inner_size` and the
     // desktop decides, which is the behavior of always. Restoring **does not touch this**: the
@@ -659,11 +603,20 @@ pub fn run() -> eframe::Result {
             // constructors with thirty-three calls among tests, and none of them configures
             // anything.
             settings.apply_to(&mut window);
+            if integrated {
+                window.chrome.enable();
+                if std::env::var("MEASURE_CHROME").ok().as_deref() == Some("zoom") {
+                    let tab = window.active().name;
+                    let focus = window.active().focus;
+                    window.pane_view.toggle(tab, focus);
+                    window.chrome.set_zoom_probe(true);
+                }
+            }
             // **The strip is switched off by the same gate that vetoes the settings file**, and a
             // batch opts back into it with a knob of its own: a header takes a row from every
             // console, so a measured run that painted one would publish a grid no published batch
             // was measured with. See [`header::Headers::resolved`].
-            window.headers = header::Headers::resolved(entry, wants_headers);
+            window.headers = header::Headers::resolved(entry, wants_headers).integrated(integrated);
             window.settings_editor = settings::editor::Editor::resolved(
                 entry,
                 std::env::var("MEASURE_SETTINGS").ok().as_deref(),
@@ -718,6 +671,8 @@ struct Pane {
     /// kept aligned are an invariant somebody will break; inside the type there is nothing to
     /// align.
     name: usize,
+    /// Explicit display label; never used as process input or identity.
+    label: Option<String>,
     /// The pseudoterminal and its queue go together on purpose. The bridge's thread lives as long
     /// as the pseudoterminal lives, not as long as the bridge does: separating them would leave a
     /// thread and a queue with no owner, growing.
@@ -1084,6 +1039,8 @@ struct Window {
     headers: header::Headers,
     header_input: header::actions::Input,
     settings_editor: settings::editor::Editor,
+    chrome: chrome::Chrome,
+    pane_view: pane_view::State,
     /// The previous frame's mirror. **The deadline is armed against it**, so the deadline is
     /// rearmed **when something changes** and not when something is unwritten: without this, a
     /// non-writable directory would leave the difference in place and **the window would never go
@@ -1365,92 +1322,6 @@ impl Window {
         ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(how_much));
     }
 
-    /// Gives the consoles of the tabs that are not seen the grid they would have if they were.
-    ///
-    /// **Without this a background tab is stuck with [`INITIAL_GRID`] for as long as it lasts**,
-    /// because `measured` is only written when painting and they are not painted. And that is not
-    /// an internal detail: it is the size [`Pane::resize`] announces to the program inside, so an
-    /// agent working in a tab you are not looking at formats its output for a window that does not
-    /// exist —80 start-up columns when its own are 57— and on going back to that tab what was
-    /// written stays fitted to somebody else's width until the program redraws. The milestone's
-    /// promise is that the background one keeps running; running with the wrong grid it runs badly.
-    ///
-    /// **Each one is tiled with its own fraction, not with the active one's**: the divider belongs
-    /// to the layout, and using the visible tab's would measure these consoles with a divider that
-    /// is not theirs — the same defect that already cost a review when the bar's click was attended
-    /// to after tiling.
-    ///
-    /// **The panel is reread here too, just as in the painting, and the first attempt did not do
-    /// it.** How much width the console has left depends on whether there is a panel —the panel
-    /// takes 36 columns—, so a background pane whose producer publishes for the first time would be
-    /// measured **36 columns too wide** for as long as the background lasts: the same defect this
-    /// function comes to fix, with the sign flipped and bigger. Rereading is not expensive by
-    /// default: `refresh_its_panel` leaves through an atomic `swap` and only reaches the disk on
-    /// the frame in which the watcher warned that **that** `panel.json` changed, which is exactly
-    /// when it is needed.
-    ///
-    /// **And that read is declared**, which is the other half. It falls inside the interface pass,
-    /// and here there is no painting to time it: without declaring it, the subtraction would hand
-    /// it as a gift to the framework — the figure D3 decides with. It is kept in
-    /// `panel_reread_unpainted` and collected by [`Window::close_the_unpainted_rounds`], which runs
-    /// right afterwards.
-    ///
-    /// **The stopwatch only counts if this console has a panel directory.** Without one there is no
-    /// file to read and the refresh is the `swap` and nothing else; publishing those nanoseconds
-    /// under the «panel» label would be a span with the name changed, and in this project that has
-    /// already invalidated a whole measurement.
-    ///
-    /// With the window minimized or occluded there is no interface pass and this does not run, just
-    /// as the painting that measures the visible one does not run: nobody ends up worse off than
-    /// the one that is seen.
-    pub(crate) fn size_hidden(&mut self, ctx: &egui::Context, area: egui::Rect, m: &CellMetrics) {
-        // A single clock for all of them, and here one really is enough: the only thing that
-        // depends on the time is whether a pane's panel is stale, and nothing is painted afterwards
-        // that could contradict it.
-        let now = SystemTime::now();
-        let active = self.active;
-        // **The console of a tab nobody is looking at is measured the same way as a painted one.**
-        // Its strip is not drawn — nothing of that tab is — but the row is reserved all the same, or
-        // the program inside would be told a grid one row taller than the one it gets the moment its
-        // tab comes to the front.
-        let headers = self.headers;
-
-        for (which, tab) in self.tabs.iter_mut().enumerate() {
-            if which == active {
-                continue;
-            }
-
-            // **By that tab's tree and not by an assumed tiling of two.** A background tab has
-            // whatever layout it has, and giving it a template's would announce to its program a
-            // grid that is not its own — which is exactly the defect F2.1 fixed for the tabs and
-            // that here would come back through the tree's door.
-            let tiling = tab.root.place(area, m.width());
-            for (pane, rect) in tab.panes_mut().into_iter().zip(tiling.parts) {
-                let refreshed = pane.refresh_its_panel(ctx);
-                let before_the_panel = Instant::now();
-                let panel_split = pane.chrome_within(rect, m, now, headers);
-                // **The span's boundary is the same as in the painting**, which also closes its
-                // stopwatch after tiling: `tile_with_its_panel` asks whether the panel is visible,
-                // and that question goes as far as composing the text of a warning when the
-                // producer is quiet or broken. Closing earlier would leave that work out, and the
-                // two consoles of one and the same report would measure the «panel» span with
-                // different boundaries depending on whether they are looked at or not.
-                if pane.panel.is_some() {
-                    // **The same shape as in the painting, and for the same reason**: the clock
-                    // starts after the refresh and what the refresh cost is added back, so the
-                    // control channel is never inside a clock the panel's span is built from. A
-                    // console of a background tab is drained just the same, and a span that meant
-                    // «reading a file» in one place and «reading a file plus applying a document»
-                    // in the other would be one number meaning two things.
-                    pane.panel_reread_unpainted = refreshed.reading + before_the_panel.elapsed();
-                    pane.control_unpainted = refreshed.applying;
-                }
-
-                pane.measured = m.cells_in(panel_split.console().size());
-            }
-        }
-    }
-
     /// Pumps **every** console of **every** tab and resizes them, and sums up what the frame has to
     /// decide with that.
     ///
@@ -1579,41 +1450,7 @@ impl Window {
     /// panel directory —either both or neither—, and for the same reason: half a tab is discovered
     /// on reaching it, which is too late.
     fn create_a_tab(&mut self, ctx: &egui::Context) {
-        // **Opening the tab is two `fork`/`exec`s, and they are timed.** They happen inside the
-        // interface pass —that is where the chord is attended to— and no pane is going to declare
-        // them: the one that pays for them is the tab that does not exist yet. Without this,
-        // launching two processes is published as interface framework cost.
-        let before = Instant::now();
-        #[cfg(test)]
-        let before = tests::OperationClock::start(before);
-        // **A tab opened with the chord is born with the usual two columns**, and not with the
-        // layout the measurement gate might have asked for: that variable says how **the window**
-        // opens, and whoever presses the chord has not asked for four consoles. That a batch's tabs
-        // and this one can differ deceives nobody, because the report publishes each pane's grid.
-        let with_what = OpeningLayout::DEFAULT;
-        let opened = Tab::new_counting_reads(
-            ctx,
-            self.next_name,
-            self.next_pane_name,
-            &with_what,
-            self.control.read_activity(),
-        );
-        // **The names are spent even if the opening fails**, so that they are never reused: if the
-        // failed attempt left a line on the error output, whatever is opened afterwards must not be
-        // called the same as what never got to exist. It holds for the tab and for its two panes
-        // for the same reason, so both counters are advanced in the same place.
-        self.next_name += 1;
-        self.next_pane_name += with_what.how_many_panes();
-
-        // **The stopwatch is closed after putting the tab in front, and that line was drawn in the
-        // wrong place.** Putting it in front **rearms the watcher**, which rebuilds the watching
-        // over the panes of every tab and makes them reread their `panel.json`: it is the expensive
-        // half of opening a tab, and no pane declares it. Closing the stopwatch earlier, that work
-        // fell into «the rest of the frame» — the name this project gives to the interface
-        // framework cost, which is the figure D3 decides with. It is the same fix splitting already
-        // carries.
-        self.bring_to_front(opened, ctx);
-        self.timed_separately += before.elapsed();
+        opening::create_a_tab(self, ctx);
     }
 
     /// Puts the tab that has just been opened in front, or leaves the window as it was if it could
@@ -1789,7 +1626,17 @@ impl eframe::App for Window {
 
         // Settings claims its input before the console dispatcher. Its named work is discounted
         // from frame accounting; outbound latency still includes this earlier application work.
-        let requests = settings::editor::before_keys(self, ui, &metrics);
+        let pane_owned = pane_view::before_keys(self, ui, &metrics);
+        if pane_owned {
+            ui.disable();
+        }
+        let chrome_owned = chrome::before_keys(self, ui, &metrics);
+        self.timed_separately += self.chrome.take_cost();
+        let requests = if pane_owned {
+            Vec::new()
+        } else {
+            settings::editor::before_keys(self, ui, &metrics)
+        };
         let area = ui.max_rect();
 
         // **The order is applied before tiling**, so that what gets painted in this same frame is
@@ -1805,7 +1652,9 @@ impl eframe::App for Window {
         // tabs there are and which a close can change.
         self.answer_the_windows_requests(ui.ctx(), area, &metrics);
 
-        let header_owns_pointer = header::menu::pointer_blocked(self, ui.ctx());
+        pane_view::reconcile(self);
+        let header_owns_pointer =
+            pane_owned || chrome_owned || header::menu::pointer_blocked(self, ui.ctx());
         if header_owns_pointer {
             ui.disable();
         }
@@ -1843,7 +1692,7 @@ impl eframe::App for Window {
         settings::editor::runtime::resolve_fonts(self, ui.ctx());
 
         let travel = Instant::now();
-        let tiling_of = |window: &Self| window.active().root.place(area, metrics.width());
+        let tiling_of = |window: &Self| pane_view::view_tiling(window, area, &metrics);
         let mut tiling = tiling_of(self);
         self.timed_separately += travel.elapsed();
 
@@ -1909,6 +1758,7 @@ impl eframe::App for Window {
         // comment says why.
         let of_the_mouse = self.handle_the_mouse(ui, &tiling.parts, &metrics);
         if of_the_mouse.the_tree_changed {
+            pane_view::reconcile(self);
             let redoing = Instant::now();
             tiling = tiling_of(self);
             self.timed_separately += redoing.elapsed();
@@ -1916,10 +1766,14 @@ impl eframe::App for Window {
 
         for divider in &tiling.dividers {
             ui.painter()
-                .rect_filled(divider.rect, 0.0, self.theme.divider());
+                .rect_filled(divider.rect, 0.0, pane_view::separator_color(self));
         }
 
         let rects = tiling.parts;
+        if self.chrome.enabled() {
+            let visible = rects.iter().filter(|rect| rect.is_positive()).count();
+            self.chrome.record_view(visible, rects.len() - visible);
+        }
         // **The target that is painted indexes the earlier tiling**, and that is fine: there is
         // only a target while the drag is still in flight, and on that frame nobody has dropped, so
         // the tree did not change.
@@ -1964,11 +1818,17 @@ impl eframe::App for Window {
         // Read once before the walk, like the two questions above it: it is the session's decision
         // and not a pane's, and every pane of the frame has to be tiled by the same one.
         let headers = self.headers;
+        let integrated = self.chrome.enabled();
+        let maximized = self.pane_view.zoomed(self.active().name);
         for (pane, rect) in self.tabs[self.active]
             .panes_mut()
             .into_iter()
             .zip(rects.iter().copied())
         {
+            if !rect.is_positive() {
+                pane.painted_console = None;
+                continue;
+            }
             let keys = painter::Keys::of(the_window_has_the_keyboard, pane.name, with_the_focus);
             let pane_outcome = painter::paint_pane(
                 ui,
@@ -1981,6 +1841,8 @@ impl eframe::App for Window {
                 // and the list being walked is the answer: one rectangle per console of the active
                 // tab. See [`header::Button::in_a_tab_of`].
                 painter::HowToPaint::of(blink.on(keys), headers, &rects)
+                    .integrated(integrated)
+                    .maximized(maximized)
                     .measuring_links(measuring_links),
             );
             // **What the painting really drew, not what the program asked for**: it is what the
@@ -2040,14 +1902,7 @@ impl eframe::App for Window {
         // **The focus is a name, so where it fell has to be looked up**: indexing the list of
         // rectangles with it would point at another console —or fall off the list— as soon as the
         // names stop matching the positions, which is the whole reason the focus is a name.
-        if let Some(at) = self.active().where_the_focus_is() {
-            ui.painter().rect_stroke(
-                rects[at],
-                0.0,
-                egui::Stroke::new(1.0, self.theme.focus()),
-                egui::StrokeKind::Inside,
-            );
-        }
+        pane_view::paint_borders(self, ui, &rects);
 
         // And the target's veil goes after the highlight, for the same reason: it is the last thing
         // decided and it has to be seen over everything else. It is timed separately because it
@@ -2301,7 +2156,9 @@ mod tests {
         }
     }
     mod header_controls;
+    mod integrated_chrome;
     pub(crate) mod markdown;
+    mod pane_rename;
     mod settings_chrome;
     mod settings_editor;
 
@@ -5964,7 +5821,9 @@ mod tests {
         let ctx = egui::Context::default();
         let mut window = Window::with_tabs(&ctx, 1, OpeningLayout::DEFAULT, None)
             .expect("open a production-shaped window");
-        let [leaving, staying] = dirs_of(window.active());
+        let [leaving, staying]: [_; 2] = dirs_of(window.active())
+            .try_into()
+            .expect("two original panes");
         let retiring_watcher = window.watcher.blindness_witness();
         let retirements = window.watcher.retirement_witness();
         let retired_late = window.watcher.late_retirement_witness();
@@ -6955,6 +6814,7 @@ mod tests {
 
         Pane {
             name,
+            label: None,
             pty,
             pty_output: PtyOutput::new(output, || {}),
             panel: None,
@@ -7081,6 +6941,8 @@ mod tests {
             last_frame_with_buttons: None,
             header_input: header::actions::Input::default(),
             settings_editor: settings::editor::Editor::default(),
+            chrome: chrome::Chrome::default(),
+            pane_view: pane_view::State::default(),
             link_press_in_progress: None,
             drag_in_progress: None,
             last_painted: Vec::new(),
@@ -7721,14 +7583,17 @@ mod tests {
 
     /// The paths of a tab's panel directories, so that it can be seen afterwards whether they are
     /// still there.
-    fn dirs_of(tab: &Tab) -> [std::path::PathBuf; 2] {
-        both(tab, |pane| {
-            pane.panel
-                .as_ref()
-                .expect("the console has to start up with its directory")
-                .path()
-                .to_path_buf()
-        })
+    fn dirs_of(tab: &Tab) -> Vec<std::path::PathBuf> {
+        tab.panes()
+            .iter()
+            .map(|pane| {
+                pane.panel
+                    .as_ref()
+                    .expect("the console has to start up with its directory")
+                    .path()
+                    .to_path_buf()
+            })
+            .collect()
     }
 
     #[test]
@@ -7744,6 +7609,11 @@ mod tests {
 
         assert_eq!(window.tabs.len(), 2, "the tab did not open");
         assert_eq!(window.active, 1, "the new tab did not end up in front");
+        assert_eq!(
+            window.tabs[1].panes().len(),
+            1,
+            "a new tab opens exactly one console"
+        );
         assert!(
             window.tabs[0].panes()[0].keystrokes.is_empty(),
             "the create chord slipped through to the program"
@@ -10424,8 +10294,8 @@ mod tests {
     }
 
     #[test]
-    fn opening_a_tab_declares_what_launching_its_two_programs_costs() {
-        // Both real launches and bringing the tab forward belong inside the declaration.
+    fn opening_a_tab_declares_what_launching_its_program_costs() {
+        // The real launch and bringing the tab forward belong inside the declaration.
         // Activation rearms all watchers, work no individual pane can declare on its own.
         // Distinct units expose whether launch, rearm, or the entire addition was omitted.
         let ctx = egui::Context::default();
@@ -10438,8 +10308,8 @@ mod tests {
         assert_eq!(window.tabs.len(), 2, "the real tab was not opened");
         assert_eq!(
             window.timed_separately - before,
-            Duration::from_secs(12),
-            "the declaration must include both completed launches and the watcher rearm"
+            Duration::from_secs(11),
+            "the declaration must include the completed launch and the watcher rearm"
         );
     }
 
@@ -16065,6 +15935,8 @@ mod tests {
                 &metrics,
                 discoverer,
                 painter::HowToPaint {
+                    integrated: false,
+                    maximized: None,
                     blink: painter::Blink {
                         ceiling: Some(false),
                         since_a_key: std::time::Duration::ZERO,
@@ -16590,6 +16462,8 @@ mod tests {
                     &metrics,
                     &mut fonts::Discoverer::default(),
                     painter::HowToPaint {
+                        integrated: false,
+                        maximized: None,
                         blink: painter::Blink {
                             ceiling: Some(false),
                             since_a_key: std::time::Duration::ZERO,
@@ -16855,6 +16729,8 @@ mod tests {
                 &metrics,
                 &mut fonts::Discoverer::default(),
                 painter::HowToPaint {
+                    integrated: false,
+                    maximized: None,
                     blink: painter::Blink {
                         ceiling: Some(false),
                         since_a_key: std::time::Duration::ZERO,
@@ -17216,6 +17092,8 @@ mod tests {
                 &metrics,
                 &mut fonts::Discoverer::default(),
                 painter::HowToPaint {
+                    integrated: false,
+                    maximized: None,
                     blink: painter::Blink {
                         ceiling: Some(false),
                         since_a_key: std::time::Duration::ZERO,
@@ -17267,6 +17145,8 @@ mod tests {
                 &metrics,
                 &mut discoverer,
                 painter::HowToPaint {
+                    integrated: false,
+                    maximized: None,
                     blink: painter::Blink {
                         ceiling: Some(false),
                         since_a_key: std::time::Duration::ZERO,
@@ -17338,6 +17218,8 @@ mod tests {
                 &metrics,
                 &mut fonts::Discoverer::default(),
                 painter::HowToPaint {
+                    integrated: false,
+                    maximized: None,
                     blink: painter::Blink {
                         ceiling: Some(false),
                         since_a_key: std::time::Duration::ZERO,
@@ -17391,6 +17273,8 @@ mod tests {
                 &metrics,
                 &mut fonts::Discoverer::default(),
                 painter::HowToPaint {
+                    integrated: false,
+                    maximized: None,
                     blink: painter::Blink {
                         ceiling: Some(false),
                         since_a_key: std::time::Duration::ZERO,
@@ -19413,7 +19297,9 @@ mod tests {
         let ctx = egui::Context::default();
         let mut window = Window::with_tabs(&ctx, 1, OpeningLayout::DEFAULT, None)
             .expect("the window could not be opened");
-        let [of_the_one_leaving, of_the_one_that_stays] = dirs_of(window.active());
+        let [of_the_one_leaving, of_the_one_that_stays]: [_; 2] = dirs_of(window.active())
+            .try_into()
+            .expect("two original panes");
         let retiring_watcher = window.watcher.blindness_witness();
         let retirements = window.watcher.retirement_witness();
         let retired_late = window.watcher.late_retirement_witness();
@@ -23912,12 +23798,14 @@ mod tests {
             v: session::VERSION,
             tabs: vec![
                 session::StoredTab {
+                    label: None,
                     root: session::StoredNode::Branch {
                         orientation: session::StoredOrientation::Columns,
                         children: vec![
                             session::StoredChild {
                                 weight: 3.0,
                                 node: session::StoredNode::Leaf(session::StoredLeaf {
+                                    label: None,
                                     panel_width: 52,
                                     folded: false,
                                 }),
@@ -23925,6 +23813,7 @@ mod tests {
                             session::StoredChild {
                                 weight: 1.0,
                                 node: session::StoredNode::Leaf(session::StoredLeaf {
+                                    label: None,
                                     panel_width: 24,
                                     folded: true,
                                 }),
@@ -23933,7 +23822,9 @@ mod tests {
                     },
                 },
                 session::StoredTab {
+                    label: None,
                     root: session::StoredNode::Leaf(session::StoredLeaf {
+                        label: None,
                         panel_width: 36,
                         folded: false,
                     }),
@@ -24211,6 +24102,7 @@ mod tests {
         let one_too_many = session::StoredChild {
             weight: 1.0,
             node: session::StoredNode::Leaf(session::StoredLeaf {
+                label: None,
                 panel_width: 36,
                 folded: false,
             }),
@@ -24218,6 +24110,7 @@ mod tests {
         window.last_seen = Some(session::StoredDocument {
             v: session::VERSION,
             tabs: vec![session::StoredTab {
+                label: None,
                 root: session::StoredNode::Branch {
                     orientation: session::StoredOrientation::Columns,
                     children: vec![one_too_many; session::MAX_LEAVES + 1],
@@ -24642,7 +24535,9 @@ mod tests {
         let saving = session::validate(session::StoredDocument {
             v: session::VERSION,
             tabs: vec![session::StoredTab {
+                label: None,
                 root: session::StoredNode::Leaf(session::StoredLeaf {
+                    label: None,
                     panel_width: 0,
                     folded: false,
                 }),
@@ -25849,6 +25744,8 @@ mod tests {
                 &metrics,
                 &mut fonts::Discoverer::default(),
                 painter::HowToPaint {
+                    integrated: false,
+                    maximized: None,
                     blink: painter::Blink {
                         ceiling: Some(false),
                         since_a_key: std::time::Duration::ZERO,

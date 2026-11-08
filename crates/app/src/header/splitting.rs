@@ -53,7 +53,7 @@ impl Window {
 /// Without this, the frame's cost is shared out by subtraction and both would end up published
 /// as interface framework cost — the figure D3 judges it with. The shortcut times this call;
 /// a header press is already inside the mouse stopwatch and must not subtract it twice.
-pub(super) fn split(
+pub(crate) fn split(
     window: &mut Window,
     target: usize,
     cut_along: Orientation,

@@ -84,11 +84,9 @@ pub const MAX_BYTES: usize = 64 * 1024;
 /// identity**; the pseudoterminal and its screen because they are a live process and a history; and the
 /// timers because they belong to the run.
 ///
-/// **And no free-text field, which is a decision and not an accident.** No program, no arguments, no
-/// environment, no working directory, no path at all. Launching a console stops being harmless the
-/// moment the program or its arguments **come from configuration**, and this file is configuration: if
-/// the type does not have it, there is nothing to connect to a `spawn`.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+/// The optional label is display-only data; it never supplies a program, argument, environment,
+/// working directory or path to the process launcher.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct StoredLeaf {
     /// In cells, as in the live pane: what the panel has to preserve when the desktop zoom changes is
     /// **how many characters fit**, not how many points it takes up.
@@ -96,6 +94,27 @@ pub struct StoredLeaf {
     /// Separate from the width on purpose: folding does not lose the working width, and unfolding goes
     /// back **to the one it had** instead of inventing one.
     pub folded: bool,
+    /// Optional user-provided label, never used to launch a program.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "read_label"
+    )]
+    pub label: Option<String>,
+}
+
+pub(crate) fn valid_label(label: &str) -> bool {
+    !label.chars().any(char::is_control) && label.chars().count() <= 128
+}
+
+fn read_label<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    let label = Option::<String>::deserialize(deserializer)?;
+    if label.as_deref().is_some_and(|s| !valid_label(s)) {
+        return Err(serde::de::Error::custom("invalid display label"));
+    }
+    Ok(label)
 }
 
 /// In which direction a branch divides.
@@ -150,6 +169,13 @@ pub struct StoredChild {
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct StoredTab {
     pub root: StoredNode,
+    /// Optional display-only tab name.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "read_label"
+    )]
+    pub label: Option<String>,
 }
 
 /// The whole document, just as it is read from disk: **not validated yet**.
@@ -1162,6 +1188,7 @@ mod tests {
 
     fn leaf(width: usize) -> StoredNode {
         StoredNode::Leaf(StoredLeaf {
+            label: None,
             panel_width: width,
             folded: false,
         })
@@ -1184,7 +1211,10 @@ mod tests {
     fn document(raices: Vec<StoredNode>) -> StoredDocument {
         StoredDocument {
             v: VERSION,
-            tabs: raices.into_iter().map(|root| StoredTab { root }).collect(),
+            tabs: raices
+                .into_iter()
+                .map(|root| StoredTab { root, label: None })
+                .collect(),
         }
     }
 
@@ -1224,6 +1254,7 @@ mod tests {
                                 StoredChild {
                                     weight: 2.0,
                                     node: StoredNode::Leaf(StoredLeaf {
+                                        label: None,
                                         panel_width: 36,
                                         folded: true,
                                     }),
@@ -1370,7 +1401,10 @@ mod tests {
     fn a_version_that_is_not_the_known_one_is_rejected_saying_which_it_is() {
         let of_the_future = StoredDocument {
             v: VERSION + 1,
-            tabs: vec![StoredTab { root: leaf(36) }],
+            tabs: vec![StoredTab {
+                root: leaf(36),
+                label: None,
+            }],
         };
 
         assert_eq!(
@@ -1422,6 +1456,7 @@ mod ceiling_tests {
         StoredDocument {
             v: VERSION,
             tabs: vec![StoredTab {
+                label: None,
                 root: StoredNode::Branch {
                     orientation: StoredOrientation::Columns,
                     children: weights
@@ -1429,6 +1464,7 @@ mod ceiling_tests {
                         .map(|weight| StoredChild {
                             weight: *weight,
                             node: StoredNode::Leaf(StoredLeaf {
+                                label: None,
                                 panel_width: 36,
                                 folded: false,
                             }),
@@ -1582,12 +1618,14 @@ mod ceiling_tests {
             v: VERSION,
             tabs: vec![
                 StoredTab {
+                    label: None,
                     root: StoredNode::Branch {
                         orientation: StoredOrientation::Columns,
                         children: vec![
                             StoredChild {
                                 weight: 1.0,
                                 node: StoredNode::Leaf(StoredLeaf {
+                                    label: None,
                                     panel_width: 36,
                                     folded: false,
                                 }),
@@ -1595,6 +1633,7 @@ mod ceiling_tests {
                             StoredChild {
                                 weight: 1.0,
                                 node: StoredNode::Leaf(StoredLeaf {
+                                    label: None,
                                     panel_width: 36,
                                     folded: false,
                                 }),
@@ -1603,7 +1642,9 @@ mod ceiling_tests {
                     },
                 },
                 StoredTab {
+                    label: None,
                     root: StoredNode::Leaf(StoredLeaf {
+                        label: None,
                         panel_width: 36,
                         folded: false,
                     }),
@@ -1668,12 +1709,14 @@ mod file_tests {
         StoredDocument {
             v: VERSION,
             tabs: vec![StoredTab {
+                label: None,
                 root: StoredNode::Branch {
                     orientation: StoredOrientation::Rows,
                     children: vec![
                         StoredChild {
                             weight: 3.0,
                             node: StoredNode::Leaf(StoredLeaf {
+                                label: None,
                                 panel_width: 52,
                                 folded: false,
                             }),
@@ -1681,6 +1724,7 @@ mod file_tests {
                         StoredChild {
                             weight: 1.0,
                             node: StoredNode::Leaf(StoredLeaf {
+                                label: None,
                                 panel_width: 24,
                                 folded: true,
                             }),

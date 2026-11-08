@@ -238,6 +238,14 @@ impl Default for Theme {
 }
 
 impl Theme {
+    /// A subtle selected chrome surface derived from the configured colors.
+    pub(crate) fn chrome_surface(&self) -> Color32 {
+        mix(self.background, self.focus, 0.15)
+    }
+    /// A quiet pane outline derived from the configured background and ink.
+    pub(crate) fn chrome_outline(&self) -> Color32 {
+        mix(self.background, self.foreground, 0.15)
+    }
     /// The factory theme with the colors the configuration file asks for on top.
     ///
     /// **What the file does not say stays factory**, which is what allows changing a single color without

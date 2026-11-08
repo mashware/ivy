@@ -6,7 +6,7 @@ use crate::{
     Window,
     painter::CellMetrics,
     pointer::MouseOutcome,
-    tiling::{Orientation, can_split},
+    tiling::{Orientation, can_split_content as can_split},
 };
 use eframe::egui;
 use std::time::SystemTime;
@@ -73,6 +73,54 @@ pub(crate) fn pointer(
         });
     }
     let events = ui.ctx().input(|input| input.events.clone());
+    // egui reports a double click on the second release, not on its press.
+    if window.chrome.enabled()
+        && ui.is_enabled()
+        && window.header_input.blocked_frame != Some(frame)
+        && ui.ctx().input(|i| {
+            i.pointer
+                .button_double_clicked(egui::PointerButton::Primary)
+        })
+        && let Some(pos) = events.iter().find_map(|event| match event {
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers,
+            } if modifiers.is_none() => Some(*pos),
+            _ => None,
+        })
+    {
+        let owner = window
+            .active()
+            .panes()
+            .into_iter()
+            .zip(rects)
+            .find_map(|(pane, rect)| {
+                if *rect == egui::Rect::NOTHING {
+                    return None;
+                }
+                let strip = pane
+                    .chrome_within(*rect, metrics, SystemTime::now(), window.headers)
+                    .header()?;
+                (super::integrated::hit(strip, metrics, rects.len() > 1, pos)
+                    == Some(super::integrated::Target::Label))
+                .then_some(pane.name)
+            });
+        if let Some(name) = owner {
+            let tab = window.active().name;
+            let initial = window
+                .pane_called(name)
+                .and_then(|p| p.label.clone())
+                .unwrap_or_else(|| format!("Console {}", name + 1));
+            window.pane_view.begin_rename(tab, name, initial);
+            window.header_input.held = None;
+            window.header_input.blocked_frame = Some(frame);
+            window.drag_in_progress = None;
+            ui.ctx().request_repaint();
+            return Some(quiet());
+        }
+    }
     if let Some(held) = window.header_input.held {
         if events.iter().any(|event| matches!(event, egui::Event::PointerButton {button, pressed:false,..} if *button == held))
                 || !ui.ctx().input(|input| input.focused && input.pointer.button_down(held))
@@ -128,6 +176,69 @@ pub(crate) fn pointer(
         if !modifiers.is_none() {
             continue;
         }
+        if window.chrome.enabled() && *button == egui::PointerButton::Primary {
+            let hit = window
+                .active()
+                .panes()
+                .into_iter()
+                .zip(rects)
+                .find_map(|(pane, rect)| {
+                    if *rect == egui::Rect::NOTHING {
+                        return None;
+                    }
+                    let strip = pane
+                        .chrome_within(*rect, metrics, SystemTime::now(), window.headers)
+                        .header()?;
+                    super::integrated::hit(strip, metrics, rects.len() > 1, *pos)
+                        .map(|target| (pane.name, target))
+                });
+            if let Some((name, target)) = hit {
+                if target == super::integrated::Target::Label {
+                    continue;
+                }
+                window.header_input.held = ui
+                    .ctx()
+                    .input(|input| input.pointer.button_down(*button))
+                    .then_some(*button);
+                window.header_input.blocked_frame = Some(frame);
+                window.drag_in_progress = None;
+                let tab = window.active().name;
+                let changed = match target {
+                    super::integrated::Target::Label => {
+                        let initial = window
+                            .pane_called(name)
+                            .and_then(|p| p.label.clone())
+                            .unwrap_or_else(|| format!("Console {}", name + 1));
+                        window.pane_view.begin_rename(tab, name, initial);
+                        false
+                    }
+                    super::integrated::Target::Panel => {
+                        if let Some(pane) = window.pane_called(name)
+                            && pane.panel_state.is_visible(SystemTime::now())
+                        {
+                            pane.folded = !pane.folded;
+                        }
+                        false
+                    }
+                    super::integrated::Target::Zoom => {
+                        window.active_mut().focus = name;
+                        window.pane_view.toggle(tab, name);
+                        true
+                    }
+                    super::integrated::Target::Close => {
+                        window.pane_view.clear(tab);
+                        if let Err(error) = window.close_a_pane_called(name, ui.ctx()) {
+                            eprintln!("the button could not close its console: {error}");
+                        }
+                        true
+                    }
+                };
+                return Some(MouseOutcome {
+                    target: None,
+                    the_tree_changed: changed,
+                });
+            }
+        }
         let close = super::Button::in_a_tab_of(rects);
         let hit = window
             .active()
@@ -135,6 +246,9 @@ pub(crate) fn pointer(
             .into_iter()
             .zip(rects)
             .find_map(|(pane, rect)| {
+                if *rect == egui::Rect::NOTHING {
+                    return None;
+                }
                 let chrome = pane.chrome_within(*rect, metrics, SystemTime::now(), window.headers);
                 if !chrome.strip_holds(*pos) {
                     return None;
@@ -147,7 +261,7 @@ pub(crate) fn pointer(
                 );
                 let hit = if *button == egui::PointerButton::Secondary {
                     Some(Hit::Menu)
-                } else if *button == egui::PointerButton::Primary {
+                } else if *button == egui::PointerButton::Primary && !window.chrome.enabled() {
                     controls.hit(*pos)
                 } else {
                     None
@@ -170,6 +284,13 @@ pub(crate) fn pointer(
                     apply(window, name, action, ui.ctx(), metrics)
                 }
                 Hit::Action(_) => false,
+                Hit::Menu if window.chrome.enabled() => {
+                    window
+                        .pane_view
+                        .open_menu(window.active().name, name, rects.len() > 1);
+                    ui.ctx().request_repaint();
+                    false
+                }
                 Hit::Menu => {
                     window.header_input.menu = Some(Menu::new(
                         name,

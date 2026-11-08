@@ -88,6 +88,13 @@ const GLOSSARY_CLEAN_FILES: &[&str] = &[
     "app/src/tab_bar.rs",
     "app/src/tiling.rs",
     "app/src/tree.rs",
+    "app/src/chrome.rs",
+    "app/src/header/integrated.rs",
+    "app/src/pane_view.rs",
+    "app/src/visibility.rs",
+    "app/src/tests/pane_rename.rs",
+    "app/src/tests/integrated_chrome.rs",
+    "app/src/tab_bar/interaction.rs",
     "app/src/alarms.rs",
     "app/src/closing.rs",
     "app/src/control.rs",
@@ -191,6 +198,13 @@ const GLOSSARY_PENDING_FILES: &[&str] = &[
 /// What *can* be enforced here is a **file** name, and [`no_retired_file_name_is_still_cited`] reads
 /// this file for exactly that — it found two.
 const CITATIONS_CHECKED: &[(&str, &str)] = &[
+    ("app/src/tab_bar/interaction.rs", "app"),
+    ("app/src/tests/integrated_chrome.rs", "app"),
+    ("app/src/tests/pane_rename.rs", "app"),
+    ("app/src/chrome.rs", "app"),
+    ("app/src/header/integrated.rs", "app"),
+    ("app/src/pane_view.rs", "app"),
+    ("app/src/visibility.rs", "app"),
     ("app/src/lib.rs", "app"),
     ("app/src/alarms.rs", "app"),
     ("app/src/closing.rs", "app"),

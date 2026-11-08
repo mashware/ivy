@@ -6,7 +6,28 @@ mod appearance;
 mod colors;
 
 const SECTIONS: [&str; 3] = ["Appearance", "Cursor", "Shortcuts"];
-const ACCENT: egui::Color32 = egui::Color32::from_rgb(173, 195, 255);
+
+#[cfg(test)]
+mod theme_tests {
+    use super::*;
+
+    #[test]
+    fn modal_controls_follow_the_effective_theme() {
+        let ctx = egui::Context::default();
+        let first = crate::theme::NamedTheme::TokyoNight.theme();
+        let second = crate::theme::NamedTheme::GruvboxDark.theme();
+        assert_ne!(first.focus(), second.focus());
+        ctx.run_ui(Default::default(), |ui| {
+            style(ui, first);
+            assert_eq!(ui.visuals().selection.bg_fill, first.focus());
+            assert_eq!(ui.visuals().override_text_color, Some(first.foreground()));
+            style(ui, second);
+            assert_eq!(ui.visuals().selection.bg_fill, second.focus());
+            assert_eq!(ui.visuals().override_text_color, Some(second.foreground()));
+        })
+        .drop_without_applying_deltas();
+    }
+}
 
 pub(super) fn show(
     editor: &mut Editor,
@@ -15,15 +36,16 @@ pub(super) fn show(
 ) {
     let mut close = false;
     let popup_was_open = egui::Popup::is_any_open(ctx);
+    let theme = editor.theme;
     let frame = egui::Frame::new()
-        .fill(egui::Color32::from_rgb(27, 31, 40))
-        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(48, 55, 68)))
+        .fill(theme.panel_background())
+        .stroke(egui::Stroke::new(1.0, theme.divider()))
         .corner_radius(10)
         .inner_margin(18);
     egui::Modal::new(egui::Id::new("terminal-settings"))
         .frame(frame)
         .show(ctx, |ui| {
-            style(ui);
+            style(ui, theme);
             form(editor, ui, discoverer, &mut close);
         });
     if ctx.input(|i| i.key_pressed(egui::Key::Escape))
@@ -47,14 +69,30 @@ pub(super) fn show(
     }
 }
 
-fn style(ui: &mut egui::Ui) {
+pub(crate) fn style(ui: &mut egui::Ui, theme: crate::theme::Theme) {
     let style = ui.style_mut();
     style.visuals = egui::Visuals::dark();
-    style.visuals.override_text_color = Some(egui::Color32::from_rgb(233, 237, 245));
-    style.visuals.extreme_bg_color = egui::Color32::from_rgb(21, 26, 34);
-    style.visuals.selection.bg_fill = egui::Color32::from_rgb(43, 54, 80);
-    style.visuals.selection.stroke.color = ACCENT;
-    style.visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(35, 41, 52);
+    style.visuals.override_text_color = Some(theme.foreground());
+    style.visuals.extreme_bg_color = theme.background();
+    style.visuals.faint_bg_color = theme.panel_background();
+    style.visuals.window_fill = theme.panel_background();
+    style.visuals.panel_fill = theme.panel_background();
+    style.visuals.selection.bg_fill = theme.focus();
+    style.visuals.selection.stroke.color = theme.background();
+    style.visuals.error_fg_color = theme.color(term_core::TermColor::Indexed(1));
+    for widget in [
+        &mut style.visuals.widgets.noninteractive,
+        &mut style.visuals.widgets.inactive,
+        &mut style.visuals.widgets.hovered,
+        &mut style.visuals.widgets.active,
+        &mut style.visuals.widgets.open,
+    ] {
+        widget.bg_fill = theme.panel_background();
+        widget.weak_bg_fill = theme.background();
+        widget.bg_stroke.color = theme.divider();
+        widget.fg_stroke.color = theme.foreground();
+    }
+    style.visuals.widgets.hovered.bg_fill = theme.divider();
     style.spacing.item_spacing = egui::vec2(10.0, 9.0);
     style.spacing.button_padding = egui::vec2(10.0, 7.0);
     style.spacing.interact_size.y = 30.0;
@@ -169,7 +207,7 @@ fn footer(
 ) {
     if !errors.is_empty() {
         ui.colored_label(
-            egui::Color32::LIGHT_RED,
+            ui.visuals().error_fg_color,
             format!("{} setting errors: fix them before saving.", errors.len()),
         );
     }
@@ -194,9 +232,9 @@ fn footer(
             .add_enabled(
                 can_save,
                 egui::Button::new(
-                    egui::RichText::new("Save changes").color(egui::Color32::from_rgb(20, 35, 71)),
+                    egui::RichText::new("Save changes").color(editor.theme.background()),
                 )
-                .fill(ACCENT),
+                .fill(editor.theme.focus()),
             )
             .clicked()
         {
@@ -286,7 +324,7 @@ fn shortcuts(editor: &mut Editor, ui: &mut egui::Ui, errors: &[(String, String)]
 
 fn field_errors(ui: &mut egui::Ui, key: &str, errors: &[(String, String)]) {
     for (_, error) in errors.iter().filter(|(candidate, _)| candidate == key) {
-        ui.colored_label(egui::Color32::LIGHT_RED, error);
+        ui.colored_label(ui.visuals().error_fg_color, error);
     }
 }
 

@@ -76,6 +76,29 @@ use std::path::Path;
 /// entry down.
 const SOURCES: &[(&str, &str, usize)] = &[
     (
+        "src/tab_bar/interaction.rs",
+        include_str!("../src/tab_bar/interaction.rs"),
+        1,
+    ),
+    (
+        "src/tests/integrated_chrome.rs",
+        include_str!("../src/tests/integrated_chrome.rs"),
+        1,
+    ),
+    (
+        "src/tests/pane_rename.rs",
+        include_str!("../src/tests/pane_rename.rs"),
+        1,
+    ),
+    ("src/chrome.rs", include_str!("../src/chrome.rs"), 1),
+    (
+        "src/header/integrated.rs",
+        include_str!("../src/header/integrated.rs"),
+        1,
+    ),
+    ("src/pane_view.rs", include_str!("../src/pane_view.rs"), 1),
+    ("src/visibility.rs", include_str!("../src/visibility.rs"), 1),
+    (
         "src/settings/editor/probe.rs",
         include_str!("../src/settings/editor/probe.rs"),
         1,
@@ -293,7 +316,8 @@ const SOURCES: &[(&str, &str, usize)] = &[
     ),
     ("src/mouse.rs", include_str!("../src/mouse.rs"), 201),
     ("src/opening.rs", include_str!("../src/opening.rs"), 148),
-    ("src/pointer.rs", include_str!("../src/pointer.rs"), 648),
+    // Pointer documentation moved to pointer/header.rs alongside its behavior.
+    ("src/pointer.rs", include_str!("../src/pointer.rs"), 623),
     (
         "src/pointer/links.rs",
         include_str!("../src/pointer/links.rs"),
@@ -301,7 +325,8 @@ const SOURCES: &[(&str, &str, usize)] = &[
     ),
     ("src/report.rs", include_str!("../src/report.rs"), 238),
     ("src/search.rs", include_str!("../src/search.rs"), 48),
-    ("src/tab_bar.rs", include_str!("../src/tab_bar.rs"), 171),
+    // Three comment lines moved with the tab interaction to its own module.
+    ("src/tab_bar.rs", include_str!("../src/tab_bar.rs"), 168),
     (
         "src/tests/markdown.rs",
         include_str!("../src/tests/markdown.rs"),
@@ -1620,19 +1645,27 @@ fn no_document_mixes_the_two_languages() {
 
 // ── The prototypes, which no delivery of the milestone named ─────────────────────────────────────
 
-/// The two files of `prototypes/` that are not markdown, pulled in at compile time like [`SOURCES`].
+/// The files of `prototypes/` that are not markdown, pulled in at compile time like [`SOURCES`].
 ///
 /// **They were translated after the milestone closed, because nothing here read them.** `SOURCES`
 /// walks Rust comments and `DOCUMENTS` walks markdown, so a Python script and an HTML page carried
 /// their Spanish past every guard until the tree was swept by hand.
-const PROTOTYPES: &[(&str, &str)] = &[
+// Per-file floors preserve coverage without imposing the older prototypes' size on the 88-line chrome demo.
+const PROTOTYPES: &[(&str, &str, usize)] = &[
+    (
+        "prototypes/chrome-demo/index.html",
+        include_str!("../../../prototypes/chrome-demo/index.html"),
+        88,
+    ),
     (
         "prototypes/flow-panel",
         include_str!("../../../prototypes/flow-panel"),
+        500,
     ),
     (
         "prototypes/mockup-terminal.html",
         include_str!("../../../prototypes/mockup-terminal.html"),
+        500,
     ),
 ];
 
@@ -1641,12 +1674,6 @@ const PROTOTYPES: &[(&str, &str)] = &[
 const SPANISH_LETTERS: &[char] = &[
     'á', 'é', 'í', 'ó', 'ú', 'ü', 'ñ', '¿', '¡', 'Á', 'É', 'Í', 'Ó', 'Ú', 'Ü', 'Ñ',
 ];
-
-/// How many lines each prototype has to still give the walk. Measured as this guard lands:
-/// `flow-panel` 887, `mockup-terminal.html` 602. The walk has no filter, so the floor is not about
-/// detection: it is what fails when a file is emptied, or the loop stops yielding, and the guard
-/// goes on judging nothing clean.
-const PROTOTYPE_LINES_PER_FILE_AT_LEAST: usize = 500;
 
 /// Why a prototype line reads as Spanish, or `None`: the listed words it carries, then its accented
 /// letters.
@@ -1735,7 +1762,7 @@ fn no_line_of_the_prototypes_reads_as_spanish() {
     let on_disk = prototypes_on_disk(&root, &root);
     let declared: BTreeSet<String> = PROTOTYPES
         .iter()
-        .map(|(name, _)| (*name).to_owned())
+        .map(|(name, _, _)| (*name).to_owned())
         .collect();
     assert_eq!(
         declared, on_disk,
@@ -1744,9 +1771,9 @@ fn no_line_of_the_prototypes_reads_as_spanish() {
     );
 
     let mut reported = Vec::new();
-    for (name, src) in PROTOTYPES {
+    for (name, src, floor) in PROTOTYPES {
         assert!(
-            src.lines().count() >= PROTOTYPE_LINES_PER_FILE_AT_LEAST,
+            src.lines().count() >= *floor,
             "«{name}» gave {} lines: either it emptied out, or the walk below judges it clean \
              without having read it",
             src.lines().count()

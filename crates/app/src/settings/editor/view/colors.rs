@@ -96,7 +96,7 @@ fn swatch(
             ui.painter().rect_stroke(
                 rect,
                 5.0,
-                egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 110, 130)),
+                egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
                 egui::StrokeKind::Inside,
             );
             let response = response.on_hover_text(format!(
@@ -144,7 +144,7 @@ fn swatch(
                 .size(10.0),
             );
             if errors.iter().any(|(key, _)| key == &field.key) {
-                ui.colored_label(egui::Color32::LIGHT_RED, "Invalid");
+                ui.colored_label(ui.visuals().error_fg_color, "Invalid");
             }
         });
     });

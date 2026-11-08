@@ -28,7 +28,7 @@ mod search;
 /// **Zero when there is no variable, and that is what makes this not exist for whoever uses the
 /// application**: with no gestures asked for not a single event is injected and the new path does
 /// not get to run. A value that is not understood is ignored just as if it were not there, as in
-/// [`crate::how_many_tabs`] and [`crate::window_size`]: whoever measures finds out on reading the drags the
+/// [`crate::how_many_tabs`] and [`crate::opening::window_size`]: whoever measures finds out on reading the drags the
 /// report declares.
 ///
 /// **It receives the value and does not read it**, for the same reason as [`crate::how_many_tabs`]:
