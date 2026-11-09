@@ -9041,3 +9041,24 @@ headless geometry and routing tests.
 The native startup resource factory now belongs to opening.rs, keeping clipboard construction out
 of the window core. The stateless primary-press reader is a free pointer function; the measured
 Window implementation ratchet falls from 1611 to 1605 production lines.
+
+## D83 — PR checks validate source; release preparation validates native packages
+
+**Decision.** Ordinary pull requests run formatting, workspace lint and tests, documentation-link
+checks and portable packaging-logic tests on Ubuntu 24.04. Full Ubuntu, Arch and macOS packaging
+and installation checks run only through explicit manual dispatch on the selected revision.
+The same workflow retains its complete platform matrix and publication dependencies; publishing
+still requires the explicit `publish` input, matching version/tag and unchanged integrity checks.
+
+**Why.** Full release compilation, package creation and installation on every PR update delays
+iteration even though merging does not publish a release. The owner explicitly accepts that
+platform incompatibilities can reach main and surface during release preparation, when attribution
+may span multiple merged changes. Source checks preserve fast feedback without claiming native
+package compatibility. No elapsed-time improvement is claimed without hosted measurements.
+
+**Discarded.** Keeping the full matrix on PRs preserves earlier detection but retains the delay
+this change addresses. Removing platform checks from publication would allow unvalidated packages
+to reach users. Separate release workflows or repeated conditions on dependent install jobs add
+configuration duplication: dispatch-gating the existing independent build roots reuses their
+dependency graph. Reusing artifacts from earlier runs would separate publication from the selected
+revision's fresh complete validation.

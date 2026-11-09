@@ -110,16 +110,49 @@ GPU rendering or restoration of the visible layout.
 
 ## Build artifacts and publishing
 
-The **Ivy Linux package** GitHub Actions workflow builds on `ubuntu-24.04` for pull requests and
-manual runs. Its default manual run only builds; it uploads the package, manifest and checksums
-as a workflow artifact named `ivy-linux-x86_64`. Separate jobs test installation, upgrade and
-removal in disposable Ubuntu 24.04 and 26.04 containers using that exact package. These checks
-are separate from a public GitHub Release and from real-desktop validation.
+The **Ivy packages** GitHub Actions workflow (`.github/workflows/ivy-prerelease.yml`) uses a
+single Ubuntu 24.04 `checks` job for ordinary pull requests. It runs the following commands with
+the pinned Rust toolchain and Linux build dependencies installed:
+
+```sh
+cargo fmt --all --check
+cargo clippy --locked --workspace --all-targets -- -D warnings
+cargo test --locked --workspace
+cargo doc-check --locked
+python3 -m unittest scripts/test_release.py scripts/test_macos.py -v
+```
+
+PR updates do not build release binaries or run the package/installation matrix. This makes PR
+iteration cheaper, but a platform incompatibility can reach `main` and be found only during full
+manual or release validation. Several changes may have merged by then, making attribution harder.
+A green PR check is not evidence that native packages build or install on every platform.
+
+For complete validation before a release, choose **Run workflow** in Actions, select the intended
+branch or tag, and leave `publish` unchecked. The equivalent CLI command is:
+
+```sh
+gh workflow run ivy-prerelease.yml --ref <branch-or-tag> -f publish=false
+```
+
+Both manual modes run the full matrix against the selected revision: the Ubuntu 24.04 baseline
+build, installation/upgrade/removal on Ubuntu 24.04 and 26.04, Arch packaging and installation,
+and native macOS 15 ARM64 and Intel DMG builds and installation checks. Artifacts are uploaded as
+`ivy-linux-x86_64`, `ivy-arch-x86_64`, `ivy-macos-arm64` and `ivy-macos-x86_64`.
+With `publish=false`, nothing is published. These checks remain separate from real-desktop evidence.
 
 For a release, approve the exact version, commit, target set and notes first. Commit the intended
 workspace version and lockfile update, create its matching `v<VERSION>` tag, and run the workflow
-on that tag with `publish=true`. The workflow rejects a tag/version mismatch, builds the declared
-Linux package, requires both Ubuntu installation checks, and uses a dependent publication job. It creates a draft prerelease, uploads all
+on that tag with `publish=true`:
+
+```sh
+gh workflow run ivy-prerelease.yml --ref v<VERSION> -f publish=true
+```
+
+The workflow rejects a tag/version mismatch and rebuilds the complete matrix on that revision.
+Publication requires the successful `build`, `install`, `arch` and `macos` jobs, including both
+Ubuntu versions and both Mac architectures; failed, skipped or cancelled required jobs prevent
+publication. It never relies on the reduced PR checks or artifacts from an earlier run.
+It creates a draft prerelease, uploads all
 assets, then makes that complete draft visible. A failed build publishes nothing; a failed upload
 leaves an unpublished draft to inspect. Existing release assets must not be overwritten silently.
 Before creating the draft and before publishing it, the current remote tag must still resolve to
@@ -129,8 +162,8 @@ draft before retrying; there is no automatic replacement path.
 The workflow uses read-only repository access for builds and write access only in its manual
 publication job. It does not use signing credentials. Release metadata records the workspace
 version, commit, exact asset name, architecture target, build environment, unsigned status and
-SHA-256 digest. A full cross-platform release will declare each additional target when its own
-packaging delivery is ready.
+SHA-256 digest. The final manifest and checksums require the Ubuntu, Arch and both Mac packages.
+Windows packaging and its native validation remain separate work.
 
 ## Platform evidence
 
