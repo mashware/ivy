@@ -29,8 +29,8 @@ pub(crate) fn native_window(
         size,
         persistence,
     )?;
-    if !measuring && let Some(native) = cc.winit_window() {
-        window.clipboard = clipboard::Service::new(native.clone(), cc.egui_ctx.clone());
+    if !measuring {
+        window.clipboard = clipboard::Service::new(cc.egui_ctx.clone());
     }
     Ok(window)
 }

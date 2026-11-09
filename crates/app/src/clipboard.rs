@@ -24,7 +24,7 @@ struct Reply {
 #[derive(Default)]
 struct Mailbox {
     read: Option<Read>,
-    primary: Option<String>,
+    primary: Option<(String, Instant)>,
 }
 
 struct Worker {
@@ -39,7 +39,7 @@ struct Pending {
     expired: bool,
 }
 
-/// One outstanding read keeps late smithay replies from becoming a different pane's paste.
+/// One outstanding read keeps late clipboard replies from becoming a different pane's paste.
 #[derive(Default)]
 pub(crate) struct Service {
     worker: Option<Worker>,
@@ -47,7 +47,7 @@ pub(crate) struct Service {
 }
 
 impl Service {
-    pub(crate) fn new(window: Arc<winit::window::Window>, context: egui::Context) -> Self {
+    pub(crate) fn new(context: egui::Context) -> Self {
         let (requests, receiver) = mpsc::sync_channel(1);
         let (sender, replies) = mpsc::channel();
         let mailbox = Arc::new(Mutex::new(Mailbox::default()));
@@ -55,11 +55,11 @@ impl Service {
         let repaint = context.clone();
         match std::thread::Builder::new()
             .name("clipboard".into())
-            .spawn(move || run(window, receiver, sender, selection, repaint))
+            .spawn(move || run(receiver, sender, selection, repaint))
         {
             Ok(thread) => {
-                // Abandoned on purpose: a clipboard owner can stall a read or backend destruction;
-                // the worker retains its window so its borrowed Wayland display cannot dangle.
+                // Abandoned on purpose: an unresponsive clipboard owner must not freeze closing.
+                // The backend owns its connections; it borrows nothing from the application.
                 drop(thread);
                 Self {
                     worker: Some(Worker {
@@ -116,7 +116,7 @@ impl Service {
         if let Some(worker) = &self.worker {
             // The worker only takes this value under the lock; backend calls never hold it.
             if let Ok(mut mailbox) = worker.mailbox.lock() {
-                mailbox.primary = Some(text);
+                mailbox.primary = Some((text, Instant::now() + DEADLINE));
                 if matches!(
                     worker.requests.try_send(()),
                     Err(mpsc::TrySendError::Disconnected(()))
@@ -181,13 +181,13 @@ pub(crate) fn deliver(window: &mut crate::Window, context: &egui::Context) {
 }
 
 fn run(
-    window: Arc<winit::window::Window>,
     requests: mpsc::Receiver<()>,
     replies: mpsc::Sender<Reply>,
     mailbox: Arc<Mutex<Mailbox>>,
     context: egui::Context,
 ) {
-    // Declared after window: backend is destroyed first, including smithay's internal worker.
+    // Arboard finishes capability/seat setup before returning; first operations cannot be
+    // dropped by a separate focus-event queue. Initialization stays off the UI thread.
     let mut backend = None;
     loop {
         // Bounded: dropping Service closes the only wake sender and ends this idle receive.
@@ -202,11 +202,16 @@ fn run(
         if read.is_none() && selection.is_none() {
             continue;
         }
-        let backend = backend.get_or_insert_with(|| Backend::new(&window));
-        if let Some(text) = selection {
+        let backend = backend.get_or_insert_with(Backend::new);
+        if let Some(selection) = selection {
             match backend.as_mut() {
                 Ok(backend) => {
-                    if let Err(error) = backend.store_primary(text) {
+                    let focused = context.input(|input| input.focused);
+                    if let Err(error) =
+                        publish_current_selection(selection, Instant::now(), focused, |text| {
+                            backend.store_primary(text)
+                        })
+                    {
                         eprintln!("Primary selection could not be published: {error}");
                     }
                 }
@@ -232,83 +237,71 @@ fn run(
     }
 }
 
-enum Backend {
-    Native(arboard::Clipboard),
-    #[cfg(target_os = "linux")]
-    Wayland(smithay_clipboard::Clipboard),
+// A blocked clipboard owner must not publish an old selection after the person left the window.
+fn publish_current_selection(
+    (text, deadline): (String, Instant),
+    now: Instant,
+    focused: bool,
+    publish: impl FnOnce(String) -> Result<(), String>,
+) -> Result<(), String> {
+    if now >= deadline || !focused {
+        return Ok(());
+    }
+    publish(text)
 }
 
+struct Backend(arboard::Clipboard);
+
 impl Backend {
-    fn new(window: &winit::window::Window) -> Result<Self, String> {
-        #[cfg(target_os = "linux")]
-        {
-            use winit::raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
-            let display = window.display_handle().map_err(|error| error.to_string())?;
-            if let RawDisplayHandle::Wayland(handle) = display.as_raw() {
-                // SAFETY: run retains the window until after this backend and its internal
-                // worker have been destroyed, even when the UI abandons a stalled read.
-                return Ok(Self::Wayland(unsafe {
-                    smithay_clipboard::Clipboard::new(handle.display.as_ptr())
-                }));
-            }
-        }
-        #[cfg(not(target_os = "linux"))]
-        let _ = window;
+    fn new() -> Result<Self, String> {
+        // On Linux arboard tries Wayland data-control, then X11/XWayland. Pure Wayland
+        // without data-control or a reachable X server is explicitly unavailable.
         arboard::Clipboard::new()
-            .map(Self::Native)
+            .map(Self)
             .map_err(|error| error.to_string())
     }
 
     fn load(&mut self, source: Source) -> Result<String, String> {
-        match self {
-            #[cfg(target_os = "linux")]
-            Self::Wayland(clipboard) => match source {
-                Source::Clipboard => clipboard.load(),
-                Source::Primary => clipboard.load_primary(),
-            }
-            .map_err(|error| error.to_string()),
-            Self::Native(clipboard) => match source {
-                Source::Clipboard => clipboard.get_text().map_err(|error| error.to_string()),
-                Source::Primary => {
-                    #[cfg(target_os = "linux")]
-                    {
-                        use arboard::GetExtLinux;
-                        clipboard
-                            .get()
-                            .clipboard(arboard::LinuxClipboardKind::Primary)
-                            .text()
-                            .map_err(|error| error.to_string())
-                    }
-                    #[cfg(not(target_os = "linux"))]
-                    Err("primary selection is unsupported on this platform".into())
-                }
-            },
+        #[cfg(target_os = "linux")]
+        {
+            use arboard::GetExtLinux;
+            self.0
+                .get()
+                .clipboard(source.selection())
+                .text()
+                .map_err(|error| error.to_string())
+        }
+        #[cfg(not(target_os = "linux"))]
+        match source {
+            Source::Clipboard => self.0.get_text().map_err(|error| error.to_string()),
+            Source::Primary => Err("primary selection is unsupported on this platform".into()),
         }
     }
 
     fn store_primary(&mut self, text: String) -> Result<(), String> {
+        #[cfg(target_os = "linux")]
+        {
+            use arboard::SetExtLinux;
+            self.0
+                .set()
+                .clipboard(Source::Primary.selection())
+                .text(text)
+                .map_err(|error| error.to_string())
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = text;
+            Err("primary selection is unsupported".into())
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Source {
+    fn selection(self) -> arboard::LinuxClipboardKind {
         match self {
-            #[cfg(target_os = "linux")]
-            Self::Wayland(clipboard) => {
-                clipboard.store_primary(text);
-                Ok(())
-            }
-            Self::Native(clipboard) => {
-                #[cfg(target_os = "linux")]
-                {
-                    use arboard::SetExtLinux;
-                    clipboard
-                        .set()
-                        .clipboard(arboard::LinuxClipboardKind::Primary)
-                        .text(text)
-                        .map_err(|error| error.to_string())
-                }
-                #[cfg(not(target_os = "linux"))]
-                {
-                    let _ = (clipboard, text);
-                    Err("primary selection is unsupported".into())
-                }
-            }
+            Self::Clipboard => arboard::LinuxClipboardKind::Clipboard,
+            Self::Primary => arboard::LinuxClipboardKind::Primary,
         }
     }
 }
@@ -338,7 +331,12 @@ impl Harness {
     }
 
     pub(crate) fn primary(&self) -> Option<String> {
-        self.mailbox.lock().unwrap().primary.take()
+        self.mailbox
+            .lock()
+            .unwrap()
+            .primary
+            .take()
+            .map(|(text, _)| text)
     }
 }
 
@@ -404,6 +402,45 @@ mod tests {
             },
             replies,
         )
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn first_primary_operation_selects_primary_without_a_clipboard_fallback() {
+        assert!(matches!(
+            Source::Primary.selection(),
+            arboard::LinuxClipboardKind::Primary
+        ));
+        assert!(matches!(
+            Source::Clipboard.selection(),
+            arboard::LinuxClipboardKind::Clipboard
+        ));
+        let (mut service, requests, _replies) = connected();
+        assert!(service.request(21, Source::Primary, Instant::now()));
+        let first = requests.try_recv().unwrap();
+        assert_eq!(first.pane, 21);
+        assert!(matches!(
+            first.source.selection(),
+            arboard::LinuxClipboardKind::Primary
+        ));
+    }
+
+    #[test]
+    fn delayed_or_unfocused_primary_never_reaches_the_desktop_writer() {
+        let now = Instant::now();
+        for (deadline, focused) in [(now, true), (now + DEADLINE, false)] {
+            publish_current_selection(("old selection".into(), deadline), now, focused, |_| {
+                panic!("stale selection reached the desktop writer")
+            })
+            .unwrap();
+        }
+        let mut written = None;
+        publish_current_selection(("current".into(), now + DEADLINE), now, true, |text| {
+            written = Some(text);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(written.as_deref(), Some("current"));
     }
 
     #[test]
@@ -504,7 +541,8 @@ mod tests {
                 .lock()
                 .unwrap()
                 .primary
-                .as_deref(),
+                .as_ref()
+                .map(|(text, _)| text.as_str()),
             Some("latest")
         );
         assert!(requests.try_recv().is_err());

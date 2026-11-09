@@ -8898,27 +8898,34 @@ into the clicked console. Mouse-reporting programs keep right and middle gesture
 held, the existing terminal escape hatch. Both paste sources use the existing long-line gate and
 current bracketed-paste mode; they also revoke auxiliary-console control on successful personal input.
 
-An app-owned adapter uses the existing arboard and smithay clipboard dependencies. One worker reads
-native clipboard data outside the interface thread, retains the requesting pane's identity, and
-wakes the reactive window on completion. A read's delivery expires after two seconds; a late result
-never becomes input to another console. While the native read is still outstanding no replacement
-worker or read is started. PRIMARY publication coalesces to the latest selected text and never
-substitutes CLIPBOARD when the selection protocol is unavailable.
+An app-owned adapter uses arboard for native reads and PRIMARY publication. On Linux its
+Wayland data-control support is enabled: it performs capability setup before accepting operations,
+and uses X11/XWayland when native data-control initialization is unavailable. This avoids creating
+a second focus-based smithay subscription after the gesture whose serial that subscription needs.
+The pinned smithay client has no readiness or publication acknowledgement API; its first store
+could otherwise silently disappear. Arboard owns its connections and needs no borrowed display
+or retained native window. A pure Wayland compositor with neither data-control nor reachable
+XWayland is explicitly unsupported; PRIMARY is never substituted with CLIPBOARD.
 
-The worker retains the native window while smithay borrows its Wayland display, destroying its
-clipboard before releasing the window. **D57 declaration:** shutdown disconnects and abandons this
-worker; external clipboard reads and backend destruction cannot be cancelled reliably and may keep
-one worker and its native window alive until process exit. The idle receive ends when the sole
-Service sender is dropped. No clipboard worker runs in historical measurement batches. UI polling
-and completion delivery are named within the integrated chrome span; pointer selection work stays
-inside the mouse span. No new frame-cost claim is made here.
+One worker reads desktop data outside the interface thread, retains the requesting pane identity,
+and wakes the reactive window on completion. Delivery expires after two seconds; late text never
+becomes input to another console. No replacement read/worker starts while an owner is still
+answering. PRIMARY publication coalesces to the latest selected text and expires after two seconds; a queued publication is discarded after the window loses focus, so a stalled read cannot later replace another application's selection. **D57 declaration:** shutdown
+disconnects and abandons this worker because external reads and library destruction may stall;
+no interface thread joins it. The idle receive ends when its sole Service sender is dropped.
 
-Discarded: passing an untagged RequestPaste through keyboard modifiers (it would lose source pane
-identity and confuse mouse paste with Ctrl+V), replacing CLIPBOARD on selection (PRIMARY has a
-different desktop contract), shell clipboard utilities (installation and backend requirements), a
-new egui/eframe protocol fork (the native dependencies already support both selections), and
-unbounded replacement workers for stalled owners (each stalled read would retain native resources).
-Native X11/Wayland exchange must be verified separately from headless geometry and dispatch tests.
+No adapter worker runs in historical measurement batches. Delivery is counted within the existing
+integrated chrome span and selection work within the mouse span. Enabling the arboard feature is
+Cargo-global: egui's existing native clipboard construction also gains data-control capability
+setup before the first frame. This is not measured here and no startup/frame-cost claim is made.
+
+Discarded: an untagged RequestPaste interpreted through keyboard modifiers (loses the requested
+pane and mouse-paste intent), replacing CLIPBOARD on selection (PRIMARY has its own desktop
+contract), external clipboard tools (installation/backend requirements), a new framework/native
+protocol fork (arboard already provides the required selections), a second asynchronous smithay
+client (first-operation readiness race), and replacement workers for stalled owners (retains native
+resources without a ceiling). Native inter-application exchange is checked separately from
+headless geometry and routing tests.
 
 The native startup resource factory now belongs to opening.rs, keeping clipboard construction out
 of the window core. The stateless primary-press reader is a free pointer function; the measured
