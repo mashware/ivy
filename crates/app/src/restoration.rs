@@ -688,6 +688,20 @@ mod tests {
     }
 
     #[test]
+    fn verified_client_directory_wins_over_wrapper_cwd_but_not_remote_veto() {
+        let declared = PathBuf::from("/tmp/client-project");
+        let wrapper = Path::new("/tmp/launch-wrapper");
+        let mut state = PaneState {
+            session_directory: Some(declared.clone()),
+            ..Default::default()
+        };
+        observe_directory(&mut state, Some(wrapper), false);
+        assert_eq!(state.directory, Some(declared));
+        observe_directory(&mut state, Some(wrapper), true);
+        assert!(state.directory.is_none());
+    }
+
+    #[test]
     fn explicit_invalid_directory_clears_old_context_but_missing_observation_preserves_it() {
         let previous = PathBuf::from("/tmp/previous-project");
         let mut state = PaneState {

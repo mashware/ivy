@@ -274,6 +274,7 @@ pub(crate) fn take_over(pane: &mut crate::Pane) -> term_core::Result<()> {
             }
         });
         pane.screen = term_core::Screen::new(size);
+        pane.signals.reset_for_new_shell(&mut pane.screen);
         pane.painted_console = None;
         pane.received.clear();
         pane.held = None;

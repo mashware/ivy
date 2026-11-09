@@ -9005,7 +9005,6 @@ selector outside this delivery. Prompt parsing and replaying shell commands viol
 metadata/input boundary. AI recovery is a separate delivery of #19: this change neither advertises
 a sessions mode nor installs client integrations.
 
-
 ## D82 — Context menus follow their invocation and keep the console visible
 
 Rename dialogs are centered on the viewport. Console context menus retain the opening pointer
@@ -9078,7 +9077,7 @@ dependency graph. Reusing artifacts from earlier runs would separate publication
 revision's fresh complete validation.
 
 
-## D85 — AI recovery uses declared IDs and fixed client launches
+## D84 — AI recovery uses declared IDs and fixed client launches
 
 Startup sessions mode extends D81 only when explicitly enabled. Save an allowlisted client and
 validated exact ID beside the local directory; never save a program path, argument list, environment,

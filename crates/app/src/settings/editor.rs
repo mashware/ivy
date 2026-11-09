@@ -517,6 +517,35 @@ mod tests {
     }
 
     #[test]
+    fn saving_directories_removes_ai_identity_before_an_expired_snapshot_write() {
+        use panel_control::session::{Client, Identity};
+        let fixture = RestorePolicyFixture::new(super::super::StartupRestore::Sessions);
+        fixture.seed(crate::session::VERSION);
+        let mut window = fixture.open(super::super::StartupRestore::Directories);
+        fixture.save_mode(&mut window, "sessions");
+        crate::restoration::apply_saved_mode(&mut window);
+        window.active_mut().panes_mut()[0].restoration.resume =
+            Some(Identity::new(Client::Claude, "11111111-1111-4111-8111-111111111111").unwrap());
+        window.check_whether_the_layout_moved();
+        window.save_now();
+        let stored = crate::session::read(&fixture.snapshot).unwrap();
+        assert!(
+            matches!(&stored.tabs()[0].root, crate::session::StoredNode::Leaf(leaf) if leaf.resume.is_some())
+        );
+        RestorePolicyFixture::queue_expired_change(&mut window);
+        fixture.save_mode(&mut window, "directories");
+        window.save_now();
+        assert!(window.active().panes()[0].restoration.resume.is_none());
+        window.check_whether_the_layout_moved();
+        window.save_now();
+        let stored = crate::session::read(&fixture.snapshot).unwrap();
+        assert!(
+            matches!(&stored.tabs()[0].root, crate::session::StoredNode::Leaf(leaf) if leaf.resume.is_none() && leaf.cwd.as_ref() == Some(&fixture.directory))
+        );
+        assert!(window.active().panes()[0].restoration.resume.is_none());
+    }
+
+    #[test]
     fn saved_none_cancels_an_expired_layout_write_before_the_next_frame() {
         let fixture = RestorePolicyFixture::new(super::super::StartupRestore::Directories);
         let original = fixture.seed(crate::session::VERSION);

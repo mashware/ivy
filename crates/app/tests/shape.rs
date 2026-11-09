@@ -591,9 +591,22 @@ fn production_lines(source: &str) -> Vec<&str> {
         if code.is_empty() || code.starts_with("//") {
             continue;
         }
+        // A leading inner attribute makes this entire external module test-only.
+        if out.is_empty() && code.trim_end() == "#![cfg(test)]" {
+            return Vec::new();
+        }
         out.push(line);
     }
     out
+}
+
+#[test]
+fn a_leading_inner_test_attribute_excludes_only_a_test_only_module() {
+    assert!(production_lines("//! fixture\n#![cfg(test)]\nfn fixture() {}\n").is_empty());
+    assert!(!production_lines("// #![cfg(test)]\nfn production() {}\n").is_empty());
+    assert!(
+        !production_lines("const TEXT: &str = \"#![cfg(test)]\";\nfn production() {}\n").is_empty()
+    );
 }
 
 #[test]

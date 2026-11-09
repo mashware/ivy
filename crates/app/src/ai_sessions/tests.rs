@@ -28,6 +28,63 @@ for line in sys.stdin:
  else:print(json.dumps({'reply':send(command['request'],command.get('endpoint',endpoint))}),flush=True)
 "#;
 
+const OPENCODE_ROUTE_FIXTURE: &str = r#"
+import { readFileSync, writeFileSync, renameSync } from "node:fs";
+import { join, isAbsolute } from "node:path";
+
+export default {
+ id: "mashware.ivy-disposable-route-fixture",
+ async tui(api) {
+  const root = process.env.IVY_TEST_OPENCODE_CYCLE;
+  if (process.env.IVY_TEST_PROBE_ISOLATED !== "1" || !root || !isAbsolute(root) || api.app.version !== "1.18.31") return;
+  let stopped = false, timer, step = "ready";
+  api.lifecycle.onDispose(() => { stopped = true; clearInterval(timer); });
+  const save = (state) => {
+   const temporary = join(root, "state.next");
+   writeFileSync(temporary, JSON.stringify(state), { mode: 0o600 });
+   renameSync(temporary, join(root, "state.json"));
+  };
+  const until = async (ready) => {
+   const deadline = Date.now() + 10000;
+   while (!stopped && !ready()) {
+    if (Date.now() >= deadline) throw new Error("fixture_timeout");
+    await new Promise(resolve => setTimeout(resolve, 20));
+   }
+   if (stopped) throw new Error("fixture_stopped");
+  };
+  void (async () => {
+   await until(() => api.state.ready);
+   const create = async (title) => {
+    // Session creation emits local metadata; no prompt, init, message or model API is called.
+    const result = await api.client.session.create({ directory: api.state.path.directory, title });
+    const id = result?.data?.id;
+    if (!/^ses_[A-Za-z0-9]+$/.test(id ?? "")) throw new Error("fixture_create_failed");
+    return id;
+   };
+   step = "create_first";
+   const first = await create("Ivy disposable route fixture one");
+   step = "create_second";
+   const second = await create("Ivy disposable route fixture two");
+   let last;
+   save({ first, second, phase: "ready" });
+   timer = setInterval(() => {
+    let phase;
+    try { phase = JSON.parse(readFileSync(join(root, "control.json"), "utf8")).phase; } catch { return; }
+    if (phase === last || !["first", "second", "home"].includes(phase)) return;
+    if (phase === "home") api.route.navigate("home");
+    else api.route.navigate("session", { sessionID: phase === "first" ? first : second });
+    const current = api.route.current;
+    const valid = phase === "home" ? current.name === "home" :
+     current.name === "session" && current.params.sessionID === (phase === "first" ? first : second);
+    if (!valid) return;
+    last = phase;
+    save({ first, second, phase });
+   }, 50);
+  })().catch(() => { if (!stopped) save({ error: "fixture_setup_failed", step }); });
+ }
+};
+"#;
+
 struct Fixture {
     handle: Handle,
     pty: Pty,
@@ -375,10 +432,10 @@ fn installed_session_client_probe() {
     let helper = std::fs::canonicalize(helper).unwrap();
     let directory = PanelDir::create().unwrap();
     let mut arguments = launch.prefix_args;
-    let expected = std::env::var("IVY_TEST_PROBE_SESSION")
+    let mut expected = std::env::var("IVY_TEST_PROBE_SESSION")
         .ok()
         .map(|id| Identity::new(client, id).unwrap());
-    let expect_session =
+    let mut expect_session =
         expected.is_some() || std::env::var("IVY_TEST_PROBE_EXPECT_SESSION").as_deref() == Ok("1");
     if let Some(identity) = &expected {
         arguments.extend(crate::resume::arguments(identity));
@@ -404,13 +461,24 @@ fn installed_session_client_probe() {
     assert!(cwd.is_absolute() && cwd.is_dir());
     let cwd = std::fs::canonicalize(cwd).unwrap();
     assert!(cwd.starts_with(std::env::temp_dir()) && cwd != std::env::temp_dir());
+    let cycle = std::env::var_os("IVY_TEST_PROBE_OPENCODE_CYCLE").map(PathBuf::from);
+    let cycle_config = cycle.as_ref().map(|root| {
+        assert!(client == Client::Opencode && expected.is_none());
+        prepare_opencode_cycle(root)
+    });
     let args: Vec<_> = arguments.iter().map(String::as_str).collect();
-    let env = [
+    let mut env = vec![
         ("PATH", Some(launch.path.as_os_str())),
         ("PANEL_ID", Some(std::ffi::OsStr::new(directory.id()))),
         ("PANEL_DIR", Some(directory.path().as_os_str())),
         ("IVY_SESSION_HELPER", Some(helper.as_os_str())),
     ];
+    if let (Some(root), Some(config)) = (&cycle, &cycle_config) {
+        env.extend([
+            ("IVY_TEST_OPENCODE_CYCLE", Some(root.as_os_str())),
+            ("OPENCODE_TUI_CONFIG", Some(config.as_os_str())),
+        ]);
+    }
     let (pty, output) = Pty::spawn_with_env_in(
         launch.program.to_str().unwrap(),
         &args,
@@ -439,6 +507,10 @@ fn installed_session_client_probe() {
             .join(panel_contract::CONTROL_SOCKET)
             .display()
     );
+    if let Some(root) = &cycle {
+        expected = Some(drive_opencode_cycle(&handle, &output, root));
+        expect_session = true;
+    }
     let deadline = Instant::now() + Duration::from_secs(15);
     let mut snapshot = handle.snapshot();
     while (snapshot.status != Status::Registered || expect_session && snapshot.identity.is_none())
@@ -492,4 +564,120 @@ fn installed_session_client_probe() {
         );
     }
     drop(pty);
+}
+
+fn prepare_opencode_cycle(root: &std::path::Path) -> PathBuf {
+    assert!(root.is_absolute() && root.is_dir());
+    let root = std::fs::canonicalize(root).unwrap();
+    assert!(root.starts_with(std::env::temp_dir()) && root != std::env::temp_dir());
+    let fixture = root.join("route-fixture.js");
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&fixture)
+        .unwrap();
+    std::io::Write::write_all(&mut file, OPENCODE_ROUTE_FIXTURE.as_bytes()).unwrap();
+    let production = std::fs::canonicalize(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../integrations/session-recovery/opencode/index.js"),
+    )
+    .unwrap();
+    let config = root.join("tui.json");
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&config)
+        .unwrap();
+    serde_json::to_writer(file, &json!({"plugin":[production,fixture]})).unwrap();
+    config
+}
+
+fn read_cycle_state(root: &std::path::Path) -> Option<Value> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    std::fs::File::open(root.join("state.json"))
+        .ok()?
+        .take(8193)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() > 8192 {
+        return None;
+    }
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn drive_opencode_cycle(
+    handle: &Handle,
+    output: &Receiver<Vec<u8>>,
+    root: &std::path::Path,
+) -> Identity {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let state = loop {
+        if let Some(state) = read_cycle_state(root) {
+            if state.get("error").is_some() {
+                let step = state["step"]
+                    .as_str()
+                    .filter(|step| {
+                        ["ready", "create_first", "create_second", "store_sync"].contains(step)
+                    })
+                    .unwrap_or("unknown");
+                panic!("the official SDK fixture could not initialize at {step}");
+            }
+            if state["phase"] == "ready" {
+                break state;
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the official SDK fixture did not publish its own disposable metadata"
+        );
+        let _ = output.recv_timeout(Duration::from_millis(20));
+    };
+    let first = Identity::new(
+        Client::Opencode,
+        state["first"].as_str().expect("first fixture identity"),
+    )
+    .unwrap();
+    let second = Identity::new(
+        Client::Opencode,
+        state["second"].as_str().expect("second fixture identity"),
+    )
+    .unwrap();
+    assert!(
+        first != second,
+        "the official SDK must create two distinct disposable sessions"
+    );
+    for (phase, expected) in [
+        ("first", Some(&first)),
+        ("second", Some(&second)),
+        ("home", None),
+        ("first", Some(&first)),
+    ] {
+        std::fs::write(
+            root.join("control.json"),
+            serde_json::to_vec(&json!({"phase":phase})).unwrap(),
+        )
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let snapshot = handle.snapshot();
+            let selected = read_cycle_state(root).is_some_and(|state| state["phase"] == phase);
+            if selected
+                && snapshot.sampled
+                && snapshot.status == Status::Registered
+                && snapshot.identity.as_ref() == expected
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the production reporter did not follow the official disposable route change"
+            );
+            let _ = output.recv_timeout(Duration::from_millis(20));
+        }
+        eprintln!("native OpenCode route fixture accepted phase={phase}");
+    }
+    first
 }
