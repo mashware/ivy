@@ -354,6 +354,9 @@ fn what_the_silence_says(console: &crate::Pane, silence: Silence) -> String {
                     identity.client.name()
                 );
             }
+            if console.restoration.fresh_shell_required {
+                return "This AI session could not be restored. Typing or clicking this notice starts a fresh console.".to_owned();
+            }
             let path = console
                 .restoration
                 .directory

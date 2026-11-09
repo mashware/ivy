@@ -53,8 +53,8 @@ and OpenCode use their official live metadata interfaces. Verified capture curre
 These instructions are for a Linux desktop. Ivy opens one tab with one fresh console by default.
 In **Settings → Startup**, choose **Layout**, **Layout and directories**, or **Layout, directories and AI sessions** to restore your arrangement
 on later launches. Turning recovery off keeps the previous saved layout. Additional windows open
-fresh and are temporary: they do not replace the first window's saved arrangement. This version
-starts fresh programs and does not resume AI conversations.
+fresh and are temporary: they do not replace the first window's saved arrangement. AI recovery
+requires explicit setup of the matching client adapter described above.
 
 Experimental Ubuntu and Arch downloads are available in [Releases](https://github.com/mashware/ivy/releases).
 The macOS delivery adds Apple Silicon and Intel DMG builders; see the

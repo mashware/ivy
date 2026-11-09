@@ -183,16 +183,16 @@ pub(crate) fn apply_saved_mode(window: &mut Window) {
         for pane in window.all_panes_mut() {
             crate::resume::set_capture(pane, false);
             if pane.restoration.failed && pane.restoration.resume.is_some() {
-                pane.restoration.failed = pane
-                    .restoration
-                    .directory
-                    .as_ref()
-                    .is_some_and(|directory| !directory.is_dir());
+                pane.restoration.failed = pane.restoration.fresh_shell_required
+                    || pane
+                        .restoration
+                        .directory
+                        .as_ref()
+                        .is_some_and(|directory| !directory.is_dir());
             }
             pane.restoration.resume = None;
             pane.restoration.session_directory = None;
             pane.restoration.resuming = false;
-            pane.restoration.fresh_shell_required = false;
         }
     }
     window.restoration.mode = mode;
@@ -201,7 +201,7 @@ pub(crate) fn apply_saved_mode(window: &mut Window) {
     if !mode.has_directories() {
         for pane in window.all_panes_mut() {
             pane.restoration.directory = None;
-            pane.restoration.failed = false;
+            pane.restoration.failed = pane.restoration.fresh_shell_required;
         }
     }
     let cost = before.elapsed();
