@@ -83,6 +83,30 @@ pub(crate) fn identity_of(
     }
 }
 
+/// Keep the complete tiling outside the oversized Pane implementation (D28).
+fn tile_pane(
+    pane: &Pane,
+    rect: egui::Rect,
+    metrics: &CellMetrics,
+    now: SystemTime,
+) -> panel::PanelTiling {
+    // **The width comes from the pane itself, and that is what keeps the two callers in
+    // agreement.** One measures the grid of the consoles that are not painted and the other
+    // paints the one on show; if the width travelled as a parameter, each could bring its own
+    // and a background console would again be measured with a width that is not its own — the
+    // defect that already cost 36 columns.
+    //
+    // Folding and an unpublished panel leave the same outer console rectangle; both still
+    // reserve inner padding before grid sizing, painting and pointer coordinates use it.
+    let mut split = panel::set_aside(
+        rect,
+        metrics.width(),
+        (!pane.folded && pane.panel_state.is_visible(now)).then_some(pane.panel_width),
+    );
+    split.console = metrics.console_in(split.console);
+    split
+}
+
 impl Pane {
     /// Reads this console's `panel.json` again **if somebody has given notice** that it changed.
     ///
@@ -170,21 +194,7 @@ impl Pane {
         metrics: &CellMetrics,
         now: SystemTime,
     ) -> panel::PanelTiling {
-        // **The width comes from the pane itself, and that is what keeps the two callers in
-        // agreement.** One measures the grid of the consoles that are not painted and the other
-        // paints the one on show; if the width travelled as a parameter, each could bring its own
-        // and a background console would again be measured with a width that is not its own — the
-        // defect that already cost 36 columns.
-        //
-        // Folding and an unpublished panel leave the same outer console rectangle; both still
-        // reserve inner padding before grid sizing, painting and pointer coordinates use it.
-        let mut split = panel::set_aside(
-            rect,
-            metrics.width(),
-            (!self.folded && self.panel_state.is_visible(now)).then_some(self.panel_width),
-        );
-        split.console = metrics.console_in(split.console);
-        split
+        tile_pane(self, rect, metrics, now)
     }
 
     /// How a pane's rectangle is shared out between its strip, its console and its panel.
