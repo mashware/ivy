@@ -38,7 +38,7 @@ pub(crate) fn geometry(window: &Window, area: egui::Rect, metrics: &CellMetrics)
     if window.chrome.enabled() {
         let top = (area.top() + crate::chrome::HEIGHT).min(area.bottom());
         let (_, rest) = area.split_top_bottom_at_y(top);
-        let bottom = (rest.top() + 39.0).min(rest.bottom());
+        let bottom = (rest.top() + window.chrome.title_sizes.tab_height()).min(rest.bottom());
         let (cards, consoles) = rest.split_top_bottom_at_y(bottom);
         return Geometry {
             cards: Some(cards),

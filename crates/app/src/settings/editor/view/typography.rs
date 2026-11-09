@@ -270,6 +270,37 @@ pub(super) fn show(
                     .color(ui.visuals().weak_text_color()),
             );
         });
+    ui.add_space(12.0);
+    for (key, label, sample) in [
+        ("pane.title_size", "Pane title size", "Console title"),
+        ("tab.label_size", "Tab label size", "Tab label"),
+    ] {
+        let field = draft
+            .fields
+            .iter_mut()
+            .find(|field| field.key == key)
+            .unwrap();
+        ui.horizontal_wrapped(|ui| {
+            ui.label(label);
+            ui.add(
+                egui::TextEdit::singleline(&mut field.value)
+                    .hint_text("12")
+                    .desired_width(55.0),
+            );
+            ui.weak("pt (8–32)");
+            if ui.button("Reset").clicked() {
+                field.value.clear();
+            }
+            let size = field
+                .value
+                .parse::<f32>()
+                .ok()
+                .filter(|size| size.is_finite() && (8.0..=32.0).contains(size))
+                .unwrap_or(12.0);
+            ui.label(egui::RichText::new(sample).size(size));
+        });
+        field_errors(ui, key, errors);
+    }
 }
 
 #[cfg(test)]

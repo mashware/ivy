@@ -76,6 +76,21 @@ use std::path::Path;
 /// entry down.
 const SOURCES: &[(&str, &str, usize)] = &[
     (
+        "src/chrome/typography.rs",
+        include_str!("../src/chrome/typography.rs"),
+        1,
+    ),
+    (
+        "src/header/title_text.rs",
+        include_str!("../src/header/title_text.rs"),
+        1,
+    ),
+    (
+        "src/tests/title_typography.rs",
+        include_str!("../src/tests/title_typography.rs"),
+        1,
+    ),
+    (
         "src/git_process.rs",
         include_str!("../src/git_process.rs"),
         0,

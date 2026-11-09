@@ -8881,3 +8881,53 @@ Accents derive from the effective configured palette, including overrides. Live 
 **Limits and accounting.** Outside Linux, automatic directory information depends on local OSC 7 reports. An unreported silent directory change is noticed on a later ordinary frame. Native metadata/source/result/color bookkeeping has its own named frame span; header painting stays in the existing strip span. Background subprocess time is never subtracted from a frame. Historical measurement batches disable discovery; the explicit project probe injects source directories but resolves real temporary repositories and paints real badges.
 
 The size guard measures the core at 647 production lines, unchanged. Moving watcher construction to the resource factory lowers the aggregate Window implementation from 1617 to 1611; project refresh remains a free function rather than growing that already-ratcheted type.
+
+## D80 — Agent signals are declared independently of the panel publisher
+
+**Decided for [#16](https://github.com/mashware/ivy/issues/16).** Client identity, activity and
+human-input requirements belong to a transient pane-local signal, separate from the panel's
+producer-owned document. Enabling an integration is explicit per client in Connect agents.
+A signal never claims, patches or retires somebody else's panel. Its verified input-required
+claim combines with panel attention using the existing priority order; withdrawing it cannot
+withdraw the panel's claim.
+
+**Why.** A one-shot hook cannot patch the connection that already owns Flow's panel, and the
+file transport is deliberately suppressed while that connection holds it (D43). Replacing a
+published summary with a permission notification would discard the information this app exists
+to show. Hooks know lifecycle, not the work's semantic progress (D6): a completed turn or an
+error alone therefore does not become task done or task blocked.
+
+Codex 0.167.0 already publishes explicit foreground lifecycle snapshots through OSC7501,
+including permission/question/auth blocking kinds and native withdrawal. This is structured
+producer metadata, not interpretation of its title or screen. Native frames update one bounded
+pane-local register; untagged clear withdraws that register only. It does not identify separate
+sessions sharing a PTY or authenticate a client. Missing cleanup remains stale information,
+never an inferred answer or successful completion. Disabled integrations consume no signal.
+
+Claude/OpenCode use official hooks or plugin events where the tested version provides enough
+root-session association, ordering and request-resolution evidence. Their concrete contracts must
+be verified before adapter code and their supported behavior proved with the real client before
+being advertised. A short-lived hook connection ending is not the harness session ending.
+No transcript reader, process-name recognizer, generic daemon or automatic client-config editor
+is introduced. The guide exposes reviewed setup instructions and preserves existing hooks.
+
+**Presentation.** Supported identity selects a bundled logo; only explicit active state animates
+it, and hidden/inactive windows arm no logo-only repaint. Removing a duplicate spinner is a
+supported, explicitly reviewed client title setting, never a guessed substring rewrite (D69).
+Manual names retain priority. All braille patterns U+2800–U+28FF in title text are drawn from
+their dot masks, so the observed U+2838 is independent of proportional-font coverage. This is
+rendering and does not interpret braille as activity.
+
+Pane-title and tab-label point sizes are independent settings, default 12, range 8–32. Their
+resolved metrics drive both drawing and shared geometry, including hidden-console PTY resizing.
+They reuse the existing preserving save/apply boundary rather than a second configuration path.
+The console number remains unchanged.
+
+**Discarded.** Forced hooks for Codex duplicate a more precise native source. A custom OSC for
+all hooks assumes terminal access Claude explicitly disallows. Changing only title font sizes
+while retaining fixed strip heights clips text and separates paint from input. Machine-only
+proportional fallback leaves the reported braille fix dependent on installed fonts.
+
+**Evidence boundary.** This records the design, not completed integration. Per-client versions,
+fixtures, native checks and measurement accounting travel with each delivery; headless tests or
+source documentation alone do not establish a working desktop integration.
