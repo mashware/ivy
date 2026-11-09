@@ -485,6 +485,26 @@ impl Pty {
         size: Size,
         env: &[(&str, Option<&OsStr>)],
     ) -> Result<(Self, Receiver<Vec<u8>>)> {
+        Self::spawn_with_env_in(program, args, size, env, None)
+    }
+
+    /// Like [`Pty::spawn_with_env`], with a per-child working directory.
+    /// An explicit directory must be absolute and available; portable-pty otherwise silently
+    /// substitutes the home directory. Validation cannot prevent removal during the spawn itself.
+    pub fn spawn_with_env_in(
+        program: &str,
+        args: &[&str],
+        size: Size,
+        env: &[(&str, Option<&OsStr>)],
+        directory: Option<&std::path::Path>,
+    ) -> Result<(Self, Receiver<Vec<u8>>)> {
+        if let Some(directory) = directory
+            && (!directory.is_absolute() || !directory.is_dir())
+        {
+            return Err(
+                format!("working directory is unavailable: {}", directory.display()).into(),
+            );
+        }
         // **An empty name is refused here, before the pseudoterminal exists.** `openpty` succeeds
         // whatever the name is, so without this guard every descriptor below is opened for a program
         // that cannot start, and portable-pty's PATH search then reports each PATH entry as «exists
@@ -527,6 +547,9 @@ impl Pty {
 
         let mut cmd = CommandBuilder::new(program);
         cmd.args(args);
+        if let Some(directory) = directory {
+            cmd.cwd(directory);
+        }
         for (name, value) in FIXED_ENV {
             cmd.env(name, value);
         }
@@ -1198,6 +1221,23 @@ mod tests {
     use super::*;
     use std::sync::mpsc::RecvTimeoutError;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn child_directory_rejects_relative_or_missing_path() {
+        for directory in [
+            std::path::Path::new("."),
+            std::path::Path::new("/no-such-ivy-directory/child"),
+        ] {
+            let failure = Pty::spawn_with_env_in("sh", &[], Size::default(), &[], Some(directory))
+                .err()
+                .expect("invalid cwd must fail before spawning");
+            assert!(
+                failure
+                    .to_string()
+                    .contains("working directory is unavailable")
+            );
+        }
+    }
 
     #[cfg(target_os = "linux")]
     #[test]

@@ -94,7 +94,35 @@ pub(crate) fn split(
     }
 
     let name = window.next_pane_name;
-    let opened = Pane::new_counting_reads(ctx, name, window.control.read_activity());
+    let directory = window
+        .active_mut()
+        .panes_mut()
+        .into_iter()
+        .find(|pane| pane.name == target)
+        .and_then(|pane| {
+            // A remote/invalid report must not turn into the local ssh process's directory.
+            if pane.screen.working_directory_reported() && pane.screen.working_directory().is_none()
+            {
+                return None;
+            }
+            // Native discovery sees a cd even before a shell publishes its next OSC 7 report.
+            pane.pty.working_directory().or_else(|| {
+                pane.screen
+                    .working_directory()
+                    .and_then(published_directory)
+            })
+        });
+    if directory.is_none() {
+        eprintln!(
+            "the console's working directory is unavailable; splitting in the default directory"
+        );
+    }
+    let opened = crate::opening::new_in_directory(
+        ctx,
+        name,
+        window.control.read_activity(),
+        directory.as_deref(),
+    );
     // **The name is spent even if the program never gets to start**, just as when opening a
     // tab: whatever is opened afterwards must not be called the same as what never got to
     // exist, because the report may already have named the failed attempt on the error output.
@@ -158,4 +186,248 @@ fn graft(
     // been born and its panel would stay frozen with nothing saying so. It is the same as
     // opening a tab does.
     window.rearm_the_watcher(ctx);
+}
+
+/// OSC 7 uses a URI path; Windows drive paths arrive with a leading slash.
+fn published_directory(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    #[cfg(windows)]
+    {
+        let path = path.to_str()?;
+        Some(std::path::PathBuf::from(
+            path.strip_prefix('/').unwrap_or(path),
+        ))
+    }
+    #[cfg(not(windows))]
+    {
+        Some(path.to_path_buf())
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    //! The newborn shell writes pwd to a file: terminal echo cannot forge the assertion.
+    use super::*;
+    use crate::tests::window_of_tabs;
+    use std::{fs, path::PathBuf, time::Duration};
+
+    struct Sandbox(PathBuf);
+    impl Sandbox {
+        fn new() -> Self {
+            let mut nonce = [0u8; 8];
+            getrandom::fill(&mut nonce).unwrap();
+            let path =
+                std::env::temp_dir().join(format!("ivy-split-{}", u64::from_ne_bytes(nonce)));
+            fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+        fn directory(&self, name: &str) -> PathBuf {
+            let path = self.0.join(name);
+            fs::create_dir(&path).unwrap();
+            path
+        }
+    }
+    impl Drop for Sandbox {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    fn wait(mut ready: impl FnMut() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !ready() {
+            assert!(Instant::now() < deadline, "directory operation timed out");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+    fn area() -> egui::Rect {
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 900.0))
+    }
+    fn assert_newborn_pwd(window: &mut Window, sandbox: &Sandbox, expected: &std::path::Path) {
+        let output = sandbox.0.join("pwd.txt");
+        let name = window.active().focus;
+        window
+            .all_panes_mut()
+            .find(|p| p.name == name)
+            .unwrap()
+            .pty
+            .write(format!("command pwd > '{}'\n", output.display()).as_bytes())
+            .unwrap();
+        wait(|| {
+            fs::read_to_string(&output).is_ok_and(|s| s.trim_end() == expected.to_string_lossy())
+        });
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn split_directory_tracks_cd_for_both_orientations() {
+        for direction in [Orientation::Columns, Orientation::Rows] {
+            let sandbox = Sandbox::new();
+            let first = sandbox.directory("first");
+            let second = sandbox.directory("second space;$dollar");
+            let ready = sandbox.0.join("ready");
+            let change = sandbox.0.join("change");
+            let changed = sandbox.0.join("changed");
+            let script = format!(
+                "cd '{}' && touch '{}' && while ! test -f '{}'; do sleep 0.01; done; cd '{}' && touch '{}' && exec sleep 30",
+                first.display(),
+                ready.display(),
+                change.display(),
+                second.display(),
+                changed.display()
+            );
+            let mut window = window_of_tabs([[script.as_str(), "sleep 30"]]);
+            wait(|| ready.exists());
+            let original = std::env::current_dir().unwrap();
+            // A stale, valid local report must not override the live cd on Linux.
+            window.active_mut().panes_mut()[0]
+                .screen
+                .advance(format!("\x1b]7;file://{}\x07", first.display()).as_bytes());
+            fs::write(&change, "").unwrap();
+            wait(|| changed.exists());
+            let ctx = egui::Context::default();
+            window.split_the_focused(direction, &ctx, area(), &CellMetrics::of(8.0, 16.0));
+            assert_eq!(window.active().panes().len(), 3);
+            assert_newborn_pwd(&mut window, &sandbox, &second);
+            assert_eq!(std::env::current_dir().unwrap(), original);
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn split_directory_uses_named_toolbar_target_instead_of_focus() {
+        let sandbox = Sandbox::new();
+        let source = sandbox.directory("clicked console");
+        let ready = sandbox.0.join("ready");
+        let script = format!(
+            "cd '{}' && touch '{}' && exec sleep 30",
+            source.display(),
+            ready.display()
+        );
+        let mut window = window_of_tabs([["sleep 30", script.as_str()]]);
+        wait(|| ready.exists());
+        let target = window.active().panes()[1].name;
+        assert_ne!(window.active().focus, target);
+        split(
+            &mut window,
+            target,
+            Orientation::Rows,
+            &egui::Context::default(),
+            area(),
+            &CellMetrics::of(8.0, 16.0),
+        );
+        assert_eq!(window.active().panes().len(), 3);
+        assert_newborn_pwd(&mut window, &sandbox, &source);
+    }
+
+    #[test]
+    fn split_directory_osc_report_survives_source_exit_and_deleted_path_refuses_split() {
+        let sandbox = Sandbox::new();
+        let source = sandbox.directory("published directory");
+        let mut window = window_of_tabs([["exit 0", "sleep 30"]]);
+        wait(|| {
+            window.active_mut().panes_mut()[0]
+                .pty
+                .working_directory()
+                .is_none()
+        });
+        window.active_mut().panes_mut()[0]
+            .screen
+            .advance(format!("\x1b]7;file://{}\x07", source.display()).as_bytes());
+        let target = window.active().focus;
+        split(
+            &mut window,
+            target,
+            Orientation::Columns,
+            &egui::Context::default(),
+            area(),
+            &CellMetrics::of(8.0, 16.0),
+        );
+        assert_eq!(window.active().panes().len(), 3);
+        assert_newborn_pwd(&mut window, &sandbox, &source);
+        fs::remove_dir(&source).unwrap();
+        let before = window.active().focus;
+        split(
+            &mut window,
+            target,
+            Orientation::Rows,
+            &egui::Context::default(),
+            area(),
+            &CellMetrics::of(8.0, 16.0),
+        );
+        assert_eq!(window.active().panes().len(), 3);
+        assert_eq!(window.active().focus, before);
+    }
+
+    #[test]
+    fn split_directory_fallback_shell_receives_the_same_directory() {
+        let sandbox = Sandbox::new();
+        let source = sandbox.directory("fallback directory");
+        let pane = crate::opening::launch_pane_in(
+            &egui::Context::default(),
+            "/no-such-ivy-shell",
+            &[],
+            None,
+            0,
+            crate::control::ReadActivity::default(),
+            Some(&source),
+        )
+        .unwrap();
+        let tab = crate::Tab::with_panes(
+            vec![pane],
+            &crate::OpeningLayout {
+                columns: 1,
+                rows: 1,
+            },
+            0,
+        );
+        let mut window = Window::with_these_tabs(
+            &egui::Context::default(),
+            vec![tab],
+            None,
+            crate::control::WindowActivity::default(),
+        )
+        .unwrap();
+        assert_newborn_pwd(&mut window, &sandbox, &source);
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn split_directory_foreign_report_vetoes_native_and_previous_local_directory() {
+        let sandbox = Sandbox::new();
+        let source = sandbox.directory("local ssh directory");
+        let ready = sandbox.0.join("ready");
+        let script = format!(
+            "cd '{}' && touch '{}' && exec sleep 30",
+            source.display(),
+            ready.display()
+        );
+        let mut window = window_of_tabs([[script.as_str(), "sleep 30"]]);
+        wait(|| ready.exists());
+        window.active_mut().panes_mut()[0].screen.advance(
+            format!(
+                "\x1b]7;file://{}\x07\x1b]7;file://remote.invalid/some/project\x07",
+                source.display()
+            )
+            .as_bytes(),
+        );
+        window.split_the_focused(
+            Orientation::Columns,
+            &egui::Context::default(),
+            area(),
+            &CellMetrics::of(8.0, 16.0),
+        );
+        assert_eq!(window.active().panes().len(), 3);
+        let output = sandbox.0.join("remote-pwd.txt");
+        let name = window.active().focus;
+        window
+            .all_panes_mut()
+            .find(|p| p.name == name)
+            .unwrap()
+            .pty
+            .write(format!("command pwd > '{}'\n", output.display()).as_bytes())
+            .unwrap();
+        wait(|| fs::read_to_string(&output).is_ok_and(|s| !s.trim().is_empty()));
+        let actual = fs::read_to_string(&output).unwrap();
+        assert_ne!(actual.trim_end(), source.to_string_lossy());
+        assert_ne!(actual.trim_end(), "/some/project");
+    }
 }
