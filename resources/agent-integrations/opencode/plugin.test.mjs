@@ -12,7 +12,7 @@ test('route bootstrap, displayed request, cancellation, navigation and disposal'
   await mkdir(join(dir, 'node_modules/solid-js'), {recursive:true})
   await writeFile(join(dir, 'node_modules/solid-js/package.json'), '{"type":"module","exports":"./index.js"}')
   await writeFile(join(dir, 'node_modules/solid-js/index.js'), `let effects=[]; export function createRoot(f){return f(()=>{effects=[]})} export function createSignal(v){return [()=>v,x=>{v=typeof x==='function'?x(v):x; for(const e of effects)queueMicrotask(e)}]} export function createEffect(f){effects.push(f);f()} export function tick(){for(const e of effects)queueMicrotask(e)}`)
-  await writeFile(join(dir, 'net.mjs'), `import {EventEmitter} from 'node:events'; export const lines=[]; export const state={connections:0,socket:null,refuse:false}; export function createConnection(){ const s=new EventEmitter(); state.connections++; state.socket=s; s.connecting=true; let closed=false; s.write=x=>{lines.push(JSON.parse(x));queueMicrotask(()=>{if(!closed)s.emit('data',Buffer.from(state.refuse?'{"ok":false}\\n':'{"ok":true}\\n'))})}; s.end=()=>{if(!closed){closed=true;queueMicrotask(()=>s.emit('close'))}}; s.destroy=s.end; queueMicrotask(()=>{s.connecting=false;s.emit('connect')}); return s }`)
+  await writeFile(join(dir, 'net.mjs'), `import {EventEmitter} from 'node:events'; export const lines=[]; export const state={connections:0,socket:null,refuse:false,retryable:false}; export function createConnection(){ const s=new EventEmitter(); state.connections++; state.socket=s; s.connecting=true; let closed=false; s.write=x=>{lines.push(JSON.parse(x));queueMicrotask(()=>{if(!closed)s.emit('data',Buffer.from(state.refuse?JSON.stringify(state.retryable ? {ok:false,retryable:true} : {ok:false})+'\\n':'{"ok":true}\\n'))})}; s.end=()=>{if(!closed){closed=true;queueMicrotask(()=>s.emit('close'))}}; s.destroy=s.end; queueMicrotask(()=>{s.connecting=false;s.emit('connect')}); return s }`)
 
   const source = await readFile(new URL('./ivy-opencode.tsx', import.meta.url), 'utf8')
   await writeFile(join(dir, 'plugin.ts'), process.env.IVY_REAL_SOCKET ? source : source.replace('from "node:net"', 'from "./net.mjs"'))
@@ -22,8 +22,8 @@ test('route bootstrap, displayed request, cancellation, navigation and disposal'
   let lines, state
   if (process.env.IVY_REAL_SOCKET) {
     lines = []
-    state = {connections:0, socket:null, refuse:false}
-    server = createServer(socket => { state.connections++; state.socket=socket; let buffer=''; socket.on('data', chunk => { buffer += chunk; let end; while((end=buffer.indexOf('\n')) >= 0) { lines.push(JSON.parse(buffer.slice(0,end))); buffer=buffer.slice(end+1); socket.write(state.refuse ? '{"ok":false}\n' : '{"ok":true}\n') } }) })
+    state = {connections:0, socket:null, refuse:false, retryable:false}
+    server = createServer(socket => { state.connections++; state.socket=socket; let buffer=''; socket.on('data', chunk => { buffer += chunk; let end; while((end=buffer.indexOf('\n')) >= 0) { lines.push(JSON.parse(buffer.slice(0,end))); buffer=buffer.slice(end+1); socket.write(state.refuse ? JSON.stringify(state.retryable ? {ok:false,retryable:true} : {ok:false})+'\n' : '{"ok":true}\n') } }) })
     await new Promise((resolve, reject) => {server.once('error',reject); server.listen(join(dir,'control.sock'),resolve)})
   } else ({lines, state} = await import(pathToFileURL(join(dir, 'net.mjs'))))
   process.env.PANEL_DIR=dir; process.env.PANEL_ID='test'
@@ -76,7 +76,17 @@ test('route bootstrap, displayed request, cancellation, navigation and disposal'
     route={name:'home'}; solid.tick(); await pause(40)
     assert.equal(lines.at(-1).snapshot,null)
     route={name:'session',params:{sessionID:'latest'}}; solid.tick(); await pause(80)
-    state.refuse=true
+    state.refuse=true; state.retryable=true
+    const transientConnections=state.connections
+    callbacks.get('session.status')(); await pause(80)
+    state.refuse=false
+    const transientLines=lines.length
+    await pause(1250)
+    assert.equal(state.connections,transientConnections+1,'a retryable refusal reconnects')
+    assert.ok(lines.length>transientLines,'reconnection sends a complete snapshot')
+    assert.equal(lines[transientLines].snapshot.session,'latest')
+    assert.notEqual(lines[transientLines].snapshot.stale,true,'the reconnect first frame is current')
+    state.refuse=true; state.retryable=false
     callbacks.get('session.status')(); await pause(80)
     const refusedConnections=state.connections, refusedLines=lines.length
     callbacks.get('session.status')()

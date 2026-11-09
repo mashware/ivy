@@ -37,7 +37,7 @@ function channel(path: string, connected: () => void) {
       if (end < 0) return
       const line = buffer.slice(0, end)
       buffer = buffer.slice(end + 1)
-      try { if (JSON.parse(line).ok !== true) { stopped = true; current.destroy(); return } }
+      try { const reply = JSON.parse(line); if (reply.ok !== true) { stopped = reply.retryable !== true; current.destroy(); return } }
       catch { current.destroy(); return }
       inflight = false
       pump()

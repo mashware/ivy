@@ -546,7 +546,7 @@ fn answer(
     match incoming {
         Incoming::Request(Request::AgentSignal(snapshot)) => (
             ask_the_window(
-                Wants::Taken,
+                Wants::AgentSignal,
                 What::AgentSignal(snapshot),
                 connection,
                 to_the_window,
@@ -692,6 +692,7 @@ fn publish(
 #[derive(Debug, Clone, Copy)]
 enum Wants {
     Taken,
+    AgentSignal,
     Retired,
     Opened,
     Read,
@@ -702,11 +703,20 @@ impl Wants {
     fn name(self) -> &'static str {
         match self {
             Self::Taken => "a publication or a close",
+            Self::AgentSignal => "an agent signal",
             Self::Retired => "a retirement",
             Self::Opened => "an open",
             Self::Read => "a read",
             Self::Document => "a document read",
         }
+    }
+}
+
+fn temporary_failure(wants: Wants, reason: &str) -> Reply {
+    if matches!(wants, Wants::AgentSignal) {
+        Reply::Retryable(reason.to_owned())
+    } else {
+        Reply::Failed(reason.to_owned())
     }
 }
 
@@ -730,7 +740,7 @@ fn ask_the_window(
     }) {
         Ok(()) => {}
         Err(TrySendError::Full(_)) => {
-            return Reply::Failed("the window is not draining its channel".to_owned());
+            return temporary_failure(wants, "the window is not draining its channel");
         }
         Err(TrySendError::Disconnected(_)) => {
             return Reply::Failed("this pane is gone".to_owned());
@@ -740,7 +750,7 @@ fn ask_the_window(
 
     match answer.recv_timeout(ANSWER_DEADLINE) {
         Ok(Answer::Refused(why)) => Reply::Failed(why),
-        Ok(Answer::Taken) if matches!(wants, Wants::Taken) => Reply::Ok,
+        Ok(Answer::Taken) if matches!(wants, Wants::Taken | Wants::AgentSignal) => Reply::Ok,
         Ok(Answer::Retired { closed, preserved }) if matches!(wants, Wants::Retired) => {
             Reply::Retired { closed, preserved }
         }
@@ -769,7 +779,7 @@ fn ask_the_window(
         // giving up here cannot reach into a pass that has already started. Saying «it was not
         // published» would be the lie; saying it was not answered in time is true either way.
         Err(RecvTimeoutError::Timeout) => {
-            Reply::Failed("the window did not answer within five seconds".to_owned())
+            temporary_failure(wants, "the window did not answer within five seconds")
         }
         // **And a pane that is gone is not a slow one.** Folding the two together invited an agent
         // to retry against something that no longer exists, for ever.
@@ -886,6 +896,55 @@ mod tests {
         let closed = pane.next_delivery();
         assert_eq!(closed.connection, connection);
         assert!(matches!(closed.what, What::Closed));
+    }
+
+    #[test]
+    fn agent_signal_queue_full_replies_retryable_over_the_socket_but_panel_does_not() {
+        let dir = PanelDir::create().unwrap();
+        let (sender, _inbox) = sync_channel::<Delivery>(1);
+        let (answer, _) = sync_channel(1);
+        sender
+            .try_send(Delivery {
+                connection: 99,
+                what: What::Closed,
+                answer,
+            })
+            .unwrap();
+        let _channel = Channel::open_with_reader(
+            dir.path(),
+            dir.id(),
+            sender,
+            Arc::new(|| Err("no panel".into())),
+            Arc::new(|| {}),
+        )
+        .unwrap();
+        let mut stream = endpoint::connect(dir.path(), dir.id()).unwrap();
+        stream
+            .write_all(
+                b"{\"tool\":\"agent_signal\",\"v\":1,\"client\":\"opencode\",\"snapshot\":null}\n",
+            )
+            .unwrap();
+        let retry: serde_json::Value = serde_json::from_str(&read_reply(&mut stream)).unwrap();
+        assert_eq!(retry["ok"], false);
+        assert_eq!(retry["retryable"], true);
+        stream
+            .write_all(publication("flow", "{\"lines\":[]}").as_bytes())
+            .unwrap();
+        let legacy: serde_json::Value = serde_json::from_str(&read_reply(&mut stream)).unwrap();
+        assert_eq!(legacy["ok"], false);
+        assert!(legacy.get("retryable").is_none());
+    }
+
+    #[test]
+    fn timeout_classification_is_specific_to_agent_signals() {
+        assert!(matches!(
+            temporary_failure(Wants::AgentSignal, "timeout"),
+            Reply::Retryable(_)
+        ));
+        assert!(matches!(
+            temporary_failure(Wants::Taken, "timeout"),
+            Reply::Failed(_)
+        ));
     }
 
     /// The whole of what this delivery promises, end to end: a producer publishes over the channel

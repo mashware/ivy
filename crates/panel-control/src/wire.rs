@@ -574,6 +574,8 @@ pub enum Reply {
     /// newline-framed channel.
     Document(String),
     Failed(String),
+    /// A temporary failure specific to agent signal delivery.
+    Retryable(String),
 }
 
 impl Reply {
@@ -609,6 +611,10 @@ impl Reply {
             // here is not this line but its only source: the contract's writer emits one compact line
             // and puts every string of the document through the same escaping the arm above uses.
             Self::Document(document) => format!("{{\"ok\":true,\"document\":{document}}}\n"),
+            Self::Retryable(reason) => {
+                let escaped = serde_json::Value::String(reason.clone());
+                format!("{{\"ok\":false,\"error\":{escaped},\"retryable\":true}}\n")
+            }
             Self::Failed(reason) => {
                 let escaped = serde_json::Value::String(reason.clone());
                 format!("{{\"ok\":false,\"error\":{escaped}}}\n")
@@ -1211,6 +1217,19 @@ mod tests {
 #[cfg(test)]
 mod agent_signal_tests {
     use super::*;
+
+    #[test]
+    fn retryable_reply_is_escaped_and_legacy_failure_shape_is_unchanged() {
+        let reply: serde_json::Value =
+            serde_json::from_str(&Reply::Retryable("busy \"now\"".into()).line()).unwrap();
+        assert_eq!(
+            reply,
+            serde_json::json!({"ok": false, "error": "busy \"now\"", "retryable": true})
+        );
+        let legacy: serde_json::Value =
+            serde_json::from_str(&Reply::Failed("busy".into()).line()).unwrap();
+        assert_eq!(legacy, serde_json::json!({"ok": false, "error": "busy"}));
+    }
 
     #[test]
     fn accepts_only_complete_strict_opencode_v1_snapshots() {
