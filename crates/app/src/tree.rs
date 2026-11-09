@@ -1013,6 +1013,7 @@ impl From<session::StoredOrientation> for Orientation {
 fn describe_node(node: &Node) -> session::StoredNode {
     match node {
         Node::Leaf(pane) => session::StoredNode::Leaf(session::StoredLeaf {
+            cwd: pane.restoration.directory.clone(),
             panel_width: pane.panel_width,
             folded: pane.folded,
             label: pane.label.clone(),
@@ -1059,7 +1060,7 @@ impl Node {
         match saving {
             session::StoredNode::Leaf(leaf) => {
                 let mut pane =
-                    Pane::launching_counting_reads(ctx, program, *next_name, reads.clone())?;
+                    crate::restoration::open_leaf(ctx, leaf, program, *next_name, reads.clone())?;
                 *next_name += 1;
                 // **The width is raised to the drag floor, and a review asked for this.** A file
                 // can bring a zero, and **no gesture can leave one**: asking for less than the

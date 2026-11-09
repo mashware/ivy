@@ -35,6 +35,7 @@ pub(crate) struct Editor {
     held_pointer: bool,
     timing: Timing,
     application: runtime::Application,
+    pub(super) saved_startup_restore: Option<super::StartupRestore>,
 }
 
 impl Editor {
@@ -121,6 +122,10 @@ impl Editor {
         let outcome = self.save(fonts);
         self.application.saved_frame = Some((frame, outcome));
         outcome
+    }
+
+    pub(crate) fn take_saved_startup_restore(&mut self) -> Option<super::StartupRestore> {
+        self.saved_startup_restore.take()
     }
 
     pub(crate) fn remember_family(&mut self, settings: &super::Settings) {
@@ -344,6 +349,243 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
     };
     static NEXT: AtomicU64 = AtomicU64::new(0);
+    #[test]
+    fn startup_save_and_cancel_keep_the_saved_choice() {
+        let path = std::env::temp_dir().join(format!(
+            "startup-editor-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::write(&path, "# keep\nstartup.restore = layout\n").unwrap();
+        let mut editor = Editor::resolved(super::super::Entry::Normal, None);
+        let mut fonts = crate::fonts::Discoverer::default();
+        editor.open(Some(path.clone()));
+        editor
+            .draft
+            .as_mut()
+            .unwrap()
+            .fields
+            .iter_mut()
+            .find(|f| f.key == "startup.restore")
+            .unwrap()
+            .value = "directories".into();
+        assert!(editor.save(&mut fonts));
+        assert_eq!(
+            editor.take_saved_startup_restore(),
+            Some(super::super::StartupRestore::Directories)
+        );
+        assert_eq!(
+            super::super::interpret(&fs::read_to_string(&path).unwrap())
+                .unwrap()
+                .0
+                .startup_restore,
+            super::super::StartupRestore::Directories
+        );
+        editor.draft = None;
+        editor.store = None;
+        editor.open(Some(path.clone()));
+        editor
+            .draft
+            .as_mut()
+            .unwrap()
+            .fields
+            .iter_mut()
+            .find(|f| f.key == "startup.restore")
+            .unwrap()
+            .value = "none".into();
+        let ctx = egui::Context::default();
+        ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            },
+            |ui| {
+                editor.show(ui, &mut fonts, ui.max_rect());
+            },
+        )
+        .drop_without_applying_deltas();
+        assert_eq!(editor.take_saved_startup_restore(), None);
+        assert_eq!(
+            super::super::interpret(&fs::read_to_string(&path).unwrap())
+                .unwrap()
+                .0
+                .startup_restore,
+            super::super::StartupRestore::Directories
+        );
+        fs::remove_file(path).unwrap();
+    }
+
+    struct RestorePolicyFixture {
+        directory: PathBuf,
+        snapshot: PathBuf,
+        config: PathBuf,
+    }
+
+    impl RestorePolicyFixture {
+        fn new(mode: super::super::StartupRestore) -> Self {
+            let directory = std::env::temp_dir().join(format!(
+                "settings-restore-policy-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir(&directory).unwrap();
+            let fixture = Self {
+                snapshot: directory.join("layout.json"),
+                config: directory.join("config"),
+                directory,
+            };
+            let value = match mode {
+                super::super::StartupRestore::None => "none",
+                super::super::StartupRestore::Layout => "layout",
+                super::super::StartupRestore::Directories => "directories",
+            };
+            fs::write(&fixture.config, format!("startup.restore = {value}\n")).unwrap();
+            fixture
+        }
+
+        fn seed(&self, version: u64) -> Vec<u8> {
+            let document = crate::session::StoredDocument {
+                v: version,
+                tabs: vec![crate::session::StoredTab {
+                    label: None,
+                    root: crate::session::StoredNode::Leaf(crate::session::StoredLeaf {
+                        panel_width: 37,
+                        folded: true,
+                        label: Some("Saved console".into()),
+                        cwd: Some(self.directory.clone()),
+                    }),
+                }],
+            };
+            let bytes = crate::session::serialize(&document).unwrap().into_bytes();
+            fs::write(&self.snapshot, &bytes).unwrap();
+            bytes
+        }
+
+        fn open(&self, mode: super::super::StartupRestore) -> crate::Window {
+            let mut persistence = crate::session::Persistence::at(Some(self.snapshot.clone()));
+            let (opening, state) = crate::restoration::prepare(
+                &mut persistence,
+                Some(&self.snapshot),
+                mode,
+                false,
+                None,
+                None,
+            );
+            let mut window =
+                crate::Window::opening(&Default::default(), opening, "/bin/sh", None, persistence)
+                    .unwrap();
+            window.restoration = state;
+            window
+        }
+
+        fn save_mode(&self, window: &mut crate::Window, mode: &str) {
+            window.settings_editor.open(Some(self.config.clone()));
+            window
+                .settings_editor
+                .draft
+                .as_mut()
+                .unwrap()
+                .fields
+                .iter_mut()
+                .find(|field| field.key == "startup.restore")
+                .unwrap()
+                .value = mode.into();
+            assert!(window.settings_editor.save(&mut window.discoverer));
+            assert!(window.settings_editor.message.starts_with("Saved."));
+        }
+
+        fn queue_expired_change(window: &mut crate::Window) {
+            window.active_mut().panes_mut()[0].label = Some("Changed console".into());
+            window.check_whether_the_layout_moved();
+            assert!(window.persistence.save_due.is_some());
+            window.persistence.save_due = Some(Instant::now() - Duration::from_secs(1));
+        }
+    }
+
+    impl Drop for RestorePolicyFixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.directory);
+        }
+    }
+
+    #[test]
+    fn saved_none_cancels_an_expired_layout_write_before_the_next_frame() {
+        let fixture = RestorePolicyFixture::new(super::super::StartupRestore::Directories);
+        let original = fixture.seed(crate::session::VERSION);
+        let mut window = fixture.open(super::super::StartupRestore::Directories);
+        RestorePolicyFixture::queue_expired_change(&mut window);
+        fixture.save_mode(&mut window, "none");
+
+        window.save_if_due();
+
+        assert_eq!(fs::read(&fixture.snapshot).unwrap(), original);
+        assert!(window.persistence.save_due.is_none());
+        assert!(!window.restoration.can_save());
+    }
+
+    #[test]
+    fn saved_none_preserves_the_snapshot_when_the_window_closes_immediately() {
+        let fixture = RestorePolicyFixture::new(super::super::StartupRestore::Directories);
+        let original = fixture.seed(crate::session::VERSION);
+        let mut window = fixture.open(super::super::StartupRestore::Directories);
+        RestorePolicyFixture::queue_expired_change(&mut window);
+        fixture.save_mode(&mut window, "none");
+
+        crate::restoration::capture_on_exit(&mut window);
+        window.check_whether_the_layout_moved();
+        window.save_now();
+
+        assert_eq!(fs::read(&fixture.snapshot).unwrap(), original);
+        assert!(!window.restoration.can_save());
+        assert!(window.persistence.save_due.is_none());
+    }
+
+    #[test]
+    fn saved_layout_removes_cached_directories_from_the_next_snapshot() {
+        let fixture = RestorePolicyFixture::new(super::super::StartupRestore::Directories);
+        fixture.seed(crate::session::VERSION);
+        let mut window = fixture.open(super::super::StartupRestore::Directories);
+        assert!(window.active().panes()[0].restoration.directory.is_some());
+        RestorePolicyFixture::queue_expired_change(&mut window);
+        fixture.save_mode(&mut window, "layout");
+
+        window.save_if_due();
+        window.check_whether_the_layout_moved();
+        window.save_now();
+
+        let saved = crate::session::read(&fixture.snapshot).unwrap();
+        let crate::session::StoredNode::Leaf(leaf) = &saved.tabs()[0].root else {
+            panic!("expected the saved console");
+        };
+        assert_eq!(leaf.label.as_deref(), Some("Changed console"));
+        assert!(leaf.cwd.is_none());
+        assert!(window.active().panes()[0].restoration.directory.is_none());
+    }
+
+    #[test]
+    fn enabling_layout_after_disabled_startup_respects_a_newer_snapshot_version() {
+        let fixture = RestorePolicyFixture::new(super::super::StartupRestore::None);
+        let original = fixture.seed(99);
+        let mut window = fixture.open(super::super::StartupRestore::None);
+        assert!(window.persistence.load_time().is_none());
+        fixture.save_mode(&mut window, "layout");
+
+        window.save_if_due();
+        window.active_mut().panes_mut()[0].label = Some("Changed fresh console".into());
+        window.check_whether_the_layout_moved();
+        window.save_now();
+
+        assert!(window.restoration.can_save());
+        assert!(window.persistence.load_time().is_some());
+        assert_eq!(fs::read(&fixture.snapshot).unwrap(), original);
+    }
+
     #[test]
     fn opening_and_cancelling_never_write_or_enumerate_fonts() {
         let path = std::env::temp_dir().join(format!(

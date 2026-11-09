@@ -57,6 +57,10 @@ pub(crate) fn configure(
 }
 
 impl State {
+    pub(crate) fn directory(&self, pane: usize) -> Option<&std::path::Path> {
+        self.sources.get(&pane).and_then(Option::as_deref)
+    }
+
     #[cfg(test)]
     pub(crate) fn reference_report() -> String {
         let mut state = Self {

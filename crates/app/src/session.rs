@@ -29,6 +29,8 @@
 //! file name, its ceiling and its version **are the format**: whoever looked at them on their own would
 //! be writing them a second time.
 
+pub(crate) mod ownership;
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::ffi::OsStr;
@@ -76,16 +78,9 @@ pub const VERSION: u64 = 2;
 /// size, and reading it without a cap is allocating without a cap at startup**.
 pub const MAX_BYTES: usize = 64 * 1024;
 
-/// What is saved of a console, and it is everything that is saved of it.
-///
-/// Of the fifteen fields of a live pane, two. The other thirteen no, and each one for its reason: the
-/// name because the counter that guarantees they do not repeat belongs to the window and an old name
-/// would clash with it; the panel directory and its state because a restored console **gets a fresh
-/// identity**; the pseudoterminal and its screen because they are a live process and a history; and the
-/// timers because they belong to the run.
-///
-/// The optional label is display-only data; it never supplies a program, argument, environment,
-/// working directory or path to the process launcher.
+/// Saved geometry and optional local context, separate from live process identity.
+/// A restored pane always creates a fresh panel directory. Labels are display-only; a directory
+/// reaches the child cwd builder, never the program name, arguments or shell input.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct StoredLeaf {
     /// In cells, as in the live pane: what the panel has to preserve when the desktop zoom changes is
@@ -101,6 +96,25 @@ pub struct StoredLeaf {
         deserialize_with = "read_label"
     )]
     pub label: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "read_directory"
+    )]
+    pub cwd: Option<PathBuf>,
+}
+
+fn read_directory<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<PathBuf>, D::Error> {
+    let directory = Option::<String>::deserialize(deserializer)?;
+    if directory
+        .as_deref()
+        .is_some_and(|text| !crate::restoration::valid_directory_text(text))
+    {
+        return Err(serde::de::Error::custom("invalid saved local directory"));
+    }
+    Ok(directory.map(PathBuf::from))
 }
 
 pub(crate) fn valid_label(label: &str) -> bool {
@@ -204,6 +218,13 @@ pub struct Validated {
 
 impl Validated {
     /// The tabs of the document, in order.
+    pub(crate) fn without_directories(mut self) -> Self {
+        for tab in &mut self.document.tabs {
+            clear_directories(&mut tab.root);
+        }
+        self
+    }
+
     pub fn tabs(&self) -> &[StoredTab] {
         &self.document.tabs
     }
@@ -450,6 +471,17 @@ fn check(
         children,
     } = node
     else {
+        if let StoredNode::Leaf(leaf) = node
+            && leaf.cwd.as_ref().is_some_and(|path| {
+                !path
+                    .to_str()
+                    .is_some_and(crate::restoration::valid_directory_text)
+            })
+        {
+            return Err(LayoutProblem::Unintelligible(
+                "invalid saved local directory".into(),
+            ));
+        }
         return Ok(1);
     };
 
@@ -976,6 +1008,9 @@ fn save_described(
     described: Option<String>,
 ) -> Result<(), SaveFailure> {
     let text = described.ok_or(SaveFailure::NotSerializable)?;
+    if text.len() > MAX_BYTES {
+        return Err(SaveFailure::DoesntFit);
+    }
     // With no directory, or no file name, there is nowhere to put anything. It is only reached with a
     // path that did not come out of `path_from` —the root, for example—, and the reason is the same as
     // not having a configuration directory: there is nowhere. Hence the variant is one and its line
@@ -1086,6 +1121,10 @@ impl crate::Window {
     /// with— and it also has a series of its own in the report, because that accumulator
     /// **subtracts but publishes no row at all**. They are two mechanisms and both are needed.
     pub(crate) fn check_whether_the_layout_moved(&mut self) {
+        if !self.restoration.can_save() {
+            self.persistence.save_due = None;
+            return;
+        }
         let started = Instant::now();
 
         let current = self.describe();
@@ -1111,6 +1150,7 @@ impl crate::Window {
     /// closing empties what the window timed separately, so writing before would charge its cost to
     /// the previous frame — which is exactly the kind of error this instrument is after.
     pub(crate) fn save_if_due(&mut self) {
+        crate::restoration::apply_saved_mode(self);
         let Some(due) = self.persistence.save_due else {
             return;
         };
@@ -1127,58 +1167,78 @@ impl crate::Window {
     /// is the only ending in which the loss can be avoided, and avoiding it costs nothing because
     /// by then there is no frame left to measure.
     pub(crate) fn save_now(&mut self) {
-        if self.persistence.save_due.is_none() {
-            return;
-        }
-        self.persistence.save_due = None;
+        save_window(self);
+    }
+}
 
-        // **The clock starts here, before copying and comparing.** Copying the whole document and
-        // comparing it thoroughly costs something, happens on every deadline that falls due —twice
-        // a second while it is being dragged— and on the path where there is nothing to write **it
-        // is the whole cost**: leaving it outside the clock would publish it as framework cost,
-        // which is the leak the project's hard rule names.
-        let started = Instant::now();
-
-        // What is going to be written is the last thing seen: it has just been built in the
-        // interface pass, so walking the tree again would be paying twice for the same datum.
-        let Some(document) = self.last_seen.clone() else {
-            self.mirror_this_frame += started.elapsed();
-            return;
-        };
-        if self.persistence.last_written.as_ref() == Some(&document) {
-            // **It goes to the mirror's span and not to the write's, because it is what it is**:
-            // comparing two mirrors. Counting it as a write would put into that average some
-            // samples that wrote nothing.
-            self.mirror_this_frame += started.elapsed();
-            return;
-        }
-        // **Through the validated type, which is what makes it impossible to write something that
-        // cannot be read back.** And what does not pass validation **is warned about once**: the
-        // real case is having more consoles open than the format admits —the ceiling exists to
-        // bound the start-up `fork`, so it cannot be removed—, and without this warning the user
-        // would lose their layout with no signal at all.
-        let validated = match validate(document.clone()) {
-            Ok(validated) => validated,
-            Err(problem) => {
-                self.persistence.warn_cannot_save(&problem);
-                // **This is not a write and is not counted as one, not even as an attempt.** No
-                // path was resolved and the disk was not touched: what ran was validating, which is
-                // the same kind of work as comparing the mirror. Counting it in the write's span
-                // would put into that average some samples that are **all** validation, and the
-                // number would stop describing what writing costs.
-                self.mirror_this_frame += started.elapsed();
-                return;
+fn clear_directories(node: &mut StoredNode) {
+    match node {
+        StoredNode::Leaf(leaf) => leaf.cwd = None,
+        StoredNode::Branch { children, .. } => {
+            for child in children {
+                clear_directories(&mut child.node);
             }
-        };
-
-        let written = self.persistence.save(&validated).is_ok();
-        let how_much = started.elapsed();
-        self.timed_separately += how_much;
-        self.saving.record_write(how_much, written);
-
-        if written {
-            self.persistence.last_written = Some(document);
         }
+    }
+}
+
+fn save_window(window: &mut crate::Window) {
+    crate::restoration::apply_saved_mode(window);
+    if !window.restoration.can_save() {
+        window.persistence.save_due = None;
+        return;
+    }
+    if window.persistence.save_due.is_none() {
+        return;
+    }
+    window.persistence.save_due = None;
+
+    // **The clock starts here, before copying and comparing.** Copying the whole document and
+    // comparing it thoroughly costs something, happens on every deadline that falls due —twice
+    // a second while it is being dragged— and on the path where there is nothing to write **it
+    // is the whole cost**: leaving it outside the clock would publish it as framework cost,
+    // which is the leak the project's hard rule names.
+    let started = Instant::now();
+
+    // What is going to be written is the last thing seen: it has just been built in the
+    // interface pass, so walking the tree again would be paying twice for the same datum.
+    let Some(document) = window.last_seen.clone() else {
+        window.mirror_this_frame += started.elapsed();
+        return;
+    };
+    if window.persistence.last_written.as_ref() == Some(&document) {
+        // **It goes to the mirror's span and not to the write's, because it is what it is**:
+        // comparing two mirrors. Counting it as a write would put into that average some
+        // samples that wrote nothing.
+        window.mirror_this_frame += started.elapsed();
+        return;
+    }
+    // **Through the validated type, which is what makes it impossible to write something that
+    // cannot be read back.** And what does not pass validation **is warned about once**: the
+    // real case is having more consoles open than the format admits —the ceiling exists to
+    // bound the start-up `fork`, so it cannot be removed—, and without this warning the user
+    // would lose their layout with no signal at all.
+    let validated = match validate(document.clone()) {
+        Ok(validated) => validated,
+        Err(problem) => {
+            window.persistence.warn_cannot_save(&problem);
+            // **This is not a write and is not counted as one, not even as an attempt.** No
+            // path was resolved and the disk was not touched: what ran was validating, which is
+            // the same kind of work as comparing the mirror. Counting it in the write's span
+            // would put into that average some samples that are **all** validation, and the
+            // number would stop describing what writing costs.
+            window.mirror_this_frame += started.elapsed();
+            return;
+        }
+    };
+
+    let written = window.persistence.save(&validated).is_ok();
+    let how_much = started.elapsed();
+    window.timed_separately += how_much;
+    window.saving.record_write(how_much, written);
+
+    if written {
+        window.persistence.last_written = Some(document);
     }
 }
 
@@ -1188,6 +1248,7 @@ mod tests {
 
     fn leaf(width: usize) -> StoredNode {
         StoredNode::Leaf(StoredLeaf {
+            cwd: None,
             label: None,
             panel_width: width,
             folded: false,
@@ -1254,6 +1315,7 @@ mod tests {
                                 StoredChild {
                                     weight: 2.0,
                                     node: StoredNode::Leaf(StoredLeaf {
+                                        cwd: None,
                                         label: None,
                                         panel_width: 36,
                                         folded: true,
@@ -1464,6 +1526,7 @@ mod ceiling_tests {
                         .map(|weight| StoredChild {
                             weight: *weight,
                             node: StoredNode::Leaf(StoredLeaf {
+                                cwd: None,
                                 label: None,
                                 panel_width: 36,
                                 folded: false,
@@ -1625,6 +1688,7 @@ mod ceiling_tests {
                             StoredChild {
                                 weight: 1.0,
                                 node: StoredNode::Leaf(StoredLeaf {
+                                    cwd: None,
                                     label: None,
                                     panel_width: 36,
                                     folded: false,
@@ -1633,6 +1697,7 @@ mod ceiling_tests {
                             StoredChild {
                                 weight: 1.0,
                                 node: StoredNode::Leaf(StoredLeaf {
+                                    cwd: None,
                                     label: None,
                                     panel_width: 36,
                                     folded: false,
@@ -1644,6 +1709,7 @@ mod ceiling_tests {
                 StoredTab {
                     label: None,
                     root: StoredNode::Leaf(StoredLeaf {
+                        cwd: None,
                         label: None,
                         panel_width: 36,
                         folded: false,
@@ -1716,6 +1782,7 @@ mod file_tests {
                         StoredChild {
                             weight: 3.0,
                             node: StoredNode::Leaf(StoredLeaf {
+                                cwd: None,
                                 label: None,
                                 panel_width: 52,
                                 folded: false,
@@ -1724,6 +1791,7 @@ mod file_tests {
                         StoredChild {
                             weight: 1.0,
                             node: StoredNode::Leaf(StoredLeaf {
+                                cwd: None,
                                 label: None,
                                 panel_width: 24,
                                 folded: true,

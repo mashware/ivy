@@ -96,6 +96,7 @@ fn prepare_and_save(
         .as_mut()
         .expect("checked the store")
         .save(&text)?;
+    editor.saved_startup_restore = Some(settings.startup_restore);
     editor.application.pending = Some(Pending {
         settings,
         font,
