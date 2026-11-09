@@ -162,7 +162,7 @@ draft before retrying; there is no automatic replacement path.
 The workflow uses read-only repository access for builds and write access only in its manual
 publication job. It does not use signing credentials. Release metadata records the workspace
 version, commit, exact asset name, architecture target, build environment, unsigned status and
-SHA-256 digest. The final manifest and checksums require the Ubuntu, Arch and both Mac packages.
+SHA-256 digest. The final manifest and checksums require Ubuntu, Arch, both Mac packages and the Windows installer.
 Windows packaging is described below; native desktop validation remains separate.
 
 ## Platform evidence
@@ -278,8 +278,8 @@ python3 scripts/package-macos.py build --binary-dir "target/$target/release" --d
 
 The package builder uses Python's plist support plus native `sips`, `iconutil`, `codesign`, `lipo`,
 `otool` and `hdiutil`; it refuses native build/check operations on other operating systems.
-Publication requires both Mac jobs, both Ubuntu installation jobs and Arch. The final manifest uses
-`--include-arch --include-macos` and requires all four packages; an existing prerelease is never
+Publication requires both Mac jobs, both Ubuntu installation jobs, Arch and Windows. The final manifest uses
+`--include-arch --include-macos --include-windows` and requires all five packages; an existing prerelease is never
 replaced. Homebrew/App Store distribution remains separate work.
 
 ## Windows 11 x64
