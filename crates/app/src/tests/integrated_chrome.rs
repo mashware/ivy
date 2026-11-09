@@ -1078,7 +1078,7 @@ mod tests {
             frame(&mut window, &ctx, area, vec![]);
             let shapes = frame(&mut window, &ctx, area, vec![]);
             assert!(has_text(&shapes, "Installed: Ivy"));
-            assert!(has_text(&shapes, "Experimental Linux packages"));
+            assert!(has_text(&shapes, "Experimental installers"));
             assert!(!has_text(&shapes, "Checking for updates"));
         }
     }

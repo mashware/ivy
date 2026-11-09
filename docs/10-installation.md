@@ -13,14 +13,14 @@ directory. Verify them there, then install the package shown in that release:
 
 ```sh
 sha256sum --ignore-missing --check SHA256SUMS
-sudo apt install ./ivy_0.1.0-alpha.2_amd64.deb
+sudo apt install ./ivy_0.1.0-alpha.3_amd64.deb
 ivy
 ```
 
 The selected `.deb` and `release-manifest.json` must both be downloaded and reported as `OK`.
 Other package formats in the shared checksum list may be absent; `--ignore-missing` skips only
 files you did not download. Do not install a package whose checksum failed.
-The filename above illustrates workspace version `0.1.0-alpha.2`; use the actual release filename.
+The filename above illustrates workspace version `0.1.0-alpha.3`; use the actual release filename.
 The prerelease separator becomes `~` in the Debian package version. Checksums detect changed
 or mismatched downloads; they are not a publisher signature.
 
@@ -153,12 +153,12 @@ milestone remains open independently of installer work.
 
 ## Arch Linux (x86_64, rolling)
 
-Download `ivy-terminal-0.1.0alpha2-1-x86_64.pkg.tar.zst`, `release-manifest.json` and `SHA256SUMS`
+Download `ivy-terminal-0.1.0alpha3-1-x86_64.pkg.tar.zst`, `release-manifest.json` and `SHA256SUMS`
 from the same prerelease into one directory, then verify and install:
 
 ```bash
 sha256sum --ignore-missing --check SHA256SUMS
-sudo pacman -U ./ivy-terminal-0.1.0alpha2-1-x86_64.pkg.tar.zst
+sudo pacman -U ./ivy-terminal-0.1.0alpha3-1-x86_64.pkg.tar.zst
 ```
 
 The selected Arch package and `release-manifest.json` must both be reported as `OK`; an absent
@@ -180,14 +180,70 @@ tar -cf payload.tar -C payload usr
 Then on Arch, as an ordinary user with base-devel and the dependencies in `packaging/arch/PKGBUILD` installed:
 
 ```bash
-scripts/package-arch.sh /absolute/path/payload.tar dist 0.1.0-alpha.2
-packaging/arch/test-package.sh dist/*.pkg.tar.zst /absolute/path/payload.tar 0.1.0alpha2
+scripts/package-arch.sh /absolute/path/payload.tar dist 0.1.0-alpha.3
+packaging/arch/test-package.sh dist/*.pkg.tar.zst /absolute/path/payload.tar 0.1.0alpha3
 ```
 
 `packaging/arch/test-install.sh PACKAGE SEMVER` is destructive test machinery for a disposable Arch container only, guarded by root plus `IVY_DISPOSABLE_CONTAINER=yes`. It installs an older fixture, upgrades, exercises the installed Ivy/MCP own-pane roundtrip under Xvfb, removes the package and verifies unchanged config/layout bytes. It is never a workstation installation command.
 
 CI builds the Ubuntu baseline, checks that artifact's checksums, packages and tests Arch independently, then uploads `ivy-arch-x86_64`. Publication requires both Ubuntu installation jobs and the Arch job. The final manifest/checksums require both package formats (`generate --include-arch`); partial target sets cannot be published.
 
-Arch version mapping removes the SemVer hyphen and prerelease separator: `0.1.0-alpha.2` becomes `0.1.0alpha2-1`; stable versions remain unchanged. Native `vercmp` checks transitions through alpha, beta, rc and stable versions. Download names use safe SemVer characters; the Debian control version retains `~`, but its asset filename does not because GitHub rewrites that character during upload.
+Arch version mapping removes the SemVer hyphen and prerelease separator: `0.1.0-alpha.3` becomes `0.1.0alpha3-1`; stable versions remain unchanged. Native `vercmp` checks transitions through alpha, beta, rc and stable versions. Download names use safe SemVer characters; the Debian control version retains `~`, but its asset filename does not because GitHub rewrites that character during upload.
 
 Current Arch evidence is container installation/runtime evidence. Real-desktop launcher, clipboard, fonts/themes and restored layout still need an owner trial with the exact package. macOS and Windows remain separate deliveries.
+
+## macOS 15 or later (Apple Silicon and Intel)
+
+Download `Ivy-0.1.0-alpha.3-macos-arm64.dmg` for Apple Silicon (M-series), or
+`Ivy-0.1.0-alpha.3-macos-x86_64.dmg` for Intel. Download `release-manifest.json` and `SHA256SUMS`
+from the same prerelease alongside the selected DMG. In Terminal, verify the downloaded files:
+
+```bash
+shasum -a 256 --ignore-missing --check SHA256SUMS
+```
+
+The selected DMG and manifest must both report `OK`; other platform packages may be absent.
+After verification, open the DMG and drag **Ivy** to **Applications**. Eject the mounted image, then
+open Ivy from Applications. No Rust compiler or development checkout is required.
+
+These trials have no Apple Developer ID signature or notarization. Local ad-hoc integrity seals
+do not establish a publisher identity. macOS may block the download: after attempting to open it,
+use the per-application **Open Anyway** option in **System Settings → Privacy & Security** only if
+you trust this download. Follow [Apple's instructions](https://support.apple.com/en-us/102445).
+Do not disable Gatekeeper globally or remove quarantine attributes as an installation step.
+
+Configure MCP clients with `/Applications/Ivy.app/Contents/MacOS/panel-mcp`, adjusting the prefix
+if the app is installed elsewhere, and launch the client inside Ivy to inherit its pane identity.
+Preferences and layout retain the existing `~/.config/agent-terminal` namespace (or the absolute
+`XDG_CONFIG_HOME` override); this delivery does not migrate them into a different Mac directory.
+
+To update, close Ivy and replace the existing application with the new DMG's Ivy.app. To remove
+it, close it and move Ivy.app to the Trash. Both operations preserve preferences and saved layouts;
+opening a restored layout starts fresh programs rather than resuming old processes.
+
+CI builds natively on `macos-15` (Apple Silicon) and `macos-15-intel` (Intel), with deployment target
+15.0. It checks architecture, declared minimum OS, system-only linked libraries, bundle metadata,
+original notices and local integrity signatures. It mounts each DMG read-only, copies to a temporary
+Applications directory, replaces an older metadata fixture, exercises the installed app/MCP through
+its own console, removes the app and checks user data retention. Wrong-architecture and modified
+sealed-resource mutations must fail. These runner checks do not prove Finder/quarantine behavior,
+native clipboard, GPU rendering or visible layout restoration on a person's Mac.
+
+Native build example, with the repository's pinned toolchain:
+
+```bash
+export MACOSX_DEPLOYMENT_TARGET=15.0
+target=aarch64-apple-darwin # x86_64-apple-darwin on Intel
+arch=arm64 # x86_64 on Intel
+cargo build --locked --release --target "$target" -p app -p panel-control --bins
+cargo metadata --locked --filter-platform "$target" --format-version 1 > target/release-metadata.json
+python3 scripts/release.py notices --metadata target/release-metadata.json --directory "target/$target/release/notices"
+version=$(python3 scripts/release.py version)
+python3 scripts/package-macos.py build --binary-dir "target/$target/release" --directory dist --version "$version" --arch "$arch"
+```
+
+The package builder uses Python's plist support plus native `sips`, `iconutil`, `codesign`, `lipo`,
+`otool` and `hdiutil`; it refuses native build/check operations on other operating systems.
+Publication requires both Mac jobs, both Ubuntu installation jobs and Arch. The final manifest uses
+`--include-arch --include-macos` and requires all four packages; an existing prerelease is never
+replaced. Windows and Homebrew/App Store distribution remain separate work.

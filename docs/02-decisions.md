@@ -8755,3 +8755,16 @@ texts stop packaging. This preserves existing licenses rather than choosing new 
 The owner selected Arch x86_64 as the next delivery before macOS/Windows. Arch uses native makepkg metadata and pacman lifecycle checks around the same verified Ubuntu-baseline Linux payload. Reusing binary bytes avoids independent builds producing different executables within a release, while explicit Arch dependencies and actual installed-runtime checks establish whether that payload works on Arch. AUR/official repository submission remains separate.
 
 Public alpha1 upload demonstrated that GitHub rewrites '~' in asset names to '.', breaking manifest/checksum filenames. Asset names therefore retain SemVer spelling (`ivy_<V>_amd64.deb`); Debian control metadata still maps the prerelease hyphen to tilde. Public transport-safe names and package-manager version syntax are separate contracts.
+
+The Mac delivery supplies separate Apple Silicon/Intel DMGs for macOS15+, preserving Ivy.app,
+`io.github.mashware.ivy` and the existing user-data namespace. A DMG with an Applications shortcut
+was chosen over an installer package because the app owns no system services or user configuration.
+Native builds and architecture/minimum-OS/dependency checks prevent shipping a renamed Linux binary
+or an executable requiring an undeclared Homebrew installation. Original license texts travel inside
+Contents/Resources. Python's plist library handles bundle metadata directly rather than interpolating XML.
+
+Local ad-hoc signatures seal the Mac bundle's nested executable and resources, but the release remains
+unsigned in the publisher-identity sense: no Developer ID or notarization is provisioned. Per-app
+approval follows Apple's normal Privacy & Security flow. Global Gatekeeper bypasses and quarantine
+removal were discarded because an experimental installer must not weaken the person's system.
+Native runner lifecycle/MCP checks remain distinct from actual desktop and quarantine evidence.
