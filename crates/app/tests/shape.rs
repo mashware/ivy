@@ -47,6 +47,15 @@ use std::path::Path;
 /// a directory walk turns a renamed or deleted file into a target that is silently skipped, and a
 /// guard with no file to look at reads exactly like a clean one.
 const MODULES: &[(&str, &str)] = &[
+    ("src/tests/title_typography.rs", include_str!("../src/tests/title_typography.rs")),
+    (
+        "src/chrome/typography.rs",
+        include_str!("../src/chrome/typography.rs"),
+    ),
+    (
+        "src/header/title_text.rs",
+        include_str!("../src/header/title_text.rs"),
+    ),
     ("src/chrome/menu.rs", include_str!("../src/chrome/menu.rs")),
     (
         "src/chrome/updates.rs",
