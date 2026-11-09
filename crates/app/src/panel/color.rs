@@ -587,8 +587,9 @@ mod tests {
         let ctx = Context::default();
         let mut cell = 0.0;
         ctx.run_ui(RawInput::default(), |ui| {
-            cell =
-                CellMetrics::measure(ui.ctx(), FontId::monospace(crate::DEFAULT_FONT_SIZE)).width();
+            cell = CellMetrics::measure(ui.ctx(), FontId::monospace(crate::DEFAULT_FONT_SIZE))
+                .for_panel(ui.ctx())
+                .width();
         })
         .drop_without_applying_deltas();
 

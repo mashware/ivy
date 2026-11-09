@@ -47,7 +47,6 @@ use std::path::Path;
 /// a directory walk turns a renamed or deleted file into a target that is silently skipped, and a
 /// guard with no file to look at reads exactly like a clean one.
 const MODULES: &[(&str, &str)] = &[
-    ("src/tests/title_typography.rs", include_str!("../src/tests/title_typography.rs")),
     (
         "src/chrome/typography.rs",
         include_str!("../src/chrome/typography.rs"),
@@ -55,6 +54,24 @@ const MODULES: &[(&str, &str)] = &[
     (
         "src/header/title_text.rs",
         include_str!("../src/header/title_text.rs"),
+    ),
+    (
+        "src/tests/title_typography.rs",
+        include_str!("../src/tests/title_typography.rs"),
+    ),
+    ("src/git_process.rs", include_str!("../src/git_process.rs")),
+    ("src/project.rs", include_str!("../src/project.rs")),
+    (
+        "src/project/tests.rs",
+        include_str!("../src/project/tests.rs"),
+    ),
+    (
+        "src/project_view.rs",
+        include_str!("../src/project_view.rs"),
+    ),
+    (
+        "src/project_view/tests.rs",
+        include_str!("../src/project_view/tests.rs"),
     ),
     ("src/chrome/menu.rs", include_str!("../src/chrome/menu.rs")),
     (
@@ -553,7 +570,7 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
     ),
     (
         "impl Window",
-        1617,
+        1611,
         "the window's own behaviour. D28's order moved its methods out of `lib.rs` into \
          satellite blocks in twelve modules, which shrank the file and not the type. Recorded on 28 September \
          2026, the day the guard first summed a type's blocks. **The scrollback's search spent five \

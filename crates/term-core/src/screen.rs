@@ -280,6 +280,11 @@ impl Screen {
         self.directory.path()
     }
 
+    /// Completed directory reports and resets advance this revision, even when the path repeats.
+    pub fn working_directory_generation(&self) -> u64 {
+        self.directory.generation()
+    }
+
     pub fn terminal_title(&self) -> Option<&str> {
         self.terminal_title.as_deref()
     }

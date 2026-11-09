@@ -91,6 +91,27 @@ const SOURCES: &[(&str, &str, usize)] = &[
         1,
     ),
     (
+        "src/git_process.rs",
+        include_str!("../src/git_process.rs"),
+        0,
+    ),
+    ("src/project.rs", include_str!("../src/project.rs"), 0),
+    (
+        "src/project/tests.rs",
+        include_str!("../src/project/tests.rs"),
+        0,
+    ),
+    (
+        "src/project_view.rs",
+        include_str!("../src/project_view.rs"),
+        0,
+    ),
+    (
+        "src/project_view/tests.rs",
+        include_str!("../src/project_view/tests.rs"),
+        0,
+    ),
+    (
         "src/chrome/menu.rs",
         include_str!("../src/chrome/menu.rs"),
         0,

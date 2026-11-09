@@ -199,6 +199,8 @@
 # not required because the dumping load does not isolate an idle deadline wake.
 # Ligature variants: ligatures-on/off use the same pinned font, fractional size,
 # geometry, ASCII programming scene and load; only the runtime switch differs.
+# Projects variant: four visible panes use two real Git repositories; their directory sources
+# are synthetic fixture injections, not native console metadata.
 # Settings variants: settings-closed, settings-open and settings-fonts reuse C’s load.
 # Their global row has identical geometry; historical C keeps the row vetoed.
 # EVERY BATCH IS RUN TWICE and the mean of the two is published, which is what the annex does. It is
@@ -346,7 +348,7 @@ if [ -n "$INTEGRATED_CHROME" ]; then
     if [ "$INTEGRATED_CHROME" = zoom ]; then
         [ "${CHROME_VISIBLE:-0}" = 1 ] && [ "${CHROME_HIDDEN:-0}" -gt 0 ] || invalidate "zoom did not hide its sibling console: $CHROME_VIEW"
     else
-        [ "${CHROME_VISIBLE:-0}" = 2 ] && [ "${CHROME_HIDDEN:-missing}" = 0 ] || invalidate "integrated chrome did not show both consoles: $CHROME_VIEW"
+        [ "${CHROME_VISIBLE:-0}" = "${CHROME_EXPECTED_VISIBLE:-2}" ] && [ "${CHROME_HIDDEN:-missing}" = 0 ] || invalidate "integrated chrome did not show all expected consoles: $CHROME_VIEW"
     fi
 else
     [ "$CHROME_REGIME" = historical ] || invalidate "historical batch changed its titlebar regime: $CHROME_REGIME"
@@ -356,7 +358,37 @@ fi
 }
 # End integrated chrome report validation.
 
+# Validate the two records together. Legacy comparison permits absent records;
+# new runs require both. Recognize malformed prefixes so they cannot masquerade as absent.
+validate_project_records() {
+    LC_ALL=C awk -v mode="$1" -v batch="${2:-}" '
+        index($0, "project accents:") == 1 {
+            accents++
+            if ($0 !~ /^project accents: enabled=(true|false), probe=(true|false), observed=[0-9]+, resolved=[0-9]+, painted=[0-9]+$/) { bad=1; next }
+            line=$0
+            sub(/^project accents: enabled=/, "", line)
+            split(line, a, /, (probe|observed|resolved|painted)=/)
+        }
+        index($0, "project identity per frame") == 1 {
+            timings++
+            if ($0 !~ /^project identity per frame [(]native metadata [+] bookkeeping, excludes background Git[)]: mean_us=[0-9]+[.][0-9][0-9][0-9], frames=[0-9]+$/) { bad=1; next }
+            line=$0; sub(/^.*frames=/, "", line); frames=line+0
+        }
+        END {
+            if (bad || accents > 1 || timings > 1) exit 1
+            if (mode == "run") {
+                if (accents != 1 || timings != 1) exit 1
+                if (batch == "projects") {
+                    if (a[1] != "true" || a[2] != "true" || a[3]+0 < 4 || a[4]+0 < 4 || a[5]+0 < 4 || frames < 1) exit 1
+                } else if (a[1] != "false" || a[2] != "false" || a[3]+0 != 0 || a[4]+0 != 0 || a[5]+0 != 0 || frames != 0) exit 1
+            }
+        }
+    ' "$REPORT"
+}
 
+check_projects_report() {
+    validate_project_records run "$BATCH" || invalidate "project records are missing, malformed, duplicated or inconsistent with this batch"
+}
 
 
 # ── Compare mode ────────────────────────────────────────────────────────────────
@@ -404,6 +436,13 @@ if [ "${MEASURE_AS_CONSOLE:-}" != "1" ] && [ "${1:-}" = compare ]; then
     # the disguise the report's `restored:` line exists to remove. Its presence **and** its number
     # are compared.
     geometry() {
+        awk 'BEGIN { regime="project accents false false" }
+            index($0, "project accents:") == 1 {
+                line=$0; sub(/^project accents: enabled=/, "", line)
+                split(line, a, /, (probe|observed|resolved|painted)=/)
+                regime="project accents " a[1] " " a[2]
+            }
+            END { print regime }' "$1"
         sed -n \
             -e 's/^Ligature scene: */Ligature scene /p' \
             -e 's/^settings probe family: */settings probe family /p' \
@@ -419,6 +458,12 @@ if [ "${MEASURE_AS_CONSOLE:-}" != "1" ] && [ "${1:-}" = compare ]; then
             "$1"
     }
     for report in "$2" "$3"; do
+        # Missing legacy records are allowed; present records must be valid and unique.
+        REPORT=$report
+        if ! validate_project_records compare; then
+            echo "$report has malformed or duplicate project records; it cannot be averaged" >&2
+            exit 1
+        fi
         if grep -qx 'settings mode: apply' "$report" && ! grep -Eq '^settings probe family: Some\(".+"\)$' "$report"; then
             echo "$report has no effective family for its settings-apply probe; it cannot be averaged" >&2
             exit 1
@@ -554,6 +599,7 @@ case "$BATCH" in
     ligatures-on|ligatures-off) TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; LIGATURES=${BATCH#ligatures-} ;;
     overview-4-closed|overview-4-open) TABS=2; PANES=2x1; DUMPING=4; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=1; OVERVIEW=${BATCH##*-} ;;
     overview-16-closed|overview-16-open) TABS=8; PANES=2x1; DUMPING=16; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=1; OVERVIEW=${BATCH##*-} ;;
+    projects) TABS=1; PANES=2x2; DUMPING=4; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=1; CHROME_EXPECTED_VISIBLE=4 ;;
     chrome|chrome-zoom) TABS=2; PANES=2x1; DUMPING=4; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=${BATCH#chrome}; INTEGRATED_CHROME=${INTEGRATED_CHROME#-}; INTEGRATED_CHROME=${INTEGRATED_CHROME:-1} ;;
     settings-apply) TABS=2; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; SETTINGS=apply ;;
     settings-closed|settings-open|settings-fonts) TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; SETTINGS=${BATCH#settings-} ;;
@@ -669,6 +715,16 @@ rm -rf /run/user/"$(id -u)"/agent-terminal-* 2>/dev/null || true
 CONFIG="$OUTPUT/.config"
 rm -rf "$CONFIG"
 mkdir -p "$CONFIG"
+
+if [ "$BATCH" = projects ]; then
+    # Real repositories, with synthetic directory sources supplied to the measurement probe.
+    mkdir -p "$CONFIG/projects/a" "$CONFIG/projects/b"
+    git -C "$CONFIG/projects/a" init -q
+    git -C "$CONFIG/projects/b" init -q
+    export MEASURE_PROJECTS="$CONFIG/projects"
+else
+    unset MEASURE_PROJECTS
+fi
 
 # **The seeded layout, and only in the batches that restore.** It is written **before** opening the
 # window and in the run's isolated directory, so what the application finds at startup is exactly
@@ -1039,7 +1095,7 @@ seed() {
 case "$BATCH" in
     A) : ;;                       # no panel: nobody publishes anything
     B) seed quiet & ;;
-    ligatures-on|ligatures-off|overview-4-closed|overview-4-open|overview-16-closed|overview-16-open|chrome|chrome-zoom|settings-apply|settings-closed|settings-open|settings-fonts|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
+    projects|ligatures-on|ligatures-off|overview-4-closed|overview-4-open|overview-16-closed|overview-16-open|chrome|chrome-zoom|settings-apply|settings-closed|settings-open|settings-fonts|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
 esac
 
 echo "batch $BATCH · $TABS tab(s) of $PANES · $DUMPING of $DIRECTORIES consoles dumping $MIB MiB · window $WINDOW_SIZE · do not touch the machine until it closes" >&2
@@ -1470,6 +1526,7 @@ check_header_report
 check_settings_report
 
 check_chrome_report
+check_projects_report
 check_overview_report
 
 # **The settings guard, and this one invalidates on two counts.** Ever since the terminal reads a

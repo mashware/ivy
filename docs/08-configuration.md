@@ -603,3 +603,31 @@ No published releases, an up-to-date installation and a failed check are separat
 failed check with **Check for updates**; repeated clicks cannot start concurrent checks. Remote
 history is not cached between launches. No console content or credentials are included in requests.
 The feature adds no configuration keys. See [Release publication](09-releases.md) for maintainers.
+
+## Project identity in console headers
+
+Each console header shows a colored strip and a plain CamelCase project name, followed by ` | `
+and its existing console name (for example, `ProjectA | Linked worktree`). The project name has no
+colored background. A repository, its nested folders and its linked Git worktrees share the same project identity.
+Different local clones remain different projects, even if they use the same remote. A folder outside
+Git uses that exact folder as its identity. Hover over the name for the full project path and console
+name. Narrow headers clip text inside the label area and preserve the controls.
+
+Accents come from the effective theme, including your color overrides. Focus, attention indicators,
+console text and manual/program-published titles keep their existing meanings. Moving a console or
+switching focus preserves its project color. Colors can repeat when suitable distinct theme colors
+run out; project names still distinguish them. There is no project-color setting or persistent project
+catalog.
+
+Directory information follows the source console's local metadata: a remote or unusable OSC 7
+report prevents local discovery; otherwise Linux's current foreground directory takes priority over
+a local report. A fresh local report invalidates an older cached native observation without forcing
+an extra process query. Other platforms require the program to publish a local OSC 7 directory. Without a
+usable source, no project is shown. Repository lookup runs in the background and temporarily clears
+the previous badge after navigation. It never renames a console or restarts its program.
+
+Linux metadata is sampled on ordinary frames, at most once a second per console. This feature adds
+no recurring idle repaint: a silent directory change without a new report can wait until another
+normal update. Successfully resolved directories are not watched for repository creation or metadata
+restructuring at the same path; changing directories causes a fresh lookup. Operational failures stay
+neutral and may retry on later ordinary updates.
