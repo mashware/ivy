@@ -40,13 +40,16 @@ still a regular terminal.
 | **Markdown previews** | Ctrl-click a local Markdown path to read formatted plans and notes in a floating viewer that updates on save. |
 | **Git review beside the work** | Open a console's repository, compare changes in unified or side-by-side mode, and send reviewed comments back to that console. |
 | **Everyday terminal controls** | Copy and paste, scrollback search, text selection, clickable web links and mouse support for terminal programs. |
-| **A workspace of your own** | Restore tabs, pane layout and panel widths; follow program-published pane titles or set manual names. |
+| **A workspace of your own** | Optionally restore tabs, pane layout, panel widths and local directories; follow program-published pane titles or set manual names. |
 | **Appearance and preferences** | Bundled themes, installed fonts, color emoji, optional programming ligatures, cursor settings and configurable shortcuts. |
 
 ## Get started
 
-These instructions are for a Linux desktop. Reopening Ivy restores the layout and starts fresh
-programs; it does not resume running agent sessions.
+These instructions are for a Linux desktop. Ivy opens one tab with one fresh console by default.
+In **Settings → Startup**, choose **Layout** or **Layout and directories** to restore your arrangement
+on later launches. Turning recovery off keeps the previous saved layout. Additional windows open
+fresh and are temporary: they do not replace the first window's saved arrangement. This version
+starts fresh programs and does not resume AI conversations.
 
 Experimental Ubuntu and Arch downloads are available in [Releases](https://github.com/mashware/ivy/releases).
 The macOS delivery adds Apple Silicon and Intel DMG builders; see the

@@ -270,6 +270,12 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/settings/store.rs"),
     ),
     ("src/lib.rs", include_str!("../src/lib.rs")),
+    ("src/startup.rs", include_str!("../src/startup.rs")),
+    ("src/restoration.rs", include_str!("../src/restoration.rs")),
+    (
+        "src/session/ownership.rs",
+        include_str!("../src/session/ownership.rs"),
+    ),
     (
         "src/painter/pane.rs",
         include_str!("../src/painter/pane.rs"),
@@ -441,145 +447,8 @@ const IMPL_CEILING: usize = 300;
 /// module (`src/x.rs::impl Foo`) and a type summed across the crate (`impl Foo`).
 const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
     (
-        "src/lib.rs",
-        645,
-        "the window's core, and the file nobody ever split. D28 has the order its pieces come out \
-         in; it cannot come under the ceiling in one change because 16 953 lines of tests reach \
-         into its private items. **It came in at 3 119; the bench's injected gestures were the \
-         first piece out and reading the settings file the second, which left for `settings.rs` \
-         with the delivery that added the font by name**. **And the number carried three lines of \
-         slack nobody had noticed**: it read 2 804 while the file was at 2 801, so a delivery could \
-         grow the file and pass. The one that held a paste spent two of them, said so, and closed \
-         the gap by recording what the file actually is — a ratchet with slack is a ratchet that \
-         ratchets late. **Then the order moved it for real**, in five deliveries out of 2 803: the \
-         tiling and the tree 692, the mouse 430, publishing the report 96, the tab bar 100 and \
-         saving 51 into `session.rs`. **And then this entry fired on an ordinary delivery for the \
-         second time**: the one that tells the focused console's cursor apart needed ten lines \
-         here, so painting a pane left for `painter.rs` — 62 lines, and the piece that delivery \
-         was already editing, which is exactly the way through D28 records. Sixty-two out and ten \
-         back in leaves 1 382. **And then the piece went out BEFORE the delivery that needs the \
-         room, which is the first time that happened here**: the blinking cursor needs about nine \
-         lines in this file, so the deadlines the window sets itself left for `alarms.rs` on their \
-         own — 16 lines out, one `mod` line back in — leaving **1 367, against the 3 119 this file \
-         came in at**. Taking the piece out first is what lets the ratchet say whether the delivery that \
-         follows paid for its own lines — **and it says the blink did not**: it spent 14 lines here, \
-         not nine, so a second piece went out in the same delivery. Putting the settings the file \
-         asks for onto the window left for `settings.rs`, 19 lines, the piece that delivery was \
-         already editing. Nineteen out and fourteen in against 1 367 leaves **1 362**, which is what \
-         the guard measured until the phase that gives the panel buttons. (The first telling said \
-         fifteen in and did not reconcile; a comment audit did the subtraction.) **Then two pieces \
-         went out ahead of the deliveries that need the room, and nothing came in with them**: what \
-         a pane does with the keys of one pass left for `keyboard.rs` and what it does with the \
-         wheel and a mouse gesture for `mouse.rs`, **238 production lines against the 1 362 above**, \
-         leaving 1 124. The subtraction is stated between the two numbers this guard checks and not \
-         broken down per piece: a per-piece tally is arithmetic nothing runs, and the last time one \
-         was written here it did not reconcile either. That second move is also what retired the \
-         `impl Pane` entry that used to sit below: at 204 it no longer exceeds its ceiling, and an \
-         entry that stops exceeding one is deleted rather than kept as a trophy — which is exactly \
-         what `no_entry_of_the_ratchet_is_stale` fails for. **And then the milestone that gives the \
-         panel buttons paid it again**, because the previous delivery had left `impl Window` at its \
-         recorded number with no room at all and four lines were owed here: how a window comes into \
-         being — with the tabs it is asked for, or with the ones it left behind — went out to \
-         `opening.rs`, **117 production lines**, and `impl Window` lost 112 of them. That is also what \
-         retired the entry that used to sit below for that block: at **289** it no longer exceeds \
-         its ceiling. **Fifteen lines came straight back in the same delivery** — the fields the \
-         buttons' measurement needs on `Window` and on a pane's outcome, and the walk that hands the \
-         bench's injector the button the painting drew — so the file went 1 124 → 1 007 → **1 022**, \
-         which is what the guard measured until the delivery that gives the panel a channel of its \
-         own. **That one paid it the way D28 prescribes, and with the piece the delivery's own \
-         subject names**: how a pane gets its panel — its directory, the identity it hands its \
-         program, what arrives for it and how much width it takes — went out to `panel/pane.rs`, \
-         **46 production lines**, against the **24** the channel spends here: a `mod`, a `use`, the \
-         field a pane keeps its end of the channel in, the block that opens it, the one that applies \
-         what arrived, and the four that keep what the channel cost off the panel's stopwatch on \
-         the consoles nobody paints. Forty-six out and twenty-four in against 1 022 leaves \
-         **1 000**. The two \
-         numbers are said rather than netted off: what the order is worth is only readable if a \
-         delivery's own cost is written beside the piece it took out. **And the phase that gives the \
-         panel a channel of its own paid it again**: the aggregate of the channel's counters had to \
-         survive a pane that closes — a pane or a tab closed mid-run used to take its \
-         `applied`/`refused`/`released` out of the numbers the report folds — so everything that \
-         happens when a tab or the focused console goes left for `closing.rs`, **71 production \
-         lines**, against the **30** the counters' field, their init and the banking cost back here. \
-         Seventy-one out and thirty in against 1 000 leaves **959**. **And the phase that gives an \
-         agent a pane of its own paid it with the piece its own subject names**: what a keyboard \
-         chord asks of the window, and the dispatch that does it, went out to `opening.rs`, **33 \
-         production lines**, against the **19** this delivery spends back here — the field a window \
-         keeps its handles in, the walk that answers what the connections left for the tree, the \
-         arguments a launch now takes, and the flag a console the person took over carries. \
-         Thirty-three out and nineteen in against 959 leaves **945**. **And then five lines came \
-         back with nothing going out, which is the direction this table exists to allow**: the \
-         milestone that gives every pane a header made the three helpers that turn a pointer's \
-         position into a cell take the console's rectangle instead of the pane's, and the shorter \
-         name let rustfmt fold a six-line signature into one. Nothing was moved and nothing was \
-         deleted — the formatter decides what this number counts, and here it decided in the \
-         file's favour. Nine hundred and forty-five less five leaves **940**. **And the delivery \
-         that actually cut the strip paid it the way D28 prescribes, with the piece its own subject \
-         names**: attending the border between a console and its panel went out to \
-         `panel/pane.rs`, **53 production lines**, which is the module that already answered how \
-         much of its rectangle a pane's panel takes — and going `pub(crate)` on the way widened \
-         nothing, because it lived in the crate's root module where every module could already \
-         reach it. Against that, the strip spends **seven** lines back here: the `mod`, the two \
-         fields a window keeps (whether it paints strips at all, and where the last press fell), \
-         their two seeds, the one that reads the knob at startup, the one that resolves it, and \
-         the one that reads it once per walk — **less the one the clippy ceiling gave back**, \
-         because grouping the blink and the strip into one value took the painting's call from \
-         eight arguments to seven and two lines to one. Fifty-three out and six net in against 940 \
-         leaves **894**. **And the delivery that declared the strip to the bench paid it with the \
-         piece its own subject names**: closing the frame — every console's spans folded, what the \
-         window timed apart subtracted, and the rest recorded — went out to `report.rs`, **20 \
-         production lines**, which is the module that already held the pass that stops a round \
-         escaping that same sum, and whose one idea a review widened by a step to say so. Against \
-         that, declaring the strips spends **four** lines back here: the field a pane's outcome \
-         carries the cost out through, the one the window keeps the accounting in, and the two of \
-         the call that hands each strip over. **What made it four rather than seven was the review**: \
-         the first shape kept the frame's tally and the run's on two separate fields and summed and \
-         subtracted inline, and a mutation round walked straight through it — deleting the \
-         subtraction that keeps the strips out of the framework's figure (**D13**) left the whole \
-         suite green, and so did turning the sum over the panes into a replacement. Both now live in \
-         one type in `report.rs` with a test on them, and the window holds one field instead of two. \
-         Twenty out and four in against 894 leaves **878** — the figures are the diff's own, taken \
-         by matching the two files' production lines rather than by counting them by hand, which is \
-         how the first telling of this line got both of them wrong. **And the off-frame panel read \
-         paid for itself with the piece that already owns how a pane gets its panel**: the delivery \
-         first spent two lines here — constructing the committed state before the channel, and \
-         retaining a closed pane's read tally — then grouping that tally with the counters the \
-         window already keeps gave one back. Moving the state and channel construction together to \
-         `panel/pane.rs` then took four lines out. **878 + 2 - 1 - 4 leaves 875**. **The review that \
-         made every pane share one window read accumulator paid for its wiring with the constructor \
-         that already belongs to opening**: threading the accumulator through new panes first added \
-         80 production lines here, then the 124-line pane-launching block moved to `opening.rs`. \
-         **875 + 80 - 124 leaves 831**. **The retirement probe then paid for the context its hidden \
-         panes need by shortening that sizing entry point**: passing the context added one \
-         production line, and the shorter name and parameter folded its six-line signature into \
-         one. **831 + 1 - 5 leaves 827**. **The delivery that makes links openable paid it by moving \
-         out a piece that was ready to go**: the three helpers that turn a pointer's position \
-         into a cell — which links do not use — went out to `mouse.rs`, the module that already answers what a pane does with \
-         a mouse gesture, **48 production lines**, and reading how many gestures the bench \
-         asks for went to `injected.rs`, the bench's own module, **6** more, against the **11** \
-         links spend here — the `mod`, a pane's painted snapshot, the outcome field that carries \
-         the bench's points, the window's tally, where an opened link goes and the gesture holder, \
-         the bench's flag read once and handed to the painter, and the call that hands what a pane \
-         found to the report and the injector, which rustfmt lays out on three. Everything else of \
-         the feature went to modules of its own. **827 + 11 - 48 - 6 leaves 784**. **Then the \
-         saving state followed the saving policy into `session.rs`**: the pending deadline and the \
-         last document written became fields of `Persistence`, and only their two declarations \
-         counted here — both constructors sit where this guard does not count. **784 - 2 leaves \
-         782**. **Watcher rearming then followed pane closing into `closing.rs`: eight production \
-         lines left the core and one new call remained, so 782 + 1 - 8 leaves 775.** **Then the piece \
-         went out ahead of the delivery that needs the room**: collecting what a closing console's \
-         frame left undeclared is closing's work, so it went to `closing.rs` as a free function — \
-         out of this file and out of `impl Pane` at once — **10 production lines**, before the \
-         scrollback's search spends any here. **775 - 10 leaves 765.** The search then \
-         spent **eight**: its `mod`, the field a console keeps its search in, the one a pane's outcome \
-         hands the search's cost through, the window's tally, the line that hands it over, and the \
-         three that time the keyboard's pass on a frame somebody typed in — and paid **five** more \
-         here, finding a console by name moving to `Tab` and walking every console becoming one \
-         line. **765 + 8 - 5 leaves 768.** Pane controls move splitting out and add the header input hook; the measured module now has 725 production lines. Settings then moves startup font resolution to fonts/startup.rs and adds its global entry wiring, leaving 693 including the measurement injector hook. Runtime font handoff now belongs to editor/runtime.rs, leaving688. Shared strip partitioning leaves687. Integrated chrome moves hidden-view geometry and startup size parsing out, leaving685. Fresh tab creation now belongs to opening.rs and the measured module is666. Overview extracts console routing and leaves649. Optional ligatures extract startup font configuration, leaving647.",
-    ),
-    (
         "impl Window",
-        1605,
+        1588,
         "the window's own behaviour. D28's order moved its methods out of `lib.rs` into \
          satellite blocks in twelve modules, which shrank the file and not the type. Recorded on 28 September \
          2026, the day the guard first summed a type's blocks. **The scrollback's search spent five \
@@ -587,11 +456,11 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
          declared hole, the report's `search:` field and the tally's seed when a window opens; \
          handing each painting's cost over sits in `impl eframe::App`, which this count does not \
          read — **and paid five**: finding a console by name moved to `Tab`, and walking every \
-         console became one line. **1782 + 5 - 5 leaves 1782.** Header operations now use free functions around pane identity; the measured Window implementation has 1764 lines. Applying configuration now belongs to Settings, paying for editor construction and reporting; the measured total is 1750. Integrated chrome keeps tab interaction and card rendering in free functions, leaving1705 including explicitly timed hidden-view geometry. Moving fresh tab creation to opening.rs pays for the new controls and leaves1695. Overview extracts console routing and pure deadline selection, leaving1680. The common initial-state constructor now lives in opening::initial_window as a free function, leaving1620 with the ligature preference and report hook. Local Markdown link routing and gesture cleanup now use free functions, leaving1617. The clipboard integration moves the stateless primary-press reader to a free function; the measured total is1605.",
+         console became one line. **1782 + 5 - 5 leaves 1782.** Header operations now use free functions around pane identity; the measured Window implementation has 1764 lines. Applying configuration now belongs to Settings, paying for editor construction and reporting; the measured total is 1750. Integrated chrome keeps tab interaction and card rendering in free functions, leaving1705 including explicitly timed hidden-view geometry. Moving fresh tab creation to opening.rs pays for the new controls and leaves1695. Overview extracts console routing and pure deadline selection, leaving1680. The common initial-state constructor now lives in opening::initial_window as a free function, leaving1620 with the ligature preference and report hook. Local Markdown link routing and gesture cleanup now use free functions, leaving1617. Session saving delegates to a free function, and policy synchronization and restoration add two lines, leaving 1594. The clipboard integration moves the stateless primary-press reader to a free function; the combined measured total is 1588.",
     ),
     (
         "impl Pane",
-        541,
+        538,
         "a console with its panel, its keys and its mouse. On the day it was recorded it was six \
          blocks in six files: the keyboard and mouse passes (157 each), how a pane is opened (112) \
          and how it gets its panel (120), and 45 more in `lib.rs` and `control.rs`. **The search \
@@ -599,7 +468,7 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
          leftovers became a free function of `closing.rs`, 10 lines out, and the keyboard pass \
          spent ten — nine asking the search about each key, one seeding a new pane's search \
          record — with the rules themselves in `search.rs`, outside the type. **591 - 10 + 10 \
-         leaves 591.**",
+         leaves 591.** Session takeover now delegates to a free function, leaving 538.",
     ),
     (
         "impl PanelState",

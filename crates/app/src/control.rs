@@ -582,16 +582,21 @@ impl Pane {
     /// not change whose it is. It is set once, with the first byte, so the sentence an agent reads is
     /// the one from the moment the console was taken.
     pub(crate) fn hand_it_back_to_the_person(&mut self) {
-        if self.taken_over.is_none() {
-            self.taken_over = Some(HANDED_BACK.to_owned());
-            // **And the panel's own row says it too, on a console an agent opened**, which is what
-            // the person reads: the flag alone would leave a console that quietly stopped being an
-            // agent's with nothing on screen saying so (**AC15**). Whether there is such a row to
-            // publish is the panel's own question and it answers it — on every other console the row
-            // would announce the end of an access nobody ever had, and it would be the application
-            // making a panel appear where no producer published one (**D17**).
-            self.panel_state.the_person_took_it_over(HANDED_BACK);
-        }
+        take_over(self);
+    }
+}
+
+fn take_over(pane: &mut Pane) {
+    pane.restoration.take_over();
+    if pane.taken_over.is_none() {
+        pane.taken_over = Some(HANDED_BACK.to_owned());
+        // **And the panel's own row says it too, on a console an agent opened**, which is what
+        // the person reads: the flag alone would leave a console that quietly stopped being an
+        // agent's with nothing on screen saying so (**AC15**). Whether there is such a row to
+        // publish is the panel's own question and it answers it — on every other console the row
+        // would announce the end of an access nobody ever had, and it would be the application
+        // making a panel appear where no producer published one (**D17**).
+        pane.panel_state.the_person_took_it_over(HANDED_BACK);
     }
 }
 

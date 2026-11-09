@@ -34,6 +34,7 @@ fn canonical(key: &str) -> Option<String> {
         return None;
     }
     [
+        "startup.restore",
         "font",
         "font.ligatures",
         "size",
@@ -55,6 +56,7 @@ fn canonical(key: &str) -> Option<String> {
 impl Document {
     pub fn new(source: String) -> Self {
         let mut keys: Vec<String> = [
+            "startup.restore",
             "font",
             "font.ligatures",
             "size",
@@ -384,6 +386,7 @@ mod tests {
         let mut doc = Document::new(String::new());
         for (key, value) in [
             ("size", "18"),
+            ("startup.restore", "directories"),
             ("cursor.blink", "off"),
             ("theme", "tokyonight"),
             ("key.copy", "none"),
@@ -392,6 +395,10 @@ mod tests {
         }
         assert!(doc.errors().is_empty());
         let saved = super::super::interpret(&doc.text()).unwrap().0;
+        assert_eq!(
+            saved.startup_restore,
+            super::super::StartupRestore::Directories
+        );
         assert_eq!(saved.font_size, Some(18.0));
         assert_eq!(saved.blink, Some(false));
         assert_eq!(saved.copy, Some(false));

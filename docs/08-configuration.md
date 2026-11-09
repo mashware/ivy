@@ -4,7 +4,15 @@ Where it goes: **`$XDG_CONFIG_HOME/agent-terminal/config`** — or `~/.config/ag
 you do not have that variable set. Next to `layout.json`, which is where the terminal saves only how
 you left the windows; this one can be written by hand or through Settings.
 
-**If it does not exist, the terminal opens exactly as always.** You do not have to create it.
+**If it does not exist, the terminal opens one fresh console.** You do not have to create it.
+
+## Startup restoration
+
+Choose Startup in Settings or write `startup.restore = none`, `layout`, or `directories`.
+The default `none` opens one fresh console and preserves any previously saved layout. `layout`
+restores the saved arrangement with fresh shells; `directories` also restores local working
+directories when available. Changes apply on the next launch. Additional windows are temporary:
+they open fresh and do not save the primary window’s layout.
 
 ## Directory of a new split
 
@@ -21,7 +29,7 @@ Without directory information the split opens in the usual default directory and
 on standard error. A known directory that is no longer available refuses the split and leaves the
 original console in place. Directory removal during launch can still hit the dependency's home
 fallback (D78). Shell startup files can change the directory after Ivy launches the shell.
-New tabs and layout restoration retain their existing directory behaviour.
+New tabs retain their existing directory behaviour.
 
 ## Pane names and agent session titles
 
@@ -226,6 +234,7 @@ It is the same thing Kitty and Ghostty do.
 | `tab.label_size` | tab-label size in points; 8–32, default 12 |
 | `font` | the font family it paints with, by its name |
 | `font.ligatures` | programming ligatures from the selected compatible font: `on` or `off`; omitted means `off` |
+| `startup.restore` | what the primary window restores on its next launch: `none`, `layout`, or `directories` |
 | `cursor.blink` | whether the cursor blinks: `on` always, `off` never. Leave the line out and the program inside decides, over a default of «yes» |
 
 Colours are written **`#rrggbb`**, in hexadecimal, and it makes no difference whether in upper or

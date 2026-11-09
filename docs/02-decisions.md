@@ -8932,7 +8932,67 @@ proportional fallback leaves the reported braille fix dependent on installed fon
 fixtures, native checks and measurement accounting travel with each delivery; headless tests or
 source documentation alone do not establish a working desktop integration.
 
-## D81 — Context menus follow their invocation and keep the console visible
+## D81 — Startup recovery is optional and only the initial window owns its snapshot
+
+**Decision.** `startup.restore` defaults to `none`: normal startup opens exactly one tab with one
+fresh shell, even when a saved layout exists. Settings offers `none`, `layout` and `directories`;
+the latter includes layout recovery and each console's last known usable local directory. The
+preference changes the next launch and whether this initial window records its state; it never
+restarts a live console. This intentionally supersedes D16's unconditional startup restoration.
+The user's explicit request on 9 November 2026 is the new signal: “one tab with one console” by
+default, configurable recovery, and independent additional windows without duplicated sessions.
+
+Read Settings before deciding whether to load the snapshot. Disabled recovery neither reads nor
+replaces it. Enabling recovery during a primary run checks the existing file before writing, so a
+newer-version veto cannot be bypassed by starting with recovery off. The enabled primary saves its
+current arrangement for the next launch. Switching to layout removes directory metadata on the
+next successful save; switching to none preserves the last successful snapshot. Format v2 gains an
+optional `cwd` per leaf; old documents remain usable, and an older binary can discard the optional
+metadata if it saves again. Labels and paths never supply a program, arguments or shell commands.
+
+A short exclusive startup coordinator classifies windows using process-lifetime OS file leases.
+Every window retains its active lease; only a launch with no other live lease is primary. Later
+windows always open one fresh console and never read or replace the primary snapshot. Roles do not
+transfer: a secondary that outlives the primary still prevents a third launch from duplicating its
+workspace. Process death releases the lock; stale files are removed only after acquiring their OS
+locks, never by guessing from a PID or file age. On Unix the locks are process-scoped POSIX record
+locks: descriptor-scoped locks can survive a parent's crash in a concurrently forked child before
+exec, even with CLOEXEC. The application has one main window per process, and tests use real
+processes for that ownership boundary. Secondary windows are intentionally transient in this
+delivery, approved explicitly before implementation. This replaces D16's last-writer-wins
+limitation without adding a workspace registry or selector.
+
+Directory recovery uses D78's local sources and precedence, reusing the ordinary-frame project
+observations instead of introducing a polling timer. A final observation before clean exit covers
+recent navigation. An explicitly remote or unusable report clears local eligibility. A temporarily
+missing native observation preserves the last known local path. Paths must be absolute, bounded
+and free of control characters; they go to the child's cwd builder, never through a typed `cd`.
+Native discovery is Linux-only; other systems need usable local directory reports and native host
+validation before parity can be claimed.
+
+An unavailable saved directory opens a fresh shell with a console-local explanation. Its intended
+path remains separate from the fallback shell so an unrelated geometry save does not erase it.
+Typing into that console, clicking its notice or closing it explicitly takes over the fallback and
+forgets the failed target. No repeated attempt runs inside that launch. The existing 64 KiB document
+ceiling is checked against the final serialized bytes before any temporary or replacement is
+created: individually bounded directories can otherwise exceed it when combined. The previous
+snapshot survives a size failure.
+
+Historical measurement controls retain their explicit tab/pane requests, seeded layout batch and
+overwrite-veto witness. Automatic directory capture is disabled there; ordinary capture has its own
+named report row and is discounted from the frame. No frame-cost result is claimed from unit tests.
+Moving startup selection out of the core keeps D28's module limit; persistence execution and restored
+leaf construction use focused free functions instead of expanding already oversized type impls.
+
+**Discarded.** Unconditional recovery contradicts the requested default. Global last-writer-wins
+can erase another live window's arrangement. Promoting a secondary after the first closes makes its
+role depend on close order. PID-file expiry can mistake a recycled process for a live window or an
+idle window for a dead one. A named-workspace registry and restoring every window require a product
+selector outside this delivery. Prompt parsing and replaying shell commands violate the existing
+metadata/input boundary. AI recovery is a separate delivery of #19: this change neither advertises
+a sessions mode nor installs client integrations.
+
+## D82 — Context menus follow their invocation and keep the console visible
 
 Rename dialogs are centered on the viewport. Console context menus retain the opening pointer
 position with the pane identity and are constrained inside the viewport. They keep the existing

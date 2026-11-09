@@ -967,6 +967,9 @@ impl Window {
                     Some(crate::painter::notices::Silence::WentQuiet) => {
                         pane.pty_output.dismiss_the_silence(pane.pty.ending());
                     }
+                    Some(crate::painter::notices::Silence::RestoreDirectory) => {
+                        pane.restoration.take_over();
+                    }
                     Some(crate::painter::notices::Silence::Refused) => {
                         pane.pty_output.dismiss_the_refusal(pane.pty.backlog());
                     }
