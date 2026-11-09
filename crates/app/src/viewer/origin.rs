@@ -142,6 +142,94 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
+    fn review_uses_live_worktree_changes_after_a_stale_local_directory_report() {
+        use std::{
+            fs,
+            process::Command,
+            time::{Duration, Instant},
+        };
+        let mut nonce = [0; 8];
+        getrandom::fill(&mut nonce).unwrap();
+        let root =
+            std::env::temp_dir().join(format!("viewer-worktree-{}", u64::from_ne_bytes(nonce)));
+        fs::create_dir(&root).unwrap();
+        let _repository = Repository(root.clone());
+        let main = root.join("main");
+        fs::create_dir(&main).unwrap();
+        let git = |args: &[&str]| {
+            let out = Command::new("git")
+                .arg("-C")
+                .arg(&main)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        git(&["init", "-q"]);
+        fs::write(main.join("tracked"), "base\n").unwrap();
+        git(&["add", "tracked"]);
+        git(&[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qm",
+            "base",
+        ]);
+        let linked = root.join("linked");
+        git(&["worktree", "add", "-qb", "linked", linked.to_str().unwrap()]);
+        fs::write(main.join("tracked"), "MAIN_ONLY_CHANGE\n").unwrap();
+        fs::write(linked.join("tracked"), "WORKTREE_ONLY_CHANGE\n").unwrap();
+        let script = format!("cd '{}' && sleep 30", linked.display());
+        let mut window = window_of_tabs([[script.as_str(), "sleep 30"]]);
+        let name = window.active().panes()[0].name;
+        let ctx = egui::Context::default();
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while window
+            .pane_called(name)
+            .unwrap()
+            .pty
+            .working_directory()
+            .as_ref()
+            != Some(&linked)
+        {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        one_frame_in(&mut window, &ctx, area, vec![]);
+        window
+            .pane_called(name)
+            .unwrap()
+            .screen
+            .advance(format!("\x1b]7;file://{}\x07", main.display()).as_bytes());
+        open_diff_for_pane(&mut window, name);
+        loop {
+            window.viewer.poll(&ctx);
+            if let Some(loaded) = &window.viewer.loaded {
+                assert!(
+                    loaded.text.contains("+WORKTREE_ONLY_CHANGE"),
+                    "{}",
+                    loaded.text
+                );
+                assert!(!loaded.text.contains("MAIN_ONLY_CHANGE"), "{}", loaded.text);
+                assert!(!loaded.diff.as_ref().unwrap().files.is_empty());
+                break;
+            }
+            assert!(Instant::now() < deadline, "{}", window.viewer.message);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
     fn review_opens_live_console_repository_without_shell_directory_reports() {
         use std::{
             fs,

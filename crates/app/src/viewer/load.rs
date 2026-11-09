@@ -373,6 +373,78 @@ mod tests {
         assert!(status.success());
     }
     #[test]
+    fn non_repository_message_is_clear_without_hiding_other_git_errors() {
+        let temp = Temp::new();
+        for kind in [Kind::Local, Kind::Staged, Kind::Unstaged, Kind::AgainstBase] {
+            let error = load_diff(&temp.0, kind, "main").err().unwrap();
+            assert_eq!(error, "This folder is not a Git repository");
+        }
+        let error = load_diff(&temp.0.join("missing"), Kind::Local, "main")
+            .err()
+            .unwrap();
+        assert!(error.contains("Git failed:"), "{error}");
+        assert!(!error.contains("This folder is not a Git repository"));
+    }
+
+    #[test]
+    fn inherited_git_context_cannot_redirect_worktree_changes() {
+        const CHILD: &str = "IVY_VIEWER_GIT_CONTEXT_CHILD";
+        if let Some(path) = std::env::var_os(CHILD) {
+            let (text, doc) = load_diff(Path::new(&path), Kind::Local, "main").unwrap();
+            assert!(text.contains("+WORKTREE_ONLY_CHANGE"), "{text}");
+            assert!(!text.contains("MAIN_ONLY_CHANGE"), "{text}");
+            assert!(doc.files.iter().any(|f| f.path == Path::new("linked-new")));
+            assert!(!doc.files.iter().any(|f| f.path == Path::new("main-new")));
+            return;
+        }
+        let temp = Temp::new();
+        git(&temp.0, &["init", "-q"]);
+        git(&temp.0, &["config", "user.email", "test@example.invalid"]);
+        git(&temp.0, &["config", "user.name", "Test"]);
+        fs::write(temp.0.join("tracked"), "base\n").unwrap();
+        git(&temp.0, &["add", "tracked"]);
+        git(
+            &temp.0,
+            &["-c", "commit.gpgsign=false", "commit", "-qm", "base"],
+        );
+        let linked = temp.0.join("linked");
+        git(
+            &temp.0,
+            &["worktree", "add", "-qb", "linked", linked.to_str().unwrap()],
+        );
+        fs::write(temp.0.join("tracked"), "MAIN_ONLY_CHANGE\n").unwrap();
+        fs::write(linked.join("tracked"), "WORKTREE_ONLY_CHANGE\n").unwrap();
+        fs::write(temp.0.join("main-new"), "main untracked\n").unwrap();
+        fs::write(linked.join("linked-new"), "linked untracked\n").unwrap();
+        let main_index = fs::read(temp.0.join(".git/index")).unwrap();
+        let linked_index = fs::read(temp.0.join(".git/worktrees/linked/index")).unwrap();
+        // A child process isolates inherited environment without mutating the parallel test runner.
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "viewer::load::tests::inherited_git_context_cannot_redirect_worktree_changes",
+                "--nocapture",
+            ])
+            .env(CHILD, &linked)
+            .env("GIT_DIR", temp.0.join(".git"))
+            .env("GIT_WORK_TREE", &temp.0)
+            .env("GIT_INDEX_FILE", temp.0.join(".git/index"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(main_index, fs::read(temp.0.join(".git/index")).unwrap());
+        assert_eq!(
+            linked_index,
+            fs::read(temp.0.join(".git/worktrees/linked/index")).unwrap()
+        );
+    }
+
+    #[test]
     fn staged_and_unstaged_leave_repository_unchanged() {
         let temp = Temp::new();
         git(&temp.0, &["init", "-q"]);
