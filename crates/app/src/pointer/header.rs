@@ -10,7 +10,12 @@ pub(super) fn intercept(
     names: &[usize],
     now: SystemTime,
 ) -> Option<MouseOutcome> {
-    let outcome = crate::header::actions::pointer(window, ui, rects, metrics)?;
+    let outcome = crate::header::actions::pointer(window, ui, rects, metrics).or_else(|| {
+        clipboard::intercept(window, ui, rects, metrics, names, now).then_some(MouseOutcome {
+            target: None,
+            the_tree_changed: false,
+        })
+    })?;
     let releases = Window::collect_the_buttons(ui)
         .into_iter()
         .filter(|button| !button.pressed)

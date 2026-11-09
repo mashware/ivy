@@ -51,7 +51,7 @@ use std::path::{Path, PathBuf};
 /// How many waits the workspace declares today. **An equality, not a floor**: a floor would let the
 /// number go stale the day a wait is removed, and an equality is also what goes red if the matcher
 /// stops matching anything at all.
-const DECLARED_WAITS: usize = 8;
+const DECLARED_WAITS: usize = 9;
 
 /// The crates, files and production lines the walk must reach. A walk that examined nothing finds
 /// no undeclared wait, and would pass.

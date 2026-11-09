@@ -996,7 +996,9 @@ mod tests {
                 window.pane_view.begin_rename(tab, pane, "Review".into());
                 "Rename console"
             } else {
-                window.pane_view.open_menu(tab, pane, true);
+                window
+                    .pane_view
+                    .open_menu(tab, pane, true, egui::pos2(400.0, 300.0));
                 "Console actions"
             };
             for (config, surface, ink) in [

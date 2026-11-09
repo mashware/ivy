@@ -21,6 +21,11 @@ pub(crate) struct Input {
 }
 
 impl Input {
+    pub(crate) fn hold_context(&mut self, button: egui::PointerButton, frame: u64) {
+        self.held = Some(button);
+        self.blocked_frame = Some(frame);
+    }
+
     pub(crate) fn block_for_settings(&mut self, frame: u64) {
         self.menu = None;
         self.pending = None;
@@ -292,7 +297,7 @@ pub(crate) fn pointer(
                 Hit::Menu if window.chrome.enabled() => {
                     window
                         .pane_view
-                        .open_menu(window.active().name, name, rects.len() > 1);
+                        .open_menu(window.active().name, name, rects.len() > 1, *pos);
                     ui.ctx().request_repaint();
                     false
                 }

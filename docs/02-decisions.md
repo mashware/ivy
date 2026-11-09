@@ -8881,3 +8881,45 @@ Accents derive from the effective configured palette, including overrides. Live 
 **Limits and accounting.** Outside Linux, automatic directory information depends on local OSC 7 reports. An unreported silent directory change is noticed on a later ordinary frame. Native metadata/source/result/color bookkeeping has its own named frame span; header painting stays in the existing strip span. Background subprocess time is never subtracted from a frame. Historical measurement batches disable discovery; the explicit project probe injects source directories but resolves real temporary repositories and paints real badges.
 
 The size guard measures the core at 647 production lines, unchanged. Moving watcher construction to the resource factory lowers the aggregate Window implementation from 1617 to 1611; project refresh remains a free function rather than growing that already-ratcheted type.
+
+
+## D80 — Context menus follow their invocation and keep the console visible
+
+Rename dialogs are centered on the viewport. Console context menus retain the opening pointer
+position with the pane identity and are constrained inside the viewport. They keep the existing
+pane actions and add Copy for a selected terminal range and Paste for the ordinary clipboard.
+Opening or dismissing a menu preserves the selection. Escape and outside clicks dismiss it, with
+the complete gesture retained until release; input ownership does not multiply console opacity.
+This extends D62 with the user's explicit request for an ordinary pointer menu, rather than a
+floating dialog in a location chosen by the interface engine.
+
+Linux mouse selections publish PRIMARY, independently from CLIPBOARD. A middle press pastes PRIMARY
+into the clicked console. Mouse-reporting programs keep right and middle gestures unless Shift is
+held, the existing terminal escape hatch. Both paste sources use the existing long-line gate and
+current bracketed-paste mode; they also revoke auxiliary-console control on successful personal input.
+
+An app-owned adapter uses the existing arboard and smithay clipboard dependencies. One worker reads
+native clipboard data outside the interface thread, retains the requesting pane's identity, and
+wakes the reactive window on completion. A read's delivery expires after two seconds; a late result
+never becomes input to another console. While the native read is still outstanding no replacement
+worker or read is started. PRIMARY publication coalesces to the latest selected text and never
+substitutes CLIPBOARD when the selection protocol is unavailable.
+
+The worker retains the native window while smithay borrows its Wayland display, destroying its
+clipboard before releasing the window. **D57 declaration:** shutdown disconnects and abandons this
+worker; external clipboard reads and backend destruction cannot be cancelled reliably and may keep
+one worker and its native window alive until process exit. The idle receive ends when the sole
+Service sender is dropped. No clipboard worker runs in historical measurement batches. UI polling
+and completion delivery are named within the integrated chrome span; pointer selection work stays
+inside the mouse span. No new frame-cost claim is made here.
+
+Discarded: passing an untagged RequestPaste through keyboard modifiers (it would lose source pane
+identity and confuse mouse paste with Ctrl+V), replacing CLIPBOARD on selection (PRIMARY has a
+different desktop contract), shell clipboard utilities (installation and backend requirements), a
+new egui/eframe protocol fork (the native dependencies already support both selections), and
+unbounded replacement workers for stalled owners (each stalled read would retain native resources).
+Native X11/Wayland exchange must be verified separately from headless geometry and dispatch tests.
+
+The native startup resource factory now belongs to opening.rs, keeping clipboard construction out
+of the window core. The stateless primary-press reader is a free pointer function; the measured
+Window implementation ratchet falls from 1611 to 1605 production lines.

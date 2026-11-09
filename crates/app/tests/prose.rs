@@ -75,6 +75,17 @@ use std::path::Path;
 /// moved the measurement bench's injected gestures out into `src/injected.rs`, which is the next
 /// entry down.
 const SOURCES: &[(&str, &str, usize)] = &[
+    ("src/clipboard.rs", include_str!("../src/clipboard.rs"), 0),
+    (
+        "src/pointer/clipboard.rs",
+        include_str!("../src/pointer/clipboard.rs"),
+        0,
+    ),
+    (
+        "src/tests/context_clipboard.rs",
+        include_str!("../src/tests/context_clipboard.rs"),
+        0,
+    ),
     (
         "src/git_process.rs",
         include_str!("../src/git_process.rs"),
