@@ -2108,6 +2108,7 @@ mod tests {
     mod pane_rename;
     mod settings_chrome;
     mod settings_editor;
+    mod title_typography;
 
     // **The tests reach further into the two modules than the code above does**, and this is
     // where that is said. They build tilings and weights directly to assert the arithmetic;
