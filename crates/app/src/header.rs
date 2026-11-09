@@ -35,6 +35,7 @@ pub(crate) mod controls;
 pub(crate) mod integrated;
 pub(crate) mod menu;
 mod splitting;
+pub(crate) mod title_text;
 pub(crate) use splitting::split as split_named;
 
 /// Whether this session paints a strip over each console.
@@ -44,24 +45,52 @@ pub(crate) use splitting::split as split_named;
 /// here is a call site guessing. Same argument as [`crate::settings::Entry`], one step further
 /// along: that one says which door the session came in through, this one says what was decided
 /// because of it.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct Headers(bool, bool);
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) struct Headers {
+    painted: bool,
+    integrated: bool,
+    title_line_height: f32,
+    title_size: f32,
+}
 
 impl Headers {
     /// What a session gets unless the gate takes it away — every ordinary one, and the one measured
     /// batch that asks for strips on purpose. The tests build with it.
-    pub(crate) const PAINTED: Self = Self(true, false);
+    pub(crate) const PAINTED: Self = Self {
+        painted: true,
+        integrated: false,
+        title_line_height: 0.0,
+        title_size: 12.0,
+    };
 
     /// A measured run that did not ask for them, which is every batch but `T`.
-    pub(crate) const NOT_PAINTED: Self = Self(false, false);
+    pub(crate) const NOT_PAINTED: Self = Self {
+        painted: false,
+        ..Self::PAINTED
+    };
 
     pub(crate) fn integrated(self, enabled: bool) -> Self {
-        Self(self.0, enabled && self.0)
+        Self {
+            integrated: enabled && self.painted,
+            ..self
+        }
+    }
+
+    pub(crate) fn with_title_metrics(self, size: f32, line_height: f32) -> Self {
+        Self {
+            title_line_height: line_height,
+            title_size: size,
+            ..self
+        }
+    }
+
+    pub(crate) fn title_size(self) -> f32 {
+        self.title_size
     }
 
     /// Space reserved on both sides of an integrated pane, including its outline.
     pub(crate) fn pane_inset(self) -> f32 {
-        if self.1 { 2.5 } else { 0.0 }
+        if self.integrated { 2.5 } else { 0.0 }
     }
 
     /// The decision, taken once from the environment the session was launched with.
@@ -91,7 +120,7 @@ impl Headers {
 
     /// Whether a strip is painted at all.
     pub(crate) fn are_painted(self) -> bool {
-        self.0
+        self.painted
     }
 }
 
@@ -271,8 +300,10 @@ pub(crate) fn height(metrics: &CellMetrics, headers: Headers) -> f32 {
     if !headers.are_painted() {
         return 0.0;
     }
-    if headers.1 {
-        (metrics.height() + 2.0 * MARGIN).max(33.0)
+    if headers.integrated {
+        (metrics.height() + 2.0 * MARGIN)
+            .max(33.0)
+            .max(headers.title_line_height + 12.0)
     } else {
         metrics.height() + 2.0 * MARGIN
     }
