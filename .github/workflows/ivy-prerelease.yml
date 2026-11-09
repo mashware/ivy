@@ -1,11 +1,11 @@
-name: Ivy Linux packages
+name: Ivy packages
 
 on:
   pull_request:
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish the selected tag as an unsigned Ubuntu and Arch prerelease
+        description: Publish the selected tag as an unsigned Linux and macOS prerelease
         type: boolean
         default: false
 
@@ -46,7 +46,7 @@ jobs:
           version=$(python3 scripts/release.py version)
           scripts/package-linux.sh --binary-dir target/release --output-dir dist --version "$version"
           scripts/test-linux-package.sh dist/*.deb "$version" target/release/notices
-          python3 -m unittest scripts/test_release.py -v
+          python3 -m unittest scripts/test_release.py scripts/test_macos.py -v
           python3 scripts/release.py generate --directory dist --commit "$COMMIT" --built-on ubuntu-24.04
           (cd dist && sha256sum --check SHA256SUMS)
       - name: Upload package and metadata
@@ -128,9 +128,46 @@ jobs:
           path: arch-dist/*.pkg.tar.zst
           if-no-files-found: error
 
+  macos:
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            arch: arm64
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            arch: x86_64
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '15.0'
+      TARGET: ${{ matrix.target }}
+      ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Build pinned native Mac executables
+        run: |
+          rustup target add "$TARGET"
+          cargo build --locked --release --target "$TARGET" -p app -p panel-control --bins
+      - name: Bundle original notices and create DMG
+        run: |
+          cargo metadata --locked --filter-platform "$TARGET" --format-version 1 > target/release-metadata.json
+          python3 scripts/release.py notices --metadata target/release-metadata.json --directory "target/$TARGET/release/notices"
+          version=$(python3 scripts/release.py version)
+          python3 scripts/package-macos.py build --binary-dir "target/$TARGET/release" --directory dist --version "$version" --arch "$ARCH"
+          python3 -m unittest scripts/test_macos.py -v
+          python3 packaging/macos/test-install.py dist/*.dmg "$version" "$ARCH" "target/$TARGET/release/notices"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ivy-macos-${{ matrix.arch }}
+          path: dist/*.dmg
+          if-no-files-found: error
+
   publish:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
-    needs: [build, install, arch]
+    needs: [build, install, arch, macos]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -139,7 +176,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
-          pattern: ivy-*-x86_64
+          pattern: ivy-*
           path: dist
           merge-multiple: true
       - name: Validate and publish complete draft
@@ -153,13 +190,13 @@ jobs:
           test "$REF_TYPE" = tag
           test "$(git rev-parse HEAD)" = "$COMMIT"
           (cd dist && sha256sum --check SHA256SUMS)
-          python3 scripts/release.py generate --directory dist --commit "$COMMIT" --built-on ubuntu-24.04 --tag "$TAG" --include-arch
+          python3 scripts/release.py generate --directory dist --commit "$COMMIT" --built-on ubuntu-24.04 --tag "$TAG" --include-arch --include-macos
           (cd dist && sha256sum --check SHA256SUMS)
           scripts/verify-release-tag.sh "$TAG" "$COMMIT"
           if gh release view "$TAG" --json id >/dev/null 2>&1; then
             echo 'A release already exists for this tag; inspect it instead of overwriting it.' >&2
             exit 1
           fi
-          gh release create "$TAG" dist/*.deb dist/*.pkg.tar.zst dist/release-manifest.json dist/SHA256SUMS --verify-tag --draft --prerelease --title "$TAG" --notes "Unsigned experimental Ubuntu and Arch Linux x86_64 packages."
+          gh release create "$TAG" dist/*.deb dist/*.pkg.tar.zst dist/*.dmg dist/release-manifest.json dist/SHA256SUMS --verify-tag --draft --prerelease --title "$TAG" --notes "Unsigned experimental Ubuntu, Arch Linux and macOS packages."
           scripts/verify-release-tag.sh "$TAG" "$COMMIT"
           gh release edit "$TAG" --draft=false --prerelease

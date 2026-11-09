@@ -57,6 +57,11 @@ def main():
             for name in expected:
                 assert (config / name).read_bytes() == expected[name]
             smoke(root, installed, version)
+            other = "x86_64" if arch == "arm64" else "arm64"
+            wrong_arch = subprocess.run([sys.executable, str(repo / "scripts/package-macos.py"), "check",
+                                         "--bundle", str(installed), "--version", version, "--arch", other],
+                                        capture_output=True)
+            assert wrong_arch.returncode != 0 and b"wrong architecture" in wrong_arch.stderr
             # A real altered sealed resource must fail the same installed-bundle checker.
             icon = installed / "Contents/Resources/Ivy.icns"
             with icon.open("ab") as file:

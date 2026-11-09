@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the workspace release version and write the Linux release metadata."""
+"""Validate release versions, preserve dependency notices and record the declared package set."""
 import argparse
 import hashlib
 import json
@@ -38,7 +38,7 @@ def digest(path):
         return hashlib.file_digest(source, "sha256").hexdigest()
 
 
-def generate(cargo, directory, commit, built_on, tag=None, include_arch=False):
+def generate(cargo, directory, commit, built_on, tag=None, include_arch=False, include_macos=False):
     value = version(cargo)
     if not built_on.strip():
         raise ValueError("build environment must not be empty")
@@ -50,20 +50,29 @@ def generate(cargo, directory, commit, built_on, tag=None, include_arch=False):
     names = [f"ivy_{value}_amd64.deb"]
     if include_arch:
         names.append(f"ivy-terminal-{arch_version(value)}-1-x86_64.pkg.tar.zst")
+    if include_macos:
+        names.extend(f"Ivy-{value}-macos-{arch}.dmg" for arch in ("arm64", "x86_64"))
     packages = [directory / name for name in names]
     for package in packages:
         if not package.is_file() or package.stat().st_size == 0:
             raise ValueError(f"missing or empty artifact: {package.name}")
-    actual = {p.name for pattern in ("*.deb", "*.pkg.tar.*") for p in directory.glob(pattern)}
+    actual = {p.name for pattern in ("*.deb", "*.pkg.tar.*", "*.dmg") for p in directory.glob(pattern)}
     if actual != set(names):
-        raise ValueError("artifact set does not match the declared Linux target")
+        raise ValueError("artifact set does not match the declared release targets")
+    def artifact(package):
+        result = {"name": package.name, "target": "x86_64-unknown-linux-gnu", "built_on": built_on,
+                  "signing": "unsigned", "sha256": digest(package)}
+        if package.suffix == ".zst":
+            result["packaged_on"] = "Arch Linux (rolling)"
+        elif package.suffix == ".dmg":
+            arm = package.name.endswith("-arm64.dmg")
+            result["target"] = "aarch64-apple-darwin" if arm else "x86_64-apple-darwin"
+            result["built_on"] = "macos-15" if arm else "macos-15-intel"
+        return result
     manifest = {
         "version": value,
         "commit": commit,
-        "artifacts": [{"name": package.name, "target": "x86_64-unknown-linux-gnu",
-                       "built_on": built_on,
-                       **({"packaged_on": "Arch Linux (rolling)"} if package.suffix == ".zst" else {}),
-                       "signing": "unsigned", "sha256": digest(package)} for package in packages],
+        "artifacts": [artifact(package) for package in packages],
     }
     manifest_path = directory / "release-manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
@@ -153,6 +162,7 @@ def main():
     parser.add_argument("--built-on")
     parser.add_argument("--tag")
     parser.add_argument("--include-arch", action="store_true")
+    parser.add_argument("--include-macos", action="store_true")
     args = parser.parse_args()
     try:
         if args.command == "version":
@@ -167,7 +177,8 @@ def main():
         else:
             if args.directory is None or args.commit is None or args.built_on is None:
                 parser.error("generate requires --directory, --commit and --built-on")
-            generate(args.cargo, args.directory, args.commit, args.built_on, args.tag, args.include_arch)
+            generate(args.cargo, args.directory, args.commit, args.built_on, args.tag,
+                     args.include_arch, args.include_macos)
     except (OSError, ValueError, KeyError, TypeError, tomllib.TOMLDecodeError) as error:
         print(f"release: {error}", file=sys.stderr)
         return 1

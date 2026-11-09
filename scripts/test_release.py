@@ -162,6 +162,31 @@ class ReleaseTest(unittest.TestCase):
         self.assertEqual(name, "ivy_0.1.0-alpha.1_amd64.deb")
         self.assertRegex(name, r"^[A-Za-z0-9._-]+$")
 
+    def test_macos_release_requires_both_architectures_and_records_native_targets(self):
+        arch = self.root / "ivy-terminal-0.1.0alpha1-1-x86_64.pkg.tar.zst"
+        arch.write_bytes(b"Arch fixture")
+        arm = self.root / "Ivy-0.1.0-alpha.1-macos-arm64.dmg"
+        intel = self.root / "Ivy-0.1.0-alpha.1-macos-x86_64.dmg"
+        args = ("--include-arch", "--include-macos")
+        self.assertNotEqual(self.run_release(*args).returncode, 0)
+        arm.write_bytes(b"Apple Silicon DMG fixture")
+        self.assertNotEqual(self.run_release(*args).returncode, 0)
+        intel.write_bytes(b"Intel DMG fixture")
+        self.assertEqual(self.run_release(*args).returncode, 0)
+        manifest = json.loads((self.root / "release-manifest.json").read_text())
+        self.assertEqual(len(manifest["artifacts"]), 4)
+        for entry, expected in zip(manifest["artifacts"][2:], (
+                (arm, "aarch64-apple-darwin", "macos-15"),
+                (intel, "x86_64-apple-darwin", "macos-15-intel"))):
+            path, target, runner = expected
+            self.assertEqual((entry["name"], entry["target"], entry["built_on"], entry["signing"]),
+                             (path.name, target, runner, "unsigned"))
+            self.assertEqual(entry["sha256"], hashlib.sha256(path.read_bytes()).hexdigest())
+        self.assertEqual(len((self.root / "SHA256SUMS").read_text().splitlines()), 5)
+        self.assertNotEqual(self.run_release("--include-arch").returncode, 0)
+        (self.root / "unexpected.dmg").write_bytes(b"extra")
+        self.assertNotEqual(self.run_release(*args).returncode, 0)
+
     def test_arch_versions_keep_numbered_identifiers_without_forbidden_hyphens(self):
         convert = run_path(str(SCRIPT))["arch_version"]
         for semver, arch in (("0.1.0-alpha.1", "0.1.0alpha1"),
