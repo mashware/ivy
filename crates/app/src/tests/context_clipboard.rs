@@ -1,4 +1,47 @@
 #[cfg(test)]
+use eframe::egui;
+
+#[cfg(test)]
+pub(super) fn split_menu_targets(
+    shapes: &[egui::epaint::ClippedShape],
+    popup: egui::Rect,
+) -> [egui::Rect; 2] {
+    fn collect(shape: &egui::Shape, popup: egui::Rect, targets: &mut Vec<egui::Rect>) {
+        match shape {
+            egui::Shape::Rect(rect)
+                if popup.contains_rect(rect.rect)
+                    && rect.rect.width() > 40.0
+                    && (28.0..=32.0).contains(&rect.rect.height()) =>
+            {
+                targets.push(rect.rect);
+            }
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    collect(shape, popup, targets);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut targets = Vec::new();
+    for shape in shapes {
+        collect(&shape.shape, popup, &mut targets);
+    }
+    targets.sort_by(|a, b| {
+        a.top()
+            .total_cmp(&b.top())
+            .then(a.left().total_cmp(&b.left()))
+    });
+    targets.dedup();
+    assert!(
+        targets.len() >= 2,
+        "the two visible split buttons are missing"
+    );
+    assert!((targets[0].center().y - targets[1].center().y).abs() < 1.0);
+    [targets[0], targets[1]]
+}
+
+#[cfg(test)]
 mod tests {
     use super::super::*;
 
@@ -856,47 +899,4 @@ mod tests {
             }
         }
     }
-}
-
-#[cfg(test)]
-use eframe::egui;
-
-#[cfg(test)]
-pub(super) fn split_menu_targets(
-    shapes: &[egui::epaint::ClippedShape],
-    popup: egui::Rect,
-) -> [egui::Rect; 2] {
-    fn collect(shape: &egui::Shape, popup: egui::Rect, targets: &mut Vec<egui::Rect>) {
-        match shape {
-            egui::Shape::Rect(rect)
-                if popup.contains_rect(rect.rect)
-                    && rect.rect.width() > 40.0
-                    && (28.0..=32.0).contains(&rect.rect.height()) =>
-            {
-                targets.push(rect.rect);
-            }
-            egui::Shape::Vec(shapes) => {
-                for shape in shapes {
-                    collect(shape, popup, targets);
-                }
-            }
-            _ => {}
-        }
-    }
-    let mut targets = Vec::new();
-    for shape in shapes {
-        collect(&shape.shape, popup, &mut targets);
-    }
-    targets.sort_by(|a, b| {
-        a.top()
-            .total_cmp(&b.top())
-            .then(a.left().total_cmp(&b.left()))
-    });
-    targets.dedup();
-    assert!(
-        targets.len() >= 2,
-        "the two visible split buttons are missing"
-    );
-    assert!((targets[0].center().y - targets[1].center().y).abs() < 1.0);
-    [targets[0], targets[1]]
 }

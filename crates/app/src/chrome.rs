@@ -193,7 +193,7 @@ pub(crate) fn paint_button_icon(
                 line((-7.0, y), (7.0, y));
             }
         }
-        "Connect agents" => connection::paint_icon(&p, rect, fg, false),
+        "Connect agents" => connection::paint_icon(p, rect, fg, false),
         "Close window" => {
             line((-6.0, -6.0), (6.0, 6.0));
             line((6.0, -6.0), (-6.0, 6.0));
