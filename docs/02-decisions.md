@@ -8651,6 +8651,27 @@ span; historical measurement mode adds no guide. No performance result is claime
   and lets the person copy explicit text; changing external settings is separate behavior.
 
 
+**Codex setup clarification (issue #6, 9 November 2026).** The copied prompt and manual guide
+explicitly document `env_vars = ["PANEL_ID", "PANEL_DIR"]` in the existing stdio server table.
+These are names to forward, never persistent console values. A Codex shared background server
+can lack the originating console's environment even when its terminal client is already inside
+Ivy, so the missing-identity branch must reach that diagnosis instead of only asking to reopen.
+Check the installed launch or resume help before recommending `--no-daemon` inside the intended
+console; an unsupported flag is reported as a client-version limitation. Codex 0.167.0 advertises
+both command forms, but this capability check is not native two-console verification.
+
+Why: the reported session discovered both bridge tool sets while calls still returned a missing
+pane identity. Forwarding is explicit in Codex's MCP configuration, and its CLI help describes
+`--no-daemon` as bypassing the shared background server. Discovery, usable connection and correct
+console observation are three different proofs; distinct statuses in two real consoles are needed
+before claiming independent routing. The guide continues to copy text only.
+
+Rejected workarounds include persisting one console's identity (stale or wrong-pane binding),
+restarting a global daemon for each console (does not establish independent per-console identity),
+and adding a pane selector to MCP calls (changes the existing endpoint-scoped contract without
+evidence that it is necessary). Automatic client configuration remains outside this guide.
+
+
 ---
 
 ## D74 — Ivy is public free software under GPLv3
