@@ -17,8 +17,8 @@ version = "0.36.1"
 authors = ["Emil Ernerfeldt <emil.ernerfeldt@gmail.com>"]
 build = false
 include = [
-    "../../LICENSE-APACHE",
-    "../../LICENSE-MIT",
+    "LICENSE-APACHE",
+    "LICENSE-MIT",
     "**/*.rs",
     "Cargo.toml",
 ]

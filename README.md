@@ -57,8 +57,8 @@ Build Ivy from source. You need:
   needed by the windowing and font dependencies.
 
 ```sh
-git clone https://github.com/mashware/agent-terminal.git
-cd agent-terminal
+git clone https://github.com/mashware/ivy.git
+cd ivy
 cargo run --locked -p app --release
 ```
 
@@ -241,7 +241,7 @@ run the full suite. For reproducible frame measurements, use
 [`scripts/measure-frame.sh`](scripts/measure-frame.sh) and the methodology in the
 [decisions](docs/02-decisions.md).
 
-Found a bug or want to discuss a feature? [Open an issue](https://github.com/mashware/agent-terminal/issues).
+Found a bug or want to discuss a feature? [Open an issue](https://github.com/mashware/ivy/issues).
 For a bug, include your platform, build revision and steps to reproduce it.
 
 ## Further reading
@@ -255,3 +255,14 @@ For a bug, include your platform, build revision and steps to reproduce it.
 | [Decisions](docs/02-decisions.md) | Design choices, alternatives and measurement evidence |
 | [Landscape](docs/07-landscape.md) | Related tools and comparisons |
 | [References](docs/06-references.md) | Technical research behind the terminal |
+
+
+## License
+
+Ivy is free and open-source software under the [GNU General Public License, version 3 only](LICENSE)
+(`GPL-3.0-only`). You can use, modify and redistribute it, including commercially. Distributed
+modified versions must provide the corresponding source under GPLv3 and preserve the required notices.
+See [COPYRIGHT](COPYRIGHT) for authorship and [LICENSE](LICENSE) for the complete terms.
+
+Third-party dependencies and bundled assets retain their own licenses. See
+[third-party notices](THIRD-PARTY.md) for the vendored code, themes and test font included here.

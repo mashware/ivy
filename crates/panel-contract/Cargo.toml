@@ -2,6 +2,7 @@
 name = "panel-contract"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 # Already compiled in the tree as a knock-on from egui (through `ahash`), and **with these very

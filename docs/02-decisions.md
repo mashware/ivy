@@ -8649,3 +8649,25 @@ span; historical measurement mode adds no guide. No performance result is claime
 - A warning inside every empty console: the owner selected one global indicator with a guide.
 - Automatic client configuration or command execution: this delivery explains the existing setup
   and lets the person copy explicit text; changing external settings is separate behavior.
+
+
+---
+
+## D74 — Ivy is public free software under GPLv3
+
+**Decided on 9 November 2026.** Ivy's original code and documentation use GNU General Public
+License version 3 only (`GPL-3.0-only`), inherited by all five workspace packages. The complete
+license is at the root; COPYRIGHT records Alberto Vioque and Ivy contributors. Third-party
+dependencies, themes, the test font and vendored egui-winit retain their own licenses and notices.
+
+**Why:** the owner wants distributed derivatives to provide their corresponding source under the
+same license instead of allowing modified closed-source products. GPLv3 supplies that condition
+while allowing private use, modification and commercial redistribution. Public source and releases
+share one repository, so update discovery requires neither credentials nor a separate releases repo.
+
+**Discarded:** permissive licensing that allows closed-source derivatives; AGPL's additional
+network-use source obligations, which were not requested for this desktop application; returning
+the source to private visibility, which would not implement the requested public GPLv3 project.
+
+**Boundary:** public visibility and this license do not publish a binary release, claim platform
+certification or change any third-party license.

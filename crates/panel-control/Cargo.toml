@@ -2,6 +2,7 @@
 name = "panel-control"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 # The document this channel carries **is** the panel document, so its parser, its ceiling and the
