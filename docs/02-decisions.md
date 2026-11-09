@@ -8905,8 +8905,11 @@ Every window retains its active lease; only a launch with no other live lease is
 windows always open one fresh console and never read or replace the primary snapshot. Roles do not
 transfer: a secondary that outlives the primary still prevents a third launch from duplicating its
 workspace. Process death releases the lock; stale files are removed only after acquiring their OS
-locks, never by guessing from a PID or file age. Secondary windows are intentionally transient in
-this delivery, approved explicitly before implementation. This replaces D16's last-writer-wins
+locks, never by guessing from a PID or file age. On Unix the locks are process-scoped POSIX record
+locks: descriptor-scoped locks can survive a parent's crash in a concurrently forked child before
+exec, even with CLOEXEC. The application has one main window per process, and tests use real
+processes for that ownership boundary. Secondary windows are intentionally transient in this
+delivery, approved explicitly before implementation. This replaces D16's last-writer-wins
 limitation without adding a workspace registry or selector.
 
 Directory recovery uses D78's local sources and precedence, reusing the ordinary-frame project

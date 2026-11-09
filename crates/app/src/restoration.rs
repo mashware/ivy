@@ -437,24 +437,100 @@ mod tests {
     }
 
     #[test]
+    fn startup_child() {
+        use std::io::{Read, Write};
+        let Ok(snapshot) = std::env::var("IVY_STARTUP_TEST_SNAPSHOT") else {
+            return;
+        };
+        let mut gate = [0u8; 1];
+        std::io::stdin().read_exact(&mut gate).unwrap();
+        let snapshot = PathBuf::from(snapshot);
+        let mut persistence = session::Persistence::at(Some(snapshot.clone()));
+        let (opening, _state) = prepare(
+            &mut persistence,
+            Some(&snapshot),
+            StartupRestore::Layout,
+            false,
+            None,
+            None,
+        );
+        println!(
+            "STARTUP_RESTORED={}",
+            matches!(opening, OpenWith::Restored(_))
+        );
+        std::io::stdout().flush().unwrap();
+        std::io::stdin().read_exact(&mut gate).unwrap();
+    }
+
+    struct StartupChild {
+        child: std::process::Child,
+        input: Option<std::process::ChildStdin>,
+        output: std::io::BufReader<std::process::ChildStdout>,
+    }
+    impl StartupChild {
+        fn spawn(snapshot: &Path) -> Self {
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "restoration::tests::startup_child",
+                    "--exact",
+                    "--nocapture",
+                ])
+                .env("IVY_STARTUP_TEST_SNAPSHOT", snapshot)
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            let input = child.stdin.take();
+            let output = std::io::BufReader::new(child.stdout.take().unwrap());
+            Self {
+                child,
+                input,
+                output,
+            }
+        }
+        fn restored(&mut self) -> bool {
+            use std::io::{BufRead, Write};
+            self.input.as_mut().unwrap().write_all(b"s").unwrap();
+            loop {
+                let mut line = String::new();
+                assert!(
+                    self.output.read_line(&mut line).unwrap() > 0,
+                    "startup helper exited before answering"
+                );
+                if let Some((_, value)) = line.split_once("STARTUP_RESTORED=") {
+                    return value.trim() == "true";
+                }
+            }
+        }
+        fn close(&mut self) {
+            use std::io::Write;
+            self.input.take().unwrap().write_all(b"x").unwrap();
+            assert!(self.child.wait().unwrap().success());
+        }
+    }
+    impl Drop for StartupChild {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
+    #[test]
     fn secondary_start_cannot_restore_even_after_the_primary_exits() {
         let fixture = Fixture::new();
         fixture.seed(None);
-        let (first, primary, _) = fixture.prepare(StartupRestore::Layout);
-        assert!(matches!(first, OpenWith::Restored(_)));
-        assert!(primary.can_save());
-        let (second, secondary, _) = fixture.prepare(StartupRestore::Directories);
-        assert!(matches!(second, OpenWith::Factory { tabs: 1, .. }));
-        assert!(!secondary.can_save());
-        drop(primary);
-        let (third, third_state, _) = fixture.prepare(StartupRestore::Layout);
-        assert!(matches!(third, OpenWith::Factory { tabs: 1, .. }));
-        assert!(!third_state.can_save());
-        drop(secondary);
-        drop(third_state);
-        let (next, next_state, _) = fixture.prepare(StartupRestore::Layout);
-        assert!(matches!(next, OpenWith::Restored(_)));
-        assert!(next_state.can_save());
+        let mut primary = StartupChild::spawn(&fixture.snapshot);
+        assert!(primary.restored());
+        let mut secondary = StartupChild::spawn(&fixture.snapshot);
+        assert!(!secondary.restored());
+        primary.close();
+        let mut third = StartupChild::spawn(&fixture.snapshot);
+        assert!(!third.restored());
+        secondary.close();
+        third.close();
+        let mut next = StartupChild::spawn(&fixture.snapshot);
+        assert!(next.restored());
+        next.close();
     }
 
     #[test]
