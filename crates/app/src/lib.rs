@@ -4243,8 +4243,13 @@ mod tests {
             make_it_refuse_a_write(left);
         }
         let theme = window.theme;
-        let notice = the_silence_box_on(window.active().panes()[0], &theme, &metrics, rects[0])
-            .expect("the console that was refused has nothing to say");
+        let notice = the_silence_box_on(
+            window.active().panes()[0],
+            &theme,
+            &metrics,
+            console_of(rects[0], &metrics),
+        )
+        .expect("the console that was refused has nothing to say");
         deliver_to_the_mouse(
             &mut window,
             &ctx,
@@ -4253,7 +4258,13 @@ mod tests {
             click_at(notice.center()),
         );
         assert!(
-            the_silence_box_on(window.active().panes()[0], &theme, &metrics, rects[0]).is_none(),
+            the_silence_box_on(
+                window.active().panes()[0],
+                &theme,
+                &metrics,
+                console_of(rects[0], &metrics)
+            )
+            .is_none(),
             "the premise does not hold: the click did not take the sentence away"
         );
 
@@ -4263,7 +4274,13 @@ mod tests {
             .expect_err("the premise does not hold: the retry was not refused");
 
         assert!(
-            the_silence_box_on(window.active().panes()[0], &theme, &metrics, rects[0]).is_some(),
+            the_silence_box_on(
+                window.active().panes()[0],
+                &theme,
+                &metrics,
+                console_of(rects[0], &metrics)
+            )
+            .is_some(),
             "a retry the full queue refused after the sentence was dismissed said nothing"
         );
     }
@@ -4287,8 +4304,13 @@ mod tests {
             make_it_refuse_a_write(left);
         }
         let theme = window.theme;
-        let notice = the_silence_box_on(window.active().panes()[0], &theme, &metrics, rects[0])
-            .expect("the console that was refused has nothing to say");
+        let notice = the_silence_box_on(
+            window.active().panes()[0],
+            &theme,
+            &metrics,
+            console_of(rects[0], &metrics),
+        )
+        .expect("the console that was refused has nothing to say");
 
         deliver_to_the_mouse(
             &mut window,
@@ -4303,7 +4325,13 @@ mod tests {
             "a click on the sentence left it on the glass"
         );
         assert!(
-            the_silence_box_on(window.active().panes()[0], &theme, &metrics, rects[0]).is_none(),
+            the_silence_box_on(
+                window.active().panes()[0],
+                &theme,
+                &metrics,
+                console_of(rects[0], &metrics)
+            )
+            .is_none(),
             "the box is still there to swallow the next press, so the last output cannot be marked"
         );
     }
@@ -10552,13 +10580,11 @@ mod tests {
     /// of a pane.
     ///
     /// **The panel is published rather than the grid fixed by hand**, and that is the premise this
-    /// test asserts before it asserts anything else: with no panel the console *is* the whole pane,
-    /// the two rectangles are the same one, and the comparison below would hold however wrong the
-    /// code was.
+    /// test asserts before it asserts anything else: the panel must take width in addition to
+    /// the console padding, so the comparison exercises both deductions.
     ///
-    /// **Since the strip exists, the two subtractions are both visible here**: the panel takes
-    /// columns from the right and the strip takes a row from the top, and the rectangle the pointer
-    /// is measured against is the one that has paid both. Until the strip existed this could only
+    /// The panel takes columns from the right, the strip takes a row from the top, and padding
+    /// takes eight points from every side. The pointer uses the rectangle that has paid all three. Until the strip existed this could only
     /// assert that the rectangle was not computed a second way — the two shared their corner, so
     /// passing either resolved the same cell.
     #[test]
@@ -10600,14 +10626,14 @@ mod tests {
         // pane's — the difference every selection and every mouse report is counted from.
         assert_eq!(
             for_the_pointer.top(),
-            rect.top() + header::height(&metrics, header::Headers::PAINTED),
+            rect.top() + header::height(&metrics, header::Headers::PAINTED) + 8.0,
             "the pointer counts from the pane's top edge, so every press lands a row above where it \
              was made"
         );
         assert_eq!(
             pane.console_within(rect, &metrics, now, header::Headers::NOT_PAINTED)
                 .top(),
-            rect.top(),
+            rect.top() + 8.0,
             "a measured run loses a row it never painted"
         );
 
@@ -12395,26 +12421,21 @@ mod tests {
     }
 
     #[test]
-    fn the_line_the_strip_and_the_console_share_belongs_to_the_console() {
-        // **One float of ambiguity, and both sides answered yes.** `egui::Rect::contains` is
-        // inclusive on both edges and the cut leaves the strip's bottom **equal** to the console's
-        // top, so a press exactly there fell on the strip *and* resolved to row 0 of the grid. What
-        // it cost is this: aiming at the first row of text moved the console somewhere else.
-        //
-        // It is written as the twin of the two tests above it — same window, same gesture — with the
-        // press one point higher, on the shared line itself.
+    fn the_padding_below_the_strip_neither_marks_text_nor_moves_the_console() {
+        // The strip's bottom used to touch row zero. Padding now separates the two: a press
+        // on that boundary must neither grab the strip nor invent a terminal cell to select.
         let ctx = egui::Context::default();
         let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
         let mut window = two_panes_with_text(&rects, &metrics);
         let request = names_in_order(&window);
-        let on_the_line = inside_the_console(rects[0], &metrics, egui::vec2(1.0, 0.0));
+        let on_the_line = inside_the_console(rects[0], &metrics, egui::vec2(1.0, -8.0));
 
         // The premise, asserted rather than assumed: the point really is the boundary, so a test
         // that stopped putting it there would say so instead of passing for pressing elsewhere.
         assert_eq!(
             on_the_line.y,
-            console_of(rects[0], &metrics).top(),
+            console_of(rects[0], &metrics).top() - 8.0,
             "the press is not on the line the two rectangles share, so this test measures nothing"
         );
         assert_eq!(
@@ -12423,8 +12444,7 @@ mod tests {
                 .0
                 .expect("the pane carries a strip")
                 .bottom(),
-            "the strip does not end where the console begins, so there is no shared line to argue \
-             about"
+            "the test must press on the strip boundary, above the padded grid"
         );
 
         drag_to_select(
@@ -12441,9 +12461,8 @@ mod tests {
 
         assert_eq!(
             selected_at(&window, 0).as_deref(),
-            Some("good"),
-            "a press on the line the strip and the console share marked nothing: the strip took a \
-             gesture aimed at the first row of text"
+            None,
+            "a press in padding started a selection despite containing no terminal cell"
         );
         assert_eq!(
             names_in_order(&window),
@@ -12755,10 +12774,8 @@ mod tests {
 
     #[test]
     fn the_line_the_button_shares_with_the_console_does_not_close_it() {
-        // **The other tie, and this delivery already paid for the first one.** The button's bottom
-        // edge is the strip's, which is the console's first row: `Rect::contains` is inclusive, so
-        // without the strip being asked first that single line both closed the console and resolved
-        // to row 0 of its grid. Aiming at the first row of text would end the program.
+        // The button's bottom edge is now above the grid by the padding. Its inclusive rectangle
+        // must still not close a console when the strip has already released that boundary.
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
         let area = area_of_cells(200.0);
@@ -12775,12 +12792,11 @@ mod tests {
         let button = close_button_of(&window, &rects, 0, &metrics);
         let on_the_line = egui::pos2(button.center().x, button.bottom());
 
-        // The premise, asserted rather than assumed: the point really is the line the two share.
+        // The point stays on the button boundary, eight points above the first cell.
         assert_eq!(
             on_the_line.y,
-            console_of(rects[0], &metrics).top(),
-            "the press is not on the line the button and the console share, so this test measures \
-             nothing"
+            console_of(rects[0], &metrics).top() - 8.0,
+            "the point is not on the boundary between the button and the padding"
         );
 
         one_frame_in(&mut window, &ctx, area, click_at(on_the_line));
@@ -13042,11 +13058,9 @@ mod tests {
     }
 
     #[test]
-    fn a_measured_run_paints_no_strip_and_leaves_the_grid_it_always_had() {
-        // **AC7, and it is what keeps the eighteen published batches comparable.** The
-        // grid is asserted against `cells_in` of the **whole pane**, which is what every batch was
-        // measured with before this milestone: with a row reserved and not painted, or painted and
-        // not reserved, this number moves and nothing else says so.
+    fn a_measured_run_paints_no_strip_and_reserves_only_console_padding() {
+        // The header gate still reserves no row. Console padding applies to measured runs too;
+        // these grids cannot be compared with pre-padding measurements without accounting for it.
         let ctx = egui::Context::default();
         let mut window = window_with("sleep 30", "sleep 30");
         window.headers = header::Headers::NOT_PAINTED;
@@ -13064,9 +13078,8 @@ mod tests {
         for (pane, rect) in window.active().panes().into_iter().zip(&rects) {
             assert_eq!(
                 pane.measured,
-                metrics.cells_in(rect.size()),
-                "a measured run lost a row it never painted, so its grid stopped being the one \
-                 every published batch was measured with"
+                metrics.cells_in(rect.shrink(8.0).size()),
+                "a measured run reserved space beyond the console padding"
             );
         }
         // **And nothing was painted in the strip's colour**, which is the other direction: a run
@@ -13097,14 +13110,14 @@ mod tests {
         let mut window = window_with("sleep 30", "sleep 30");
         window.headers = header::Headers::NOT_PAINTED;
         for (pane, rect) in window.active_mut().panes_mut().into_iter().zip(&rects) {
-            // The grid of the **whole pane**, which is what a run with no strip measures.
-            pane.measured = metrics.cells_in(rect.size());
+            // Only padding is reserved when the header is off.
+            pane.measured = metrics.cells_in(rect.shrink(8.0).size());
             pane.screen.resize(pane.measured);
             pane.screen.advance(b"good night");
         }
         let request = names_in_order(&window);
 
-        let where_a_strip_would_be = rects[0].min + egui::vec2(1.0, 1.0);
+        let where_a_strip_would_be = rects[0].min + egui::vec2(9.0, 9.0);
         // The premise, asserted rather than assumed: this is the very band the painted session
         // moves a console by, so a test that stopped pressing there would say so instead of
         // passing for marking somewhere no strip ever was.
@@ -13122,7 +13135,7 @@ mod tests {
             &ctx,
             &rects,
             where_a_strip_would_be,
-            rects[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+            rects[0].min + egui::vec2(8.0 + metrics.width() * 3.5, 8.0 + metrics.height() * 0.5),
         );
 
         assert_eq!(
@@ -13766,7 +13779,7 @@ mod tests {
     /// from the pane's corner lands on the strip — where the gesture is not a selection at all but
     /// the one that takes the console somewhere else.
     fn console_of(rect: egui::Rect, metrics: &CellMetrics) -> egui::Rect {
-        header::set_the_header_aside(rect, metrics, header::Headers::PAINTED).1
+        metrics.console_in(header::set_the_header_aside(rect, metrics, header::Headers::PAINTED).1)
     }
 
     /// A point inside that pane's console, given as an offset **from the console's own corner**.
@@ -13783,7 +13796,7 @@ mod tests {
 
     /// The grid a pane of that rectangle really ends up with.
     ///
-    /// The cells of what is left **after the strip**, which is what the painting measures and what
+    /// The cells left after the strip and inner padding, which is what the painting measures and what
     /// the program inside is told. Measuring the pane's whole rectangle announces a row that is not
     /// there.
     fn grid_of(rect: egui::Rect, metrics: &CellMetrics) -> term_core::Size {
@@ -17137,18 +17150,101 @@ mod tests {
         );
     }
 
-    /// **The guarantee of this PR.** A console whose producer has published nothing looks exactly
-    /// as it did before the panel existed: with no width discounted and no second rectangle.
+    /// Exercise the real painter and pointer path so a glyph-only offset cannot pass.
     #[test]
-    fn a_console_with_no_published_panel_keeps_its_whole_rectangle() {
+    fn console_padding_moves_the_painted_grid_and_its_pointer_coordinates_together() {
+        let ctx = egui::Context::default();
+        let mut pane = pane_with("sleep 30", 0);
+        pane.screen.advance(b"\x1b[41mX");
+        let area = egui::Rect::from_min_size(egui::pos2(100.0, 50.0), egui::vec2(800.0, 700.0));
+        let mut first_cell = None;
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let metrics =
+                CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE));
+            let headers = header::Headers::PAINTED;
+            let expected = header::set_the_header_aside(area, &metrics, headers)
+                .1
+                .shrink(8.0);
+            let how = painter::HowToPaint::of(
+                painter::Blink {
+                    ceiling: Some(false),
+                    since_a_key: Duration::ZERO,
+                    keys: painter::Keys::Here,
+                },
+                headers,
+                &[area],
+            );
+            painter::paint_pane(
+                ui,
+                &mut pane,
+                area,
+                &Theme::default(),
+                &metrics,
+                &mut fonts::Discoverer::default(),
+                how,
+            );
+            assert_eq!(
+                pane.painted_console.as_ref().expect("painted").area,
+                expected
+            );
+            assert_eq!(pane.measured, metrics.cells_in(expected.size()));
+            let at = expected.min + egui::vec2(metrics.width() * 3.5, metrics.height() * 2.5);
+            let cell = pane
+                .cell_under(
+                    pane.console_within(area, &metrics, SystemTime::now(), headers),
+                    at,
+                    &metrics,
+                )
+                .expect("cell inside grid");
+            assert_eq!((cell.row, cell.col), (2, 3));
+            assert!(
+                pane.cell_under(expected, expected.min - egui::vec2(1.0, 1.0), &metrics)
+                    .is_none()
+            );
+            first_cell = Some(egui::Rect::from_min_size(
+                expected.min,
+                egui::vec2(metrics.width(), metrics.height()),
+            ));
+        });
+        let expected = first_cell.expect("measured");
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == Theme::default().color(term_core::TermColor::Indexed(1)) && rect.rect == expected)), "the colored first cell was not painted at the padded origin");
+        output.drop_without_applying_deltas();
+    }
+
+    #[test]
+    fn console_padding_yields_before_the_last_available_cell_in_collapsed_panes() {
+        let metrics = CellMetrics::of(8.0, 16.0);
+        let pane = pane_with("sleep 30", 0);
+        for (width, height, expected_width, expected_height) in [
+            (8.0, 16.0, 8.0, 16.0),
+            (18.0, 26.0, 8.0, 16.0),
+            (4.0, 6.0, 4.0, 6.0),
+        ] {
+            let area = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(width, height));
+            let inner = pane.console_within(
+                area,
+                &metrics,
+                SystemTime::now(),
+                header::Headers::NOT_PAINTED,
+            );
+            assert_eq!(inner.size(), egui::vec2(expected_width, expected_height));
+            assert!(area.contains_rect(inner));
+            assert!(inner.is_positive());
+        }
+    }
+
+    #[test]
+    fn a_console_with_no_published_panel_keeps_its_padded_rectangle() {
         let pane = pane_with("sleep 30", 0);
         let whole = area_of(800.0);
 
-        let panel_split = pane.tile_with_its_panel(whole, CELL_WIDTH, SystemTime::now());
+        let panel_split =
+            pane.tile_with_its_panel(whole, &CellMetrics::of(CELL_WIDTH, 16.0), SystemTime::now());
 
         assert_eq!(
-            panel_split.console, whole,
-            "with no panel nothing is discounted"
+            panel_split.console,
+            whole.shrink(8.0),
+            "with no panel only the console padding is discounted"
         );
         assert!(
             panel_split.panel.is_none(),
@@ -17247,7 +17343,7 @@ mod tests {
                 },
             );
             cut_along = pane
-                .tile_with_its_panel(whole, metrics.width(), SystemTime::now())
+                .tile_with_its_panel(whole, &metrics, SystemTime::now())
                 .console
                 .right();
         });
@@ -18288,7 +18384,7 @@ mod tests {
         // splitting tests stay **all** green, because they all split leaves hanging off the root.
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
-        let area = area_of_cells(100.0);
+        let area = area_of_cells(100.0).expand2(egui::vec2(0.0, 80.0));
 
         one_frame_in(&mut window, &ctx, area, chord_with(egui::Key::B));
         one_frame_in(&mut window, &ctx, area, the_chord_again(egui::Key::B));
@@ -18337,7 +18433,7 @@ mod tests {
             // leave neither of them pinning its own number.
             let bare = header::Headers::NOT_PAINTED;
             // Forty columns: the twenty that make a console usable, for each child.
-            let exact = 40.0 * metrics.width() + DIVIDER_THICKNESS;
+            let exact = 40.0 * metrics.width() + 32.0 + DIVIDER_THICKNESS;
             assert!(
                 can_split(area_of(exact), Orientation::Columns, metrics, bare),
                 "a pane where the two children and their divider fit exactly is not split"
@@ -18352,7 +18448,7 @@ mod tests {
             let height_of = |height| {
                 egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1000.0, height))
             };
-            let exact = 6.0 * metrics.height() + DIVIDER_THICKNESS;
+            let exact = 6.0 * metrics.height() + 32.0 + DIVIDER_THICKNESS;
             assert!(
                 can_split(height_of(exact), Orientation::Rows, metrics, bare),
                 "a pane where the two children and their divider fit exactly is not split below"
@@ -18378,7 +18474,7 @@ mod tests {
             let height_of = |height| {
                 egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1000.0, height))
             };
-            let two_consoles = 6.0 * metrics.height() + DIVIDER_THICKNESS;
+            let two_consoles = 6.0 * metrics.height() + 32.0 + DIVIDER_THICKNESS;
             let two_strips = 2.0 * header::height(metrics, header::Headers::PAINTED);
 
             assert!(
@@ -18428,7 +18524,7 @@ mod tests {
             // strip takes height; adding it to the column floor as well would refuse side-by-side
             // splits that fit perfectly, and the row assertions above would go on passing. Checked
             // by mutation: summing `header::height` into the `Columns` arm leaves them all green.
-            let exact = 40.0 * metrics.width() + DIVIDER_THICKNESS;
+            let exact = 40.0 * metrics.width() + 32.0 + DIVIDER_THICKNESS;
             assert!(
                 can_split(
                     area_of(exact),
@@ -18532,8 +18628,11 @@ mod tests {
         // pass with the defect inside.
         let cell_width = with_metrics(CellMetrics::width);
         let whole = window.active().root.place(area, cell_width).parts[0];
-        let panel_split =
-            window.active().panes()[0].tile_with_its_panel(whole, cell_width, SystemTime::now());
+        let panel_split = window.active().panes()[0].tile_with_its_panel(
+            whole,
+            &CellMetrics::of(cell_width, 16.0),
+            SystemTime::now(),
+        );
         assert!(
             panel_split.panel.is_some(),
             "the panel never got read, so the console keeps the whole pane"
@@ -18581,7 +18680,7 @@ mod tests {
         // about.** Each of the two children owes one, so a height that ignored them would sit below
         // the floor in **both** windows and the test would pass by refusing to split for a reason
         // that has nothing to do with the bar — the shape of a green that proves nothing.
-        let exact = 6.0 * height + 2.0 * strip + DIVIDER_THICKNESS + tab_bar / 2.0;
+        let exact = 6.0 * height + 2.0 * strip + 32.0 + DIVIDER_THICKNESS + tab_bar / 2.0;
         let area =
             egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(100.0 * width, exact));
 
@@ -18891,7 +18990,7 @@ mod tests {
         let ctx = egui::Context::default();
         for key in [egui::Key::D, egui::Key::B] {
             let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
-            let area = area_of_cells(200.0);
+            let area = area_of_cells(200.0).expand2(egui::vec2(0.0, 80.0));
             let mut held = chord_with(key);
             for _ in 0..3 {
                 held.push(egui::Event::Key {
@@ -21606,7 +21705,11 @@ mod tests {
         let cell_width = with_metrics(CellMetrics::width);
         let its_area = window.active().root.place(area, cell_width).parts[which];
         match window.active().panes()[which]
-            .tile_with_its_panel(its_area, cell_width, SystemTime::now())
+            .tile_with_its_panel(
+                its_area,
+                &CellMetrics::of(cell_width, 16.0),
+                SystemTime::now(),
+            )
             .panel
         {
             Some(panel_rect) => panel_rect.left(),
@@ -21737,15 +21840,19 @@ mod tests {
         let cell = with_metrics(CellMetrics::width);
         let its_area = window.active().root.place(area, cell).parts[0];
         assert!(window.active().panes()[0].folded, "it did not fold");
-        let panel_split =
-            window.active().panes()[0].tile_with_its_panel(its_area, cell, SystemTime::now());
+        let panel_split = window.active().panes()[0].tile_with_its_panel(
+            its_area,
+            &CellMetrics::of(cell, 16.0),
+            SystemTime::now(),
+        );
         assert!(
             panel_split.panel.is_none(),
             "folded, room is still being reserved for the panel"
         );
         assert_eq!(
-            panel_split.console, its_area,
-            "folded, the console did not keep the whole rectangle of its pane"
+            panel_split.console,
+            its_area.shrink(8.0),
+            "folded, the console keeps its pane apart from inner padding"
         );
 
         // **And the return journey, pulling on the handle that stays stuck to the edge.** Without
@@ -21854,14 +21961,14 @@ mod tests {
         let cell = with_metrics(CellMetrics::width);
         let its_area = window.active().root.place(area, cell).parts[0];
         let factory = window.active().panes()[0]
-            .tile_with_its_panel(its_area, cell, SystemTime::now())
+            .tile_with_its_panel(its_area, &CellMetrics::of(cell, 16.0), SystemTime::now())
             .panel
             .expect("there is a panel")
             .width();
 
         window.active_mut().panes_mut()[0].panel_width = 12;
         let custom = window.active().panes()[0]
-            .tile_with_its_panel(its_area, cell, SystemTime::now())
+            .tile_with_its_panel(its_area, &CellMetrics::of(cell, 16.0), SystemTime::now())
             .panel
             .expect("there is a panel")
             .width();
@@ -21941,8 +22048,11 @@ mod tests {
 
         let cell = with_metrics(CellMetrics::width);
         let its_area = window.active().root.place(area, cell).parts[0];
-        let panel_split =
-            window.active().panes()[0].tile_with_its_panel(its_area, cell, SystemTime::now());
+        let panel_split = window.active().panes()[0].tile_with_its_panel(
+            its_area,
+            &CellMetrics::of(cell, 16.0),
+            SystemTime::now(),
+        );
         let painted = panel_split.panel.expect("there is a panel").width() / cell;
         assert!(
             painted < panel::DEFAULT_WIDTH as f32,
@@ -21979,7 +22089,8 @@ mod tests {
 
         let cell = with_metrics(CellMetrics::width);
         let its_area = window.active().root.place(area, cell).parts[0];
-        let of_the_pane = with_metrics(|m| m.cells_in(its_area.size()).cols) as usize;
+        let of_the_pane =
+            with_metrics(|m| m.cells_in(its_area.size() - egui::vec2(16.0, 0.0)).cols) as usize;
         let fits = of_the_pane - panel::MINIMUM_CONSOLE as usize;
         assert_eq!(
             window.active().panes()[0].panel_width,
@@ -22007,8 +22118,11 @@ mod tests {
 
         let cell = with_metrics(CellMetrics::width);
         let its_area = window.active().root.place(area, cell).parts[0];
-        let panel_split =
-            window.active().panes()[0].tile_with_its_panel(its_area, cell, SystemTime::now());
+        let panel_split = window.active().panes()[0].tile_with_its_panel(
+            its_area,
+            &CellMetrics::of(cell, 16.0),
+            SystemTime::now(),
+        );
         assert_eq!(
             panel_split
                 .panel
@@ -22090,7 +22204,11 @@ mod tests {
                 .find(|(_, pane)| pane.name == moved)
                 .expect("the console is still alive");
             let width = pane
-                .tile_with_its_panel(tiling.parts[which], cell, SystemTime::now())
+                .tile_with_its_panel(
+                    tiling.parts[which],
+                    &CellMetrics::of(cell, 16.0),
+                    SystemTime::now(),
+                )
                 .panel
                 .expect("its panel still has room")
                 .width();
@@ -22390,13 +22508,13 @@ mod tests {
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
         let cell = with_metrics(CellMetrics::width);
         // Each pane keeps the console's floor plus a hair: the panel has two points to spare.
-        let area = area_of(2.0 * (panel::MINIMUM_CONSOLE * cell + 1.0) + DIVIDER_THICKNESS);
+        let area = area_of(2.0 * (panel::MINIMUM_CONSOLE * cell + 16.0 + 1.0) + DIVIDER_THICKNESS);
         with_the_panel_in_place(&mut window, 0, r#"{"lines":["working"]}"#);
         one_frame_in(&mut window, &ctx, area, Vec::new());
 
         let its_area = window.active().root.place(area, cell).parts[0];
         let panel_width = window.active().panes()[0]
-            .tile_with_its_panel(its_area, cell, SystemTime::now())
+            .tile_with_its_panel(its_area, &CellMetrics::of(cell, 16.0), SystemTime::now())
             .panel
             .expect("the panel's rectangle exists")
             .width();
@@ -22448,7 +22566,7 @@ mod tests {
         let cell = with_metrics(CellMetrics::width);
         let its_area = window.active().root.place(area, cell).parts[0];
         let painted = window.active().panes()[0]
-            .tile_with_its_panel(its_area, cell, SystemTime::now())
+            .tile_with_its_panel(its_area, &CellMetrics::of(cell, 16.0), SystemTime::now())
             .panel
             .expect("there is a panel")
             .width()
@@ -23156,7 +23274,7 @@ mod tests {
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
         let cell = with_metrics(CellMetrics::width);
         // The panel has two points to spare: more than zero, less than the grip.
-        let area = area_of(2.0 * (panel::MINIMUM_CONSOLE * cell + 1.0) + DIVIDER_THICKNESS);
+        let area = area_of(2.0 * (panel::MINIMUM_CONSOLE * cell + 16.0 + 1.0) + DIVIDER_THICKNESS);
         with_the_panel_in_place(&mut window, 0, r#"{"lines":["working"]}"#);
         // The batch has to ask for gestures, because that is the only thing that stores what was
         // painted.
@@ -23165,7 +23283,7 @@ mod tests {
 
         let its_area = window.active().root.place(area, cell).parts[0];
         let width = window.active().panes()[0]
-            .tile_with_its_panel(its_area, cell, SystemTime::now())
+            .tile_with_its_panel(its_area, &CellMetrics::of(cell, 16.0), SystemTime::now())
             .panel
             .expect("the panel's rectangle exists")
             .width();

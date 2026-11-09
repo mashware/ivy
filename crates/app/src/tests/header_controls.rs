@@ -143,11 +143,8 @@ mod tests {
         let metrics = warmed(&mut window, &ctx, area);
         let focus = window.active().focus;
         let rect = parts(&window, area, &metrics)[1];
-        let before = window.active().panes()[1].tile_with_its_panel(
-            rect,
-            metrics.width(),
-            SystemTime::now(),
-        );
+        let before =
+            window.active().panes()[1].tile_with_its_panel(rect, &metrics, SystemTime::now());
         let panel_before = before
             .panel
             .expect("a real published document occupies a panel");
@@ -165,7 +162,7 @@ mod tests {
         assert!(!the_text_queued_up(&hidden, "retained-panel-marker"));
         assert!(
             window.active().panes()[1]
-                .tile_with_its_panel(rect, metrics.width(), SystemTime::now())
+                .tile_with_its_panel(rect, &metrics, SystemTime::now())
                 .panel
                 .is_none()
         );
@@ -185,7 +182,7 @@ mod tests {
             "the document disappeared instead of being hidden"
         );
         let panel_after = window.active().panes()[1]
-            .tile_with_its_panel(rect, metrics.width(), SystemTime::now())
+            .tile_with_its_panel(rect, &metrics, SystemTime::now())
             .panel
             .expect("the second press restores the panel");
         assert_eq!(
@@ -236,7 +233,7 @@ mod tests {
         assert_eq!(parts(&window, area, &metrics), before);
         assert!(
             window.active().panes()[0]
-                .tile_with_its_panel(before[0], metrics.width(), SystemTime::now())
+                .tile_with_its_panel(before[0], &metrics, SystemTime::now())
                 .panel
                 .is_none(),
             "the held press toggled the panel more than once"
@@ -555,21 +552,21 @@ mod tests {
         let metrics = warmed(&mut window, &ctx, area);
         let rect = parts(&window, area, &metrics)[1];
         let before = window.active().panes()[1]
-            .tile_with_its_panel(rect, metrics.width(), SystemTime::now())
+            .tile_with_its_panel(rect, &metrics, SystemTime::now())
             .panel
             .expect("an unreadable document still paints its warning");
         let at = target(&window, area, 1, &metrics, Hit::Action(Action::TogglePanel));
         one_frame_in(&mut window, &ctx, area, click_at(at));
         assert!(
             window.active().panes()[1]
-                .tile_with_its_panel(rect, metrics.width(), SystemTime::now())
+                .tile_with_its_panel(rect, &metrics, SystemTime::now())
                 .panel
                 .is_none()
         );
         one_frame_in(&mut window, &ctx, area, click_at(at));
         assert_eq!(
             window.active().panes()[1]
-                .tile_with_its_panel(rect, metrics.width(), SystemTime::now())
+                .tile_with_its_panel(rect, &metrics, SystemTime::now())
                 .panel,
             Some(before)
         );
@@ -626,7 +623,7 @@ mod tests {
         let rect = parts(&window, area, &metrics)[1];
         assert!(
             window.active().panes()[1]
-                .tile_with_its_panel(rect, metrics.width(), SystemTime::now())
+                .tile_with_its_panel(rect, &metrics, SystemTime::now())
                 .panel
                 .is_none()
         );

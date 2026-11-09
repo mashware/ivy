@@ -167,7 +167,7 @@ impl Pane {
     pub(crate) fn tile_with_its_panel(
         &self,
         rect: egui::Rect,
-        cell_width: f32,
+        metrics: &CellMetrics,
         now: SystemTime,
     ) -> panel::PanelTiling {
         // **The width comes from the pane itself, and that is what keeps the two callers in
@@ -176,14 +176,15 @@ impl Pane {
         // and a background console would again be measured with a width that is not its own — the
         // defect that already cost 36 columns.
         //
-        // **Folded asks for no width, and that is why folding leaves the console the whole
-        // rectangle**: it is the same path a pane whose producer has published nothing goes down,
-        // so the two look alike without there being two ways of having no panel.
-        panel::set_aside(
+        // Folding and an unpublished panel leave the same outer console rectangle; both still
+        // reserve inner padding before grid sizing, painting and pointer coordinates use it.
+        let mut split = panel::set_aside(
             rect,
-            cell_width,
+            metrics.width(),
             (!self.folded && self.panel_state.is_visible(now)).then_some(self.panel_width),
-        )
+        );
+        split.console = metrics.console_in(split.console);
+        split
     }
 
     /// How a pane's rectangle is shared out between its strip, its console and its panel.
@@ -214,7 +215,7 @@ impl Pane {
         PaneChrome {
             header,
             below,
-            split: self.tile_with_its_panel(below, metrics.width(), now),
+            split: self.tile_with_its_panel(below, metrics, now),
         }
     }
 
@@ -356,7 +357,9 @@ impl Pane {
         // almost a thousand cells and **lets through** a width no real window is going to have.
         // What really stops that from being saved is the guard below: a drag demands that the
         // pointer has moved, and in those first two frames there is nobody dragging.
-        let fits = metrics.cells_in(pane_area.size()).cols as usize;
+        let fits = metrics
+            .cells_in(pane_area.size() - egui::vec2(2.0 * crate::painter::CONSOLE_PADDING, 0.0))
+            .cols as usize;
         let ceiling = fits
             .saturating_sub(panel::MINIMUM_CONSOLE as usize)
             .max(panel::DRAG_FLOOR);
