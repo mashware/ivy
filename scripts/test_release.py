@@ -101,6 +101,34 @@ class ReleaseTest(unittest.TestCase):
         self.package.write_bytes(b"tampered")
         self.assertNotEqual(lines[0].split("  ")[0], hashlib.sha256(self.package.read_bytes()).hexdigest())
 
+    def test_embedded_font_terms_are_preserved_separately_from_crate_license(self):
+        source = self.root / "fonts-source"
+        (source / "fonts").mkdir(parents=True)
+        names = ("OFL.txt", "UFL.txt", "Hack-Regular.txt", "emoji-icon-font-mit-license.txt")
+        for name in names:
+            (source / "fonts" / name).write_bytes(name.encode() + b" original terms\r\n")
+        package = {"id": "fonts", "name": "epaint_default_fonts", "version": "0.36.1",
+                   "source": "registry+x", "manifest_path": str(source / "Cargo.toml"),
+                   "license": "(MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0"}
+        metadata = {"packages": [{"id": name, "name": name, "source": None}
+                                 for name in ("app", "panel-control")] + [package],
+                    "workspace_members": ["app", "panel-control"], "resolve": {"nodes": [
+                        {"id": "app", "deps": [{"pkg": "fonts", "dep_kinds": [{"kind": None}]}]},
+                        {"id": "panel-control", "deps": []}, {"id": "fonts", "deps": []}]}}
+        collect = run_path(str(SCRIPT))["notices"]
+        path = self.root / "metadata.json"
+        path.write_text(json.dumps(metadata))
+        output = self.root / "notices"
+        collect(path, output)
+        dest = output / "epaint_default_fonts-0.36.1"
+        for name in names:
+            self.assertEqual((dest / "fonts" / name).read_bytes(), (source / "fonts" / name).read_bytes())
+        canonical = SCRIPT.parent.parent / "vendor/egui-winit/LICENSE-APACHE"
+        self.assertEqual((dest / "SPDX-FALLBACK-APACHE-2.0").read_bytes(), canonical.read_bytes())
+        (source / "fonts" / "UFL.txt").unlink()
+        with self.assertRaisesRegex(ValueError, "missing notice for epaint_default_fonts"):
+            collect(path, self.root / "missing")
+
     def test_wrong_tag_missing_empty_and_extra_artifacts_fail(self):
         self.assertNotEqual(self.run_release("--tag", "v0.1.0").returncode, 0)
         self.package.unlink()

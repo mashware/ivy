@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Inspect the exact package without installing it. Pass its path and the release version.
+# Inspect the exact package; optionally compare all prepared dependency notices byte for byte.
 set -euo pipefail
-[[ $# == 2 ]] || { echo 'Usage: scripts/test-linux-package.sh PACKAGE VERSION' >&2; exit 2; }
+[[ $# == 2 || $# == 3 ]] || { echo 'Usage: scripts/test-linux-package.sh PACKAGE VERSION [NOTICES_DIR]' >&2; exit 2; }
 package=$(realpath "$1")
 version=${2/-/\~}
 [[ $(basename "$package") == "ivy_${version}_amd64.deb" ]]
@@ -36,6 +36,10 @@ for file in LICENSE COPYRIGHT THIRD-PARTY.md vendor/egui-winit/LICENSE-MIT \
     [[ -s $doc/$file ]]
 done
 [[ -d $doc/cargo && -n $(ls -A "$doc/cargo") ]]
+for file in "$doc"/cargo/epaint_default_fonts-*/fonts/{OFL.txt,UFL.txt,Hack-Regular.txt,emoji-icon-font-mit-license.txt}; do
+    [[ -s $file ]]
+done
+if [[ $# == 3 ]]; then diff -r "$3" "$doc/cargo"; fi
 # User data is never package-owned or removed by a maintainer script.
 [[ ! -e $tmp/root/home && ! -e $tmp/root/root ]]
 for script in preinst postinst prerm postrm; do [[ ! -e $tmp/control/$script ]]; done

@@ -65,7 +65,7 @@ cargo metadata --locked --filter-platform x86_64-unknown-linux-gnu --format-vers
 python3 scripts/release.py notices --metadata target/release-metadata.json --directory target/release/notices
 version=$(python3 scripts/release.py version)
 scripts/package-linux.sh --binary-dir target/release --output-dir dist --version "$version"
-scripts/test-linux-package.sh dist/*.deb "$version"
+scripts/test-linux-package.sh dist/*.deb "$version" target/release/notices
 python3 scripts/release.py generate --directory dist --commit "$(git rev-parse HEAD)" --built-on ubuntu-24.04
 (cd dist && sha256sum --check SHA256SUMS)
 ```

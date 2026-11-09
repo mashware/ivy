@@ -99,11 +99,19 @@ def notices(metadata, directory):
         if package.get("license_file"):
             file = Path(package["license_file"])
             files.add(file if file.is_absolute() else root / file)
+        # This crate embeds four fonts whose original terms have nonstandard names.
+        font_assets = package["name"] == "epaint_default_fonts"
+        if font_assets:
+            files.update(root / "fonts" / name for name in (
+                "OFL.txt", "UFL.txt", "Hack-Regular.txt", "emoji-icon-font-mit-license.txt"))
         if any(not file.is_file() for file in files):
             raise ValueError(f"missing notice for {package['name']} {package['version']}")
-        has_license = any(re.match(r"^(?:licen[sc]e|copying|ofl)(?:$|[._-])", file.name, re.I)
+        has_license = any(file.parent == root and
+                          re.match(r"^(?:licen[sc]e|copying|ofl)(?:$|[._-])", file.name, re.I)
                           for file in files) or bool(package.get("license_file"))
-        fallback = not has_license and package.get("license") in ("Apache-2.0", "MIT OR Apache-2.0")
+        declared = package.get("license")
+        fallback = not has_license and (declared in ("Apache-2.0", "MIT OR Apache-2.0") or
+                   (font_assets and declared == "(MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0"))
         if not has_license and not fallback:
             raise ValueError(f"missing notice for {package['name']} {package['version']}")
         dest = directory / f"{package['name']}-{package['version']}"
