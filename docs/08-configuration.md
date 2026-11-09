@@ -657,9 +657,11 @@ A recognized, enabled client shows its mark beside the pane title. Explicit work
 
 | Client version examined | Signal source | Setup | Live interoperability |
 |---|---|---|---|
-| Codex 0.167.0 | Native root OSC7501 | Enable in Ivy; review title selection below | Not yet verified |
-| Claude Code 2.1.319 | Native root OSC7501 after capability reply | Enable in Ivy; leave terminal titles enabled | Not yet verified |
-| OpenCode 1.18.31 | Official TUI plugin, visible route and local SDK lists | Explicit plugin installation and preserving `tui.json` edit | Not yet verified |
+| Codex 0.167.0 | Native root OSC7501 | Enable in Ivy; review title selection below | Linux: permission approved once; Plan-mode question answered; native clear on quit |
+| Claude Code 2.1.319 | Native root OSC7501 after capability reply | Enable in Ivy; leave terminal titles enabled | Linux: question answered; permission canceled; native clear on exit |
+| OpenCode 1.18.31 | Official TUI plugin, visible route and local SDK lists | Explicit plugin installation and preserving `tui.json` edit | Linux: permission approved once; questions answered/canceled; independent waits in two panes; null on quit |
+
+These installed-client paths were exercised on Linux on 2026-11-09. Codex's native declarations were captured from its official TUI in a standalone pseudoterminal. Claude and OpenCode were also exercised inside Ivy: screenshots confirmed pane/tab attention, and OpenCode's background-tab withdrawal and two-session isolation used one server and directory. Synthetic protocol/producer fixtures cover additional ordering, failure and concurrent-request cases; those are not additional live-client claims. Other versions and platforms remain unverified.
 
 “Enabled” is a preference; an observed declaration is evidence of receipt. Neither proves the complete permission/question lifecycle or compatibility with a different version. Unknown clients retain their ordinary titles and show no invented identity. An absent native cleanup can leave the last claim visible: after thirty minutes without a new declaration it is dimmed and its animation stops. Silence, a keypress and viewing a tab never mean a question was answered. Unexpected OpenCode disconnection or incomplete refresh immediately dims its preceding wait; a fresh complete snapshot can confirm or replace it. After a TUI connection ends, a new native client declaration can replace its unconfirmed metadata; a probe or untagged clear alone cannot.
 

@@ -443,7 +443,7 @@ fn body(guide: &mut Guide, ui: &mut egui::Ui) {
     egui::CollapsingHeader::new("Agent activity and input signals")
         .default_open(false)
         .show(ui, |ui| {
-    ui.label("Explicit activation is required. Source behavior was checked for the versions below; live integration remains unverified.");
+    ui.label("Explicit activation is required. Permission and question lifecycles were verified on Linux for the versions below; other versions and platforms remain unverified.");
     ui.label(format!(
         "Observed declarations: Codex {}, Claude {}, OpenCode {} (including stale).",
         published.observed[0], published.observed[1], published.observed[2]
