@@ -87,6 +87,36 @@ const SOURCES: &[(&str, &str, usize)] = &[
         0,
     ),
     (
+        "src/chrome/connection/tests.rs",
+        include_str!("../src/chrome/connection/tests.rs"),
+        0,
+    ),
+    (
+        "src/control/applying.rs",
+        include_str!("../src/control/applying.rs"),
+        29,
+    ),
+    (
+        "src/agent_setup.rs",
+        include_str!("../src/agent_setup.rs"),
+        1,
+    ),
+    (
+        "src/agent_signals.rs",
+        include_str!("../src/agent_signals.rs"),
+        1,
+    ),
+    (
+        "src/agent_signals/logos.rs",
+        include_str!("../src/agent_signals/logos.rs"),
+        1,
+    ),
+    (
+        "src/tests/agent_signals.rs",
+        include_str!("../src/tests/agent_signals.rs"),
+        1,
+    ),
+    (
         "src/chrome/typography.rs",
         include_str!("../src/chrome/typography.rs"),
         1,
@@ -417,7 +447,7 @@ const SOURCES: &[(&str, &str, usize)] = &[
     ),
     ("src/alarms.rs", include_str!("../src/alarms.rs"), 133),
     ("src/closing.rs", include_str!("../src/closing.rs"), 115),
-    ("src/control.rs", include_str!("../src/control.rs"), 362),
+    ("src/control.rs", include_str!("../src/control.rs"), 358),
     (
         "src/control/retiring.rs",
         include_str!("../src/control/retiring.rs"),
@@ -536,7 +566,7 @@ const SOURCES: &[(&str, &str, usize)] = &[
     (
         "src/pty_output.rs",
         include_str!("../src/pty_output.rs"),
-        456,
+        521,
     ),
     ("src/watcher.rs", include_str!("../src/watcher.rs"), 203),
     ("src/theme.rs", include_str!("../src/theme.rs"), 202),

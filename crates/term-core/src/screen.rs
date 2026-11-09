@@ -1,6 +1,36 @@
 //! The terminal state: bytes are interpreted and settle into a grid.
 
-mod directory;
+mod metadata;
+
+/// Native application publishing terminal metadata.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProgramClient {
+    Claude,
+    Codex,
+}
+/// Lifecycle explicitly declared by the application.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProgramState {
+    Idle,
+    Working,
+    Blocked,
+    Done,
+    Error,
+}
+/// Declared reason for requiring input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProgramKind {
+    Permission,
+    Question,
+    Auth,
+}
+/// The latest root declaration; it is not an authenticated identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProgramSnapshot {
+    pub client: ProgramClient,
+    pub state: ProgramState,
+    pub kind: Option<ProgramKind>,
+}
 
 use alacritty_terminal::Term;
 use alacritty_terminal::grid::{Dimensions, Grid, Scroll as GridScroll};
@@ -62,7 +92,7 @@ pub struct Screen {
     parser: Processor,
     titles: title::Listener,
     terminal_title: Option<String>,
-    directory: directory::Directory,
+    directory: metadata::Metadata,
 }
 
 /// A cell of the **visible** grid, and which half of it is being talked about.
@@ -233,7 +263,7 @@ impl Screen {
             parser: Processor::new(),
             titles,
             terminal_title: None,
-            directory: directory::Directory::default(),
+            directory: metadata::Metadata::default(),
         }
     }
 
@@ -268,7 +298,7 @@ impl Screen {
     /// title events update it; a silent process exit does not clear it.
     /// Whether a file URI authority names this machine.
     pub fn is_local_file_host(host: &str) -> bool {
-        directory::is_local_host(host.as_bytes())
+        metadata::is_local_host(host.as_bytes())
     }
 
     /// Whether this screen has received an OSC 7 directory report, including an unusable one.
@@ -287,6 +317,32 @@ impl Screen {
 
     pub fn terminal_title(&self) -> Option<&str> {
         self.terminal_title.as_deref()
+    }
+
+    /// Enable native clients before feeding output; disabling the active client withdraws it.
+    pub fn set_program_clients(&mut self, claude: bool, codex: bool) {
+        self.directory.enabled_claude = claude;
+        self.directory.enabled_codex = codex;
+        if self.directory.program.is_some_and(|s| match s.client {
+            ProgramClient::Claude => !claude,
+            ProgramClient::Codex => !codex,
+        }) {
+            self.directory.program = None;
+            self.directory.program_generation = self.directory.program_generation.wrapping_add(1);
+        }
+    }
+
+    /// Latest valid native declaration.
+    pub fn program_snapshot(&self) -> Option<ProgramSnapshot> {
+        self.directory.program
+    }
+    /// Revision of completed native declarations, clears and resets.
+    pub fn program_generation(&self) -> u64 {
+        self.directory.program_generation
+    }
+    /// Take coalesced capability probes since the previous call.
+    pub fn take_program_query(&mut self) -> bool {
+        std::mem::take(&mut self.directory.query)
     }
 
     /// Changes the grid's size and reflows its content.

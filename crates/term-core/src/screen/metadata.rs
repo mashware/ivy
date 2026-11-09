@@ -1,13 +1,18 @@
-//! Bounded OSC 7 metadata, independent of terminal painting.
+//! Bounded OSC metadata, independent of terminal painting.
 use std::path::{Path, PathBuf};
 
 #[derive(Default)]
-pub(super) struct Directory {
+pub(super) struct Metadata {
     state: State,
     data: Vec<u8>,
     path: Option<PathBuf>,
     reported: bool,
     generation: u64,
+    pub(super) program: Option<super::ProgramSnapshot>,
+    pub(super) program_generation: u64,
+    pub(super) query: bool,
+    pub(super) enabled_claude: bool,
+    pub(super) enabled_codex: bool,
 }
 #[derive(Default)]
 enum State {
@@ -21,7 +26,7 @@ enum State {
     String,
     StringEscape,
 }
-impl Directory {
+impl Metadata {
     pub(super) fn path(&self) -> Option<&Path> {
         self.path.as_deref()
     }
@@ -58,6 +63,9 @@ impl Directory {
                     b'P' | b'_' | b'^' | b'X' => State::String,
                     0x1b => State::Escape,
                     b'c' => {
+                        self.program = None;
+                        self.query = false;
+                        self.program_generation = self.program_generation.wrapping_add(1);
                         self.path = None;
                         self.reported = false;
                         self.generation = self.generation.wrapping_add(1);
@@ -120,6 +128,24 @@ impl Directory {
         }
     }
     fn finish(&mut self) {
+        if let Some(payload) = self.data.strip_prefix(b"7501;") {
+            if payload == b"?" {
+                self.query = true;
+            } else if let Some(value) = parse_program(payload) {
+                if let Some(snapshot) = value {
+                    let enabled = match snapshot.client {
+                        super::ProgramClient::Claude => self.enabled_claude,
+                        super::ProgramClient::Codex => self.enabled_codex,
+                    };
+                    if !enabled {
+                        return;
+                    }
+                }
+                self.program = value;
+                self.program_generation = self.program_generation.wrapping_add(1);
+            }
+            return;
+        }
         let Some(uri) = self.data.strip_prefix(b"7;") else {
             return;
         };
@@ -162,6 +188,65 @@ impl Directory {
         }
     }
 }
+
+fn parse_program(payload: &[u8]) -> Option<Option<super::ProgramSnapshot>> {
+    use super::{
+        ProgramClient as Client, ProgramKind as Kind, ProgramSnapshot, ProgramState as State,
+    };
+    let mut state = None;
+    let mut client = None;
+    let mut kind = None;
+    for field in payload.split(|b| *b == b':') {
+        let at = field.iter().position(|b| *b == b'=')?;
+        let (key, value) = (&field[..at], &field[at + 1..]);
+        if value.is_empty() {
+            return None;
+        }
+        match key {
+            b"state" if state.is_none() => {
+                state = Some(match value {
+                    b"clear" => None,
+                    b"idle" => Some(State::Idle),
+                    b"working" => Some(State::Working),
+                    b"blocked" => Some(State::Blocked),
+                    b"done" => Some(State::Done),
+                    b"error" => Some(State::Error),
+                    _ => return None,
+                })
+            }
+            b"app" if client.is_none() => {
+                client = Some(match value {
+                    b"claude-code" => Client::Claude,
+                    b"codex" => Client::Codex,
+                    _ => return None,
+                })
+            }
+            b"kind" if kind.is_none() => {
+                kind = Some(match value {
+                    b"permission" => Kind::Permission,
+                    b"question" => Kind::Question,
+                    b"auth" => Kind::Auth,
+                    _ => return None,
+                })
+            }
+            // Child declarations are never root declarations, even when clearing.
+            b"id" => return None,
+            // Optional details are opaque and bounded by the scanner; never displayed or retained.
+            b"msg" | b"title" | b"progress" => {}
+            _ => return None,
+        }
+    }
+    match state? {
+        None if client.is_none() && kind.is_none() => Some(None),
+        Some(state) if kind.is_none() || state == State::Blocked => Some(Some(ProgramSnapshot {
+            client: client?,
+            state,
+            kind,
+        })),
+        _ => None,
+    }
+}
+
 /// Only an empty authority, localhost, or the operating system's own hostname is local.
 pub(super) fn is_local_host(host: &[u8]) -> bool {
     if host.is_empty() || host.eq_ignore_ascii_case(b"localhost") {
@@ -189,6 +274,73 @@ pub(super) fn is_local_host(host: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_snapshots_survive_every_chunk_boundary_and_replace_wait() {
+        use super::super::{ProgramClient, ProgramKind, ProgramState};
+        let frame = b"\x1b]7501;state=blocked:app=claude-code:kind=question\x1b\\";
+        for cut in 0..=frame.len() {
+            let mut screen = crate::Screen::new(crate::Size { rows: 2, cols: 30 });
+            screen.set_program_clients(true, true);
+            screen.advance(&frame[..cut]);
+            screen.advance(&frame[cut..]);
+            let snapshot = screen.program_snapshot().unwrap();
+            assert_eq!(
+                (snapshot.client, snapshot.state, snapshot.kind),
+                (
+                    ProgramClient::Claude,
+                    ProgramState::Blocked,
+                    Some(ProgramKind::Question)
+                )
+            );
+            screen.advance(b"\x1b]7501;state=idle:app=codex\x07");
+            assert_eq!(screen.program_snapshot().unwrap().state, ProgramState::Idle);
+            assert_eq!(screen.program_generation(), 2);
+            screen.advance(b"\x1b]7501;state=clear\x07");
+            assert_eq!(screen.program_snapshot(), None);
+        }
+    }
+
+    #[test]
+    fn native_rejects_children_invalid_strings_and_coalesces_queries() {
+        let mut screen = crate::Screen::new(crate::Size { rows: 2, cols: 30 });
+        screen.set_program_clients(true, true);
+        screen.advance(b"\x1b]7501;state=working:app=codex\x07");
+        let before = screen.program_snapshot();
+        for invalid in [
+            b"\x1b]7501;state=clear:id=child\x07".as_slice(),
+            b"\x1b]7501;state=blocked:app=codex:kind=unknown\x07",
+            b"\x1b]7501;state=working:app=unknown\x07",
+            b"\x1bP\x1b]7501;state=clear\x07\x1b\\",
+            b"\x1b]7501;state=clear\x18",
+        ] {
+            screen.advance(invalid);
+            assert_eq!(screen.program_snapshot(), before);
+        }
+        screen.advance(b"\x1b]7501;?\x07\x1b]7501;?\x1b\\");
+        assert!(screen.take_program_query());
+        assert!(!screen.take_program_query());
+        screen.advance(b"\x1bc");
+        assert_eq!(screen.program_snapshot(), None);
+        assert_eq!(screen.program_generation(), 2);
+    }
+
+    #[test]
+    fn disabled_sources_do_not_replace_enabled_sources_in_the_same_batch() {
+        let mut screen = crate::Screen::new(crate::Size { rows: 2, cols: 30 });
+        screen.advance(b"\x1b]7501;state=working:app=codex\x07");
+        assert!(screen.program_snapshot().is_none());
+        screen.set_program_clients(false, true);
+        screen.advance(b"\x1b]7501;state=working:app=codex\x07\x1b]7501;state=blocked:app=claude-code:kind=question\x07");
+        assert_eq!(
+            screen.program_snapshot().unwrap().client,
+            super::super::ProgramClient::Codex
+        );
+        let generation = screen.program_generation();
+        screen.set_program_clients(false, false);
+        assert!(screen.program_snapshot().is_none());
+        assert_eq!(screen.program_generation(), generation + 1);
+    }
+
     #[test]
     fn repeated_directory_reports_and_resets_advance_the_observation() {
         let mut screen = crate::Screen::new(crate::Size { rows: 2, cols: 30 });
@@ -225,7 +377,7 @@ mod tests {
     }
     #[test]
     fn chunks_and_rejections() {
-        let mut d = Directory::default();
+        let mut d = Metadata::default();
         for b in b"\x1b]7;file://localhost/tmp/a%20b\x1b\\" {
             d.advance(&[*b]);
         }
@@ -241,7 +393,7 @@ mod tests {
     }
     #[test]
     fn ignores_nested_strings_oversized_and_malformed_sequences() {
-        let mut d = Directory::default();
+        let mut d = Metadata::default();
         d.advance(b"\x1bPpayload\x07\x1b]7;file:///evil\x07\x1b\\");
         assert_eq!(d.path(), None);
         d.advance(b"\x1b]7;file:///");
@@ -263,7 +415,7 @@ mod tests {
         );
         let end = name.iter().position(|b| *b == 0).unwrap();
         let host = std::str::from_utf8(&name[..end]).unwrap();
-        let mut d = Directory::default();
+        let mut d = Metadata::default();
         d.advance(format!("\x1b]7;file://{host}/local\x07").as_bytes());
         assert_eq!(d.path(), Some(Path::new("/local")));
         d.advance(b"\x1b]7;file://definitely-a-different-host.invalid/remote\x07");
@@ -274,7 +426,7 @@ mod tests {
     fn accepts_windows_session_hostname_but_not_a_different_host() {
         let name = std::env::var("COMPUTERNAME").expect("Windows session computer name");
         assert!(!name.is_empty());
-        let mut d = Directory::default();
+        let mut d = Metadata::default();
         d.advance(format!("\x1b]7;file://{name}/C:/work\x07").as_bytes());
         assert_eq!(d.path(), Some(Path::new("/C:/work")));
         d.advance(b"\x1b]7;file://different-host.invalid/C:/work\x07");

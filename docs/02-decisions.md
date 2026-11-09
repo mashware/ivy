@@ -8904,10 +8904,14 @@ pane-local register; untagged clear withdraws that register only. It does not id
 sessions sharing a PTY or authenticate a client. Missing cleanup remains stale information,
 never an inferred answer or successful completion. Disabled integrations consume no signal.
 
-Claude/OpenCode use official hooks or plugin events where the tested version provides enough
-root-session association, ordering and request-resolution evidence. Their concrete contracts must
+Claude Code 2.1.319 uses the same native root snapshot protocol after an explicit capability
+reply; that negotiation also removes its duplicate title activity prefix. OpenCode 1.18.31 uses
+an official TUI plugin scoped by the visible route and authoritative local SDK pending lists,
+with complete snapshots serialized on a separate connection. Their concrete contracts must
 be verified before adapter code and their supported behavior proved with the real client before
-being advertised. A short-lived hook connection ending is not the harness session ending.
+being advertised. A connection ending is loss of its reporter, not proof that a question was answered; retain
+its last wait as stale/unconfirmed. A connection alone cannot take presentation authority: a
+complete eligible snapshot is required. Incomplete child/pending hydration cannot publish a clear.
 No transcript reader, process-name recognizer, generic daemon or automatic client-config editor
 is introduced. The guide exposes reviewed setup instructions and preserves existing hooks.
 
@@ -8924,7 +8928,8 @@ They reuse the existing preserving save/apply boundary rather than a second conf
 The console number remains unchanged.
 
 **Discarded.** Forced hooks for Codex duplicate a more precise native source. A custom OSC for
-all hooks assumes terminal access Claude explicitly disallows. Changing only title font sizes
+all hooks assumes terminal access command hooks may lack. Directory-wide OpenCode server
+events do not identify which session the person is looking at, so they cannot replace TUI state. Changing only title font sizes
 while retaining fixed strip heights clips text and separates paint from input. Machine-only
 proportional fallback leaves the reported braille fix dependent on installed fonts.
 

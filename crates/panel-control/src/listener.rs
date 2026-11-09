@@ -22,7 +22,7 @@ use interprocess::local_socket::{Stream, prelude::*};
 use panel_contract::{Dropped, Panel, Patch};
 
 use crate::endpoint;
-use crate::wire::{Framing, Incoming, Reply, Request, Side, write_reply};
+use crate::wire::{AgentSnapshot, Framing, Incoming, Reply, Request, Side, write_reply};
 
 /// How long a publication waits for the window to take it.
 ///
@@ -88,6 +88,8 @@ pub struct Delivery {
 /// The things a connection ever says.
 #[derive(Debug)]
 pub enum What {
+    /// Complete independent signal or explicit withdrawal from this connection.
+    AgentSignal(Option<AgentSnapshot>),
     /// Publish this, under this source.
     Publish { source: String, panel: Panel },
     /// Compatibility path for callers that still let the pane answer `panel_get` in its pass.
@@ -542,6 +544,16 @@ fn answer(
     wake: &Arc<dyn Fn() + Send + Sync>,
 ) -> (Reply, bool) {
     match incoming {
+        Incoming::Request(Request::AgentSignal(snapshot)) => (
+            ask_the_window(
+                Wants::Taken,
+                What::AgentSignal(snapshot),
+                connection,
+                to_the_window,
+                wake,
+            ),
+            false,
+        ),
         Incoming::Request(Request::PanelSet { source, document }) => {
             match panel_contract::parse_document_noting(&document) {
                 Ok((panel, dropped)) => (
@@ -844,6 +856,36 @@ mod tests {
             }
         }
         String::from_utf8(reply).expect("the reply is text")
+    }
+
+    #[test]
+    fn agent_signal_crosses_the_socket_and_disconnect_is_reported() {
+        let pane = a_pane();
+        let other = a_pane();
+        let mut client = pane.connect();
+        client.write_all(b"{\"tool\":\"agent_signal\",\"v\":1,\"client\":\"opencode\",\"snapshot\":{\"session\":\"ses_root\",\"activity\":\"busy\",\"permission\":false,\"question\":true}}\n").unwrap();
+        let delivery = pane.next_delivery();
+        let connection = delivery.connection;
+        assert!(
+            matches!(delivery.what, What::AgentSignal(Some(ref snapshot)) if snapshot.session == "ses_root" && snapshot.activity == crate::wire::Activity::Busy && snapshot.question && !snapshot.permission)
+        );
+        assert!(other.inbox.try_recv().is_err());
+        delivery.answer.send(Answer::Taken).unwrap();
+        assert!(read_reply(&mut client).contains("true"));
+        client
+            .write_all(
+                b"{\"tool\":\"agent_signal\",\"v\":1,\"client\":\"opencode\",\"snapshot\":null}\n",
+            )
+            .unwrap();
+        let withdrawal = pane.next_delivery();
+        assert_eq!(withdrawal.connection, connection);
+        assert!(matches!(withdrawal.what, What::AgentSignal(None)));
+        withdrawal.answer.send(Answer::Taken).unwrap();
+        assert!(read_reply(&mut client).contains("true"));
+        drop(client);
+        let closed = pane.next_delivery();
+        assert_eq!(closed.connection, connection);
+        assert!(matches!(closed.what, What::Closed));
     }
 
     /// The whole of what this delivery promises, end to end: a producer publishes over the channel

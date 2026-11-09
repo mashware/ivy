@@ -35,6 +35,9 @@ fn canonical(key: &str) -> Option<String> {
     }
     [
         "startup.restore",
+        "agent.claude.enabled",
+        "agent.codex.enabled",
+        "agent.opencode.enabled",
         "font",
         "font.ligatures",
         "size",
@@ -57,6 +60,9 @@ impl Document {
     pub fn new(source: String) -> Self {
         let mut keys: Vec<String> = [
             "startup.restore",
+            "agent.claude.enabled",
+            "agent.codex.enabled",
+            "agent.opencode.enabled",
             "font",
             "font.ligatures",
             "size",
@@ -526,5 +532,24 @@ mod tests {
             set(&mut doc, "size", value);
             assert!(doc.errors().iter().any(|(key, _)| key == "size"));
         }
+    }
+    #[test]
+    fn agent_preferences_round_trip_without_losing_other_lines() {
+        let source = "# keep me\nsize=18\nagent.codex.enabled=false\nunknown.future=value\n";
+        let mut doc = Document::new(source.into());
+        set(&mut doc, "agent.codex.enabled", "true");
+        set(&mut doc, "agent.claude.enabled", "false");
+        let saved = doc.text();
+        assert!(saved.contains("# keep me\nsize=18\n"));
+        assert!(saved.contains("unknown.future=value"));
+        let settings = super::super::interpret(&saved).unwrap().0;
+        assert!(settings.agent_codex);
+        assert!(!settings.agent_claude && !settings.agent_opencode);
+        set(&mut doc, "agent.opencode.enabled", "maybe");
+        assert!(
+            doc.errors()
+                .iter()
+                .any(|(key, _)| key == "agent.opencode.enabled")
+        );
     }
 }

@@ -525,6 +525,7 @@ pub(crate) fn launch_pane_in(
     let (panel_state, control) = panel::pane::state_and_control(ctx, panel.as_ref(), reads);
 
     Ok(Pane {
+        signals: Default::default(),
         name,
         label: None,
         project: None,

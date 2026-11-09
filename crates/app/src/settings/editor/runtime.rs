@@ -17,9 +17,49 @@ pub(super) struct Application {
 }
 
 struct Pending {
+    preferences_only: bool,
     settings: Settings,
     font: Option<PreparedSelection>,
     queued_pass: Option<u64>,
+}
+
+/// Save explicit integration preferences through the same preserving transaction as Settings.
+pub(crate) fn save_agent_preferences(
+    window: &mut Window,
+    enabled: crate::agent_signals::Enabled,
+) -> Result<(), String> {
+    let editor = &mut window.settings_editor;
+    if editor.measuring {
+        return Err("Measurement: configuration I/O is disabled.".into());
+    }
+    if editor.is_open() || editor.application.pending.is_some() {
+        return Err("Close Settings and wait for pending settings to apply first.".into());
+    }
+    let path = super::super::path().ok_or("The configuration directory is unavailable.")?;
+    let (mut store, text) = super::super::store::Store::open(path)?;
+    let mut draft = super::super::document::Document::new(text);
+    for (key, value) in [
+        ("agent.claude.enabled", enabled.claude),
+        ("agent.codex.enabled", enabled.codex),
+        ("agent.opencode.enabled", enabled.opencode),
+    ] {
+        let field = draft
+            .fields
+            .iter_mut()
+            .find(|f| f.key == key)
+            .expect("integration field");
+        field.value = value.to_string();
+    }
+    let text = draft.text();
+    let (settings, _) = super::super::interpret(&text).map_err(|e| e.to_string())?;
+    store.save(&text)?;
+    editor.application.pending = Some(Pending {
+        preferences_only: true,
+        settings,
+        font: None,
+        queued_pass: None,
+    });
+    Ok(())
 }
 
 fn same_family(a: Option<&str>, b: Option<&str>) -> bool {
@@ -98,6 +138,7 @@ fn prepare_and_save(
         .save(&text)?;
     editor.saved_startup_restore = Some(settings.startup_restore);
     editor.application.pending = Some(Pending {
+        preferences_only: false,
         settings,
         font,
         queued_pass: None,
@@ -151,8 +192,16 @@ pub(crate) fn begin_pass(window: &mut Window, ctx: &egui::Context) {
             font.activate(&mut window.discoverer);
             window.settings_editor.application.font_activations += 1;
         }
-        pending.settings.apply_to(window);
-        window.settings_editor.application.family = pending.settings.font;
+        if pending.preferences_only {
+            window.chrome.agent_preferences = crate::agent_signals::Enabled {
+                claude: pending.settings.agent_claude,
+                codex: pending.settings.agent_codex,
+                opencode: pending.settings.agent_opencode,
+            };
+        } else {
+            pending.settings.apply_to(window);
+            window.settings_editor.application.family = pending.settings.font;
+        }
         window.settings_editor.application.committed += 1;
         window.settings_editor.message = if window.settings_editor.measuring {
             "Transient settings applied; configuration I/O remains disabled."
@@ -402,6 +451,7 @@ fn run_probe(window: &mut Window, ctx: &egui::Context) {
     }
     probe.stage += 1;
     window.settings_editor.application.pending = Some(Pending {
+        preferences_only: false,
         settings,
         font,
         queued_pass: None,

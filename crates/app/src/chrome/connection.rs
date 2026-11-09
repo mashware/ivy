@@ -32,6 +32,7 @@ struct Published {
     consoles: usize,
     documents: usize,
     live: usize,
+    observed: [usize; 3],
 }
 
 #[derive(Default, Debug)]
@@ -42,6 +43,10 @@ pub(super) struct Guide {
     published: Published,
     manual_open: bool,
     copied: Option<&'static str>,
+    desired: crate::agent_signals::Enabled,
+    save_preferences: bool,
+    install_plugin: bool,
+    message: String,
 }
 
 impl Guide {
@@ -52,6 +57,7 @@ impl Guide {
 
 pub(crate) fn prepare(ctx: &egui::Context) {
     super::branding::install_logo(ctx);
+    crate::agent_signals::logos::install(ctx);
     let bridge = Bridge::check();
     ctx.data_mut(|data| data.insert_temp(egui::Id::new(BRIDGE_KEY), bridge));
 }
@@ -63,6 +69,14 @@ fn published(window: &Window) -> Published {
             result.consoles += 1;
             result.documents += usize::from(panel::summary::has_document(&pane.panel_state));
             result.live += usize::from(pane.panel_state.held_by().is_some());
+            if let Some(view) = pane.signals.view(Instant::now()) {
+                let index = match view.client {
+                    crate::agent_signals::Client::Codex => 0,
+                    crate::agent_signals::Client::Claude => 1,
+                    crate::agent_signals::Client::OpenCode => 2,
+                };
+                result.observed[index] += 1;
+            }
         });
     }
     result
@@ -146,6 +160,8 @@ pub(super) fn open(window: &mut Window, ctx: &egui::Context) {
     {
         return;
     }
+    window.chrome.guide.desired = window.chrome.agent_preferences;
+    window.chrome.guide.message.clear();
     window.chrome.guide.open = true;
     window.chrome.guide.copied = None;
     window.chrome.guide.blocked_frame = Some(ctx.cumulative_frame_nr());
@@ -179,6 +195,25 @@ pub(crate) fn begin_pass(window: &mut Window, ui: &mut egui::Ui) {
     let ctx = ui.ctx();
     if window.chrome.guide.open {
         show(&mut window.chrome.guide, ctx);
+        if std::mem::take(&mut window.chrome.guide.save_preferences) {
+            let desired = window.chrome.guide.desired;
+            window.chrome.guide.message =
+                match crate::settings::editor::runtime::save_agent_preferences(window, desired) {
+                    Ok(()) => "Saved. Applying settings...".into(),
+                    Err(error) => error,
+                };
+        }
+        if std::mem::take(&mut window.chrome.guide.install_plugin) {
+            window.chrome.guide.message = match crate::settings::path()
+                .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
+            {
+                Some(dir) => match crate::agent_setup::install(&dir) {
+                    Ok(path) => format!("Installed {}", path.display()),
+                    Err(error) => format!("Installation failed: {error}"),
+                },
+                None => "The configuration directory is unavailable.".into(),
+            };
+        }
     }
     window.chrome.guide.blocked_frame = Some(ctx.cumulative_frame_nr());
     window.chrome.guide.awaiting_release = ctx.input(|i| i.pointer.any_down());
@@ -198,6 +233,7 @@ pub(crate) fn after_panels(window: &mut Window, ui: &mut egui::Ui, area: Rect) {
         return;
     }
     let started = Instant::now();
+    crate::agent_signals::logos::arm_stale(window, ui.ctx());
     let current = published(window);
     if current != window.chrome.guide.published && window.chrome.guide.open {
         ui.ctx().request_repaint();
@@ -394,4 +430,49 @@ fn body(guide: &mut Guide, ui: &mut egui::Ui) {
     if guide.manual_open {
         manual(published, &mut guide.copied, ui);
     }
+    egui::CollapsingHeader::new("Agent activity and input signals")
+        .default_open(false)
+        .show(ui, |ui| {
+    ui.label("Explicit activation is required. Source behavior was checked for the versions below; live integration remains unverified.");
+    ui.label(format!(
+        "Observed declarations: Codex {}, Claude {}, OpenCode {} (including stale).",
+        published.observed[0], published.observed[1], published.observed[2]
+    ));
+    ui.checkbox(&mut guide.desired.codex, "Codex 0.167.0");
+    ui.checkbox(&mut guide.desired.claude, "Claude Code 2.1.319");
+    ui.checkbox(&mut guide.desired.opencode, "OpenCode 1.18.31");
+    if ui.button("Save agent preferences").clicked() {
+        guide.save_preferences = true;
+    }
+    ui.label("Codex and Claude use native terminal declarations; Claude requires no hooks.");
+    ui.label("To avoid a duplicate Codex title spinner, merge this key into your existing [tui] table in ~/.codex/config.toml. Preserve other settings, then restart Codex and resume your conversation:");
+    copyable(ui, "terminal_title = [\"thread-name\", \"project-name\"]", "Copy Codex title setting", &mut guide.copied);
+    ui.label("Claude removes its duplicate title indicator after native negotiation. Live client verification is still required.");
+    if cfg!(windows) { ui.label("The OpenCode TUI plugin transport is not supported on Windows in this delivery."); }
+    if let Some(dir) =
+        crate::settings::path().and_then(|p| p.parent().map(std::path::Path::to_path_buf))
+    {
+        ui.label(format!(
+            "OpenCode plugin destination: {}",
+            crate::agent_setup::plugin_path(&dir).display()
+        ));
+        if ui.button("Install / repair OpenCode plugin").clicked() {
+            guide.install_plugin = true;
+        }
+        ui.label("Add this entry to the existing plugin array in OpenCode tui.json, preserving its other entries:");
+        copyable(
+            ui,
+            &crate::agent_setup::snippet(&dir),
+            "Copy OpenCode plugin entry",
+            &mut guide.copied,
+        );
+    }
+    if !guide.message.is_empty() {
+        ui.label(&guide.message);
+    }
+    ui.separator();
+        });
 }
+
+#[cfg(test)]
+mod tests;
