@@ -443,6 +443,23 @@ pub(crate) fn size_at_startup() -> Option<egui::Vec2> {
 }
 
 /// Opens the PTY, output bridge and producer endpoint as one pane.
+pub(crate) fn new_in_directory(
+    ctx: &egui::Context,
+    name: usize,
+    reads: control::ReadActivity,
+    directory: Option<&std::path::Path>,
+) -> term_core::Result<Pane> {
+    launch_pane_in(
+        ctx,
+        &the_users_shell(),
+        &[],
+        panel_or_none(PanelDir::create()),
+        name,
+        reads,
+        directory,
+    )
+}
+
 fn launch_pane(
     ctx: &egui::Context,
     program: &str,
@@ -451,15 +468,30 @@ fn launch_pane(
     name: usize,
     reads: control::ReadActivity,
 ) -> term_core::Result<Pane> {
+    launch_pane_in(ctx, program, args, panel, name, reads, None)
+}
+
+pub(crate) fn launch_pane_in(
+    ctx: &egui::Context,
+    program: &str,
+    args: &[String],
+    panel: Option<PanelDir>,
+    name: usize,
+    reads: control::ReadActivity,
+    directory: Option<&std::path::Path>,
+) -> term_core::Result<Pane> {
     let identity = identity_of(panel.as_ref());
     let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
-    let (pty, output) = match Pty::spawn_with_env(program, &borrowed, INITIAL_GRID, &identity) {
-        Ok(spawned) => spawned,
-        Err(failure) => {
-            eprintln!("'{program}' could not be launched ({failure}); opening {FALLBACK_SHELL}");
-            Pty::spawn_with_env(FALLBACK_SHELL, &[], INITIAL_GRID, &identity)?
-        }
-    };
+    let (pty, output) =
+        match Pty::spawn_with_env_in(program, &borrowed, INITIAL_GRID, &identity, directory) {
+            Ok(spawned) => spawned,
+            Err(failure) => {
+                eprintln!(
+                    "'{program}' could not be launched ({failure}); opening {FALLBACK_SHELL}"
+                );
+                Pty::spawn_with_env_in(FALLBACK_SHELL, &[], INITIAL_GRID, &identity, directory)?
+            }
+        };
 
     #[cfg(test)]
     crate::tests::completed_operation(crate::tests::OperationWork::Launch);

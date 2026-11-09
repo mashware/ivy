@@ -6,6 +6,23 @@ you left the windows; this one can be written by hand or through Settings.
 
 **If it does not exist, the terminal opens exactly as always.** You do not have to create it.
 
+## Directory of a new split
+
+**Split right** and **Split down**, including their shortcuts and compact-menu entries, open the
+new shell in the local working directory of the source console. A toolbar button uses its own
+console even if another console has keyboard focus. A shortcut uses the focused console.
+
+On Linux, Ivy uses the live foreground process directory when available. A local OSC 7 directory
+report is used when native discovery is unavailable; a latest remote or invalid report prevents
+using the local process directory. On macOS and Windows this currently requires OSC 7 reports from
+the shell. Ivy does not install shell hooks or alter shell settings.
+
+Without directory information the split opens in the usual default directory and explains that
+on standard error. A known directory that is no longer available refuses the split and leaves the
+original console in place. Directory removal during launch can still hit the dependency's home
+fallback (D78). Shell startup files can change the directory after Ivy launches the shell.
+New tabs and layout restoration retain their existing directory behaviour.
+
 ## Pane names and agent session titles
 
 A console without a manual name follows the **terminal title published by its program**. Its

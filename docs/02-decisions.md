@@ -8798,3 +8798,36 @@ adds a product surface the requested fixed spacing does not need.
 **Measurement boundary.** Padding changes the available grid, including measurement runs; no
 frame-cost improvement is claimed against older grids. Its geometry remains in the existing
 timed panel-tiling path, and grid measurement and painting consume that one result.
+
+
+## D78 — User splits inherit their source console's local working directory
+
+**Decision.** Toolbar, compact-menu and keyboard splits resolve the source console by name,
+after the geometry check. A latest unusable OSC 7 report vetoes local process discovery, so a
+remote shell path is never mistaken for the local ssh process's directory. Otherwise the live
+foreground directory supplied by term-core takes precedence over a valid but potentially stale
+local OSC 7 report. When native discovery is unavailable, the local report supplies the path.
+
+The path goes to the new child's command builder, including the fallback shell. It never changes
+the application's current directory and never becomes a `cd` command written to a PTY. A known
+path must be absolute and an existing directory; opening fails through the ordinary split failure
+path if validation fails. Without directory information the ordinary launch directory remains,
+with a diagnostic on standard error. No discovery is added to an idle frame: the complete
+operation remains inside the existing shortcut or pointer stopwatch.
+
+**Why.** A second console for the same project should start where its source console is working,
+after navigation as well as at first launch. Header controls can address an unfocused console
+(D62), so resolving global focus would inherit the wrong project.
+
+**What was discarded.** Parsing the prompt is unreliable and violates D6. Changing process-global
+cwd races sibling launches. Sending `cd` mixes application setup with program input and shell
+quoting. Always trusting the latest local OSC 7 ignores a subsequent cd before another report.
+Installing shell hooks changes the user's setup and is outside this feature. New tabs, saved
+restart directories and agent-requested explicit programs keep their existing behaviour.
+
+**Limits.** Live native discovery is currently Linux-only. macOS needs local OSC 7 metadata;
+Windows drive-letter file URIs are converted to native paths before launch, but real host
+validation remains F2.7. Shell startup scripts may themselves change directory. portable-pty
+0.9.0 silently substitutes home for a configured directory that is not a directory, which is why
+validation happens before invoking it. A directory removed between that check and the dependency's
+own check can still fall back to home; this is not an atomic directory-pinning guarantee.
