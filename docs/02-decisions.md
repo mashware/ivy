@@ -8598,8 +8598,9 @@ viewport icon alone proves.
 **8 November 2026 — #337.** Markdown and Git changes open in a transient, resizable floating
 view above the consoles. The console tree and its running programs retain their geometry and identity.
 The user chooses the source explicitly: a local Markdown path, or the review control of a console.
-Git opens that console's working directory without a path form. The directory comes from its OSC 7
-metadata, or on Linux from its live foreground process when no directory has been published. An
+Git opens that console's working directory without a path form. On Linux, the live foreground
+process directory takes precedence over a previous local OSC 7 report, which may predate a `cd`.
+Local OSC 7 metadata remains the fallback when native discovery is unavailable. An
 explicit unusable/remote directory is never replaced with another console's or the app's directory.
 The terminal does not infer task state. The viewer has no PTY, producer identity, attention claim or MCP endpoint.
 It is not persisted. The view owns its gestures and keyboard input until focus returns to a console;
@@ -8613,7 +8614,9 @@ errors and oversized content are visible rather than silently truncated.
 Git presents files and hunks in unified or side-by-side form. Local changes compare tracked content
 with HEAD and include untracked files; a user-selected base provides another comparison. Git runs
 without a shell, pager, external diff, text conversion or fsmonitor, with optional locks disabled and
-its ownership checks intact. File and process limits are enforced away from the UI thread. Untracked
+its ownership checks intact. Inherited Git environment variables cannot redirect the selected
+worktree. A folder outside Git gets a clear non-repository message; actual Git failures remain
+visible. File and process limits are enforced away from the UI thread. Untracked
 symlinks are not read.
 
 Review comments can be drafted against the displayed changes. A preview shows the complete text

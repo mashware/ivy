@@ -128,6 +128,16 @@ fn read_bounded(reader: impl Read, limit: usize) -> std::io::Result<Vec<u8>> {
 
 fn git_command(path: &Path) -> Command {
     let mut command = Command::new("git");
+    // Agent sessions can inherit Git routing that would override the selected worktree.
+    for (key, _) in std::env::vars_os() {
+        if key
+            .to_string_lossy()
+            .to_ascii_uppercase()
+            .starts_with("GIT_")
+        {
+            command.env_remove(key);
+        }
+    }
     command
         .args([
             "--no-pager",
@@ -138,6 +148,7 @@ fn git_command(path: &Path) -> Command {
             "-C",
         ])
         .arg(path)
+        .env("LC_ALL", "C")
         .env("GIT_OPTIONAL_LOCKS", "0")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -151,6 +162,11 @@ fn git_diff(path: &Path, kind: Kind) -> Result<String, String> {
 }
 
 fn git_diff_base(path: &Path, kind: Kind, base: &str) -> Result<String, String> {
+    let mut inspect = git_command(path);
+    inspect.args(["rev-parse", "--is-inside-work-tree"]);
+    if run_git(inspect, GIT_TIMEOUT)?.trim() != "true" {
+        return Err("This repository has no working tree".into());
+    }
     let revision = match kind {
         Kind::Local => {
             let mut verify = git_command(path);
@@ -329,6 +345,15 @@ fn open_untracked(root: &Path, path: &Path) -> std::io::Result<std::fs::File> {
 fn run_git(command: Command, timeout: Duration) -> Result<String, String> {
     let output = crate::git_process::run(command, timeout, DIFF_LIMIT, STDERR_LIMIT)?;
     if !output.status.success() {
+        if output
+            .stderr
+            .starts_with(b"fatal: not a git repository (or any of the parent directories): .git")
+            || output
+                .stderr
+                .starts_with(b"fatal: not a git repository (or any parent up to mount point ")
+        {
+            return Err("This folder is not a Git repository".into());
+        }
         return Err(format!(
             "Git failed: {}",
             String::from_utf8_lossy(&output.stderr).trim()
@@ -384,6 +409,11 @@ mod tests {
             .unwrap();
         assert!(error.contains("Git failed:"), "{error}");
         assert!(!error.contains("This folder is not a Git repository"));
+        git(&temp.0, &["init", "--bare", "-q"]);
+        assert_eq!(
+            load_diff(&temp.0, Kind::Local, "main").err().unwrap(),
+            "This repository has no working tree"
+        );
     }
 
     #[test]

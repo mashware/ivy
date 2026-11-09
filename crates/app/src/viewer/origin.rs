@@ -5,11 +5,16 @@ use std::path::PathBuf;
 
 fn source(window: &mut Window, name: usize) -> Option<Source> {
     let pane = window.all_panes_mut().find(|pane| pane.name == name)?;
-    let cwd = if pane.screen.working_directory_reported() {
-        pane.screen.working_directory().map(ToOwned::to_owned)
-    } else {
-        pane.pty.working_directory()
-    };
+    let cwd =
+        if pane.screen.working_directory_reported() && pane.screen.working_directory().is_none() {
+            // A remote/invalid report must not become the local ssh process's directory.
+            None
+        } else {
+            // Native discovery sees a cd before the shell publishes its next local report.
+            pane.pty
+                .working_directory()
+                .or_else(|| pane.screen.working_directory().map(ToOwned::to_owned))
+        };
     Some(Source {
         pane: name,
         label: crate::pane_view::display_label(pane).into_owned(),
