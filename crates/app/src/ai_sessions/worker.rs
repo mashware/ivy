@@ -109,6 +109,12 @@ pub(super) fn notify_existing() {
     }
 }
 
+pub(super) fn reap_later() {
+    if let Some(service) = service() {
+        service.notify();
+    }
+}
+
 pub(super) fn prepare_close(handles: &[&Handle], deadline: Instant) -> Vec<Ticket> {
     let Some(Some(service)) = SERVICE.get() else {
         return Vec::new();
@@ -172,6 +178,7 @@ impl Service {
 fn run(mut pipe: io::PipeReader, receiver: Receiver<Command>) {
     let mut entries: HashMap<usize, Entry> = HashMap::new();
     loop {
+        programs::reap_children();
         cleanup(&mut entries);
         let mut watched = vec![poll(pipe.as_raw_fd())];
         for entry in entries.values() {
@@ -179,8 +186,18 @@ fn run(mut pipe: io::PipeReader, receiver: Receiver<Command>) {
                 watched.push(poll(root.lifetime.as_raw_fd()));
             }
         }
+        let (reaping, needs_tick) = programs::pending_children();
+        for lifetime in &reaping {
+            watched.push(poll(lifetime.as_raw_fd()));
+        }
         // SAFETY: initialized poll descriptors remain owned by the entries until this wait ends.
-        let ready = unsafe { libc::poll(watched.as_mut_ptr(), watched.len() as libc::nfds_t, -1) };
+        let ready = unsafe {
+            libc::poll(
+                watched.as_mut_ptr(),
+                watched.len() as libc::nfds_t,
+                if needs_tick { 10 } else { -1 },
+            )
+        };
         if ready < 0 {
             if io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
                 continue;

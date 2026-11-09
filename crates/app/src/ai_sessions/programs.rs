@@ -1,9 +1,20 @@
 use panel_control::session::Client;
 use std::ffi::{OsStr, OsString};
 use std::io::{self, Read};
+use std::os::fd::{AsRawFd, OwnedFd};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+mod child;
+
+pub(super) fn reap_children() {
+    child::reap();
+}
+pub(super) fn pending_children() -> (Vec<Arc<OwnedFd>>, bool) {
+    child::watched()
+}
 
 pub(crate) struct ResolvedLaunch {
     pub(crate) program: PathBuf,
@@ -116,40 +127,89 @@ fn resolve(name: &str, path: &OsStr) -> io::Result<PathBuf> {
 }
 
 fn volta_which(volta: &Path, name: &str, path: &OsStr) -> io::Result<PathBuf> {
-    let mut child = Command::new(volta)
+    let deadline = Instant::now() + Duration::from_millis(750);
+    let mut command = Command::new(volta);
+    command
         .args(["which", name])
         .env("PATH", path)
         .current_dir("/")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()?;
-    let deadline = Instant::now() + Duration::from_millis(750);
+        .stderr(Stdio::null());
+    let mut running = child::Running::start(&mut command)?;
+    let mut output = Vec::new();
+    let mut status = None;
+    let mut ended = false;
     loop {
-        if let Some(status) = child.try_wait()? {
-            if !status.success() {
-                return Err(unsupported());
-            }
-            break;
-        }
         if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
             return Err(io::ErrorKind::TimedOut.into());
         }
-        std::thread::sleep(Duration::from_millis(5));
+        if status.is_none() {
+            status = running.child.as_mut().unwrap().try_wait()?;
+            if status.is_some_and(|status| !status.success()) {
+                return Err(unsupported());
+            }
+        }
+        if !ended {
+            let mut bytes = [0; 512];
+            match running.stdout.read(&mut bytes) {
+                Ok(0) => ended = true,
+                Ok(count) => {
+                    output.extend_from_slice(&bytes[..count]);
+                    if output.len() > 4096 {
+                        return Err(unsupported());
+                    }
+                    continue;
+                }
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(error),
+            }
+        }
+        if ended && status.is_some() {
+            break;
+        }
+        let mut watched = [
+            libc::pollfd {
+                fd: if ended {
+                    -1
+                } else {
+                    running.stdout.as_raw_fd()
+                },
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: if status.is_none() {
+                    running.lifetime.as_ref().unwrap().as_raw_fd()
+                } else {
+                    -1
+                },
+                events: libc::POLLIN,
+                revents: 0,
+            },
+        ];
+        let timeout = deadline
+            .saturating_duration_since(Instant::now())
+            .as_millis()
+            .min(750) as i32;
+        // SAFETY: the pipe and pidfd remain owned by running; the shared deadline bounds poll.
+        if unsafe { libc::poll(watched.as_mut_ptr(), watched.len() as libc::nfds_t, timeout) } < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() != io::ErrorKind::Interrupted {
+                return Err(error);
+            }
+        }
     }
-    let mut output = String::new();
-    child
-        .stdout
-        .take()
-        .ok_or_else(unsupported)?
-        .take(4097)
-        .read_to_string(&mut output)?;
-    if output.len() > 4096 || !Path::new(output.trim()).is_absolute() {
+    let output = std::str::from_utf8(&output).map_err(|_| unsupported())?;
+    if !Path::new(output.trim()).is_absolute() {
         return Err(unsupported());
     }
-    std::fs::canonicalize(output.trim())
+    let path = std::fs::canonicalize(output.trim())?;
+    if Instant::now() >= deadline {
+        return Err(io::ErrorKind::TimedOut.into());
+    }
+    Ok(path)
 }
 
 fn is_native(path: &Path) -> io::Result<bool> {
