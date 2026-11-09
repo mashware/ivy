@@ -27,8 +27,16 @@ feature_id: feat_distribution_kb0x1w
 
 ## What it does
 
-A plain SemVer hyphen-to-Debian-tilde conversion is restricted to stable MAJOR.MINOR.PATCH and numbered alpha.N, beta.N, rc.N labels. General prerelease identifiers have different ordering/equality in dpkg: dpkg sorts ~rc10 greater than ~rc2 although SemVer lexical rc10 precedes rc2, and dpkg equates ~alpha01 with ~alpha1. Accepting arbitrary labels can silently prevent upgrades or merge release identities. Numeric fields must have no leading zeroes; build metadata is outside this initial release vocabulary.
+A plain SemVer hyphen-to-Debian-tilde conversion is restricted to stable MAJOR.MINOR.PATCH and
+numbered alpha.N, beta.N, rc.N labels. General prerelease identifiers have different
+ordering/equality in dpkg: dpkg sorts ~rc10 greater than ~rc2 although SemVer lexical rc10
+precedes rc2, and dpkg equates ~alpha01 with ~alpha1. Accepting arbitrary labels can silently
+prevent upgrades or merge release identities. Numeric fields must have no leading zeroes; build
+metadata is outside this initial release vocabulary.
 
 ## Where it lives
 
-scripts/release.py version()/deb_version(), scripts/package-linux.sh version guard, scripts/test_release.py actual dpkg ordering and Bash guard tests; docs/02-decisions.md D76. Direct dpkg --compare-versions reproductions and mutation tests in delivery343 confirmed the mismatches.
+scripts/release.py version()/deb_version(), scripts/package-linux.sh version guard,
+scripts/test_release.py actual dpkg ordering and Bash guard tests; docs/02-decisions.md D76.
+Direct dpkg --compare-versions reproductions and mutation tests in delivery343 confirmed the
+mismatches.

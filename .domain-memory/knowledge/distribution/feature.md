@@ -26,8 +26,14 @@ tags:
 
 ## What it does
 
-Ivy's first native installers must distinguish packaged executables from supported platform capabilities. Including panel-mcp in a Windows installer does not enable MCP: the control acceptor explicitly returns Unsupported until F2.7. Packaging therefore documents that bridge as unavailable on Windows and leaves native portability completion separate. An installer build is not implementation or validation of its transport.
+Ivy's first native installers must distinguish packaged executables from supported platform
+capabilities. Including panel-mcp in a Windows installer does not enable MCP: the control
+acceptor explicitly returns Unsupported until F2.7. Packaging therefore documents that bridge
+as unavailable on Windows and leaves native portability completion separate. An installer build
+is not implementation or validation of its transport.
 
 ## Where it lives
 
-crates/panel-control/src/endpoint.rs Windows acceptor()/Acceptor::wait() arms; docs/05-roadmap.md F2.7; docs/10-installation.md. Design343 preserves this boundary; Linux delivery does not claim completion of F2.7.
+crates/panel-control/src/endpoint.rs Windows acceptor()/Acceptor::wait() arms;
+docs/05-roadmap.md F2.7; docs/10-installation.md. Design343 preserves this boundary; Linux
+delivery does not claim completion of F2.7.
