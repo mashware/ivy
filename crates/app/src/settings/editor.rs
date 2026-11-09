@@ -35,6 +35,7 @@ pub(crate) struct Editor {
     held_pointer: bool,
     timing: Timing,
     application: runtime::Application,
+    pub(super) saved_startup_restore: Option<super::StartupRestore>,
 }
 
 impl Editor {
@@ -121,6 +122,10 @@ impl Editor {
         let outcome = self.save(fonts);
         self.application.saved_frame = Some((frame, outcome));
         outcome
+    }
+
+    pub(crate) fn take_saved_startup_restore(&mut self) -> Option<super::StartupRestore> {
+        self.saved_startup_restore.take()
     }
 
     pub(crate) fn remember_family(&mut self, settings: &super::Settings) {
@@ -344,6 +349,78 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
     };
     static NEXT: AtomicU64 = AtomicU64::new(0);
+    #[test]
+    fn startup_save_and_cancel_keep_the_saved_choice() {
+        let path = std::env::temp_dir().join(format!(
+            "startup-editor-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::write(&path, "# keep\nstartup.restore = layout\n").unwrap();
+        let mut editor = Editor::resolved(super::super::Entry::Normal, None);
+        let mut fonts = crate::fonts::Discoverer::default();
+        editor.open(Some(path.clone()));
+        editor
+            .draft
+            .as_mut()
+            .unwrap()
+            .fields
+            .iter_mut()
+            .find(|f| f.key == "startup.restore")
+            .unwrap()
+            .value = "directories".into();
+        assert!(editor.save(&mut fonts));
+        assert_eq!(
+            editor.take_saved_startup_restore(),
+            Some(super::super::StartupRestore::Directories)
+        );
+        assert_eq!(
+            super::super::interpret(&fs::read_to_string(&path).unwrap())
+                .unwrap()
+                .0
+                .startup_restore,
+            super::super::StartupRestore::Directories
+        );
+        editor.draft = None;
+        editor.store = None;
+        editor.open(Some(path.clone()));
+        editor
+            .draft
+            .as_mut()
+            .unwrap()
+            .fields
+            .iter_mut()
+            .find(|f| f.key == "startup.restore")
+            .unwrap()
+            .value = "none".into();
+        let ctx = egui::Context::default();
+        ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            },
+            |ui| {
+                editor.show(ui, &mut fonts, ui.max_rect());
+            },
+        )
+        .drop_without_applying_deltas();
+        assert_eq!(editor.take_saved_startup_restore(), None);
+        assert_eq!(
+            super::super::interpret(&fs::read_to_string(&path).unwrap())
+                .unwrap()
+                .0
+                .startup_restore,
+            super::super::StartupRestore::Directories
+        );
+        fs::remove_file(path).unwrap();
+    }
+
     #[test]
     fn opening_and_cancelling_never_write_or_enumerate_fonts() {
         let path = std::env::temp_dir().join(format!(

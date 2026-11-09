@@ -7,7 +7,7 @@ mod colors;
 mod footer;
 pub(super) mod typography;
 
-const SECTIONS: [&str; 3] = ["Appearance", "Cursor", "Shortcuts"];
+const SECTIONS: [&str; 4] = ["Appearance", "Cursor", "Shortcuts", "Startup"];
 const ACCENT: egui::Color32 = egui::Color32::from_rgb(173, 195, 255);
 
 pub(super) fn show(
@@ -303,12 +303,13 @@ fn main_column(
             .max_rect(heading),
     );
     head_ui.set_clip_rect(heading.intersect(ui.clip_rect()));
-    head_ui.heading(SECTIONS[editor.section.min(2)]);
+    head_ui.heading(SECTIONS[editor.section.min(3)]);
     head_ui.label(
         egui::RichText::new(match editor.section {
             0 => "Your theme, colors and type.",
             1 => "Keep your place in the terminal.",
-            _ => "Make familiar actions your own.",
+            2 => "Make familiar actions your own.",
+            _ => "Choose what opens next time.",
         })
         .size(14.0)
         .color(egui::Color32::from_rgb(146, 155, 174)),
@@ -335,7 +336,8 @@ fn main_column(
                     match editor.section {
                         0 => appearance::show(editor, ui, discoverer, errors),
                         1 => cursor(editor, ui),
-                        _ => shortcuts(editor, ui, errors),
+                        2 => shortcuts(editor, ui, errors),
+                        _ => startup(editor, ui),
                     }
                 });
             });
@@ -406,7 +408,11 @@ fn navigation(editor: &mut Editor, ui: &mut egui::Ui, vertical: bool) {
     if vertical {
         ui.vertical(controls);
     } else {
-        ui.horizontal(controls);
+        egui::ScrollArea::horizontal()
+            .id_salt("settings-navigation-scroll")
+            .show(ui, |ui| {
+                ui.horizontal(controls);
+            });
     }
 }
 
@@ -475,6 +481,36 @@ fn cursor(editor: &mut Editor, ui: &mut egui::Ui) {
     }
     ui.add_space(10.0);
     ui.weak("Blinking still stops after 15 seconds without typing and only runs in the focused console and window.");
+}
+
+fn startup(editor: &mut Editor, ui: &mut egui::Ui) {
+    let field = editor
+        .draft
+        .as_mut()
+        .unwrap()
+        .fields
+        .iter_mut()
+        .find(|field| field.key == "startup.restore")
+        .expect("startup setting exists");
+    let mut selection = if field.value.is_empty() {
+        "none".to_owned()
+    } else {
+        field.value.clone()
+    };
+    for (value, label) in [
+        ("none", "None: one fresh console"),
+        ("layout", "Layout"),
+        ("directories", "Layout and directories"),
+    ] {
+        if ui
+            .radio_value(&mut selection, value.into(), label)
+            .changed()
+        {
+            field.value = selection.clone();
+        }
+    }
+    ui.add_space(10.0);
+    ui.weak("Changes apply on the next launch. Turning restoration off keeps the previous saved layout. Additional windows are temporary and do not save their layout.");
 }
 
 fn shortcuts(editor: &mut Editor, ui: &mut egui::Ui, errors: &[(String, String)]) {

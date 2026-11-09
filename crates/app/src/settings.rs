@@ -213,11 +213,21 @@ pub struct Colors {
     pub panel: Option<Color32>,
 }
 
+/// What the primary window restores on its next launch.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum StartupRestore {
+    #[default]
+    None,
+    Layout,
+    Directories,
+}
+
 /// What the file requests, already understood.
 // **`Copy` falls away here**: the shortcuts are a list, and a list does not copy itself. The type is passed by
 // reference, which is how its only two consumers already asked for it.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Settings {
+    pub startup_restore: StartupRestore,
     pub colors: Colors,
     pub theme: Option<crate::theme::NamedTheme>,
     /// The family the file asks to paint with. `None` if it asks for none.
@@ -645,6 +655,20 @@ fn apply(settings: &mut Settings, key: &str, value: &str) -> Result<(), Missing>
         settings.font = Some(value.to_owned());
         return Ok(());
     }
+    if key == "startup.restore" {
+        settings.startup_restore = match value {
+            "none" => StartupRestore::None,
+            "layout" => StartupRestore::Layout,
+            "directories" => StartupRestore::Directories,
+            _ => {
+                return Err(Missing::InvalidValue {
+                    key: key.to_owned(),
+                    value: value.to_owned(),
+                });
+            }
+        };
+        return Ok(());
+    }
     if key == "theme" {
         settings.theme = Some(
             crate::theme::NamedTheme::from_written(value)
@@ -739,6 +763,38 @@ mod tests {
     use crate::tests::markdown;
 
     /// What parsing a text that is understood in full returns.
+    #[test]
+    fn startup_restore_is_tolerant_and_last_valid_value_wins() {
+        assert_eq!(
+            interpret("").unwrap().0.startup_restore,
+            StartupRestore::None
+        );
+        for (value, expected) in [
+            ("none", StartupRestore::None),
+            ("layout", StartupRestore::Layout),
+            ("directories", StartupRestore::Directories),
+        ] {
+            assert_eq!(
+                interpret(&format!("startup.restore = {value}"))
+                    .unwrap()
+                    .0
+                    .startup_restore,
+                expected
+            );
+        }
+        let (settings, warnings) = interpret(
+            "startup.restore = layout\nstartup.restore = invalid\nstartup.restore = directories\n",
+        )
+        .unwrap();
+        assert_eq!(settings.startup_restore, StartupRestore::Directories);
+        assert_eq!(warnings.total(), 2);
+        assert!(matches!(
+            &warnings.kept()[0].missing,
+            Missing::InvalidValue { .. }
+        ));
+        assert!(matches!(&warnings.kept()[1].missing, Missing::Repeated(_)));
+    }
+
     fn parsed(text: &str) -> (Settings, Warnings) {
         interpret(text).expect("the test text should not bring down the whole file")
     }
@@ -1692,10 +1748,10 @@ mod tests {
             .collect();
         // **Without a floor this test passes by being empty**, which is how a guard that reads another
         // file dies: someone changes the table's header, the walk does not hook, and nothing is
-        // left to check. Twelve is what the table publishes today.
+        // left to check. Thirteen is what the table publishes today.
         assert_eq!(
             published.len(),
-            12,
+            13,
             "the document's key table gave {} rows: either the document changed shape, or this \
              walk stopped finding it and the test is not looking at anything — {published:?}",
             published.len()
@@ -1704,7 +1760,7 @@ mod tests {
         for key in published {
             // One of these values must really apply; merely avoiding UnknownKey would admit a
             // published key whose documented value is rejected.
-            let known = ["#ff0000", "14", "on", "tokyonight"]
+            let known = ["#ff0000", "14", "on", "tokyonight", "none"]
                 .iter()
                 .any(|value| apply(&mut Settings::default(), key, value).is_ok());
             assert!(
@@ -2172,7 +2228,7 @@ mod tests {
         /// artifact to satisfy a test, which is the tail wagging the dog.
         const DRAWN_RULE: char = '\u{2500}';
 
-        const SOURCES: [(&str, &str); 45] = [
+        const SOURCES: [(&str, &str); 48] = [
             ("git_process.rs", include_str!("git_process.rs")),
             ("project.rs", include_str!("project.rs")),
             ("project/tests.rs", include_str!("project/tests.rs")),
@@ -2234,6 +2290,9 @@ mod tests {
             ),
             ("fonts/startup.rs", include_str!("fonts/startup.rs")),
             ("session.rs", include_str!("session.rs")),
+            ("session/ownership.rs", include_str!("session/ownership.rs")),
+            ("startup.rs", include_str!("startup.rs")),
+            ("restoration.rs", include_str!("restoration.rs")),
             ("watcher.rs", include_str!("watcher.rs")),
             ("lib.rs", include_str!("lib.rs")),
             ("header/splitting.rs", include_str!("header/splitting.rs")),
@@ -2333,6 +2392,15 @@ mod tests {
         // One and not more: `tab_bar.rs` carries a single sentence, so any higher number would be a
         // table rather than a floor — the same reason its sibling gives.
         for (name, _) in SOURCES {
+            if name == "session/ownership.rs" {
+                // This lock/IO module returns errors to its caller and has no user-facing
+                // sentences. If that changes, require it to join the per-file census.
+                assert!(
+                    !sentences.iter().any(|(from, _)| from == &name),
+                    "{name} now has a sentence: include it in the per-file census"
+                );
+                continue;
+            }
             assert!(
                 sentences.iter().any(|(from, _)| from == &name),
                 "{name} yielded no sentence-shaped literal: either its messages left for a module \
