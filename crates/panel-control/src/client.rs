@@ -312,6 +312,14 @@ pub enum Answered {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn legacy_reply_reader_ignores_retryable_extension() {
+        let parsed: super::Reply<'_> =
+            serde_json::from_str(r#"{"ok":false,"error":"busy","retryable":true}"#).unwrap();
+        assert_eq!(parsed.ok, Some(false));
+        assert_eq!(parsed.error.unwrap().get(), "\"busy\"");
+    }
+
     use super::*;
     use crate::listener::{Answer, Channel, Delivery, What};
     use panel_contract::PanelDir;

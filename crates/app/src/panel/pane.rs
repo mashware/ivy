@@ -145,7 +145,7 @@ impl Pane {
             .as_mut()
             .map_or(std::time::Duration::ZERO, |control| {
                 let started = std::time::Instant::now();
-                control.apply(&mut self.panel_state, SystemTime::now());
+                control.apply(&mut self.panel_state, &mut self.signals, SystemTime::now());
                 started.elapsed()
             });
 

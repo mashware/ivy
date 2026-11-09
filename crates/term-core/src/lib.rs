@@ -35,6 +35,7 @@ mod search;
 mod view;
 
 pub use screen::{Cell, Half, MouseReporting, SCROLLBACK, Screen, Scroll};
+pub use screen::{ProgramClient, ProgramKind, ProgramSnapshot, ProgramState};
 pub use search::{Refused, Search, Toward};
 pub use view::{
     CellWidth, CombiningSpan, Cursor, CursorShape, Link, LinkSource, TermColor, Underline, View,

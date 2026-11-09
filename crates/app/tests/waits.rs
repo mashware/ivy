@@ -51,7 +51,7 @@ use std::path::{Path, PathBuf};
 /// How many waits the workspace declares today. **An equality, not a floor**: a floor would let the
 /// number go stale the day a wait is removed, and an equality is also what goes red if the matcher
 /// stops matching anything at all.
-const DECLARED_WAITS: usize = 8;
+const DECLARED_WAITS: usize = 9;
 
 /// The crates, files and production lines the walk must reach. A walk that examined nothing finds
 /// no undeclared wait, and would pass.
@@ -338,6 +338,18 @@ struct Judgement {
 /// **The rule, and the only place it lives.** The walk and every fixture call this one function.
 fn judge(src: &str) -> Judgement {
     let mut layers = layers(src);
+    // An inner crate/module attribute makes every item in an external test source test-only.
+    if layers
+        .code
+        .iter()
+        .find(|line| !line.trim().is_empty())
+        .is_some_and(|line| line.trim() == "#![cfg(test)]")
+    {
+        return Judgement {
+            undeclared: Vec::new(),
+            declared: 0,
+        };
+    }
     without_test_modules(&mut layers);
     let mut judgement = Judgement {
         undeclared: Vec::new(),
@@ -516,6 +528,23 @@ fn a_wait_named_in_a_comment_or_a_literal_is_not_a_call() {
                \x20   let c = '\"'; let d = x.len();\n\
                }\n";
     assert!(judge(src).undeclared.is_empty());
+}
+
+#[test]
+fn an_external_source_requires_a_real_inner_test_only_attribute() {
+    assert!(
+        judge("#![cfg(test)]\nfn fixture() { rx.recv(); }\n")
+            .undeclared
+            .is_empty()
+    );
+    assert_eq!(
+        judge("// #![cfg(test)]\nfn production() { rx.recv(); }\n").undeclared,
+        vec![(2, "recv")]
+    );
+    assert_eq!(
+        judge("const TEXT: &str = \"#![cfg(test)]\";\nfn production() { rx.recv(); }\n").undeclared,
+        vec![(2, "recv")]
+    );
 }
 
 #[test]

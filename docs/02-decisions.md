@@ -8904,12 +8904,24 @@ pane-local register; untagged clear withdraws that register only. It does not id
 sessions sharing a PTY or authenticate a client. Missing cleanup remains stale information,
 never an inferred answer or successful completion. Disabled integrations consume no signal.
 
-Claude/OpenCode use official hooks or plugin events where the tested version provides enough
-root-session association, ordering and request-resolution evidence. Their concrete contracts must
+Claude Code 2.1.319 uses the same native root snapshot protocol after an explicit capability
+reply; that negotiation also removes its duplicate title activity prefix. OpenCode 1.18.31 uses
+an official TUI plugin scoped by the visible route and authoritative local SDK pending lists,
+with complete snapshots serialized on a separate connection. Their concrete contracts must
 be verified before adapter code and their supported behavior proved with the real client before
-being advertised. A short-lived hook connection ending is not the harness session ending.
+being advertised. A connection ending is loss of its reporter, not proof that a question was answered; retain
+its last wait as stale/unconfirmed. A connection alone cannot take presentation authority: a
+complete eligible snapshot is required. Incomplete child/pending hydration cannot publish a clear.
 No transcript reader, process-name recognizer, generic daemon or automatic client-config editor
 is introduced. The guide exposes reviewed setup instructions and preserves existing hooks.
+
+Automatic capability replies reuse the existing PTY write queue only when it has no backlog;
+at most one reply is deferred. They cannot spend or clear the person's refused-input state.
+A fresh enabled native declaration can replace a disconnected TUI reporter; an untagged clear or
+capability probe cannot withdraw that reporter's unconfirmed wait. Transient signal channel queue-full/timeouts carry an explicit retryable flag and retry
+on the same connection; legacy tool replies keep their shape. Repeatedly reconnecting while a
+window is not draining would fill its finite connection slots with undelivered close notices. A permanent adapter refusal stops reconnect attempts until the client is explicitly restarted, so a disabled integration
+does not wake an idle window forever.
 
 **Presentation.** Supported identity selects a bundled logo; only explicit active state animates
 it, and hidden/inactive windows arm no logo-only repaint. Removing a duplicate spinner is a
@@ -8924,7 +8936,8 @@ They reuse the existing preserving save/apply boundary rather than a second conf
 The console number remains unchanged.
 
 **Discarded.** Forced hooks for Codex duplicate a more precise native source. A custom OSC for
-all hooks assumes terminal access Claude explicitly disallows. Changing only title font sizes
+all hooks assumes terminal access command hooks may lack. Directory-wide OpenCode server
+events do not identify which session the person is looking at, so they cannot replace TUI state. Changing only title font sizes
 while retaining fixed strip heights clips text and separates paint from input. Machine-only
 proportional fallback leaves the reported braille fix dependent on installed fonts.
 
@@ -8993,7 +9006,79 @@ metadata/input boundary. AI recovery is a separate delivery of #19: this change 
 a sessions mode nor installs client integrations.
 
 
-## D82 — AI recovery uses declared IDs and fixed client launches
+## D82 — Context menus follow their invocation and keep the console visible
+
+Rename dialogs are centered on the viewport. Console context menus retain the opening pointer
+position with the pane identity and are constrained inside the viewport. They keep the existing
+pane actions and add Copy for a selected terminal range and Paste for the ordinary clipboard.
+The menu has no heading or Cancel row. Two adjacent split buttons at the top reuse the titlebar
+icons; text actions occupy full-width rows with a hover highlight. Opening or dismissing a menu
+preserves the selection. Escape and outside clicks dismiss it, with
+the complete gesture retained until release; input ownership does not multiply console opacity.
+This extends D62 with the user's explicit request for an ordinary pointer menu, rather than a
+floating dialog in a location chosen by the interface engine.
+
+Linux mouse selections publish PRIMARY, independently from CLIPBOARD. A middle press pastes PRIMARY
+into the clicked console. Mouse-reporting programs keep right and middle gestures unless Shift is
+held, the existing terminal escape hatch. Both paste sources use the existing long-line gate and
+current bracketed-paste mode; they also revoke auxiliary-console control on successful personal input.
+
+An app-owned adapter uses arboard for native reads and PRIMARY publication. On Linux its
+Wayland data-control support is enabled: it performs capability setup before accepting operations,
+and uses X11/XWayland when native data-control initialization is unavailable. This avoids creating
+a second focus-based smithay subscription after the gesture whose serial that subscription needs.
+The pinned smithay client has no readiness or publication acknowledgement API; its first store
+could otherwise silently disappear. Arboard owns its connections and needs no borrowed display
+or retained native window. A pure Wayland compositor with neither data-control nor reachable
+XWayland is explicitly unsupported; PRIMARY is never substituted with CLIPBOARD.
+
+One worker reads desktop data outside the interface thread, retains the requesting pane identity,
+and wakes the reactive window on completion. Delivery expires after two seconds; late text never
+becomes input to another console. No replacement read/worker starts while an owner is still
+answering. PRIMARY publication coalesces to the latest selected text and expires after two seconds; a queued publication is discarded after the window loses focus, so a stalled read cannot later replace another application's selection. **D57 declaration:** shutdown
+disconnects and abandons this worker because external reads and library destruction may stall;
+no interface thread joins it. The idle receive ends when its sole Service sender is dropped.
+
+No adapter worker runs in historical measurement batches. Delivery is counted within the existing
+integrated chrome span and selection work within the mouse span. Enabling the arboard feature is
+Cargo-global: egui's existing native clipboard construction also gains data-control capability
+setup before the first frame. This is not measured here and no startup/frame-cost claim is made.
+
+Discarded: an untagged RequestPaste interpreted through keyboard modifiers (loses the requested
+pane and mouse-paste intent), replacing CLIPBOARD on selection (PRIMARY has its own desktop
+contract), external clipboard tools (installation/backend requirements), a new framework/native
+protocol fork (arboard already provides the required selections), a second asynchronous smithay
+client (first-operation readiness race), and replacement workers for stalled owners (retains native
+resources without a ceiling). Native inter-application exchange is checked separately from
+headless geometry and routing tests.
+
+The native startup resource factory now belongs to opening.rs, keeping clipboard construction out
+of the window core. The stateless primary-press reader is a free pointer function; the measured
+Window implementation ratchet falls from 1611 to 1605 production lines.
+
+## D83 — PR checks validate source; release preparation validates native packages
+
+**Decision.** Ordinary pull requests run formatting, workspace lint and tests, documentation-link
+checks and portable packaging-logic tests on Ubuntu 24.04. Full Ubuntu, Arch and macOS packaging
+and installation checks run only through explicit manual dispatch on the selected revision.
+The same workflow retains its complete platform matrix and publication dependencies; publishing
+still requires the explicit `publish` input, matching version/tag and unchanged integrity checks.
+
+**Why.** Full release compilation, package creation and installation on every PR update delays
+iteration even though merging does not publish a release. The owner explicitly accepts that
+platform incompatibilities can reach main and surface during release preparation, when attribution
+may span multiple merged changes. Source checks preserve fast feedback without claiming native
+package compatibility. No elapsed-time improvement is claimed without hosted measurements.
+
+**Discarded.** Keeping the full matrix on PRs preserves earlier detection but retains the delay
+this change addresses. Removing platform checks from publication would allow unvalidated packages
+to reach users. Separate release workflows or repeated conditions on dependent install jobs add
+configuration duplication: dispatch-gating the existing independent build roots reuses their
+dependency graph. Reusing artifacts from earlier runs would separate publication from the selected
+revision's fresh complete validation.
+
+
+## D85 — AI recovery uses declared IDs and fixed client launches
 
 Startup sessions mode extends D81 only when explicitly enabled. Save an allowlisted client and
 validated exact ID beside the local directory; never save a program path, argument list, environment,

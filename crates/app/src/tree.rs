@@ -786,7 +786,7 @@ impl Tab {
     pub(crate) fn attention(&self, now: SystemTime) -> Option<panel::AttentionState> {
         self.panes()
             .iter()
-            .filter_map(|pane| pane.panel_state.attention(now))
+            .filter_map(|pane| pane.effective_attention(now))
             .max()
     }
 

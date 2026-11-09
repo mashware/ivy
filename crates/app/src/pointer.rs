@@ -40,6 +40,7 @@ use eframe::egui;
 use std::time::{Duration, Instant, SystemTime};
 use term_core::Cell;
 
+mod clipboard;
 mod header;
 pub(crate) mod links;
 
@@ -191,6 +192,32 @@ pub(crate) struct WheelOutcome {
     pub(crate) was_a_report: bool,
 }
 
+/// Where the primary button was pressed on this frame and with which chord, if it was pressed
+/// at all.
+///
+/// **From the event itself and not from the frame's state.** The state describes the **end of
+/// the batch of events**: if the press arrives in the same batch and afterwards the notice that
+/// `Ctrl` was released, reading it would give «no chord» for a press that did carry one. It is
+/// the same source the paste already drinks from, and the same trap that cost a case over
+/// there.
+///
+/// **It does not consume the event**, unlike the wheel and the keyboard: the press is what egui
+/// needs in order to start the drag, and taking it away would leave the gesture never starting.
+/// Here it is only looked at.
+fn the_primary_press(ui: &egui::Ui) -> Option<(egui::Pos2, egui::Modifiers)> {
+    ui.ctx().input(|state| {
+        state.events.iter().find_map(|event| match event {
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers,
+            } => Some((*pos, *modifiers)),
+            _ => None,
+        })
+    })
+}
+
 impl Window {
     /// Attends to the mouse over the consoles: the click that gives focus, the bare drag that marks
     /// text, and the drag with `Ctrl+Shift` that moves them from one place to another (**D20**).
@@ -282,7 +309,7 @@ impl Window {
         // [`DragIntent::from_the_press`] and [`Self::chord_of_the_last_press`]. It is looked at before
         // the loop because the answer belongs to the window, not to each console: only one of them
         // receives the press.
-        if let Some((at, chord)) = Self::the_primary_press(ui) {
+        if let Some((at, chord)) = the_primary_press(ui) {
             // **Both are written from one reading of one event, in one statement.** Kept as two
             // separate reads, a frame could note the chord of this press beside the position of the
             // previous one, and the gesture would be decided from a point nobody pressed.
@@ -445,7 +472,14 @@ impl Window {
 
             if self.drag_in_progress == Some(DragIntent::Select) {
                 if let Some(console) = console {
-                    self.select_while_dragging(&response, name, console, metrics, press_origin);
+                    clipboard::select_while_dragging(
+                        self,
+                        &response,
+                        name,
+                        console,
+                        metrics,
+                        press_origin,
+                    );
                 }
                 if response.drag_stopped() {
                     self.drag_in_progress = None;
@@ -694,7 +728,7 @@ impl Window {
 
     /// The presses and releases in this frame's queue.
     ///
-    /// **It does not consume them**, just like [`Self::the_primary_press`]: the press is what egui
+    /// **It does not consume them**, just like [`the_primary_press`]: the press is what egui
     /// needs in order to decide who is being dragged, and taking it away would leave the gesture
     /// never starting.
     fn collect_the_buttons(ui: &egui::Ui) -> Vec<ButtonPress> {
@@ -717,32 +751,6 @@ impl Window {
                     _ => None,
                 })
                 .collect()
-        })
-    }
-
-    /// Where the primary button was pressed on this frame and with which chord, if it was pressed
-    /// at all.
-    ///
-    /// **From the event itself and not from the frame's state.** The state describes the **end of
-    /// the batch of events**: if the press arrives in the same batch and afterwards the notice that
-    /// `Ctrl` was released, reading it would give «no chord» for a press that did carry one. It is
-    /// the same source the paste already drinks from, and the same trap that cost a case over
-    /// there.
-    ///
-    /// **It does not consume the event**, unlike the wheel and the keyboard: the press is what egui
-    /// needs in order to start the drag, and taking it away would leave the gesture never starting.
-    /// Here it is only looked at.
-    fn the_primary_press(ui: &egui::Ui) -> Option<(egui::Pos2, egui::Modifiers)> {
-        ui.ctx().input(|state| {
-            state.events.iter().find_map(|event| match event {
-                egui::Event::PointerButton {
-                    pos,
-                    button: egui::PointerButton::Primary,
-                    pressed: true,
-                    modifiers,
-                } => Some((*pos, *modifiers)),
-                _ => None,
-            })
         })
     }
 

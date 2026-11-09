@@ -74,6 +74,43 @@ use std::path::Path;
 /// [`the_list_still_names_every_module`] checks it against the tree and the reviewers no longer have
 /// to.
 const MODULES: &[(&str, &str)] = &[
+    ("app/src/clipboard.rs", include_str!("../src/clipboard.rs")),
+    (
+        "app/src/pointer/clipboard.rs",
+        include_str!("../src/pointer/clipboard.rs"),
+    ),
+    (
+        "app/src/tests/context_clipboard.rs",
+        include_str!("../src/tests/context_clipboard.rs"),
+    ),
+    (
+        "app/src/tests/agent_signals/native_transport.rs",
+        include_str!("../src/tests/agent_signals/native_transport.rs"),
+    ),
+    (
+        "app/src/chrome/connection/tests.rs",
+        include_str!("../src/chrome/connection/tests.rs"),
+    ),
+    (
+        "app/src/control/applying.rs",
+        include_str!("../src/control/applying.rs"),
+    ),
+    (
+        "app/src/agent_setup.rs",
+        include_str!("../src/agent_setup.rs"),
+    ),
+    (
+        "app/src/agent_signals.rs",
+        include_str!("../src/agent_signals.rs"),
+    ),
+    (
+        "app/src/agent_signals/logos.rs",
+        include_str!("../src/agent_signals/logos.rs"),
+    ),
+    (
+        "app/src/tests/agent_signals.rs",
+        include_str!("../src/tests/agent_signals.rs"),
+    ),
     (
         "app/src/control/channel.rs",
         include_str!("../src/control/channel.rs"),
@@ -241,8 +278,8 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/links/local.rs"),
     ),
     (
-        "term-core/src/screen/directory.rs",
-        include_str!("../../term-core/src/screen/directory.rs"),
+        "term-core/src/screen/metadata.rs",
+        include_str!("../../term-core/src/screen/metadata.rs"),
     ),
     (
         "term-core/src/view/local.rs",

@@ -1,8 +1,8 @@
 //! Startup policy is resolved before any restored process is opened.
 use crate::{
-    APP_NAME, InjectedDrags, PANES_VARIABLE, TABS_VARIABLE, Window, any_measurement_variable,
-    chrome, gesture_at_startup, header, injected, ligatures, project_view, restoration, session,
-    settings, size_at_startup, summary, the_users_shell,
+    APP_NAME, InjectedDrags, PANES_VARIABLE, TABS_VARIABLE, any_measurement_variable, chrome,
+    gesture_at_startup, header, injected, ligatures, opening, project_view, restoration, session,
+    settings, size_at_startup, summary,
 };
 
 pub fn run() -> eframe::Result {
@@ -79,14 +79,8 @@ pub fn run() -> eframe::Result {
         APP_NAME,
         options,
         Box::new(move |cc| {
-            chrome::prepare(&cc.egui_ctx);
-            let mut window = Window::opening(
-                &cc.egui_ctx,
-                with_what,
-                &the_users_shell(),
-                requested,
-                persistence,
-            )?;
+            let mut window =
+                opening::native_window(cc, with_what, requested, persistence, measuring)?;
             window.restoration = restoration;
             // Only a measurement batch asks for them, so they are set here and not in the
             // constructor. The cell gets measured later on: the panel gesture counts its travel in

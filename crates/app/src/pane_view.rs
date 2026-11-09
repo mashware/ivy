@@ -25,7 +25,7 @@ enum RenameTarget {
 pub(crate) struct State {
     zoom: HashMap<usize, usize>,
     rename: Option<(RenameTarget, String)>,
-    menu: Option<(usize, usize, bool)>,
+    menu: Option<(usize, usize, bool, egui::Pos2)>,
     blocked_frame: Option<u64>,
     awaiting_release: bool,
 }
@@ -38,8 +38,8 @@ impl State {
     pub(crate) fn is_renaming(&self) -> bool {
         self.rename.is_some()
     }
-    pub(crate) fn open_menu(&mut self, tab: usize, pane: usize, can_close: bool) {
-        self.menu = Some((tab, pane, can_close));
+    pub(crate) fn open_menu(&mut self, tab: usize, pane: usize, can_close: bool, at: egui::Pos2) {
+        self.menu = Some((tab, pane, can_close, at));
     }
     pub(crate) fn zoomed(&self, tab: usize) -> Option<usize> {
         self.zoom.get(&tab).copied()
@@ -182,6 +182,50 @@ pub(crate) fn paint_borders(window: &mut crate::Window, ui: &egui::Ui, rects: &[
     }
 }
 
+fn menu_item(ui: &mut egui::Ui, label: &str, enabled: bool) -> bool {
+    let button = egui::Button::new((label, egui::Atom::grow()))
+        .frame_when_inactive(false)
+        .min_size(egui::vec2(ui.available_width(), 28.0));
+    ui.add_enabled(enabled, button).clicked()
+}
+
+fn split_buttons(
+    ui: &mut egui::Ui,
+    theme: crate::theme::Theme,
+    enabled: [bool; 2],
+) -> Option<usize> {
+    let width = (ui.available_width() - 2.0).max(0.0) / 2.0;
+    let mut chosen = None;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        for (index, label) in ["Split right", "Split down"].into_iter().enumerate() {
+            let response = ui.add_enabled(
+                enabled[index],
+                egui::Button::new("").min_size(egui::vec2(width, 30.0)),
+            );
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled[index], label)
+            });
+            crate::chrome::paint_button_icon(
+                ui.painter(),
+                response.rect,
+                "",
+                label,
+                if enabled[index] {
+                    theme.foreground()
+                } else {
+                    theme.foreground().gamma_multiply(0.35)
+                },
+            );
+            if response.clicked() {
+                chosen = Some(index);
+            }
+            response.on_hover_text(label);
+        }
+    });
+    chosen
+}
+
 /// Returns true for every frame owned by the editor, including its dismissal.
 pub(crate) fn before_keys(
     window: &mut crate::Window,
@@ -200,7 +244,7 @@ pub(crate) fn before_keys(
     }
     let started = std::time::Instant::now();
     window.pane_view.blocked_frame = Some(frame);
-    if let Some((tab, pane, can_close)) = window.pane_view.menu.take() {
+    if let Some((tab, pane, can_close, at)) = window.pane_view.menu.take() {
         let mut action = None;
         let area = crate::tab_bar::geometry(window, ui.max_rect(), metrics).consoles;
         let axes = [
@@ -218,49 +262,82 @@ pub(crate) fn before_keys(
             })
             .unwrap_or([false; 2]);
         let theme = window.theme;
-        egui::Window::new("Console actions")
-            .title_bar(false)
-            .frame(
-                egui::Frame::window(ui.style())
-                    .fill(theme.panel_background())
-                    .stroke(egui::Stroke::new(1.0, theme.divider())),
-            )
-            .collapsible(false)
-            .resizable(false)
+        let selected = window
+            .pane_called(pane)
+            .and_then(|pane| pane.screen.selected_text());
+        let viewport = ui.ctx().viewport_rect();
+        let menu = egui::Area::new(egui::Id::new("console-context-menu"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(at)
+            .constrain_to(ui.ctx().viewport_rect())
             .show(ui.ctx(), |ui| {
-                crate::settings::editor::view::style(ui, theme);
-                ui.heading("Console actions");
-                if ui.button("Rename").clicked() {
-                    action = Some(0);
-                }
-                for (index, label) in ["Split right", "Split down"].into_iter().enumerate() {
-                    if ui
-                        .add_enabled(enabled[index], egui::Button::new(label))
-                        .clicked()
-                    {
-                        action = Some(5 + index);
-                    }
-                }
-                if ui.button("Review changes").clicked() {
-                    action = Some(7);
-                }
-                if ui.button("Toggle information panel").clicked() {
-                    action = Some(1);
-                }
-                if ui.button("Maximize / restore").clicked() {
-                    action = Some(2);
-                }
-                if ui
-                    .add_enabled(can_close, egui::Button::new("Close console"))
-                    .clicked()
-                {
-                    action = Some(3);
-                }
-                if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                    action = Some(4);
-                }
+                egui::Frame::popup(ui.style())
+                    .fill(theme.panel_background())
+                    .stroke(egui::Stroke::new(1.0, theme.divider()))
+                    .show(ui, |ui| {
+                        egui::ScrollArea::vertical()
+                            .max_height((viewport.height() - 20.0).max(1.0))
+                            .show(ui, |ui| {
+                                crate::settings::editor::view::style(ui, theme);
+                                ui.set_width(190.0_f32.min((viewport.width() - 20.0).max(1.0)));
+                                ui.spacing_mut().item_spacing = egui::vec2(0.0, 2.0);
+                                ui.visuals_mut().widgets.hovered.weak_bg_fill =
+                                    theme.divider().gamma_multiply(0.55);
+                                ui.visuals_mut().widgets.active.weak_bg_fill = theme.divider();
+                                if let Some(index) = split_buttons(ui, theme, enabled) {
+                                    action = Some(5 + index);
+                                }
+                                ui.separator();
+                                if menu_item(ui, "Copy", selected.is_some()) {
+                                    action = Some(8);
+                                }
+                                if menu_item(ui, "Paste", true) {
+                                    action = Some(9);
+                                }
+                                ui.separator();
+                                if menu_item(ui, "Rename", true) {
+                                    action = Some(0);
+                                }
+                                if menu_item(ui, "Review changes", true) {
+                                    action = Some(7);
+                                }
+                                if menu_item(ui, "Toggle information panel", true) {
+                                    action = Some(1);
+                                }
+                                if menu_item(ui, "Maximize / restore", true) {
+                                    action = Some(2);
+                                }
+                                if menu_item(ui, "Close console", can_close) {
+                                    action = Some(3);
+                                }
+                                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                                    action = Some(4);
+                                }
+                            });
+                    });
             });
+        if ui.input(|input| {
+            input.pointer.any_pressed()
+                && input
+                    .pointer
+                    .interact_pos()
+                    .is_some_and(|pos| !menu.response.rect.contains(pos))
+        }) {
+            action = Some(4);
+        }
         match action {
+            Some(8) => {
+                if let Some(text) = selected {
+                    ui.ctx().copy_text(text);
+                }
+            }
+            Some(9) => {
+                window.clipboard.request(
+                    pane,
+                    crate::clipboard::Source::Clipboard,
+                    std::time::Instant::now(),
+                );
+            }
             Some(0) => {
                 let initial = window
                     .pane_called(pane)
@@ -300,7 +377,7 @@ pub(crate) fn before_keys(
                 );
             }
             Some(_) => {}
-            None => window.pane_view.menu = Some((tab, pane, can_close)),
+            None => window.pane_view.menu = Some((tab, pane, can_close, at)),
         }
         if action.is_some() {
             window.pane_view.awaiting_release = ui.ctx().input(|i| i.pointer.any_down());
@@ -346,6 +423,9 @@ pub(crate) fn before_keys(
     };
     egui::Window::new(title)
         .title_bar(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .constrain_to(ui.ctx().viewport_rect())
+        .movable(false)
         .default_width(380.0)
         .frame(
             egui::Frame::window(ui.style())

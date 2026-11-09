@@ -1,3 +1,4 @@
+#![cfg(test)]
 use crate::{Pty, Size};
 use std::sync::mpsc::Receiver;
 use std::time::Duration;

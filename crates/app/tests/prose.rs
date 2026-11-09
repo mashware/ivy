@@ -75,6 +75,52 @@ use std::path::Path;
 /// moved the measurement bench's injected gestures out into `src/injected.rs`, which is the next
 /// entry down.
 const SOURCES: &[(&str, &str, usize)] = &[
+    ("src/clipboard.rs", include_str!("../src/clipboard.rs"), 0),
+    (
+        "src/pointer/clipboard.rs",
+        include_str!("../src/pointer/clipboard.rs"),
+        0,
+    ),
+    (
+        "src/tests/context_clipboard.rs",
+        include_str!("../src/tests/context_clipboard.rs"),
+        0,
+    ),
+    (
+        "src/tests/agent_signals/native_transport.rs",
+        include_str!("../src/tests/agent_signals/native_transport.rs"),
+        1,
+    ),
+    (
+        "src/chrome/connection/tests.rs",
+        include_str!("../src/chrome/connection/tests.rs"),
+        0,
+    ),
+    (
+        "src/control/applying.rs",
+        include_str!("../src/control/applying.rs"),
+        29,
+    ),
+    (
+        "src/agent_setup.rs",
+        include_str!("../src/agent_setup.rs"),
+        1,
+    ),
+    (
+        "src/agent_signals.rs",
+        include_str!("../src/agent_signals.rs"),
+        1,
+    ),
+    (
+        "src/agent_signals/logos.rs",
+        include_str!("../src/agent_signals/logos.rs"),
+        1,
+    ),
+    (
+        "src/tests/agent_signals.rs",
+        include_str!("../src/tests/agent_signals.rs"),
+        1,
+    ),
     (
         "src/control/channel.rs",
         include_str!("../src/control/channel.rs"),
@@ -433,7 +479,7 @@ const SOURCES: &[(&str, &str, usize)] = &[
         include_str!("../src/settings/store.rs"),
         2,
     ),
-    ("src/lib.rs", include_str!("../src/lib.rs"), 6_181),
+    ("src/lib.rs", include_str!("../src/lib.rs"), 6_155),
     ("src/startup.rs", include_str!("../src/startup.rs"), 51),
     (
         "src/restoration.rs",
@@ -447,7 +493,7 @@ const SOURCES: &[(&str, &str, usize)] = &[
     ),
     ("src/alarms.rs", include_str!("../src/alarms.rs"), 133),
     ("src/closing.rs", include_str!("../src/closing.rs"), 115),
-    ("src/control.rs", include_str!("../src/control.rs"), 362),
+    ("src/control.rs", include_str!("../src/control.rs"), 358),
     (
         "src/control/retiring.rs",
         include_str!("../src/control/retiring.rs"),
@@ -566,7 +612,7 @@ const SOURCES: &[(&str, &str, usize)] = &[
     (
         "src/pty_output.rs",
         include_str!("../src/pty_output.rs"),
-        456,
+        521,
     ),
     ("src/watcher.rs", include_str!("../src/watcher.rs"), 203),
     ("src/theme.rs", include_str!("../src/theme.rs"), 202),

@@ -95,9 +95,42 @@ impl Side {
     }
 }
 
+/// Activity declared by the OpenCode TUI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Activity {
+    Busy,
+    Idle,
+    Unknown,
+}
+
+/// Complete, pane-local OpenCode metadata. Session is inert, bounded metadata.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentSnapshot {
+    pub session: String,
+    pub activity: Activity,
+    pub permission: bool,
+    pub question: bool,
+    /// The last complete claim is unconfirmed while authoritative refresh is unavailable.
+    #[serde(default)]
+    pub stale: bool,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AgentEnvelope {
+    tool: String,
+    v: u8,
+    client: String,
+    snapshot: Option<AgentSnapshot>,
+}
+
 /// A request, once it has been understood.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
+    /// An independent OpenCode signal, never a panel publication.
+    AgentSignal(Option<AgentSnapshot>),
     /// Publish this document on the pane this connection opened, under this source.
     ///
     /// The document travels as **its own text** and not as an interpreted value: the contract's
@@ -309,6 +342,10 @@ fn interpret(line: &[u8]) -> Incoming {
         }
     };
 
+    if envelope.tool == "agent_signal" {
+        return agent_signal(text);
+    }
+
     match envelope.tool.as_str() {
         "session_observe" | "session_attach" | "session_probe" | "session_update" => {
             Incoming::Session(crate::session::Request::parse(
@@ -324,6 +361,30 @@ fn interpret(line: &[u8]) -> Incoming {
         "split_close" => split_close(&envelope),
         other => Incoming::Request(Request::NotServed(other.to_owned())),
     }
+}
+
+fn agent_signal(text: &str) -> Incoming {
+    // Option normally accepts an absent field; require explicit null or a complete snapshot.
+    let value: serde_json::Value = match serde_json::from_str(text) {
+        Ok(value) => value,
+        Err(_) => return Incoming::Malformed("invalid agent signal".to_owned()),
+    };
+    if value.get("snapshot").is_none() {
+        return Incoming::Malformed("agent signal requires snapshot".to_owned());
+    }
+    let envelope: AgentEnvelope = match serde_json::from_str(text) {
+        Ok(envelope) => envelope,
+        Err(_) => return Incoming::Malformed("invalid agent signal".to_owned()),
+    };
+    if envelope.tool != "agent_signal" || envelope.v != 1 || envelope.client != "opencode" {
+        return Incoming::Malformed("unsupported agent signal".to_owned());
+    }
+    if envelope.snapshot.as_ref().is_some_and(|s| {
+        s.session.is_empty() || s.session.len() > 256 || s.session.chars().any(char::is_control)
+    }) {
+        return Incoming::Malformed("invalid agent session".to_owned());
+    }
+    Incoming::Request(Request::AgentSignal(envelope.snapshot))
 }
 
 /// The publication, understood at the wire.
@@ -520,6 +581,8 @@ pub enum Reply {
     /// newline-framed channel.
     Document(String),
     Failed(String),
+    /// A temporary failure specific to agent signal delivery.
+    Retryable(String),
 }
 
 impl Reply {
@@ -555,6 +618,10 @@ impl Reply {
             // here is not this line but its only source: the contract's writer emits one compact line
             // and puts every string of the document through the same escaping the arm above uses.
             Self::Document(document) => format!("{{\"ok\":true,\"document\":{document}}}\n"),
+            Self::Retryable(reason) => {
+                let escaped = serde_json::Value::String(reason.clone());
+                format!("{{\"ok\":false,\"error\":{escaped},\"retryable\":true}}\n")
+            }
             Self::Failed(reason) => {
                 let escaped = serde_json::Value::String(reason.clone());
                 format!("{{\"ok\":false,\"error\":{escaped}}}\n")
@@ -1151,5 +1218,62 @@ mod tests {
         write_reply(&mut written, &Reply::Ok).expect("write the reply");
 
         assert_eq!(String::from_utf8(written).expect("text"), "{\"ok\":true}\n");
+    }
+}
+
+#[cfg(test)]
+mod agent_signal_tests {
+    use super::*;
+
+    #[test]
+    fn retryable_reply_is_escaped_and_legacy_failure_shape_is_unchanged() {
+        let reply: serde_json::Value =
+            serde_json::from_str(&Reply::Retryable("busy \"now\"".into()).line()).unwrap();
+        assert_eq!(
+            reply,
+            serde_json::json!({"ok": false, "error": "busy \"now\"", "retryable": true})
+        );
+        let legacy: serde_json::Value =
+            serde_json::from_str(&Reply::Failed("busy".into()).line()).unwrap();
+        assert_eq!(legacy, serde_json::json!({"ok": false, "error": "busy"}));
+    }
+
+    #[test]
+    fn accepts_only_complete_strict_opencode_v1_snapshots() {
+        let valid = r#"{"tool":"agent_signal","v":1,"client":"opencode","snapshot":{"session":"ses_root","activity":"busy","permission":false,"question":true}}"#;
+        assert!(matches!(
+            interpret(valid.as_bytes()),
+            Incoming::Request(Request::AgentSignal(Some(_)))
+        ));
+        assert!(matches!(
+            interpret(br#"{"tool":"agent_signal","v":1,"client":"opencode","snapshot":null}"#),
+            Incoming::Request(Request::AgentSignal(None))
+        ));
+        assert!(
+            matches!(interpret(valid.as_bytes()), Incoming::Request(Request::AgentSignal(Some(snapshot))) if !snapshot.stale)
+        );
+        let stale = valid.replace("\"question\":true", "\"question\":true,\"stale\":true");
+        assert!(
+            matches!(interpret(stale.as_bytes()), Incoming::Request(Request::AgentSignal(Some(snapshot))) if snapshot.stale && snapshot.question)
+        );
+        let invalid = [
+            valid.replace("\"question\":true", "\"question\":true,\"stale\":1"),
+            valid.replace("opencode", "codex"),
+            valid.replace("\"v\":1", "\"v\":2"),
+            valid.replace("\"busy\"", "\"working\""),
+            valid.replace("\"question\":true", "\"question\":1"),
+            valid.replace("\"session\":\"ses_root\",", ""),
+            valid.replace("\"question\":true", "\"question\":true,\"pane\":\"other\""),
+            valid.replace("\"v\":1", "\"v\":1,\"pane\":\"other\""),
+            valid.replace("ses_root", &"x".repeat(257)),
+            valid.replace("ses_root", ""),
+            r#"{"tool":"agent_signal","v":1,"client":"opencode"}"#.to_owned(),
+        ];
+        for line in invalid {
+            assert!(
+                matches!(interpret(line.as_bytes()), Incoming::Malformed(_)),
+                "accepted {line}"
+            );
+        }
     }
 }

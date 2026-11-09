@@ -29,6 +29,7 @@ use crate::panel::{PanelState, Retirement};
 use crate::tiling::{Side, can_split};
 use crate::{Pane, Window, the_users_shell};
 
+mod applying;
 mod channel;
 mod retiring;
 pub(crate) use channel::open_with_sessions;
@@ -304,92 +305,6 @@ impl PaneControl {
         open_with_sessions(dir, reader, reads, None, wake)
     }
 
-    /// Applies everything waiting, and answers whoever is waiting for an answer.
-    ///
-    /// **The queue is bounded at [`MAX_PENDING`], and the earlier shape that left it unbounded was
-    /// wrong for a reason review found.** The argument for leaving it open was that a pane serves a
-    /// fixed, small number of connections and each one blocks on its own reply, so what is ordinarily
-    /// waiting is one request per connection. What that missed is a caller that *gave up*: its thread
-    /// goes back to reading with its delivery still queued, and a window that is minimised runs no
-    /// pass to drain it — so a producer parked against it piled up one document per connection per
-    /// timeout, unbounded. With `sync_channel` the send applies backpressure (or the listener refuses,
-    /// see its `publish`), and memory stays capped.
-    ///
-    /// **A caller that gave up still gets its document applied when a pass runs**, and the wording on
-    /// the other side is what makes that honest: the reply a timed-out caller reads says the window
-    /// did not answer in time, never that nothing was published.
-    pub fn apply(&mut self, state: &mut PanelState, now: SystemTime) {
-        while let Ok(delivery) = self.inbox.try_recv() {
-            match delivery.what {
-                What::Publish { source, panel } => {
-                    let answer = match state.deliver(delivery.connection, &source, panel, now) {
-                        Ok(()) => {
-                            self.did.applied += 1;
-                            Answer::Taken
-                        }
-                        Err(why) => {
-                            self.did.refused += 1;
-                            Answer::Refused(why)
-                        }
-                    };
-                    // The send cannot block — the answer channel takes one value — and it fails only
-                    // when the caller is already gone, which changes nothing about what is on screen.
-                    let _ = delivery.answer.send(answer);
-                }
-                What::Get => {
-                    let answer = match state.document() {
-                        Ok(document) => {
-                            self.reads.succeeded(document.len());
-                            Answer::Document(document)
-                        }
-                        Err(why) => {
-                            self.reads.refused();
-                            Answer::Refused(why)
-                        }
-                    };
-                    let _ = delivery.answer.send(answer);
-                }
-                // **The patch lands beside the publication and not beside the reads**, because it
-                // is a write: it needs the hold, it stamps the date, and what it leaves behind is
-                // what the next painting draws.
-                What::Patch { ops } => {
-                    let answer = match state.patch(delivery.connection, &ops, now) {
-                        Ok(written) => {
-                            self.did.patched += 1;
-                            // **The size of what the patch left behind, not of the ops that
-                            // arrived**, and it comes back from the ceiling check rather than from a
-                            // second write: the document a following read would hand over is the one
-                            // whose size explains this path's cost.
-                            self.did.largest_serialized = self.did.largest_serialized.max(written);
-                            Answer::Taken
-                        }
-                        Err(why) => {
-                            self.did.patches_refused += 1;
-                            Answer::Refused(why)
-                        }
-                    };
-                    let _ = delivery.answer.send(answer);
-                }
-                What::Closed => {
-                    self.apply_closed(state, delivery);
-                }
-                // **The three `split_*` verbs are the window's, and a pane has no tree.** They are
-                // held here until the window's drain takes them, which is where the handles, the
-                // focus and the revocation live — and the window is woken for it, because the drain
-                // of this very pass has already run: without that, a request arriving while the
-                // window is at rest would be answered by no pass at all.
-                What::Retire => {
-                    self.defer_retirement(delivery);
-                    break;
-                }
-                What::Open { .. } | What::Read { .. } | What::Close { .. } => {
-                    self.waiting_on_the_window.push(delivery);
-                    (self.wake)();
-                }
-            }
-        }
-    }
-
     /// Takes what only the window can answer, leaving the panel's own deliveries applied.
     ///
     /// **A second queue and not a second thread**: the pane's inbox is drained where the file's
@@ -655,7 +570,7 @@ impl Window {
                     // there is nobody to answer and nothing to say.
                     continue;
                 }
-                What::Publish { .. } | What::Get | What::Patch { .. } => {
+                What::Publish { .. } | What::Get | What::Patch { .. } | What::AgentSignal(_) => {
                     Answer::Refused("that request is not the window's".to_owned())
                 }
             };
@@ -1282,7 +1197,11 @@ mod tests {
             "reading woke the window"
         );
 
-        driven.control.apply(&mut driven.state, SystemTime::now());
+        driven.control.apply(
+            &mut driven.state,
+            &mut crate::agent_signals::Signals::default(),
+            SystemTime::now(),
+        );
         assert_eq!(publishing.answer(), Answered::Ok);
 
         let asking = Asking::start(driven.producer());
@@ -1390,7 +1309,11 @@ mod tests {
         fn frames_until(&mut self, what: impl Fn(&PanelState) -> bool) {
             let deadline = Instant::now() + Duration::from_secs(5);
             while Instant::now() < deadline {
-                self.control.apply(&mut self.state, SystemTime::now());
+                self.control.apply(
+                    &mut self.state,
+                    &mut crate::agent_signals::Signals::default(),
+                    SystemTime::now(),
+                );
                 if what(&self.state) {
                     return;
                 }
@@ -1404,7 +1327,11 @@ mod tests {
         fn frames_for(&mut self, how_long: Duration) {
             let deadline = Instant::now() + how_long;
             while Instant::now() < deadline {
-                self.control.apply(&mut self.state, SystemTime::now());
+                self.control.apply(
+                    &mut self.state,
+                    &mut crate::agent_signals::Signals::default(),
+                    SystemTime::now(),
+                );
                 std::thread::sleep(Duration::from_millis(5));
             }
         }
@@ -1480,7 +1407,11 @@ mod tests {
         )
         .expect("publish by file");
         // The refusal happens here, with the hold still standing.
-        pane.control.apply(&mut pane.state, SystemTime::now());
+        pane.control.apply(
+            &mut pane.state,
+            &mut crate::agent_signals::Signals::default(),
+            SystemTime::now(),
+        );
         assert_eq!(
             pane.state.refresh(pane.dir.path()),
             crate::panel::Refreshed::Declined
@@ -1695,7 +1626,11 @@ mod tests {
         let after_arrival = pane.woken.load(Ordering::Relaxed);
         assert!(after_arrival > 0, "the request never arrived at the pane");
 
-        pane.control.apply(&mut pane.state, SystemTime::now());
+        pane.control.apply(
+            &mut pane.state,
+            &mut crate::agent_signals::Signals::default(),
+            SystemTime::now(),
+        );
 
         assert!(
             pane.woken.load(Ordering::Relaxed) > after_arrival,
@@ -1775,7 +1710,11 @@ mod tests {
             session.asked.send(verb).expect("the session is listening");
             let deadline = Instant::now() + Duration::from_secs(5);
             while Instant::now() < deadline {
-                self.control.apply(&mut self.state, SystemTime::now());
+                self.control.apply(
+                    &mut self.state,
+                    &mut crate::agent_signals::Signals::default(),
+                    SystemTime::now(),
+                );
                 match session.answered.try_recv() {
                     Ok(answer) => return answer,
                     Err(std::sync::mpsc::TryRecvError::Empty) => {

@@ -4,6 +4,7 @@ use crate::{Window, panel};
 use eframe::egui::{self, Color32, Rect, Stroke};
 use std::{path::PathBuf, time::Instant};
 
+const APPLYING_PREFERENCES: &str = "Saved. Applying settings...";
 const BRIDGE_KEY: &str = "ivy-mcp-bridge-location";
 const CODEX_ENV: &str = "env_vars = [\"PANEL_ID\", \"PANEL_DIR\"]";
 const PROMPT: &str = "Use Ivy's panel tools to publish your current task and update it when the phase or attention changes. Set attention to wait when you need my answer, block when an external dependency stops the task, and done when the work is finished. Omit attention during ordinary progress.";
@@ -33,6 +34,7 @@ struct Published {
     consoles: usize,
     documents: usize,
     live: usize,
+    observed: [usize; 3],
 }
 
 #[derive(Default, Debug)]
@@ -44,9 +46,18 @@ pub(super) struct Guide {
     recovery: recovery::Status,
     manual_open: bool,
     copied: Option<&'static str>,
+    desired: crate::agent_signals::Enabled,
+    save_preferences: bool,
+    install_plugin: bool,
+    message: String,
 }
 
 impl Guide {
+    fn application_status(&mut self, applying: bool) {
+        if self.message == APPLYING_PREFERENCES && !applying {
+            self.message = "Saved and applied.".into();
+        }
+    }
     pub(super) fn blocked(&self, ctx: &egui::Context) -> bool {
         self.open || self.awaiting_release || self.blocked_frame == Some(ctx.cumulative_frame_nr())
     }
@@ -54,6 +65,7 @@ impl Guide {
 
 pub(crate) fn prepare(ctx: &egui::Context) {
     super::branding::install_logo(ctx);
+    crate::agent_signals::logos::install(ctx);
     let bridge = Bridge::check();
     ctx.data_mut(|data| data.insert_temp(egui::Id::new(BRIDGE_KEY), bridge));
 }
@@ -65,6 +77,14 @@ fn published(window: &Window) -> Published {
             result.consoles += 1;
             result.documents += usize::from(panel::summary::has_document(&pane.panel_state));
             result.live += usize::from(pane.panel_state.held_by().is_some());
+            if let Some(view) = pane.signals.view(Instant::now()) {
+                let index = match view.client {
+                    crate::agent_signals::Client::Codex => 0,
+                    crate::agent_signals::Client::Claude => 1,
+                    crate::agent_signals::Client::OpenCode => 2,
+                };
+                result.observed[index] += 1;
+            }
         });
     }
     result
@@ -148,6 +168,8 @@ pub(super) fn open(window: &mut Window, ctx: &egui::Context) {
     {
         return;
     }
+    window.chrome.guide.desired = window.chrome.agent_preferences;
+    window.chrome.guide.message.clear();
     window.chrome.guide.open = true;
     window.chrome.guide.copied = None;
     window.chrome.guide.blocked_frame = Some(ctx.cumulative_frame_nr());
@@ -179,8 +201,31 @@ pub(crate) fn begin_pass(window: &mut Window, ui: &mut egui::Ui) {
     }
     let started = Instant::now();
     let ctx = ui.ctx();
+    window
+        .chrome
+        .guide
+        .application_status(window.settings_editor.is_applying());
     if window.chrome.guide.open {
         show(&mut window.chrome.guide, ctx);
+        if std::mem::take(&mut window.chrome.guide.save_preferences) {
+            let desired = window.chrome.guide.desired;
+            window.chrome.guide.message =
+                match crate::settings::editor::runtime::save_agent_preferences(window, desired) {
+                    Ok(()) => APPLYING_PREFERENCES.into(),
+                    Err(error) => error,
+                };
+        }
+        if std::mem::take(&mut window.chrome.guide.install_plugin) {
+            window.chrome.guide.message = match crate::settings::path()
+                .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
+            {
+                Some(dir) => match crate::agent_setup::install(&dir) {
+                    Ok(path) => format!("Installed {}", path.display()),
+                    Err(error) => format!("Installation failed: {error}"),
+                },
+                None => "The configuration directory is unavailable.".into(),
+            };
+        }
     }
     window.chrome.guide.blocked_frame = Some(ctx.cumulative_frame_nr());
     window.chrome.guide.awaiting_release = ctx.input(|i| i.pointer.any_down());
@@ -200,6 +245,7 @@ pub(crate) fn after_panels(window: &mut Window, ui: &mut egui::Ui, area: Rect) {
         return;
     }
     let started = Instant::now();
+    crate::agent_signals::logos::arm_stale(window, ui.ctx());
     let current = published(window);
     if current != window.chrome.guide.published && window.chrome.guide.open {
         ui.ctx().request_repaint();
@@ -404,4 +450,50 @@ fn body(guide: &mut Guide, ui: &mut egui::Ui) {
         manual(published, &mut guide.copied, ui);
     }
     recovery::show(guide.recovery, &mut guide.copied, ui);
+    egui::CollapsingHeader::new("Agent activity and input signals")
+        .default_open(false)
+        .show(ui, |ui| {
+    ui.label("Explicit activation is required. Permission and question lifecycles were verified on Linux for the versions below; other versions and platforms remain unverified.");
+    ui.label(format!(
+        "Observed declarations: Codex {}, Claude {}, OpenCode {} (including stale).",
+        published.observed[0], published.observed[1], published.observed[2]
+    ));
+    ui.checkbox(&mut guide.desired.codex, "Codex 0.167.0");
+    ui.checkbox(&mut guide.desired.claude, "Claude Code 2.1.319");
+    ui.checkbox(&mut guide.desired.opencode, "OpenCode 1.18.31");
+    if ui.button("Save agent preferences").clicked() {
+        guide.save_preferences = true;
+    }
+    ui.label("Codex and Claude use native terminal declarations; Claude requires no hooks.");
+    ui.label("Enable before starting the client. If OpenCode was refused while disabled, restart it after enabling.");
+    ui.label("To avoid a duplicate Codex title spinner, merge this key into your existing [tui] table in ~/.codex/config.toml. Preserve other settings, then restart Codex and resume your conversation:");
+    copyable(ui, "terminal_title = [\"thread-name\", \"project-name\"]", "Copy Codex title setting", &mut guide.copied);
+    ui.label("Claude removes its duplicate title indicator after native negotiation. Live client verification is still required.");
+    if cfg!(windows) { ui.label("The OpenCode TUI plugin transport is not supported on Windows in this delivery."); }
+    if let Some(dir) =
+        crate::settings::path().and_then(|p| p.parent().map(std::path::Path::to_path_buf))
+    {
+        ui.label(format!(
+            "OpenCode plugin destination: {}",
+            crate::agent_setup::plugin_path(&dir).display()
+        ));
+        if ui.button("Install / repair OpenCode plugin").clicked() {
+            guide.install_plugin = true;
+        }
+        ui.label("Add this entry to the existing plugin array in OpenCode tui.json, preserving its other entries:");
+        copyable(
+            ui,
+            &crate::agent_setup::snippet(&dir),
+            "Copy OpenCode plugin entry",
+            &mut guide.copied,
+        );
+    }
+    if !guide.message.is_empty() {
+        ui.label(&guide.message);
+    }
+    ui.separator();
+        });
 }
+
+#[cfg(test)]
+mod tests;

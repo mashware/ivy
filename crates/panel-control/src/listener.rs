@@ -23,13 +23,13 @@ use panel_contract::{Dropped, Panel, Patch};
 
 use crate::endpoint;
 use crate::session::{Peer, SessionHandler};
+use crate::wire::{AgentSnapshot, Framing, Incoming, Reply, Request, Side, write_reply};
 
 #[derive(Clone, Default)]
 struct Services {
     reader: Option<ReadDocument>,
     session: Option<SessionHandler>,
 }
-use crate::wire::{Framing, Incoming, Reply, Request, Side, write_reply};
 
 /// How long a publication waits for the window to take it.
 ///
@@ -95,6 +95,8 @@ pub struct Delivery {
 /// The things a connection ever says.
 #[derive(Debug)]
 pub enum What {
+    /// Complete independent signal or explicit withdrawal from this connection.
+    AgentSignal(Option<AgentSnapshot>),
     /// Publish this, under this source.
     Publish { source: String, panel: Panel },
     /// Compatibility path for callers that still let the pane answer `panel_get` in its pass.
@@ -593,6 +595,16 @@ fn answer(
 ) -> (Reply, bool) {
     match incoming {
         Incoming::Session(_) => (Reply::Failed("session service unavailable".into()), false),
+        Incoming::Request(Request::AgentSignal(snapshot)) => (
+            ask_the_window(
+                Wants::AgentSignal,
+                What::AgentSignal(snapshot),
+                connection,
+                to_the_window,
+                wake,
+            ),
+            false,
+        ),
         Incoming::Request(Request::PanelSet { source, document }) => {
             match panel_contract::parse_document_noting(&document) {
                 Ok((panel, dropped)) => (
@@ -731,6 +743,7 @@ fn publish(
 #[derive(Debug, Clone, Copy)]
 enum Wants {
     Taken,
+    AgentSignal,
     Retired,
     Opened,
     Read,
@@ -741,11 +754,20 @@ impl Wants {
     fn name(self) -> &'static str {
         match self {
             Self::Taken => "a publication or a close",
+            Self::AgentSignal => "an agent signal",
             Self::Retired => "a retirement",
             Self::Opened => "an open",
             Self::Read => "a read",
             Self::Document => "a document read",
         }
+    }
+}
+
+fn temporary_failure(wants: Wants, reason: &str) -> Reply {
+    if matches!(wants, Wants::AgentSignal) {
+        Reply::Retryable(reason.to_owned())
+    } else {
+        Reply::Failed(reason.to_owned())
     }
 }
 
@@ -769,7 +791,7 @@ fn ask_the_window(
     }) {
         Ok(()) => {}
         Err(TrySendError::Full(_)) => {
-            return Reply::Failed("the window is not draining its channel".to_owned());
+            return temporary_failure(wants, "the window is not draining its channel");
         }
         Err(TrySendError::Disconnected(_)) => {
             return Reply::Failed("this pane is gone".to_owned());
@@ -779,7 +801,7 @@ fn ask_the_window(
 
     match answer.recv_timeout(ANSWER_DEADLINE) {
         Ok(Answer::Refused(why)) => Reply::Failed(why),
-        Ok(Answer::Taken) if matches!(wants, Wants::Taken) => Reply::Ok,
+        Ok(Answer::Taken) if matches!(wants, Wants::Taken | Wants::AgentSignal) => Reply::Ok,
         Ok(Answer::Retired { closed, preserved }) if matches!(wants, Wants::Retired) => {
             Reply::Retired { closed, preserved }
         }
@@ -808,7 +830,7 @@ fn ask_the_window(
         // giving up here cannot reach into a pass that has already started. Saying «it was not
         // published» would be the lie; saying it was not answered in time is true either way.
         Err(RecvTimeoutError::Timeout) => {
-            Reply::Failed("the window did not answer within five seconds".to_owned())
+            temporary_failure(wants, "the window did not answer within five seconds")
         }
         // **And a pane that is gone is not a slow one.** Folding the two together invited an agent
         // to retry against something that no longer exists, for ever.
@@ -895,6 +917,85 @@ mod tests {
             }
         }
         String::from_utf8(reply).expect("the reply is text")
+    }
+
+    #[test]
+    fn agent_signal_crosses_the_socket_and_disconnect_is_reported() {
+        let pane = a_pane();
+        let other = a_pane();
+        let mut client = pane.connect();
+        client.write_all(b"{\"tool\":\"agent_signal\",\"v\":1,\"client\":\"opencode\",\"snapshot\":{\"session\":\"ses_root\",\"activity\":\"busy\",\"permission\":false,\"question\":true}}\n").unwrap();
+        let delivery = pane.next_delivery();
+        let connection = delivery.connection;
+        assert!(
+            matches!(delivery.what, What::AgentSignal(Some(ref snapshot)) if snapshot.session == "ses_root" && snapshot.activity == crate::wire::Activity::Busy && snapshot.question && !snapshot.permission)
+        );
+        assert!(other.inbox.try_recv().is_err());
+        delivery.answer.send(Answer::Taken).unwrap();
+        assert!(read_reply(&mut client).contains("true"));
+        client
+            .write_all(
+                b"{\"tool\":\"agent_signal\",\"v\":1,\"client\":\"opencode\",\"snapshot\":null}\n",
+            )
+            .unwrap();
+        let withdrawal = pane.next_delivery();
+        assert_eq!(withdrawal.connection, connection);
+        assert!(matches!(withdrawal.what, What::AgentSignal(None)));
+        withdrawal.answer.send(Answer::Taken).unwrap();
+        assert!(read_reply(&mut client).contains("true"));
+        drop(client);
+        let closed = pane.next_delivery();
+        assert_eq!(closed.connection, connection);
+        assert!(matches!(closed.what, What::Closed));
+    }
+
+    #[test]
+    fn agent_signal_queue_full_replies_retryable_over_the_socket_but_panel_does_not() {
+        let dir = PanelDir::create().unwrap();
+        let (sender, _inbox) = sync_channel::<Delivery>(1);
+        let (answer, _) = sync_channel(1);
+        sender
+            .try_send(Delivery {
+                connection: 99,
+                what: What::Closed,
+                answer,
+            })
+            .unwrap();
+        let _channel = Channel::open_with_reader(
+            dir.path(),
+            dir.id(),
+            sender,
+            Arc::new(|| Err("no panel".into())),
+            Arc::new(|| {}),
+        )
+        .unwrap();
+        let mut stream = endpoint::connect(dir.path(), dir.id()).unwrap();
+        stream
+            .write_all(
+                b"{\"tool\":\"agent_signal\",\"v\":1,\"client\":\"opencode\",\"snapshot\":null}\n",
+            )
+            .unwrap();
+        let retry: serde_json::Value = serde_json::from_str(&read_reply(&mut stream)).unwrap();
+        assert_eq!(retry["ok"], false);
+        assert_eq!(retry["retryable"], true);
+        stream
+            .write_all(publication("flow", "{\"lines\":[]}").as_bytes())
+            .unwrap();
+        let legacy: serde_json::Value = serde_json::from_str(&read_reply(&mut stream)).unwrap();
+        assert_eq!(legacy["ok"], false);
+        assert!(legacy.get("retryable").is_none());
+    }
+
+    #[test]
+    fn timeout_classification_is_specific_to_agent_signals() {
+        assert!(matches!(
+            temporary_failure(Wants::AgentSignal, "timeout"),
+            Reply::Retryable(_)
+        ));
+        assert!(matches!(
+            temporary_failure(Wants::Taken, "timeout"),
+            Reply::Failed(_)
+        ));
     }
 
     /// The whole of what this delivery promises, end to end: a producer publishes over the channel

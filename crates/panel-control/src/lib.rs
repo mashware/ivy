@@ -21,6 +21,10 @@
 //! of `/proc/<pid>/environ`, so it is a name and not a credential; a field carrying it would be a
 //! field somebody starts trusting, and the check that validates it is what a later refactor drops.
 //!
+//! OpenCode may also send a strict `agent_signal` v1 snapshot on its pane endpoint.
+//! This independent connection does not claim the panel and is not an MCP tool; its
+//! connection identity and disconnect are delivered to the application for arbitration.
+//!
 //! # What this build serves
 //!
 //! The six verbs of the frozen wire format: `panel_set`, `panel_get`, `panel_patch`, and the three
@@ -38,4 +42,4 @@ pub mod wire;
 
 pub use client::{Answered, Producer};
 pub use listener::{Answer, Channel, Connection, Delivery, ReadDocument, What};
-pub use wire::{MAX_REQUEST, Reply, Request, Side};
+pub use wire::{Activity, AgentSnapshot, MAX_REQUEST, Reply, Request, Side};
