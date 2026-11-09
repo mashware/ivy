@@ -41,6 +41,7 @@ pub(crate) mod control;
 mod pane_view;
 use panel::pane::{identity_of, panel_or_none};
 pub mod fonts;
+mod git_process;
 mod header;
 mod injected;
 pub mod keyboard;
@@ -52,6 +53,8 @@ mod opening;
 pub mod painter;
 pub mod panel;
 mod pointer;
+mod project;
+mod project_view;
 pub mod pty_output;
 mod report;
 mod search;
@@ -584,6 +587,7 @@ pub fn run() -> eframe::Result {
     // and a measured session takes them away, so no test depends on what the session that launched
     // it exported.
     let wants_headers = std::env::var_os(header::HEADER_VARIABLE).is_some();
+    let project_probe = project_view::probe_at_startup(measuring);
     if let Some(size) = requested {
         options.viewport = options.viewport.with_inner_size(size);
     }
@@ -623,6 +627,7 @@ pub fn run() -> eframe::Result {
             // console, so a measured run that painted one would publish a grid no published batch
             // was measured with. See [`header::Headers::resolved`].
             window.headers = header::Headers::resolved(entry, wants_headers).integrated(integrated);
+            project_view::configure(&mut window, entry, project_probe.clone());
             window.settings_editor = settings::editor::Editor::resolved(
                 entry,
                 std::env::var("MEASURE_SETTINGS").ok().as_deref(),
@@ -679,6 +684,7 @@ struct Pane {
     name: usize,
     /// Explicit display label; never used as process input or identity.
     label: Option<String>,
+    project: Option<project_view::Badge>,
     /// The pseudoterminal and its queue go together on purpose. The bridge's thread lives as long
     /// as the pseudoterminal lives, not as long as the bridge does: separating them would leave a
     /// thread and a queue with no owner, growing.
@@ -1051,6 +1057,7 @@ struct Window {
     pane_view: pane_view::State,
     summary: summary::State,
     viewer: viewer::State,
+    projects: project_view::State,
     /// The previous frame's mirror. **The deadline is armed against it**, so the deadline is
     /// rearmed **when something changes** and not when something is unwritten: without this, a
     /// non-writable directory would leave the difference in place and **the window would never go
@@ -1272,21 +1279,7 @@ impl Window {
     /// A console with no directory is not watched because there is nothing to watch: nobody can
     /// publish a panel for it. Its flag stays as it is and its read finds nowhere to look.
     fn watch<'a>(ctx: &egui::Context, panes: impl IntoIterator<Item = &'a Pane>) -> Watcher {
-        let consoles: Vec<_> = panes
-            .into_iter()
-            .filter_map(|pane| {
-                let dir = pane.panel.as_ref()?;
-                Some((dir.path(), pane.to_reread.clone()))
-            })
-            .collect();
-
-        // The only thing the watcher needs from the window is how to wake it, just like the bridge:
-        // that way its module does not depend on the interface framework, which is what is going to
-        // be rewritten. Asking for the repaint does not panic, which is the condition for whoever
-        // calls it from another thread.
-        let waker = ctx.clone();
-
-        Watcher::new(move || waker.request_repaint(), &consoles)
+        opening::watch_panes(ctx, panes)
     }
 
     /// Asks for the window size again while the window does not have it and attempts remain.
@@ -1542,6 +1535,8 @@ impl eframe::App for Window {
             some_left_a_queue,
             all_finished,
         } = self.pump_them_all();
+
+        project_view::refresh(self, ctx);
 
         self.insist_on_the_size(ctx);
 
@@ -6790,6 +6785,7 @@ mod tests {
         Pane {
             name,
             label: None,
+            project: None,
             pty,
             pty_output: PtyOutput::new(output, || {}),
             panel: None,
@@ -6922,6 +6918,7 @@ mod tests {
             pane_view: pane_view::State::default(),
             summary: summary::State::default(),
             viewer: viewer::State::default(),
+            projects: project_view::State::default(),
             link_press_in_progress: None,
             drag_in_progress: None,
             last_painted: Vec::new(),

@@ -470,6 +470,49 @@ impl Theme {
     }
 }
 
+pub(crate) fn project_accents(theme: &Theme) -> Vec<Color32> {
+    let mut colors = Vec::new();
+    for slot in [4, 2, 5, 6, 3, 1, 12, 10, 13, 14, 11, 9] {
+        let original = theme.color(term_core::TermColor::Indexed(slot));
+        let mut color = original;
+        for step in 0..=10 {
+            let amount = step as f32 / 10.0;
+            color = mix(original, theme.foreground(), amount);
+            if project_ink_contrast(color, theme.panel_background()) >= 3.0 {
+                break;
+            }
+        }
+        if project_ink_contrast(color, theme.panel_background()) >= 3.0
+            && colors
+                .iter()
+                .all(|other| project_inks_distinct(color, *other))
+        {
+            colors.push(color);
+        }
+    }
+    colors
+}
+
+pub(crate) fn project_inks_distinct(a: Color32, b: Color32) -> bool {
+    let distance = |a: u8, b: u8| (i32::from(a) - i32::from(b)).pow(2);
+    distance(a.r(), b.r()) + distance(a.g(), b.g()) + distance(a.b(), b.b()) >= 48 * 48
+}
+pub(crate) fn project_ink_contrast(a: Color32, b: Color32) -> f32 {
+    let luminance = |c: Color32| {
+        let linear = |n: u8| {
+            let x = n as f32 / 255.0;
+            if x <= 0.04045 {
+                x / 12.92
+            } else {
+                ((x + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * linear(c.r()) + 0.7152 * linear(c.g()) + 0.0722 * linear(c.b())
+    };
+    let (a, b) = (luminance(a), luminance(b));
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
+
 /// **Bold means bright.**
 ///
 /// It is the convention taken for granted by programs that use bold to stand out, and that makes
