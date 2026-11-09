@@ -34,6 +34,9 @@ use eframe::egui::{
 use std::time::Duration;
 use term_core::{CellWidth, CursorShape, Size, TermColor, View, ViewCell};
 
+/// Inner spacing belongs to console geometry, including sizing and input (D77).
+pub(crate) const CONSOLE_PADDING: f32 = 8.0;
+
 /// The largest size accepted for a grid.
 ///
 /// Deliberately generous: a 4K monitor with the smallest legible font does not go past about 300
@@ -219,6 +222,16 @@ impl CellMetrics {
             rows: ((space.y / self.height) as u16).clamp(1, CEILING.rows),
             cols: ((space.x / self.width) as u16).clamp(1, CEILING.cols),
         }
+    }
+
+    /// Keep grid sizing, painting and pointer coordinates on the same padded rectangle.
+    /// Padding yields before the last cell when a divider collapses a console (D77).
+    pub(crate) fn console_in(&self, area: Rect) -> Rect {
+        let inset = vec2(
+            CONSOLE_PADDING.min(((area.width() - self.width) / 2.0).max(0.0)),
+            CONSOLE_PADDING.min(((area.height() - self.height) / 2.0).max(0.0)),
+        );
+        area.shrink2(inset)
     }
 
     /// What one device pixel is worth in points, for whoever has to keep a shape from rounding away

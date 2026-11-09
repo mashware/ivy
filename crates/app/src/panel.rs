@@ -136,7 +136,10 @@ pub fn set_aside(pane: Rect, cell_width: f32, panel_cells: Option<usize>) -> Pan
     };
 
     let in_points = cells as f32 * cell_width;
-    let available = (pane.width() - MINIMUM_CONSOLE * cell_width).max(0.0);
+    // Reserve the terminal's inner margins before letting the panel keep spare width (D77).
+    let available =
+        (pane.width() - MINIMUM_CONSOLE * cell_width - 2.0 * crate::painter::CONSOLE_PADDING)
+            .max(0.0);
     let cut = pane.right() - in_points.min(available);
 
     PanelTiling {
@@ -1375,7 +1378,7 @@ mod tests {
     /// write while its panel keeps its thirty-six columns.
     #[test]
     fn in_a_narrow_pane_the_panel_yields_and_the_console_keeps_its_floor() {
-        let narrow = (MINIMUM_CONSOLE + 4.0) * CELL_WIDTH;
+        let narrow = (MINIMUM_CONSOLE + 4.0) * CELL_WIDTH + 16.0;
 
         let slot = set_aside(pane_of(narrow), CELL_WIDTH, Some(DEFAULT_WIDTH));
 
@@ -1384,7 +1387,7 @@ mod tests {
             4.0 * CELL_WIDTH,
             "the panel is the one that yields"
         );
-        assert_eq!(slot.console.width(), MINIMUM_CONSOLE * CELL_WIDTH);
+        assert_eq!(slot.console.width(), MINIMUM_CONSOLE * CELL_WIDTH + 16.0);
     }
 
     /// And the edge of the previous one: below the console's floor the panel disappears entirely rather

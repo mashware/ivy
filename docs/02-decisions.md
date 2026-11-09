@@ -8755,3 +8755,25 @@ texts stop packaging. This preserves existing licenses rather than choosing new 
 The owner selected Arch x86_64 as the next delivery before macOS/Windows. Arch uses native makepkg metadata and pacman lifecycle checks around the same verified Ubuntu-baseline Linux payload. Reusing binary bytes avoids independent builds producing different executables within a release, while explicit Arch dependencies and actual installed-runtime checks establish whether that payload works on Arch. AUR/official repository submission remains separate.
 
 Public alpha1 upload demonstrated that GitHub rewrites '~' in asset names to '.', breaking manifest/checksum filenames. Asset names therefore retain SemVer spelling (`ivy_<V>_amd64.deb`); Debian control metadata still maps the prerelease hyphen to tilde. Public transport-safe names and package-manager version syntax are separate contracts.
+
+
+## D77 — Console text has its own inner spacing
+
+**Decision.** Every console reserves 8 logical points on all four sides of the terminal grid.
+The shared console rectangle determines painting, PTY rows/columns and pointer coordinates,
+including hidden tabs and the immediate retiling while dragging a status-panel divider.
+Panel allocation and split feasibility include the extra 16 points before preserving the existing
+20-column and 3-row split minimum. Tree-divider dragging retains its existing smaller floor;
+padding yields before the last available cell in a collapsed console.
+
+**Why.** Text against the console border is harder to read, as shown in the user screenshot.
+Changing only the drawing origin would make selection and application mouse reports disagree with
+what is painted. Padding is presentation space, not blank terminal cells a program can overwrite.
+
+**Discarded.** A glyph-only translation breaks input alignment. Empty terminal rows or columns
+are controlled by the program and cannot reserve a stable margin. A new configurable preference
+adds a product surface the requested fixed spacing does not need.
+
+**Measurement boundary.** Padding changes the available grid, including measurement runs; no
+frame-cost improvement is claimed against older grids. Its geometry remains in the existing
+timed panel-tiling path, and grid measurement and painting consume that one result.

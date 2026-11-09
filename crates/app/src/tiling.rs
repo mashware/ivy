@@ -493,6 +493,7 @@ pub(crate) fn can_split(
     headers: crate::header::Headers,
 ) -> bool {
     let minimum = 2.0 * headers.pane_inset()
+        + 2.0 * crate::painter::CONSOLE_PADDING
         + match cut_along {
             Orientation::Columns => panel::MINIMUM_CONSOLE * metrics.width(),
             // **The strip counts towards the minimum, and it has to count here.** Each daughter gets one
