@@ -147,6 +147,45 @@ into an auxiliary console revokes the agent's read and close handle. See the
 [architecture](docs/03-architecture.md) and [contract](docs/04-panel-contract.md) for connection
 and ownership rules.
 
+### Codex: forward identity and check the launch mode
+
+In `~/.codex/config.toml`, configure the local stdio bridge with its verified absolute path:
+
+```toml
+[mcp_servers.ivy]
+command = "/absolute/path/to/panel-mcp"
+env_vars = ["PANEL_ID", "PANEL_DIR"]
+```
+
+If an Ivy bridge entry already exists under another name, update that table and preserve its
+command and other settings instead of adding a duplicate. `env_vars` forwards **variable names**
+from the launching environment; never save a console's actual `PANEL_ID` or `PANEL_DIR` in `env`.
+See the [official Codex MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
+
+Codex can use a shared background server whose environment lacks the intended console's identity,
+even when its terminal client is already running inside Ivy. Forwarding variables cannot supply
+values missing from that server. A missing-identity error therefore does not by itself mean the
+client was launched outside Ivy, and reopening against the same server can repeat it.
+
+Check `codex --help` for a new session, or `codex resume --help` for a saved session. If the relevant
+command supports `--no-daemon`, run it **inside the intended Ivy console** to bypass the shared server:
+
+```sh
+codex --no-daemon
+# Or resume your saved session, replacing <session-id> with its actual ID:
+codex resume --no-daemon <session-id>
+```
+
+Codex CLI 0.167.0 advertises both forms. If the installed version does not support the option,
+report that client-version limitation instead of passing an unknown flag or hard-coding a console
+identity. Ivy does not modify Codex configuration or restart its processes.
+
+Tool discovery alone proves no connection to a console. Successful pane-tool calls prove a usable
+connection; observe a test status beside the intended console to confirm the target. To verify
+independent routing, launch two Codex sessions in separate Ivy consoles with distinct test statuses
+and confirm each appears only beside its originating console. Without that observation, report
+native two-console verification as incomplete rather than claiming isolation is proved.
+
 ## Read plans and review changes
 
 Read the plan or inspect changes while your consoles keep running. Both viewers float above the

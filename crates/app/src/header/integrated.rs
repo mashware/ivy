@@ -308,8 +308,11 @@ mod tests {
         let m = CellMetrics::of(8.0, 16.0);
         let headers = super::super::Headers::PAINTED.integrated(true);
         for (axis, minimum) in [
-            (crate::tiling::Orientation::Columns, 20.0 * 8.0 + 5.0),
-            (crate::tiling::Orientation::Rows, 3.0 * 16.0 + 33.0 + 5.0),
+            (crate::tiling::Orientation::Columns, 20.0 * 8.0 + 16.0 + 5.0),
+            (
+                crate::tiling::Orientation::Rows,
+                3.0 * 16.0 + 16.0 + 33.0 + 5.0,
+            ),
         ] {
             let threshold = 2.0 * minimum + crate::DIVIDER_THICKNESS;
             let size = |length| match axis {

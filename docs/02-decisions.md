@@ -8651,6 +8651,27 @@ span; historical measurement mode adds no guide. No performance result is claime
   and lets the person copy explicit text; changing external settings is separate behavior.
 
 
+**Codex setup clarification (issue #6, 9 November 2026).** The copied prompt and manual guide
+explicitly document `env_vars = ["PANEL_ID", "PANEL_DIR"]` in the existing stdio server table.
+These are names to forward, never persistent console values. A Codex shared background server
+can lack the originating console's environment even when its terminal client is already inside
+Ivy, so the missing-identity branch must reach that diagnosis instead of only asking to reopen.
+Check the installed launch or resume help before recommending `--no-daemon` inside the intended
+console; an unsupported flag is reported as a client-version limitation. Codex 0.167.0 advertises
+both command forms, but this capability check is not native two-console verification.
+
+Why: the reported session discovered both bridge tool sets while calls still returned a missing
+pane identity. Forwarding is explicit in Codex's MCP configuration, and its CLI help describes
+`--no-daemon` as bypassing the shared background server. Discovery, usable connection and correct
+console observation are three different proofs; distinct statuses in two real consoles are needed
+before claiming independent routing. The guide continues to copy text only.
+
+Rejected workarounds include persisting one console's identity (stale or wrong-pane binding),
+restarting a global daemon for each console (does not establish independent per-console identity),
+and adding a pane selector to MCP calls (changes the existing endpoint-scoped contract without
+evidence that it is necessary). Automatic client configuration remains outside this guide.
+
+
 ---
 
 ## D74 — Ivy is public free software under GPLv3
@@ -8774,3 +8795,24 @@ license files. The build retains pinned upstream MIT text and licensing context,
 attribution and source revisions for the explicitly verified versions. Provenance and the dispatch
 MIT fallback distinction are recorded in resources/licenses/macos/README.md; unknown versions still
 stop packaging. This preserves declared terms and available attribution rather than changing licenses.
+
+## D77 — Console text has its own inner spacing
+
+**Decision.** Every console reserves 8 logical points on all four sides of the terminal grid.
+The shared console rectangle determines painting, PTY rows/columns and pointer coordinates,
+including hidden tabs and the immediate retiling while dragging a status-panel divider.
+Panel allocation and split feasibility include the extra 16 points before preserving the existing
+20-column and 3-row split minimum. Tree-divider dragging retains its existing smaller floor;
+padding yields before the last available cell in a collapsed console.
+
+**Why.** Text against the console border is harder to read, as shown in the user screenshot.
+Changing only the drawing origin would make selection and application mouse reports disagree with
+what is painted. Padding is presentation space, not blank terminal cells a program can overwrite.
+
+**Discarded.** A glyph-only translation breaks input alignment. Empty terminal rows or columns
+are controlled by the program and cannot reserve a stable margin. A new configurable preference
+adds a product surface the requested fixed spacing does not need.
+
+**Measurement boundary.** Padding changes the available grid, including measurement runs; no
+frame-cost improvement is claimed against older grids. Its geometry remains in the existing
+timed panel-tiling path, and grid measurement and painting consume that one result.

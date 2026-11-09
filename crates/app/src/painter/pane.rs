@@ -213,7 +213,7 @@ pub(crate) fn paint_pane(
     // counting a fold in there would be publishing work that did not happen.
     let width_before = pane.panel_width;
     if pane.drag_its_panel_divider(ui, chrome.below(), panel_split.panel, metrics, now) {
-        panel_split = pane.tile_with_its_panel(chrome.below(), metrics.width(), now);
+        panel_split = pane.tile_with_its_panel(chrome.below(), metrics, now);
     }
     let width_changed = pane.panel_width != width_before;
     let cost_of_reading = refreshed.reading + before_the_panel.elapsed();
