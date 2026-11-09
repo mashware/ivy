@@ -2,7 +2,7 @@
 mod delivery;
 mod diff;
 mod load;
-mod markdown;
+pub(crate) mod markdown;
 mod origin;
 mod review;
 mod view;

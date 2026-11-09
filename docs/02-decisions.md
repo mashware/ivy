@@ -8671,3 +8671,41 @@ the source to private visibility, which would not implement the requested public
 
 **Boundary:** public visibility and this license do not publish a binary release, claim platform
 certification or change any third-party license.
+
+---
+
+## D75 — Stable release discovery is global and does not interrupt consoles
+
+**Decided on 9 November 2026.** Ivy checks the public GitHub releases of `mashware/ivy` once per
+ordinary launch on a background thread. A dot on the application menu announces a newer stable
+semantic version. The menu offers **Check for updates** and **What's new**; neither starts a program
+inside a console. A user can dismiss the dot for this launch and still reopen the notes.
+
+The dialog includes bundled notes for the installed version, available offline, and the twenty most
+recent published releases returned by GitHub. Drafts, prereleases and tags that are not semantic
+versions are excluded; versions are compared numerically, ignoring build metadata. No releases is
+not the same as up to date. Failed requests are visible in the dialog and retried only on request.
+
+**Why:** people using an older binary need to discover releases and understand new features without
+an agent, running command or active terminal losing focus. Published releases give the maintainer an
+explicit publication boundary; ordinary commits and tags do not become user announcements.
+
+**Boundaries:** one request at a time, a ten-second global timeout and a one-MiB response limit.
+Release notes are bounded and use the existing inert Markdown viewer: remote images, links and HTML
+do not execute. Explicit download and release-page buttons use fixed HTTPS GitHub repository URLs
+through the desktop's existing opener. No provider credentials, console output or pane identities
+are sent. The update check runs on all supported desktop platforms and requires no external CLI.
+
+Every measurement launch suppresses the automatic check, including integrated-chrome measurements.
+Polling and dialog work is attributed to integrated chrome and subtracted from framework cost.
+
+**Discarded:** automatic installation, which requires platform packaging/signing and restart policy
+that this request does not define; periodic polling, which would wake idle terminals; a latest-only
+endpoint, which cannot supply history; browser-only notes, which are unavailable offline and leave
+installed features undiscoverable without a published release; a second Markdown renderer.
+
+**Accepted limits:** release history and dismissed notifications last for the current launch only.
+Offline users retain bundled installed notes, but remote history is not cached. A single request
+reads twenty recent releases, so older history remains on GitHub. Source builds identify themselves
+by their Cargo version. Publishing a release requires bumping that version and updating the bundled
+notes; this feature does not publish releases or build installers.

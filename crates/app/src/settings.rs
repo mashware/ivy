@@ -545,7 +545,7 @@ pub fn interpret(text: &str) -> Result<(Settings, Warnings), ConfigProblem> {
 impl Settings {
     /// Puts on the window whatever whoever uses it configured, **except the font**.
     ///
-    /// The family named in the file is applied by [`crate::choose_the_font`] instead, and it is not tidiness:
+    /// The family named in the file is applied by [`crate::fonts::choose_the_font`] instead, and it is not tidiness:
     /// everything here puts a value on the window, while that one talks to the text engine, needs the
     /// context and can cost tens of milliseconds. It runs beside this, at start-up.
     ///
@@ -2308,7 +2308,7 @@ mod tests {
              walk stopped working",
             sentences.len()
         );
-        // **Two floors and not one**, the lesson `COMMENT_LINES_AT_LEAST` in `tests/prose.rs`
+        // **Two floors and not one**, the per-file comment census in `tests/prose.rs`
         // already paid for and this walk had only half of. A total floor answers «the walk still
         // works»; it cannot answer «this file is still being read», because the slack above it is
         // wider than any one file. Measured as the search's delivery leaves the tree: **seven of

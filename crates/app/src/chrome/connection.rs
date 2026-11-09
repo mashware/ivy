@@ -139,6 +139,7 @@ pub(super) fn open_requested(
 
 pub(super) fn open(window: &mut Window, ctx: &egui::Context) {
     if window.settings_editor.is_open()
+        || window.chrome.updates.blocked(ctx)
         || crate::summary::blocked(window, ctx)
         || window.pane_view.is_modal()
     {
@@ -168,6 +169,7 @@ fn claim_input(ctx: &egui::Context) {
 
 pub(crate) fn begin_pass(window: &mut Window, ui: &mut egui::Ui) {
     crate::settings::editor::runtime::begin_pass(window, ui.ctx());
+    super::updates::begin_pass(window, ui);
     if !window.chrome.enabled() || !window.chrome.guide.blocked(ui.ctx()) {
         return;
     }

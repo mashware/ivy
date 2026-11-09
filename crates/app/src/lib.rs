@@ -610,7 +610,7 @@ pub fn run() -> eframe::Result {
             // anything.
             settings.apply_to(&mut window);
             if integrated {
-                window.chrome.enable();
+                window.chrome.start(&cc.egui_ctx, !measuring);
                 if std::env::var("MEASURE_CHROME").ok().as_deref() == Some("zoom") {
                     let tab = window.active().name;
                     let focus = window.active().focus;
