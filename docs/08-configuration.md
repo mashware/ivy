@@ -640,3 +640,43 @@ no recurring idle repaint: a silent directory change without a new report can wa
 normal update. Successfully resolved directories are not watched for repository creation or metadata
 restructuring at the same path; changing directories causes a fresh lookup. Operational failures stay
 neutral and may retry on later ordinary updates.
+
+## Agent identity, activity and input attention
+
+Integrations are explicitly off until enabled in **Connect agents → Activity and attention**, or by enabling the clients you use in this file (all three default to false):
+
+```text
+agent.codex.enabled = true
+agent.claude.enabled = true
+agent.opencode.enabled = true
+```
+
+Each value is `true` or `false`, with the normal line tolerance and duplicate-key diagnostics. The guide's **Save agent preferences** preserves unrelated file content and applies only these preferences. A change in the guide is not saved until that button is pressed. Disabling a client removes its contribution without removing a panel producer's document or attention.
+
+A recognized, enabled client shows its mark beside the pane title. Explicit work makes the mark pulse; hidden pane headers and unfocused/minimized windows request no logo animation repaint. Manual console names still win over terminal titles. A displayed permission, question or authentication request adds `wait` to its pane and tab, including a background tab. A client's explicit replacement withdraws its own input claim; it cannot clear Flow's panel attention. Turn completion and errors are not translated to task completion or task blockers.
+
+| Client version examined | Signal source | Setup | Live interoperability |
+|---|---|---|---|
+| Codex 0.167.0 | Native root OSC7501 | Enable in Ivy; review title selection below | Linux: permission approved once; Plan-mode question answered; native clear on quit |
+| Claude Code 2.1.319 | Native root OSC7501 after capability reply | Enable in Ivy; leave terminal titles enabled | Linux: question answered; permission canceled; native clear on exit |
+| OpenCode 1.18.31 | Official TUI plugin, visible route and local SDK lists | Explicit plugin installation and preserving `tui.json` edit | Linux: permission approved once; questions answered/canceled; independent waits in two panes; null on quit |
+
+These installed-client paths were exercised on Linux on 2026-11-09. Codex's native declarations were captured from its official TUI in a standalone pseudoterminal. Claude and OpenCode were also exercised inside Ivy: screenshots confirmed pane/tab attention, and OpenCode's background-tab withdrawal and two-session isolation used one server and directory. Synthetic protocol/producer fixtures cover additional ordering, failure and concurrent-request cases; those are not additional live-client claims. Other versions and platforms remain unverified.
+
+“Enabled” is a preference; an observed declaration is evidence of receipt. Neither proves the complete permission/question lifecycle or compatibility with a different version. Unknown clients retain their ordinary titles and show no invented identity. An absent native cleanup can leave the last claim visible: after thirty minutes without a new declaration it is dimmed and its animation stops. Silence, a keypress and viewing a tab never mean a question was answered. Unexpected OpenCode disconnection or incomplete refresh immediately dims its preceding wait; a fresh complete snapshot can confirm or replace it. After a TUI connection ends, a new native client declaration can replace its unconfirmed metadata; a probe or untagged clear alone cannot.
+
+### Codex title selection
+
+Codex's native lifecycle is independent of its title settings. To retain conversation/project names without a second activity indicator, merge this key into the existing `[tui]` table in the effective Codex `config.toml` (normally `~/.codex/config.toml`):
+
+Use the [copyable Codex title selection](../resources/agent-integrations/codex/README.md). This belongs to Codex’s configuration, not Ivy’s.
+
+Preserve unrelated settings and existing title items you want. If `terminal_title` already exists, remove `activity` (or its `spinner` alias) rather than blindly replacing customized items; optional `run-state`/`status` also adds lifecycle text. Restart Codex and resume the conversation. Ivy never edits that file or strips characters from a title. Claude automatically suppresses its duplicate activity prefix after successful native capability negotiation; disabling Claude terminal titles also disables its native status.
+
+### OpenCode plugin
+
+The guide previews a stable destination beneath Ivy's configuration directory: `agent-integrations/opencode/ivy-opencode.tsx`. **Install / repair** writes only that bundled asset. Copy its path into the existing `plugin` array in OpenCode's `tui.json`, preserving other entries, then restart OpenCode inside the intended console. Enable before starting; if the adapter received a refusal while disabled, restart OpenCode after enabling. The guide's copy button confirms completion with **Copied**. Configuration instructions and fixture commands accompany the [bundled adapter](../resources/agent-integrations/opencode/README.md).
+
+The TUI plugin follows that TUI's displayed session, not every session on a server or in a directory. It reconciles root/direct-child prompts against the local pending-request API; these requests do not call a model or send prompt contents. The current adapter is inactive on Windows. A missing/moved asset, failed plugin load or lack of observed declarations remains setup-required/unverified; enabling the checkbox does not prove installation.
+
+Before marking a client version live-verified, exercise working/idle, displayed permission and question open/reply/denial/cancellation, explicit clear/exit, manual-title preservation and independent routing from two consoles on a real desktop. Source fixtures and headless painting tests do not satisfy those checks.

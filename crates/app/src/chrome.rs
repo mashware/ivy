@@ -8,6 +8,7 @@ pub(crate) const HEIGHT: f32 = 49.0;
 #[derive(Default, Debug)]
 pub(crate) struct Chrome {
     enabled: bool,
+    pub(crate) agent_preferences: crate::agent_signals::Enabled,
     pub(crate) title_sizes: typography::Sizes,
     zoom_probe: bool,
     menu: bool,

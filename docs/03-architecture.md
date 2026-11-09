@@ -136,3 +136,9 @@ every version of the agent. That is what channel 1 is for.
 | Reading the buffer and sending it to a model | It exfiltrates whatever is on screen: tokens, keys, API responses. Choosing what gets sent must be explicit, never automatic |
 | Setting `ANTHROPIC_API_KEY` when launching a panel | Forbidden: it would change the user's billing (see D4) |
 | Secrets in the panel | The panel is persisted text; it is no place for credentials |
+
+### Declared client metadata
+
+Native OSC7501 and the OpenCode TUI adapter update a transient pane-local signal independently of `PanelState`. The panel document, publisher hold and actions retain their existing authority. Only declared human input contributes the existing `wait` attention class; lifecycle `done` and `error` do not assert task semantics. Root native frames and one connection-owned TUI snapshot slot are bounded; child native declarations are ignored. The shared bounded OSC scanner retains OSC7 directory invalidation/reset behavior.
+
+Measurement boundaries are unchanged: native scanning, preference application and capability-response queueing belong to the existing **interpretation** span; independent socket delivery belongs to **control** application; logo drawing/deadlines belong to **pane header** painting; stale-deadline scheduling and connection diagnostics belong to **integrated chrome**. None is attributed by subtraction to framework overhead. Hidden panes retain the same PTY pump budget. No new frame-cost improvement is claimed.

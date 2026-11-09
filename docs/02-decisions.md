@@ -8904,12 +8904,24 @@ pane-local register; untagged clear withdraws that register only. It does not id
 sessions sharing a PTY or authenticate a client. Missing cleanup remains stale information,
 never an inferred answer or successful completion. Disabled integrations consume no signal.
 
-Claude/OpenCode use official hooks or plugin events where the tested version provides enough
-root-session association, ordering and request-resolution evidence. Their concrete contracts must
+Claude Code 2.1.319 uses the same native root snapshot protocol after an explicit capability
+reply; that negotiation also removes its duplicate title activity prefix. OpenCode 1.18.31 uses
+an official TUI plugin scoped by the visible route and authoritative local SDK pending lists,
+with complete snapshots serialized on a separate connection. Their concrete contracts must
 be verified before adapter code and their supported behavior proved with the real client before
-being advertised. A short-lived hook connection ending is not the harness session ending.
+being advertised. A connection ending is loss of its reporter, not proof that a question was answered; retain
+its last wait as stale/unconfirmed. A connection alone cannot take presentation authority: a
+complete eligible snapshot is required. Incomplete child/pending hydration cannot publish a clear.
 No transcript reader, process-name recognizer, generic daemon or automatic client-config editor
 is introduced. The guide exposes reviewed setup instructions and preserves existing hooks.
+
+Automatic capability replies reuse the existing PTY write queue only when it has no backlog;
+at most one reply is deferred. They cannot spend or clear the person's refused-input state.
+A fresh enabled native declaration can replace a disconnected TUI reporter; an untagged clear or
+capability probe cannot withdraw that reporter's unconfirmed wait. Transient signal channel queue-full/timeouts carry an explicit retryable flag and retry
+on the same connection; legacy tool replies keep their shape. Repeatedly reconnecting while a
+window is not draining would fill its finite connection slots with undelivered close notices. A permanent adapter refusal stops reconnect attempts until the client is explicitly restarted, so a disabled integration
+does not wake an idle window forever.
 
 **Presentation.** Supported identity selects a bundled logo; only explicit active state animates
 it, and hidden/inactive windows arm no logo-only repaint. Removing a duplicate spinner is a
@@ -8924,7 +8936,8 @@ They reuse the existing preserving save/apply boundary rather than a second conf
 The console number remains unchanged.
 
 **Discarded.** Forced hooks for Codex duplicate a more precise native source. A custom OSC for
-all hooks assumes terminal access Claude explicitly disallows. Changing only title font sizes
+all hooks assumes terminal access command hooks may lack. Directory-wide OpenCode server
+events do not identify which session the person is looking at, so they cannot replace TUI state. Changing only title font sizes
 while retaining fixed strip heights clips text and separates paint from input. Machine-only
 proportional fallback leaves the reported braille fix dependent on installed fonts.
 

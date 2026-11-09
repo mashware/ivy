@@ -84,6 +84,34 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/tests/context_clipboard.rs"),
     ),
     (
+        "app/src/tests/agent_signals/native_transport.rs",
+        include_str!("../src/tests/agent_signals/native_transport.rs"),
+    ),
+    (
+        "app/src/chrome/connection/tests.rs",
+        include_str!("../src/chrome/connection/tests.rs"),
+    ),
+    (
+        "app/src/control/applying.rs",
+        include_str!("../src/control/applying.rs"),
+    ),
+    (
+        "app/src/agent_setup.rs",
+        include_str!("../src/agent_setup.rs"),
+    ),
+    (
+        "app/src/agent_signals.rs",
+        include_str!("../src/agent_signals.rs"),
+    ),
+    (
+        "app/src/agent_signals/logos.rs",
+        include_str!("../src/agent_signals/logos.rs"),
+    ),
+    (
+        "app/src/tests/agent_signals.rs",
+        include_str!("../src/tests/agent_signals.rs"),
+    ),
+    (
         "app/src/chrome/typography.rs",
         include_str!("../src/chrome/typography.rs"),
     ),
@@ -153,8 +181,8 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/links/local.rs"),
     ),
     (
-        "term-core/src/screen/directory.rs",
-        include_str!("../../term-core/src/screen/directory.rs"),
+        "term-core/src/screen/metadata.rs",
+        include_str!("../../term-core/src/screen/metadata.rs"),
     ),
     (
         "term-core/src/view/local.rs",

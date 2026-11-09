@@ -12,6 +12,7 @@
 //! sender that never sends anything and drops it on finishing, so the closure reaches the other
 //! side **by construction**, not because someone remembers to raise a flag.
 
+use crate::PUMP_BUDGET;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
@@ -480,6 +481,100 @@ impl QuietConsole {
 #[derive(Default)]
 struct RefusedWrite {
     dismissed_at: Option<u64>,
+}
+
+impl crate::Pane {
+    /// Takes what the program has written, up to the budget, and puts it into the grid.
+    ///
+    /// Returns whether the budget cut the pumping short and left a queue to swallow.
+    pub(crate) fn pump(&mut self, enabled: crate::agent_signals::Enabled) -> bool {
+        pump_pane(self, enabled)
+    }
+}
+
+fn pump_pane(pane: &mut crate::Pane, enabled: crate::agent_signals::Enabled) -> bool {
+    pane.received.clear();
+    let pickup = pane
+        .pty_output
+        .pick_up(&mut pane.received, PUMP_BUDGET, Silences::of(&pane.pty));
+    // **One clock and not two.** The stamp of when the bytes were collected is also the start of
+    // interpreting them: between the two there was nothing, and a second `Instant::now()` only
+    // added a reading of its own to the span it was meant to measure.
+    let collected_at = Instant::now();
+    pane.signals.configure(enabled, &mut pane.screen);
+    pane.screen.advance(&pane.received);
+    let queried = pane.signals.sync_native(&mut pane.screen, collected_at);
+    // Automatic replies must not consume the backlog reserved for the person's input.
+    if pane
+        .signals
+        .take_capability_reply(queried, pane.pty.backlog().is_none())
+        && let Err(error) = pane.pty.write(b"\x1b]7501;?\x07")
+    {
+        eprintln!("could not answer client status capability: {error}");
+    }
+    let interpreted = collected_at.elapsed();
+
+    // Queueing the painting is measured in the UI pass, which comes afterwards; here what is
+    // already known is noted down and there it is completed.
+    pane.pending_measurement = Some((pickup.waiting_since, collected_at, interpreted));
+    pickup.left_a_queue
+}
+
+pub(crate) fn resize(pane: &mut crate::Pane) {
+    if pane.measured == pane.screen.size() {
+        return;
+    }
+
+    // **Reflowing the text is timed since there is a scrollback**, and until this milestone
+    // nobody declared it: it runs in the logical half, where there is no painting to wrap it,
+    // so the subtraction took it — that is, the framework. With the scrollback off it was 7 µs;
+    // with the lines that are now kept, almost a millisecond every time (**D21**).
+    //
+    // **The span is the whole body**, telling the program included: it is what attending a
+    // resize costs, and splitting it would leave half an operation with no owner.
+    let before = Instant::now();
+    pane.screen.resize(pane.measured);
+    if let Err(failure) = pane.pty.resize(pane.measured) {
+        // The grid already changed and the program has not heard about it: what is seen from
+        // here on is painted against a size that is not its own. There is no way to fix it from
+        // here, but keeping quiet would leave a crooked screen with no explanation at all.
+        eprintln!("the program could not be told the new size: {failure}");
+    }
+    pane.reflowed += before.elapsed();
+}
+
+pub(crate) fn pump_all(window: &mut crate::Window) -> crate::Pump {
+    let mut pump = crate::Pump {
+        some_left_a_queue: false,
+        all_finished: true,
+    };
+
+    // **What reflowing cost is collected here and recorded in the window**, which is the one
+    // that publishes the report. What **every** console of the frame spent is added up and
+    // recorded **once**: what has to be readable is what attending to a width change cost one
+    // frame, and one divider moves two consoles at a time.
+    let mut reflowed = std::time::Duration::ZERO;
+
+    let agent_preferences = window.chrome.agent_preferences;
+    for pane in window.all_panes_mut() {
+        // First what is pending is interpreted and afterwards the size is changed: the program
+        // wrote those bytes for the dimensions it does not yet know have changed.
+        let queue_left = pane.pump(agent_preferences);
+        pane.resize();
+        reflowed += std::mem::take(&mut pane.reflowed);
+
+        pump.some_left_a_queue |= queue_left;
+        pump.all_finished &= pane.is_finished(queue_left);
+    }
+
+    // **Only when there really was a reflow.** Recording a zero on the thousands of still
+    // frames would sink the average and make this span say the opposite of what it is worth.
+    if !reflowed.is_zero() {
+        window.reflow.record(reflowed);
+        window.timed_separately += reflowed;
+    }
+
+    pump
 }
 
 #[cfg(test)]

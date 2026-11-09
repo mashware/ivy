@@ -229,6 +229,9 @@ pub enum StartupRestore {
 pub struct Settings {
     pub startup_restore: StartupRestore,
     pub colors: Colors,
+    pub agent_claude: bool,
+    pub agent_codex: bool,
+    pub agent_opencode: bool,
     pub theme: Option<crate::theme::NamedTheme>,
     /// The family the file asks to paint with. `None` if it asks for none.
     ///
@@ -567,6 +570,11 @@ impl Settings {
     /// span: taking it inside would force passing it through three constructors with dozens of
     /// calls, and none of them configures anything.
     pub(crate) fn apply_to(&self, window: &mut crate::Window) {
+        window.chrome.agent_preferences = crate::agent_signals::Enabled {
+            claude: self.agent_claude,
+            codex: self.agent_codex,
+            opencode: self.agent_opencode,
+        };
         window.theme = self.resolved_theme();
         // A complete document replaces the preceding configuration. Omitting an override must
         // restore the same defaults as a fresh startup, including shortcuts previously unbound.
@@ -638,6 +646,27 @@ fn apply(settings: &mut Settings, key: &str, value: &str) -> Result<(), Missing>
     }
     // **Before the colour table on purpose**: `cursor` on its own is the colour, and `cursor.blink`
     // would otherwise fall through to `strip_prefix("color.")` and come back as an unknown key.
+    if matches!(
+        key,
+        "agent.claude.enabled" | "agent.codex.enabled" | "agent.opencode.enabled"
+    ) {
+        let enabled = match value {
+            "true" | "on" => true,
+            "false" | "off" => false,
+            _ => {
+                return Err(Missing::InvalidValue {
+                    key: key.to_owned(),
+                    value: value.to_owned(),
+                });
+            }
+        };
+        match key {
+            "agent.claude.enabled" => settings.agent_claude = enabled,
+            "agent.codex.enabled" => settings.agent_codex = enabled,
+            _ => settings.agent_opencode = enabled,
+        }
+        return Ok(());
+    }
     if matches!(key, "cursor.blink" | "font.ligatures") {
         // **«on» and «off», and not the «none» the shortcuts use.** There it means «hand the chord
         // back to the program»; here the program is exactly who is being overruled, so the same word
@@ -1843,7 +1872,7 @@ mod tests {
         // blocks, this test passes by being empty.
         assert_eq!(
             examples.len(),
-            17,
+            20,
             "the document's example blocks gave {} configuration lines: either the document \
              changed shape, or this walk stopped finding them — {examples:?}",
             examples.len()

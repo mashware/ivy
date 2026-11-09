@@ -33,6 +33,8 @@
 //! window hidden, the input `logic` sees is the one of the last shown pass, so reading the keyboard
 //! there would resend the last key pressed thousands of times per second during a dump.
 
+mod agent_setup;
+mod agent_signals;
 mod alarms;
 mod chrome;
 mod clipboard;
@@ -104,7 +106,7 @@ use injected::{InjectedDrags, gesture_at_startup};
 use measure::{RestOfFrame, Timings};
 use painter::CellMetrics;
 use panel_contract::PanelDir;
-use pty_output::{PtyOutput, Silences};
+use pty_output::PtyOutput;
 use std::time::{Instant, SystemTime};
 use term_core::{Cell, Pty, Screen, Scroll, Size};
 use theme::Theme;
@@ -557,6 +559,7 @@ fn the_users_shell() -> String {
 /// what allows the whole set to be instantiated more than once without writing every operation
 /// twice.
 struct Pane {
+    signals: agent_signals::Signals,
     /// What it is called in the report, and **it does not change even if others are closed**.
     ///
     /// **The index in the layout is no good for this**, for the same reason it was no good for the
@@ -722,47 +725,7 @@ impl Pane {
     /// after.** As soon as the program knows the new size it starts sending bytes meant for it, and
     /// if the grid were still the old one they would be interpreted against the wrong dimensions.
     fn resize(&mut self) {
-        if self.measured == self.screen.size() {
-            return;
-        }
-
-        // **Reflowing the text is timed since there is a scrollback**, and until this milestone
-        // nobody declared it: it runs in the logical half, where there is no painting to wrap it,
-        // so the subtraction took it — that is, the framework. With the scrollback off it was 7 µs;
-        // with the lines that are now kept, almost a millisecond every time (**D21**).
-        //
-        // **The span is the whole body**, telling the program included: it is what attending a
-        // resize costs, and splitting it would leave half an operation with no owner.
-        let before = Instant::now();
-        self.screen.resize(self.measured);
-        if let Err(failure) = self.pty.resize(self.measured) {
-            // The grid already changed and the program has not heard about it: what is seen from
-            // here on is painted against a size that is not its own. There is no way to fix it from
-            // here, but keeping quiet would leave a crooked screen with no explanation at all.
-            eprintln!("the program could not be told the new size: {failure}");
-        }
-        self.reflowed += before.elapsed();
-    }
-
-    /// Takes what the program has written, up to the budget, and puts it into the grid.
-    ///
-    /// Returns whether the budget cut the pumping short and left a queue to swallow.
-    fn pump(&mut self) -> bool {
-        self.received.clear();
-        let pickup =
-            self.pty_output
-                .pick_up(&mut self.received, PUMP_BUDGET, Silences::of(&self.pty));
-        // **One clock and not two.** The stamp of when the bytes were collected is also the start of
-        // interpreting them: between the two there was nothing, and a second `Instant::now()` only
-        // added a reading of its own to the span it was meant to measure.
-        let collected_at = Instant::now();
-        self.screen.advance(&self.received);
-        let interpreted = collected_at.elapsed();
-
-        // Queueing the painting is measured in the UI pass, which comes afterwards; here what is
-        // already known is noted down and there it is completed.
-        self.pending_measurement = Some((pickup.waiting_since, collected_at, interpreted));
-        pickup.left_a_queue
+        pty_output::resize(self);
     }
 
     /// Whether the program finished **well** and nothing of its own is left to show.
@@ -1236,36 +1199,7 @@ impl Window {
     /// the only way to prove that **a dead console does not close the window**, which is what this
     /// milestone promises and what a failure here would take with it without any test noticing.
     fn pump_them_all(&mut self) -> Pump {
-        let mut pump = Pump {
-            some_left_a_queue: false,
-            all_finished: true,
-        };
-
-        // **What reflowing cost is collected here and recorded in the window**, which is the one
-        // that publishes the report. What **every** console of the frame spent is added up and
-        // recorded **once**: what has to be readable is what attending to a width change cost one
-        // frame, and one divider moves two consoles at a time.
-        let mut reflowed = std::time::Duration::ZERO;
-
-        for pane in self.all_panes_mut() {
-            // First what is pending is interpreted and afterwards the size is changed: the program
-            // wrote those bytes for the dimensions it does not yet know have changed.
-            let queue_left = pane.pump();
-            pane.resize();
-            reflowed += std::mem::take(&mut pane.reflowed);
-
-            pump.some_left_a_queue |= queue_left;
-            pump.all_finished &= pane.is_finished(queue_left);
-        }
-
-        // **Only when there really was a reflow.** Recording a zero on the thousands of still
-        // frames would sink the average and make this span say the opposite of what it is worth.
-        if !reflowed.is_zero() {
-            self.reflow.record(reflowed);
-            self.timed_separately += reflowed;
-        }
-
-        pump
+        pty_output::pump_all(self)
     }
 
     /// Opens a tab with its two consoles and leaves it in front.
@@ -1992,6 +1926,7 @@ mod tests {
             }
         }
     }
+    mod agent_signals;
     mod context_clipboard;
     mod header_controls;
     mod integrated_chrome;
@@ -3820,7 +3755,7 @@ mod tests {
                 "the program never asked for the mouse, so a press reaching it would look like a \
                  press that did not"
             );
-            window.active_mut().panes_mut()[0].pump();
+            window.active_mut().panes_mut()[0].pump(Default::default());
             std::thread::sleep(Duration::from_millis(10));
         }
         make_it_go_quiet(window.active_mut().panes_mut()[0]);
@@ -3991,7 +3926,7 @@ mod tests {
         let theme = theme::Theme::default();
         let mut pane = pane_with("printf done", 0);
         wait_for_it_to_die(&pane);
-        pane.pump();
+        pane.pump(Default::default());
         assert_eq!(
             pane.pty.ending(),
             Some(term_core::Ending::EndedWell),
@@ -4461,7 +4396,7 @@ mod tests {
                 Instant::now() < deadline,
                 "the program never wrote anything"
             );
-            pane.pump();
+            pane.pump(Default::default());
             std::thread::sleep(Duration::from_millis(10));
         }
         assert!(
@@ -4479,7 +4414,7 @@ mod tests {
         // The sentence is drawn over the console — that is what this asks about — and the pump runs
         // afterwards, which is the frame a leak would show up in.
         let _ = the_sentence_over(&pane, &theme, &metrics, area);
-        pane.pump();
+        pane.pump(Default::default());
 
         let on_screen = pane.screen.to_text();
         for word in painter::notices::what_it_says(false)
@@ -6241,7 +6176,11 @@ mod tests {
             what: panel_control::What::Closed,
             answer: closing,
         });
-        control.apply(&mut origin.panel_state, SystemTime::now());
+        control.apply(
+            &mut origin.panel_state,
+            &mut crate::agent_signals::Signals::default(),
+            SystemTime::now(),
+        );
         assert_eq!(
             origin.panel_state.held_by(),
             Some("flow"),
@@ -6272,7 +6211,11 @@ mod tests {
             .control
             .as_mut()
             .expect("the pane has its channel")
-            .apply(&mut origin.panel_state, SystemTime::now());
+            .apply(
+                &mut origin.panel_state,
+                &mut crate::agent_signals::Signals::default(),
+                SystemTime::now(),
+            );
         assert!(
             !origin.panel_state.is_visible(SystemTime::now()),
             "disconnect turned an admitted clear into an ordinary crash release"
@@ -6319,7 +6262,11 @@ mod tests {
             },
             answer: publishing,
         });
-        control.apply(&mut origin.panel_state, SystemTime::now());
+        control.apply(
+            &mut origin.panel_state,
+            &mut crate::agent_signals::Signals::default(),
+            SystemTime::now(),
+        );
         assert!(
             published.try_recv().is_err(),
             "the later publication overtook retirement"
@@ -6347,7 +6294,11 @@ mod tests {
             .control
             .as_mut()
             .expect("the pane has its channel")
-            .apply(&mut origin.panel_state, SystemTime::now());
+            .apply(
+                &mut origin.panel_state,
+                &mut crate::agent_signals::Signals::default(),
+                SystemTime::now(),
+            );
         assert!(
             matches!(
                 published.recv_timeout(Duration::from_secs(1)),
@@ -6411,7 +6362,11 @@ mod tests {
             what: panel_control::What::Closed,
             answer: closing,
         });
-        control.apply(&mut origin.panel_state, SystemTime::now());
+        control.apply(
+            &mut origin.panel_state,
+            &mut crate::agent_signals::Signals::default(),
+            SystemTime::now(),
+        );
         with_metrics(|metrics| {
             window.answer_the_windows_requests(
                 &ctx,
@@ -6686,6 +6641,7 @@ mod tests {
             label: None,
             project: None,
             restoration: restoration::PaneState::default(),
+            signals: Default::default(),
             pty,
             pty_output: PtyOutput::new(output, || {}),
             panel: None,
@@ -6869,7 +6825,10 @@ mod tests {
         let mut pane = pane_with("printf hello", 0);
         wait_for_it_to_die(&pane);
 
-        assert!(!pane.pump(), "five bytes do not exhaust the budget");
+        assert!(
+            !pane.pump(Default::default()),
+            "five bytes do not exhaust the budget"
+        );
         assert!(
             pane.screen.to_text().contains("hello"),
             "what the program wrote did not reach the grid"
@@ -6878,7 +6837,7 @@ mod tests {
         // A frame with nothing new cannot interpret again what came in the previous one. If the
         // buffer were not emptied at the start, the screen would show twice something the program
         // wrote once — and it would be the user who found out.
-        pane.pump();
+        pane.pump(Default::default());
         assert_eq!(
             pane.screen.to_text().matches("hello").count(),
             1,
@@ -6897,7 +6856,7 @@ mod tests {
         );
         wait_for_it_to_die(&pane);
 
-        let mut queue_left = pane.pump();
+        let mut queue_left = pane.pump(Default::default());
 
         // This is the budget doing its job: without it, the frame swallows the 400 KiB in one go
         // and the window stays still meanwhile, which is exactly what cannot happen.
@@ -6917,7 +6876,7 @@ mod tests {
 
         let mut frames = 1;
         while queue_left {
-            queue_left = pane.pump();
+            queue_left = pane.pump(Default::default());
             frames += 1;
             assert!(frames < 100, "the pumping is not advancing");
         }
@@ -6993,7 +6952,7 @@ mod tests {
                 Instant::now() < deadline,
                 "the console's program wrote nothing, so nobody knows if it reads the keyboard"
             );
-            pane.pump();
+            pane.pump(Default::default());
             std::thread::sleep(Duration::from_millis(10));
         }
     }
@@ -7013,7 +6972,7 @@ mod tests {
                 "the program never wrote «{text}»; on the screen there is: {:?}",
                 pane.screen.to_text()
             );
-            pane.pump();
+            pane.pump(Default::default());
             std::thread::sleep(Duration::from_millis(10));
         }
     }
@@ -7398,7 +7357,7 @@ mod tests {
 
         let mut received = Vec::new();
         loop {
-            let queue_left = pane.pump();
+            let queue_left = pane.pump(Default::default());
             received.extend_from_slice(&pane.received);
             if !queue_left {
                 break;
@@ -8237,7 +8196,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
 
-        let queue_left = pane.pump();
+        let queue_left = pane.pump(Default::default());
 
         assert_eq!(
             pane.pty.ending(),
@@ -25862,7 +25821,7 @@ mod tests {
                 "the program did not receive «{text}»; on screen there is: {:?}",
                 pane.screen.to_text()
             );
-            pane.pump();
+            pane.pump(Default::default());
             std::thread::sleep(Duration::from_millis(10));
         }
     }
@@ -26103,7 +26062,7 @@ mod tests {
                 Instant::now() < deadline,
                 "one page had to be worth {rows} notches and {how_many} arrived"
             );
-            pane.pump();
+            pane.pump(Default::default());
             std::thread::sleep(Duration::from_millis(10));
         }
     }
@@ -27511,7 +27470,7 @@ mod tests {
                 Instant::now() < deadline,
                 "the console's program never wrote anything, so the pumping brought nothing in"
             );
-            pane.pump();
+            pane.pump(Default::default());
             std::thread::sleep(Duration::from_millis(10));
         }
 

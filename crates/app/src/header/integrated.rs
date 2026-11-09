@@ -31,6 +31,7 @@ pub(crate) fn paint_strip(
             theme,
             Appearance {
                 label: &label,
+                agent: pane.signals.view(std::time::Instant::now()),
                 number: pane.name + 1,
                 title_size: strip.headers.title_size(),
                 can_close: strip.button.is_drawn(),
@@ -127,6 +128,7 @@ pub(crate) fn hit(
 }
 
 struct Appearance<'a> {
+    agent: Option<crate::agent_signals::View>,
     label: &'a str,
     number: usize,
     title_size: f32,
@@ -144,6 +146,7 @@ fn paint(
     appearance: Appearance<'_>,
 ) {
     let Appearance {
+        agent,
         label,
         number,
         title_size,
@@ -212,6 +215,29 @@ fn paint(
                 theme.foreground(),
             );
             let mut title_left = left + egui::vec2(offset, 0.0);
+            if let Some(agent) = agent {
+                let logo = egui::Rect::from_center_size(
+                    title_left + egui::vec2(8.0, 0.0),
+                    egui::Vec2::splat(16.0),
+                )
+                .intersect(rect);
+                if logo.is_positive() {
+                    crate::agent_signals::logos::paint(ui, logo, agent);
+                }
+                title_left.x += 23.0;
+                if agent.waiting {
+                    painter.with_clip_rect(rect).text(
+                        title_left,
+                        egui::Align2::LEFT_CENTER,
+                        "?",
+                        egui::FontId::proportional(title_size),
+                        theme
+                            .color(term_core::TermColor::Indexed(3))
+                            .gamma_multiply(if agent.backed { 1.0 } else { 0.45 }),
+                    );
+                    title_left.x += title_size * 0.8;
+                }
+            }
             if let Some(project) = project {
                 let available = (rect.right() - title_left.x - 8.0).max(0.0);
                 let galley = painter.layout_no_wrap(
@@ -417,6 +443,7 @@ mod tests {
                 &CellMetrics::of(8.0, 16.0),
                 &Theme::default(),
                 Appearance {
+                    agent: None,
                     label: "Review changes",
                     number: 1,
                     title_size: 32.0,
@@ -477,6 +504,7 @@ mod tests {
                     &metrics,
                     &theme,
                     Appearance {
+                        agent: None,
                         label: "Fix login",
                         number: 1,
                         title_size: 12.0,

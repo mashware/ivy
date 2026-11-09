@@ -57,6 +57,31 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/tests/context_clipboard.rs"),
     ),
     (
+        "src/tests/agent_signals/native_transport.rs",
+        include_str!("../src/tests/agent_signals/native_transport.rs"),
+    ),
+    (
+        "src/chrome/connection/tests.rs",
+        include_str!("../src/chrome/connection/tests.rs"),
+    ),
+    (
+        "src/control/applying.rs",
+        include_str!("../src/control/applying.rs"),
+    ),
+    ("src/agent_setup.rs", include_str!("../src/agent_setup.rs")),
+    (
+        "src/agent_signals.rs",
+        include_str!("../src/agent_signals.rs"),
+    ),
+    (
+        "src/agent_signals/logos.rs",
+        include_str!("../src/agent_signals/logos.rs"),
+    ),
+    (
+        "src/tests/agent_signals.rs",
+        include_str!("../src/tests/agent_signals.rs"),
+    ),
+    (
         "src/chrome/typography.rs",
         include_str!("../src/chrome/typography.rs"),
     ),
@@ -448,7 +473,7 @@ const IMPL_CEILING: usize = 300;
 const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
     (
         "impl Window",
-        1588,
+        1572,
         "the window's own behaviour. D28's order moved its methods out of `lib.rs` into \
          satellite blocks in twelve modules, which shrank the file and not the type. Recorded on 28 September \
          2026, the day the guard first summed a type's blocks. **The scrollback's search spent five \
@@ -456,11 +481,11 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
          declared hole, the report's `search:` field and the tally's seed when a window opens; \
          handing each painting's cost over sits in `impl eframe::App`, which this count does not \
          read — **and paid five**: finding a console by name moved to `Tab`, and walking every \
-         console became one line. **1782 + 5 - 5 leaves 1782.** Header operations now use free functions around pane identity; the measured Window implementation has 1764 lines. Applying configuration now belongs to Settings, paying for editor construction and reporting; the measured total is 1750. Integrated chrome keeps tab interaction and card rendering in free functions, leaving1705 including explicitly timed hidden-view geometry. Moving fresh tab creation to opening.rs pays for the new controls and leaves1695. Overview extracts console routing and pure deadline selection, leaving1680. The common initial-state constructor now lives in opening::initial_window as a free function, leaving1620 with the ligature preference and report hook. Local Markdown link routing and gesture cleanup now use free functions, leaving1617. Session saving delegates to a free function, and policy synchronization and restoration add two lines, leaving 1594. The clipboard integration moves the stateless primary-press reader to a free function; the combined measured total is 1588.",
+         console became one line. **1782 + 5 - 5 leaves 1782.** Header operations now use free functions around pane identity; the measured Window implementation has 1764 lines. Applying configuration now belongs to Settings, paying for editor construction and reporting; the measured total is 1750. Integrated chrome keeps tab interaction and card rendering in free functions, leaving1705 including explicitly timed hidden-view geometry. Moving fresh tab creation to opening.rs pays for the new controls and leaves1695. Overview extracts console routing and pure deadline selection, leaving1680. The common initial-state constructor now lives in opening::initial_window as a free function, leaving1620 with the ligature preference and report hook. Local Markdown link routing and gesture cleanup now use free functions, leaving1617. Session saving delegates to a free function, and policy synchronization and restoration add two lines, leaving 1594. The clipboard integration moves the stateless primary-press reader to a free function; the combined measured total is 1588. Agent-signal integration delegates control application and pane pumping to free functions in their owning modules; after integrating startup recovery and clipboard changes, the measured total is 1572.",
     ),
     (
         "impl Pane",
-        538,
+        534,
         "a console with its panel, its keys and its mouse. On the day it was recorded it was six \
          blocks in six files: the keyboard and mouse passes (157 each), how a pane is opened (112) \
          and how it gets its panel (120), and 45 more in `lib.rs` and `control.rs`. **The search \
@@ -468,7 +493,7 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
          leftovers became a free function of `closing.rs`, 10 lines out, and the keyboard pass \
          spent ten — nine asking the search about each key, one seeding a new pane's search \
          record — with the rules themselves in `search.rs`, outside the type. **591 - 10 + 10 \
-         leaves 591.** Session takeover now delegates to a free function, leaving 538.",
+         leaves 591.** Session takeover now delegates to a free function, leaving 538. Delegating the shared signal-aware pump and geometry work leaves534 after integrating startup recovery and clipboard changes.",
     ),
     (
         "impl PanelState",
