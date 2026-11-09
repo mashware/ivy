@@ -1038,4 +1038,193 @@ mod tests {
                 "console label ignored the configured foreground");
         }
     }
+
+    fn open_updates_menu(
+        window: &mut Window,
+        ctx: &egui::Context,
+        area: egui::Rect,
+    ) -> Vec<egui::epaint::ClippedShape> {
+        let offset = if area.width() < 300.0 {
+            20.0
+        } else if cfg!(target_os = "macos") {
+            23.0
+        } else {
+            125.0
+        };
+        let at = egui::pos2(area.right() - offset, area.top() + 24.5);
+        frame(window, ctx, area, vec![]);
+        frame(window, ctx, area, click_at(at));
+        frame(window, ctx, area, vec![])
+    }
+
+    #[test]
+    fn update_notes_are_reachable_in_wide_and_compact_windows_without_network() {
+        for width in [1400.0, 240.0] {
+            let ctx = egui::Context::default();
+            let mut window = window_with("sleep 30", "sleep 30");
+            window.chrome.start(&ctx, false);
+            window.headers = window.headers.integrated(true);
+            let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 600.0));
+            let shapes = open_updates_menu(&mut window, &ctx, area);
+            for label in ["Check for updates", "What's new"] {
+                assert!(has_text(&shapes, label));
+                assert!(
+                    area.contains(text_center(&shapes, label)),
+                    "menu item is clipped"
+                );
+            }
+            let at = text_center(&shapes, "What's new");
+            frame(&mut window, &ctx, area, click_at(at));
+            frame(&mut window, &ctx, area, vec![]);
+            let shapes = frame(&mut window, &ctx, area, vec![]);
+            assert!(has_text(&shapes, "Installed: Ivy"));
+            assert!(has_text(&shapes, "Work across consoles"));
+            assert!(!has_text(&shapes, "Checking for updates"));
+        }
+    }
+
+    #[test]
+    fn update_notes_close_and_pointer_release_do_not_type_or_resize_consoles() {
+        let ctx = egui::Context::default();
+        let received = term_core::received::Received::new("updates-input");
+        let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
+        window.chrome.start(&ctx, false);
+        window.headers = window.headers.integrated(true);
+        received.wait_until_ready(Duration::from_secs(5));
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0));
+        let menu = open_updates_menu(&mut window, &ctx, area);
+        let grids = window
+            .active()
+            .panes()
+            .iter()
+            .map(|p| p.measured)
+            .collect::<Vec<_>>();
+        let at = text_center(&menu, "What's new");
+        let mut events = click_at(at);
+        events.push(egui::Event::Text("OPENING".into()));
+        frame(&mut window, &ctx, area, events);
+        frame(&mut window, &ctx, area, vec![]);
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::Paste("INSIDE".into())],
+        );
+        let held_at = egui::pos2(10.0, 200.0);
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![
+                egui::Event::PointerMoved(held_at),
+                egui::Event::PointerButton {
+                    pos: held_at,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![
+                egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::Text("CLOSING".into()),
+            ],
+        );
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![
+                egui::Event::PointerButton {
+                    pos: held_at,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::Paste("RELEASE".into()),
+            ],
+        );
+        assert_eq!(
+            window
+                .active()
+                .panes()
+                .iter()
+                .map(|p| p.measured)
+                .collect::<Vec<_>>(),
+            grids
+        );
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::Text("AFTER".into())],
+        );
+        assert_eq!(received.wait_for(5, Duration::from_secs(5)), b"AFTER");
+    }
+
+    #[test]
+    fn short_window_menu_scroll_keeps_existing_commands_reachable_without_console_input() {
+        for width in [1400.0, 240.0] {
+            let ctx = egui::Context::default();
+            let received = term_core::received::Received::new("updates-menu-scroll");
+            let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
+            window.chrome.start(&ctx, false);
+            window.headers = window.headers.integrated(true);
+            received.wait_until_ready(Duration::from_secs(5));
+            let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 450.0));
+            open_updates_menu(&mut window, &ctx, area);
+            let point = egui::pos2(width - 100.0, 250.0);
+            frame(
+                &mut window,
+                &ctx,
+                area,
+                vec![
+                    egui::Event::PointerMoved(point),
+                    egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Point,
+                        phase: egui::TouchPhase::Move,
+                        delta: egui::vec2(0.0, -2000.0),
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                    egui::Event::Text("SCROLL".into()),
+                ],
+            );
+            let shapes = frame(&mut window, &ctx, area, vec![]);
+            let at = text_center(&shapes, "Connect agents");
+            assert!(area.contains(at));
+            frame(&mut window, &ctx, area, click_at(at));
+            frame(&mut window, &ctx, area, vec![]);
+            let shapes = frame(&mut window, &ctx, area, vec![]);
+            assert!(has_text(&shapes, "Copy setup prompt"));
+            frame(
+                &mut window,
+                &ctx,
+                area,
+                vec![egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+            frame(
+                &mut window,
+                &ctx,
+                area,
+                vec![egui::Event::Text("AFTER".into())],
+            );
+            assert_eq!(received.wait_for(5, Duration::from_secs(5)), b"AFTER");
+        }
+    }
 }

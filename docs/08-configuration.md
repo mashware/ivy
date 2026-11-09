@@ -509,3 +509,21 @@ Clear or send comments before changing repository, comparison or origin.
 Git output and included new-file contents share a 4 MiB limit. Each Git command has a five-second
 timeout; errors appear in the viewer. Paths, modes, comments and width are transient and have no
 configuration keys.
+
+
+## Updates and release notes
+
+The global application menu offers **Check for updates** and **What's new**, including with one tab
+or a narrow window. Ivy checks public stable releases once per normal launch in the background.
+A dot on the menu indicates a newer stable version. Opening the dialog and dismissing the dot do
+not stop, resize or type into any console. **Dismiss notification** applies until the next launch.
+
+The dialog shows the installed version and its bundled notes without a connection. Its version
+selector also lists up to twenty recent published stable releases after a successful check.
+**View download** and **Open release page** open the selected GitHub release in your browser after a
+click. Ivy never downloads or installs an executable automatically.
+
+No published releases, an up-to-date installation and a failed check are separate states. Retry a
+failed check with **Check for updates**; repeated clicks cannot start concurrent checks. Remote
+history is not cached between launches. No console content or credentials are included in requests.
+The feature adds no configuration keys. See [Release publication](09-releases.md) for maintainers.

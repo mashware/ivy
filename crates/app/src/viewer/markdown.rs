@@ -34,13 +34,13 @@ enum Block {
 }
 
 #[derive(Debug, Default)]
-pub(super) struct MarkdownDocument {
+pub(crate) struct MarkdownDocument {
     blocks: Vec<Block>,
     heights: RefCell<(f32, Vec<f32>, Vec<f32>)>,
 }
 
 impl MarkdownDocument {
-    pub(super) fn parse(text: &str) -> Result<Self, String> {
+    pub(crate) fn parse(text: &str) -> Result<Self, String> {
         let mut doc = Self::default();
         let mut runs = Vec::new();
         let mut style = Style::default();
@@ -199,7 +199,7 @@ impl MarkdownDocument {
         Ok(doc)
     }
 
-    pub(super) fn show(&self, ui: &mut egui::Ui) {
+    pub(crate) fn show(&self, ui: &mut egui::Ui) {
         egui::ScrollArea::both()
             .id_salt("markdown-content")
             .auto_shrink([false; 2])

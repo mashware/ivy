@@ -76,6 +76,26 @@ use std::path::Path;
 /// entry down.
 const SOURCES: &[(&str, &str, usize)] = &[
     (
+        "src/chrome/menu.rs",
+        include_str!("../src/chrome/menu.rs"),
+        0,
+    ),
+    (
+        "src/chrome/updates.rs",
+        include_str!("../src/chrome/updates.rs"),
+        0,
+    ),
+    (
+        "src/chrome/updates/feed.rs",
+        include_str!("../src/chrome/updates/feed.rs"),
+        0,
+    ),
+    (
+        "src/chrome/updates/service.rs",
+        include_str!("../src/chrome/updates/service.rs"),
+        0,
+    ),
+    (
         "src/viewer/origin.rs",
         include_str!("../src/viewer/origin.rs"),
         0,
@@ -1384,6 +1404,10 @@ fn no_comment_in_the_translated_files_reads_as_spanish() {
 /// The two READMEs are here for the same reason and by the same milestone: they were translated in
 /// the same delivery and nothing was left watching them either.
 const DOCUMENTS: &[(&str, &str)] = &[
+    (
+        "docs/09-releases.md",
+        include_str!("../../../docs/09-releases.md"),
+    ),
     (
         "docs/01-vision.md",
         include_str!("../../../docs/01-vision.md"),

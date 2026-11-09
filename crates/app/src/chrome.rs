@@ -10,7 +10,9 @@ pub(crate) struct Chrome {
     enabled: bool,
     zoom_probe: bool,
     menu: bool,
+    menu_scroll: f32,
     guide: connection::Guide,
+    updates: updates::Dialog,
     held: bool,
     blocked_frame: Option<u64>,
     cost: Duration,
@@ -25,6 +27,12 @@ impl Chrome {
     pub(crate) fn enable(&mut self) {
         self.enabled = true;
     }
+    pub(crate) fn start(&mut self, ctx: &egui::Context, automatic_updates: bool) {
+        self.enable();
+        if automatic_updates {
+            self.updates.start(ctx);
+        }
+    }
     pub(crate) fn set_zoom_probe(&mut self, value: bool) {
         self.zoom_probe = value;
     }
@@ -36,7 +44,7 @@ impl Chrome {
         self.enabled
     }
     pub(crate) fn guide_blocked(&self, ctx: &egui::Context) -> bool {
-        self.guide.blocked(ctx)
+        self.guide.blocked(ctx) || self.updates.blocked(ctx)
     }
     pub(crate) fn record_work(&mut self, cost: Duration) {
         self.cost += cost;
@@ -81,6 +89,8 @@ pub(crate) use crate::opening::chrome_viewport as viewport;
 
 mod branding;
 mod connection;
+mod menu;
+mod updates;
 pub(crate) use branding::native_options;
 pub(crate) use connection::{after_panels, begin_pass, prepare};
 
@@ -92,6 +102,7 @@ enum Action {
     Search,
     Overview,
     Connect,
+    Updates(bool),
     Menu,
     Preferences,
     Viewer(bool),
@@ -300,6 +311,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         }
     }
     connection::compact_button(window, ui, row);
+    updates::indicator(window, ui, row);
     let left_end = row.left() + left_offset + if compact { 0.0 } else { 3.0 * width + 14.0 };
     let right_start = row.right()
         - if compact {
@@ -324,127 +336,13 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     }
     if matches!(action, Some(Action::Menu)) {
         window.chrome.menu = !window.chrome.menu;
+        window.chrome.menu_scroll = 0.0;
         action = None;
         ctx.request_repaint();
     }
     connection::open_requested(window, &ctx, &mut action);
-    let menu_entries = [
-        (
-            "New tab",
-            Action::NewTab,
-            Some(crate::keyboard::Action::NewTab),
-            false,
-        ),
-        (
-            "Split right",
-            Action::SplitRight,
-            Some(crate::keyboard::Action::SplitRight),
-            true,
-        ),
-        (
-            "Split down",
-            Action::SplitDown,
-            Some(crate::keyboard::Action::SplitDown),
-            false,
-        ),
-        ("Toggle information panel", Action::TogglePanel, None, false),
-        ("Preferences", Action::Preferences, None, true),
-        ("Keyboard shortcuts", Action::Shortcuts, None, false),
-        ("Markdown viewer", Action::Viewer(true), None, true),
-        ("Git diff viewer", Action::Viewer(false), None, false),
-        (
-            "Overview",
-            Action::Overview,
-            Some(crate::keyboard::Action::Overview),
-            true,
-        ),
-        ("Connect agents", Action::Connect, None, true),
-        (
-            "Search console",
-            Action::Search,
-            Some(crate::keyboard::Action::Search),
-            true,
-        ),
-        ("Minimize window", Action::Minimize, None, true),
-        ("Maximize window", Action::Maximize, None, false),
-        ("Close window", Action::Close, None, false),
-    ];
-    let menu_entries = &menu_entries[..if compact { 14 } else { 10 }];
-    let menu_height = 12.0
-        + menu_entries.len() as f32 * 30.0
-        + menu_entries.iter().filter(|entry| entry.3).count() as f32 * 9.0;
-    let menu_rect = Rect::from_min_size(
-        egui::pos2((row.right() - 250.0).max(row.left()), row.bottom()),
-        Vec2::new(
-            240.0_f32.min(row.width()),
-            menu_height.min((area.bottom() - row.bottom()).max(0.0)),
-        ),
-    );
-    if window.chrome.menu && !window.settings_editor.is_open() {
-        // An Area's first pass is invisible while egui measures it. The menu's geometry is
-        // already known, so draw on a foreground layer directly and interact before the pane UI.
-        let painter = ctx
-            .layer_painter(egui::LayerId::new(
-                egui::Order::Foreground,
-                egui::Id::new("integrated-menu"),
-            ))
-            .with_clip_rect(menu_rect);
-        painter.rect_filled(menu_rect, 8.0, bg);
-        painter.rect_stroke(
-            menu_rect,
-            8.0,
-            Stroke::new(1.0, hover),
-            egui::StrokeKind::Inside,
-        );
-        let mut top = menu_rect.top() + 6.0;
-        for (index, &(label, cmd, shortcut, separator)) in menu_entries.iter().enumerate() {
-            if separator {
-                let y = top + 4.0;
-                painter.line_segment(
-                    [
-                        egui::pos2(menu_rect.left() + 6.0, y),
-                        egui::pos2(menu_rect.right() - 6.0, y),
-                    ],
-                    Stroke::new(1.0, hover),
-                );
-                top += 9.0;
-            }
-            let item = Rect::from_min_max(
-                egui::pos2(menu_rect.left(), top),
-                egui::pos2(menu_rect.right(), (top + 30.0).min(menu_rect.bottom())),
-            );
-            if !item.is_positive() {
-                break;
-            }
-            let response = ui.interact(item, ui.id().with(("menu-item", index)), Sense::CLICK);
-            if response.hovered() {
-                painter.rect_filled(item, 3.0, hover);
-            }
-            painter.text(
-                item.left_center() + egui::vec2(10.0, 0.0),
-                Align2::LEFT_CENTER,
-                label,
-                FontId::proportional(12.0),
-                fg,
-            );
-            if let Some(hint) = shortcut
-                .and_then(|a| window.keymap.chord_for(a))
-                .map(shortcut_label)
-            {
-                painter.text(
-                    item.right_center() - egui::vec2(9.0, 0.0),
-                    Align2::RIGHT_CENTER,
-                    hint,
-                    FontId::proportional(10.0),
-                    hover,
-                );
-            }
-            if response.clicked() {
-                action = Some(cmd);
-            }
-            top += 30.0;
-        }
-    }
+    let (menu_rect, menu_action) = menu::show(window, ui, row, area, compact);
+    action = menu_action.or(action);
     let frame = ctx.cumulative_frame_nr();
     let pointer = ctx.input(|i| i.pointer.interact_pos());
     let over =
@@ -469,7 +367,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     {
         window.chrome.menu = false;
     }
-    let owned = window.chrome.guide.blocked(&ctx)
+    let owned = window.chrome.guide_blocked(&ctx)
         || menu_owned
         || ((over || edge.is_some()) && gesture)
         || window.chrome.held
@@ -515,6 +413,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
                 | Action::Maximize
                 | Action::Close
                 | Action::Connect
+                | Action::Updates(_)
         )
     );
     match action {
@@ -543,6 +442,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         }
         Some(Action::Overview) => crate::summary::toggle(window, &ctx),
         Some(Action::Connect) => connection::open(window, &ctx),
+        Some(Action::Updates(check)) => updates::open(window, &ctx, check),
         Some(Action::Menu) => window.chrome.menu = !window.chrome.menu,
         Some(Action::Preferences) => {
             window.chrome.menu = false;

@@ -118,6 +118,18 @@ restarting any console. The sources are chosen explicitly and both views are rea
 This is a standalone addition requested after the terminal's core workflow; it does not change
 what completing any of the five phases means. Installable plugins are outside this addition.
 
+## Updates and release notes — «Know what changed»
+
+**What you see:** a discreet dot on the global application menu when a newer stable Ivy version is
+published. Nothing takes focus from a running console.
+
+**What you can do:** check for updates explicitly, read the installed version's bundled notes even
+offline, browse recent published release notes and open a release's download page. Dismissing the
+notification keeps the notes accessible. Ivy does not install or restart itself.
+
+This is a standalone addition, independent of phase completion. The release publication contract
+and deliberate limits are recorded in D75 and [09-releases.md](09-releases.md).
+
 ## Where the cut is
 
 | | |
@@ -468,6 +480,13 @@ use the same channel. If it is never done, nothing has been lost.
   local and base comparisons. Review comments are previewed before insertion into the pinned origin
   console. D72 records input isolation, bounded loading and the remaining contract. Native desktop
   validation remains distinct from headless proofs.
+
+## Updates and release notes — Standalone addition
+
+- [ ] **U1 — Update notifications and release history.** One background stable-release check per
+  ordinary launch, an application-menu badge, manual checking and an inert in-app notes dialog with
+  bundled installed notes. Explicit links open GitHub release pages; no automatic installer. D75.
+  Implementation and validation are tracked on the `update-notifications` branch.
 
 ## Loose ends
 
