@@ -35,6 +35,7 @@
 
 mod alarms;
 mod chrome;
+mod clipboard;
 mod closing;
 mod console_input;
 pub(crate) mod control;
@@ -942,6 +943,7 @@ struct Window {
     settings_editor: settings::editor::Editor,
     chrome: chrome::Chrome,
     pane_view: pane_view::State,
+    clipboard: clipboard::Service,
     summary: summary::State,
     viewer: viewer::State,
     projects: project_view::State,
@@ -1449,6 +1451,7 @@ impl eframe::App for Window {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         chrome::begin_pass(self, ui);
+        clipboard::deliver(self, ui.ctx());
         let metrics = CellMetrics::measure(ui.ctx(), egui::FontId::monospace(self.font_size));
 
         // Settings claims its input before the console dispatcher. Its named work is discounted
@@ -1456,6 +1459,9 @@ impl eframe::App for Window {
         let mut overview_owned = summary::before_keys(self, ui, &metrics);
         let pane_owned = !overview_owned && pane_view::before_keys(self, ui, &metrics);
         if pane_owned {
+            if !self.pane_view.is_renaming() {
+                ui.style_mut().visuals.disabled_alpha = 1.0;
+            }
             ui.disable();
         }
         let chrome_owned = chrome::before_keys(self, ui, &metrics);
@@ -1986,6 +1992,7 @@ mod tests {
             }
         }
     }
+    mod context_clipboard;
     mod header_controls;
     mod integrated_chrome;
     pub(crate) mod markdown;
@@ -6809,6 +6816,7 @@ mod tests {
             settings_editor: settings::editor::Editor::default(),
             chrome: chrome::Chrome::default(),
             pane_view: pane_view::State::default(),
+            clipboard: clipboard::Service::default(),
             summary: summary::State::default(),
             viewer: viewer::State::default(),
             projects: project_view::State::default(),

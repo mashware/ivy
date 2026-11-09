@@ -14,6 +14,27 @@ use crate::painter::CellMetrics;
 use crate::*;
 use eframe::egui;
 
+pub(crate) fn native_window(
+    cc: &eframe::CreationContext<'_>,
+    with_what: OpenWith,
+    size: Option<egui::Vec2>,
+    persistence: session::Persistence,
+    measuring: bool,
+) -> term_core::Result<Window> {
+    chrome::prepare(&cc.egui_ctx);
+    let mut window = Window::opening(
+        &cc.egui_ctx,
+        with_what,
+        &the_users_shell(),
+        size,
+        persistence,
+    )?;
+    if !measuring {
+        window.clipboard = clipboard::Service::new(cc.egui_ctx.clone());
+    }
+    Ok(window)
+}
+
 impl Pane {
     pub(crate) fn new_counting_reads(
         ctx: &egui::Context,
@@ -307,6 +328,7 @@ fn initial_window(
         settings_editor: crate::settings::editor::Editor::default(),
         chrome: crate::chrome::Chrome::default(),
         pane_view: crate::pane_view::State::default(),
+        clipboard: crate::clipboard::Service::default(),
         summary: crate::summary::State::default(),
         viewer: crate::viewer::State::default(),
         projects: crate::project_view::State::default(),

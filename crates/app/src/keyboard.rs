@@ -1095,6 +1095,29 @@ impl crate::Pane {
     }
 }
 
+pub(crate) fn paste_into(pane: &mut crate::Pane, text: &str) {
+    let mut steps = crate::search::Steps::new(pane.search.is_open());
+    let mut bytes = Vec::new();
+    if !steps.took_a_paste(text) {
+        paste_or_hold(
+            text,
+            pane.screen.bracketed_paste(),
+            &mut bytes,
+            &mut pane.held,
+        );
+    }
+    crate::search::apply(&mut pane.search, &mut pane.screen, steps);
+    if bytes.is_empty() {
+        return;
+    }
+    if let Err(error) = pane.pty.write(&bytes) {
+        eprintln!("the clipboard paste could not be sent to the program: {error}");
+        return;
+    }
+    pane.screen.scroll_by(Scroll::ToBottom);
+    pane.hand_it_back_to_the_person();
+}
+
 #[cfg(test)]
 mod tests {
     /// One event, asked the way the frame asks it.

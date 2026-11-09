@@ -8991,3 +8991,53 @@ idle window for a dead one. A named-workspace registry and restoring every windo
 selector outside this delivery. Prompt parsing and replaying shell commands violate the existing
 metadata/input boundary. AI recovery is a separate delivery of #19: this change neither advertises
 a sessions mode nor installs client integrations.
+
+## D82 — Context menus follow their invocation and keep the console visible
+
+Rename dialogs are centered on the viewport. Console context menus retain the opening pointer
+position with the pane identity and are constrained inside the viewport. They keep the existing
+pane actions and add Copy for a selected terminal range and Paste for the ordinary clipboard.
+The menu has no heading or Cancel row. Two adjacent split buttons at the top reuse the titlebar
+icons; text actions occupy full-width rows with a hover highlight. Opening or dismissing a menu
+preserves the selection. Escape and outside clicks dismiss it, with
+the complete gesture retained until release; input ownership does not multiply console opacity.
+This extends D62 with the user's explicit request for an ordinary pointer menu, rather than a
+floating dialog in a location chosen by the interface engine.
+
+Linux mouse selections publish PRIMARY, independently from CLIPBOARD. A middle press pastes PRIMARY
+into the clicked console. Mouse-reporting programs keep right and middle gestures unless Shift is
+held, the existing terminal escape hatch. Both paste sources use the existing long-line gate and
+current bracketed-paste mode; they also revoke auxiliary-console control on successful personal input.
+
+An app-owned adapter uses arboard for native reads and PRIMARY publication. On Linux its
+Wayland data-control support is enabled: it performs capability setup before accepting operations,
+and uses X11/XWayland when native data-control initialization is unavailable. This avoids creating
+a second focus-based smithay subscription after the gesture whose serial that subscription needs.
+The pinned smithay client has no readiness or publication acknowledgement API; its first store
+could otherwise silently disappear. Arboard owns its connections and needs no borrowed display
+or retained native window. A pure Wayland compositor with neither data-control nor reachable
+XWayland is explicitly unsupported; PRIMARY is never substituted with CLIPBOARD.
+
+One worker reads desktop data outside the interface thread, retains the requesting pane identity,
+and wakes the reactive window on completion. Delivery expires after two seconds; late text never
+becomes input to another console. No replacement read/worker starts while an owner is still
+answering. PRIMARY publication coalesces to the latest selected text and expires after two seconds; a queued publication is discarded after the window loses focus, so a stalled read cannot later replace another application's selection. **D57 declaration:** shutdown
+disconnects and abandons this worker because external reads and library destruction may stall;
+no interface thread joins it. The idle receive ends when its sole Service sender is dropped.
+
+No adapter worker runs in historical measurement batches. Delivery is counted within the existing
+integrated chrome span and selection work within the mouse span. Enabling the arboard feature is
+Cargo-global: egui's existing native clipboard construction also gains data-control capability
+setup before the first frame. This is not measured here and no startup/frame-cost claim is made.
+
+Discarded: an untagged RequestPaste interpreted through keyboard modifiers (loses the requested
+pane and mouse-paste intent), replacing CLIPBOARD on selection (PRIMARY has its own desktop
+contract), external clipboard tools (installation/backend requirements), a new framework/native
+protocol fork (arboard already provides the required selections), a second asynchronous smithay
+client (first-operation readiness race), and replacement workers for stalled owners (retains native
+resources without a ceiling). Native inter-application exchange is checked separately from
+headless geometry and routing tests.
+
+The native startup resource factory now belongs to opening.rs, keeping clipboard construction out
+of the window core. The stateless primary-press reader is a free pointer function; the measured
+Window implementation ratchet falls from 1611 to 1605 production lines.
