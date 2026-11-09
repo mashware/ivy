@@ -211,23 +211,30 @@ fn paint(
             let mut title_left = left + egui::vec2(offset, 0.0);
             if let Some(project) = project {
                 let available = (rect.right() - title_left.x - 8.0).max(0.0);
-                let width = (available * 0.45).min(140.0);
-                let badge = egui::Rect::from_min_size(
+                let galley = painter.layout_no_wrap(
+                    project.name.clone(),
+                    egui::FontId::proportional(12.0),
+                    theme.foreground(),
+                );
+                let width = galley.size().x.min(available * 0.45).min(140.0);
+                let name_rect = egui::Rect::from_min_size(
                     egui::pos2(title_left.x, rect.center().y - 8.0),
                     egui::vec2(width, 16.0),
                 );
                 if width > 0.0 {
-                    painter.rect_filled(badge, 3.0, project.ink.gamma_multiply(0.13));
-                    painter
-                        .with_clip_rect(badge.shrink2(egui::vec2(4.0, 0.0)))
-                        .text(
-                            badge.left_center() + egui::vec2(4.0, 0.0),
-                            egui::Align2::LEFT_CENTER,
-                            &project.name,
-                            egui::FontId::proportional(10.0),
-                            theme.foreground(),
-                        );
-                    title_left.x = badge.right() + 7.0;
+                    painter.with_clip_rect(name_rect).galley(
+                        name_rect.left_center() - egui::vec2(0.0, galley.size().y / 2.0),
+                        galley,
+                        theme.foreground(),
+                    );
+                    let separator = painter.with_clip_rect(rect).text(
+                        egui::pos2(name_rect.right(), rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        " | ",
+                        egui::FontId::proportional(12.0),
+                        theme.foreground().gamma_multiply(0.65),
+                    );
+                    title_left.x = separator.right();
                 }
             }
             painter.with_clip_rect(rect).text(
@@ -397,7 +404,7 @@ mod tests {
             ..Default::default()
         });
         let badge = crate::project_view::Badge {
-            name: "backend".into(),
+            name: "Backend".into(),
             details: "/work/backend".into(),
             ink,
             painted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -424,13 +431,14 @@ mod tests {
             });
             out.textures_delta.clear();
             assert!(out.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == ink && r.rect.width() == 3.0)));
+            assert!(!out.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == ink.gamma_multiply(0.13))), "project name must not have a colored background");
             let text: Vec<_> =
                 out.shapes
                     .iter()
                     .filter_map(|s| {
                         if let egui::Shape::Text(text) = &s.shape {
                             assert!(s.clip_rect.right() <= label_rect.right());
-                            if text.galley.job.text == "backend" {
+                            if text.galley.job.text == "Backend" {
                                 assert_ne!(ink, theme.foreground());
                                 assert!(
                                     text.galley.job.sections.iter().all(|section| {
@@ -446,7 +454,8 @@ mod tests {
                     })
                     .collect();
             if width == 500.0 {
-                assert!(text.contains(&"backend"));
+                assert!(text.contains(&"Backend"));
+                assert!(text.contains(&" | "));
                 assert!(text.contains(&"Fix login"));
             }
             out.drop_without_applying_deltas();

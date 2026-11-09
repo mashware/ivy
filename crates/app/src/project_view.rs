@@ -231,9 +231,10 @@ fn published_directory(path: &std::path::Path) -> Option<PathBuf> {
 }
 
 fn badge_name(identity: &Identity, all: &[(usize, Identity)]) -> String {
+    let name = display_name(&identity.name);
     if all
         .iter()
-        .any(|(_, other)| other.key != identity.key && other.name == identity.name)
+        .any(|(_, other)| other.key != identity.key && display_name(&other.name) == name)
     {
         let path = naming_path(identity);
         let parts: Vec<_> = path.components().collect();
@@ -241,15 +242,41 @@ fn badge_name(identity: &Identity, all: &[(usize, Identity)]) -> String {
             let suffix: PathBuf = parts[start..].iter().map(|part| part.as_os_str()).collect();
             if all.iter().all(|(_, other)| {
                 other.key == identity.key
-                    || other.name != identity.name
-                    || !naming_path(other).ends_with(&suffix)
+                    || display_name(&other.name) != name
+                    || !display_name(&naming_path(other).to_string_lossy())
+                        .ends_with(&display_name(&suffix.to_string_lossy()))
             }) {
-                return suffix.to_string_lossy().into_owned();
+                return display_name(&suffix.to_string_lossy());
             }
         }
         return path.display().to_string();
     }
-    identity.name.clone()
+    name
+}
+
+fn display_name(name: &str) -> String {
+    let mut uppercase = true;
+    let mut result = String::new();
+    for character in name.chars() {
+        if character == '-' || character == '_' || character.is_whitespace() {
+            uppercase = true;
+        } else if character == '/' || character == '\\' {
+            result.push(character);
+            uppercase = true;
+        } else {
+            if uppercase {
+                result.extend(character.to_uppercase());
+            } else {
+                result.push(character);
+            }
+            uppercase = false;
+        }
+    }
+    if result.is_empty() {
+        name.into()
+    } else {
+        result
+    }
 }
 
 fn naming_path(identity: &Identity) -> &std::path::Path {

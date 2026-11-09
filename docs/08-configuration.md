@@ -583,8 +583,9 @@ The feature adds no configuration keys. See [Release publication](09-releases.md
 
 ## Project identity in console headers
 
-Each console header shows a colored strip and a project badge alongside its existing console
-name. A repository, its nested folders and its linked Git worktrees share the same project identity.
+Each console header shows a colored strip and a plain CamelCase project name, followed by ` | `
+and its existing console name (for example, `ProjectA | Linked worktree`). The project name has no
+colored background. A repository, its nested folders and its linked Git worktrees share the same project identity.
 Different local clones remain different projects, even if they use the same remote. A folder outside
 Git uses that exact folder as its identity. Hover over the name for the full project path and console
 name. Narrow headers clip text inside the label area and preserve the controls.
