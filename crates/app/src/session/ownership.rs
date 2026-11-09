@@ -66,6 +66,7 @@ impl Ownership {
         };
         lease.lock()?;
         // Dropping the coordinator releases the startup lock only after the lease is held.
+        coordinator.unlock()?;
         drop(coordinator);
         Ok(Self {
             _lease: lease,
@@ -78,11 +79,40 @@ impl Ownership {
     }
 }
 
+impl Drop for Ownership {
+    fn drop(&mut self) {
+        // A concurrent fork can inherit this open-file description until exec, despite CLOEXEC.
+        // Explicit unlock ends the window lease now rather than when that child's duplicate closes.
+        let _ = self._lease.unlock();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::{BufRead, BufReader, Read, Write};
     use std::process::{Child, ChildStdin, Command, Stdio};
+
+    #[test]
+    fn closing_owner_releases_an_inherited_open_file_description() {
+        let mut random = [0u8; 8];
+        getrandom::fill(&mut random).unwrap();
+        let directory = std::env::temp_dir().join(format!(
+            "ivy-ownership-inherited-{:x}",
+            u64::from_le_bytes(random)
+        ));
+        let owner = Ownership::acquire(&directory).unwrap();
+        let inherited = owner._lease.try_clone().unwrap();
+        drop(owner);
+        let replacement = Ownership::acquire(&directory).unwrap();
+        assert!(
+            replacement.is_primary(),
+            "a duplicate inherited during fork must not keep a closed window alive"
+        );
+        drop(replacement);
+        drop(inherited);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn ownership_child() {
