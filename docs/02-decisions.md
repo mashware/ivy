@@ -8768,3 +8768,9 @@ unsigned in the publisher-identity sense: no Developer ID or notarization is pro
 approval follows Apple's normal Privacy & Security flow. Global Gatekeeper bypasses and quarantine
 removal were discarded because an experimental installer must not weaken the person's system.
 Native runner lifecycle/MCP checks remain distinct from actual desktop and quarantine evidence.
+
+Offline export of both Mac dependency graphs exposed published Objective-C binding crates without
+license files. The build retains pinned upstream MIT text and licensing context, original Cargo
+attribution and source revisions for the explicitly verified versions. Provenance and the dispatch
+MIT fallback distinction are recorded in resources/licenses/macos/README.md; unknown versions still
+stop packaging. This preserves declared terms and available attribution rather than changing licenses.

@@ -101,6 +101,36 @@ class ReleaseTest(unittest.TestCase):
         self.package.write_bytes(b"tampered")
         self.assertNotEqual(lines[0].split("  ")[0], hashlib.sha256(self.package.read_bytes()).hexdigest())
 
+    def test_verified_mac_notice_fallback_preserves_original_text_and_rejects_new_versions(self):
+        source = self.root / "mac-source"
+        source.mkdir()
+        original = b'[package]\nname="block2"\nlicense="MIT"\n'
+        (source / "Cargo.toml").write_bytes(original)
+        package = {"id": "mac", "name": "block2", "version": "0.5.1", "source": "registry+x",
+                   "manifest_path": str(source / "Cargo.toml"), "license": "MIT",
+                   "repository": "https://github.com/madsmtm/objc2", "authors": ["Steven Sheldon"]}
+        data = {"packages": [{"id": name, "name": name, "source": None}
+                             for name in ("app", "panel-control")] + [package],
+                "workspace_members": ["app", "panel-control"], "resolve": {"nodes": [
+                    {"id": "app", "deps": [{"pkg": "mac", "dep_kinds": [{"kind": None}]}]},
+                    {"id": "panel-control", "deps": []}, {"id": "mac", "deps": []}]}}
+        metadata = self.root / "mac.json"
+        metadata.write_text(json.dumps(data))
+        collect = run_path(str(SCRIPT))["notices"]
+        out = self.root / "mac-notices"
+        collect(metadata, out)
+        dest = out / "block2-0.5.1"
+        self.assertEqual(hashlib.sha256((dest / "MIT-LICENSE.txt").read_bytes()).hexdigest(),
+                         "e353f37b12aefbb9f9b29490e837cfee05d9bda70804b3562839a3285c1df1e5")
+        self.assertEqual((dest / "UPSTREAM-Cargo.toml").read_bytes(), original)
+        self.assertIn("Steven Sheldon", (dest / "FALLBACK-ATTRIBUTION.txt").read_text())
+        self.assertEqual(hashlib.sha256((dest / "UPSTREAM-PROJECT-LICENSING.md").read_bytes()).hexdigest(),
+                         "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54")
+        package["version"] = "99.0.0"
+        metadata.write_text(json.dumps(data))
+        with self.assertRaisesRegex(ValueError, "missing notice"):
+            collect(metadata, self.root / "unverified")
+
     def test_embedded_font_terms_are_preserved_separately_from_crate_license(self):
         source = self.root / "fonts-source"
         (source / "fonts").mkdir(parents=True)

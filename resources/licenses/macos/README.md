@@ -1,0 +1,8 @@
+# Original Mac dependency notices
+
+Several published Objective-C binding crates omit the repository's license files. Packaging must not silently drop their declared terms and available attribution. These preserved upstream files are used only for explicitly enumerated dependency versions; unknown missing texts still stop the build. The exporter records each crate's original Cargo license expression, authors, repository and source revision alongside the text.
+
+- `MIT-LICENSE.txt`: original MIT text with Steven Sheldon copyright from objc2 source commit `4fc083f1c6d6784577e38b0ee8dbd344481e2fd2`, root `LICENSE.txt`, Git blob `e9ab3babc0d8602b83dccde8a462f8f3dc1e52ad`. Source: https://github.com/madsmtm/objc2/blob/4fc083f1c6d6784577e38b0ee8dbd344481e2fd2/LICENSE.txt
+- `OBJC2-LICENSE.md`: later project licensing context at objc2 source commit `8852b424193ca41602281b3d7540d7c8ed51e49a`, root `LICENSE.md`, Git blob `540ae4c81adb5f64a9f61e222b688880da24300e`. Source: https://github.com/madsmtm/objc2/blob/8852b424193ca41602281b3d7540d7c8ed51e49a/LICENSE.md
+
+The copied texts are not rewritten. MIT is selected only where the crate's own SPDX expression permits MIT. `dispatch`0.2.0 declares MIT and Steven Sheldon in its original Cargo metadata, but its recorded source commit `82d6c7a5b75dc0c71c3f46f87bb6c16a476f7748` in https://github.com/SSheldon/rust-dispatch contains no standalone license file. Its export therefore identifies this preserved MIT text as a fallback, includes the crate's original Cargo metadata and attribution, and does not claim that text was present in its source archive.

@@ -15,6 +15,17 @@ RELEASE_VERSION = re.compile(
     r"(?:-(alpha|beta|rc)\.(0|[1-9][0-9]*))?"
 )
 
+# These published Mac dependencies omit upstream license files. Preserve the pinned
+# project texts and original Cargo attribution; new versions still need verification.
+MAC_MIT_NOTICES = {
+    ("block2", "0.5.1"), ("block2", "0.6.2"), ("dispatch2", "0.3.1"), ("dispatch", "0.2.0"),
+    ("objc-sys", "0.3.5"), ("objc2-app-kit", "0.2.2"), ("objc2-app-kit", "0.3.2"),
+    ("objc2-core-data", "0.2.2"), ("objc2-core-foundation", "0.3.2"), ("objc2-core-graphics", "0.3.2"),
+    ("objc2-core-image", "0.2.2"), ("objc2-core-text", "0.3.2"), ("objc2-encode", "4.1.0"),
+    ("objc2-foundation", "0.2.2"), ("objc2-foundation", "0.3.2"), ("objc2-io-surface", "0.3.2"),
+    ("objc2-metal", "0.2.2"), ("objc2-quartz-core", "0.2.2"), ("objc2", "0.5.2"), ("objc2", "0.6.4"),
+}
+
 
 def version(cargo):
     with cargo.open("rb") as source:
@@ -131,9 +142,28 @@ def notices(metadata, directory):
         declared = package.get("license")
         fallback = not has_license and (declared in ("Apache-2.0", "MIT OR Apache-2.0") or
                    (font_assets and declared == "(MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0"))
-        if not has_license and not fallback:
+        mac_mit = not has_license and (package["name"], package["version"]) in MAC_MIT_NOTICES and declared in (
+            "MIT", "Zlib OR Apache-2.0 OR MIT")
+        if not has_license and not fallback and not mac_mit:
             raise ValueError(f"missing notice for {package['name']} {package['version']}")
         dest = directory / f"{package['name']}-{package['version']}"
+        if mac_mit:
+            original = Path(__file__).resolve().parent.parent / "resources/licenses/macos"
+            dest.mkdir(parents=True, exist_ok=True)
+            for name in ("MIT-LICENSE.txt", "README.md"):
+                shutil.copyfile(original / name, dest / name)
+            if package["name"] != "dispatch":
+                shutil.copyfile(original / "OBJC2-LICENSE.md", dest / "UPSTREAM-PROJECT-LICENSING.md")
+            shutil.copyfile(root / "Cargo.toml", dest / "UPSTREAM-Cargo.toml")
+            vcs = root / ".cargo_vcs_info.json"
+            if vcs.is_file():
+                shutil.copyfile(vcs, dest / "source-vcs.json")
+            (dest / "FALLBACK-ATTRIBUTION.txt").write_text(
+                "The published crate omitted license text. Its declared MIT option is used;\n"
+                "the preserved upstream text and provenance are included, not claimed as an archive original.\n"
+                f"Name: {package['name']}\nVersion: {package['version']}\nLicense: {declared}\n"
+                f"Repository: {package.get('repository')}\nAuthors: {', '.join(package.get('authors', []))}\n",
+                encoding="utf-8")
         if fallback:
             dest.mkdir(parents=True, exist_ok=True)
             canonical = Path(__file__).resolve().parent.parent / "vendor/egui-winit/LICENSE-APACHE"
