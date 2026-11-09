@@ -17,7 +17,27 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  checks:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - name: Install Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential libxkbcommon-dev libssl-dev pkg-config
+      - name: Check formatting
+        run: cargo fmt --all --check
+      - name: Lint workspace
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - name: Test workspace
+        run: cargo test --locked --workspace
+      - name: Check documentation links
+        run: cargo doc-check --locked
+      - name: Test portable packaging logic
+        run: python3 -m unittest scripts/test_release.py scripts/test_macos.py -v
+
   build:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -129,6 +149,7 @@ jobs:
           if-no-files-found: error
 
   macos:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 35
     strategy:
