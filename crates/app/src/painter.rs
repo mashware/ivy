@@ -127,6 +127,12 @@ pub struct CellMetrics {
 }
 
 impl CellMetrics {
+    /// Panel rows are painted as whole strings, so their columns use the font's natural advance.
+    pub(crate) fn for_panel(&self, ctx: &Context) -> Self {
+        let mut metrics = self.clone();
+        metrics.width = ctx.fonts_mut(|fonts| fonts.glyph_width(&self.font, 'M'));
+        metrics
+    }
     /// Asks the font how much a cell measures.
     ///
     /// The width is taken from any glyph **of fixed width**: in a monospaced font they all measure

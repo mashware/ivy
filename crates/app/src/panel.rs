@@ -1132,6 +1132,8 @@ pub fn paint(
 ) -> std::time::Duration {
     let rect = painter.clip_rect();
     painter.rect_filled(rect, 0.0, theme.panel_background());
+    let panel_metrics = metrics.for_panel(painter.ctx());
+    let metrics = &panel_metrics;
 
     // The width in cells is deducted the margin of both sides even though only the left one is painted:
     // without the right one, the wrapping would fill to the exact edge of the panel and the text would be
@@ -1250,6 +1252,60 @@ mod tests {
     use super::*;
     use crate::tests::markdown;
     use panel_contract::{PANEL_FILE, PanelDir};
+
+    #[test]
+    fn ordinary_text_wraps_inside_the_panel_as_its_width_and_font_change() {
+        let ctx = eframe::egui::Context::default();
+        let mut state = PanelState::default();
+        let document = serde_json::json!({"header":false,"lines":[{"mark":"current","text": "Now: ".to_owned() + &"abcdefghij ".repeat(12) + "h)"}]}).to_string();
+        state.commit(panel_contract::parse_document(&document).unwrap());
+        let mut discoverer = crate::fonts::Discoverer::default();
+        let mut observed = 0;
+        for (size, scale, width) in [
+            (14.0, 1.0, 240.0),
+            (14.0, 1.0, 241.0),
+            (17.0, 1.0, 240.0),
+            (14.0, 1.5, 240.0),
+            (14.0, 1.5, 320.0),
+        ] {
+            ctx.set_pixels_per_point(scale);
+            let rect = Rect::from_min_size(Pos2::ZERO, eframe::egui::vec2(width, 1000.0));
+            let output = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+                let painter = ui
+                    .ctx()
+                    .layer_painter(eframe::egui::LayerId::new(
+                        eframe::egui::Order::Foreground,
+                        eframe::egui::Id::new("panel bounds"),
+                    ))
+                    .with_clip_rect(rect);
+                let metrics = CellMetrics::measure(ui.ctx(), eframe::egui::FontId::monospace(size));
+                paint(
+                    &painter,
+                    &mut state,
+                    "test",
+                    &Theme::default(),
+                    &metrics,
+                    SystemTime::now(),
+                    &mut discoverer,
+                );
+            });
+            let mut overflow = None;
+            for clipped in &output.shapes {
+                if let eframe::egui::Shape::Text(text) = &clipped.shape {
+                    observed += 1;
+                    if text.pos.x + text.galley.rect.right() > rect.right() {
+                        overflow = Some(text.galley.text().to_owned());
+                    }
+                }
+            }
+            output.drop_without_applying_deltas();
+            assert!(
+                overflow.is_none(),
+                "text {overflow:?} overflows at size {size}, scale {scale}, width {width}"
+            );
+        }
+        assert!(observed > 5, "the panel must actually paint wrapped rows");
+    }
 
     #[test]
     fn a_document_acquired_before_close_survives_but_a_later_read_does_not() {
@@ -1935,6 +1991,7 @@ mod tests {
                 ui.ctx(),
                 eframe::egui::FontId::monospace(crate::DEFAULT_FONT_SIZE),
             );
+            let metrics = metrics.for_panel(ui.ctx());
             measured = (metrics.width(), metrics.height());
         })
         .drop_without_applying_deltas();
@@ -4578,7 +4635,7 @@ mod pressing {
     /// could have sent something nobody could read.
     ///
     /// This module lays text out counting **characters**, and a character is not a column: a kanji
-    /// is two. So a command in Japanese that fits by the character count is drawn beyond the strip
+    /// may be wider. So a command that fits by the character count can be drawn beyond the strip
     /// and the painter clips what sticks out — the person reads a fragment, and pressing would send
     /// the whole string.
     ///
@@ -4587,8 +4644,8 @@ mod pressing {
     #[test]
     fn a_command_drawn_past_the_strip_is_not_pressable() {
         // Narrow enough that the character count fits and the columns do not: the strip takes about
-        // thirty cells and every one of these is two wide.
-        let wide = "日".repeat(40);
+        // thirty cells and the font draws these symbols wider than a cell.
+        let wide = "☀".repeat(40);
         let document =
             format!(r#"{{"actions": [{{"label": "Wide", "send": "{wide}"}}], "lines": ["b"]}}"#);
         let strip = Rect::from_min_size(Pos2::new(100.0, 50.0), eframe::egui::vec2(260.0, 600.0));
