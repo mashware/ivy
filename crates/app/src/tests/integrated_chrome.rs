@@ -361,10 +361,13 @@ mod tests {
         assert!(output.platform_output.commands.iter().any(|command| matches!(command, egui::OutputCommand::CopyText(text) if text.contains(&serde_json::to_string(&expected.to_string_lossy()).unwrap())
             && text.contains("local stdio MCP server named ivy")
             && text.contains("env_vars = [\"PANEL_ID\", \"PANEL_DIR\"]")
+            && text.contains("Tool discovery alone does not prove a connection")
+            && text.contains("shared background server lacks that console identity")
             && text.contains("do not assume the client is outside Ivy")
             && text.contains("codex --help")
             && text.contains("codex resume --help")
             && text.contains("Only if that command supports --no-daemon")
+            && text.contains("run codex --no-daemon or")
             && text.contains("codex resume --no-daemon <session-id>")
             && text.contains("client-version limitation")
             && text.contains("not correct-console routing")
@@ -405,6 +408,14 @@ mod tests {
         let expected_manual = [
             "Codex: forward the console identity",
             "env_vars = [\"PANEL_ID\", \"PANEL_DIR\"]",
+            "Do not hard-code PANEL_ID or PANEL_DIR",
+            "These are variable names, not saved console values.",
+            "Tool discovery alone does not prove a connection",
+            "shared background server whose environment lacks this console's identity",
+            "Check codex --help",
+            "codex resume --help",
+            "If that command supports --no-daemon",
+            "A successful tool call proves a usable connection.",
             "codex --no-daemon",
             "codex resume --no-daemon <session-id>",
         ];
