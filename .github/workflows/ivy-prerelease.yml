@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: Validate selected tag for publication
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
         env:
@@ -50,7 +50,7 @@ jobs:
           python3 scripts/release.py generate --directory dist --commit "$COMMIT" --built-on ubuntu-24.04
           (cd dist && sha256sum --check SHA256SUMS)
       - name: Upload package and metadata
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: ivy-linux-x86_64
           path: dist/
@@ -64,8 +64,8 @@ jobs:
       matrix:
         ubuntu: ['24.04', '26.04']
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: ivy-linux-x86_64
           path: dist
@@ -91,8 +91,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: ivy-linux-x86_64
           path: baseline
@@ -122,7 +122,7 @@ jobs:
               /src/packaging/arch/test-install.sh /out/*.pkg.tar.zst "$VERSION"
               /src/packaging/arch/test-package.sh --versions
             '
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: ivy-arch-x86_64
           path: arch-dist/*.pkg.tar.zst
@@ -146,7 +146,7 @@ jobs:
       TARGET: ${{ matrix.target }}
       ARCH: ${{ matrix.arch }}
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: Build pinned native Mac executables
         run: |
           rustup target add "$TARGET"
@@ -159,7 +159,7 @@ jobs:
           python3 scripts/package-macos.py build --binary-dir "target/$TARGET/release" --directory dist --version "$version" --arch "$ARCH"
           python3 -m unittest scripts/test_macos.py -v
           python3 packaging/macos/test-install.py dist/*.dmg "$version" "$ARCH" "target/$TARGET/release/notices" "dist/Ivy-$version-macos-$ARCH.executables.json"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: ivy-macos-${{ matrix.arch }}
           path: dist/*.dmg
@@ -173,8 +173,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           pattern: ivy-*
           path: dist
