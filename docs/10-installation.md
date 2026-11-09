@@ -12,11 +12,14 @@ Download the `.deb`, `release-manifest.json` and `SHA256SUMS` from the same rele
 directory. Verify them there, then install the package shown in that release:
 
 ```sh
-sha256sum --check SHA256SUMS
+sha256sum --ignore-missing --check SHA256SUMS
 sudo apt install ./ivy_0.1.0-alpha.2_amd64.deb
 ivy
 ```
 
+The selected `.deb` and `release-manifest.json` must both be downloaded and reported as `OK`.
+Other package formats in the shared checksum list may be absent; `--ignore-missing` skips only
+files you did not download. Do not install a package whose checksum failed.
 The filename above illustrates workspace version `0.1.0-alpha.2`; use the actual release filename.
 The prerelease separator becomes `~` in the Debian package version. Checksums detect changed
 or mismatched downloads; they are not a publisher signature.
@@ -150,11 +153,16 @@ milestone remains open independently of installer work.
 
 ## Arch Linux (x86_64, rolling)
 
-Download `ivy-terminal-0.1.0alpha2-1-x86_64.pkg.tar.zst` from the matching prerelease and install with:
+Download `ivy-terminal-0.1.0alpha2-1-x86_64.pkg.tar.zst`, `release-manifest.json` and `SHA256SUMS`
+from the same prerelease into one directory, then verify and install:
 
 ```bash
+sha256sum --ignore-missing --check SHA256SUMS
 sudo pacman -U ./ivy-terminal-0.1.0alpha2-1-x86_64.pkg.tar.zst
 ```
+
+The selected Arch package and `release-manifest.json` must both be reported as `OK`; an absent
+Ubuntu package is allowed. Do not install after a failed checksum check.
 
 Open Ivy from the application menu or run `ivy`. MCP uses the same `/usr/bin/panel-mcp` command as Ubuntu. A Rust compiler is not required on the tester machine. Update Arch normally with `sudo pacman -Syu` before installing; do not perform a partial system upgrade.
 
