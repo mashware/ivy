@@ -254,6 +254,6 @@ jobs:
             echo 'A release already exists for this tag; inspect it instead of overwriting it.' >&2
             exit 1
           fi
-          gh release create "$TAG" dist/*.deb dist/*.pkg.tar.zst dist/*.dmg dist/*-setup.exe dist/release-manifest.json dist/SHA256SUMS --verify-tag --draft --prerelease --title "$TAG" --notes "Unsigned experimental Ubuntu, Arch Linux, macOS and Windows packages."
+          gh release create "$TAG" dist/*.deb dist/*.pkg.tar.zst dist/*.dmg dist/*-setup.exe dist/release-manifest.json dist/SHA256SUMS --verify-tag --draft --prerelease --title "$TAG" --notes-file resources/release-notes.md
           scripts/verify-release-tag.sh "$TAG" "$COMMIT"
           gh release edit "$TAG" --draft=false --prerelease

@@ -5,10 +5,17 @@
 - Install Ivy and its MCP bridge together from a `.deb`, with an application-menu entry and icon.
 - Install the same Linux executables on Arch from a native `.pkg.tar.zst` using `pacman -U`.
 - On macOS 15 or later, choose the Apple Silicon or Intel `.dmg` and drag Ivy into Applications.
+- Install on Windows 11 x64 with a per-user installer, Start menu shortcut and uninstaller.
 - Updates and removal preserve existing preferences and saved layouts.
-- This alpha adds macOS 15+ on Apple Silicon and Intel alongside Ubuntu and Arch; downloads are unsigned and experimental.
+- Downloads for Ubuntu, Arch, macOS and Windows are unsigned and experimental.
+- Windows installer lifecycle checks pass in CI; real Windows desktop trials are still pending. The Windows MCP/control listener is not available yet.
 
 ## Work across consoles
+
+- New splits inherit the source console's local working directory.
+- Choose whether startup restores the previous layout; additional windows keep independent layouts.
+- Identify projects and agents from pane titles, accents and agent logos, with human-input alerts.
+- Use the console context menu to copy, paste, rename or split; Linux also supports PRIMARY selection paste.
 
 - Organize independent consoles in tabs, split them, drag them into place and resize their borders.
 - Restore your tabs, console layout and information-panel widths when Ivy opens again.
@@ -30,3 +37,15 @@
 - A dot on the application menu announces a newer stable version without interrupting your work.
 - Choose Check for updates to check again, or What's new to read these notes and recent releases.
 - View download opens the release page in your browser. Ivy does not install updates automatically.
+
+## Choose a download
+
+- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.3_amd64.deb`.
+- Arch Linux x86_64: `ivy-terminal-0.1.0alpha3-1-x86_64.pkg.tar.zst`.
+- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.3-macos-arm64.dmg`.
+- macOS 15+ Intel: `Ivy-0.1.0-alpha.3-macos-x86_64.dmg`.
+- Windows 11 x64: `Ivy-0.1.0-alpha.3-windows-x86_64-setup.exe`.
+
+Download `release-manifest.json` and `SHA256SUMS` with the chosen package and verify its SHA-256
+before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.3/docs/10-installation.md)
+for verification, installation, upgrade and removal commands. No Rust toolchain is needed.
