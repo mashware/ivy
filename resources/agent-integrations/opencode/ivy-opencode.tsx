@@ -44,7 +44,6 @@ function channel(path: string, connected: () => void) {
           if (reply.retryable !== true) { stopped = true; current.destroy(); return }
           // The listener may be paused in the background. Reconnecting on every
           // timeout would fill its connection slots with close notifications.
-          const withdraw = pending === null || inflightSnapshot === null
           inflight = false
           inflightSnapshot = undefined
           pending = undefined
@@ -53,8 +52,7 @@ function channel(path: string, connected: () => void) {
             retryReply = undefined
             if (socket !== current || stopped) return
             waitingForRefresh = false
-            if (withdraw) { pending = null; pump() }
-            else connected() // obtain fresh authoritative state; never replay old bytes
+            connected() // refresh the current route, never replay old bytes
           }, 1000)
           return
         }

@@ -77,6 +77,13 @@ test('route bootstrap, displayed request, cancellation, navigation and disposal'
     assert.equal(lines.at(-1).snapshot,null)
     route={name:'session',params:{sessionID:'latest'}}; solid.tick(); await pause(80)
     state.refuse=true; state.retryable=true
+    route={name:'home'}; solid.tick(); await pause(80)
+    route={name:'session',params:{sessionID:'latest'}}; solid.tick(); await pause(80)
+    state.refuse=false
+    await pause(1150)
+    assert.equal(lines.at(-1).snapshot.session,'latest','retry must refresh the current route after a rejected home withdrawal')
+    assert.equal(lines.at(-1).snapshot.activity,'idle')
+    state.refuse=true; state.retryable=true
     const transientConnections=state.connections
     const firstTransientLine=lines.length
     callbacks.get('session.status')(); await pause(8500)
