@@ -8915,6 +8915,13 @@ complete eligible snapshot is required. Incomplete child/pending hydration canno
 No transcript reader, process-name recognizer, generic daemon or automatic client-config editor
 is introduced. The guide exposes reviewed setup instructions and preserves existing hooks.
 
+Automatic capability replies reuse the existing PTY write queue only when it has no backlog;
+at most one reply is deferred. They cannot spend or clear the person's refused-input state.
+A fresh enabled native declaration can replace a disconnected TUI reporter; an untagged clear or
+capability probe cannot withdraw that reporter's unconfirmed wait. A permanent adapter refusal
+stops reconnect attempts until the client is explicitly restarted, so a disabled integration
+does not wake an idle window forever.
+
 **Presentation.** Supported identity selects a bundled logo; only explicit active state animates
 it, and hidden/inactive windows arm no logo-only repaint. Removing a duplicate spinner is a
 supported, explicitly reviewed client title setting, never a guessed substring rewrite (D69).

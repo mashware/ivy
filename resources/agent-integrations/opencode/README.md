@@ -14,9 +14,10 @@ Run the executable adapter fixture:
 
 ```sh
 node --test resources/agent-integrations/opencode/plugin.test.mjs
+IVY_REAL_SOCKET=1 node --test resources/agent-integrations/opencode/plugin.test.mjs
 ```
 
-It executes the actual asset with a simulated SDK/reactive runtime and a temporary Unix socket, including request cancellation, delayed navigation, reconnect, failed refresh and a 100-event storm. This proves local adapter behavior, not real-client permission/question interoperability. The support status and required live checks are documented in `docs/08-configuration.md`.
+The first command uses a simulated SDK/reactive runtime and transport; the second substitutes a real temporary Unix socket. They execute the actual asset, including request cancellation, delayed navigation, failed refresh, a 100-event storm, fresh reconnect after an outage, and silence after a permanent wire refusal. Actual client session behavior and normal client shutdown still require live verification. Use a Node runtime with native TypeScript support. A wire refusal stops automatic reconnect; enable the integration and restart OpenCode to retry. This proves local adapter behavior, not real-client permission/question interoperability. The support status and required live checks are documented in `docs/08-configuration.md`.
 
 First-party contract sources:
 

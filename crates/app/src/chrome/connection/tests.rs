@@ -71,3 +71,30 @@ fn activity_controls_require_opening_and_explicit_save() {
     click(&ctx, &mut guide, save);
     assert!(guide.save_preferences);
 }
+
+#[test]
+fn saved_preferences_show_completion_after_the_application_finishes() {
+    let ctx = egui::Context::default();
+    let mut guide = Guide {
+        message: APPLYING_PREFERENCES.into(),
+        ..Default::default()
+    };
+    let initial = frame(&ctx, &mut guide, vec![]);
+    let at = center(&initial, "Agent activity and input signals");
+    click(&ctx, &mut guide, at);
+    for _ in 0..30 {
+        frame(&ctx, &mut guide, vec![]);
+    }
+    guide.application_status(true);
+    let pending = frame(&ctx, &mut guide, vec![]);
+    center(&pending, APPLYING_PREFERENCES);
+    guide.application_status(false);
+    let applied = frame(&ctx, &mut guide, vec![]);
+    center(&applied, "Saved and applied.");
+    assert!(!applied.shapes.iter().any(
+        |s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.text() == APPLYING_PREFERENCES)
+    ));
+    guide.message = "Save failed".into();
+    guide.application_status(false);
+    center(&frame(&ctx, &mut guide, vec![]), "Save failed");
+}

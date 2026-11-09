@@ -661,7 +661,7 @@ A recognized, enabled client shows its mark beside the pane title. Explicit work
 | Claude Code 2.1.319 | Native root OSC7501 after capability reply | Enable in Ivy; leave terminal titles enabled | Not yet verified |
 | OpenCode 1.18.31 | Official TUI plugin, visible route and local SDK lists | Explicit plugin installation and preserving `tui.json` edit | Not yet verified |
 
-“Enabled” is a preference; an observed declaration is evidence of receipt. Neither proves the complete permission/question lifecycle or compatibility with a different version. Unknown clients retain their ordinary titles and show no invented identity. An absent native cleanup can leave the last claim visible: after thirty minutes without a new declaration it is dimmed and its animation stops. Silence, a keypress and viewing a tab never mean a question was answered. Unexpected OpenCode disconnection or incomplete refresh immediately dims its preceding wait; a fresh complete snapshot can confirm or replace it.
+“Enabled” is a preference; an observed declaration is evidence of receipt. Neither proves the complete permission/question lifecycle or compatibility with a different version. Unknown clients retain their ordinary titles and show no invented identity. An absent native cleanup can leave the last claim visible: after thirty minutes without a new declaration it is dimmed and its animation stops. Silence, a keypress and viewing a tab never mean a question was answered. Unexpected OpenCode disconnection or incomplete refresh immediately dims its preceding wait; a fresh complete snapshot can confirm or replace it. After a TUI connection ends, a new native client declaration can replace its unconfirmed metadata; a probe or untagged clear alone cannot.
 
 ### Codex title selection
 
@@ -673,7 +673,7 @@ Preserve unrelated settings and existing title items you want. If `terminal_titl
 
 ### OpenCode plugin
 
-The guide previews a stable destination beneath Ivy's configuration directory: `agent-integrations/opencode/ivy-opencode.tsx`. **Install / repair** writes only that bundled asset. Copy its path into the existing `plugin` array in OpenCode's `tui.json`, preserving other entries, then restart OpenCode inside the intended console. The guide's copy button confirms completion with **Copied**. Configuration instructions and fixture commands accompany the [bundled adapter](../resources/agent-integrations/opencode/README.md).
+The guide previews a stable destination beneath Ivy's configuration directory: `agent-integrations/opencode/ivy-opencode.tsx`. **Install / repair** writes only that bundled asset. Copy its path into the existing `plugin` array in OpenCode's `tui.json`, preserving other entries, then restart OpenCode inside the intended console. Enable before starting; if the adapter received a refusal while disabled, restart OpenCode after enabling. The guide's copy button confirms completion with **Copied**. Configuration instructions and fixture commands accompany the [bundled adapter](../resources/agent-integrations/opencode/README.md).
 
 The TUI plugin follows that TUI's displayed session, not every session on a server or in a directory. It reconciles root/direct-child prompts against the local pending-request API; these requests do not call a model or send prompt contents. The current adapter is inactive on Windows. A missing/moved asset, failed plugin load or lack of observed declarations remains setup-required/unverified; enabling the checkbox does not prove installation.
 

@@ -11,19 +11,23 @@ type Entry = { id: string; sessionID: string }
 // writing the next one; neither a slow endpoint nor an outage accumulates frames.
 function channel(path: string, connected: () => void) {
   let socket: Socket | undefined, retry: ReturnType<typeof setTimeout> | undefined
-  let pending: string | undefined, inflight = false, buffer = "", stopped = false
+  let pending: Snapshot | null | undefined, inflight = false, buffer = "", stopped = false
+  let reporterReady = false
   let drained: (() => void) | undefined
   function pump() {
     if (!socket || socket.connecting || inflight || pending === undefined) return
     inflight = true
-    const line = pending
+    const snapshot = pending
     pending = undefined
-    socket.write(line)
+    if (snapshot === null) reporterReady = false
+    else if (!snapshot.stale) reporterReady = true
+    socket.write(envelope(snapshot))
   }
   function connect() {
     if (stopped) return
     const current = createConnection(path)
     socket = current
+    reporterReady = false
     current.on("connect", () => { if (socket === current) connected() })
     current.on("data", (chunk) => {
       if (socket !== current) return
@@ -33,7 +37,7 @@ function channel(path: string, connected: () => void) {
       if (end < 0) return
       const line = buffer.slice(0, end)
       buffer = buffer.slice(end + 1)
-      try { if (JSON.parse(line).ok !== true) { current.destroy(); return } }
+      try { if (JSON.parse(line).ok !== true) { stopped = true; current.destroy(); return } }
       catch { current.destroy(); return }
       inflight = false
       pump()
@@ -42,14 +46,20 @@ function channel(path: string, connected: () => void) {
     current.on("error", () => {})
     current.on("close", () => {
       if (socket !== current) return
-      socket = undefined; pending = undefined; inflight = false; buffer = ""
+      socket = undefined; pending = undefined; inflight = false; buffer = ""; reporterReady = false
       drained?.(); drained = undefined
       if (!stopped) retry = setTimeout(connect, 1000)
     })
   }
   connect()
   return {
-    send(snapshot: Snapshot | null) { if (!socket || socket.connecting) return; pending = envelope(snapshot); pump() },
+    send(snapshot: Snapshot | null) {
+      if (!socket || socket.connecting || (snapshot?.stale && !reporterReady)) return false
+      pending = snapshot
+      if (snapshot === null) reporterReady = false
+      pump()
+      return true
+    },
     async drain() {
       if (!socket || (!inflight && pending === undefined)) return
       await new Promise<void>(resolve => {
@@ -75,8 +85,7 @@ export default {
     let lastSnapshot: Snapshot | undefined, markedStale = false
     const markStale = () => {
       if (lastSnapshot && !markedStale) {
-        markedStale = true
-        transport.send({...lastSnapshot, stale: true})
+        markedStale = transport.send({...lastSnapshot, stale: true})
       }
     }
     const withdraw = () => { lastSnapshot = undefined; markedStale = false; transport.send(null) }

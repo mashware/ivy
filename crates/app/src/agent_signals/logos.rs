@@ -77,7 +77,7 @@ pub(crate) fn paint(ui: &egui::Ui, rect: egui::Rect, view: View) {
         } else if view.busy {
             "Working"
         } else {
-            "Idle"
+            "No declared activity"
         }
     ));
 }

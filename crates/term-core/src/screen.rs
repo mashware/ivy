@@ -92,7 +92,7 @@ pub struct Screen {
     parser: Processor,
     titles: title::Listener,
     terminal_title: Option<String>,
-    directory: metadata::Metadata,
+    metadata: metadata::Metadata,
 }
 
 /// A cell of the **visible** grid, and which half of it is being talked about.
@@ -263,7 +263,7 @@ impl Screen {
             parser: Processor::new(),
             titles,
             terminal_title: None,
-            directory: metadata::Metadata::default(),
+            metadata: metadata::Metadata::default(),
         }
     }
 
@@ -285,7 +285,7 @@ impl Screen {
     /// sequence split across two deliveries produces the same result as a whole one. It is what makes
     /// it correct for the PTY to deliver partial reads.
     pub fn advance(&mut self, bytes: &[u8]) {
-        self.directory.advance(bytes);
+        self.metadata.advance(bytes);
         self.parser.advance(&mut self.term, bytes);
         if let Some(update) = self.titles.take() {
             self.terminal_title = update;
@@ -303,16 +303,16 @@ impl Screen {
 
     /// Whether this screen has received an OSC 7 directory report, including an unusable one.
     pub fn working_directory_reported(&self) -> bool {
-        self.directory.reported()
+        self.metadata.reported()
     }
 
     pub fn working_directory(&self) -> Option<&std::path::Path> {
-        self.directory.path()
+        self.metadata.path()
     }
 
     /// Completed directory reports and resets advance this revision, even when the path repeats.
     pub fn working_directory_generation(&self) -> u64 {
-        self.directory.generation()
+        self.metadata.generation()
     }
 
     pub fn terminal_title(&self) -> Option<&str> {
@@ -321,28 +321,28 @@ impl Screen {
 
     /// Enable native clients before feeding output; disabling the active client withdraws it.
     pub fn set_program_clients(&mut self, claude: bool, codex: bool) {
-        self.directory.enabled_claude = claude;
-        self.directory.enabled_codex = codex;
-        if self.directory.program.is_some_and(|s| match s.client {
+        self.metadata.enabled_claude = claude;
+        self.metadata.enabled_codex = codex;
+        if self.metadata.program.is_some_and(|s| match s.client {
             ProgramClient::Claude => !claude,
             ProgramClient::Codex => !codex,
         }) {
-            self.directory.program = None;
-            self.directory.program_generation = self.directory.program_generation.wrapping_add(1);
+            self.metadata.program = None;
+            self.metadata.program_generation = self.metadata.program_generation.wrapping_add(1);
         }
     }
 
     /// Latest valid native declaration.
     pub fn program_snapshot(&self) -> Option<ProgramSnapshot> {
-        self.directory.program
+        self.metadata.program
     }
     /// Revision of completed native declarations, clears and resets.
     pub fn program_generation(&self) -> u64 {
-        self.directory.program_generation
+        self.metadata.program_generation
     }
     /// Take coalesced capability probes since the previous call.
     pub fn take_program_query(&mut self) -> bool {
-        std::mem::take(&mut self.directory.query)
+        std::mem::take(&mut self.metadata.query)
     }
 
     /// Changes the grid's size and reflows its content.

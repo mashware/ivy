@@ -62,6 +62,12 @@ pub(crate) fn save_agent_preferences(
     Ok(())
 }
 
+impl Editor {
+    pub(crate) fn is_applying(&self) -> bool {
+        self.application.pending.is_some()
+    }
+}
+
 fn same_family(a: Option<&str>, b: Option<&str>) -> bool {
     match (a, b) {
         (None, None) => true,

@@ -503,7 +503,11 @@ fn pump_pane(pane: &mut crate::Pane, enabled: crate::agent_signals::Enabled) -> 
     let collected_at = Instant::now();
     pane.signals.configure(enabled, &mut pane.screen);
     pane.screen.advance(&pane.received);
-    if pane.signals.sync_native(&mut pane.screen, collected_at)
+    let queried = pane.signals.sync_native(&mut pane.screen, collected_at);
+    // Automatic replies must not consume the backlog reserved for the person's input.
+    if pane
+        .signals
+        .take_capability_reply(queried, pane.pty.backlog().is_none())
         && let Err(error) = pane.pty.write(b"\x1b]7501;?\x07")
     {
         eprintln!("could not answer client status capability: {error}");

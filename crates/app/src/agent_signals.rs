@@ -56,12 +56,16 @@ struct Reporter {
 pub(crate) struct Signals {
     enabled: Enabled,
     generation: u64,
+    capability_pending: bool,
     native: Option<Declaration>,
     reporter: Option<Reporter>,
 }
 impl Signals {
     pub(crate) fn configure(&mut self, enabled: Enabled, screen: &mut Screen) {
         self.enabled = enabled;
+        if !enabled.claude {
+            self.capability_pending = false;
+        }
         screen.set_program_clients(enabled.claude, enabled.codex);
         if self
             .native
@@ -75,11 +79,15 @@ impl Signals {
         }
     }
     pub(crate) fn sync_native(&mut self, screen: &mut Screen, now: Instant) -> bool {
-        let reply = screen.take_program_query() && self.enabled.claude && self.reporter.is_none();
+        let ipc_live = self.reporter.as_ref().is_some_and(|r| r.connected);
+        let reply = screen.take_program_query() && self.enabled.claude && !ipc_live;
         let generation = screen.program_generation();
         if generation != self.generation {
             self.generation = generation;
-            if self.reporter.is_none() {
+            if screen.program_snapshot().is_none() {
+                self.capability_pending = false;
+            }
+            if !ipc_live {
                 self.native = screen.program_snapshot().and_then(|snapshot| {
                     let client = match snapshot.client {
                         ProgramClient::Claude => Client::Claude,
@@ -96,9 +104,20 @@ impl Signals {
                         at: now,
                     })
                 });
+                if self.native.is_some() {
+                    self.reporter = None;
+                }
             }
         }
         reply
+    }
+    pub(crate) fn take_capability_reply(&mut self, queried: bool, writable: bool) -> bool {
+        if !self.enabled.claude || self.reporter.as_ref().is_some_and(|r| r.connected) {
+            self.capability_pending = false;
+            return false;
+        }
+        self.capability_pending |= queried;
+        writable && std::mem::take(&mut self.capability_pending)
     }
     pub(crate) fn receive(
         &mut self,

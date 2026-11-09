@@ -3,6 +3,7 @@ use crate::{Window, panel};
 use eframe::egui::{self, Color32, Rect, Stroke};
 use std::{path::PathBuf, time::Instant};
 
+const APPLYING_PREFERENCES: &str = "Saved. Applying settings...";
 const BRIDGE_KEY: &str = "ivy-mcp-bridge-location";
 const CODEX_ENV: &str = "env_vars = [\"PANEL_ID\", \"PANEL_DIR\"]";
 const PROMPT: &str = "Use Ivy's panel tools to publish your current task and update it when the phase or attention changes. Set attention to wait when you need my answer, block when an external dependency stops the task, and done when the work is finished. Omit attention during ordinary progress.";
@@ -50,6 +51,11 @@ pub(super) struct Guide {
 }
 
 impl Guide {
+    fn application_status(&mut self, applying: bool) {
+        if self.message == APPLYING_PREFERENCES && !applying {
+            self.message = "Saved and applied.".into();
+        }
+    }
     pub(super) fn blocked(&self, ctx: &egui::Context) -> bool {
         self.open || self.awaiting_release || self.blocked_frame == Some(ctx.cumulative_frame_nr())
     }
@@ -193,13 +199,17 @@ pub(crate) fn begin_pass(window: &mut Window, ui: &mut egui::Ui) {
     }
     let started = Instant::now();
     let ctx = ui.ctx();
+    window
+        .chrome
+        .guide
+        .application_status(window.settings_editor.is_applying());
     if window.chrome.guide.open {
         show(&mut window.chrome.guide, ctx);
         if std::mem::take(&mut window.chrome.guide.save_preferences) {
             let desired = window.chrome.guide.desired;
             window.chrome.guide.message =
                 match crate::settings::editor::runtime::save_agent_preferences(window, desired) {
-                    Ok(()) => "Saved. Applying settings...".into(),
+                    Ok(()) => APPLYING_PREFERENCES.into(),
                     Err(error) => error,
                 };
         }
@@ -445,6 +455,7 @@ fn body(guide: &mut Guide, ui: &mut egui::Ui) {
         guide.save_preferences = true;
     }
     ui.label("Codex and Claude use native terminal declarations; Claude requires no hooks.");
+    ui.label("Enable before starting the client. If OpenCode was refused while disabled, restart it after enabling.");
     ui.label("To avoid a duplicate Codex title spinner, merge this key into your existing [tui] table in ~/.codex/config.toml. Preserve other settings, then restart Codex and resume your conversation:");
     copyable(ui, "terminal_title = [\"thread-name\", \"project-name\"]", "Copy Codex title setting", &mut guide.copied);
     ui.label("Claude removes its duplicate title indicator after native negotiation. Live client verification is still required.");
