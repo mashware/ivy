@@ -742,9 +742,7 @@ impl crate::Pane {
         // pass**: it is set by the program inside with what it writes, and what it writes is
         // interpreted in the other half of the frame. (Asking it inside the closure would compile
         // as well —the two fields are disjoint borrows—, so this is a choice, not a wall.)
-        let bracketed = self.screen.bracketed_paste();
-        // Same reasoning as the one above: set by the program, so it cannot change within the pass.
-        let cursor_keys = CursorKeys::of(&self.screen);
+        let (bracketed, cursor_keys) = crate::resume::input_modes(self);
         // **With a paste held, its answer is read before anything else.** The bytes are not written
         // and the question owns `Enter` and `Escape` until it is answered; everything else still
         // reaches the program, because a held paste is not a frozen console. It is composed against
@@ -1082,7 +1080,7 @@ impl crate::Pane {
         let Some(held) = self.held.as_ref() else {
             return;
         };
-        let bytes = held.send_anyway(self.screen.bracketed_paste());
+        let bytes = held.send_anyway(crate::resume::input_modes(self).0);
         if let Err(failure) = crate::resume::write(self, &bytes) {
             eprintln!(
                 "the held paste could not be sent to the program, and is still held: {failure}"
@@ -1096,9 +1094,18 @@ impl crate::Pane {
 }
 
 pub(crate) fn paste_into(pane: &mut crate::Pane, text: &str) {
+    if text.is_empty() {
+        return;
+    }
     let mut steps = crate::search::Steps::new(pane.search.is_open());
     let mut bytes = Vec::new();
     if !steps.took_a_paste(text) {
+        if pane.restoration.failed
+            && let Err(error) = crate::resume::take_over(pane)
+        {
+            eprintln!("A fresh console could not be opened for the clipboard paste: {error}");
+            return;
+        }
         paste_or_hold(
             text,
             pane.screen.bracketed_paste(),
@@ -1110,7 +1117,7 @@ pub(crate) fn paste_into(pane: &mut crate::Pane, text: &str) {
     if bytes.is_empty() {
         return;
     }
-    if let Err(error) = pane.pty.write(&bytes) {
+    if let Err(error) = crate::resume::write(pane, &bytes) {
         eprintln!("the clipboard paste could not be sent to the program: {error}");
         return;
     }
@@ -1777,6 +1784,40 @@ mod tests {
             );
         }
         boundary
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn clicking_failed_recovery_does_not_discard_an_unanswered_held_paste() {
+        let boundary = the_longest_line_a_reader_keeps().unwrap();
+        let mut pane = crate::Pane::launching(&Default::default(), "/bin/cat", 0).unwrap();
+        let mut bytes = Vec::new();
+        pane.held = hold_from(&"x".repeat(boundary + 1), false, &mut bytes);
+        assert!(pane.held.is_some() && bytes.is_empty());
+        pane.restoration.failed = true;
+        pane.restoration.fresh_shell_required = true;
+        crate::resume::dismiss_failure(&mut pane);
+        assert!(
+            pane.held.is_some(),
+            "starting fresh does not answer the held paste"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn clipboard_takeover_uses_the_fresh_shell_gate_instead_of_old_tui_paste_mode() {
+        let boundary = the_longest_line_a_reader_keeps().unwrap();
+        let mut pane = crate::Pane::launching(&Default::default(), "/bin/cat", 0).unwrap();
+        pane.restoration.failed = true;
+        pane.restoration.fresh_shell_required = true;
+        pane.screen.advance(b"\x1b[?2004h");
+        paste_into(&mut pane, &"x".repeat(boundary + 1));
+        assert!(
+            pane.held.is_some(),
+            "the new shell's long-line gate must hold this paste"
+        );
+        assert!(!pane.restoration.failed);
+        assert!(!pane.screen.bracketed_paste());
     }
 
     /// **That Linux has a gate at all**, which is the one thing no other test in this module can

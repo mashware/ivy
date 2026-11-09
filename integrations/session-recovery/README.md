@@ -8,7 +8,7 @@ Use Ivy's **Sessions** startup mode and the `ivy-session` executable installed b
 
 The examples below are additions to existing client configuration. Preserve existing keys, plugins and hooks. Ivy does not install or rewrite them automatically. Replace `/ABS/ivy/session-recovery` with the absolute directory containing this README. The app supplies the helper locator when launching its panes; it is not saved conversation metadata or a command to configure manually.
 
-### Claude Code 2.1.319
+### Claude Code 2.1.319 and 2.1.321
 
 This directory is an official Claude Mods plugin. For a temporary load, start the official CLI with:
 
@@ -26,7 +26,7 @@ For loading on future exact-ID restarts, explicitly add its directory to the off
 }
 ```
 
-If that variable already lists directories, append to that list using the platform's documented separator. The adapter currently enables only the verified API version 2.1.319. Client policy/trust can prevent a mod from loading; no bypass is used. Ivy's fixed restore command does not replay a temporary `--plugin-dir` flag.
+If that variable already lists directories, append to that list using the platform's documented separator. The adapter currently enables only the verified API versions 2.1.319 and 2.1.321. Client policy/trust can prevent a mod from loading; no bypass is used. Ivy's fixed restore command does not replay a temporary `--plugin-dir` flag.
 
 The mod requires an official attached `terminal` surface before registration, then reads the official live `$.session.id()` after probing for a close challenge. A single serialized cycle runs at most once per second while idle, and publishes only a changed ID or a new close challenge. It withholds cwd; Ivy obtains independently validated native directory metadata. Existing **StatusLine/HUD configuration is untouched**. Outside an Ivy pane, or without a valid absolute helper locator, it creates no timer or helper process.
 
@@ -53,15 +53,15 @@ if [ -n "$PANEL_DIR" ] && [ -n "$PANEL_ID" ] && [ -n "$IVY_SESSION_HELPER" ]; th
   case "$IVY_SESSION_HELPER" in
     /*) case "$IVY_SESSION_HELPER" in
       *[[:cntrl:]]*) ;;
-      *) "$IVY_SESSION_HELPER" hook codex ;;
+      *) "$IVY_SESSION_HELPER" hook codex >/dev/null || : ;;
     esac ;;
   esac
 fi
 ```
 
-Use a direct local Codex invocation with `--no-daemon`. Ivy restores it with `codex resume --no-daemon ID` and the client's existing authentication.
+Use a direct local Codex invocation with `--no-daemon`. Capture also accepts up to four bounded `-c` / `--config` pairs immediately after that flag, before an optional `resume ID`; values remain opaque and are never saved or restored. Ivy restores it with `codex resume --no-daemon ID` and the client's existing authentication.
 
-The reviewed static shell guard invokes only the quoted app-supplied absolute path. Missing pane variables, a missing/relative locator or control characters cause no execution. Hook stdin remains the official JSON; no saved command, payload interpolation or `eval` is used.
+The reviewed static shell guard invokes only the quoted app-supplied absolute path. It discards the native protocol reply because Codex uses a different strict hook-output schema, and returns success even when optional recovery is disabled or unavailable. This observational hook cannot block a model turn; actual registration is still checked in Ivy. Missing pane variables, a missing/relative locator or control characters cause no execution. Hook stdin remains the official JSON; no saved command, payload interpolation or `eval` is used.
 
 **Codex recovery uses its last accepted hook report.** In 0.167.0, SessionStart can wait until a model turn. An idle selection, clear, resume or fork can therefore leave the reported ID different from the displayed conversation. Ivy does not modify Codex, infer a selection from its screen, or substitute `--last`/`--continue`. The helper forwards only the allowlisted ID, cwd, source and event, ignoring transcript/content fields. Hook-end notifications do not clear a live root.
 
@@ -80,12 +80,35 @@ node --test --test-isolation=none tests/*.test.js
 claude plugin validate . --strict --json
 ```
 
-The fixtures exercise serialized delivery, unchanged-state suppression, fresh challenge reads, stale-generation replacement, disposal, ID/input bounds, literal absolute helper argv/stdin, hostile PATH entries, guarded Codex shell execution and conservative local-route eligibility.
+The fixtures exercise serialized delivery, unchanged-state suppression, fresh challenge reads,
+stale-generation replacement, disposal, ID/input bounds, literal absolute helper argv/stdin,
+hostile PATH entries, quiet/nonfatal Codex shell execution and conservative local-route eligibility.
 
-Installed OpenCode 1.18.31 loaded the production TUI plugin, resolved the host Solid import and registered through the production helper, native PTY verifier and pane service using isolated configuration. A test-only TUI fixture created two disposable empty sessions through the official public SDK, then selected the first, switched to the second, opened home and selected the first again. The production reporter followed both exact IDs and withdrew identity on home. Its production clean-close challenge retained the final selected ID. A fresh native process then reopened that same disposable ID with Ivy's fixed production `--session ID` arguments and declared the same ID and directory, including another confirmed close. The route-driving fixture was inactive during reopening. No prompt or model API was called, and no user history or private session file was inspected. A separate local-server attach probe was declined by the eligibility check.
+Installed OpenCode 1.18.31 loaded the actual TUI adapter and host Solid runtime, reported two own
+sessions and home in sequence, acknowledged clean close, and reopened the same exact ID and cwd
+in a fresh process without a model prompt. A separate local-server attach probe was declined.
 
-Installed Claude 2.1.319 passed its static plugin validator, loaded the production mod with the official client's existing authentication and published its live conversation ID through the same native service without a prompt or model turn. It also generated the installed version's public API declarations. The Claude probe disabled ordinary settings sources and used a temporary cwd/XDG setup; it did not copy credentials or rewrite user settings/HUD. These probes do not establish full installed fork/compaction/crash behavior or end-to-end Ivy desktop restoration. Those checks require explicit real-client setup and transition probes.
+Claude 2.1.319 passed live identity and close-acknowledgment probes. Claude 2.1.321 passed a
+separately authorized one-message own conversation, assistant OK, close acknowledgment and fresh
+exact-ID/cwd reopening without another message. A final no-input reopen used the actual production
+plugin directory and also acknowledged close. Its public generated Mods declarations matched the
+required APIs. Normal subscription authentication was used with provider/key overrides removed;
+the installed native artifact was pinned through a temporary PATH and the documented auto-updater
+was disabled only in that child. Personal settings, authentication and HUD were not rewritten.
 
-An actual Claude reporter also acknowledged the production clean-close challenge within the 1250 ms bound and retained its confirmed ID. A second launch with that exact disposable ID and the same directory did not register within 15 seconds, so positive exact-ID reopening remains unverified. A renderer-only diagnostic then confirmed the installed client’s explicit “No conversation found with session ID” path. Version-matched source maps the live UUID directly to the resume lookup and rejects logs without stored messages before Mods startup. This explains this zero-prompt fixture; it does not imply that every visually empty or cleared conversation is unresumable. No model turn was added.
+A separate zero-message Claude fixture did not have a resumable record. The client's explicit
+“No conversation found with session ID” result matched its versioned loader rejecting logs without
+stored messages. This does not mean that every visually empty or cleared conversation is absent.
+Ivy keeps the failed target and explains the failure rather than silently choosing another session.
+
+Codex 0.167.0 passed its separately authorized one-message native hook capture, assistant OK and
+exact-ID/cwd reopening in a fresh process. The reopened foreground ID was checked with the official
+local `/status` command, without another model turn. Its test-only hook trust was supplied through
+supported per-run configuration and confirmed by a metadata-only local `hooks/list` query; no
+thread or model request was made by that query. Personal configuration stayed unchanged. The first
+combined test exposed a local-status input-timing issue in its provisional loading composer; the
+separate resume-only confirmation retained the positive ID/directory criteria and the used ledger. Full Claude switch/fork/compaction and native Settings/guide
+mouse interaction checks also remain unverified; successful installed resume probes do not replace
+them.
 
 Official references: [Claude Mods APIs](https://code.claude.com/docs/en/plugins/mods/reference), [between-turn timers](https://code.claude.com/docs/en/plugins/mods/api#run-work-in-the-background), [explicit plugin loading](https://code.claude.com/docs/en/plugins/mods/create), [OpenCode 1.18.31 TUI plugin contract](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/specs/tui-plugins.md), [Codex hooks](https://learn.chatgpt.com/docs/hooks).

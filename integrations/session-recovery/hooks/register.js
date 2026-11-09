@@ -9,7 +9,7 @@ export function register(on) {
     if (!isAbsoluteHelper(helperPath)) return next(event);
     const version = await $.session.version();
     // Public APIs evolve; enable only the installed version verified for this adapter.
-    if (version.version !== "2.1.319") return next(event);
+    if (!["2.1.319", "2.1.321"].includes(version.version)) return next(event);
     const surfaces = await $.session.surfaces();
     if (!surfaces.includes("terminal")) return next(event);
     const reporter = createReporter({

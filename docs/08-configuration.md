@@ -22,7 +22,7 @@ never persist these per-console values in client configuration.
 
 **Codex 0.167.0 restores its last hook-reported context.** Changing the visible conversation without
 sending a message can leave the previous conversation recorded. Use the supported direct local
-`--no-daemon` form. Claude Code 2.1.319 uses an official Mods live getter; OpenCode 1.18.31 uses an
+`--no-daemon` form; bounded `-c`/`--config` pairs after that flag are accepted for capture, never saved. Claude Code 2.1.319 and 2.1.321 use an official Mods live getter; OpenCode 1.18.31 uses an
 official TUI plugin. No prompt is sent when restoring, and custom client flags, profiles and models
 are not replayed. Only a fixed client and validated exact ID are saved, with a usable local directory.
 
@@ -30,8 +30,9 @@ Changes do not restart running consoles. Disabling recovery preserves the last s
 lowering to directories removes AI metadata from the next successful save. A clean exit asks active
 Claude/OpenCode reporters for a fresh read within one shared deadline; a missing confirmation keeps
 the directory rather than recording an unconfirmed conversation. An unavailable saved target leaves
-a fresh console with an explanation and a retained retry target until typing, clicking its notice or
-closing the console takes over. A crash recovers the last successfully saved snapshot.
+an explanation and a retained retry target. A client that rejects the target keeps its output visible;
+typing, clicking its notice or pasting starts a fresh shell before any personal input reaches it.
+Closing the console discards that console’s target. A crash recovers the last successfully saved snapshot.
 
 ## Directory of a new split
 

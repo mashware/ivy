@@ -10,6 +10,8 @@ use std::sync::mpsc::{Receiver, sync_channel};
 use term_core::{Pty, Size};
 
 const UUID: &str = "11111111-1111-4111-8111-111111111111";
+const CLAUDE_AUTHORIZED_MESSAGE: &str =
+    "Responde solo OK, sin usar herramientas ni modificar archivos";
 const ROOT_SCRIPT: &str = r#"
 import os,sys,socket,json,termios,subprocess
 a=termios.tcgetattr(0);a[3]&=~termios.ECHO;termios.tcsetattr(0,termios.TCSANOW,a)
@@ -21,11 +23,20 @@ print(json.dumps({'ready':os.getpid()}),flush=True)
 for line in sys.stdin:
  command=json.loads(line)
  if command.get('exit'):break
+ if 'chdir' in command:os.chdir(command['chdir'])
+ target=command.get('endpoint',endpoint)
  if command.get('helper'):
-  r=subprocess.run(['/usr/bin/python3','-c',helper,endpoint,json.dumps(command['request'])],capture_output=True,text=True);print(json.dumps({'reply':json.loads(r.stdout)}),flush=True)
+  r=subprocess.run(['/usr/bin/python3','-c',helper,endpoint,json.dumps(command['request'])],cwd=command.get('helper_cwd'),capture_output=True,text=True);print(json.dumps({'reply':json.loads(r.stdout)}),flush=True)
  elif command.get('nested'):
   r=subprocess.run([sys.executable,'-c',helper,endpoint,json.dumps(command['request'])],capture_output=True,text=True);print(json.dumps({'reply':json.loads(r.stdout)}),flush=True)
- else:print(json.dumps({'reply':send(command['request'],command.get('endpoint',endpoint))}),flush=True)
+ elif command.get('detached'):
+  r=subprocess.run(['/usr/bin/python3','-c',helper,target,json.dumps(command['request'])],start_new_session=True,capture_output=True,text=True);print(json.dumps({'reply':json.loads(r.stdout)}),flush=True)
+ elif command.get('nested_detached'):
+  r=subprocess.run([sys.executable,'-c',helper,target,json.dumps(command['request'])],start_new_session=True,capture_output=True,text=True);print(json.dumps({'reply':json.loads(r.stdout)}),flush=True)
+ elif command.get('background_detached'):
+  background='import sys,subprocess; r=subprocess.run(["/usr/bin/python3","-c",sys.argv[1],sys.argv[2],sys.argv[3]],start_new_session=True,capture_output=True,text=True); print(r.stdout,end="")'
+  r=subprocess.run([sys.executable,'-c',background,helper,target,json.dumps(command['request'])],process_group=0,capture_output=True,text=True);print(json.dumps({'reply':json.loads(r.stdout)}),flush=True)
+ else:print(json.dumps({'reply':send(command['request'],target)}),flush=True)
 "#;
 
 const OPENCODE_ROUTE_FIXTURE: &str = r#"
@@ -93,10 +104,20 @@ struct Fixture {
     wakes: Arc<AtomicUsize>,
     _channel: Channel,
     _executable: FixtureExecutable,
+    _directories: FixtureDirectories,
     _directory: PanelDir,
 }
 
 struct FixtureExecutable(PathBuf);
+struct FixtureDirectories(Vec<PathBuf>);
+
+impl Drop for FixtureDirectories {
+    fn drop(&mut self) {
+        for directory in self.0.iter().rev() {
+            let _ = std::fs::remove_dir(directory);
+        }
+    }
+}
 
 impl Drop for FixtureExecutable {
     fn drop(&mut self) {
@@ -106,17 +127,44 @@ impl Drop for FixtureExecutable {
 
 impl Fixture {
     fn new(client: Client) -> Self {
+        Self::build(client, false)
+    }
+
+    fn build(client: Client, wrapped: bool) -> Self {
         let directory = PanelDir::create().unwrap();
         let executable = directory.path().join("fixture-client");
         std::fs::copy("/usr/bin/python3", &executable).unwrap();
         std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
         let cleanup = FixtureExecutable(executable.clone());
         let endpoint = directory.path().join(panel_contract::CONTROL_SOCKET);
-        let (pty, output) = Pty::spawn(
-            executable.to_str().unwrap(),
-            &["-c", ROOT_SCRIPT, endpoint.to_str().unwrap()],
-            Size::default(),
-        )
+        let mut directories = FixtureDirectories(Vec::new());
+        let (pty, output) = if wrapped {
+            for name in ["shell-cwd", "client-cwd", "closing-cwd"] {
+                let path = directory.path().join(name);
+                std::fs::create_dir(&path).unwrap();
+                directories.0.push(path);
+            }
+            Pty::spawn_with_env_in(
+                "/usr/bin/python3",
+                &[
+                    "-c",
+                    "import subprocess,sys; subprocess.run([sys.argv[1],'-c',sys.argv[4],sys.argv[2]],cwd=sys.argv[3])",
+                    executable.to_str().unwrap(),
+                    endpoint.to_str().unwrap(),
+                    directories.0[1].to_str().unwrap(),
+                    ROOT_SCRIPT,
+                ],
+                Size::default(),
+                &[],
+                Some(&directories.0[0]),
+            )
+        } else {
+            Pty::spawn(
+                executable.to_str().unwrap(),
+                &["-c", ROOT_SCRIPT, endpoint.to_str().unwrap()],
+                Size::default(),
+            )
+        }
         .unwrap();
         let wakes = Arc::new(AtomicUsize::new(0));
         let counting = Arc::clone(&wakes);
@@ -145,6 +193,7 @@ impl Fixture {
             wakes,
             _channel: channel,
             _executable: cleanup,
+            _directories: directories,
             _directory: directory,
         };
         assert!(fixture.read()["ready"].is_u64());
@@ -159,10 +208,7 @@ impl Fixture {
         if !mode.is_empty() {
             command[mode] = json!(true);
         }
-        let mut line = serde_json::to_vec(&command).unwrap();
-        line.push(b'\n');
-        self.pty.write(&line).unwrap();
-        self.read()["reply"].clone()
+        control(&mut self.pty, &self.output, &mut self.buffered, command)
     }
     fn request(&mut self, request: Value) -> Value {
         self.command(request, "")
@@ -197,10 +243,90 @@ fn exchange(
     buffered: &mut Vec<u8>,
     request: Value,
 ) -> Value {
-    let mut line = serde_json::to_vec(&json!({"request":request})).unwrap();
+    control(pty, output, buffered, json!({"request":request}))
+}
+
+fn control(
+    pty: &mut Pty,
+    output: &Receiver<Vec<u8>>,
+    buffered: &mut Vec<u8>,
+    command: Value,
+) -> Value {
+    let mut line = serde_json::to_vec(&command).unwrap();
     line.push(b'\n');
     pty.write(&line).unwrap();
     read(output, buffered)["reply"].clone()
+}
+
+#[test]
+fn claude_null_directory_uses_the_verified_client_not_its_shell_or_helper() {
+    let mut f = Fixture::build(Client::Claude, true);
+    let shell = f._directory.path().join("shell-cwd");
+    let client = f._directory.path().join("client-cwd");
+    let closing = f._directory.path().join("closing-cwd");
+    assert_eq!(f.pty.working_directory().as_deref(), Some(shell.as_path()));
+    f.handle.set_enabled(true);
+    let generation = f.attach("claude");
+    assert_eq!(
+        control(
+            &mut f.pty,
+            &f.output,
+            &mut f.buffered,
+            json!({"helper":true,"helper_cwd":shell,"request":{"tool":"session_update","generation":generation,"sequence":1,"session_id":UUID,"cwd":null,"challenge":null}}),
+        )["ok"],
+        true
+    );
+    assert_eq!(f.handle.snapshot().cwd.as_deref(), Some(client.as_path()));
+    assert_eq!(f.pty.working_directory().as_deref(), Some(shell.as_path()));
+    let frozen = std::thread::scope(|scope| {
+        let handle = &f.handle;
+        let freezing = scope.spawn(move || freeze_all(&[handle], Duration::from_millis(1250)));
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let challenge = loop {
+            assert!(
+                Instant::now() < deadline,
+                "close challenge was not published"
+            );
+            let reply = exchange(
+                &mut f.pty,
+                &f.output,
+                &mut f.buffered,
+                json!({"tool":"session_probe","generation":generation}),
+            );
+            if let Some(challenge) = reply["challenge"].as_str() {
+                break challenge.to_owned();
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        };
+        assert_eq!(
+            control(
+                &mut f.pty,
+                &f.output,
+                &mut f.buffered,
+                json!({"chdir":closing,"helper":true,"helper_cwd":shell,"request":{"tool":"session_update","generation":generation,"sequence":2,"session_id":UUID,"cwd":null,"challenge":challenge}}),
+            )["ok"],
+            true
+        );
+        freezing.join().unwrap()
+    });
+    assert_eq!(frozen[0].cwd.as_deref(), Some(closing.as_path()));
+    assert!(frozen[0].identity.is_some());
+    assert_eq!(f.pty.working_directory().as_deref(), Some(shell.as_path()));
+}
+
+#[test]
+fn unavailable_claude_root_directory_revokes_the_verified_identity() {
+    let mut f = Fixture::build(Client::Claude, true);
+    f.handle.set_enabled(true);
+    let generation = f.attach("claude");
+    let update = |sequence| json!({"tool":"session_update","generation":generation,"sequence":sequence,"session_id":UUID,"cwd":null,"challenge":null});
+    assert_eq!(f.request(update(1))["ok"], true);
+    std::fs::remove_dir(f._directory.path().join("client-cwd")).unwrap();
+    assert_eq!(f.request(update(2))["error"], "unavailable_directory");
+    let snapshot = f.handle.snapshot();
+    assert!(snapshot.identity.is_none() && !snapshot.sampled);
+    assert_eq!(snapshot.status, Status::Waiting);
+    assert_eq!(f.request(update(3))["error"], "stale_generation");
 }
 
 #[test]
@@ -384,6 +510,34 @@ fn native_session_endpoint_rejects_a_reporter_from_another_real_pane() {
 }
 
 #[test]
+fn detached_reporters_require_their_own_current_foreground_client_root() {
+    let mut pane = Fixture::new(Client::Claude);
+    pane.handle.set_enabled(true);
+    let attach = json!({"tool":"session_attach","client":"claude"});
+    let attached = pane.command(attach.clone(), "detached");
+    assert_eq!(attached["ok"], true);
+    let generation = attached["generation"].as_str().unwrap();
+    let update = json!({"tool":"session_update","generation":generation,"sequence":1,"session_id":UUID,"cwd":"/tmp","challenge":null});
+    assert_eq!(pane.command(update, "detached")["ok"], true);
+    assert!(pane.handle.snapshot().sampled && pane.handle.snapshot().identity.is_some());
+    assert_eq!(
+        pane.command(attach.clone(), "nested_detached")["error"],
+        "unauthorized"
+    );
+    assert_eq!(
+        pane.command(attach.clone(), "background_detached")["error"],
+        "unauthorized"
+    );
+    let foreign = Fixture::new(Client::Claude);
+    foreign.handle.set_enabled(true);
+    let mut request = serde_json::to_vec(&json!({"request":attach,"detached":true,"endpoint":foreign._directory.path().join(panel_contract::CONTROL_SOCKET)})).unwrap();
+    request.push(b'\n');
+    pane.pty.write(&request).unwrap();
+    assert_eq!(pane.read()["reply"]["error"], "unauthorized");
+    assert!(foreign.handle.snapshot().identity.is_none());
+}
+
+#[test]
 fn native_close_rejects_an_old_challenge_even_when_the_sequence_increases() {
     let mut f = Fixture::new(Client::Claude);
     f.handle.set_enabled(true);
@@ -479,7 +633,7 @@ fn installed_session_client_probe() {
             ("OPENCODE_TUI_CONFIG", Some(config.as_os_str())),
         ]);
     }
-    let (pty, output) = Pty::spawn_with_env_in(
+    let (mut pty, output) = Pty::spawn_with_env_in(
         launch.program.to_str().unwrap(),
         &args,
         Size::default(),
@@ -489,13 +643,39 @@ fn installed_session_client_probe() {
     .unwrap();
     let handle = Handle::new(pty.foreground_scope().unwrap(), Arc::new(|| {}));
     handle.set_enabled(true);
+    let one_message = std::env::var("IVY_TEST_PROBE_CLAUDE_ONE_MESSAGE").as_deref() == Ok("1");
+    let callback = handle.callback();
+    let diagnostic_callback: SessionHandler = Arc::new(move |peer, request| {
+        let reply = callback(peer, request);
+        if one_message && reply["ok"] != true {
+            let reason = reply["error"]
+                .as_str()
+                .filter(|reason| {
+                    [
+                        "unauthorized",
+                        "disabled",
+                        "unsupported",
+                        "busy",
+                        "invalid_request",
+                        "stale_generation",
+                        "stale_sequence",
+                        "closing",
+                        "unavailable",
+                    ]
+                    .contains(reason)
+                })
+                .unwrap_or("other");
+            eprintln!("Claude probe metadata request rejected reason={reason}");
+        }
+        reply
+    });
     let (sender, _inbox) = sync_channel(0);
     let _channel = Channel::open_with_services(
         directory.path(),
         directory.id(),
         sender,
         None,
-        Some(handle.callback()),
+        Some(diagnostic_callback),
         Arc::new(|| {}),
     )
     .unwrap();
@@ -519,6 +699,39 @@ fn installed_session_client_probe() {
         // The output is drained without interpreting or logging the client's private console.
         let _ = output.recv_timeout(Duration::from_millis(20));
         snapshot = handle.snapshot();
+    }
+    if one_message {
+        eprintln!(
+            "Claude probe readiness registered={} sampled={} has_id={} exited={}",
+            snapshot.status == Status::Registered,
+            snapshot.sampled,
+            snapshot.identity.is_some(),
+            pty.exit_success().is_some()
+        );
+        assert!(client == Client::Claude && expected.is_none());
+        for (key, _) in std::env::vars_os() {
+            let key = key.to_string_lossy();
+            assert!(
+                !key.ends_with("_API_KEY")
+                    && !key.starts_with("ANTHROPIC_")
+                    && !key.starts_with("CLAUDE_CODE_USE_")
+                    && key != "CLAUDE_CODE_OAUTH_TOKEN",
+                "a provider/auth environment override is present"
+            );
+        }
+        assert_eq!(
+            std::env::var("IVY_TEST_PROBE_CLAUDE_AUTH").as_deref(),
+            Ok("claude.ai")
+        );
+        assert!(
+            snapshot.status == Status::Registered
+                && snapshot.sampled
+                && snapshot.identity.is_some()
+        );
+        let used = PathBuf::from(
+            std::env::var_os("IVY_TEST_PROBE_MESSAGE_USED").expect("one-message usage ledger"),
+        );
+        send_one_authorized_claude_message(&mut pty, &output, &used);
     }
     let destination = std::env::var_os("IVY_TEST_PROBE_SNAPSHOT");
     if destination.is_some() {
@@ -544,7 +757,14 @@ fn installed_session_client_probe() {
             .mode(0o600)
             .open(path)
             .unwrap();
-        serde_json::to_writer(file, &json!({"client":client,"session_id":snapshot.identity.as_ref().map(|identity|&identity.session_id),"cwd":snapshot.cwd})).unwrap();
+        let recorded_cwd = snapshot.cwd.clone().or_else(|| pty.working_directory());
+        assert!(
+            recorded_cwd
+                .as_ref()
+                .is_none_or(|recorded| recorded == &cwd),
+            "the probe left its disposable directory"
+        );
+        serde_json::to_writer(file, &json!({"client":client,"session_id":snapshot.identity.as_ref().map(|identity|&identity.session_id),"cwd":recorded_cwd})).unwrap();
     }
     assert_eq!(
         snapshot.status,
@@ -564,6 +784,108 @@ fn installed_session_client_probe() {
         );
     }
     drop(pty);
+}
+
+fn send_one_authorized_claude_message(
+    pty: &mut Pty,
+    output: &Receiver<Vec<u8>>,
+    used: &std::path::Path,
+) {
+    use std::io::Write;
+    assert!(used.is_absolute());
+    let parent = std::fs::canonicalize(used.parent().unwrap()).unwrap();
+    assert!(parent.starts_with(std::env::temp_dir()) && parent != std::env::temp_dir());
+    let mut ledger = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(used)
+        .expect("authorized message has already been used or cannot be marked");
+    ledger.write_all(b"message_used=true\n").unwrap();
+    ledger.sync_all().unwrap();
+    std::fs::File::open(parent).unwrap().sync_all().unwrap();
+    let paste = format!("\u{1b}[200~{CLAUDE_AUTHORIZED_MESSAGE}\u{1b}[201~");
+    pty.write(paste.as_bytes())
+        .expect("the single marked message was not delivered; do not retry");
+    std::thread::sleep(Duration::from_millis(100));
+    pty.write(b"\r")
+        .expect("the single marked message was not submitted; do not retry");
+    let deadline = Instant::now() + Duration::from_secs(90);
+    let mut own_response = Vec::new();
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "no expected assistant OK observed after the single message; do not send another"
+        );
+        if let Ok(bytes) = output.recv_timeout(Duration::from_millis(50)) {
+            own_response.extend(bytes);
+            assert!(
+                own_response.len() <= 256 * 1024,
+                "single-turn probe output ceiling reached; do not retry"
+            );
+            if own_assistant_ok(&own_response) {
+                break;
+            }
+        }
+    }
+    eprintln!("authorized Claude message_used=true assistant_ok_observed=true");
+}
+
+fn own_assistant_ok(bytes: &[u8]) -> bool {
+    let mut plain = Vec::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index..].starts_with(b"\x1b[") {
+            index += 2;
+            while index < bytes.len() && !(0x40..=0x7e).contains(&bytes[index]) {
+                index += 1;
+            }
+            if index < bytes.len() && matches!(bytes[index], b'H' | b'f' | b'E' | b'F') {
+                plain.push(b'\n');
+            }
+        } else if bytes[index..].starts_with(b"\x1b]") {
+            index += 2;
+            while index < bytes.len() && bytes[index] != 7 && !bytes[index..].starts_with(b"\x1b\\")
+            {
+                index += 1;
+            }
+            if bytes.get(index) == Some(&27) {
+                index += 1;
+            }
+        } else {
+            plain.push(if bytes[index] == b'\r' {
+                b'\n'
+            } else {
+                bytes[index]
+            });
+        }
+        index += 1;
+    }
+    let mut marker = false;
+    for line in String::from_utf8_lossy(&plain).lines() {
+        let line = line.trim();
+        if let Some(body) = line.strip_prefix(['⏺', '●', '•']) {
+            if body.trim() == "OK" {
+                return true;
+            }
+            marker = body.trim().is_empty();
+        } else if marker && line == "OK" {
+            return true;
+        } else if !line.is_empty() {
+            marker = false;
+        }
+    }
+    false
+}
+
+#[test]
+fn single_claude_reply_classifier_requires_an_assistant_marker_not_the_prompt_echo() {
+    assert!(!own_assistant_ok(
+        format!("❯ {CLAUDE_AUTHORIZED_MESSAGE}\r\n").as_bytes()
+    ));
+    assert!(own_assistant_ok("\u{1b}[1m⏺\u{1b}[0m OK\r\n".as_bytes()));
+    assert!(own_assistant_ok("●\u{1b}[3;1HOK\r\n".as_bytes()));
+    assert!(!own_assistant_ok("❯ OK\r\n".as_bytes()));
 }
 
 fn prepare_opencode_cycle(root: &std::path::Path) -> PathBuf {
@@ -681,3 +1003,5 @@ fn drive_opencode_cycle(
     }
     first
 }
+
+mod codex_probe;

@@ -95,15 +95,21 @@ pub(super) fn apply(entry: &mut Entry, shared: &Shared, peer: Peer, request: Req
                 },
                 None => None,
             };
+            let cwd = match cwd {
+                Some(cwd) => Some(PathBuf::from(cwd)),
+                None if root.client == Client::Claude && identity.is_some() => {
+                    match root.working_directory(&shared.scope) {
+                        Ok(directory) => Some(directory),
+                        Err(_) => {
+                            entry.revoke(shared);
+                            return error("unavailable_directory");
+                        }
+                    }
+                }
+                None => None,
+            };
             let acknowledged = entry.challenge.is_some() && challenge == entry.challenge;
-            if !commit(
-                shared,
-                entry.epoch,
-                identity,
-                cwd.map(PathBuf::from),
-                true,
-                acknowledged,
-            ) {
+            if !commit(shared, entry.epoch, identity, cwd, true, acknowledged) {
                 return error("disabled");
             }
             entry.sequence = sequence;

@@ -9097,7 +9097,7 @@ restore an earlier reported conversation. Settings and setup instructions disclo
 No hook birth ordering is presented as a canonical Codex UI revision. Root death still invalidates
 that root’s registration; stale roots cannot overwrite a newer invocation.
 
-Claude 2.1.319 uses an explicitly installed official Mods live-session getter; OpenCode 1.18.31 uses
+Claude 2.1.319 and 2.1.321 use an explicitly installed official Mods live-session getter; OpenCode 1.18.31 uses
 its official TUI route getter. Serialized producer reads assign their own monotonic sequence before
 asynchronous delivery. A bounded client-side probe publishes only changed state or a requested
 final challenge; unchanged probes do not request an Ivy repaint. A clean exit requests a fresh
@@ -9121,3 +9121,20 @@ remains the routing contract. A reporter attach proves a process binding, not a 
 only a subsequent live sample can confirm a pending restoration. Verified client-declared cwd takes
 precedence over a launch wrapper’s stale directory in sessions mode, with the explicit remote or
 unusable-directory veto preserved. Ordinary-shell D78 precedence remains unchanged.
+
+Codex ordinary direct TUI configuration flags are structural options, not dispatch selectors in
+0.167.0. Capture accepts up to four `-c` / `--config` value pairs after `--no-daemon`, optionally
+followed by exact-ID resume. Values are streamed with a byte bound and discarded; unknown modes,
+flags and later prompt payloads remain rejected. Restore still uses only its fixed arguments. This
+permits explicit per-run client setup without modifying personal configuration. Codex hook output
+is a different strict protocol from the native helper's JSON reply: the observational static guard
+discards that reply and cannot block a turn when optional recovery is disabled or unavailable.
+
+Official Codex command hooks start a new OS session. The reporter helper therefore needs bounded
+descendant attestation, separately from strict foreground inspection. Only a recognized native
+client ancestor in the pane's actual foreground group, SID and terminal grants authority; its root
+is rechecked strictly. Detached helpers cannot promote foreign, background or nested roots.
+
+A failed live client is distinct from an already opened fallback shell. The former is replaced on
+explicit takeover, including clipboard and mouse paths; stale TUI input modes cannot reach the new
+shell. A held paste remains a pending user question until answered or dismissed explicitly.

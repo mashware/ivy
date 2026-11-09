@@ -188,6 +188,7 @@ pub(crate) fn capture(
         && snapshot.identity.is_some()
     {
         pane.restoration.failed = true;
+        pane.restoration.fresh_shell_required = true;
         pane.restoration.resuming = false;
         return;
     }
@@ -231,6 +232,7 @@ pub(crate) fn inspect_restored_exit(pane: &mut crate::Pane) {
         return;
     }
     pane.restoration.failed = true;
+    pane.restoration.fresh_shell_required = true;
     pane.restoration.resuming = false;
     if let Some(wake) = &pane.restoration.wake {
         wake();
@@ -239,7 +241,9 @@ pub(crate) fn inspect_restored_exit(pane: &mut crate::Pane) {
 
 /// Preserve the failed client's output until an explicit user action starts a fresh shell.
 pub(crate) fn take_over(pane: &mut crate::Pane) -> term_core::Result<()> {
-    if pane.restoration.failed && pane.pty.exit_success().is_some() {
+    if pane.restoration.failed
+        && (pane.restoration.fresh_shell_required || pane.pty.exit_success().is_some())
+    {
         let wake = pane.restoration.wake.as_ref().map(Arc::clone);
         let mut identity: Vec<_> = crate::identity_of(pane.panel.as_ref())
             .into_iter()
@@ -277,7 +281,6 @@ pub(crate) fn take_over(pane: &mut crate::Pane) -> term_core::Result<()> {
         pane.signals.reset_for_new_shell(&mut pane.screen);
         pane.painted_console = None;
         pane.received.clear();
-        pane.held = None;
         pane.search = Default::default();
         pane.pending_wheel = Default::default();
     }
@@ -288,6 +291,26 @@ pub(crate) fn take_over(pane: &mut crate::Pane) -> term_core::Result<()> {
 pub(crate) fn dismiss_failure(pane: &mut crate::Pane) {
     if let Err(error) = take_over(pane) {
         eprintln!("A fresh console could not be opened: {error}");
+    }
+}
+
+pub(crate) fn input_modes(pane: &crate::Pane) -> (bool, crate::keyboard::CursorKeys) {
+    if pane.restoration.failed && pane.restoration.fresh_shell_required {
+        (false, crate::keyboard::CursorKeys::Normal)
+    } else {
+        (
+            pane.screen.bracketed_paste(),
+            crate::keyboard::CursorKeys::of(&pane.screen),
+        )
+    }
+}
+
+/// Old TUI mouse reports cannot become input to the replacement shell.
+pub(crate) fn write_report(pane: &mut crate::Pane, bytes: &[u8]) -> term_core::Result<()> {
+    if pane.restoration.failed && pane.restoration.fresh_shell_required {
+        take_over(pane)
+    } else {
+        write(pane, bytes)
     }
 }
 
@@ -481,6 +504,78 @@ mod tests {
             "the fresh shell is alive"
         );
         pane.pty.write(b"exit\r").unwrap();
+    }
+
+    fn wait_for_fresh_shell_output(pane: &mut crate::Pane) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut output = Vec::new();
+        while Instant::now() < deadline {
+            pane.pty_output.pick_up(
+                &mut output,
+                65536,
+                crate::pty_output::Silences::of(&pane.pty),
+            );
+            if output
+                .windows(b"fresh-shell-output".len())
+                .any(|bytes| bytes == b"fresh-shell-output")
+            {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        panic!("the first personal input did not reach the replacement shell");
+    }
+
+    #[test]
+    fn a_wrong_live_session_is_replaced_before_notice_keyboard_clipboard_or_mouse_input() {
+        for input in ["notice", "keyboard", "clipboard", "mouse"] {
+            let mut pane = crate::Pane::launching(&Default::default(), "/bin/cat", 0).unwrap();
+            pane.restoration.resume = saved(Client::Claude, std::env::temp_dir()).resume;
+            pane.restoration.directory = Some(std::env::temp_dir());
+            pane.restoration.resuming = true;
+            pane.screen.advance(b"\x1b[?2004h\x1b[?1h");
+            capture(
+                &mut pane,
+                Some(crate::ai_sessions::Snapshot {
+                    identity: Some(
+                        Identity::new(Client::Claude, "22222222-2222-4222-8222-222222222222")
+                            .unwrap(),
+                    ),
+                    cwd: Some(std::env::temp_dir()),
+                    revision: 1,
+                    status: crate::ai_sessions::Status::Registered,
+                    sampled: true,
+                }),
+            );
+            assert!(pane.restoration.failed);
+            assert!(
+                pane.pty.exit_success().is_none(),
+                "this is a live mismatching client"
+            );
+            assert!(!input_modes(&pane).0);
+            assert_eq!(input_modes(&pane).1, crate::keyboard::CursorKeys::Normal);
+            let command = "printf 'fresh''-shell-output\\n'\r";
+            match input {
+                "notice" => {
+                    dismiss_failure(&mut pane);
+                    pane.pty.write(command.as_bytes()).unwrap();
+                }
+                "keyboard" => {
+                    pane.keystrokes = command.as_bytes().to_vec();
+                    write_keys(&mut pane).unwrap();
+                }
+                "clipboard" => crate::keyboard::paste_into(&mut pane, command),
+                "mouse" => {
+                    write_report(&mut pane, b"UNINTENDED_REPORT").unwrap();
+                    pane.pty.write(command.as_bytes()).unwrap();
+                }
+                _ => unreachable!(),
+            }
+            assert!(!pane.restoration.failed);
+            assert!(pane.restoration.resume.is_none());
+            assert!(!pane.screen.bracketed_paste());
+            wait_for_fresh_shell_output(&mut pane);
+        }
     }
 
     #[test]

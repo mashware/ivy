@@ -13,12 +13,13 @@ const UUID = "11111111-1111-4111-8111-111111111111";
 const HELPER = "/opt/Ivy tools/ivy-session";
 
 test("Claude registers only a metadata timer, keeps next(event), and uses exact argv/stdin", async () => {
+  for (const version of ["2.1.319", "2.1.321"]) {
   let handler;
   register((event, fn) => { assert.equal(event, "session.start"); handler = fn; });
   const calls = [], envReads = [], timers = [];
   const $ = {
     env: { get: async (key) => { envReads.push(key); return key === "IVY_SESSION_HELPER" ? HELPER : "fixture"; } },
-    session: { version: async () => ({ version: "2.1.319" }),
+    session: { version: async () => ({ version }),
       surfaces: async () => ["terminal"], id: async () => UUID },
     clock: { every: (ms, fn) => { timers.push({ ms, fn }); return { cancel() {} }; } },
     process: { run: async (argv, init) => {
@@ -39,6 +40,18 @@ test("Claude registers only a metadata timer, keeps next(event), and uses exact 
   assert.deepEqual(JSON.parse(calls[2].init.stdin), { sequence: 1, session_id: UUID, cwd: null, challenge: null });
   await timers[0].fn();
   assert.equal(calls.length, 4); // Unchanged ID: only a probe, no publication.
+  }
+});
+
+test("Claude unverified versions do not start reporters", async () => {
+  for (const version of ["2.1.320", "2.2.0"]) {
+    let handler;
+    register((_, fn) => { handler = fn; });
+    const $ = { env: { get: async (key) => key === "IVY_SESSION_HELPER" ? HELPER : "fixture" },
+      session: { version: async () => ({ version }), surfaces: () => assert.fail() },
+      process: { run: () => assert.fail() }, clock: { every: () => assert.fail() } };
+    assert.equal(await handler($, "event", (event) => event), "event");
+  }
 });
 
 test("Claude installed globally does nothing outside Ivy", async () => {
@@ -137,21 +150,24 @@ test("actual child runner passes literal argv/stdin and captures helper output",
 test("Codex static guarded command uses the absolute locator literally and never PATH", async () => {
   const config = JSON.parse(await readFile(new URL("../codex/hooks.json", import.meta.url), "utf8"));
   const command = config.hooks.SessionStart[0].hooks[0].command;
-  assert.equal(command, 'if [ -n "$PANEL_DIR" ] && [ -n "$PANEL_ID" ] && [ -n "$IVY_SESSION_HELPER" ]; then case "$IVY_SESSION_HELPER" in /*) case "$IVY_SESSION_HELPER" in *[[:cntrl:]]*) ;; *) "$IVY_SESSION_HELPER" hook codex ;; esac ;; esac; fi');
+  assert.equal(command, 'if [ -n "$PANEL_DIR" ] && [ -n "$PANEL_ID" ] && [ -n "$IVY_SESSION_HELPER" ]; then case "$IVY_SESSION_HELPER" in /*) case "$IVY_SESSION_HELPER" in *[[:cntrl:]]*) ;; *) "$IVY_SESSION_HELPER" hook codex >/dev/null || : ;; esac ;; esac; fi');
   const directory = await mkdtemp(join(tmpdir(), "ivy-codex-hook-"));
   const trace = join(directory, "trace.json");
   const helper = join(directory, "trusted helper $(not-executed) 'quoted'");
   try {
-    await writeFile(helper, '#!/usr/bin/python3\nimport json,os,sys\nopen(os.environ["IVY_HELPER_FIXTURE_TRACE"],"w").write(json.dumps({"argv":sys.argv[1:],"input":sys.stdin.read()}))\n');
+    await writeFile(helper, '#!/usr/bin/python3\nimport json,os,sys\nopen(os.environ["IVY_HELPER_FIXTURE_TRACE"],"w").write(json.dumps({"argv":sys.argv[1:],"input":sys.stdin.read()}))\nprint(json.dumps({"ok":True}))\nsys.exit(int(os.environ.get("IVY_HELPER_FIXTURE_EXIT","0")))\n');
     await chmod(helper, 0o700);
     await writeFile(join(directory, "ivy-session"), '#!/bin/sh\nexit 78\n');
     await chmod(join(directory, "ivy-session"), 0o700);
     const run = (changes) => new Promise((resolve, reject) => {
-      const child = spawn("/bin/sh", ["-c", command], { cwd: directory, stdio: ["pipe", "ignore", "ignore"],
+      const child = spawn("/bin/sh", ["-c", command], { cwd: directory, stdio: ["pipe", "pipe", "ignore"],
         env: { PATH: ".", PANEL_DIR: "/pane", PANEL_ID: "pane", IVY_SESSION_HELPER: helper,
           IVY_HELPER_FIXTURE_TRACE: trace, ...changes } });
       child.once("error", reject);
-      child.once("close", (code) => code === 0 ? resolve() : reject(new Error(`hook exit ${code}`)));
+      let stdout = "";
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", (data) => { stdout += data; });
+      child.once("close", (code) => code === 0 ? resolve(stdout) : reject(new Error(`hook exit ${code}`)));
       child.stdin.on("error", (error) => { if (error.code !== "EPIPE") reject(error); });
       child.stdin.end('{"official":"metadata"}');
     });
@@ -160,7 +176,8 @@ test("Codex static guarded command uses the absolute locator literally and never
       await run(changes);
       await assert.rejects(readFile(trace), { code: "ENOENT" });
     }
-    await run({});
+    assert.equal(await run({}), "", "native protocol JSON must not become Codex hook output");
+    assert.equal(await run({ IVY_HELPER_FIXTURE_EXIT: "1" }), "", "optional recovery failure must not block Codex");
     assert.deepEqual(JSON.parse(await readFile(trace, "utf8")), {
       argv: ["hook", "codex"], input: '{"official":"metadata"}',
     });

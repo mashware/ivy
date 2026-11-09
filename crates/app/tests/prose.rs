@@ -76,6 +76,11 @@ use std::path::Path;
 /// entry down.
 const SOURCES: &[(&str, &str, usize)] = &[
     (
+        "src/ai_sessions/tests/codex_probe.rs",
+        include_str!("../src/ai_sessions/tests/codex_probe.rs"),
+        1,
+    ),
+    (
         "src/ai_sessions/programs/child.rs",
         include_str!("../src/ai_sessions/programs/child.rs"),
         0,

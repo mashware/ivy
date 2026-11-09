@@ -16,7 +16,7 @@ pub(super) fn root(scope: &ForegroundScope, peer: &Peer, programs: &[Program]) -
     if !peer.is_alive() {
         return Err(denied());
     }
-    let chain = scope.inspect(peer.pid(), peer.birth())?;
+    let chain = scope.inspect_descendant(peer.pid(), peer.birth())?;
     let mut selected: Option<(&Program, &NativeProcess, bool)> = None;
     for process in &chain.processes {
         for program in programs {
@@ -31,7 +31,7 @@ pub(super) fn root(scope: &ForegroundScope, peer: &Peer, programs: &[Program]) -
             if !native && !wrapper {
                 continue;
             }
-            if process.group != chain.foreground_group {
+            if !process.foreground {
                 return Err(denied());
             }
             if let Some((previous, previous_process, previous_wrapper)) = selected {
@@ -55,44 +55,89 @@ pub(super) fn root(scope: &ForegroundScope, peer: &Peer, programs: &[Program]) -
     let check_mode = program.client == Client::Codex;
     #[cfg(test)]
     let check_mode = check_mode && !program.fixture;
-    if check_mode && !codex_interactive(process)? {
-        return Err(denied());
-    }
     let lifetime = Arc::new(process.lifetime()?);
-    if !peer.is_alive() || !scope.is_open() {
-        return Err(denied());
-    }
-    Ok(Root {
+    let root = Root {
         process: process.clone(),
         client: program.client,
         lifetime,
         check_mode,
-    })
+    };
+    if !peer.is_alive() || !root.current(scope) {
+        return Err(denied());
+    }
+    Ok(root)
 }
 
 impl Root {
+    pub(super) fn working_directory(
+        &self,
+        scope: &ForegroundScope,
+    ) -> io::Result<std::path::PathBuf> {
+        if !self.current(scope) {
+            return Err(denied());
+        }
+        let directory = self.process.working_directory()?;
+        let text = directory.to_str().ok_or_else(denied)?;
+        if panel_control::session::validate_cwd(text).is_err() || !self.current(scope) {
+            return Err(denied());
+        }
+        Ok(directory)
+    }
+
     pub(super) fn current(&self, scope: &ForegroundScope) -> bool {
-        scope
-            .inspect(self.process.pid, self.process.birth)
-            .is_ok_and(|chain| {
-                chain
-                    .processes
-                    .last()
-                    .is_some_and(|process| process.executable == self.process.executable)
-            })
+        use std::os::fd::AsRawFd;
+        let mut watched = libc::pollfd {
+            fd: self.lifetime.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // SAFETY: this root owns the exact pidfd; the observation never waits.
+        (unsafe { libc::poll(&mut watched, 1, 0) == 0 })
+            && scope
+                .inspect(self.process.pid, self.process.birth)
+                .is_ok_and(|chain| {
+                    chain
+                        .processes
+                        .last()
+                        .is_some_and(|process| process.executable == self.process.executable)
+                })
             && (!self.check_mode || codex_interactive(&self.process).unwrap_or(false))
     }
 }
 
 fn codex_interactive(process: &NativeProcess) -> io::Result<bool> {
-    use term_core::Argument::{Literal as L, Uuid};
-    process.matches_arguments(&[
-        &[],
-        &[L("--no-daemon")],
-        &[L("resume"), Uuid],
-        &[L("resume"), L("--no-daemon"), Uuid],
-        &[L("--no-daemon"), L("resume"), Uuid],
-    ])
+    let shapes = codex_shapes();
+    let shapes: Vec<_> = shapes.iter().map(Vec::as_slice).collect();
+    process.matches_arguments(&shapes)
+}
+
+fn codex_shapes() -> Vec<Vec<term_core::Argument<'static>>> {
+    use term_core::Argument::{Literal as L, Opaque, Uuid};
+    let mut shapes = vec![
+        vec![],
+        vec![L("--no-daemon")],
+        vec![L("resume"), Uuid],
+        vec![L("resume"), L("--no-daemon"), Uuid],
+        vec![L("--no-daemon"), L("resume"), Uuid],
+    ];
+    // Codex keeps --no-daemon authoritative with config overrides; their values are opaque.
+    for pairs in 1..=4 {
+        for aliases in 0..1 << pairs {
+            let mut shape = vec![L("--no-daemon")];
+            for index in 0..pairs {
+                shape.push(L(if aliases & (1 << index) == 0 {
+                    "-c"
+                } else {
+                    "--config"
+                }));
+                shape.push(Opaque { max_bytes: 8192 });
+            }
+            shapes.push(shape.clone());
+            shape.extend([L("resume"), Uuid]);
+            shapes.push(shape);
+        }
+    }
+    shapes
 }
 
 fn denied() -> io::Error {

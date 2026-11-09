@@ -394,7 +394,7 @@ impl crate::Pane {
         if bytes.is_empty() {
             return None;
         }
-        if let Err(failure) = self.pty.write(&bytes) {
+        if let Err(failure) = crate::resume::write_report(self, &bytes) {
             eprintln!("the wheel turn could not be sent to the program: {failure}");
             // **A send that failed is not a fast outbound trip**, just as on the keyboard's path
             // and on the click's: recording it would measure the failure and publish it as the
@@ -437,7 +437,7 @@ impl crate::Pane {
             self.screen.mouse_reporting(),
             chord,
         )?;
-        if let Err(failure) = self.pty.write(&bytes) {
+        if let Err(failure) = crate::resume::write_report(self, &bytes) {
             // A gesture lost in silence inside an editor reads as the window being hung, just like
             // a lost key.
             eprintln!("the mouse could not be sent to the program: {failure}");

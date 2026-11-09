@@ -23,6 +23,8 @@ pub struct NativeProcess {
     pub group: u32,
     pub session: u32,
     pub executable: PathBuf,
+    /// This process belongs to the pane's current foreground group, session and terminal.
+    pub foreground: bool,
 }
 
 /// Processes ordered from the console's original child to the kernel-attested reporter.
@@ -36,6 +38,10 @@ pub struct ForegroundAncestry {
 pub enum Argument<'a> {
     Literal(&'a str),
     Uuid,
+    /// Consumes one nonempty argument without keeping or interpreting its bytes.
+    Opaque {
+        max_bytes: usize,
+    },
 }
 
 pub(crate) fn scope(pty: &crate::Pty) -> io::Result<ForegroundScope> {
@@ -66,10 +72,27 @@ impl ForegroundScope {
             Err(io::ErrorKind::Unsupported.into())
         }
     }
+
+    /// Attests a descendant chain; only processes marked foreground may grant client authority.
+    /// Helpers can start a new session, but cannot supply or replace a foreground root.
+    pub fn inspect_descendant(&self, pid: u32, birth: u64) -> io::Result<ForegroundAncestry> {
+        #[cfg(target_os = "linux")]
+        return self.native.inspect_descendant(pid, birth);
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = (pid, birth);
+            Err(io::ErrorKind::Unsupported.into())
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]
 impl NativeProcess {
+    /// Reads this exact process's directory, rather than a wrapper's foreground-group leader.
+    pub fn working_directory(&self) -> io::Result<PathBuf> {
+        linux::working_directory(self)
+    }
+
     pub fn matches_arguments(&self, shapes: &[&[Argument<'_>]]) -> io::Result<bool> {
         linux::matches_arguments(self, shapes)
     }

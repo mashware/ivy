@@ -48,6 +48,10 @@ use std::path::Path;
 /// guard with no file to look at reads exactly like a clean one.
 const MODULES: &[(&str, &str)] = &[
     (
+        "src/ai_sessions/tests/codex_probe.rs",
+        include_str!("../src/ai_sessions/tests/codex_probe.rs"),
+    ),
+    (
         "src/ai_sessions/programs/child.rs",
         include_str!("../src/ai_sessions/programs/child.rs"),
     ),
@@ -526,7 +530,7 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
     ),
     (
         "impl Pane",
-        534,
+        533,
         "a console with its panel, its keys and its mouse. On the day it was recorded it was six \
          blocks in six files: the keyboard and mouse passes (157 each), how a pane is opened (112) \
          and how it gets its panel (120), and 45 more in `lib.rs` and `control.rs`. **The search \
@@ -534,7 +538,7 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
          leftovers became a free function of `closing.rs`, 10 lines out, and the keyboard pass \
          spent ten — nine asking the search about each key, one seeding a new pane's search \
          record — with the rules themselves in `search.rs`, outside the type. **591 - 10 + 10 \
-         leaves 591.** Session takeover now delegates to a free function, leaving 538. Delegating the shared signal-aware pump and geometry work leaves534 after integrating startup recovery and clipboard changes.",
+         leaves 591.** Session takeover now delegates to a free function, leaving 538. Delegating the shared signal-aware pump and geometry work leaves534 after integrating startup recovery and clipboard changes. Sharing effective input modes with recovery leaves533.",
     ),
     (
         "impl PanelState",

@@ -12,6 +12,7 @@ pub(crate) struct PaneState {
     pub(crate) failed: bool,
     pub(crate) resume: Option<panel_control::session::Identity>,
     pub(crate) resuming: bool,
+    pub(crate) fresh_shell_required: bool,
     pub(crate) interacted: bool,
     pub(crate) session_status: Option<crate::ai_sessions::Status>,
     pub(crate) session_revision: u64,
@@ -33,6 +34,7 @@ impl PaneState {
             self.resume = None;
             self.session_directory = None;
             self.resuming = false;
+            self.fresh_shell_required = false;
             self.session_revision = 0;
         }
     }
@@ -190,6 +192,7 @@ pub(crate) fn apply_saved_mode(window: &mut Window) {
             pane.restoration.resume = None;
             pane.restoration.session_directory = None;
             pane.restoration.resuming = false;
+            pane.restoration.fresh_shell_required = false;
         }
     }
     window.restoration.mode = mode;
@@ -271,6 +274,7 @@ pub(crate) fn capture_on_exit(window: &mut Window) {
     for pane in window.all_panes_mut() {
         if pane.restoration.resuming && pane.pty.exit_success() == Some(false) {
             pane.restoration.failed = true;
+            pane.restoration.fresh_shell_required = true;
             pane.restoration.resuming = false;
         }
     }

@@ -51,18 +51,38 @@ impl Scope {
     }
 
     pub(super) fn inspect(&self, pid: u32, birth: u64) -> io::Result<ForegroundAncestry> {
+        self.ancestry(pid, birth, false)
+    }
+
+    pub(super) fn inspect_descendant(
+        &self,
+        pid: u32,
+        birth: u64,
+    ) -> io::Result<ForegroundAncestry> {
+        self.ancestry(pid, birth, true)
+    }
+
+    fn ancestry(
+        &self,
+        pid: u32,
+        birth: u64,
+        detached_helper: bool,
+    ) -> io::Result<ForegroundAncestry> {
         if !self.is_open() || stat(self.child.pid)?.birth != self.child.birth {
             return Err(denied());
         }
         let foreground = self.group()?;
         let mut current = stat(pid)?;
-        if current.birth != birth || current.group != foreground {
+        if current.birth != birth || !detached_helper && current.group != foreground {
             return Err(denied());
         }
         let mut processes = Vec::new();
+        let mut observed = Vec::new();
         // A hostile or unexpectedly deep topology must not monopolize the single verifier.
         for _ in 0..64 {
-            if current.session != self.child.session || current.tty != self.child.tty {
+            if !detached_helper
+                && (current.session != self.child.session || current.tty != self.child.tty)
+            {
                 return Err(denied());
             }
             let executable = std::fs::read_link(format!("/proc/{}/exe", current.pid))?;
@@ -76,12 +96,24 @@ impl Scope {
                 group: current.group,
                 session: current.session,
                 executable,
+                foreground: current.group == foreground
+                    && current.session == self.child.session
+                    && current.tty == self.child.tty,
             });
+            observed.push(current);
             if current.pid == self.child.pid {
                 if current.birth != self.child.birth
                     || self.group()? != foreground
                     || !self.is_open()
                 {
+                    return Err(denied());
+                }
+                for process in &observed {
+                    if stat(process.pid)? != *process {
+                        return Err(denied());
+                    }
+                }
+                if self.group()? != foreground || !self.is_open() {
                     return Err(denied());
                 }
                 processes.reverse();
@@ -156,6 +188,29 @@ fn alive(fd: &OwnedFd) -> bool {
     };
     // SAFETY: poll receives one initialized descriptor and never waits.
     unsafe { libc::poll(&mut poll, 1, 0) == 0 }
+}
+
+pub(super) fn working_directory(process: &NativeProcess) -> io::Result<std::path::PathBuf> {
+    let before = stat(process.pid)?;
+    let executable = format!("/proc/{}/exe", process.pid);
+    if before.birth != process.birth || std::fs::read_link(&executable)? != process.executable {
+        return Err(denied());
+    }
+    let lifetime = lifetime(process.pid, process.birth)?;
+    let directory = std::fs::read_link(format!("/proc/{}/cwd", process.pid))?;
+    // The kernel appends this suffix when the directory no longer has a usable pathname.
+    if !directory.is_absolute()
+        || directory
+            .as_os_str()
+            .as_encoded_bytes()
+            .ends_with(b" (deleted)")
+        || stat(process.pid)? != before
+        || std::fs::read_link(&executable)? != process.executable
+        || !alive(&lifetime)
+    {
+        return Err(denied());
+    }
+    Ok(directory)
 }
 
 pub(super) fn runs_script(process: &NativeProcess, expected: &Path) -> io::Result<bool> {
