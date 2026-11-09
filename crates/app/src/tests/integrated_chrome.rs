@@ -330,7 +330,7 @@ mod tests {
         window.chrome.enable();
         window.headers = window.headers.integrated(true);
         received.wait_until_ready(Duration::from_secs(5));
-        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 3600.0));
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 800.0));
         let shapes = open_connection_guide(&mut window, &ctx, area);
         assert!(!has_text(&shapes, "1. Locate the MCP bridge"));
         let at = text_center(&shapes, "Copy setup prompt");
@@ -408,7 +408,22 @@ mod tests {
             "codex --no-daemon",
             "codex resume --no-daemon <session-id>",
         ];
-        let mut seen = expected_manual.map(|text| has_text(&shapes, text));
+        let visible = |shapes: &[egui::epaint::ClippedShape], needle: &str| {
+            shapes.iter().any(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => {
+                    text.galley.text().contains(needle)
+                        && clipped
+                            .clip_rect
+                            .contains_rect(egui::Rect::from_min_size(text.pos, text.galley.size()))
+                }
+                _ => false,
+            })
+        };
+        assert!(
+            !visible(&shapes, "codex resume --no-daemon <session-id>"),
+            "the lower guidance must require scrolling in a normal-height window"
+        );
+        let mut seen = expected_manual.map(|text| visible(&shapes, text));
         for step in 0..8 {
             let shapes = ui_pass(
                 &mut window,
@@ -426,7 +441,7 @@ mod tests {
                 },
             );
             for (found, text) in seen.iter_mut().zip(expected_manual) {
-                *found |= has_text(&shapes, text);
+                *found |= visible(&shapes, text);
             }
         }
         for (found, text) in seen.into_iter().zip(expected_manual) {
