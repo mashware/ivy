@@ -79,13 +79,10 @@ guide changes no running programs or terminal sizes.
 
 ### Codex: forward identity and check the launch mode
 
-In `~/.codex/config.toml`, configure the local stdio bridge with its verified absolute path:
-
-```toml
-[mcp_servers.ivy]
-command = "/absolute/path/to/panel-mcp"
-env_vars = ["PANEL_ID", "PANEL_DIR"]
-```
+In Codex's own `~/.codex/config.toml`, set the local stdio server's `command` to the verified
+absolute bridge path and add `env_vars = ["PANEL_ID", "PANEL_DIR"]` to that server's table
+(for example, `[mcp_servers.ivy]`). The [complete copyable Codex example](../README.md#codex-forward-identity-and-check-the-launch-mode)
+is in the README. These settings belong to Codex, not Ivy's configuration file.
 
 If an Ivy bridge entry already exists under another name, update that table and preserve its
 command and other settings instead of adding a duplicate. `env_vars` forwards **variable names**
