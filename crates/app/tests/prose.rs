@@ -438,7 +438,7 @@ const SOURCES: &[(&str, &str, usize)] = &[
         include_str!("../src/settings/store.rs"),
         2,
     ),
-    ("src/lib.rs", include_str!("../src/lib.rs"), 6_181),
+    ("src/lib.rs", include_str!("../src/lib.rs"), 6_155),
     ("src/startup.rs", include_str!("../src/startup.rs"), 51),
     (
         "src/restoration.rs",

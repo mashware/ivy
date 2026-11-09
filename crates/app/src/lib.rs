@@ -1926,8 +1926,8 @@ mod tests {
             }
         }
     }
-    mod context_clipboard;
     mod agent_signals;
+    mod context_clipboard;
     mod header_controls;
     mod integrated_chrome;
     pub(crate) mod markdown;
