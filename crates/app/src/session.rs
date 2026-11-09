@@ -1150,6 +1150,7 @@ impl crate::Window {
     /// closing empties what the window timed separately, so writing before would charge its cost to
     /// the previous frame — which is exactly the kind of error this instrument is after.
     pub(crate) fn save_if_due(&mut self) {
+        crate::restoration::apply_saved_mode(self);
         let Some(due) = self.persistence.save_due else {
             return;
         };
@@ -1182,6 +1183,7 @@ fn clear_directories(node: &mut StoredNode) {
 }
 
 fn save_window(window: &mut crate::Window) {
+    crate::restoration::apply_saved_mode(window);
     if !window.restoration.can_save() {
         window.persistence.save_due = None;
         return;

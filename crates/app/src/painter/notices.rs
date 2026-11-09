@@ -347,15 +347,19 @@ fn what_the_silence_says(console: &crate::Pane, silence: Silence) -> String {
     match silence {
         Silence::WentQuiet => what_it_says(is_deaf(console)),
         Silence::Refused => INPUT_QUEUE_FULL.to_owned(),
-        Silence::RestoreDirectory => format!(
-            "The saved directory could not be restored: {}. It will be retried next time. Typing or clicking this notice starts fresh.",
-            console
+        Silence::RestoreDirectory => {
+            let path = console
                 .restoration
                 .directory
                 .as_deref()
                 .unwrap_or_else(|| std::path::Path::new(""))
-                .display()
-        ),
+                .to_string_lossy();
+            let short: String = path.chars().take(80).collect();
+            let suffix = if path.chars().count() > 80 { "..." } else { "" };
+            format!(
+                "The saved directory could not be restored: {short}{suffix}. It will be retried next time. Typing or clicking this notice starts fresh."
+            )
+        }
     }
 }
 

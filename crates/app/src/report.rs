@@ -176,6 +176,7 @@ impl Window {
         // count the script reads answer a question nobody asked — see [`measure::Strips`].
         self.strips.close_the_frame();
         self.projects.close_frame();
+        self.restoration.close_frame();
         close_views(self);
 
         // **And the raw-input hook's is declared here, AFTER emptying.** See

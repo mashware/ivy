@@ -28,6 +28,7 @@ pub(crate) struct State {
     _ownership: Option<session::ownership::Ownership>,
     total: Duration,
     frames: usize,
+    pending: Option<Duration>,
 }
 
 impl Default for State {
@@ -41,11 +42,23 @@ impl Default for State {
             _ownership: None,
             total: Duration::ZERO,
             frames: 0,
+            pending: None,
         }
     }
 }
 
 impl State {
+    fn record(&mut self, cost: Duration) {
+        *self.pending.get_or_insert_default() += cost;
+    }
+
+    pub(crate) fn close_frame(&mut self) {
+        if let Some(cost) = self.pending.take() {
+            self.total += cost;
+            self.frames += 1;
+        }
+    }
+
     pub(crate) fn can_save(&self) -> bool {
         self.primary && self.mode != StartupRestore::None
     }
@@ -65,10 +78,6 @@ pub(crate) fn valid_directory_text(text: &str) -> bool {
         && text.len() <= 4096
         && Path::new(text).is_absolute()
         && !text.chars().any(char::is_control)
-}
-
-fn savable(path: Option<PathBuf>) -> Option<PathBuf> {
-    path.filter(|path| path.to_str().is_some_and(valid_directory_text))
 }
 
 /// The measurement path retains its seeded-layout semantics and overwrite witness.
@@ -125,59 +134,82 @@ pub(crate) fn prepare(
             _ownership: ownership,
             total: Duration::ZERO,
             frames: 0,
+            pending: None,
         },
     )
 }
 
-pub(crate) fn refresh(window: &mut Window) {
+/// Consume successful Settings saves before a due write or clean shutdown can use the old policy.
+pub(crate) fn apply_saved_mode(window: &mut Window) {
     if window.restoration.measuring {
         return;
     }
+    let Some(mode) = window.settings_editor.take_saved_startup_restore() else {
+        return;
+    };
     let before = Instant::now();
-    if let Some(mode) = window.settings_editor.take_saved_startup_restore() {
-        if window.restoration.mode == StartupRestore::None
-            && mode != StartupRestore::None
-            && window.restoration.primary
-        {
-            // Disabled startup did not read the snapshot; learn a newer-version veto before writing.
-            let _ = window.persistence.load();
-        }
-        window.restoration.mode = mode;
-        window.last_seen = None;
+    if window.restoration.mode == StartupRestore::None
+        && mode != StartupRestore::None
+        && window.restoration.primary
+    {
+        let _ = window.persistence.load();
     }
-    if window.restoration.mode != StartupRestore::Directories {
+    window.restoration.mode = mode;
+    window.last_seen = None;
+    window.persistence.save_due = None;
+    if mode != StartupRestore::Directories {
         for pane in window.all_panes_mut() {
             pane.restoration.directory = None;
             pane.restoration.failed = false;
         }
-    } else if window.restoration.primary {
-        let sources: std::collections::HashMap<_, _> = window
-            .all_panes()
-            .map(|pane| (pane.name, window.projects.directory(pane.name)))
-            .collect();
-        for pane in window.all_panes_mut() {
+    }
+    let cost = before.elapsed();
+    window.restoration.record(cost);
+    window.timed_separately += cost;
+}
+
+pub(crate) fn refresh(window: &mut Window) {
+    if window.restoration.measuring
+        || !window.restoration.primary
+        || window.restoration.mode != StartupRestore::Directories
+    {
+        return;
+    }
+    let before = Instant::now();
+    let projects = &window.projects;
+    for tab in &mut window.tabs {
+        for pane in tab.panes_mut() {
             if !pane.restoration.failed {
-                if pane.screen.working_directory_reported()
-                    && pane.screen.working_directory().is_none()
-                {
-                    pane.restoration.directory = None;
-                } else if let Some(directory) = sources
-                    .get(&pane.name)
-                    .and_then(|directory| savable(directory.clone()))
-                {
-                    pane.restoration.directory = Some(directory);
-                }
+                let unusable = pane.screen.working_directory_reported()
+                    && pane.screen.working_directory().is_none();
+                observe_directory(
+                    &mut pane.restoration,
+                    projects.directory(pane.name),
+                    unusable,
+                );
             }
         }
     }
     let cost = before.elapsed();
-    window.restoration.total += cost;
-    window.restoration.frames += 1;
+    window.restoration.record(cost);
     window.timed_separately += cost;
+}
+
+fn observe_directory(state: &mut PaneState, observed: Option<&Path>, explicitly_unusable: bool) {
+    if explicitly_unusable {
+        state.directory = None;
+    } else if let Some(path) = observed {
+        if !path.to_str().is_some_and(valid_directory_text) {
+            state.directory = None;
+        } else if state.directory.as_deref() != Some(path) {
+            state.directory = Some(path.to_path_buf());
+        }
+    }
 }
 
 /// A final native observation covers navigation immediately before closing, without an idle timer.
 pub(crate) fn capture_on_exit(window: &mut Window) {
+    apply_saved_mode(window);
     if window.restoration.measuring
         || !window.restoration.can_save()
         || window.restoration.mode != StartupRestore::Directories
@@ -190,15 +222,11 @@ pub(crate) fn capture_on_exit(window: &mut Window) {
         }
         let unusable =
             pane.screen.working_directory_reported() && pane.screen.working_directory().is_none();
-        if unusable {
-            pane.restoration.directory = None;
-        } else if let Some(directory) = savable(
-            pane.pty
-                .working_directory()
-                .or_else(|| pane.screen.working_directory().map(local_directory)),
-        ) {
-            pane.restoration.directory = Some(directory);
-        }
+        let directory = pane
+            .pty
+            .working_directory()
+            .or_else(|| pane.screen.working_directory().map(local_directory));
+        observe_directory(&mut pane.restoration, directory.as_deref(), unusable);
     }
 }
 
@@ -473,6 +501,89 @@ mod tests {
             1,
             "oversize must not create a temporary"
         );
+    }
+
+    #[test]
+    fn explicit_invalid_directory_clears_old_context_but_missing_observation_preserves_it() {
+        let previous = PathBuf::from("/tmp/previous-project");
+        let mut state = PaneState {
+            directory: Some(previous.clone()),
+            failed: false,
+        };
+        observe_directory(&mut state, None, false);
+        assert_eq!(state.directory, Some(previous));
+        let mut screen = term_core::Screen::new(crate::INITIAL_GRID);
+        screen.advance(b"\x1b]7;file:///tmp/a%C2%85b\x07");
+        let declared = screen
+            .working_directory()
+            .expect("OSC 7 accepts this explicit local path");
+        observe_directory(&mut state, Some(declared), false);
+        assert!(
+            state.directory.is_none(),
+            "an invalid new path must not retain an old project"
+        );
+    }
+
+    #[test]
+    fn long_missing_directory_keeps_a_visible_notice_without_losing_its_full_target() {
+        let ctx = eframe::egui::Context::default();
+        let path = PathBuf::from(format!("/tmp/{}", "a/".repeat(2000)));
+        let leaf = StoredLeaf {
+            panel_width: 37,
+            folded: false,
+            label: None,
+            cwd: Some(path.clone()),
+        };
+        let pane = open_leaf(&ctx, &leaf, "/bin/sh", 0, Default::default()).unwrap();
+        assert!(pane.restoration.failed);
+        ctx.run_ui(Default::default(), |ui| {
+            let metrics = crate::painter::CellMetrics::measure(
+                ui.ctx(),
+                eframe::egui::FontId::monospace(14.0),
+            );
+            let area = eframe::egui::Rect::from_min_size(
+                eframe::egui::Pos2::ZERO,
+                eframe::egui::vec2(1200.0, 760.0),
+            );
+            let boxes = crate::painter::notices::the_boxes(
+                ui.painter(),
+                &pane,
+                &crate::theme::Theme::default(),
+                &metrics,
+                area,
+            );
+            assert!(
+                boxes.silence.is_some(),
+                "an accepted long path must not hide the fallback explanation"
+            );
+        })
+        .drop_without_applying_deltas();
+        assert_eq!(
+            pane.restoration.directory,
+            Some(path),
+            "only display text may be shortened"
+        );
+    }
+
+    #[test]
+    fn repeated_capture_passes_close_one_actual_frame_sample() {
+        let fixture = Fixture::new();
+        let (opening, state, persistence) = fixture.prepare(StartupRestore::Directories);
+        let mut window =
+            Window::opening(&Default::default(), opening, "/bin/sh", None, persistence).unwrap();
+        window.restoration = state;
+        refresh(&mut window);
+        refresh(&mut window);
+        assert_eq!(window.restoration.frames, 0, "passes are not frame samples");
+        window.close_the_frame(Duration::from_secs(1));
+        assert_eq!(window.restoration.frames, 1);
+        let first = window.restoration.total;
+        window.close_the_frame(Duration::from_secs(1));
+        assert_eq!(
+            window.restoration.frames, 1,
+            "a frame with no new capture is not another sample"
+        );
+        assert_eq!(window.restoration.total, first);
     }
 
     #[test]
