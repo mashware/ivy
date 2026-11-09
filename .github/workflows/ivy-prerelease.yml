@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish the selected tag as an unsigned Linux and macOS prerelease
+        description: Publish the selected tag as an unsigned Linux, macOS and Windows prerelease
         type: boolean
         default: false
 
@@ -34,7 +34,7 @@ jobs:
       - name: Check documentation links
         run: cargo doc-check --locked
       - name: Test portable packaging logic
-        run: python3 -m unittest scripts/test_release.py scripts/test_macos.py -v
+        run: python3 -m unittest scripts/test_release.py scripts/test_macos.py scripts/test_windows.py -v
 
   build:
     if: ${{ github.event_name == 'workflow_dispatch' }}
@@ -66,7 +66,7 @@ jobs:
           version=$(python3 scripts/release.py version)
           scripts/package-linux.sh --binary-dir target/release --output-dir dist --version "$version"
           scripts/test-linux-package.sh dist/*.deb "$version" target/release/notices
-          python3 -m unittest scripts/test_release.py scripts/test_macos.py -v
+          python3 -m unittest scripts/test_release.py scripts/test_macos.py scripts/test_windows.py -v
           python3 scripts/release.py generate --directory dist --commit "$COMMIT" --built-on ubuntu-24.04
           (cd dist && sha256sum --check SHA256SUMS)
       - name: Upload package and metadata
@@ -186,9 +186,43 @@ jobs:
           path: dist/*.dmg
           if-no-files-found: error
 
+  windows:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - name: Build pinned native Windows executables
+        shell: pwsh
+        run: |
+          cargo build --locked --release --target x86_64-pc-windows-msvc -p app -p panel-control --bins
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo metadata --locked --filter-platform x86_64-pc-windows-msvc --format-version 1 > target/release-metadata.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build per-user installer with original notices
+        shell: pwsh
+        run: |
+          python scripts/release.py notices --metadata target/release-metadata.json --directory target/x86_64-pc-windows-msvc/release/notices
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $Version = python scripts/release.py version
+          python scripts/package-windows.py --binary-dir target/x86_64-pc-windows-msvc/release --output-dir dist --version $Version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Check installed payload, replacement and removal
+        shell: pwsh
+        env:
+          IVY_DISPOSABLE_RUNNER: 'yes'
+        run: |
+          $Installer = (Get-ChildItem dist/*-setup.exe).FullName
+          ./packaging/windows/test-install.ps1 -Installer $Installer -BinaryDir target/x86_64-pc-windows-msvc/release
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: ivy-windows-x86_64
+          path: dist/*-setup.exe
+          if-no-files-found: error
+
   publish:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
-    needs: [build, install, arch, macos]
+    needs: [build, install, arch, macos, windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -211,13 +245,13 @@ jobs:
           test "$REF_TYPE" = tag
           test "$(git rev-parse HEAD)" = "$COMMIT"
           (cd dist && sha256sum --check SHA256SUMS)
-          python3 scripts/release.py generate --directory dist --commit "$COMMIT" --built-on ubuntu-24.04 --tag "$TAG" --include-arch --include-macos
+          python3 scripts/release.py generate --directory dist --commit "$COMMIT" --built-on ubuntu-24.04 --tag "$TAG" --include-arch --include-macos --include-windows
           (cd dist && sha256sum --check SHA256SUMS)
           scripts/verify-release-tag.sh "$TAG" "$COMMIT"
           if gh release view "$TAG" --json id >/dev/null 2>&1; then
             echo 'A release already exists for this tag; inspect it instead of overwriting it.' >&2
             exit 1
           fi
-          gh release create "$TAG" dist/*.deb dist/*.pkg.tar.zst dist/*.dmg dist/release-manifest.json dist/SHA256SUMS --verify-tag --draft --prerelease --title "$TAG" --notes "Unsigned experimental Ubuntu, Arch Linux and macOS packages."
+          gh release create "$TAG" dist/*.deb dist/*.pkg.tar.zst dist/*.dmg dist/*-setup.exe dist/release-manifest.json dist/SHA256SUMS --verify-tag --draft --prerelease --title "$TAG" --notes "Unsigned experimental Ubuntu, Arch Linux, macOS and Windows packages."
           scripts/verify-release-tag.sh "$TAG" "$COMMIT"
           gh release edit "$TAG" --draft=false --prerelease

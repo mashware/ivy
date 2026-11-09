@@ -8809,6 +8809,18 @@ attribution and source revisions for the explicitly verified versions. Provenanc
 MIT fallback distinction are recorded in resources/licenses/macos/README.md; unknown versions still
 stop packaging. This preserves declared terms and available attribution rather than changing licenses.
 
+The Windows delivery uses a per-user Inno Setup executable for Windows 11 x64, with a stable
+application identity, a Start menu shortcut and an uninstaller. It installs under LocalAppData,
+requests no elevation, changes no PATH or default terminal, and owns no preferences or layouts.
+Inno Setup's established per-user lifecycle was chosen over a portable ZIP (no installer or
+uninstaller) and a machine-wide MSI (unnecessary administrator requirement). Cargo target names
+stay unchanged; the installed GUI filename is Ivy.exe. The existing PNG supplies a multi-size ICO.
+Native MSVC builds, PE architecture checks and installed-file/notice hash comparisons gate artifact
+upload; installation, same-version replacement and removal run only on a disposable Windows runner.
+An older-to-newer version upgrade and real desktop behavior remain separate evidence. The installer
+is unsigned and has no automatic updater. Packaging does not implement the Windows control listener.
+The complete release manifest now requires this installer as well as Linux and both Mac assets.
+
 ## D77 — Console text has its own inner spacing
 
 **Decision.** Every console reserves 8 logical points on all four sides of the terminal grid.

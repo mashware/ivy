@@ -119,7 +119,7 @@ cargo fmt --all --check
 cargo clippy --locked --workspace --all-targets -- -D warnings
 cargo test --locked --workspace
 cargo doc-check --locked
-python3 -m unittest scripts/test_release.py scripts/test_macos.py -v
+python3 -m unittest scripts/test_release.py scripts/test_macos.py scripts/test_windows.py -v
 ```
 
 PR updates do not build release binaries or run the package/installation matrix. This makes PR
@@ -136,8 +136,8 @@ gh workflow run ivy-prerelease.yml --ref <branch-or-tag> -f publish=false
 
 Both manual modes run the full matrix against the selected revision: the Ubuntu 24.04 baseline
 build, installation/upgrade/removal on Ubuntu 24.04 and 26.04, Arch packaging and installation,
-and native macOS 15 ARM64 and Intel DMG builds and installation checks. Artifacts are uploaded as
-`ivy-linux-x86_64`, `ivy-arch-x86_64`, `ivy-macos-arm64` and `ivy-macos-x86_64`.
+native macOS 15 ARM64 and Intel DMG builds and installation checks, and a Windows 11 x64 installer lifecycle check. Artifacts are uploaded as
+`ivy-linux-x86_64`, `ivy-arch-x86_64`, `ivy-macos-arm64`, `ivy-macos-x86_64` and `ivy-windows-x86_64`.
 With `publish=false`, nothing is published. These checks remain separate from real-desktop evidence.
 
 For a release, approve the exact version, commit, target set and notes first. Commit the intended
@@ -149,7 +149,7 @@ gh workflow run ivy-prerelease.yml --ref v<VERSION> -f publish=true
 ```
 
 The workflow rejects a tag/version mismatch and rebuilds the complete matrix on that revision.
-Publication requires the successful `build`, `install`, `arch` and `macos` jobs, including both
+Publication requires the successful `build`, `install`, `arch`, `macos` and `windows` jobs, including both
 Ubuntu versions and both Mac architectures; failed, skipped or cancelled required jobs prevent
 publication. It never relies on the reduced PR checks or artifacts from an earlier run.
 It creates a draft prerelease, uploads all
@@ -163,7 +163,7 @@ The workflow uses read-only repository access for builds and write access only i
 publication job. It does not use signing credentials. Release metadata records the workspace
 version, commit, exact asset name, architecture target, build environment, unsigned status and
 SHA-256 digest. The final manifest and checksums require the Ubuntu, Arch and both Mac packages.
-Windows packaging and its native validation remain separate work.
+Windows packaging is described below; native desktop validation remains separate.
 
 ## Platform evidence
 
@@ -176,7 +176,7 @@ the release. Mark missing evidence explicitly; do not turn CI success into deskt
 | Ubuntu 24.04 x86_64 | Linux `.deb` | Install, menu launch/icon, shell input/output, panes/tabs, copy/paste, settings/layout restoration, upgrade and removal |
 | Ubuntu 26.04 x86_64 | Same baseline-built `.deb` | Same checks against the exact same package |
 | macOS 15+ ARM64 and Intel | Planned next delivery | Native bundle/DMG, architecture checks and real desktop trials; signing status declared |
-| Windows 11 x86_64 | Planned next delivery | Per-user installer, persistence and ordinary-user desktop trials |
+| Windows 11 x86_64 | Per-user `.exe` installer | Per-user installer, persistence and ordinary-user desktop trials |
 
 This table defines the evidence still to collect, not completed tests. The release notes or work
 validation artifact must record the actual results. macOS and Windows downloads are not supplied
@@ -280,4 +280,43 @@ The package builder uses Python's plist support plus native `sips`, `iconutil`, 
 `otool` and `hdiutil`; it refuses native build/check operations on other operating systems.
 Publication requires both Mac jobs, both Ubuntu installation jobs and Arch. The final manifest uses
 `--include-arch --include-macos` and requires all four packages; an existing prerelease is never
-replaced. Windows and Homebrew/App Store distribution remain separate work.
+replaced. Homebrew/App Store distribution remains separate work.
+
+## Windows 11 x64
+
+Download `Ivy-<VERSION>-windows-x86_64-setup.exe`, `release-manifest.json` and `SHA256SUMS`
+from the same release. In PowerShell, compare `Get-FileHash -Algorithm SHA256 <filename>` for
+both downloaded files with their corresponding SHA256SUMS entries before opening the installer.
+Checksums detect mismatched bytes; they do not authenticate the publisher.
+
+The installer is unsigned. Windows may show an unknown-publisher or SmartScreen warning; proceed
+only if you trust the source. No global security setting needs to change. Installation is per user,
+requires no administrator rights and defaults to `%LOCALAPPDATA%\Programs\Ivy`. Open **Ivy** from
+Start. No Rust compiler is required. There is no PATH modification or default-terminal registration.
+
+Close Ivy before installing a newer version into the same location. Remove it through Windows
+Settings → Apps → Installed apps → Ivy → Uninstall. Preferences and saved layouts are preserved;
+the installer never owns the `agent-terminal` user-data directory. Restoring a layout launches fresh
+processes rather than resuming old programs. The Windows MCP/control listener still requires its
+separate portability delivery; the bundled bridge alone does not enable MCP on Windows.
+
+The manual package workflow uses `windows-2025` with the pinned Rust toolchain and the runner's
+Inno Setup 6 compiler. It builds `x86_64-pc-windows-msvc` binaries and preserves original notices:
+
+```powershell
+cargo build --locked --release --target x86_64-pc-windows-msvc -p app -p panel-control --bins
+cargo metadata --locked --filter-platform x86_64-pc-windows-msvc --format-version 1 > target/release-metadata.json
+python scripts/release.py notices --metadata target/release-metadata.json --directory target/x86_64-pc-windows-msvc/release/notices
+$Version = python scripts/release.py version
+python scripts/package-windows.py --binary-dir target/x86_64-pc-windows-msvc/release --output-dir dist --version $Version
+```
+
+The builder rejects non-PE or non-x64 inputs and missing notices. The disposable-runner lifecycle
+check compares installed executable and notice hashes, checks the Start menu shortcut, reinstalls
+the same version, removes it, and verifies unchanged preference/layout fixtures. It changes the
+runner's per-user installation registry and must never run on a workstation. These checks do not
+prove ordinary-user desktop launch, shell input/output, clipboard, rendering, layout restoration or
+older-version upgrades. Record those trials separately against the exact installer SHA-256.
+
+Publication adds `--include-windows` to the existing complete manifest command and waits for the
+Windows job. Preparing or uploading an Actions artifact does not publish a GitHub release.

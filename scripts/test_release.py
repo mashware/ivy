@@ -217,6 +217,23 @@ class ReleaseTest(unittest.TestCase):
         (self.root / "unexpected.dmg").write_bytes(b"extra")
         self.assertNotEqual(self.run_release(*args).returncode, 0)
 
+    def test_windows_release_requires_installer_and_hashes_actual_bytes(self):
+        installer = self.root / "Ivy-0.1.0-alpha.1-windows-x86_64-setup.exe"
+        self.assertNotEqual(self.run_release("--include-windows").returncode, 0)
+        installer.write_bytes(b"Windows installer fixture")
+        self.assertNotEqual(self.run_release().returncode, 0)
+        self.assertEqual(self.run_release("--include-windows").returncode, 0)
+        manifest = json.loads((self.root / "release-manifest.json").read_text())
+        entry = manifest["artifacts"][1]
+        self.assertEqual((entry["name"], entry["target"], entry["built_on"], entry["signing"]),
+                         (installer.name, "x86_64-pc-windows-msvc", "windows-2025", "unsigned"))
+        self.assertEqual(entry["sha256"], hashlib.sha256(installer.read_bytes()).hexdigest())
+        for line in (self.root / "SHA256SUMS").read_text().splitlines():
+            checksum, name = line.split("  ")
+            self.assertEqual(checksum, hashlib.sha256((self.root / name).read_bytes()).hexdigest())
+        (self.root / "unexpected.exe").write_bytes(b"extra")
+        self.assertNotEqual(self.run_release("--include-windows").returncode, 0)
+
     def test_arch_versions_keep_numbered_identifiers_without_forbidden_hyphens(self):
         convert = run_path(str(SCRIPT))["arch_version"]
         for semver, arch in (("0.1.0-alpha.1", "0.1.0alpha1"),
