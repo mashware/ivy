@@ -156,7 +156,8 @@ fn git_viewer_opens_and_switches_modes_through_its_controls() {
     git(&["add", "example.txt"]);
     fs::write(path.join("example.txt"), "unstaged\n").unwrap();
 
-    let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+    let script = format!("cd '{}' && sleep 30", path.display());
+    let mut window = window_of_tabs([["sleep 30", script.as_str()]]);
     let ctx = egui::Context::default();
     window.chrome.enable();
     frame(&mut window, &ctx, vec![]);
@@ -169,6 +170,21 @@ fn git_viewer_opens_and_switches_modes_through_its_controls() {
         .collect();
     let focused = window.active().focus;
     assert_eq!(focused, names[0]);
+    #[cfg(target_os = "linux")]
+    {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while window
+            .pane_called(names[1])
+            .unwrap()
+            .pty
+            .working_directory()
+            .as_ref()
+            != Some(&path)
+        {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
     for (name, cwd) in [(names[0], path.join("missing")), (names[1], path.clone())] {
         window
             .pane_called(name)
@@ -271,6 +287,53 @@ fn control_click_on_a_painted_markdown_path_opens_the_floating_viewer() {
         }],
     );
     assert!(window.viewer.open);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn non_repository_console_paints_a_clear_message_after_review_click() {
+    let mut nonce = [0; 8];
+    getrandom::fill(&mut nonce).unwrap();
+    let path = std::env::temp_dir().join(format!("viewer-nonrepo-{}", u64::from_ne_bytes(nonce)));
+    fs::create_dir(&path).unwrap();
+    let _directory = Directory(path.clone());
+    let script = format!("cd '{}' && sleep 30", path.display());
+    let mut window = window_of_tabs([[script.as_str(), "sleep 30"]]);
+    let name = window.active().panes()[0].name;
+    let ctx = egui::Context::default();
+    window.chrome.enable();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while window
+        .pane_called(name)
+        .unwrap()
+        .pty
+        .working_directory()
+        .as_ref()
+        != Some(&path)
+    {
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    frame(&mut window, &ctx, vec![]);
+    frame(&mut window, &ctx, vec![]);
+    click_review(&mut window, &ctx, 0);
+    loop {
+        let texts = frame(&mut window, &ctx, vec![]);
+        assert!(
+            !texts
+                .iter()
+                .any(|(text, _)| text.contains("Git failed:") || text.contains("usage: git"))
+        );
+        if texts
+            .iter()
+            .any(|(text, _)| text == "This folder is not a Git repository")
+        {
+            assert!(window.viewer.loaded.is_none());
+            break;
+        }
+        assert!(Instant::now() < deadline, "{}", window.viewer.message);
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 #[test]
