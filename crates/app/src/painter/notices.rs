@@ -321,6 +321,7 @@ pub(crate) enum Silence {
     WentQuiet,
     /// The input queue refused what was just typed (**D60**).
     Refused,
+    RestoreDirectory,
 }
 
 /// What the box under the held paste's question is about, or nothing if it has nothing to say.
@@ -334,6 +335,8 @@ pub(crate) fn what_the_silence_is(console: &crate::Pane) -> Option<Silence> {
         Some(Silence::WentQuiet)
     } else if still_says_a_write_was_refused(console) {
         Some(Silence::Refused)
+    } else if console.restoration.failed {
+        Some(Silence::RestoreDirectory)
     } else {
         None
     }
@@ -344,6 +347,15 @@ fn what_the_silence_says(console: &crate::Pane, silence: Silence) -> String {
     match silence {
         Silence::WentQuiet => what_it_says(is_deaf(console)),
         Silence::Refused => INPUT_QUEUE_FULL.to_owned(),
+        Silence::RestoreDirectory => format!(
+            "The saved directory could not be restored: {}. It will be retried next time. Typing or clicking this notice starts fresh.",
+            console
+                .restoration
+                .directory
+                .as_deref()
+                .unwrap_or_else(|| std::path::Path::new(""))
+                .display()
+        ),
     }
 }
 

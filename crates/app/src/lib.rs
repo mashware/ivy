@@ -57,9 +57,11 @@ mod project;
 mod project_view;
 pub mod pty_output;
 mod report;
+mod restoration;
 mod search;
 pub mod session;
 pub mod settings;
+mod startup;
 mod summary;
 mod tab_bar;
 pub mod theme;
@@ -529,123 +531,7 @@ fn open_with(
 /// without its gate. Whoever measures finds out as soon as they open the window and see a single
 /// tab.
 pub fn run() -> eframe::Result {
-    // **The file is read HERE and not inside the first frame**, and it is a decision: reading from
-    // disk inside the path that is measured would put a disk wait into the frame in exchange for
-    // nothing. What is read comes in through the `move` of the closure below, already interpreted
-    // and already validated.
-    //
-    // **And the one that loads is the one that keeps the window**, which was the debt the previous
-    // PR left written: the veto of a newer version lives in it, so a second instance would lose it
-    // and would clobber the layout of a newer binary.
-    let mut persistence = session::Persistence::from_env();
-    let saved = persistence.load();
-
-    // **A measurement session does not step on the layout of whoever measures.** The two variables
-    // below open what the batch says instead of what the user left, so saving would write **the
-    // batch's layout** over it. The measurement script already isolates the configuration
-    // directory, but whoever launches the binary by hand with those variables —which is how the
-    // documentation says to open a particular layout— does not.
-    let tabs = std::env::var(TABS_VARIABLE).ok();
-    let panes = std::env::var(PANES_VARIABLE).ok();
-    // **Any of the measurement gate's variables vetoes the writing, not only the two that ask for
-    // consoles.** With the check put only on those two, **the batch that restores was the only
-    // measurement session with saving alive** —it does not set them on purpose, so that the file
-    // rules—, so it could write to disk during the run while its control batch had writing vetoed:
-    // two different regimes being compared row by row in the annex. And the script only demands
-    // that the writes be declared in the batches that drag, so nobody would have caught that one's.
-    let measuring = any_measurement_variable(|which| std::env::var_os(which).is_some());
-    if measuring {
-        persistence.forbid_overwrite("a measurement batch asked for this session");
-    }
-    let with_what = open_with(tabs.as_deref(), panes.as_deref(), saved);
-
-    // **The settings are read here, and are NOT read under measurement.** The second is what
-    // matters: the measurement script isolates the configuration directory, but whoever launches
-    // the binary by hand with those variables would read theirs — and their font size would change
-    // the grid, which is what all the project's published figures depend on. Colors do not change
-    // it; the whole file is vetoed all the same, because the rule is read at a glance and «only
-    // these settings» would be a list that forgets to grow.
-    let entry = if measuring {
-        settings::Entry::Measuring
-    } else {
-        settings::Entry::Normal
-    };
-    let (settings, what_it_cost) = settings::to_use(entry, settings::path().as_deref());
-
-    let integrated = !measuring || std::env::var_os("MEASURE_CHROME").is_some();
-    let mut options = chrome::native_options(integrated);
-    // **The size is only asked for if somebody asked for it**, and that is why there is no default
-    // size here: without the variable, `NativeOptions::default()` carries no `inner_size` and the
-    // desktop decides, which is the behavior of always. Restoring **does not touch this**: the
-    // window's size is not saved, because leaving it to the desktop is what makes the measurements
-    // comparable. See [`SIZE_VARIABLE`].
-    let requested = size_at_startup();
-    let injected_drags = injected::drags_at_startup();
-    // **Read here with the rest of the environment, and not inside the closure**, which is where
-    // every other gate of this function is read. It is **applied** to the window after it is built,
-    // like the theme and the injected gestures beside it — `Window::opening` is born painting strips
-    // and a measured session takes them away, so no test depends on what the session that launched
-    // it exported.
-    let wants_headers = std::env::var_os(header::HEADER_VARIABLE).is_some();
-    let project_probe = project_view::probe_at_startup(measuring);
-    if let Some(size) = requested {
-        options.viewport = options.viewport.with_inner_size(size);
-    }
-
-    eframe::run_native(
-        APP_NAME,
-        options,
-        Box::new(move |cc| {
-            chrome::prepare(&cc.egui_ctx);
-            let mut window = Window::opening(
-                &cc.egui_ctx,
-                with_what,
-                &the_users_shell(),
-                requested,
-                persistence,
-            )?;
-            // Only a measurement batch asks for them, so they are set here and not in the
-            // constructor. The cell gets measured later on: the panel gesture counts its travel in
-            // cells and its hook runs before the pass that measures the font.
-            window.injected_drags = InjectedDrags::new(injected_drags, gesture_at_startup());
-            // **The theme is set here and not in the constructor**, just like the drags above and
-            // the restoring span: taking it right inside would force passing it through three
-            // constructors with thirty-three calls among tests, and none of them configures
-            // anything.
-            settings.apply_to(&mut window);
-            if integrated {
-                window.chrome.start(&cc.egui_ctx, !measuring);
-                if std::env::var("MEASURE_CHROME").ok().as_deref() == Some("zoom") {
-                    let tab = window.active().name;
-                    let focus = window.active().focus;
-                    window.pane_view.toggle(tab, focus);
-                    window.chrome.set_zoom_probe(true);
-                }
-            }
-            // **The strip is switched off by the same gate that vetoes the settings file**, and a
-            // batch opts back into it with a knob of its own: a header takes a row from every
-            // console, so a measured run that painted one would publish a grid no published batch
-            // was measured with. See [`header::Headers::resolved`].
-            window.headers = header::Headers::resolved(entry, wants_headers).integrated(integrated);
-            project_view::configure(&mut window, entry, project_probe.clone());
-            window.settings_editor = settings::editor::Editor::resolved(
-                entry,
-                std::env::var("MEASURE_SETTINGS").ok().as_deref(),
-            );
-            window.settings_editor.remember_family(&settings);
-            summary::probe::configure(
-                &mut window,
-                measuring,
-                std::env::var("MEASURE_OVERVIEW").ok().as_deref(),
-            );
-            // **The font goes apart from the rest of the settings, and it is not tidiness.** The
-            // others put a value on the window; this one talks to the text engine and **costs
-            // between 17.3 and 23.2 ms** (**D24**) because resolving a name forces enumerating the
-            // machine. It needs the context, which only exists here.
-            ligatures::configure(&mut window, &settings, &cc.egui_ctx, what_it_cost);
-            Ok(Box::new(window))
-        }),
-    )
+    startup::run()
 }
 
 /// The program that opens a console: the shell of whoever launched the application.
@@ -654,7 +540,7 @@ pub fn run() -> eframe::Result {
 /// this project exists to look at what comes out on screen. It is still not outside input —it is
 /// the user's own session—, but the day the program comes from **configuration** or from a file
 /// from outside, this line becomes sensitive surface and has to be reviewed as such. That is why
-/// the layout file **saves no text field at all**: if the type does not have it, there is nothing
+/// saved labels and directories **never supply a program**: there is nothing
 /// to connect here.
 ///
 /// **It has been in a function of its own since restoring exists**, and not for pleasure: restoring
@@ -685,6 +571,7 @@ struct Pane {
     /// Explicit display label; never used as process input or identity.
     label: Option<String>,
     project: Option<project_view::Badge>,
+    restoration: restoration::PaneState,
     /// The pseudoterminal and its queue go together on purpose. The bridge's thread lives as long
     /// as the pseudoterminal lives, not as long as the bridge does: separating them would leave a
     /// thread and a queue with no owner, growing.
@@ -1058,6 +945,7 @@ struct Window {
     summary: summary::State,
     viewer: viewer::State,
     projects: project_view::State,
+    restoration: restoration::State,
     /// The previous frame's mirror. **The deadline is armed against it**, so the deadline is
     /// rearmed **when something changes** and not when something is unwritten: without this, a
     /// non-writable directory would leave the difference in place and **the window would never go
@@ -1537,6 +1425,7 @@ impl eframe::App for Window {
         } = self.pump_them_all();
 
         project_view::refresh(self, ctx);
+        restoration::refresh(self);
 
         self.insist_on_the_size(ctx);
 
@@ -1952,6 +1841,8 @@ impl eframe::App for Window {
         // **What is pending is written before leaving.** Closing the window by hand is not dying,
         // and it is the only ending in which the half second the delay accepts losing **can** be
         // not lost. Here there is no frame left to measure, so there is no cost to declare.
+        restoration::capture_on_exit(self);
+        self.check_whether_the_layout_moved();
         self.save_now();
 
         self.publish_the_report(&mut std::io::stdout().lock())
@@ -6786,6 +6677,7 @@ mod tests {
             name,
             label: None,
             project: None,
+            restoration: restoration::PaneState::default(),
             pty,
             pty_output: PtyOutput::new(output, || {}),
             panel: None,
@@ -6919,6 +6811,7 @@ mod tests {
             summary: summary::State::default(),
             viewer: viewer::State::default(),
             projects: project_view::State::default(),
+            restoration: restoration::State::default(),
             link_press_in_progress: None,
             drag_in_progress: None,
             last_painted: Vec::new(),
@@ -23879,6 +23772,7 @@ mod tests {
                             session::StoredChild {
                                 weight: 3.0,
                                 node: session::StoredNode::Leaf(session::StoredLeaf {
+                                    cwd: None,
                                     label: None,
                                     panel_width: 52,
                                     folded: false,
@@ -23887,6 +23781,7 @@ mod tests {
                             session::StoredChild {
                                 weight: 1.0,
                                 node: session::StoredNode::Leaf(session::StoredLeaf {
+                                    cwd: None,
                                     label: None,
                                     panel_width: 24,
                                     folded: true,
@@ -23898,6 +23793,7 @@ mod tests {
                 session::StoredTab {
                     label: None,
                     root: session::StoredNode::Leaf(session::StoredLeaf {
+                        cwd: None,
                         label: None,
                         panel_width: 36,
                         folded: false,
@@ -24176,6 +24072,7 @@ mod tests {
         let one_too_many = session::StoredChild {
             weight: 1.0,
             node: session::StoredNode::Leaf(session::StoredLeaf {
+                cwd: None,
                 label: None,
                 panel_width: 36,
                 folded: false,
@@ -24611,6 +24508,7 @@ mod tests {
             tabs: vec![session::StoredTab {
                 label: None,
                 root: session::StoredNode::Leaf(session::StoredLeaf {
+                    cwd: None,
                     label: None,
                     panel_width: 0,
                     folded: false,

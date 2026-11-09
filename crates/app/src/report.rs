@@ -376,6 +376,7 @@ impl Window {
         self.chrome.publish(to)?;
         self.viewer.publish(to)?;
         self.projects.publish(to)?;
+        self.restoration.publish(to)?;
         self.summary.timing.publish(to)?;
         self.saving.publish(to)?;
         // **And discovery the same: its row goes after the rest because it too is discounted from
