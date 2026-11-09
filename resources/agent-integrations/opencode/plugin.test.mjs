@@ -28,11 +28,43 @@ test('route bootstrap, displayed request, cancellation, navigation and disposal'
   } else ({lines, state} = await import(pathToFileURL(join(dir, 'net.mjs'))))
   process.env.PANEL_DIR=dir; process.env.PANEL_ID='test'
   let route={name:'session',params:{sessionID:'root'}}, pending=[], visible=[], dispose, status='busy'
+  let permissions=[], visiblePermissions=[], descendants=[], childRoute=false
   const callbacks = new Map()
-  const api={route:{get current(){return route}},state:{ready:true,session:{get:()=>({id:'root',directory:dir}),status:()=>({type:status}),permission:()=>[],question:()=>visible}},client:{session:{children:async()=>({data:[]})},permission:{list:async()=>({data:[]})},question:{list:async()=>({data:pending})}},event:{on:(name,cb)=>{callbacks.set(name,cb);return()=>callbacks.delete(name)}},lifecycle:{onDispose:fn=>dispose=fn}}
+  const api={route:{get current(){return route}},state:{ready:true,session:{get:()=>({id:route.params?.sessionID,directory:dir,...(childRoute?{parentID:'root'}:{})}),status:()=>({type:status}),permission:id=>visiblePermissions.filter(p=>p.sessionID===id),question:id=>visible.filter(q=>q.sessionID===id)}},client:{session:{children:async()=>({data:descendants})},permission:{list:async()=>({data:permissions})},question:{list:async()=>({data:pending})}},event:{on:(name,cb)=>{callbacks.set(name,cb);return()=>callbacks.delete(name)}},lifecycle:{onDispose:fn=>dispose=fn}}
   try {
     await plugin.tui(api); await pause(80)
     assert.equal(lines.at(-1).snapshot.question,false)
+    descendants=[{id:'child',parentID:'root'},{id:'grandchild',parentID:'child'},{id:'other',parentID:'unrelated'}]
+    permissions=[{id:'p-root',sessionID:'root'},{id:'p-child',sessionID:'child'},{id:'p-other',sessionID:'other'}]
+    visiblePermissions=[...permissions]
+    pending=[{id:'q-child',sessionID:'child'},{id:'q-grandchild',sessionID:'grandchild'}]; visible=[...pending]
+    callbacks.get('permission.asked')(); await pause(80)
+    assert.equal(lines.at(-1).snapshot.permission,true,'displayed root permissions reach the wire')
+    assert.equal(lines.at(-1).snapshot.question,true,'a displayed direct-child question reaches the root wire snapshot')
+    status='idle'; callbacks.get('session.status')(); await pause(80)
+    assert.equal(lines.at(-1).snapshot.activity,'idle')
+    assert.equal(lines.at(-1).snapshot.permission,true,'idle activity cannot answer a pending permission')
+    assert.equal(lines.at(-1).snapshot.question,true,'idle activity cannot answer a pending question')
+    permissions=permissions.filter(p=>p.id!=='p-root')
+    callbacks.get('permission.replied')(); await pause(80)
+    assert.equal(lines.at(-1).snapshot.permission,true,'answering one permission must retain the concurrent direct-child permission')
+    permissions=permissions.filter(p=>p.id!=='p-child')
+    callbacks.get('permission.replied')(); await pause(80)
+    assert.equal(lines.at(-1).snapshot.permission,false,'unrelated-root permissions must not keep this root waiting')
+    assert.equal(lines.at(-1).snapshot.question,true,'permission resolution must not clear a concurrent question')
+    pending=pending.filter(q=>q.id!=='q-child')
+    callbacks.get('question.rejected')(); await pause(80)
+    assert.equal(lines.at(-1).snapshot.question,false,'grandchild requests are outside the displayed root/direct-child scope')
+    childRoute=true; route={name:'session',params:{sessionID:'child'}}
+    permissions=[{id:'p-child',sessionID:'child'}]; visiblePermissions=[...permissions]
+    pending=[{id:'q-child',sessionID:'child'}]; visible=[...pending]
+    solid.tick(); await pause(80)
+    assert.equal(lines.at(-1).snapshot.session,'child')
+    assert.equal(lines.at(-1).snapshot.permission,false,'a child route does not display root permission prompts')
+    assert.equal(lines.at(-1).snapshot.question,false,'a child route does not display root question prompts')
+    childRoute=false; route={name:'session',params:{sessionID:'root'}}
+    permissions=[]; visiblePermissions=[]; descendants=[]; pending=[]; visible=[]; status='busy'
+    solid.tick(); await pause(80)
     pending=[{id:'q',sessionID:'root'}]; visible=[...pending]; callbacks.get('question.asked')(); await pause(80)
     assert.equal(lines.at(-1).snapshot.question,true)
     api.client.question.list = async () => { throw new Error('offline') }
@@ -103,6 +135,6 @@ test('route bootstrap, displayed request, cancellation, navigation and disposal'
     await pause(1250)
     assert.equal(state.connections,refusedConnections,'a refusal permanently stops reconnection')
     assert.equal(lines.length,refusedLines,'a refusal sends no more frames')
-    await dispose()
-  } finally { if (server) await new Promise(resolve => server.close(resolve)); delete process.env.PANEL_DIR; delete process.env.PANEL_ID; await rm(dir,{recursive:true,force:true}) }
+    await dispose(); dispose=undefined
+  } finally { if (dispose) await dispose(); if (server) await new Promise(resolve => server.close(resolve)); delete process.env.PANEL_DIR; delete process.env.PANEL_ID; await rm(dir,{recursive:true,force:true}) }
 })
