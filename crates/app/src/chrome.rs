@@ -136,7 +136,17 @@ fn button(ui: &egui::Ui, rect: Rect, label: &str, hint: &str, bg: Color32, fg: C
     if response.hovered() {
         ui.painter().rect_filled(rect.shrink(2.0), 4.0, bg);
     }
-    let p = ui.painter_at(rect);
+    paint_button_icon(&ui.painter_at(rect), rect, label, hint, fg);
+    response.clicked()
+}
+
+pub(crate) fn paint_button_icon(
+    p: &egui::Painter,
+    rect: Rect,
+    label: &str,
+    hint: &str,
+    fg: Color32,
+) {
     let c = rect.center();
     // Use the approved prototype's 24-unit SVG paths inside its 17-point icon box.
     let scale = 17.0 / 24.0;
@@ -215,7 +225,6 @@ fn button(ui: &egui::Ui, rect: Rect, label: &str, hint: &str, bg: Color32, fg: C
             );
         }
     }
-    response.clicked()
 }
 
 /// Paint and claim the titlebar before settings and terminal input dispatch.

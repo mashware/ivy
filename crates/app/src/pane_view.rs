@@ -182,6 +182,50 @@ pub(crate) fn paint_borders(window: &mut crate::Window, ui: &egui::Ui, rects: &[
     }
 }
 
+fn menu_item(ui: &mut egui::Ui, label: &str, enabled: bool) -> bool {
+    let button = egui::Button::new((label, egui::Atom::grow()))
+        .frame_when_inactive(false)
+        .min_size(egui::vec2(ui.available_width(), 28.0));
+    ui.add_enabled(enabled, button).clicked()
+}
+
+fn split_buttons(
+    ui: &mut egui::Ui,
+    theme: crate::theme::Theme,
+    enabled: [bool; 2],
+) -> Option<usize> {
+    let width = (ui.available_width() - 2.0).max(0.0) / 2.0;
+    let mut chosen = None;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        for (index, label) in ["Split right", "Split down"].into_iter().enumerate() {
+            let response = ui.add_enabled(
+                enabled[index],
+                egui::Button::new("").min_size(egui::vec2(width, 30.0)),
+            );
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled[index], label)
+            });
+            crate::chrome::paint_button_icon(
+                ui.painter(),
+                response.rect,
+                "",
+                label,
+                if enabled[index] {
+                    theme.foreground()
+                } else {
+                    theme.foreground().gamma_multiply(0.35)
+                },
+            );
+            if response.clicked() {
+                chosen = Some(index);
+            }
+            response.on_hover_text(label);
+        }
+    });
+    chosen
+}
+
 /// Returns true for every frame owned by the editor, including its dismissal.
 pub(crate) fn before_keys(
     window: &mut crate::Window,
@@ -235,48 +279,38 @@ pub(crate) fn before_keys(
                             .max_height((viewport.height() - 20.0).max(1.0))
                             .show(ui, |ui| {
                                 crate::settings::editor::view::style(ui, theme);
-                                ui.heading("Console actions");
-                                if ui
-                                    .add_enabled(selected.is_some(), egui::Button::new("Copy"))
-                                    .clicked()
-                                {
+                                ui.set_width(190.0_f32.min((viewport.width() - 20.0).max(1.0)));
+                                ui.spacing_mut().item_spacing = egui::vec2(0.0, 2.0);
+                                ui.visuals_mut().widgets.hovered.weak_bg_fill =
+                                    theme.divider().gamma_multiply(0.55);
+                                ui.visuals_mut().widgets.active.weak_bg_fill = theme.divider();
+                                if let Some(index) = split_buttons(ui, theme, enabled) {
+                                    action = Some(5 + index);
+                                }
+                                ui.separator();
+                                if menu_item(ui, "Copy", selected.is_some()) {
                                     action = Some(8);
                                 }
-                                if ui.button("Paste").clicked() {
+                                if menu_item(ui, "Paste", true) {
                                     action = Some(9);
                                 }
                                 ui.separator();
-                                if ui.button("Rename").clicked() {
+                                if menu_item(ui, "Rename", true) {
                                     action = Some(0);
                                 }
-                                for (index, label) in
-                                    ["Split right", "Split down"].into_iter().enumerate()
-                                {
-                                    if ui
-                                        .add_enabled(enabled[index], egui::Button::new(label))
-                                        .clicked()
-                                    {
-                                        action = Some(5 + index);
-                                    }
-                                }
-                                if ui.button("Review changes").clicked() {
+                                if menu_item(ui, "Review changes", true) {
                                     action = Some(7);
                                 }
-                                if ui.button("Toggle information panel").clicked() {
+                                if menu_item(ui, "Toggle information panel", true) {
                                     action = Some(1);
                                 }
-                                if ui.button("Maximize / restore").clicked() {
+                                if menu_item(ui, "Maximize / restore", true) {
                                     action = Some(2);
                                 }
-                                if ui
-                                    .add_enabled(can_close, egui::Button::new("Close console"))
-                                    .clicked()
-                                {
+                                if menu_item(ui, "Close console", can_close) {
                                     action = Some(3);
                                 }
-                                if ui.button("Cancel").clicked()
-                                    || ui.input(|i| i.key_pressed(egui::Key::Escape))
-                                {
+                                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                                     action = Some(4);
                                 }
                             });

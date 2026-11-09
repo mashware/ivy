@@ -885,8 +885,13 @@ mod tests {
         frame(&mut window, &ctx, area, vec![]);
         let shapes = frame(&mut window, &ctx, area, vec![]);
         assert!(has_text(&shapes, "Rename"));
-        assert!(has_text(&shapes, "Split down"));
-        let split = text_center(&shapes, "Split right");
+        assert!(!has_text(&shapes, "Console actions"));
+        assert!(!has_text(&shapes, "Cancel"));
+        assert!(!has_text(&shapes, "Split down"));
+        let popup = ctx
+            .memory(|memory| memory.area_rect(egui::Id::new("console-context-menu")))
+            .unwrap();
+        let split = super::super::context_clipboard::split_menu_targets(&shapes, popup)[0].center();
         frame(&mut window, &ctx, area, click_at(split));
         assert_eq!(
             window.active().panes().len(),
@@ -999,7 +1004,7 @@ mod tests {
                 window
                     .pane_view
                     .open_menu(tab, pane, true, egui::pos2(400.0, 300.0));
-                "Console actions"
+                "Paste"
             };
             for (config, surface, ink) in [
                 (

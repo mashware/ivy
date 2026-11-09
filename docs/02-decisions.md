@@ -8937,7 +8937,9 @@ source documentation alone do not establish a working desktop integration.
 Rename dialogs are centered on the viewport. Console context menus retain the opening pointer
 position with the pane identity and are constrained inside the viewport. They keep the existing
 pane actions and add Copy for a selected terminal range and Paste for the ordinary clipboard.
-Opening or dismissing a menu preserves the selection. Escape and outside clicks dismiss it, with
+The menu has no heading or Cancel row. Two adjacent split buttons at the top reuse the titlebar
+icons; text actions occupy full-width rows with a hover highlight. Opening or dismissing a menu
+preserves the selection. Escape and outside clicks dismiss it, with
 the complete gesture retained until release; input ownership does not multiply console opacity.
 This extends D62 with the user's explicit request for an ordinary pointer menu, rather than a
 floating dialog in a location chosen by the interface engine.

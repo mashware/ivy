@@ -135,7 +135,7 @@ mod tests {
         );
         one_frame_in(&mut window, &ctx, area, vec![]);
         let shapes = ui_pass(&mut window, &ctx, area, egui::RawInput::default());
-        let rect = dialog_rect(&shapes, "Console actions", window.theme.panel_background());
+        let rect = dialog_rect(&shapes, "Paste", window.theme.panel_background());
         assert!(area.contains_rect(rect), "menu escapes viewport: {rect:?}");
         assert!(
             rect.distance_to_pos(at) < 3.0,
@@ -167,10 +167,7 @@ mod tests {
             );
             one_frame_in(&mut window, &ctx, area, vec![]);
             let open = ui_pass(&mut window, &ctx, area, egui::RawInput::default());
-            assert!(
-                the_text_queued_up(&open, "Console actions"),
-                "menu did not open"
-            );
+            assert!(the_text_queued_up(&open, "Paste"), "menu did not open");
             window.active_mut().panes_mut()[0]
                 .screen
                 .advance(b"\x1b[?1000h\x1b[?1006h");
@@ -275,7 +272,7 @@ mod tests {
         );
         one_frame_in(&mut window, &ctx, area, vec![]);
         let open = ui_pass(&mut window, &ctx, area, egui::RawInput::default());
-        assert!(the_text_queued_up(&open, "Console actions"));
+        assert!(the_text_queued_up(&open, "Paste"));
         assert_eq!(colors(&open), baseline, "opening a menu dimmed the console");
     }
 
@@ -435,7 +432,7 @@ mod tests {
         output.drop_without_applying_deltas();
         let shown = ui_pass(&mut window, &ctx, area, egui::RawInput::default());
         assert!(
-            the_text_queued_up(&shown, "Console actions"),
+            the_text_queued_up(&shown, "Paste"),
             "disabled Copy closed the menu"
         );
     }
@@ -581,7 +578,7 @@ mod tests {
         let area = area_of(1280.0);
         one_frame_in(&mut window, &ctx, area, vec![]);
         let shapes = menu_at_console(&mut window, &ctx, area, 1);
-        let rect = dialog_rect(&shapes, "Console actions", window.theme.panel_background());
+        let rect = dialog_rect(&shapes, "Paste", window.theme.panel_background());
         assert!(
             area.contains_rect(rect),
             "menu escapes a short viewport: {rect:?}"
@@ -688,7 +685,7 @@ mod tests {
             if button == egui::PointerButton::Secondary {
                 one_frame_in(&mut window, &ctx, area, vec![]);
                 let shapes = ui_pass(&mut window, &ctx, area, egui::RawInput::default());
-                assert!(the_text_queued_up(&shapes, "Console actions"));
+                assert!(the_text_queued_up(&shapes, "Paste"));
                 one_frame_in(
                     &mut window,
                     &ctx,
@@ -859,4 +856,47 @@ mod tests {
             }
         }
     }
+}
+
+#[cfg(test)]
+use eframe::egui;
+
+#[cfg(test)]
+pub(super) fn split_menu_targets(
+    shapes: &[egui::epaint::ClippedShape],
+    popup: egui::Rect,
+) -> [egui::Rect; 2] {
+    fn collect(shape: &egui::Shape, popup: egui::Rect, targets: &mut Vec<egui::Rect>) {
+        match shape {
+            egui::Shape::Rect(rect)
+                if popup.contains_rect(rect.rect)
+                    && rect.rect.width() > 40.0
+                    && (28.0..=32.0).contains(&rect.rect.height()) =>
+            {
+                targets.push(rect.rect);
+            }
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    collect(shape, popup, targets);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut targets = Vec::new();
+    for shape in shapes {
+        collect(&shape.shape, popup, &mut targets);
+    }
+    targets.sort_by(|a, b| {
+        a.top()
+            .total_cmp(&b.top())
+            .then(a.left().total_cmp(&b.left()))
+    });
+    targets.dedup();
+    assert!(
+        targets.len() >= 2,
+        "the two visible split buttons are missing"
+    );
+    assert!((targets[0].center().y - targets[1].center().y).abs() < 1.0);
+    [targets[0], targets[1]]
 }
