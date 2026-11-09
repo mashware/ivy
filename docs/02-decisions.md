@@ -8102,6 +8102,19 @@ isolate the controls. The menu and clicks were exercised functionally; this batc
 an open menu or continuous clicking, and these figures do not claim that cost.
 
 
+**Gesture brightness clarification (9 November 2026, Ivy #13).** Retaining a pane-header
+press until its release blocks interaction without adding a disabled appearance to the shared
+console painter. egui's `Ui::disable` both denies interaction and multiplies painter opacity;
+the input guard therefore preserves the opacity that existed before disabling. This keeps
+close and information-panel controls from briefly fading unrelated consoles, while preserving
+existing modal opacity and the complete gesture ownership required above.
+
+Discarded: removing the input guard (release could reach a console or another control), forcing
+opacity to one (would erase an intentional inherited fade), and changing the global disabled
+style (would change the appearance of genuinely unavailable controls). The regression observes
+rendered glyph vertex colors during press, hold, release and idle; text presence alone cannot
+prove stable brightness. Native desktop observation remains separate from that rendering proof.
+
 ## D63 — Graphical settings stage the shared file and apply on restart
 
 **The restart-only Save boundary is superseded by D64 when #324 is delivered.** The staged editing, shared-file preservation and historical measurements below remain their original record.
