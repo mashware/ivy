@@ -55,10 +55,26 @@ pub(crate) fn paint(ui: &egui::Ui, rect: egui::Rect, view: View) {
         .ctx()
         .data(|data| data.get_temp::<egui::TextureHandle>(key(view.client)))
     {
+        // The official OpenCode favicon includes a wide square background around its 4:5 mark.
+        // Sample the mark itself and preserve its proportions inside the shared logo slot.
+        let (image_rect, uv) = if view.client == Client::OpenCode {
+            (
+                egui::Rect::from_center_size(
+                    rect.center(),
+                    egui::vec2(rect.width() * 0.8, rect.height()),
+                ),
+                egui::Rect::from_min_max(egui::pos2(0.25, 0.1875), egui::pos2(0.75, 0.8125)),
+            )
+        } else {
+            (
+                rect,
+                egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+            )
+        };
         painter.image(
             texture.id(),
-            rect,
-            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+            image_rect,
+            uv,
             egui::Color32::WHITE.gamma_multiply(alpha),
         );
     }
