@@ -358,6 +358,37 @@ mod tests {
     }
 
     #[test]
+    fn split_directory_unknown_after_source_exit_uses_ordinary_launch_directory() {
+        let sandbox = Sandbox::new();
+        let output = sandbox.0.join("ordinary-pwd.txt");
+        let ctx = egui::Context::default();
+        // Observe the ordinary user-shell launch, including its own startup configuration.
+        let mut ordinary =
+            Pane::new_counting_reads(&ctx, 90, crate::control::ReadActivity::default()).unwrap();
+        ordinary
+            .pty
+            .write(format!("command pwd > '{}'\n", output.display()).as_bytes())
+            .unwrap();
+        wait(|| fs::read_to_string(&output).is_ok_and(|s| !s.trim().is_empty()));
+        let expected = PathBuf::from(fs::read_to_string(&output).unwrap().trim_end());
+        let mut window = window_of_tabs([["exit 0", "sleep 30"]]);
+        wait(|| {
+            window.active_mut().panes_mut()[0]
+                .pty
+                .working_directory()
+                .is_none()
+        });
+        assert!(
+            !window.active().panes()[0]
+                .screen
+                .working_directory_reported()
+        );
+        window.split_the_focused(Orientation::Rows, &ctx, area(), &CellMetrics::of(8.0, 16.0));
+        assert_eq!(window.active().panes().len(), 3);
+        assert_newborn_pwd(&mut window, &sandbox, &expected);
+    }
+
+    #[test]
     fn split_directory_fallback_shell_receives_the_same_directory() {
         let sandbox = Sandbox::new();
         let source = sandbox.directory("fallback directory");
@@ -429,5 +460,16 @@ mod tests {
         let actual = fs::read_to_string(&output).unwrap();
         assert_ne!(actual.trim_end(), source.to_string_lossy());
         assert_ne!(actual.trim_end(), "/some/project");
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    #[test]
+    fn drive_uri_directory_becomes_an_absolute_native_path() {
+        let path =
+            super::published_directory(std::path::Path::new("/C:/work/project one")).unwrap();
+        assert_eq!(path, std::path::PathBuf::from("C:/work/project one"));
+        assert!(path.is_absolute());
     }
 }

@@ -171,6 +171,12 @@ pub(super) fn is_local_host(host: &[u8]) -> bool {
             return host.eq_ignore_ascii_case(&name[..end]);
         }
     }
+    // Windows supplies its local computer name in the inherited session environment. This
+    // is locality metadata, not authentication; the same session already selects the shell.
+    #[cfg(windows)]
+    if let Ok(name) = std::env::var("COMPUTERNAME") {
+        return !name.is_empty() && host.eq_ignore_ascii_case(name.as_bytes());
+    }
     false
 }
 
@@ -237,6 +243,18 @@ mod tests {
         d.advance(b"\x1b]7;file://definitely-a-different-host.invalid/remote\x07");
         assert_eq!(d.path(), None);
     }
+    #[test]
+    #[cfg(windows)]
+    fn accepts_windows_session_hostname_but_not_a_different_host() {
+        let name = std::env::var("COMPUTERNAME").expect("Windows session computer name");
+        assert!(!name.is_empty());
+        let mut d = Directory::default();
+        d.advance(format!("\x1b]7;file://{name}/C:/work\x07").as_bytes());
+        assert_eq!(d.path(), Some(Path::new("/C:/work")));
+        d.advance(b"\x1b]7;file://different-host.invalid/C:/work\x07");
+        assert_eq!(d.path(), None);
+    }
+
     #[test]
     fn remote_directory_clears_context_in_next_painted_snapshot() {
         let mut screen = crate::Screen::new(crate::Size { rows: 2, cols: 30 });
