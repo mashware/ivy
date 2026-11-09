@@ -330,7 +330,7 @@ mod tests {
         window.chrome.enable();
         window.headers = window.headers.integrated(true);
         received.wait_until_ready(Duration::from_secs(5));
-        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1800.0));
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 800.0));
         let shapes = open_connection_guide(&mut window, &ctx, area);
         assert!(!has_text(&shapes, "1. Locate the MCP bridge"));
         let at = text_center(&shapes, "Copy setup prompt");
@@ -360,6 +360,18 @@ mod tests {
             });
         assert!(output.platform_output.commands.iter().any(|command| matches!(command, egui::OutputCommand::CopyText(text) if text.contains(&serde_json::to_string(&expected.to_string_lossy()).unwrap())
             && text.contains("local stdio MCP server named ivy")
+            && text.contains("env_vars = [\"PANEL_ID\", \"PANEL_DIR\"]")
+            && text.contains("Tool discovery alone does not prove a connection")
+            && text.contains("shared background server lacks that console identity")
+            && text.contains("do not assume the client is outside Ivy")
+            && text.contains("codex --help")
+            && text.contains("codex resume --help")
+            && text.contains("Only if that command supports --no-daemon")
+            && text.contains("run codex --no-daemon or")
+            && text.contains("codex resume --no-daemon <session-id>")
+            && text.contains("client-version limitation")
+            && text.contains("not correct-console routing")
+            && text.contains("distinct statuses from two separate Codex consoles")
             && text.contains("Never hard-code")
             && text.contains("PANEL_ID and PANEL_DIR")
             && text.contains("reconnecting or restarting")
@@ -370,6 +382,82 @@ mod tests {
             "copy has no visible confirmation"
         );
         output.drop_without_applying_deltas();
+        let shapes = frame(&mut window, &ctx, area, vec![]);
+        let at = text_center(&shapes, "Manual setup and diagnostics");
+        frame(&mut window, &ctx, area, vec![egui::Event::PointerMoved(at)]);
+        frame(&mut window, &ctx, area, click_at(at));
+        let time = ctx.input(|input| input.time) + 1.0;
+        ui_pass(
+            &mut window,
+            &ctx,
+            area,
+            egui::RawInput {
+                time: Some(time),
+                ..Default::default()
+            },
+        );
+        let shapes = ui_pass(
+            &mut window,
+            &ctx,
+            area,
+            egui::RawInput {
+                time: Some(time + 1.0),
+                ..Default::default()
+            },
+        );
+        let expected_manual = [
+            "Codex: forward the console identity",
+            "env_vars = [\"PANEL_ID\", \"PANEL_DIR\"]",
+            "Do not hard-code PANEL_ID or PANEL_DIR",
+            "These are variable names, not saved console values.",
+            "Tool discovery alone does not prove a connection",
+            "shared background server whose environment lacks this console's identity",
+            "Check codex --help",
+            "codex resume --help",
+            "If that command supports --no-daemon",
+            "A successful tool call proves a usable connection.",
+            "codex --no-daemon",
+            "codex resume --no-daemon <session-id>",
+        ];
+        let visible = |shapes: &[egui::epaint::ClippedShape], needle: &str| {
+            shapes.iter().any(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => {
+                    text.galley.text().contains(needle)
+                        && clipped
+                            .clip_rect
+                            .contains_rect(egui::Rect::from_min_size(text.pos, text.galley.size()))
+                }
+                _ => false,
+            })
+        };
+        assert!(
+            !visible(&shapes, "codex resume --no-daemon <session-id>"),
+            "the lower guidance must require scrolling in a normal-height window"
+        );
+        let mut seen = expected_manual.map(|text| visible(&shapes, text));
+        for step in 0..8 {
+            let shapes = ui_pass(
+                &mut window,
+                &ctx,
+                area,
+                egui::RawInput {
+                    time: Some(time + 2.0 + f64::from(step)),
+                    events: vec![egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Point,
+                        phase: egui::TouchPhase::Move,
+                        delta: egui::vec2(0.0, -300.0),
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                    ..Default::default()
+                },
+            );
+            for (found, text) in seen.iter_mut().zip(expected_manual) {
+                *found |= visible(&shapes, text);
+            }
+        }
+        for (found, text) in seen.into_iter().zip(expected_manual) {
+            assert!(found, "manual guidance missing while scrolling: {text}");
+        }
         let escape = egui::Event::Key {
             key: egui::Key::Escape,
             physical_key: None,
