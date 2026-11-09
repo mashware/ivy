@@ -20,7 +20,7 @@ mkdir "$tmp/package" "$tmp/payload"
 bsdtar -xf "$package" -C "$tmp/package"
 bsdtar -xf "$payload" -C "$tmp/payload"
 grep -qx 'pkgname = ivy-terminal' "$tmp/package/.PKGINFO"
-grep -qx "pkgver = $version-1" "$tmp/package/.PKGINFO"
+grep -Fqx "pkgver = $version-1" "$tmp/package/.PKGINFO"
 grep -qx 'arch = x86_64' "$tmp/package/.PKGINFO"
 [[ ! -e $tmp/package/.INSTALL && ! -e $tmp/package/home && ! -e $tmp/package/root ]]
 for binary in app panel-mcp; do

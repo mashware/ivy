@@ -8751,3 +8751,7 @@ The package retains the current GPLv3/COPYRIGHT and third-party asset notices. C
 license/notice texts are collected from resolved release dependencies; known Apache-2.0 choices
 may use the repository's preserved canonical text when published crates omit it. Unknown missing
 texts stop packaging. This preserves existing licenses rather than choosing new ones.
+
+The owner selected Arch x86_64 as the next delivery before macOS/Windows. Arch uses native makepkg metadata and pacman lifecycle checks around the same verified Ubuntu-baseline Linux payload. Reusing binary bytes avoids independent builds producing different executables within a release, while explicit Arch dependencies and actual installed-runtime checks establish whether that payload works on Arch. AUR/official repository submission remains separate.
+
+Public alpha1 upload demonstrated that GitHub rewrites '~' in asset names to '.', breaking manifest/checksum filenames. Asset names therefore retain SemVer spelling (`ivy_<V>_amd64.deb`); Debian control metadata still maps the prerelease hyphen to tilde. Public transport-safe names and package-manager version syntax are separate contracts.

@@ -1,10 +1,11 @@
-# Ivy 0.1.0-alpha.1
+# Ivy 0.1.0-alpha.2
 
-## Experimental Ubuntu packages
+## Experimental Linux packages
 
 - Install Ivy and its MCP bridge together from a `.deb`, with an application-menu entry and icon.
+- Install the same Linux executables on Arch from a native `.pkg.tar.zst` using `pacman -U`.
 - Updates and removal preserve existing preferences and saved layouts.
-- This alpha targets Ubuntu 24.04 and 26.04 on x86_64; it is unsigned and experimental.
+- This alpha targets Ubuntu 24.04, 26.04 and current Arch Linux on x86_64; it is unsigned and experimental.
 
 ## Work across consoles
 
