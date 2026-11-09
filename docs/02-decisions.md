@@ -8777,6 +8777,24 @@ The owner selected Arch x86_64 as the next delivery before macOS/Windows. Arch u
 
 Public alpha1 upload demonstrated that GitHub rewrites '~' in asset names to '.', breaking manifest/checksum filenames. Asset names therefore retain SemVer spelling (`ivy_<V>_amd64.deb`); Debian control metadata still maps the prerelease hyphen to tilde. Public transport-safe names and package-manager version syntax are separate contracts.
 
+The Mac delivery supplies separate Apple Silicon/Intel DMGs for macOS15+, preserving Ivy.app,
+`io.github.mashware.ivy` and the existing user-data namespace. A DMG with an Applications shortcut
+was chosen over an installer package because the app owns no system services or user configuration.
+Native builds and architecture/minimum-OS/dependency checks prevent shipping a renamed Linux binary
+or an executable requiring an undeclared Homebrew installation. Original license texts travel inside
+Contents/Resources. Python's plist library handles bundle metadata directly rather than interpolating XML.
+
+Local ad-hoc signatures seal the Mac bundle's nested executable and resources, but the release remains
+unsigned in the publisher-identity sense: no Developer ID or notarization is provisioned. Per-app
+approval follows Apple's normal Privacy & Security flow. Global Gatekeeper bypasses and quarantine
+removal were discarded because an experimental installer must not weaken the person's system.
+Native runner lifecycle/MCP checks remain distinct from actual desktop and quarantine evidence.
+
+Offline export of both Mac dependency graphs exposed published Objective-C binding crates without
+license files. The build retains pinned upstream MIT text and licensing context, original Cargo
+attribution and source revisions for the explicitly verified versions. Provenance and the dispatch
+MIT fallback distinction are recorded in resources/licenses/macos/README.md; unknown versions still
+stop packaging. This preserves declared terms and available attribution rather than changing licenses.
 
 ## D77 — Console text has its own inner spacing
 

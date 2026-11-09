@@ -48,8 +48,9 @@ still a regular terminal.
 These instructions are for a Linux desktop. Reopening Ivy restores the layout and starts fresh
 programs; it does not resume running agent sessions.
 
-Packaged downloads are not published yet. The first Linux packaging delivery provides a `.deb`
-builder and an explicit prerelease workflow; see the [installation and release guide](docs/10-installation.md).
+Experimental Ubuntu and Arch downloads are available in [Releases](https://github.com/mashware/ivy/releases).
+The macOS delivery adds Apple Silicon and Intel DMG builders; see the
+[installation and release guide](docs/10-installation.md) for the packages actually published and their trial status.
 To build from source, you need:
 
 - Git and [Rust installed through rustup](https://rustup.rs/). The repository selects its pinned

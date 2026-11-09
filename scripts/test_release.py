@@ -101,6 +101,36 @@ class ReleaseTest(unittest.TestCase):
         self.package.write_bytes(b"tampered")
         self.assertNotEqual(lines[0].split("  ")[0], hashlib.sha256(self.package.read_bytes()).hexdigest())
 
+    def test_verified_mac_notice_fallback_preserves_original_text_and_rejects_new_versions(self):
+        source = self.root / "mac-source"
+        source.mkdir()
+        original = b'[package]\nname="block2"\nlicense="MIT"\n'
+        (source / "Cargo.toml").write_bytes(original)
+        package = {"id": "mac", "name": "block2", "version": "0.5.1", "source": "registry+x",
+                   "manifest_path": str(source / "Cargo.toml"), "license": "MIT",
+                   "repository": "https://github.com/madsmtm/objc2", "authors": ["Steven Sheldon"]}
+        data = {"packages": [{"id": name, "name": name, "source": None}
+                             for name in ("app", "panel-control")] + [package],
+                "workspace_members": ["app", "panel-control"], "resolve": {"nodes": [
+                    {"id": "app", "deps": [{"pkg": "mac", "dep_kinds": [{"kind": None}]}]},
+                    {"id": "panel-control", "deps": []}, {"id": "mac", "deps": []}]}}
+        metadata = self.root / "mac.json"
+        metadata.write_text(json.dumps(data))
+        collect = run_path(str(SCRIPT))["notices"]
+        out = self.root / "mac-notices"
+        collect(metadata, out)
+        dest = out / "block2-0.5.1"
+        self.assertEqual(hashlib.sha256((dest / "MIT-LICENSE.txt").read_bytes()).hexdigest(),
+                         "e353f37b12aefbb9f9b29490e837cfee05d9bda70804b3562839a3285c1df1e5")
+        self.assertEqual((dest / "UPSTREAM-Cargo.toml").read_bytes(), original)
+        self.assertIn("Steven Sheldon", (dest / "FALLBACK-ATTRIBUTION.txt").read_text())
+        self.assertEqual(hashlib.sha256((dest / "UPSTREAM-PROJECT-LICENSING.md").read_bytes()).hexdigest(),
+                         "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54")
+        package["version"] = "99.0.0"
+        metadata.write_text(json.dumps(data))
+        with self.assertRaisesRegex(ValueError, "missing notice"):
+            collect(metadata, self.root / "unverified")
+
     def test_embedded_font_terms_are_preserved_separately_from_crate_license(self):
         source = self.root / "fonts-source"
         (source / "fonts").mkdir(parents=True)
@@ -161,6 +191,31 @@ class ReleaseTest(unittest.TestCase):
         name = json.loads((self.root / "release-manifest.json").read_text())["artifacts"][0]["name"]
         self.assertEqual(name, "ivy_0.1.0-alpha.1_amd64.deb")
         self.assertRegex(name, r"^[A-Za-z0-9._-]+$")
+
+    def test_macos_release_requires_both_architectures_and_records_native_targets(self):
+        arch = self.root / "ivy-terminal-0.1.0alpha1-1-x86_64.pkg.tar.zst"
+        arch.write_bytes(b"Arch fixture")
+        arm = self.root / "Ivy-0.1.0-alpha.1-macos-arm64.dmg"
+        intel = self.root / "Ivy-0.1.0-alpha.1-macos-x86_64.dmg"
+        args = ("--include-arch", "--include-macos")
+        self.assertNotEqual(self.run_release(*args).returncode, 0)
+        arm.write_bytes(b"Apple Silicon DMG fixture")
+        self.assertNotEqual(self.run_release(*args).returncode, 0)
+        intel.write_bytes(b"Intel DMG fixture")
+        self.assertEqual(self.run_release(*args).returncode, 0)
+        manifest = json.loads((self.root / "release-manifest.json").read_text())
+        self.assertEqual(len(manifest["artifacts"]), 4)
+        for entry, expected in zip(manifest["artifacts"][2:], (
+                (arm, "aarch64-apple-darwin", "macos-15"),
+                (intel, "x86_64-apple-darwin", "macos-15-intel"))):
+            path, target, runner = expected
+            self.assertEqual((entry["name"], entry["target"], entry["built_on"], entry["signing"]),
+                             (path.name, target, runner, "unsigned"))
+            self.assertEqual(entry["sha256"], hashlib.sha256(path.read_bytes()).hexdigest())
+        self.assertEqual(len((self.root / "SHA256SUMS").read_text().splitlines()), 5)
+        self.assertNotEqual(self.run_release("--include-arch").returncode, 0)
+        (self.root / "unexpected.dmg").write_bytes(b"extra")
+        self.assertNotEqual(self.run_release(*args).returncode, 0)
 
     def test_arch_versions_keep_numbered_identifiers_without_forbidden_hyphens(self):
         convert = run_path(str(SCRIPT))["arch_version"]

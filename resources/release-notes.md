@@ -1,11 +1,12 @@
-# Ivy 0.1.0-alpha.2
+# Ivy 0.1.0-alpha.3
 
-## Experimental Linux packages
+## Experimental installers
 
 - Install Ivy and its MCP bridge together from a `.deb`, with an application-menu entry and icon.
 - Install the same Linux executables on Arch from a native `.pkg.tar.zst` using `pacman -U`.
+- On macOS 15 or later, choose the Apple Silicon or Intel `.dmg` and drag Ivy into Applications.
 - Updates and removal preserve existing preferences and saved layouts.
-- This alpha targets Ubuntu 24.04, 26.04 and current Arch Linux on x86_64; it is unsigned and experimental.
+- This alpha adds macOS 15+ on Apple Silicon and Intel alongside Ubuntu and Arch; downloads are unsigned and experimental.
 
 ## Work across consoles
 
