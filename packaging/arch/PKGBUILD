@@ -1,0 +1,20 @@
+# Native Arch metadata around the shared, checked Linux binary payload.
+pkgname=ivy-terminal
+pkgver=${IVY_ARCH_VERSION:?}
+pkgrel=1
+pkgdesc='Terminal for hosting agents with a status panel per console'
+arch=('x86_64')
+url='https://github.com/mashware/ivy'
+license=('GPL-3.0-only')
+depends=('glibc' 'gcc-libs' 'fontconfig' 'libx11' 'libxcb' 'libxcursor' 'libxi'
+         'libxrandr' 'libxkbcommon' 'libxkbcommon-x11' 'wayland' 'libglvnd')
+# Preserve the very bytes already checked in the baseline build, including notices.
+options=('!strip' '!debug')
+source=('payload.tar')
+sha256sums=("${IVY_PAYLOAD_SHA256:?}")
+
+package() {
+    cp -a "$srcdir/usr" "$pkgdir/"
+    install -Dm644 "$srcdir/usr/share/doc/ivy-terminal/LICENSE" \
+        "$pkgdir/usr/share/licenses/ivy-terminal/LICENSE"
+}
