@@ -171,16 +171,51 @@ mod tests {
                 the_text_queued_up(&open, "Console actions"),
                 "menu did not open"
             );
-            let events = if outside {
-                mouse(
-                    area.left_bottom() + egui::vec2(20.0, -20.0),
-                    egui::PointerButton::Primary,
-                    egui::Modifiers::NONE,
-                )
+            window.active_mut().panes_mut()[0]
+                .screen
+                .advance(b"\x1b[?1000h\x1b[?1006h");
+            for key in [egui::Key::ArrowDown, egui::Key::Home, egui::Key::PageUp] {
+                one_frame_in(
+                    &mut window,
+                    &ctx,
+                    area,
+                    vec![key_press(key, egui::Modifiers::NONE)],
+                );
+            }
+            if outside {
+                let at = console_point(&window, &ctx, area, 0);
+                for pressed in [true, false] {
+                    one_frame_in(
+                        &mut window,
+                        &ctx,
+                        area,
+                        vec![
+                            egui::Event::PointerMoved(at),
+                            egui::Event::PointerButton {
+                                pos: at,
+                                button: egui::PointerButton::Primary,
+                                pressed,
+                                modifiers: egui::Modifiers::NONE,
+                            },
+                        ],
+                    );
+                }
             } else {
-                vec![key_press(egui::Key::Escape, egui::Modifiers::NONE)]
-            };
-            one_frame_in(&mut window, &ctx, area, events);
+                for pressed in [true, false] {
+                    one_frame_in(
+                        &mut window,
+                        &ctx,
+                        area,
+                        vec![egui::Event::Key {
+                            key: egui::Key::Escape,
+                            physical_key: None,
+                            pressed,
+                            repeat: false,
+                            modifiers: egui::Modifiers::NONE,
+                        }],
+                    );
+                }
+            }
             one_frame_in(&mut window, &ctx, area, vec![]);
             one_frame_in(
                 &mut window,
@@ -195,13 +230,18 @@ mod tests {
     #[test]
     fn opening_menu_preserves_unrelated_console_colors() {
         let (mut window, ctx) = warmed();
-        window.active_mut().panes_mut()[0].label = Some("Unaffected console".into());
         let area = area_of(1280.0);
+        for _ in 0..2 {
+            one_frame_in(&mut window, &ctx, area, vec![]);
+        }
+        window.active_mut().panes_mut()[0]
+            .screen
+            .advance(b"\x1b[2J\x1b[H\x1b[38;2;17;231;83mQ\x1b[0m");
         let colors = |shapes: &[egui::epaint::ClippedShape]| {
             shapes
                 .iter()
                 .find_map(|shape| match &shape.shape {
-                    egui::Shape::Text(text) if text.galley.text() == "Unaffected console" => Some(
+                    egui::Shape::Text(text) if text.galley.text() == "Q" => Some(
                         text.galley
                             .rows
                             .iter()
@@ -217,10 +257,15 @@ mod tests {
                     ),
                     _ => None,
                 })
-                .expect("console label is painted")
+                .expect("colored terminal glyph is painted")
         };
         let baseline = colors(&ui_pass(&mut window, &ctx, area, egui::RawInput::default()));
         assert!(!baseline.is_empty());
+        assert!(
+            baseline
+                .iter()
+                .all(|color| *color == egui::Color32::from_rgb(17, 231, 83))
+        );
         let at = header_point(&window, &ctx, area, 1);
         one_frame_in(
             &mut window,
@@ -676,61 +721,142 @@ mod tests {
     }
 
     #[test]
-    fn menu_paste_uses_current_bracketed_mode_and_holds_overlong_lines() {
-        for bracketed in [false, true] {
-            let Some(ceiling) = keyboard::the_longest_line_a_reader_keeps() else {
-                return;
-            };
-            let received = term_core::received::Received::new("context-paste-protection");
-            let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
-            window.chrome.enable();
-            window.headers = window.headers.integrated(true);
-            let (service, harness) = crate::clipboard::Service::testing();
-            window.clipboard = service;
-            received.wait_until_ready(Duration::from_secs(5));
-            let ctx = egui::Context::default();
-            let area = area_of(1280.0);
-            for _ in 0..2 {
-                one_frame_in(&mut window, &ctx, area, vec![]);
-            }
-            let target = window.active().focus;
-            let shapes = menu_at_console(&mut window, &ctx, area, 0);
-            choose_menu_item(&mut window, &ctx, area, &shapes, "Paste");
-            assert_eq!(
-                harness.requested(),
-                Some((target, crate::clipboard::Source::Clipboard))
-            );
-            if bracketed {
-                window
-                    .pane_called(target)
-                    .unwrap()
-                    .screen
-                    .advance(b"\x1b[?2004h");
-            }
-            let text = "x".repeat(ceiling + 1);
-            harness.reply(target, Ok(text.clone()));
+    fn blocked_clipboard_owner_leaves_frames_and_program_input_available() {
+        let received = term_core::received::Received::new("clipboard-busy-frame");
+        let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        received.wait_until_ready(Duration::from_secs(5));
+        let ctx = egui::Context::default();
+        let area = area_of(1280.0);
+        for _ in 0..2 {
             one_frame_in(&mut window, &ctx, area, vec![]);
-            assert_eq!(
-                window.pane_called(target).unwrap().held.is_some(),
-                !bracketed
-            );
-            one_frame_in(
-                &mut window,
-                &ctx,
-                area,
-                vec![egui::Event::Text("sentinel".into())],
-            );
-            let mut expected = Vec::new();
-            if bracketed {
-                expected.extend_from_slice(b"\x1b[200~");
-                expected.extend_from_slice(text.as_bytes());
-                expected.extend_from_slice(b"\x1b[201~");
+        }
+        let (service, entered, release, finished) =
+            crate::clipboard::Service::testing_blocked(ctx.clone());
+        window.clipboard = service;
+        let target = window.active().focus;
+        assert!(window.clipboard.request(
+            target,
+            crate::clipboard::Source::Clipboard,
+            Instant::now()
+        ));
+        entered
+            .recv_timeout(Duration::from_secs(5))
+            .expect("worker entered clipboard read");
+        one_frame_in(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::Text("sentinel".into())],
+        );
+        assert_eq!(received.wait_for(8, Duration::from_secs(5)), b"sentinel");
+        assert!(
+            matches!(
+                finished.try_recv(),
+                Err(std::sync::mpsc::TryRecvError::Empty)
+            ),
+            "the clipboard operation finished before the interface frame and input completed"
+        );
+        release.send(()).unwrap();
+        finished
+            .recv_timeout(Duration::from_secs(5))
+            .expect("worker finished after release");
+    }
+
+    #[test]
+    fn menu_paste_uses_current_bracketed_mode_and_holds_overlong_lines() {
+        let sources = if cfg!(target_os = "linux") {
+            vec![
+                crate::clipboard::Source::Clipboard,
+                crate::clipboard::Source::Primary,
+            ]
+        } else {
+            vec![crate::clipboard::Source::Clipboard]
+        };
+        for source in sources {
+            for bracketed in [false, true] {
+                let Some(ceiling) = keyboard::the_longest_line_a_reader_keeps() else {
+                    return;
+                };
+                let received = term_core::received::Received::new("context-paste-protection");
+                let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
+                window.chrome.enable();
+                window.headers = window.headers.integrated(true);
+                let (service, harness) = crate::clipboard::Service::testing();
+                window.clipboard = service;
+                received.wait_until_ready(Duration::from_secs(5));
+                let ctx = egui::Context::default();
+                let area = area_of(1280.0);
+                for _ in 0..2 {
+                    one_frame_in(&mut window, &ctx, area, vec![]);
+                }
+                let target = window.active().focus;
+                match source {
+                    crate::clipboard::Source::Clipboard => {
+                        let shapes = menu_at_console(&mut window, &ctx, area, 0);
+                        choose_menu_item(&mut window, &ctx, area, &shapes, "Paste");
+                    }
+                    crate::clipboard::Source::Primary => {
+                        let at = console_point(&window, &ctx, area, 0);
+                        one_frame_in(
+                            &mut window,
+                            &ctx,
+                            area,
+                            mouse(at, egui::PointerButton::Middle, egui::Modifiers::NONE),
+                        );
+                    }
+                }
+                assert_eq!(harness.requested(), Some((target, source)));
+                if bracketed {
+                    window
+                        .pane_called(target)
+                        .unwrap()
+                        .screen
+                        .advance(b"\x1b[?2004h");
+                }
+                let text = "x".repeat(ceiling + 1);
+                harness.reply(target, Ok(text.clone()));
+                one_frame_in(&mut window, &ctx, area, vec![]);
+                assert_eq!(
+                    window.pane_called(target).unwrap().held.is_some(),
+                    !bracketed
+                );
+                assert_eq!(
+                    window.pane_called(target).unwrap().taken_over.is_some(),
+                    bracketed,
+                    "only delivered clipboard text hands input back to the person"
+                );
+                if !bracketed {
+                    one_frame_in(
+                        &mut window,
+                        &ctx,
+                        area,
+                        vec![key_press(egui::Key::Enter, egui::Modifiers::CTRL)],
+                    );
+                    assert!(window.pane_called(target).unwrap().held.is_none());
+                    assert!(window.pane_called(target).unwrap().taken_over.is_some());
+                }
+                one_frame_in(
+                    &mut window,
+                    &ctx,
+                    area,
+                    vec![egui::Event::Text("sentinel".into())],
+                );
+                let mut expected = Vec::new();
+                if bracketed {
+                    expected.extend_from_slice(b"\x1b[200~");
+                    expected.extend_from_slice(text.as_bytes());
+                    expected.extend_from_slice(b"\x1b[201~");
+                } else {
+                    expected.extend_from_slice(text.as_bytes());
+                }
+                expected.extend_from_slice(b"sentinel");
+                assert_eq!(
+                    received.wait_for(expected.len(), Duration::from_secs(5)),
+                    expected
+                );
             }
-            expected.extend_from_slice(b"sentinel");
-            assert_eq!(
-                received.wait_for(expected.len(), Duration::from_secs(5)),
-                expected
-            );
         }
     }
 }

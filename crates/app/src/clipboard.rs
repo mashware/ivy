@@ -186,9 +186,43 @@ fn run(
     mailbox: Arc<Mutex<Mailbox>>,
     context: egui::Context,
 ) {
-    // Arboard finishes capability/seat setup before returning; first operations cannot be
-    // dropped by a separate focus-event queue. Initialization stays off the UI thread.
     let mut backend = None;
+    let native_context = context.clone();
+    run_with(requests, replies, mailbox, context, |read, selection| {
+        // Capability/seat setup finishes before operations, without borrowing the app's window.
+        let backend = backend.get_or_insert_with(Backend::new);
+        if let Some(selection) = selection {
+            match backend.as_mut() {
+                Ok(backend) => {
+                    let focused = native_context.input(|input| input.focused);
+                    if let Err(error) =
+                        publish_current_selection(selection, Instant::now(), focused, |text| {
+                            backend.store_primary(text)
+                        })
+                    {
+                        eprintln!("Primary selection could not be published: {error}");
+                    }
+                }
+                Err(error) => eprintln!("Primary selection is unavailable: {error}"),
+            }
+        }
+        read.map(|read| Reply {
+            pane: read.pane,
+            text: match backend.as_mut() {
+                Ok(backend) => backend.load(read.source),
+                Err(error) => Err(error.clone()),
+            },
+        })
+    });
+}
+
+fn run_with(
+    requests: mpsc::Receiver<()>,
+    replies: mpsc::Sender<Reply>,
+    mailbox: Arc<Mutex<Mailbox>>,
+    context: egui::Context,
+    mut operate: impl FnMut(Option<Read>, Option<(String, Instant)>) -> Option<Reply>,
+) {
     loop {
         // Bounded: dropping Service closes the only wake sender and ends this idle receive.
         if requests.recv().is_err() {
@@ -202,34 +236,8 @@ fn run(
         if read.is_none() && selection.is_none() {
             continue;
         }
-        let backend = backend.get_or_insert_with(Backend::new);
-        if let Some(selection) = selection {
-            match backend.as_mut() {
-                Ok(backend) => {
-                    let focused = context.input(|input| input.focused);
-                    if let Err(error) =
-                        publish_current_selection(selection, Instant::now(), focused, |text| {
-                            backend.store_primary(text)
-                        })
-                    {
-                        eprintln!("Primary selection could not be published: {error}");
-                    }
-                }
-                Err(error) => eprintln!("Primary selection is unavailable: {error}"),
-            }
-        }
-        if let Some(read) = read {
-            let text = match backend.as_mut() {
-                Ok(backend) => backend.load(read.source),
-                Err(error) => Err(error.clone()),
-            };
-            if replies
-                .send(Reply {
-                    pane: read.pane,
-                    text,
-                })
-                .is_err()
-            {
+        if let Some(reply) = operate(read, selection) {
+            if replies.send(reply).is_err() {
                 break;
             }
             context.request_repaint();
@@ -342,6 +350,44 @@ impl Harness {
 
 #[cfg(test)]
 impl Service {
+    pub(crate) fn testing_blocked(
+        context: egui::Context,
+    ) -> (
+        Self,
+        mpsc::Receiver<()>,
+        mpsc::Sender<()>,
+        mpsc::Receiver<()>,
+    ) {
+        let (mut service, harness) = Self::testing();
+        service.worker.as_mut().unwrap().context = context.clone();
+        let (entered, entering) = mpsc::channel();
+        let (release, released) = mpsc::channel();
+        let (finished, finishing) = mpsc::channel();
+        std::thread::spawn(move || {
+            run_with(
+                harness.wake,
+                harness.replies,
+                harness.mailbox,
+                context,
+                |read, _| {
+                    read.map(|read| {
+                        entered.send(()).unwrap();
+                        let text = released
+                            .recv_timeout(DEADLINE + DEADLINE)
+                            .map(|()| "clipboard completion".into())
+                            .map_err(|_| "test clipboard owner did not release".into());
+                        finished.send(()).unwrap();
+                        Reply {
+                            pane: read.pane,
+                            text,
+                        }
+                    })
+                },
+            );
+        });
+        (service, entering, release, finishing)
+    }
+
     pub(crate) fn testing() -> (Self, Harness) {
         let (requests, wake) = mpsc::sync_channel(1);
         let (replies, delivered) = mpsc::channel();
