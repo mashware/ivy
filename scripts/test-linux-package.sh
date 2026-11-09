@@ -4,7 +4,7 @@ set -euo pipefail
 [[ $# == 2 || $# == 3 ]] || { echo 'Usage: scripts/test-linux-package.sh PACKAGE VERSION [NOTICES_DIR]' >&2; exit 2; }
 package=$(realpath "$1")
 version=${2/-/\~}
-[[ $(basename "$package") == "ivy_${version}_amd64.deb" ]]
+[[ $(basename "$package") == "ivy_${2}_amd64.deb" ]]
 [[ $(dpkg-deb -f "$package" Package) == ivy-terminal ]]
 [[ $(dpkg-deb -f "$package" Version) == "$version" ]]
 [[ $(dpkg-deb -f "$package" Architecture) == amd64 ]]

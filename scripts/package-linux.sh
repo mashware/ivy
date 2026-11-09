@@ -93,5 +93,5 @@ CONTROL
 if [[ -n ${SOURCE_DATE_EPOCH:-} ]]; then
     find "$stage/root" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
 fi
-artifact=$output_dir/ivy_${deb_version}_amd64.deb
+artifact=$output_dir/ivy_${version}_amd64.deb
 dpkg-deb --root-owner-group --build "$stage/root" "$artifact"

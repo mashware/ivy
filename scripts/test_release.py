@@ -16,7 +16,7 @@ class ReleaseTest(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.cargo = self.root / "Cargo.toml"
         self.cargo.write_text('[workspace.package]\nversion = "0.1.0-alpha.1"\n')
-        self.package = self.root / "ivy_0.1.0~alpha.1_amd64.deb"
+        self.package = self.root / "ivy_0.1.0-alpha.1_amd64.deb"
         self.package.write_bytes(b"actual package contents")
 
     def run_release(self, *extra):
@@ -139,6 +139,36 @@ class ReleaseTest(unittest.TestCase):
         (self.root / "unexpected.deb").write_bytes(b"data")
         self.assertNotEqual(self.run_release().returncode, 0)
         self.assertFalse((self.root / "SHA256SUMS").exists())
+
+    def test_combined_ubuntu_arch_release_requires_both_and_hashes_their_bytes(self):
+        arch = self.root / "ivy-terminal-0.1.0alpha1-1-x86_64.pkg.tar.zst"
+        self.assertNotEqual(self.run_release("--include-arch").returncode, 0)
+        arch.write_bytes(b"native Arch package")
+        self.assertNotEqual(self.run_release().returncode, 0)
+        self.assertEqual(self.run_release("--include-arch").returncode, 0)
+        manifest = json.loads((self.root / "release-manifest.json").read_text())
+        self.assertEqual([a["name"] for a in manifest["artifacts"]], [self.package.name, arch.name])
+        self.assertEqual(manifest["artifacts"][1]["packaged_on"], "Arch Linux (rolling)")
+        for line in (self.root / "SHA256SUMS").read_text().splitlines():
+            checksum, name = line.split("  ")
+            self.assertEqual(checksum, hashlib.sha256((self.root / name).read_bytes()).hexdigest())
+        (self.root / "unexpected.pkg.tar.zst").write_bytes(b"extra")
+        self.assertNotEqual(self.run_release("--include-arch").returncode, 0)
+
+    def test_download_names_survive_github_asset_name_normalization(self):
+        self.assertEqual(self.run_release().returncode, 0)
+        # Public upload of '~' was observed to replace it with '.', breaking SHA256SUMS.
+        name = json.loads((self.root / "release-manifest.json").read_text())["artifacts"][0]["name"]
+        self.assertEqual(name, "ivy_0.1.0-alpha.1_amd64.deb")
+        self.assertRegex(name, r"^[A-Za-z0-9._-]+$")
+
+    def test_arch_versions_keep_numbered_identifiers_without_forbidden_hyphens(self):
+        convert = run_path(str(SCRIPT))["arch_version"]
+        for semver, arch in (("0.1.0-alpha.1", "0.1.0alpha1"),
+                             ("0.1.0-alpha.10", "0.1.0alpha10"),
+                             ("0.1.0-beta.2", "0.1.0beta2"),
+                             ("0.1.0-rc.10", "0.1.0rc10"), ("0.1.0", "0.1.0")):
+            self.assertEqual(convert(semver), arch)
 
     def test_invalid_semver_is_rejected(self):
         for value in ("0.1.0-alpha.01", "0.1.0+metadata", "01.1.0", "0.1.0-rc10", "0.1.0-alpha01"):

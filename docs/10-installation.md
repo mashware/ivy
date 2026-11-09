@@ -12,12 +12,15 @@ Download the `.deb`, `release-manifest.json` and `SHA256SUMS` from the same rele
 directory. Verify them there, then install the package shown in that release:
 
 ```sh
-sha256sum --check SHA256SUMS
-sudo apt install ./ivy_0.1.0~alpha.1_amd64.deb
+sha256sum --ignore-missing --check SHA256SUMS
+sudo apt install ./ivy_0.1.0-alpha.2_amd64.deb
 ivy
 ```
 
-The filename above illustrates workspace version `0.1.0-alpha.1`; use the actual release filename.
+The selected `.deb` and `release-manifest.json` must both be downloaded and reported as `OK`.
+Other package formats in the shared checksum list may be absent; `--ignore-missing` skips only
+files you did not download. Do not install a package whose checksum failed.
+The filename above illustrates workspace version `0.1.0-alpha.2`; use the actual release filename.
 The prerelease separator becomes `~` in the Debian package version. Checksums detect changed
 or mismatched downloads; they are not a publisher signature.
 
@@ -147,3 +150,44 @@ validation artifact must record the actual results. macOS and Windows downloads 
 by the Linux delivery. The Windows control channel and MCP are unavailable until F2.7 implements
 and proves its native listener; merely packaging `panel-mcp` does not enable it. The portability
 milestone remains open independently of installer work.
+
+## Arch Linux (x86_64, rolling)
+
+Download `ivy-terminal-0.1.0alpha2-1-x86_64.pkg.tar.zst`, `release-manifest.json` and `SHA256SUMS`
+from the same prerelease into one directory, then verify and install:
+
+```bash
+sha256sum --ignore-missing --check SHA256SUMS
+sudo pacman -U ./ivy-terminal-0.1.0alpha2-1-x86_64.pkg.tar.zst
+```
+
+The selected Arch package and `release-manifest.json` must both be reported as `OK`; an absent
+Ubuntu package is allowed. Do not install after a failed checksum check.
+
+Open Ivy from the application menu or run `ivy`. MCP uses the same `/usr/bin/panel-mcp` command as Ubuntu. A Rust compiler is not required on the tester machine. Update Arch normally with `sudo pacman -Syu` before installing; do not perform a partial system upgrade.
+
+To remove the package, run `sudo pacman -R ivy-terminal`. Existing preferences and layouts are preserved. This is a direct experimental package download, not an AUR entry or an official Arch repository package. The package is unsigned; local package signature requirements still apply.
+
+The Arch build uses native `makepkg` around the exact Linux binary/resource payload built on Ubuntu24.04. It supplies Arch dependency names independently; Debian dependency metadata is not reused. Both binaries, icons and original license notices are compared byte for byte. Arch's ordinary build user runs makepkg; only disposable-container installation tests run as root.
+
+For a local package build, prepare the payload on the baseline build machine:
+
+```bash
+dpkg-deb -x dist/*.deb payload
+tar -cf payload.tar -C payload usr
+```
+
+Then on Arch, as an ordinary user with base-devel and the dependencies in `packaging/arch/PKGBUILD` installed:
+
+```bash
+scripts/package-arch.sh /absolute/path/payload.tar dist 0.1.0-alpha.2
+packaging/arch/test-package.sh dist/*.pkg.tar.zst /absolute/path/payload.tar 0.1.0alpha2
+```
+
+`packaging/arch/test-install.sh PACKAGE SEMVER` is destructive test machinery for a disposable Arch container only, guarded by root plus `IVY_DISPOSABLE_CONTAINER=yes`. It installs an older fixture, upgrades, exercises the installed Ivy/MCP own-pane roundtrip under Xvfb, removes the package and verifies unchanged config/layout bytes. It is never a workstation installation command.
+
+CI builds the Ubuntu baseline, checks that artifact's checksums, packages and tests Arch independently, then uploads `ivy-arch-x86_64`. Publication requires both Ubuntu installation jobs and the Arch job. The final manifest/checksums require both package formats (`generate --include-arch`); partial target sets cannot be published.
+
+Arch version mapping removes the SemVer hyphen and prerelease separator: `0.1.0-alpha.2` becomes `0.1.0alpha2-1`; stable versions remain unchanged. Native `vercmp` checks transitions through alpha, beta, rc and stable versions. Download names use safe SemVer characters; the Debian control version retains `~`, but its asset filename does not because GitHub rewrites that character during upload.
+
+Current Arch evidence is container installation/runtime evidence. Real-desktop launcher, clipboard, fonts/themes and restored layout still need an owner trial with the exact package. macOS and Windows remain separate deliveries.

@@ -21,7 +21,10 @@ trap cleanup EXIT
 mkdir -m 700 "$tmp/config" "$tmp/runtime"
 export XDG_CONFIG_HOME="$tmp/config" XDG_RUNTIME_DIR="$tmp/runtime" LIBGL_ALWAYS_SOFTWARE=1
 export IVY_SMOKE_DIR="$tmp"
-IVY_SMOKE_VERSION=$(dpkg-query -W -f='${Version}' ivy-terminal | tr '~' '-')
+IVY_SMOKE_VERSION=${IVY_EXPECTED_VERSION:-}
+if [[ -z $IVY_SMOKE_VERSION ]]; then
+    IVY_SMOKE_VERSION=$(dpkg-query -W -f='${Version}' ivy-terminal | tr '~' '-')
+fi
 export IVY_SMOKE_VERSION
 cat > "$tmp/probe.py" <<'PY'
 import json, os, subprocess, sys

@@ -1,11 +1,11 @@
-name: Ivy Linux package
+name: Ivy Linux packages
 
 on:
   pull_request:
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish the selected version tag as an unsigned Linux-only prerelease
+        description: Publish the selected tag as an unsigned Ubuntu and Arch prerelease
         type: boolean
         default: false
 
@@ -86,9 +86,51 @@ jobs:
               /checks/test-install.sh "$package"
             '
 
+  arch:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: ivy-linux-x86_64
+          path: baseline
+      - name: Prepare the verified shared Linux payload
+        run: |
+          (cd baseline && sha256sum --check SHA256SUMS)
+          dpkg-deb -x baseline/*.deb payload
+          tar -cf payload.tar -C payload usr
+          mkdir arch-dist
+      - name: Build and test native Arch package
+        run: |
+          version=$(python3 scripts/release.py version)
+          docker run --rm --env IVY_DISPOSABLE_CONTAINER=yes --env VERSION="$version" \
+            --mount "type=bind,src=$PWD,dst=/src,readonly" \
+            --mount "type=bind,src=$PWD/payload.tar,dst=/payload.tar,readonly" \
+            --mount "type=bind,src=$PWD/arch-dist,dst=/out" \
+            archlinux:base-devel bash -euc '
+              pacman -Syu --noconfirm --needed python fontconfig libx11 libxcb libxcursor libxi libxrandr libxkbcommon libxkbcommon-x11 wayland libglvnd mesa xorg-server-xvfb xorg-xauth xdotool desktop-file-utils diffutils
+              useradd -m -u 1000 builder
+              chown builder /out
+              runuser -u builder -- /src/scripts/package-arch.sh /payload.tar /out "$VERSION"
+              arch_version=${VERSION/-/}
+              arch_version=${arch_version/alpha./alpha}
+              arch_version=${arch_version/beta./beta}
+              arch_version=${arch_version/rc./rc}
+              /src/packaging/arch/test-package.sh /out/*.pkg.tar.zst /payload.tar "$arch_version"
+              /src/packaging/arch/test-install.sh /out/*.pkg.tar.zst "$VERSION"
+              /src/packaging/arch/test-package.sh --versions
+            '
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ivy-arch-x86_64
+          path: arch-dist/*.pkg.tar.zst
+          if-no-files-found: error
+
   publish:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
-    needs: [build, install]
+    needs: [build, install, arch]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -97,8 +139,9 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
-          name: ivy-linux-x86_64
+          pattern: ivy-*-x86_64
           path: dist
+          merge-multiple: true
       - name: Validate and publish complete draft
         env:
           GH_TOKEN: ${{ github.token }}
@@ -110,13 +153,13 @@ jobs:
           test "$REF_TYPE" = tag
           test "$(git rev-parse HEAD)" = "$COMMIT"
           (cd dist && sha256sum --check SHA256SUMS)
-          python3 scripts/release.py generate --directory dist --commit "$COMMIT" --built-on ubuntu-24.04 --tag "$TAG"
+          python3 scripts/release.py generate --directory dist --commit "$COMMIT" --built-on ubuntu-24.04 --tag "$TAG" --include-arch
           (cd dist && sha256sum --check SHA256SUMS)
           scripts/verify-release-tag.sh "$TAG" "$COMMIT"
           if gh release view "$TAG" --json id >/dev/null 2>&1; then
             echo 'A release already exists for this tag; inspect it instead of overwriting it.' >&2
             exit 1
           fi
-          gh release create "$TAG" dist/*.deb dist/release-manifest.json dist/SHA256SUMS --verify-tag --draft --prerelease --title "$TAG" --notes "Unsigned experimental Linux x86_64 build."
+          gh release create "$TAG" dist/*.deb dist/*.pkg.tar.zst dist/release-manifest.json dist/SHA256SUMS --verify-tag --draft --prerelease --title "$TAG" --notes "Unsigned experimental Ubuntu and Arch Linux x86_64 packages."
           scripts/verify-release-tag.sh "$TAG" "$COMMIT"
           gh release edit "$TAG" --draft=false --prerelease
