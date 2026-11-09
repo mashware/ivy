@@ -301,9 +301,11 @@ processes rather than resuming old programs. The Windows MCP/control listener st
 separate portability delivery; the bundled bridge alone does not enable MCP on Windows.
 
 The manual package workflow uses `windows-2025` with the pinned Rust toolchain and the runner's
-Inno Setup 6 compiler. It builds `x86_64-pc-windows-msvc` binaries and preserves original notices:
+Inno Setup 6 compiler. The Microsoft C runtime is linked statically to avoid requiring a separate
+Visual C++ runtime installation. It builds `x86_64-pc-windows-msvc` binaries and preserves original notices:
 
 ```powershell
+$env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS = "-C target-feature=+crt-static"
 cargo build --locked --release --target x86_64-pc-windows-msvc -p app -p panel-control --bins
 cargo metadata --locked --filter-platform x86_64-pc-windows-msvc --format-version 1 > target/release-metadata.json
 python scripts/release.py notices --metadata target/release-metadata.json --directory target/x86_64-pc-windows-msvc/release/notices
