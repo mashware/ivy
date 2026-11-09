@@ -309,6 +309,7 @@ fn initial_window(
         pane_view: crate::pane_view::State::default(),
         summary: crate::summary::State::default(),
         viewer: crate::viewer::State::default(),
+        projects: crate::project_view::State::default(),
         link_press_in_progress: None,
         drag_in_progress: None,
         last_painted: Vec::new(),
@@ -503,6 +504,7 @@ pub(crate) fn launch_pane_in(
     Ok(Pane {
         name,
         label: None,
+        project: None,
         pty,
         pty_output,
         panel,
@@ -619,4 +621,26 @@ pub(crate) fn chrome_viewport(
     {
         builder.with_decorations(false)
     }
+}
+
+/// Constructs the pane watcher with the other window resources.
+pub(crate) fn watch_panes<'a>(
+    ctx: &egui::Context,
+    panes: impl IntoIterator<Item = &'a Pane>,
+) -> Watcher {
+    let consoles: Vec<_> = panes
+        .into_iter()
+        .filter_map(|pane| {
+            let dir = pane.panel.as_ref()?;
+            Some((dir.path(), pane.to_reread.clone()))
+        })
+        .collect();
+
+    // The only thing the watcher needs from the window is how to wake it, just like the bridge:
+    // that way its module does not depend on the interface framework, which is what is going to
+    // be rewritten. Asking for the repaint does not panic, which is the condition for whoever
+    // calls it from another thread.
+    let waker = ctx.clone();
+
+    Watcher::new(move || waker.request_repaint(), &consoles)
 }

@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(test)]
+use std::time::Instant;
 
 const MARKDOWN_LIMIT: usize = 1024 * 1024;
 const DIFF_LIMIT: usize = 4 * 1024 * 1024;
@@ -324,81 +326,15 @@ fn open_untracked(root: &Path, path: &Path) -> std::io::Result<std::fs::File> {
 }
 
 // D57: all waiting and pipe draining stays off the window thread; readers have byte ceilings.
-fn run_git(mut command: Command, timeout: Duration) -> Result<String, String> {
-    let mut child = command
-        .spawn()
-        .map_err(|e| format!("Cannot start Git: {e}"))?;
-    let stdout = child.stdout.take().expect("piped stdout");
-    let stderr = child.stderr.take().expect("piped stderr");
-    let (sender, receiver) = mpsc::channel();
-    for (index, reader, limit) in [
-        (0, Box::new(stdout) as Box<dyn Read + Send>, DIFF_LIMIT),
-        (1, Box::new(stderr) as Box<dyn Read + Send>, STDERR_LIMIT),
-    ] {
-        let sender = sender.clone();
-        if let Err(e) = thread::Builder::new()
-            .name("viewer-git-pipe".into())
-            .spawn(move || {
-                let _ = sender.send((index, read_bounded(reader, limit)));
-            })
-        {
-            stop_child(&mut child);
-            return Err(format!("Cannot start Git output reader: {e}"));
-        }
+fn run_git(command: Command, timeout: Duration) -> Result<String, String> {
+    let output = crate::git_process::run(command, timeout, DIFF_LIMIT, STDERR_LIMIT)?;
+    if !output.status.success() {
+        return Err(format!(
+            "Git failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
     }
-    drop(sender);
-    let start = Instant::now();
-    let mut output = None;
-    let mut errors = None;
-    let mut status = None;
-    loop {
-        while let Ok((index, result)) = receiver.try_recv() {
-            match result {
-                Ok(bytes) if index == 0 => output = Some(bytes),
-                Ok(bytes) => errors = Some(bytes),
-                Err(e) => {
-                    stop_child(&mut child);
-                    return Err(format!("Git output error: {e}"));
-                }
-            }
-        }
-        if status.is_none() {
-            status = match child.try_wait() {
-                Ok(status) => status,
-                Err(e) => {
-                    stop_child(&mut child);
-                    return Err(format!("Cannot wait for Git: {e}"));
-                }
-            };
-        }
-        if let (Some(exit), Some(out), Some(err)) = (&status, &output, &errors) {
-            if !exit.success() {
-                return Err(format!(
-                    "Git failed: {}",
-                    String::from_utf8_lossy(err).trim()
-                ));
-            }
-            return String::from_utf8(out.clone()).map_err(|_| "Git output is not UTF-8".into());
-        }
-        if start.elapsed() >= timeout {
-            stop_child(&mut child);
-            return Err("Git timed out".into());
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
-}
-
-// D57: never wait without a deadline, even after kill. If the OS does not reap
-// promptly, dropping the handle deliberately abandons that child rather than hanging.
-fn stop_child(child: &mut std::process::Child) {
-    let _ = child.kill();
-    let deadline = Instant::now() + Duration::from_millis(100);
-    while Instant::now() < deadline {
-        match child.try_wait() {
-            Ok(Some(_)) | Err(_) => return,
-            Ok(None) => thread::sleep(Duration::from_millis(5)),
-        }
-    }
+    String::from_utf8(output.stdout).map_err(|_| "Git output is not UTF-8".into())
 }
 
 #[cfg(test)]

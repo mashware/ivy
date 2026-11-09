@@ -7,6 +7,7 @@ pub(super) struct Directory {
     data: Vec<u8>,
     path: Option<PathBuf>,
     reported: bool,
+    generation: u64,
 }
 #[derive(Default)]
 enum State {
@@ -26,6 +27,9 @@ impl Directory {
     }
     pub(super) fn reported(&self) -> bool {
         self.reported
+    }
+    pub(super) fn generation(&self) -> u64 {
+        self.generation
     }
     pub(super) fn advance(&mut self, bytes: &[u8]) {
         let mut index = 0;
@@ -56,6 +60,7 @@ impl Directory {
                     b'c' => {
                         self.path = None;
                         self.reported = false;
+                        self.generation = self.generation.wrapping_add(1);
                         State::Ground
                     }
                     _ => State::Ground,
@@ -118,6 +123,7 @@ impl Directory {
         let Some(uri) = self.data.strip_prefix(b"7;") else {
             return;
         };
+        self.generation = self.generation.wrapping_add(1);
         self.path = None;
         let Some(uri) = uri.strip_prefix(b"file://") else {
             return;
@@ -183,6 +189,26 @@ pub(super) fn is_local_host(host: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn repeated_directory_reports_and_resets_advance_the_observation() {
+        let mut screen = crate::Screen::new(crate::Size { rows: 2, cols: 30 });
+        assert_eq!(screen.working_directory_generation(), 0);
+        for expected in 1..=2 {
+            screen.advance(b"\x1b]7;file://localhost/tmp\x07");
+            assert_eq!(screen.working_directory_generation(), expected);
+            assert_eq!(
+                screen.working_directory(),
+                Some(std::path::Path::new("/tmp"))
+            );
+        }
+        screen.advance(b"\x1bc");
+        assert_eq!(screen.working_directory_generation(), 3);
+        assert!(screen.working_directory().is_none());
+        screen.advance(b"\x1b]7;file://remote.invalid/tmp\x07");
+        assert_eq!(screen.working_directory_generation(), 4);
+        assert!(screen.working_directory().is_none());
+    }
+
     #[test]
     fn reported_tracks_prefix_invalid_reports_and_reset() {
         let mut screen = crate::Screen::new(crate::Size { rows: 2, cols: 30 });

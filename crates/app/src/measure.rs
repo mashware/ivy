@@ -2039,6 +2039,10 @@ mod tests {
 
         vec![
             (
+                "explicit project identity probe",
+                crate::project_view::State::reference_report(),
+            ),
+            (
                 "explicit ligature measurement startup",
                 crate::ligatures::reference_report(),
             ),
@@ -2625,5 +2629,68 @@ mod tests {
              batch that restores would open from factory and its run would be published as good",
             crate::session::FILE
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn project_report_guard_rejects_bad_or_duplicate_records_and_accepts_legacy_comparison() {
+        let script = include_str!("../../../scripts/measure-frame.sh");
+        let (_, rest) = script.split_once("validate_project_records() {").unwrap();
+        let (body, _) = rest.split_once("\n}\n").unwrap();
+        let function = format!(
+            "validate_project_records() {{{body}\n}}\nvalidate_project_records \"$1\" \"$2\""
+        );
+        let root = std::env::temp_dir().join(format!("ivy-project-report-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let report = root.join("report.txt");
+        let accents =
+            "project accents: enabled=true, probe=true, observed=4, resolved=4, painted=8\n";
+        let timing = "project identity per frame (native metadata + bookkeeping, excludes background Git): mean_us=1.234, frames=9\n";
+        let valid = format!("{accents}{timing}");
+        let disabled = "project accents: enabled=false, probe=false, observed=0, resolved=0, painted=0\nproject identity per frame (native metadata + bookkeeping, excludes background Git): mean_us=0.000, frames=0\n";
+        for (mode, batch, text, expected) in [
+            ("run", "projects", valid.clone(), true),
+            (
+                "run",
+                "projects",
+                valid.replace("resolved=4", "resolved=3"),
+                false,
+            ),
+            (
+                "run",
+                "projects",
+                valid.replace("painted=8", "painted=3"),
+                false,
+            ),
+            ("run", "C", disabled.into(), true),
+            ("run", "C", disabled.replace("frames=0", "frames=1"), false),
+            ("run", "projects", format!("{valid}{accents}"), false),
+            ("run", "projects", format!("{valid}{timing}"), false),
+            ("run", "projects", valid.replace("1.234", "1..234"), false),
+            (
+                "run",
+                "projects",
+                valid.replace("observed=4", "observed="),
+                false,
+            ),
+            ("run", "projects", String::new(), false),
+            ("compare", "", String::new(), true),
+            ("compare", "", valid.clone(), true),
+            ("compare", "", format!("{valid}{timing}"), false),
+            ("compare", "", valid.replace("1.234", "1..234"), false),
+        ] {
+            std::fs::write(&report, &text).unwrap();
+            let status = std::process::Command::new("sh")
+                .args(["-c", &function, "project-guard", mode, batch])
+                .env("REPORT", &report)
+                .status()
+                .unwrap();
+            assert_eq!(
+                status.success(),
+                expected,
+                "mode={mode} batch={batch} report={text:?}"
+            );
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -2172,7 +2172,15 @@ mod tests {
         /// artifact to satisfy a test, which is the tail wagging the dog.
         const DRAWN_RULE: char = '\u{2500}';
 
-        const SOURCES: [(&str, &str); 40] = [
+        const SOURCES: [(&str, &str); 45] = [
+            ("git_process.rs", include_str!("git_process.rs")),
+            ("project.rs", include_str!("project.rs")),
+            ("project/tests.rs", include_str!("project/tests.rs")),
+            ("project_view.rs", include_str!("project_view.rs")),
+            (
+                "project_view/tests.rs",
+                include_str!("project_view/tests.rs"),
+            ),
             ("viewer/origin.rs", include_str!("viewer/origin.rs")),
             ("viewer/delivery.rs", include_str!("viewer/delivery.rs")),
             ("viewer/diff.rs", include_str!("viewer/diff.rs")),

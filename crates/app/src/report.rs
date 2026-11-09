@@ -175,6 +175,7 @@ impl Window {
         // in under the clock's resolution is a frame that had one, and skipping it would make the
         // count the script reads answer a question nobody asked — see [`measure::Strips`].
         self.strips.close_the_frame();
+        self.projects.close_frame();
         close_views(self);
 
         // **And the raw-input hook's is declared here, AFTER emptying.** See
@@ -374,6 +375,7 @@ impl Window {
         self.settings_editor.publish(to)?;
         self.chrome.publish(to)?;
         self.viewer.publish(to)?;
+        self.projects.publish(to)?;
         self.summary.timing.publish(to)?;
         self.saving.publish(to)?;
         // **And discovery the same: its row goes after the rest because it too is discounted from

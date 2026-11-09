@@ -8831,3 +8831,20 @@ validation remains F2.7. Shell startup scripts may themselves change directory. 
 0.9.0 silently substitutes home for a configured directory that is not a directory, which is why
 validation happens before invoking it. A directory removed between that check and the dependency's
 own check can still fall back to home; this is not an atomic directory-pinning guarantee.
+
+
+## D79 — Project identity is a theme-aware header cue independent of the console title
+
+A console's header gains a colored inner strip and a separate project badge. The existing manual/program title, focus outline and producer-declared attention keep their semantics. The project key is a canonical common Git directory, so a repository's subdirectories and linked worktrees share it. An exact canonical folder identifies a positively established non-repository. Unavailable or remote directory metadata stays neutral; a failed Git launch is not evidence of a non-repository.
+
+Directory selection follows D78: unusable published metadata vetoes discovery; otherwise native local information precedes the local report. Native observations occur at most once per second on existing frames, including hidden tabs; the cue adds no periodic idle repaint. Git and canonicalization run in one bounded background worker, coalescing the latest request per live pane. Source/generation checks reject results after navigation or closing. Identity is transient and changes no program or saved launch directory. Directory reports carry an observation revision: comparing path text alone misses A → native B → newly reported A, because the final text repeats. Resets advance the revision too; they do not discard a newer usable native sample.
+
+Accents derive from the effective configured palette, including overrides. Live project assignments survive focus and layout changes; distinct suitable resulting colors are used while available. A finite or monochrome palette cannot encode unlimited identities, so names and full-path hover text remain available. A narrow header clips project and session text inside its existing label region without moving controls or changing console geometry.
+
+**Why.** Several projects can share one tab, and their task titles do not reliably identify them. A shared border has two neighbors; an inner header strip unambiguously belongs to one console. Shared Git metadata groups worktrees without guessing from prompts, session titles or remote URLs.
+
+**Discarded.** Replacing the session title loses task context. Full-console tint alters program colors. Manual project catalogs and per-project settings duplicate directory metadata. Hash-only color assignment collides even with two projects. Per-frame Git blocks painting; a permanent cache keeps stale directory identities. Recurring repaint timers wake an otherwise resting window for a decorative cue.
+
+**Limits and accounting.** Outside Linux, automatic directory information depends on local OSC 7 reports. An unreported silent directory change is noticed on a later ordinary frame. Native metadata/source/result/color bookkeeping has its own named frame span; header painting stays in the existing strip span. Background subprocess time is never subtracted from a frame. Historical measurement batches disable discovery; the explicit project probe injects source directories but resolves real temporary repositories and paints real badges.
+
+The size guard measures the core at 647 production lines, unchanged. Moving watcher construction to the resource factory lowers the aggregate Window implementation from 1617 to 1611; project refresh remains a free function rather than growing that already-ratcheted type.
