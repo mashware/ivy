@@ -348,6 +348,15 @@ fn what_the_silence_says(console: &crate::Pane, silence: Silence) -> String {
         Silence::WentQuiet => what_it_says(is_deaf(console)),
         Silence::Refused => INPUT_QUEUE_FULL.to_owned(),
         Silence::RestoreDirectory => {
+            if let Some(identity) = &console.restoration.resume {
+                return format!(
+                    "The saved {} session could not be restored. It will be retried next time. Typing or clicking this notice starts fresh.",
+                    identity.client.name()
+                );
+            }
+            if console.restoration.fresh_shell_required {
+                return "This AI session could not be restored. Typing or clicking this notice starts a fresh console.".to_owned();
+            }
             let path = console
                 .restoration
                 .directory

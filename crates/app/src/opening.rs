@@ -504,32 +504,96 @@ pub(crate) fn launch_pane_in(
     reads: control::ReadActivity,
     directory: Option<&std::path::Path>,
 ) -> term_core::Result<Pane> {
-    let identity = identity_of(panel.as_ref());
+    launch(
+        ctx,
+        Launch {
+            program,
+            args,
+            directory,
+            path: None,
+        },
+        panel,
+        name,
+        reads,
+        true,
+    )
+}
+
+pub(crate) struct Launch<'a> {
+    pub(crate) program: &'a str,
+    pub(crate) args: &'a [String],
+    pub(crate) directory: Option<&'a std::path::Path>,
+    pub(crate) path: Option<&'a std::ffi::OsStr>,
+}
+
+pub(crate) fn launch_exact(
+    ctx: &egui::Context,
+    program: Launch<'_>,
+    panel: Option<PanelDir>,
+    name: usize,
+    reads: control::ReadActivity,
+) -> term_core::Result<Pane> {
+    launch(ctx, program, panel, name, reads, false)
+}
+
+fn launch(
+    ctx: &egui::Context,
+    program: Launch<'_>,
+    panel: Option<PanelDir>,
+    name: usize,
+    reads: control::ReadActivity,
+    fallback: bool,
+) -> term_core::Result<Pane> {
+    let Launch {
+        program,
+        args,
+        directory,
+        path,
+    } = program;
+    let mut identity: Vec<_> = identity_of(panel.as_ref()).into_iter().collect();
+    let helper = crate::resume::helper_path();
+    identity.push((
+        "IVY_SESSION_HELPER",
+        helper.as_deref().map(std::path::Path::as_os_str),
+    ));
+    if let Some(path) = path {
+        identity.push(("PATH", Some(path)));
+    }
     let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
     let (pty, output) =
         match Pty::spawn_with_env_in(program, &borrowed, INITIAL_GRID, &identity, directory) {
             Ok(spawned) => spawned,
-            Err(failure) => {
+            Err(failure) if fallback => {
                 eprintln!(
                     "'{program}' could not be launched ({failure}); opening {FALLBACK_SHELL}"
                 );
                 Pty::spawn_with_env_in(FALLBACK_SHELL, &[], INITIAL_GRID, &identity, directory)?
             }
+            Err(failure) => return Err(failure),
         };
 
     #[cfg(test)]
     crate::tests::completed_operation(crate::tests::OperationWork::Launch);
 
     let waker = ctx.clone();
-    let pty_output = PtyOutput::new(output, move || waker.request_repaint());
-    let (panel_state, control) = panel::pane::state_and_control(ctx, panel.as_ref(), reads);
+    let wake: std::sync::Arc<dyn Fn() + Send + Sync> =
+        std::sync::Arc::new(move || waker.request_repaint());
+    let output_wake = std::sync::Arc::clone(&wake);
+    let pty_output = PtyOutput::new(output, move || output_wake());
+    let mut restoration = crate::restoration::PaneState {
+        wake: Some(wake),
+        ..Default::default()
+    };
+    let callback = restoration.route.callback();
+    let (panel_state, control) =
+        panel::pane::state_and_control_with_sessions(ctx, panel.as_ref(), reads, Some(callback));
 
     Ok(Pane {
         signals: Default::default(),
         name,
         label: None,
         project: None,
-        restoration: crate::restoration::PaneState::default(),
+        restoration,
         pty,
         pty_output,
         panel,

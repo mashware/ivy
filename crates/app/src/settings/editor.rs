@@ -444,6 +444,7 @@ mod tests {
                 super::super::StartupRestore::None => "none",
                 super::super::StartupRestore::Layout => "layout",
                 super::super::StartupRestore::Directories => "directories",
+                super::super::StartupRestore::Sessions => "sessions",
             };
             fs::write(&fixture.config, format!("startup.restore = {value}\n")).unwrap();
             fixture
@@ -455,6 +456,7 @@ mod tests {
                 tabs: vec![crate::session::StoredTab {
                     label: None,
                     root: crate::session::StoredNode::Leaf(crate::session::StoredLeaf {
+                        resume: None,
                         panel_width: 37,
                         folded: true,
                         label: Some("Saved console".into()),
@@ -511,6 +513,104 @@ mod tests {
     impl Drop for RestorePolicyFixture {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.directory);
+        }
+    }
+
+    #[test]
+    fn saving_directories_removes_ai_identity_before_an_expired_snapshot_write() {
+        use panel_control::session::{Client, Identity};
+        let fixture = RestorePolicyFixture::new(super::super::StartupRestore::Sessions);
+        fixture.seed(crate::session::VERSION);
+        let mut window = fixture.open(super::super::StartupRestore::Directories);
+        fixture.save_mode(&mut window, "sessions");
+        crate::restoration::apply_saved_mode(&mut window);
+        window.active_mut().panes_mut()[0].restoration.resume =
+            Some(Identity::new(Client::Claude, "11111111-1111-4111-8111-111111111111").unwrap());
+        window.check_whether_the_layout_moved();
+        window.save_now();
+        let stored = crate::session::read(&fixture.snapshot).unwrap();
+        assert!(
+            matches!(&stored.tabs()[0].root, crate::session::StoredNode::Leaf(leaf) if leaf.resume.is_some())
+        );
+        RestorePolicyFixture::queue_expired_change(&mut window);
+        fixture.save_mode(&mut window, "directories");
+        window.save_now();
+        assert!(window.active().panes()[0].restoration.resume.is_none());
+        window.check_whether_the_layout_moved();
+        window.save_now();
+        let stored = crate::session::read(&fixture.snapshot).unwrap();
+        assert!(
+            matches!(&stored.tabs()[0].root, crate::session::StoredNode::Leaf(leaf) if leaf.resume.is_none() && leaf.cwd.as_ref() == Some(&fixture.directory))
+        );
+        assert!(window.active().panes()[0].restoration.resume.is_none());
+    }
+
+    #[test]
+    fn lowering_recovery_after_a_wrong_live_session_still_replaces_it_before_input() {
+        use panel_control::session::{Client, Identity};
+        for mode in ["directories", "layout", "none"] {
+            for clipboard in [false, true] {
+                let fixture = RestorePolicyFixture::new(super::super::StartupRestore::Sessions);
+                fixture.seed(crate::session::VERSION);
+                let mut window = fixture.open(super::super::StartupRestore::Sessions);
+                let mut pane = crate::Pane::launching(&Default::default(), "/bin/cat", 0).unwrap();
+                pane.restoration.resume = Some(
+                    Identity::new(Client::Claude, "11111111-1111-4111-8111-111111111111").unwrap(),
+                );
+                pane.restoration.directory = Some(fixture.directory.clone());
+                pane.restoration.resuming = true;
+                pane.screen.advance(b"\x1b[?2004h");
+                crate::resume::capture(
+                    &mut pane,
+                    Some(crate::ai_sessions::Snapshot {
+                        identity: Some(
+                            Identity::new(Client::Claude, "22222222-2222-4222-8222-222222222222")
+                                .unwrap(),
+                        ),
+                        cwd: Some(fixture.directory.clone()),
+                        revision: 1,
+                        status: crate::ai_sessions::Status::Registered,
+                        sampled: true,
+                    }),
+                );
+                assert!(pane.restoration.failed);
+                *window.active_mut().panes_mut()[0] = pane;
+                fixture.save_mode(&mut window, mode);
+                crate::restoration::apply_saved_mode(&mut window);
+                assert!(window.active().panes()[0].restoration.resume.is_none());
+                let pane = &mut window.active_mut().panes_mut()[0];
+                let command = "printf 'downgrade''-shell-output\\n'\r";
+                if clipboard {
+                    crate::keyboard::paste_into(pane, command);
+                } else {
+                    pane.keystrokes = command.as_bytes().to_vec();
+                    crate::resume::write_keys(pane).unwrap();
+                }
+                let deadline = Instant::now() + std::time::Duration::from_secs(2);
+                let mut output = Vec::new();
+                let expected = b"downgrade-shell-output";
+                while Instant::now() < deadline {
+                    pane.pty_output.pick_up(
+                        &mut output,
+                        65536,
+                        crate::pty_output::Silences::of(&pane.pty),
+                    );
+                    if output
+                        .windows(expected.len())
+                        .any(|bytes| bytes == expected)
+                    {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+                assert!(
+                    output
+                        .windows(expected.len())
+                        .any(|bytes| bytes == expected),
+                    "{mode}, clipboard={clipboard}: input did not reach a fresh shell"
+                );
+                assert!(!pane.restoration.failed);
+            }
         }
     }
 

@@ -501,6 +501,7 @@ fn startup(editor: &mut Editor, ui: &mut egui::Ui) {
         ("none", "None: one fresh console"),
         ("layout", "Layout"),
         ("directories", "Layout and directories"),
+        ("sessions", "Layout, directories and AI sessions"),
     ] {
         if ui
             .radio_value(&mut selection, value.into(), label)
@@ -509,6 +510,7 @@ fn startup(editor: &mut Editor, ui: &mut egui::Ui) {
             field.value = selection.clone();
         }
     }
+    ui.weak("AI recovery needs an explicitly configured client integration. Codex restores its last hook-reported session; switching without sending a message can leave the previous session recorded.");
     ui.add_space(10.0);
     ui.weak("Changes apply on the next launch. Turning restoration off keeps the previous saved layout. Additional windows are temporary and do not save their layout.");
 }

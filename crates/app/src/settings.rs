@@ -220,6 +220,13 @@ pub enum StartupRestore {
     None,
     Layout,
     Directories,
+    Sessions,
+}
+
+impl StartupRestore {
+    pub(crate) fn has_directories(self) -> bool {
+        matches!(self, Self::Directories | Self::Sessions)
+    }
 }
 
 /// What the file requests, already understood.
@@ -697,6 +704,7 @@ fn apply(settings: &mut Settings, key: &str, value: &str) -> Result<(), Missing>
             "none" => StartupRestore::None,
             "layout" => StartupRestore::Layout,
             "directories" => StartupRestore::Directories,
+            "sessions" => StartupRestore::Sessions,
             _ => {
                 return Err(Missing::InvalidValue {
                     key: key.to_owned(),
@@ -826,6 +834,7 @@ mod tests {
             ("none", StartupRestore::None),
             ("layout", StartupRestore::Layout),
             ("directories", StartupRestore::Directories),
+            ("sessions", StartupRestore::Sessions),
         ] {
             assert_eq!(
                 interpret(&format!("startup.restore = {value}"))

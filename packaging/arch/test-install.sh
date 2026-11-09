@@ -15,20 +15,28 @@ printf 'fixture settings\n' > "$config/config"
 printf 'fixture layout\n' > "$config/layout.json"
 (cd "$config" && sha256sum config layout.json) > "$tmp/expected"
 check_data() { (cd "$config" && sha256sum -c "$tmp/expected"); }
+check_session_payload() {
+    [[ $(readlink /usr/bin/ivy-session) == /usr/lib/ivy-terminal/ivy-session ]]
+    [[ -x /usr/bin/ivy-session ]]
+    diff -r "$(dirname "$(realpath "$0")")/../../integrations/session-recovery" /usr/lib/ivy-terminal/session-recovery
+}
 bsdtar -xf "$package" -C "$tmp/old"
 sed -i 's/^pkgver = .*/pkgver = 0-1/' "$tmp/old/.PKGINFO"
 rm -f "$tmp/old/.MTREE"
 bsdtar --zstd -cf "$tmp/old.pkg.tar.zst" -C "$tmp/old" .PKGINFO .BUILDINFO usr
 pacman -U --noconfirm "$tmp/old.pkg.tar.zst"
 check_data
+check_session_payload
 pacman -U --noconfirm "$package"
 check_data
-for binary in /usr/bin/ivy /usr/bin/panel-mcp; do
+check_session_payload
+for binary in /usr/bin/ivy /usr/bin/panel-mcp /usr/bin/ivy-session; do
     [[ -x $binary ]]
     if ldd "$binary" | grep -q 'not found'; then echo "Unresolved library: $binary" >&2; exit 1; fi
 done
 IVY_EXPECTED_VERSION=$2 "$(dirname "$(realpath "$0")")/../linux/test-runtime.sh"
 pacman -R --noconfirm ivy-terminal
 check_data
-[[ ! -e /usr/bin/ivy && ! -e /usr/bin/panel-mcp ]]
+[[ ! -e /usr/bin/ivy && ! -e /usr/bin/panel-mcp && ! -e /usr/bin/ivy-session ]]
+[[ ! -e /usr/lib/ivy-terminal/session-recovery ]]
 echo 'Arch install, upgrade, runtime and removal preserved user data.'

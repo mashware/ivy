@@ -18,17 +18,22 @@ use crate::tiling::{DIVIDER_THICKNESS, Orientation};
 use crate::{PANEL_GRIP, Pane, panel};
 
 /// Creates the interface-owned panel state before its channel receives the weak read capability.
-pub(crate) fn state_and_control(
+pub(crate) fn state_and_control_with_sessions(
     ctx: &egui::Context,
     dir: Option<&PanelDir>,
     reads: crate::control::ReadActivity,
+    sessions: Option<panel_control::session::SessionHandler>,
 ) -> (panel::PanelState, Option<crate::control::PaneControl>) {
     let state = panel::PanelState::default();
     let control = dir.and_then(|dir| {
         let waker = ctx.clone();
-        crate::control::PaneControl::open(dir, state.reader(), reads, move || {
-            waker.request_repaint()
-        })
+        let wake = move || waker.request_repaint();
+        match sessions {
+            Some(sessions) => {
+                crate::control::open_with_sessions(dir, state.reader(), reads, Some(sessions), wake)
+            }
+            None => crate::control::PaneControl::open(dir, state.reader(), reads, wake),
+        }
     });
     (state, control)
 }

@@ -75,6 +75,21 @@ use std::path::Path;
 /// moved the measurement bench's injected gestures out into `src/injected.rs`, which is the next
 /// entry down.
 const SOURCES: &[(&str, &str, usize)] = &[
+    (
+        "src/ai_sessions/tests/codex_probe.rs",
+        include_str!("../src/ai_sessions/tests/codex_probe.rs"),
+        1,
+    ),
+    (
+        "src/ai_sessions/programs/child.rs",
+        include_str!("../src/ai_sessions/programs/child.rs"),
+        0,
+    ),
+    (
+        "src/ai_sessions/programs/child/tests.rs",
+        include_str!("../src/ai_sessions/programs/child/tests.rs"),
+        0,
+    ),
     ("src/clipboard.rs", include_str!("../src/clipboard.rs"), 0),
     (
         "src/pointer/clipboard.rs",
@@ -121,6 +136,47 @@ const SOURCES: &[(&str, &str, usize)] = &[
         include_str!("../src/tests/agent_signals.rs"),
         1,
     ),
+    (
+        "src/control/channel.rs",
+        include_str!("../src/control/channel.rs"),
+        1,
+    ),
+    (
+        "src/ai_sessions/mod.rs",
+        include_str!("../src/ai_sessions/mod.rs"),
+        1,
+    ),
+    (
+        "src/ai_sessions/programs.rs",
+        include_str!("../src/ai_sessions/programs.rs"),
+        0,
+    ),
+    (
+        "src/ai_sessions/protocol.rs",
+        include_str!("../src/ai_sessions/protocol.rs"),
+        1,
+    ),
+    (
+        "src/ai_sessions/tests.rs",
+        include_str!("../src/ai_sessions/tests.rs"),
+        1,
+    ),
+    (
+        "src/ai_sessions/verify.rs",
+        include_str!("../src/ai_sessions/verify.rs"),
+        2,
+    ),
+    (
+        "src/ai_sessions/worker.rs",
+        include_str!("../src/ai_sessions/worker.rs"),
+        5,
+    ),
+    (
+        "src/chrome/connection/recovery.rs",
+        include_str!("../src/chrome/connection/recovery.rs"),
+        1,
+    ),
+    ("src/resume.rs", include_str!("../src/resume.rs"), 1),
     (
         "src/chrome/typography.rs",
         include_str!("../src/chrome/typography.rs"),
@@ -452,7 +508,7 @@ const SOURCES: &[(&str, &str, usize)] = &[
     ),
     ("src/alarms.rs", include_str!("../src/alarms.rs"), 133),
     ("src/closing.rs", include_str!("../src/closing.rs"), 115),
-    ("src/control.rs", include_str!("../src/control.rs"), 358),
+    ("src/control.rs", include_str!("../src/control.rs"), 354),
     (
         "src/control/retiring.rs",
         include_str!("../src/control/retiring.rs"),

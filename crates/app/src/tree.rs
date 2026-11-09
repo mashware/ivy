@@ -1013,6 +1013,11 @@ impl From<session::StoredOrientation> for Orientation {
 fn describe_node(node: &Node) -> session::StoredNode {
     match node {
         Node::Leaf(pane) => session::StoredNode::Leaf(session::StoredLeaf {
+            resume: if pane.restoration.failed || pane.restoration.directory.is_some() {
+                pane.restoration.resume.clone()
+            } else {
+                None
+            },
             cwd: pane.restoration.directory.clone(),
             panel_width: pane.panel_width,
             folded: pane.folded,

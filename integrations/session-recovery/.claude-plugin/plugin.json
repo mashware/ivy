@@ -1,0 +1,6 @@
+{
+  "name": "ivy-session-recovery",
+  "version": "1.0.0",
+  "description": "Report the foreground Claude conversation to Ivy without reading conversation content or changing the status line.",
+  "author": { "name": "Mashware" }
+}

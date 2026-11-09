@@ -13,6 +13,7 @@ import tempfile
 
 VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(alpha|beta|rc)\.(0|[1-9][0-9]*))?")
 ARCHES = ("arm64", "x86_64")
+EXECUTABLES = ("app", "panel-mcp", "ivy-session")
 
 
 def info(version):
@@ -37,7 +38,7 @@ def check_contents(bundle, version):
         actual = plistlib.load(file)
     if actual != info(version):
         raise ValueError("bundle metadata does not match the declared release")
-    for binary in ("app", "panel-mcp"):
+    for binary in EXECUTABLES:
         path = contents / "MacOS" / binary
         if not path.is_file() or not path.stat().st_mode & 0o111:
             raise ValueError(f"missing executable: {binary}")
@@ -48,9 +49,28 @@ def check_contents(bundle, version):
                  "licenses/themes/nord-LICENSE", "licenses/themes/rose-pine-LICENSE"):
         if not (resources / name).is_file() or not (resources / name).stat().st_size:
             raise ValueError(f"missing bundle resource: {name}")
+    source = Path(__file__).resolve().parent.parent / "integrations/session-recovery"
+    if resource_hashes(resources / "session-recovery") != resource_hashes(source):
+        raise ValueError("session recovery resources differ from the release sources")
     notices = resources / "licenses/cargo"
     if not notices.is_dir() or not any(notices.iterdir()):
         raise ValueError("missing Cargo dependency notices")
+
+
+def resource_hashes(directory):
+    """Bind the complete tree, including hidden plugin metadata, to its exact source bytes."""
+    if not directory.is_dir() or directory.is_symlink():
+        raise ValueError("missing session recovery resources")
+    result = {}
+    for path in sorted(directory.rglob("*")):
+        if path.is_symlink() or not (path.is_dir() or path.is_file()):
+            raise ValueError("session recovery resources must be regular files")
+        if path.is_file():
+            with path.open("rb") as file:
+                result[path.relative_to(directory).as_posix()] = hashlib.file_digest(file, "sha256").hexdigest()
+    if not result:
+        raise ValueError("missing session recovery resources")
+    return result
 
 
 def check_load_commands(load_commands, libraries):
@@ -76,7 +96,7 @@ def check_native(bundle, version, arch):
     if arch not in ARCHES:
         raise ValueError("unsupported macOS architecture")
     check_contents(bundle, version)
-    for name in ("app", "panel-mcp"):
+    for name in EXECUTABLES:
         binary = str(bundle / "Contents/MacOS" / name)
         if output("lipo", "-archs", binary).strip().split() != [arch]:
             raise ValueError(f"wrong architecture in {name}; expected {arch}")
@@ -99,7 +119,8 @@ def build(binary_dir, directory, version, arch):
         resources = contents / "Resources"
         executables.mkdir(parents=True)
         resources.mkdir()
-        for name in ("app", "panel-mcp"):
+        shutil.copytree(repo / "integrations/session-recovery", resources / "session-recovery")
+        for name in EXECUTABLES:
             shutil.copy2(binary_dir / name, executables / name)
         with (contents / "Info.plist").open("wb") as file:
             plistlib.dump(metadata, file)
@@ -128,13 +149,14 @@ def build(binary_dir, directory, version, arch):
                                 "--out", str(iconset / f"icon_{points}x{points}{suffix}.png")], check=True)
         subprocess.run(["iconutil", "-c", "icns", str(iconset), "-o", str(resources / "Ivy.icns")], check=True)
         # Local integrity seals carry no publisher identity and do not provide notarization.
-        subprocess.run(["codesign", "--force", "--sign", "-", "--timestamp=none",
-                        str(executables / "panel-mcp")], check=True)
+        for name in EXECUTABLES[1:]:
+            subprocess.run(["codesign", "--force", "--sign", "-", "--timestamp=none",
+                            str(executables / name)], check=True)
         subprocess.run(["codesign", "--force", "--sign", "-", "--timestamp=none", str(bundle)], check=True)
         check_native(bundle, version, arch)
         # Signing changes Mach-O bytes; bind the final image to the sealed staging executables.
         hashes = {}
-        for name in ("app", "panel-mcp"):
+        for name in EXECUTABLES:
             with (executables / name).open("rb") as file:
                 hashes[name] = hashlib.file_digest(file, "sha256").hexdigest()
         sidecar = directory / f"Ivy-{version}-macos-{arch}.executables.json"

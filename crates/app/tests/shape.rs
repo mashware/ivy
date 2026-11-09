@@ -47,6 +47,18 @@ use std::path::Path;
 /// a directory walk turns a renamed or deleted file into a target that is silently skipped, and a
 /// guard with no file to look at reads exactly like a clean one.
 const MODULES: &[(&str, &str)] = &[
+    (
+        "src/ai_sessions/tests/codex_probe.rs",
+        include_str!("../src/ai_sessions/tests/codex_probe.rs"),
+    ),
+    (
+        "src/ai_sessions/programs/child.rs",
+        include_str!("../src/ai_sessions/programs/child.rs"),
+    ),
+    (
+        "src/ai_sessions/programs/child/tests.rs",
+        include_str!("../src/ai_sessions/programs/child/tests.rs"),
+    ),
     ("src/clipboard.rs", include_str!("../src/clipboard.rs")),
     (
         "src/pointer/clipboard.rs",
@@ -81,6 +93,39 @@ const MODULES: &[(&str, &str)] = &[
         "src/tests/agent_signals.rs",
         include_str!("../src/tests/agent_signals.rs"),
     ),
+    (
+        "src/control/channel.rs",
+        include_str!("../src/control/channel.rs"),
+    ),
+    (
+        "src/ai_sessions/mod.rs",
+        include_str!("../src/ai_sessions/mod.rs"),
+    ),
+    (
+        "src/ai_sessions/programs.rs",
+        include_str!("../src/ai_sessions/programs.rs"),
+    ),
+    (
+        "src/ai_sessions/protocol.rs",
+        include_str!("../src/ai_sessions/protocol.rs"),
+    ),
+    (
+        "src/ai_sessions/tests.rs",
+        include_str!("../src/ai_sessions/tests.rs"),
+    ),
+    (
+        "src/ai_sessions/verify.rs",
+        include_str!("../src/ai_sessions/verify.rs"),
+    ),
+    (
+        "src/ai_sessions/worker.rs",
+        include_str!("../src/ai_sessions/worker.rs"),
+    ),
+    (
+        "src/chrome/connection/recovery.rs",
+        include_str!("../src/chrome/connection/recovery.rs"),
+    ),
+    ("src/resume.rs", include_str!("../src/resume.rs")),
     (
         "src/chrome/typography.rs",
         include_str!("../src/chrome/typography.rs"),
@@ -485,7 +530,7 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
     ),
     (
         "impl Pane",
-        534,
+        533,
         "a console with its panel, its keys and its mouse. On the day it was recorded it was six \
          blocks in six files: the keyboard and mouse passes (157 each), how a pane is opened (112) \
          and how it gets its panel (120), and 45 more in `lib.rs` and `control.rs`. **The search \
@@ -493,7 +538,7 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
          leftovers became a free function of `closing.rs`, 10 lines out, and the keyboard pass \
          spent ten — nine asking the search about each key, one seeding a new pane's search \
          record — with the rules themselves in `search.rs`, outside the type. **591 - 10 + 10 \
-         leaves 591.** Session takeover now delegates to a free function, leaving 538. Delegating the shared signal-aware pump and geometry work leaves534 after integrating startup recovery and clipboard changes.",
+         leaves 591.** Session takeover now delegates to a free function, leaving 538. Delegating the shared signal-aware pump and geometry work leaves534 after integrating startup recovery and clipboard changes. Sharing effective input modes with recovery leaves533.",
     ),
     (
         "impl PanelState",
@@ -558,9 +603,22 @@ fn production_lines(source: &str) -> Vec<&str> {
         if code.is_empty() || code.starts_with("//") {
             continue;
         }
+        // A leading inner attribute makes this entire external module test-only.
+        if out.is_empty() && code.trim_end() == "#![cfg(test)]" {
+            return Vec::new();
+        }
         out.push(line);
     }
     out
+}
+
+#[test]
+fn a_leading_inner_test_attribute_excludes_only_a_test_only_module() {
+    assert!(production_lines("//! fixture\n#![cfg(test)]\nfn fixture() {}\n").is_empty());
+    assert!(!production_lines("// #![cfg(test)]\nfn production() {}\n").is_empty());
+    assert!(
+        !production_lines("const TEXT: &str = \"#![cfg(test)]\";\nfn production() {}\n").is_empty()
+    );
 }
 
 #[test]

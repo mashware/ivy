@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -n \"$PANEL_DIR\" ] && [ -n \"$PANEL_ID\" ] && [ -n \"$IVY_SESSION_HELPER\" ]; then case \"$IVY_SESSION_HELPER\" in /*) case \"$IVY_SESSION_HELPER\" in *[[:cntrl:]]*) ;; *) \"$IVY_SESSION_HELPER\" hook codex >/dev/null || : ;; esac ;; esac; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -10,13 +10,32 @@ use std::{
 pub(crate) struct PaneState {
     pub(crate) directory: Option<PathBuf>,
     pub(crate) failed: bool,
+    pub(crate) resume: Option<panel_control::session::Identity>,
+    pub(crate) resuming: bool,
+    pub(crate) fresh_shell_required: bool,
+    pub(crate) interacted: bool,
+    pub(crate) session_status: Option<crate::ai_sessions::Status>,
+    pub(crate) session_revision: u64,
+    pub(crate) scope_unavailable: bool,
+    pub(crate) session_directory: Option<PathBuf>,
+    pub(crate) sessions: Option<crate::ai_sessions::Handle>,
+    pub(crate) route: crate::resume::Route,
+    pub(crate) wake: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
 }
 
 impl PaneState {
     pub(crate) fn take_over(&mut self) {
+        if self.resuming {
+            self.interacted = true;
+        }
         if self.failed {
             self.failed = false;
             self.directory = None;
+            self.resume = None;
+            self.session_directory = None;
+            self.resuming = false;
+            self.fresh_shell_required = false;
+            self.session_revision = 0;
         }
     }
 }
@@ -57,6 +76,10 @@ impl State {
             self.total += cost;
             self.frames += 1;
         }
+    }
+
+    pub(crate) fn captures_sessions(&self) -> bool {
+        !self.measuring && self.primary && self.mode == StartupRestore::Sessions
     }
 
     pub(crate) fn can_save(&self) -> bool {
@@ -110,10 +133,12 @@ pub(crate) fn prepare(
     } else {
         None
     };
-    let saved = if mode == StartupRestore::Directories {
-        saved
-    } else {
-        saved.map(session::Validated::without_directories)
+    let saved = match mode {
+        StartupRestore::Sessions => saved,
+        StartupRestore::Directories => saved.map(session::Validated::without_sessions),
+        StartupRestore::None | StartupRestore::Layout => {
+            saved.map(session::Validated::without_directories)
+        }
     };
     let opening = match saved {
         Some(saved) => OpenWith::Restored(saved),
@@ -154,13 +179,29 @@ pub(crate) fn apply_saved_mode(window: &mut Window) {
     {
         let _ = window.persistence.load();
     }
+    if mode != StartupRestore::Sessions {
+        for pane in window.all_panes_mut() {
+            crate::resume::set_capture(pane, false);
+            if pane.restoration.failed && pane.restoration.resume.is_some() {
+                pane.restoration.failed = pane.restoration.fresh_shell_required
+                    || pane
+                        .restoration
+                        .directory
+                        .as_ref()
+                        .is_some_and(|directory| !directory.is_dir());
+            }
+            pane.restoration.resume = None;
+            pane.restoration.session_directory = None;
+            pane.restoration.resuming = false;
+        }
+    }
     window.restoration.mode = mode;
     window.last_seen = None;
     window.persistence.save_due = None;
-    if mode != StartupRestore::Directories {
+    if !mode.has_directories() {
         for pane in window.all_panes_mut() {
             pane.restoration.directory = None;
-            pane.restoration.failed = false;
+            pane.restoration.failed = pane.restoration.fresh_shell_required;
         }
     }
     let cost = before.elapsed();
@@ -171,15 +212,28 @@ pub(crate) fn apply_saved_mode(window: &mut Window) {
 pub(crate) fn refresh(window: &mut Window) {
     if window.restoration.measuring
         || !window.restoration.primary
-        || window.restoration.mode != StartupRestore::Directories
+        || !window.restoration.mode.has_directories()
     {
         return;
     }
     let before = Instant::now();
+    let capture_sessions = window.restoration.mode == StartupRestore::Sessions;
+    if capture_sessions {
+        for pane in window.all_panes_mut() {
+            crate::resume::set_capture(pane, !pane.restoration.failed);
+            crate::resume::inspect_restored_exit(pane);
+        }
+    }
     let projects = &window.projects;
     for tab in &mut window.tabs {
         for pane in tab.panes_mut() {
             if !pane.restoration.failed {
+                if capture_sessions {
+                    crate::resume::capture(pane, None);
+                    if pane.restoration.failed {
+                        continue;
+                    }
+                }
                 let unusable = pane.screen.working_directory_reported()
                     && pane.screen.working_directory().is_none();
                 observe_directory(
@@ -196,6 +250,7 @@ pub(crate) fn refresh(window: &mut Window) {
 }
 
 fn observe_directory(state: &mut PaneState, observed: Option<&Path>, explicitly_unusable: bool) {
+    let observed = state.session_directory.as_deref().or(observed);
     if explicitly_unusable {
         state.directory = None;
     } else if let Some(path) = observed {
@@ -212,13 +267,42 @@ pub(crate) fn capture_on_exit(window: &mut Window) {
     apply_saved_mode(window);
     if window.restoration.measuring
         || !window.restoration.can_save()
-        || window.restoration.mode != StartupRestore::Directories
+        || !window.restoration.mode.has_directories()
     {
         return;
     }
     for pane in window.all_panes_mut() {
+        if pane.restoration.resuming && pane.pty.exit_success() == Some(false) {
+            pane.restoration.failed = true;
+            pane.restoration.fresh_shell_required = true;
+            pane.restoration.resuming = false;
+        }
+    }
+    let snapshots = if window.restoration.mode == StartupRestore::Sessions {
+        let handles: Vec<_> = window
+            .all_panes()
+            .filter_map(|pane| pane.restoration.sessions.as_ref())
+            .collect();
+        crate::ai_sessions::freeze_all(&handles, Duration::from_millis(1250))
+    } else {
+        Vec::new()
+    };
+    let mut snapshots = snapshots.into_iter();
+    let capture_sessions = window.restoration.mode == StartupRestore::Sessions;
+    for pane in window.all_panes_mut() {
+        let snapshot = pane
+            .restoration
+            .sessions
+            .as_ref()
+            .and_then(|_| snapshots.next());
         if pane.restoration.failed {
             continue;
+        }
+        if capture_sessions {
+            crate::resume::capture(pane, snapshot);
+            if pane.restoration.failed {
+                continue;
+            }
         }
         let unusable =
             pane.screen.working_directory_reported() && pane.screen.working_directory().is_none();
@@ -227,6 +311,16 @@ pub(crate) fn capture_on_exit(window: &mut Window) {
             .working_directory()
             .or_else(|| pane.screen.working_directory().map(local_directory));
         observe_directory(&mut pane.restoration, directory.as_deref(), unusable);
+        if capture_sessions
+            && pane.restoration.resuming
+            && pane
+                .restoration
+                .resume
+                .as_ref()
+                .is_some_and(|identity| identity.client != panel_control::session::Client::Codex)
+        {
+            pane.restoration.resume = None;
+        }
     }
 }
 
@@ -249,6 +343,22 @@ pub(crate) fn open_leaf(
     name: usize,
     reads: crate::control::ReadActivity,
 ) -> term_core::Result<crate::Pane> {
+    if leaf.resume.is_some() {
+        match crate::resume::try_open(ctx, leaf, name, reads.clone()) {
+            Ok(pane) => return Ok(pane),
+            Err(error) => {
+                eprintln!(
+                    "The saved AI session could not be started ({error}); opening a fresh console"
+                );
+                let mut shell = leaf.clone();
+                shell.resume = None;
+                let mut pane = open_leaf(ctx, &shell, program, name, reads)?;
+                pane.restoration.resume = leaf.resume.clone();
+                pane.restoration.failed = true;
+                return Ok(pane);
+            }
+        }
+    }
     let directory = leaf.cwd.as_deref().filter(|path| path.is_dir());
     let opened = crate::opening::launch_pane_in(
         ctx,
@@ -309,6 +419,7 @@ mod tests {
                     .map(|_| StoredTab {
                         label: None,
                         root: StoredNode::Leaf(StoredLeaf {
+                            resume: None,
                             panel_width: 37,
                             folded: true,
                             label: Some("Saved console".into()),
@@ -557,6 +668,7 @@ mod tests {
                 .map(|_| StoredTab {
                     label: None,
                     root: StoredNode::Leaf(StoredLeaf {
+                        resume: None,
                         panel_width: 37,
                         folded: false,
                         label: None,
@@ -580,11 +692,25 @@ mod tests {
     }
 
     #[test]
+    fn verified_client_directory_wins_over_wrapper_cwd_but_not_remote_veto() {
+        let declared = PathBuf::from("/tmp/client-project");
+        let wrapper = Path::new("/tmp/launch-wrapper");
+        let mut state = PaneState {
+            session_directory: Some(declared.clone()),
+            ..Default::default()
+        };
+        observe_directory(&mut state, Some(wrapper), false);
+        assert_eq!(state.directory, Some(declared));
+        observe_directory(&mut state, Some(wrapper), true);
+        assert!(state.directory.is_none());
+    }
+
+    #[test]
     fn explicit_invalid_directory_clears_old_context_but_missing_observation_preserves_it() {
         let previous = PathBuf::from("/tmp/previous-project");
         let mut state = PaneState {
             directory: Some(previous.clone()),
-            failed: false,
+            ..Default::default()
         };
         observe_directory(&mut state, None, false);
         assert_eq!(state.directory, Some(previous));
@@ -605,6 +731,7 @@ mod tests {
         let ctx = eframe::egui::Context::default();
         let path = PathBuf::from(format!("/tmp/{}", "a/".repeat(2000)));
         let leaf = StoredLeaf {
+            resume: None,
             panel_width: 37,
             folded: false,
             label: None,

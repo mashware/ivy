@@ -1,4 +1,5 @@
 //! In-app setup help reports published panels, never inferred client installation (D73).
+mod recovery;
 use crate::{Window, panel};
 use eframe::egui::{self, Color32, Rect, Stroke};
 use std::{path::PathBuf, time::Instant};
@@ -42,6 +43,7 @@ pub(super) struct Guide {
     blocked_frame: Option<u64>,
     awaiting_release: bool,
     published: Published,
+    recovery: recovery::Status,
     manual_open: bool,
     copied: Option<&'static str>,
     desired: crate::agent_signals::Enabled,
@@ -249,6 +251,13 @@ pub(crate) fn after_panels(window: &mut Window, ui: &mut egui::Ui, area: Rect) {
         ui.ctx().request_repaint();
     }
     window.chrome.guide.published = current;
+    if window.chrome.guide.open {
+        let recovery = recovery::status(window);
+        if recovery != window.chrome.guide.recovery {
+            ui.ctx().request_repaint();
+        }
+        window.chrome.guide.recovery = recovery;
+    }
     let bounds = ui.max_rect();
     let row = Rect::from_min_max(
         bounds.min,
@@ -440,6 +449,7 @@ fn body(guide: &mut Guide, ui: &mut egui::Ui) {
     if guide.manual_open {
         manual(published, &mut guide.copied, ui);
     }
+    recovery::show(guide.recovery, &mut guide.copied, ui);
     egui::CollapsingHeader::new("Agent activity and input signals")
         .default_open(false)
         .show(ui, |ui| {

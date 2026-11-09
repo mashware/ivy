@@ -74,6 +74,18 @@ use std::path::Path;
 /// [`the_list_still_names_every_module`] checks it against the tree and the reviewers no longer have
 /// to.
 const MODULES: &[(&str, &str)] = &[
+    (
+        "app/src/ai_sessions/tests/codex_probe.rs",
+        include_str!("../src/ai_sessions/tests/codex_probe.rs"),
+    ),
+    (
+        "app/src/ai_sessions/programs/child.rs",
+        include_str!("../src/ai_sessions/programs/child.rs"),
+    ),
+    (
+        "app/src/ai_sessions/programs/child/tests.rs",
+        include_str!("../src/ai_sessions/programs/child/tests.rs"),
+    ),
     ("app/src/clipboard.rs", include_str!("../src/clipboard.rs")),
     (
         "app/src/pointer/clipboard.rs",
@@ -110,6 +122,103 @@ const MODULES: &[(&str, &str)] = &[
     (
         "app/src/tests/agent_signals.rs",
         include_str!("../src/tests/agent_signals.rs"),
+    ),
+    (
+        "app/src/control/channel.rs",
+        include_str!("../src/control/channel.rs"),
+    ),
+    (
+        "panel-control/src/bin/panel-mcp.rs",
+        include_str!("../../panel-control/src/bin/panel-mcp.rs"),
+    ),
+    (
+        "panel-control/src/client.rs",
+        include_str!("../../panel-control/src/client.rs"),
+    ),
+    (
+        "panel-control/src/endpoint.rs",
+        include_str!("../../panel-control/src/endpoint.rs"),
+    ),
+    (
+        "panel-control/src/lib.rs",
+        include_str!("../../panel-control/src/lib.rs"),
+    ),
+    (
+        "panel-control/src/listener.rs",
+        include_str!("../../panel-control/src/listener.rs"),
+    ),
+    (
+        "panel-control/src/wire.rs",
+        include_str!("../../panel-control/src/wire.rs"),
+    ),
+    (
+        "app/src/ai_sessions/mod.rs",
+        include_str!("../src/ai_sessions/mod.rs"),
+    ),
+    (
+        "app/src/ai_sessions/programs.rs",
+        include_str!("../src/ai_sessions/programs.rs"),
+    ),
+    (
+        "app/src/ai_sessions/protocol.rs",
+        include_str!("../src/ai_sessions/protocol.rs"),
+    ),
+    (
+        "app/src/ai_sessions/tests.rs",
+        include_str!("../src/ai_sessions/tests.rs"),
+    ),
+    (
+        "app/src/ai_sessions/verify.rs",
+        include_str!("../src/ai_sessions/verify.rs"),
+    ),
+    (
+        "app/src/ai_sessions/worker.rs",
+        include_str!("../src/ai_sessions/worker.rs"),
+    ),
+    (
+        "app/src/chrome/connection/recovery.rs",
+        include_str!("../src/chrome/connection/recovery.rs"),
+    ),
+    ("app/src/resume.rs", include_str!("../src/resume.rs")),
+    (
+        "panel-control/src/bin/ivy-session.rs",
+        include_str!("../../panel-control/src/bin/ivy-session.rs"),
+    ),
+    (
+        "panel-control/src/session.rs",
+        include_str!("../../panel-control/src/session.rs"),
+    ),
+    (
+        "panel-control/src/session/helper.rs",
+        include_str!("../../panel-control/src/session/helper.rs"),
+    ),
+    (
+        "panel-control/src/session/peer.rs",
+        include_str!("../../panel-control/src/session/peer.rs"),
+    ),
+    (
+        "panel-control/src/session/tests.rs",
+        include_str!("../../panel-control/src/session/tests.rs"),
+    ),
+    (
+        "panel-control/tests/session_helper.rs",
+        include_str!("../../panel-control/tests/session_helper.rs"),
+    ),
+    (
+        "term-core/src/foreground.rs",
+        include_str!("../../term-core/src/foreground.rs"),
+    ),
+    (
+        "term-core/src/foreground/arguments.rs",
+        include_str!("../../term-core/src/foreground/arguments.rs"),
+    ),
+    (
+        "term-core/src/foreground/linux.rs",
+        include_str!("../../term-core/src/foreground/linux.rs"),
+    ),
+    (
+        "term-core/src/foreground/tests.rs",
+        include_str!("../../term-core/src/foreground/tests.rs"),
     ),
     (
         "app/src/chrome/typography.rs",
@@ -623,8 +732,8 @@ const NOT_JUDGED: &str = "app/tests/scripts.rs";
 /// **The list is checked against the tree, and the count stays beside it as a floor.** A count
 /// raised by hand binds only the delivery that remembers to raise it: with one, this list still fell
 /// twelve files behind, and one of those twelve printed its ready marker after a `stty` it did not
-/// wait for. The tree is every Rust file of `app` and `term-core` — their sources, examples and
-/// tests — minus [`NOT_JUDGED`]; the other crates run no shell.
+/// wait for. The tree is every Rust file of `app`, `term-core` and `panel-control` — their sources, examples and
+/// tests — minus [`NOT_JUDGED`]; the remaining crates run no shell.
 #[test]
 fn the_list_still_names_every_module() {
     let declared: Vec<&str> = MODULES.iter().map(|(name, _)| *name).collect();
@@ -638,6 +747,8 @@ fn the_list_still_names_every_module() {
             "term-core/src",
             "term-core/examples",
             "term-core/tests",
+            "panel-control/src",
+            "panel-control/tests",
         ],
     );
     assert!(

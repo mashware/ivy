@@ -61,6 +61,12 @@ pub(crate) struct Signals {
     reporter: Option<Reporter>,
 }
 impl Signals {
+    pub(crate) fn reset_for_new_shell(&mut self, screen: &mut Screen) {
+        let enabled = self.enabled;
+        *self = Self::default();
+        self.configure(enabled, screen);
+    }
+
     pub(crate) fn configure(&mut self, enabled: Enabled, screen: &mut Screen) {
         self.enabled = enabled;
         if !enabled.claude {
