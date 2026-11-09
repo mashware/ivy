@@ -25,6 +25,67 @@ class ReleaseTest(unittest.TestCase):
                                "--built-on", "test-builder", *extra],
                               capture_output=True, text=True)
 
+    def test_notices_preserve_nested_originals_and_reject_missing(self):
+        source = self.root / "source"
+        (source / "fonts").mkdir(parents=True)
+        (source / "Cargo.toml").touch()
+        (source / "LICENSE-MIT").write_bytes(b"original license\r\n")
+        (source / "fonts" / "OFL.txt").write_bytes(b"font terms\n")
+        (source / "special.txt").write_bytes(b"declared license\n")
+        packages = [
+            {"id": name, "name": name, "source": None} for name in ("app", "panel-control")
+        ] + [{"id": "dep", "name": "dep", "version": "1.0.0", "source": "registry+x",
+              "manifest_path": str(source / "Cargo.toml"), "license_file": "special.txt"}]
+        metadata = {"packages": packages, "workspace_members": ["app", "panel-control"],
+                    "resolve": {"nodes": [
+                        {"id": "app", "deps": [{"pkg": "dep", "dep_kinds": [{"kind": None}]}]},
+                        {"id": "panel-control", "deps": []}, {"id": "dep", "deps": []}]}}
+        path = self.root / "metadata.json"
+        path.write_text(json.dumps(metadata))
+        output = self.root / "notices"
+        command = ["python3", str(SCRIPT), "notices", "--metadata", str(path), "--directory", str(output)]
+        result = subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for name in ("LICENSE-MIT", "fonts/OFL.txt", "special.txt"):
+            self.assertEqual((output / "dep-1.0.0" / name).read_bytes(), (source / name).read_bytes())
+        for name in ("LICENSE-MIT", "fonts/OFL.txt", "special.txt"):
+            (source / name).unlink()
+        result = subprocess.run(command[:-1] + [str(self.root / "missing")], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("missing notice for dep 1.0.0", result.stderr)
+
+    def test_notices_use_explicit_apache_fallback_and_keep_original_notice(self):
+        source = self.root / "fallback-source"
+        source.mkdir()
+        (source / "Cargo.toml").touch()
+        (source / "NOTICE").write_bytes(b"upstream notice\r\n")
+        package = {"id": "dep", "name": "dep", "version": "2.0.0", "source": "registry+x",
+                   "manifest_path": str(source / "Cargo.toml"), "license": "MIT OR Apache-2.0",
+                   "repository": "https://example.test/dep", "authors": ["Author"]}
+        packages = [{"id": name, "name": name, "source": None} for name in ("app", "panel-control")] + [package]
+        metadata = {"packages": packages, "workspace_members": ["app", "panel-control"],
+                    "resolve": {"nodes": [
+                        {"id": "app", "deps": [{"pkg": "dep", "dep_kinds": [{"kind": None}]}]},
+                        {"id": "panel-control", "deps": []}, {"id": "dep", "deps": []}]}}
+        path = self.root / "metadata.json"
+        path.write_text(json.dumps(metadata))
+        output = self.root / "notices"
+        command = ["python3", str(SCRIPT), "notices", "--metadata", str(path), "--directory", str(output)]
+        result = subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        dest = output / "dep-2.0.0"
+        self.assertEqual((dest / "NOTICE").read_bytes(), b"upstream notice\r\n")
+        canonical = SCRIPT.parent.parent / "vendor/egui-winit/LICENSE-APACHE"
+        self.assertEqual((dest / "SPDX-FALLBACK-APACHE-2.0").read_bytes(), canonical.read_bytes())
+        attribution = (dest / "SPDX-FALLBACK-ATTRIBUTION.txt").read_text()
+        for value in ("dep", "2.0.0", "MIT OR Apache-2.0", "https://example.test/dep", "Author"):
+            self.assertIn(value, attribution)
+        package["license"] = "Unrecognized"
+        path.write_text(json.dumps(metadata))
+        result = subprocess.run(command[:-1] + [str(self.root / "unknown")], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("missing notice for dep 2.0.0", result.stderr)
+
     def test_manifest_and_checksums_cover_actual_bytes(self):
         self.assertEqual(self.run_release("--tag", "v0.1.0-alpha.1").returncode, 0)
         manifest = json.loads((self.root / "release-manifest.json").read_text())

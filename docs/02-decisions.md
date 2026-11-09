@@ -8746,3 +8746,8 @@ Release versions admit stable `MAJOR.MINOR.PATCH` and numbered `alpha.N`, `beta.
 prereleases only. A direct hyphen-to-tilde conversion of all SemVer labels was discarded: Debian
 orders `rc10` after `rc2`, whereas SemVer orders these lexical identifiers the other way, and Debian
 equates `alpha01` with `alpha1`. The supported numbered subset preserves ordering and identity.
+
+The package retains the current GPLv3/COPYRIGHT and third-party asset notices. Cargo source
+license/notice texts are collected from resolved release dependencies; known Apache-2.0 choices
+may use the repository's preserved canonical text when published crates omit it. Unknown missing
+texts stop packaging. This preserves existing licenses rather than choosing new ones.

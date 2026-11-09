@@ -51,6 +51,16 @@ ln -s /usr/lib/ivy-terminal/panel-mcp "$stage/root/usr/bin/panel-mcp"
 install -m 644 "$repo/packaging/linux/Ivy.desktop" "$stage/root/usr/share/applications/"
 install -m 644 "$repo/resources/branding/ivy.png" "$stage/root/usr/share/icons/hicolor/512x512/apps/ivy.png"
 install -m 644 "$repo/resources/branding/ivy.svg" "$stage/root/usr/share/icons/hicolor/scalable/apps/ivy.svg"
+# Preserve upstream texts and attribution alongside the installed binaries.
+doc="$stage/root/usr/share/doc/ivy-terminal"
+[[ -d $binary_dir/notices ]] && [[ -n $(ls -A "$binary_dir/notices") ]] || {
+    echo "Missing prepared dependency notices: $binary_dir/notices" >&2; exit 1;
+}
+mkdir -p "$doc/vendor/egui-winit" "$doc/resources/themes" "$doc/cargo"
+install -m 644 "$repo/LICENSE" "$repo/COPYRIGHT" "$repo/THIRD-PARTY.md" "$doc/"
+install -m 644 "$repo/vendor/egui-winit/LICENSE-MIT" "$repo/vendor/egui-winit/LICENSE-APACHE" "$doc/vendor/egui-winit/"
+install -m 644 "$repo/resources/themes/README.md" "$repo/resources/themes/"*-LICENSE "$doc/resources/themes/"
+cp -R "$binary_dir/notices/." "$doc/cargo/"
 # dpkg-shlibdeps reads the source package's control file in its working directory.
 cat > "$stage/debian/control" <<'CONTROL'
 Source: ivy-terminal

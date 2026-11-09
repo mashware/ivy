@@ -28,6 +28,14 @@ grep -qx 'Icon=ivy' "$desktop"
 if command -v desktop-file-validate >/dev/null; then desktop-file-validate "$desktop"; fi
 [[ -s $tmp/root/usr/share/icons/hicolor/512x512/apps/ivy.png ]]
 [[ -s $tmp/root/usr/share/icons/hicolor/scalable/apps/ivy.svg ]]
+doc=$tmp/root/usr/share/doc/ivy-terminal
+for file in LICENSE COPYRIGHT THIRD-PARTY.md vendor/egui-winit/LICENSE-MIT \
+    vendor/egui-winit/LICENSE-APACHE resources/themes/README.md \
+    resources/themes/catppuccin-LICENSE resources/themes/github-LICENSE \
+    resources/themes/nord-LICENSE resources/themes/rose-pine-LICENSE; do
+    [[ -s $doc/$file ]]
+done
+[[ -d $doc/cargo && -n $(ls -A "$doc/cargo") ]]
 # User data is never package-owned or removed by a maintainer script.
 [[ ! -e $tmp/root/home && ! -e $tmp/root/root ]]
 for script in preinst postinst prerm postrm; do [[ ! -e $tmp/control/$script ]]; done

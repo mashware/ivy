@@ -41,6 +41,8 @@ jobs:
         env:
           COMMIT: ${{ github.sha }}
         run: |
+          cargo metadata --locked --filter-platform x86_64-unknown-linux-gnu --format-version 1 > target/release-metadata.json
+          python3 scripts/release.py notices --metadata target/release-metadata.json --directory target/release/notices
           version=$(python3 scripts/release.py version)
           scripts/package-linux.sh --binary-dir target/release --output-dir dist --version "$version"
           scripts/test-linux-package.sh dist/*.deb "$version"

@@ -3,6 +3,8 @@
 import argparse
 import hashlib
 import json
+import os
+import shutil
 from pathlib import Path
 import re
 import sys
@@ -61,11 +63,74 @@ def generate(cargo, directory, commit, built_on, tag=None):
     )
 
 
+def notices(metadata, directory):
+    """Copy original notices; use the canonical Apache text for supported SPDX fallbacks."""
+    data = json.loads(metadata.read_text(encoding="utf-8"))
+    packages = {package["id"]: package for package in data["packages"]}
+    nodes = {node["id"]: node for node in data["resolve"]["nodes"]}
+    roots = [package["id"] for package in packages.values()
+             if package["id"] in data["workspace_members"]
+             and package["name"] in ("app", "panel-control")]
+    if len(roots) != 2:
+        raise ValueError("metadata must contain both release workspace packages")
+    pending, selected = roots[:], set()
+    while pending:
+        ident = pending.pop()
+        if ident in selected:
+            continue
+        selected.add(ident)
+        for dep in nodes[ident]["deps"]:
+            if any(kind["kind"] != "dev" for kind in dep["dep_kinds"]):
+                pending.append(dep["pkg"])
+    if directory.exists() and any(directory.iterdir()):
+        raise ValueError(f"notice directory is not empty: {directory}")
+    directory.mkdir(parents=True, exist_ok=True)
+    for ident in sorted(selected):
+        package = packages[ident]
+        if package["source"] is None:
+            continue
+        root = Path(package["manifest_path"]).parent
+        files = set()
+        for current, dirs, names in os.walk(root):
+            dirs[:] = sorted(d for d in dirs if d not in (".git", "target"))
+            for name in names:
+                if re.match(r"^(?:licen[sc]e|copying|notice|ofl)(?:$|[._-])", name, re.I):
+                    files.add(Path(current, name))
+        if package.get("license_file"):
+            file = Path(package["license_file"])
+            files.add(file if file.is_absolute() else root / file)
+        if any(not file.is_file() for file in files):
+            raise ValueError(f"missing notice for {package['name']} {package['version']}")
+        has_license = any(re.match(r"^(?:licen[sc]e|copying|ofl)(?:$|[._-])", file.name, re.I)
+                          for file in files) or bool(package.get("license_file"))
+        fallback = not has_license and package.get("license") in ("Apache-2.0", "MIT OR Apache-2.0")
+        if not has_license and not fallback:
+            raise ValueError(f"missing notice for {package['name']} {package['version']}")
+        dest = directory / f"{package['name']}-{package['version']}"
+        if fallback:
+            dest.mkdir(parents=True, exist_ok=True)
+            canonical = Path(__file__).resolve().parent.parent / "vendor/egui-winit/LICENSE-APACHE"
+            shutil.copyfile(canonical, dest / "SPDX-FALLBACK-APACHE-2.0")
+            (dest / "SPDX-FALLBACK-ATTRIBUTION.txt").write_text(
+                "No license text was present in the source distribution.\n"
+                "Apache-2.0 is selected from the declared SPDX expression below;\n"
+                "SPDX-FALLBACK-APACHE-2.0 contains its canonical text.\n"
+                f"Name: {package['name']}\nVersion: {package['version']}\n"
+                f"License: {package.get('license')}\nRepository: {package.get('repository')}\n"
+                f"Authors: {', '.join(package.get('authors', []))}\n", encoding="utf-8")
+        for file in sorted(files):
+            relative = file.relative_to(root)
+            target = dest / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(file, target)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("version", "generate"))
+    parser.add_argument("command", choices=("version", "generate", "notices"))
     parser.add_argument("--cargo", type=Path, default=Path("Cargo.toml"))
     parser.add_argument("--directory", type=Path)
+    parser.add_argument("--metadata", type=Path)
     parser.add_argument("--commit")
     parser.add_argument("--built-on")
     parser.add_argument("--tag")
@@ -76,6 +141,10 @@ def main():
             if args.tag is not None and args.tag != "v" + value:
                 raise ValueError(f"tag {args.tag!r} does not match workspace version {value}")
             print(value)
+        elif args.command == "notices":
+            if args.directory is None or args.metadata is None:
+                parser.error("notices requires --metadata and --directory")
+            notices(args.metadata, args.directory)
         else:
             if args.directory is None or args.commit is None or args.built_on is None:
                 parser.error("generate requires --directory, --commit and --built-on")

@@ -1,4 +1,10 @@
-# Ivy 0.1.0
+# Ivy 0.1.0-alpha.1
+
+## Experimental Ubuntu packages
+
+- Install Ivy and its MCP bridge together from a `.deb`, with an application-menu entry and icon.
+- Updates and removal preserve existing preferences and saved layouts.
+- This alpha targets Ubuntu 24.04 and 26.04 on x86_64; it is unsigned and experimental.
 
 ## Work across consoles
 

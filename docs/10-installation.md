@@ -6,6 +6,7 @@ The first packaging delivery targets **Ubuntu 24.04 and 26.04 on x86_64**. It bu
 package without requiring Rust on the machine that installs it. Adding packaging to the repository
 does not itself publish a download: use an explicitly published GitHub prerelease, or build the
 package below. The alpha is experimental and unsigned.
+Prereleases do not appear in the stable-only [in-app update checker](09-releases.md).
 
 Download the `.deb`, `release-manifest.json` and `SHA256SUMS` from the same release into an empty
 directory. Verify them there, then install the package shown in that release:
@@ -22,7 +23,8 @@ or mismatched downloads; they are not a publisher signature.
 
 You can also open **Ivy** from the applications menu. The package installs the application and
 MCP bridge under `/usr/lib/ivy-terminal/`, with `/usr/bin/ivy` and `/usr/bin/panel-mcp` as public
-commands. Its desktop entry and icons are package-owned files. It does not register itself as
+commands. Its desktop entry and icons are package-owned files. GPLv3, copyright and bundled third-party
+notices are installed under `/usr/share/doc/ivy-terminal/`. It does not register itself as
 your default terminal, change agent settings, or install agents for you.
 
 To upgrade, close Ivy after saving your work and install the newer `.deb` in the same way. Existing
@@ -59,6 +61,8 @@ packaging tools:
 sudo apt update
 sudo apt install build-essential pkg-config libssl-dev libxkbcommon-dev dpkg-dev binutils desktop-file-utils python3
 cargo build --locked --release -p app -p panel-control --bins
+cargo metadata --locked --filter-platform x86_64-unknown-linux-gnu --format-version 1 > target/release-metadata.json
+python3 scripts/release.py notices --metadata target/release-metadata.json --directory target/release/notices
 version=$(python3 scripts/release.py version)
 scripts/package-linux.sh --binary-dir target/release --output-dir dist --version "$version"
 scripts/test-linux-package.sh dist/*.deb "$version"
