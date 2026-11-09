@@ -78,12 +78,15 @@ test('route bootstrap, displayed request, cancellation, navigation and disposal'
     route={name:'session',params:{sessionID:'latest'}}; solid.tick(); await pause(80)
     state.refuse=true; state.retryable=true
     const transientConnections=state.connections
-    callbacks.get('session.status')(); await pause(80)
+    const firstTransientLine=lines.length
+    callbacks.get('session.status')(); await pause(8500)
+    assert.equal(state.connections,transientConnections,'retryable refusals retain the same connection')
+    assert.ok(lines.length-firstTransientLine >= 9,'more than eight retries were exercised')
     state.refuse=false
     const transientLines=lines.length
     await pause(1250)
-    assert.equal(state.connections,transientConnections+1,'a retryable refusal reconnects')
-    assert.ok(lines.length>transientLines,'reconnection sends a complete snapshot')
+    assert.equal(state.connections,transientConnections,'successful retry keeps the connection')
+    assert.ok(lines.length>transientLines,'retry sends a complete snapshot')
     assert.equal(lines[transientLines].snapshot.session,'latest')
     assert.notEqual(lines[transientLines].snapshot.stale,true,'the reconnect first frame is current')
     state.refuse=true; state.retryable=false

@@ -8918,8 +8918,9 @@ is introduced. The guide exposes reviewed setup instructions and preserves exist
 Automatic capability replies reuse the existing PTY write queue only when it has no backlog;
 at most one reply is deferred. They cannot spend or clear the person's refused-input state.
 A fresh enabled native declaration can replace a disconnected TUI reporter; an untagged clear or
-capability probe cannot withdraw that reporter's unconfirmed wait. Transient signal channel queue-full/timeouts carry an explicit retryable flag; legacy tool
-replies keep their shape. A permanent adapter refusal stops reconnect attempts until the client is explicitly restarted, so a disabled integration
+capability probe cannot withdraw that reporter's unconfirmed wait. Transient signal channel queue-full/timeouts carry an explicit retryable flag and retry
+on the same connection; legacy tool replies keep their shape. Repeatedly reconnecting while a
+window is not draining would fill its finite connection slots with undelivered close notices. A permanent adapter refusal stops reconnect attempts until the client is explicitly restarted, so a disabled integration
 does not wake an idle window forever.
 
 **Presentation.** Supported identity selects a bundled logo; only explicit active state animates

@@ -87,6 +87,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         0,
     ),
     (
+        "src/tests/agent_signals/native_transport.rs",
+        include_str!("../src/tests/agent_signals/native_transport.rs"),
+        1,
+    ),
+    (
         "src/chrome/connection/tests.rs",
         include_str!("../src/chrome/connection/tests.rs"),
         0,

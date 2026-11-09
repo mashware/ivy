@@ -11,16 +11,17 @@ type Entry = { id: string; sessionID: string }
 // writing the next one; neither a slow endpoint nor an outage accumulates frames.
 function channel(path: string, connected: () => void) {
   let socket: Socket | undefined, retry: ReturnType<typeof setTimeout> | undefined
-  let pending: Snapshot | null | undefined, inflight = false, buffer = "", stopped = false
+  let retryReply: ReturnType<typeof setTimeout> | undefined, waitingForRefresh = false
+  let pending: Snapshot | null | undefined, inflightSnapshot: Snapshot | null | undefined, inflight = false, buffer = "", stopped = false
   let reporterReady = false
   let drained: (() => void) | undefined
   function pump() {
     if (!socket || socket.connecting || inflight || pending === undefined) return
     inflight = true
     const snapshot = pending
+    inflightSnapshot = snapshot
     pending = undefined
     if (snapshot === null) reporterReady = false
-    else if (!snapshot.stale) reporterReady = true
     socket.write(envelope(snapshot))
   }
   function connect() {
@@ -37,16 +38,40 @@ function channel(path: string, connected: () => void) {
       if (end < 0) return
       const line = buffer.slice(0, end)
       buffer = buffer.slice(end + 1)
-      try { const reply = JSON.parse(line); if (reply.ok !== true) { stopped = reply.retryable !== true; current.destroy(); return } }
+      try {
+        const reply = JSON.parse(line)
+        if (reply.ok !== true) {
+          if (reply.retryable !== true) { stopped = true; current.destroy(); return }
+          // The listener may be paused in the background. Reconnecting on every
+          // timeout would fill its connection slots with close notifications.
+          const withdraw = pending === null || inflightSnapshot === null
+          inflight = false
+          inflightSnapshot = undefined
+          pending = undefined
+          waitingForRefresh = true
+          retryReply = setTimeout(() => {
+            retryReply = undefined
+            if (socket !== current || stopped) return
+            waitingForRefresh = false
+            if (withdraw) { pending = null; pump() }
+            else connected() // obtain fresh authoritative state; never replay old bytes
+          }, 1000)
+          return
+        }
+      }
       catch { current.destroy(); return }
+      if (inflightSnapshot && !inflightSnapshot.stale) reporterReady = true
       inflight = false
+      inflightSnapshot = undefined
       pump()
       if (!inflight && pending === undefined) { drained?.(); drained = undefined }
     })
     current.on("error", () => {})
     current.on("close", () => {
       if (socket !== current) return
-      socket = undefined; pending = undefined; inflight = false; buffer = ""; reporterReady = false
+      if (retryReply) clearTimeout(retryReply)
+      retryReply = undefined; waitingForRefresh = false
+      socket = undefined; pending = undefined; inflightSnapshot = undefined; inflight = false; buffer = ""; reporterReady = false
       drained?.(); drained = undefined
       if (!stopped) retry = setTimeout(connect, 1000)
     })
@@ -54,7 +79,8 @@ function channel(path: string, connected: () => void) {
   connect()
   return {
     send(snapshot: Snapshot | null) {
-      if (!socket || socket.connecting || (snapshot?.stale && !reporterReady)) return false
+      if (!socket || socket.connecting || (waitingForRefresh && snapshot !== null) || (snapshot?.stale && !reporterReady)) return false
+      if (snapshot === null && retryReply) { clearTimeout(retryReply); retryReply = undefined; waitingForRefresh = false }
       pending = snapshot
       if (snapshot === null) reporterReady = false
       pump()
@@ -67,7 +93,7 @@ function channel(path: string, connected: () => void) {
         drained = () => { clearTimeout(timeout); resolve() }
       })
     },
-    close() { stopped = true; if (retry) clearTimeout(retry); socket?.end(); socket = undefined },
+    close() { stopped = true; if (retry) clearTimeout(retry); if (retryReply) clearTimeout(retryReply); socket?.end(); socket = undefined },
   }
 }
 

@@ -84,6 +84,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/tests/context_clipboard.rs"),
     ),
     (
+        "app/src/tests/agent_signals/native_transport.rs",
+        include_str!("../src/tests/agent_signals/native_transport.rs"),
+    ),
+    (
         "app/src/chrome/connection/tests.rs",
         include_str!("../src/chrome/connection/tests.rs"),
     ),
