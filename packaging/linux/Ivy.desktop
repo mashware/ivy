@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Ivy
+Comment=Terminal for hosting agents
+Exec=ivy
+Icon=ivy
+Terminal=false
+Categories=System;TerminalEmulator;
+StartupWMClass=Ivy

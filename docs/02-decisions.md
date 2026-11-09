@@ -8709,3 +8709,45 @@ Offline users retain bundled installed notes, but remote history is not cached. 
 reads twenty recent releases, so older history remains on GitHub. Source builds identify themselves
 by their Cargo version. Publishing a release requires bumping that version and updating the bundled
 notes; this feature does not publish releases or build installers.
+## D76 — Native packages make Ivy available for explicit experimental trials
+
+**8 November 2026 — #343.** Installers wrap the existing terminal and MCP bridge without changing
+Cargo target names or the `agent-terminal` user-data namespace retained by D71. The first delivery
+is an Ubuntu 24.04-baseline x86_64 `.deb`, usable on the approved Ubuntu 24.04 and 26.04 targets;
+macOS 15+ ARM64/Intel and Windows 11 x86_64 follow as separate coherent deliveries. Native runtime
+and desktop evidence, including upgrade and uninstall, decides what is actually supported.
+
+Linux installs `app` and `panel-mcp` under `/usr/lib/ivy-terminal`, exposes `ivy` and `panel-mcp`
+commands, and supplies an Ivy desktop entry and the approved icons. Package metadata owns no
+configuration or layout, and uninstall has no script deleting them. ELF inspection determines
+linked dependencies; dynamically loaded desktop/font libraries are declared separately because
+ELF dependency scanning cannot see them.
+
+Versioned CI artifacts and explicit prerelease publication are different acts. Builds have read-only
+repository access; a manual publication on a matching version tag aggregates the complete declared
+asset set and checksums in a draft before making it visible. The first alpha has no publisher
+signature. No signing identity, certificate purchase, provider key or updater is assumed.
+
+**Discarded, with reasons:**
+- Source-only installation: it requires a compiler on every tester's machine and ties daily use to
+  a development checkout instead of an identifiable package.
+- A new GUI wrapper or target rename: packaging needs desktop resources, not a replacement for the
+  existing application, and D71 preserves internal identifiers.
+- A release-framework-only first delivery: it supplies no terminal the owner can install. Shared
+  machinery instead ships with Linux and is reused by both later platform deliveries.
+- A single all-platform delivery: an unvalidated Mac or Windows assumption would delay usable Linux
+  trials; platform packages can each stand alone with their actual limitations declared.
+- Mandatory signed distribution before owner-led trials: identity provisioning is a separate
+  credential/cost decision, while explicitly experimental packages enable the native testing.
+- Treating package creation as portability completion: the Windows listener deliberately rejects
+  control connections until F2.7, and desktop integration cannot be proved by compilation alone.
+
+Release versions admit stable `MAJOR.MINOR.PATCH` and numbered `alpha.N`, `beta.N`, `rc.N`
+prereleases only. A direct hyphen-to-tilde conversion of all SemVer labels was discarded: Debian
+orders `rc10` after `rc2`, whereas SemVer orders these lexical identifiers the other way, and Debian
+equates `alpha01` with `alpha1`. The supported numbered subset preserves ordering and identity.
+
+The package retains the current GPLv3/COPYRIGHT and third-party asset notices. Cargo source
+license/notice texts are collected from resolved release dependencies; known Apache-2.0 choices
+may use the repository's preserved canonical text when published crates omit it. Unknown missing
+texts stop packaging. This preserves existing licenses rather than choosing new ones.

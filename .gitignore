@@ -15,6 +15,10 @@ AGENTS.md
 # Rust (llega en F1.0)
 /target
 
+# Generated installation artifacts and Python test bytecode.
+/dist/
+/scripts/__pycache__/
+
 # domain-memory (per-developer)
 .domain-memory/config.json
 .mcp.json

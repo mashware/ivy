@@ -66,6 +66,9 @@
 //! it costs adding no dependency to a crate whose own manifest argues, line by line, about every
 //! package that enters the tree.
 //!
+//! D74 adds the two original license texts and points the manifest at those local files.
+//! Their exact bytes and the adjusted manifest are locked too; runtime source remains unchanged.
+//!
 //! # What defeats it
 //!
 //! **Reformatting.** Every check here matches literal, `rustfmt`-shaped text — a line reflowed, a
@@ -183,7 +186,7 @@ fn the_workspace_still_patches_egui_winit_to_the_vendored_copy() {
     );
 }
 
-/// The six files of the vendored copy that are supposed to be untouched, as
+/// The vendored source and approved licensing files, as
 /// `(path relative to vendor/egui-winit, FNV-1a-64 of its bytes, its byte length)`.
 ///
 /// **Locked *and* scanned**, which is not what this list looked like at first. A fixed list says
@@ -191,7 +194,9 @@ fn the_workspace_still_patches_egui_winit_to_the_vendored_copy() {
 /// directory and demands that what is there is exactly this list plus `src/lib.rs` — a review found
 /// the gap by adding a file and watching every check stay green.
 const LOCKED_FILES: &[(&str, u64, usize)] = &[
-    ("Cargo.toml", 0x639172b7f9018a0f, 10328),
+    ("Cargo.toml", 0xc3d1058a15a32a77, 10316),
+    ("LICENSE-APACHE", 0x519795a3ca7bc6f0, 10850),
+    ("LICENSE-MIT", 0x98e169e17925e47e, 1092),
     ("README.md", 0x869047775257e977, 571),
     ("src/clipboard.rs", 0xc134c090beecb79a, 5801),
     ("src/dropped_file.rs", 0x6e83ae380deac032, 425),
@@ -220,9 +225,8 @@ fn nothing_else_in_the_vendored_copy_has_drifted_from_the_published_crate() {
             bytes.len(),
             *expected_len,
             "`vendor/egui-winit/{rel}` changed size ({} bytes, recorded {expected_len}): this file \
-             is supposed to be byte-for-byte the published egui-winit 0.36.1, and D33's whole \
-             argument for a copy instead of a fork rests on the difference from crates.io being \
-             confined to two places in `src/lib.rs`, and nowhere else",
+             must match the recorded egui-winit 0.36.1 plus D74 licensing snapshot; \
+             runtime differences remain confined to the two D33 patches in `src/lib.rs`",
             bytes.len()
         );
         assert_eq!(
@@ -230,7 +234,7 @@ fn nothing_else_in_the_vendored_copy_has_drifted_from_the_published_crate() {
             *expected_hash,
             "`vendor/egui-winit/{rel}` has the recorded length but different content: it was edited \
              without this guard's numbers being updated. This is not `src/lib.rs` — nothing here is \
-             supposed to differ from the published crate at all"
+             allowed to drift beyond the published source and recorded D74 licensing changes"
         );
     }
 
