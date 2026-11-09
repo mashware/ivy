@@ -84,6 +84,18 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/tests/context_clipboard.rs"),
     ),
     (
+        "app/src/chrome/typography.rs",
+        include_str!("../src/chrome/typography.rs"),
+    ),
+    (
+        "app/src/header/title_text.rs",
+        include_str!("../src/header/title_text.rs"),
+    ),
+    (
+        "app/src/tests/title_typography.rs",
+        include_str!("../src/tests/title_typography.rs"),
+    ),
+    (
         "app/src/git_process.rs",
         include_str!("../src/git_process.rs"),
     ),

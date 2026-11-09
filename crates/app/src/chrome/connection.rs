@@ -170,6 +170,7 @@ fn claim_input(ctx: &egui::Context) {
 
 pub(crate) fn begin_pass(window: &mut Window, ui: &mut egui::Ui) {
     crate::settings::editor::runtime::begin_pass(window, ui.ctx());
+    super::typography::begin_pass(window, ui.ctx());
     super::updates::begin_pass(window, ui);
     if !window.chrome.enabled() || !window.chrome.guide.blocked(ui.ctx()) {
         return;

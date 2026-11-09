@@ -8,6 +8,7 @@ pub(crate) const HEIGHT: f32 = 49.0;
 #[derive(Default, Debug)]
 pub(crate) struct Chrome {
     enabled: bool,
+    pub(crate) title_sizes: typography::Sizes,
     zoom_probe: bool,
     menu: bool,
     menu_scroll: f32,
@@ -90,6 +91,7 @@ pub(crate) use crate::opening::chrome_viewport as viewport;
 mod branding;
 mod connection;
 mod menu;
+pub(crate) mod typography;
 mod updates;
 pub(crate) use branding::native_options;
 pub(crate) use connection::{after_panels, begin_pass, prepare};

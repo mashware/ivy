@@ -32,6 +32,7 @@ pub(crate) fn paint_strip(
             Appearance {
                 label: &label,
                 number: pane.name + 1,
+                title_size: strip.headers.title_size(),
                 can_close: strip.button.is_drawn(),
                 zoomed: strip.maximized == Some(pane.name),
                 folded: pane.folded,
@@ -128,6 +129,7 @@ pub(crate) fn hit(
 struct Appearance<'a> {
     label: &'a str,
     number: usize,
+    title_size: f32,
     can_close: bool,
     zoomed: bool,
     folded: bool,
@@ -144,6 +146,7 @@ fn paint(
     let Appearance {
         label,
         number,
+        title_size,
         can_close,
         zoomed,
         folded,
@@ -213,13 +216,13 @@ fn paint(
                 let available = (rect.right() - title_left.x - 8.0).max(0.0);
                 let galley = painter.layout_no_wrap(
                     project.name.clone(),
-                    egui::FontId::proportional(12.0),
+                    egui::FontId::proportional(title_size),
                     theme.foreground(),
                 );
                 let width = galley.size().x.min(available * 0.45).min(140.0);
                 let name_rect = egui::Rect::from_min_size(
-                    egui::pos2(title_left.x, rect.center().y - 8.0),
-                    egui::vec2(width, 16.0),
+                    egui::pos2(title_left.x, rect.center().y - galley.size().y / 2.0),
+                    egui::vec2(width, galley.size().y),
                 );
                 if width > 0.0 {
                     painter.with_clip_rect(name_rect).galley(
@@ -231,17 +234,18 @@ fn paint(
                         egui::pos2(name_rect.right(), rect.center().y),
                         egui::Align2::LEFT_CENTER,
                         " | ",
-                        egui::FontId::proportional(12.0),
+                        egui::FontId::proportional(title_size),
                         theme.foreground().gamma_multiply(0.65),
                     );
                     title_left.x = separator.right();
                 }
             }
-            painter.with_clip_rect(rect).text(
+            crate::header::title_text::paint(
+                &painter.with_clip_rect(rect),
                 title_left,
                 egui::Align2::LEFT_CENTER,
                 label,
-                egui::FontId::proportional(12.0),
+                egui::FontId::proportional(title_size),
                 theme.foreground(),
             );
             continue;
@@ -395,6 +399,59 @@ mod tests {
     }
 
     #[test]
+    fn enlarged_project_prefix_uses_the_title_size_and_full_line_height() {
+        let ctx = egui::Context::default();
+        let badge = crate::project_view::Badge {
+            name: "Backend".into(),
+            details: "/work/backend".into(),
+            ink: egui::Color32::GREEN,
+            painted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        };
+        let mut output = ctx.run_ui(Default::default(), |ui| {
+            let height =
+                ui.fonts_mut(|fonts| fonts.row_height(&egui::FontId::proportional(32.0))) + 12.0;
+            let strip = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, height));
+            paint(
+                ui,
+                strip,
+                &CellMetrics::of(8.0, 16.0),
+                &Theme::default(),
+                Appearance {
+                    label: "Review changes",
+                    number: 1,
+                    title_size: 32.0,
+                    can_close: true,
+                    zoomed: false,
+                    folded: false,
+                    project: Some(&badge),
+                },
+            );
+        });
+        output.textures_delta.clear();
+        for label in ["Backend", " | ", "Review changes"] {
+            let (clipped, text) = output
+                .shapes
+                .iter()
+                .find_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(text) if text.galley.text() == label => Some((clipped, text)),
+                    _ => None,
+                })
+                .expect("both parts of the project header must be painted");
+            assert!(
+                text.galley
+                    .job
+                    .sections
+                    .iter()
+                    .all(|section| section.format.font_id.size == 32.0)
+            );
+            assert!(
+                clipped.clip_rect.height() >= text.galley.size().y,
+                "project text was vertically clipped"
+            );
+        }
+    }
+
+    #[test]
     fn project_badge_paints_its_own_ink_and_retains_the_console_title() {
         let ctx = egui::Context::default();
         let ink = egui::Color32::from_rgb(67, 192, 113);
@@ -422,6 +479,7 @@ mod tests {
                     Appearance {
                         label: "Fix login",
                         number: 1,
+                        title_size: 12.0,
                         can_close: true,
                         zoomed: false,
                         folded: false,

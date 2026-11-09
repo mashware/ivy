@@ -292,7 +292,8 @@ fn paint_cards(
         } else {
             painter.clone()
         };
-        label_painter.text(
+        crate::header::title_text::paint(
+            &label_painter,
             if window.chrome.enabled() {
                 tab_area.left_center()
                     + egui::vec2(
@@ -311,7 +312,7 @@ fn paint_cards(
             } else {
                 egui::Align2::CENTER_CENTER
             },
-            if window.chrome.enabled() {
+            &if window.chrome.enabled() {
                 window.tabs[which_tab].label.clone().unwrap_or_else(|| {
                     let number = window.tabs[which_tab].name + 1;
                     if tab_area.width() < 100.0 {
@@ -324,7 +325,7 @@ fn paint_cards(
                 (which_tab + 1).to_string()
             },
             if window.chrome.enabled() {
-                egui::FontId::proportional(12.0)
+                egui::FontId::proportional(window.chrome.title_sizes.tab_size())
             } else {
                 metrics.font()
             },
