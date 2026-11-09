@@ -223,7 +223,8 @@ opening a restored layout starts fresh programs rather than resuming old process
 
 CI builds natively on `macos-15` (Apple Silicon) and `macos-15-intel` (Intel), with deployment target
 15.0. It checks architecture, declared minimum OS, system-only linked libraries, bundle metadata,
-original notices and local integrity signatures. It mounts each DMG read-only, copies to a temporary
+original notices and local integrity signatures. It mounts each DMG read-only, compares both executable
+hashes with the sealed staging copies, copies to a temporary
 Applications directory, replaces an older metadata fixture, exercises the installed app/MCP through
 its own console, removes the app and checks user data retention. Wrong-architecture and modified
 sealed-resource mutations must fail. These runner checks do not prove Finder/quarantine behavior,

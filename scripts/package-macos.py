@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Build and check a native macOS trial bundle and drag-to-Applications disk image."""
 import argparse
+import hashlib
+import json
 import plistlib
 from pathlib import Path
 import re
@@ -130,6 +132,13 @@ def build(binary_dir, directory, version, arch):
                         str(executables / "panel-mcp")], check=True)
         subprocess.run(["codesign", "--force", "--sign", "-", "--timestamp=none", str(bundle)], check=True)
         check_native(bundle, version, arch)
+        # Signing changes Mach-O bytes; bind the final image to the sealed staging executables.
+        hashes = {}
+        for name in ("app", "panel-mcp"):
+            with (executables / name).open("rb") as file:
+                hashes[name] = hashlib.file_digest(file, "sha256").hexdigest()
+        sidecar = directory / f"Ivy-{version}-macos-{arch}.executables.json"
+        sidecar.write_text(json.dumps(hashes, indent=2) + "\n", encoding="utf-8")
         (image / "Applications").symlink_to("/Applications")
         target = directory / f"Ivy-{version}-macos-{arch}.dmg"
         subprocess.run(["hdiutil", "create", "-ov", "-volname", "Ivy", "-srcfolder", str(image),

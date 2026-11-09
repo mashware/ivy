@@ -158,7 +158,7 @@ jobs:
           version=$(python3 scripts/release.py version)
           python3 scripts/package-macos.py build --binary-dir "target/$TARGET/release" --directory dist --version "$version" --arch "$ARCH"
           python3 -m unittest scripts/test_macos.py -v
-          python3 packaging/macos/test-install.py dist/*.dmg "$version" "$ARCH" "target/$TARGET/release/notices"
+          python3 packaging/macos/test-install.py dist/*.dmg "$version" "$ARCH" "target/$TARGET/release/notices" "dist/Ivy-$version-macos-$ARCH.executables.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ivy-macos-${{ matrix.arch }}

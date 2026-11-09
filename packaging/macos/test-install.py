@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Mount and copy a DMG in a temporary Applications directory; native CI, not desktop proof."""
 import os
+import hashlib
+import json
 from pathlib import Path
 import plistlib
 import shlex
@@ -12,9 +14,11 @@ import time
 
 
 def main():
-    if sys.platform != "darwin" or len(sys.argv) != 5:
-        raise SystemExit("Usage on macOS: test-install.py DMG SEMVER ARCH NOTICES_DIR")
-    dmg, version, arch, notices = sys.argv[1:]
+    if sys.platform != "darwin" or len(sys.argv) != 6:
+        raise SystemExit("Usage on macOS: test-install.py DMG SEMVER ARCH NOTICES_DIR EXECUTABLE_HASHES.json")
+    dmg, version, arch, notices, hashes = sys.argv[1:]
+    expected_binaries = json.loads(Path(hashes).read_text(encoding="utf-8"))
+    assert set(expected_binaries) == {"app", "panel-mcp"}
     repo = Path(__file__).resolve().parents[2]
     # A short runtime path keeps the fixture's Unix socket below Darwin's path limit.
     with tempfile.TemporaryDirectory(prefix="ivy-mac-", dir="/tmp") as temp:
@@ -46,6 +50,9 @@ def main():
             assert not (installed / "previous-install-marker").exists()
             subprocess.run([sys.executable, str(repo / "scripts/package-macos.py"), "check",
                             "--bundle", str(installed), "--version", version, "--arch", arch], check=True)
+            for name, expected_hash in expected_binaries.items():
+                with (installed / "Contents/MacOS" / name).open("rb") as file:
+                    assert hashlib.file_digest(file, "sha256").hexdigest() == expected_hash, name
             resources = installed / "Contents/Resources/licenses"
             subprocess.run(["diff", "-r", notices, str(resources / "cargo")], check=True)
             for name in ("LICENSE", "COPYRIGHT", "THIRD-PARTY.md"):
