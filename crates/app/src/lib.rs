@@ -1595,13 +1595,11 @@ impl eframe::App for Window {
         self.answer_the_windows_requests(ui.ctx(), area, &metrics);
 
         pane_view::reconcile(self);
-        let header_owns_pointer = viewer_owned
-            || overview_owned
-            || pane_owned
-            || chrome_owned
-            || header::menu::pointer_blocked(self, ui.ctx());
+        let overlay_owns_pointer = viewer_owned || overview_owned || pane_owned || chrome_owned;
+        let header_owns_pointer =
+            overlay_owns_pointer || header::menu::pointer_blocked(self, ui.ctx());
         if header_owns_pointer {
-            ui.disable();
+            header::menu::block_pointer(ui, overlay_owns_pointer);
         }
         let (tab_bar, area) = tab_bar::partition(self, area, &metrics);
 

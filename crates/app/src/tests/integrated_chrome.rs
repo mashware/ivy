@@ -3,6 +3,130 @@
 mod tests {
     use super::super::*;
 
+    #[test]
+    fn pane_header_gestures_preserve_unrelated_console_colors() {
+        for (action, initially_folded, from_right) in [
+            ("hide", false, 62.5),
+            ("show", true, 62.5),
+            ("close", false, 12.5),
+        ] {
+            let ctx = egui::Context::default();
+            chrome::prepare(&ctx);
+            let mut window = window_with("sleep 30", "sleep 30");
+            window.chrome.enable();
+            window.headers = window.headers.integrated(true);
+            with_the_panel_in_place(&mut window, 0, r#"{"lines":["Left panel"]}"#);
+            window.active_mut().panes_mut()[0].folded = initially_folded;
+            with_the_panel_in_place(&mut window, 1, r#"{"lines":["Sibling panel"]}"#);
+            window.active_mut().panes_mut()[1].label = Some("Unaffected console".into());
+            let area = area_of(1400.0);
+            let colors = |shapes: &[egui::epaint::ClippedShape]| {
+                shapes
+                    .iter()
+                    .find_map(|s| match &s.shape {
+                        egui::Shape::Text(t) if t.galley.text() == "Unaffected console" => Some(
+                            t.galley
+                                .rows
+                                .iter()
+                                .flat_map(|row| {
+                                    row.row
+                                        .visuals
+                                        .mesh
+                                        .vertices
+                                        .iter()
+                                        .map(|vertex| vertex.color)
+                                })
+                                .collect::<Vec<_>>(),
+                        ),
+                        _ => None,
+                    })
+                    .expect("unaffected console is painted")
+            };
+            let baseline = colors(&frame(&mut window, &ctx, area, vec![]));
+            assert!(
+                !baseline.is_empty(),
+                "unrelated label has no rendered vertices"
+            );
+            let at = control(&window, &ctx, area, 0, from_right);
+            let pressed = frame(
+                &mut window,
+                &ctx,
+                area,
+                vec![
+                    egui::Event::PointerMoved(at),
+                    egui::Event::PointerButton {
+                        pos: at,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+            if action != "close" {
+                assert!(
+                    window.active().panes()[0].folded != initially_folded,
+                    "panel {action} did not execute"
+                );
+                assert_eq!(window.active().panes().len(), 2);
+            } else {
+                assert_eq!(
+                    window.active().panes().len(),
+                    1,
+                    "pane close did not execute"
+                );
+                assert_eq!(
+                    window.active().panes()[0].label.as_deref(),
+                    Some("Unaffected console")
+                );
+            }
+            // Releasing over another panel control must not transfer the gesture.
+            let sibling_index = usize::from(action != "close");
+            let sibling_control = control(&window, &ctx, area, sibling_index, 62.5);
+            let held = frame(
+                &mut window,
+                &ctx,
+                area,
+                vec![egui::Event::PointerMoved(sibling_control)],
+            );
+            let released = frame(
+                &mut window,
+                &ctx,
+                area,
+                vec![egui::Event::PointerButton {
+                    pos: sibling_control,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+            let idle = frame(&mut window, &ctx, area, vec![]);
+            assert!(
+                !window.active().panes()[sibling_index].folded,
+                "{action} gesture clicked through to the sibling panel control"
+            );
+            assert_eq!(
+                window.active().panes().len(),
+                if action == "close" { 1 } else { 2 }
+            );
+            for (phase, shapes) in [
+                ("press", pressed),
+                ("held", held),
+                ("release", released),
+                ("idle", idle),
+            ] {
+                assert_eq!(
+                    colors(&shapes),
+                    baseline,
+                    "{action} changes an unrelated console's rendered colors on {phase}"
+                );
+            }
+            assert!(
+                window.drag_in_progress.is_none(),
+                "header gesture started a console drag"
+            );
+        }
+    }
+
     fn has_text(shapes: &[egui::epaint::ClippedShape], needle: &str) -> bool {
         fn inside(shape: &egui::Shape, needle: &str) -> bool {
             match shape {

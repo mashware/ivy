@@ -181,6 +181,15 @@ pub(crate) fn keys(window: &mut crate::Window, ctx: &egui::Context) -> bool {
     true
 }
 
+/// Owning a gesture must not dim the consoles; preserve any opacity already in effect.
+pub(crate) fn block_pointer(ui: &mut egui::Ui, overlay_owned: bool) {
+    let opacity = ui.opacity();
+    ui.disable();
+    if !overlay_owned {
+        ui.set_opacity(opacity);
+    }
+}
+
 pub(crate) fn pointer_blocked(window: &crate::Window, ctx: &egui::Context) -> bool {
     window.header_input.menu.is_some()
         || window.header_input.held.is_some()
@@ -209,6 +218,60 @@ pub(crate) fn paint(window: &mut crate::Window, ctx: &egui::Context, metrics: &C
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pointer_blocking_preserves_existing_transparency_and_disables_interaction() {
+        fn rendered_colors(mode: u8) -> Vec<egui::Color32> {
+            let ctx = egui::Context::default();
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                ui.set_opacity(0.7);
+                if mode == 1 || mode == 2 {
+                    block_pointer(ui, mode == 2);
+                    assert!(
+                        !ui.is_enabled(),
+                        "pointer blocking left interaction enabled"
+                    );
+                }
+                if mode == 3 {
+                    ui.disable();
+                }
+                ui.painter().text(
+                    egui::pos2(20.0, 20.0),
+                    egui::Align2::LEFT_TOP,
+                    "Translucent console",
+                    egui::FontId::monospace(14.0),
+                    egui::Color32::WHITE,
+                );
+            });
+            output.textures_delta.clear();
+            output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some(
+                        text.galley
+                            .rows
+                            .iter()
+                            .flat_map(|row| {
+                                row.row
+                                    .visuals
+                                    .mesh
+                                    .vertices
+                                    .iter()
+                                    .map(|vertex| vertex.color)
+                            })
+                            .collect(),
+                    ),
+                    _ => None,
+                })
+                .expect("console text is painted")
+        }
+        let baseline = rendered_colors(0);
+        assert!(!baseline.is_empty());
+        assert!(baseline.iter().all(|color| color.a() < 255));
+        assert_eq!(rendered_colors(1), baseline);
+        assert_eq!(rendered_colors(2), rendered_colors(3));
+    }
 
     #[test]
     fn hovering_the_shared_row_edge_selects_the_same_action_as_clicking() {
