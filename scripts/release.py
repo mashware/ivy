@@ -145,7 +145,7 @@ def notices(metadata, directory):
                           re.match(r"^(?:licen[sc]e|copying|ofl)(?:$|[._-])", file.name, re.I)
                           for file in files) or bool(package.get("license_file"))
         declared = package.get("license")
-        fallback = not has_license and (declared in ("Apache-2.0", "MIT OR Apache-2.0") or
+        fallback = not has_license and (declared in ("Apache-2.0", "MIT OR Apache-2.0", "BSL-1.0") or
                    (font_assets and declared == "(MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0"))
         mac_mit = not has_license and (package["name"], package["version"]) in MAC_MIT_NOTICES and declared in (
             "MIT", "Zlib OR Apache-2.0 OR MIT")
@@ -171,12 +171,15 @@ def notices(metadata, directory):
                 encoding="utf-8")
         if fallback:
             dest.mkdir(parents=True, exist_ok=True)
-            canonical = Path(__file__).resolve().parent.parent / "vendor/egui-winit/LICENSE-APACHE"
-            shutil.copyfile(canonical, dest / "SPDX-FALLBACK-APACHE-2.0")
+            repository_root = Path(__file__).resolve().parent.parent
+            selected_license = "BSL-1.0" if declared == "BSL-1.0" else "Apache-2.0"
+            canonical = (repository_root / "resources/licenses/windows/BSL-1.0.txt" if declared == "BSL-1.0"
+                         else repository_root / "vendor/egui-winit/LICENSE-APACHE")
+            shutil.copyfile(canonical, dest / f"SPDX-FALLBACK-{selected_license.upper()}")
             (dest / "SPDX-FALLBACK-ATTRIBUTION.txt").write_text(
                 "No license text was present in the source distribution.\n"
-                "Apache-2.0 is selected from the declared SPDX expression below;\n"
-                "SPDX-FALLBACK-APACHE-2.0 contains its canonical text.\n"
+                f"{selected_license} is selected from the declared SPDX expression below;\n"
+                f"SPDX-FALLBACK-{selected_license.upper()} contains its canonical text.\n"
                 f"Name: {package['name']}\nVersion: {package['version']}\n"
                 f"License: {package.get('license')}\nRepository: {package.get('repository')}\n"
                 f"Authors: {', '.join(package.get('authors', []))}\n", encoding="utf-8")
