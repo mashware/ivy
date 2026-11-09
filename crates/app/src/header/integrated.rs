@@ -32,6 +32,7 @@ pub(crate) fn paint_strip(
             Appearance {
                 label: &label,
                 number: pane.name + 1,
+                title_size: strip.headers.title_size(),
                 can_close: strip.button.is_drawn(),
                 zoomed: strip.maximized == Some(pane.name),
                 folded: pane.folded,
@@ -127,6 +128,7 @@ pub(crate) fn hit(
 struct Appearance<'a> {
     label: &'a str,
     number: usize,
+    title_size: f32,
     can_close: bool,
     zoomed: bool,
     folded: bool,
@@ -142,6 +144,7 @@ fn paint(
     let Appearance {
         label,
         number,
+        title_size,
         can_close,
         zoomed,
         folded,
@@ -186,11 +189,12 @@ fn paint(
                 number_galley,
                 theme.foreground(),
             );
-            painter.with_clip_rect(rect).text(
+            crate::header::title_text::paint(
+                &painter.with_clip_rect(rect),
                 left + egui::vec2(offset, 0.0),
                 egui::Align2::LEFT_CENTER,
                 label,
-                egui::FontId::proportional(12.0),
+                egui::FontId::proportional(title_size),
                 theme.foreground(),
             );
             continue;
