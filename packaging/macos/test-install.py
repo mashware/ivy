@@ -18,7 +18,7 @@ def main():
         raise SystemExit("Usage on macOS: test-install.py DMG SEMVER ARCH NOTICES_DIR EXECUTABLE_HASHES.json")
     dmg, version, arch, notices, hashes = sys.argv[1:]
     expected_binaries = json.loads(Path(hashes).read_text(encoding="utf-8"))
-    assert set(expected_binaries) == {"app", "panel-mcp"}
+    assert set(expected_binaries) == {"app", "panel-mcp", "ivy-session"}
     repo = Path(__file__).resolve().parents[2]
     # A short runtime path keeps the fixture's Unix socket below Darwin's path limit.
     with tempfile.TemporaryDirectory(prefix="ivy-mac-", dir="/tmp") as temp:
@@ -53,6 +53,8 @@ def main():
             for name, expected_hash in expected_binaries.items():
                 with (installed / "Contents/MacOS" / name).open("rb") as file:
                     assert hashlib.file_digest(file, "sha256").hexdigest() == expected_hash, name
+            subprocess.run(["diff", "-r", str(repo / "integrations/session-recovery"),
+                            str(installed / "Contents/Resources/session-recovery")], check=True)
             resources = installed / "Contents/Resources/licenses"
             subprocess.run(["diff", "-r", notices, str(resources / "cargo")], check=True)
             for name in ("LICENSE", "COPYRIGHT", "THIRD-PARTY.md"):
@@ -69,6 +71,21 @@ def main():
                                          "--bundle", str(installed), "--version", version, "--arch", other],
                                         capture_output=True)
             assert wrong_arch.returncode != 0 and b"wrong architecture" in wrong_arch.stderr
+            helper = installed / "Contents/MacOS/ivy-session"
+            helper.chmod(0o644)
+            missing_helper = subprocess.run([sys.executable, str(repo / "scripts/package-macos.py"), "check",
+                                            "--bundle", str(installed), "--version", version, "--arch", arch],
+                                           capture_output=True)
+            assert missing_helper.returncode != 0 and b"missing executable: ivy-session" in missing_helper.stderr
+            helper.chmod(0o755)
+            adapter = installed / "Contents/Resources/session-recovery/reporter.js"
+            original_adapter = adapter.read_bytes()
+            adapter.write_bytes(original_adapter + b"mutation")
+            altered_adapter = subprocess.run([sys.executable, str(repo / "scripts/package-macos.py"), "check",
+                                             "--bundle", str(installed), "--version", version, "--arch", arch],
+                                            capture_output=True)
+            assert altered_adapter.returncode != 0, "bundle checker accepted altered session adapter"
+            adapter.write_bytes(original_adapter)
             # A real altered sealed resource must fail the same installed-bundle checker.
             icon = installed / "Contents/Resources/Ivy.icns"
             with icon.open("ab") as file:
@@ -110,6 +127,10 @@ assert answers[0]["result"]["serverInfo"]["version"] == os.environ["IVY_MAC_VERS
 assert {t["name"] for t in answers[1]["result"]["tools"]} == {
     "panel_set","panel_get","panel_patch","panel_retire","split_open","split_read","split_close"}
 assert "IVY_MAC_PACKAGE_OK" in json.dumps(answers[3]["result"]["content"]), answers[3]
+helper = subprocess.run([os.environ["IVY_MAC_HELPER"], "attach", "claude"],
+                        text=True, capture_output=True, timeout=5)
+assert helper.returncode == 1, helper
+assert json.loads(helper.stdout).get("error") in {"disabled", "unsupported", "unauthorized"}, helper.stdout
 pathlib.Path(os.environ["IVY_MAC_PROOF"]).write_text("own-pane MCP passed\\n")
 time.sleep(10)
 ''')
@@ -121,7 +142,8 @@ time.sleep(10)
     runtime.mkdir(mode=0o700)
     env = dict(os.environ, SHELL=str(shell), XDG_RUNTIME_DIR=str(runtime),
                XDG_CONFIG_HOME=str(root / "runtime-config"), IVY_MAC_VERSION=version,
-               IVY_MAC_BRIDGE=str(installed / "Contents/MacOS/panel-mcp"), IVY_MAC_PROOF=str(root / "proof"))
+               IVY_MAC_BRIDGE=str(installed / "Contents/MacOS/panel-mcp"),
+               IVY_MAC_HELPER=str(installed / "Contents/MacOS/ivy-session"), IVY_MAC_PROOF=str(root / "proof"))
     log = root / "runtime.log"
     with log.open("wb") as file:
         process = subprocess.Popen([str(installed / "Contents/MacOS/app")], env=env, stdout=file, stderr=file)

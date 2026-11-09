@@ -33,12 +33,14 @@
 //! window hidden, the input `logic` sees is the one of the last shown pass, so reading the keyboard
 //! there would resend the last key pressed thousands of times per second during a dump.
 
+mod ai_sessions;
 mod alarms;
 mod chrome;
 mod closing;
 mod console_input;
 pub(crate) mod control;
 mod pane_view;
+mod resume;
 use panel::pane::{identity_of, panel_or_none};
 pub mod fonts;
 mod git_process;
@@ -775,7 +777,7 @@ impl Pane {
     /// pseudoterminal** and not of anything the bridge keeps, so it does not depend on the pump
     /// having run this frame — which the queue, the other half of the question, does by definition.
     fn is_finished(&self, queue_left: bool) -> bool {
-        pty_output::is_finished(self.pty_output.is_alive(), queue_left, self.pty.ending())
+        crate::resume::finished(self, queue_left)
     }
 }
 
@@ -23773,6 +23775,7 @@ mod tests {
                             session::StoredChild {
                                 weight: 3.0,
                                 node: session::StoredNode::Leaf(session::StoredLeaf {
+                                    resume: None,
                                     cwd: None,
                                     label: None,
                                     panel_width: 52,
@@ -23782,6 +23785,7 @@ mod tests {
                             session::StoredChild {
                                 weight: 1.0,
                                 node: session::StoredNode::Leaf(session::StoredLeaf {
+                                    resume: None,
                                     cwd: None,
                                     label: None,
                                     panel_width: 24,
@@ -23794,6 +23798,7 @@ mod tests {
                 session::StoredTab {
                     label: None,
                     root: session::StoredNode::Leaf(session::StoredLeaf {
+                        resume: None,
                         cwd: None,
                         label: None,
                         panel_width: 36,
@@ -24073,6 +24078,7 @@ mod tests {
         let one_too_many = session::StoredChild {
             weight: 1.0,
             node: session::StoredNode::Leaf(session::StoredLeaf {
+                resume: None,
                 cwd: None,
                 label: None,
                 panel_width: 36,
@@ -24509,6 +24515,7 @@ mod tests {
             tabs: vec![session::StoredTab {
                 label: None,
                 root: session::StoredNode::Leaf(session::StoredLeaf {
+                    resume: None,
                     cwd: None,
                     label: None,
                     panel_width: 0,

@@ -9,7 +9,7 @@
 //! once — so a request travels there and comes back as an answer. What this module owns is the
 //! bytes and the threads.
 
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -22,6 +22,13 @@ use interprocess::local_socket::{Stream, prelude::*};
 use panel_contract::{Dropped, Panel, Patch};
 
 use crate::endpoint;
+use crate::session::{Peer, SessionHandler};
+
+#[derive(Clone, Default)]
+struct Services {
+    reader: Option<ReadDocument>,
+    session: Option<SessionHandler>,
+}
 use crate::wire::{Framing, Incoming, Reply, Request, Side, write_reply};
 
 /// How long a publication waits for the window to take it.
@@ -169,7 +176,7 @@ impl Channel {
         to_the_window: SyncSender<Delivery>,
         wake: Arc<dyn Fn() + Send + Sync>,
     ) -> io::Result<Self> {
-        Self::open_inner(dir, id, to_the_window, None, wake)
+        Self::open_with_services(dir, id, to_the_window, None, None, wake)
     }
 
     /// Binds a pane whose document reads are answered without a window pass.
@@ -180,16 +187,22 @@ impl Channel {
         read_document: ReadDocument,
         wake: Arc<dyn Fn() + Send + Sync>,
     ) -> io::Result<Self> {
-        Self::open_inner(dir, id, to_the_window, Some(read_document), wake)
+        Self::open_with_services(dir, id, to_the_window, Some(read_document), None, wake)
     }
 
-    fn open_inner(
+    /// Adds optional off-frame services while retaining the existing panel ownership protocol.
+    pub fn open_with_services(
         dir: &Path,
         id: &str,
         to_the_window: SyncSender<Delivery>,
         read_document: Option<ReadDocument>,
+        session_handler: Option<SessionHandler>,
         wake: Arc<dyn Fn() + Send + Sync>,
     ) -> io::Result<Self> {
+        let services = Services {
+            reader: read_document,
+            session: session_handler,
+        };
         let listener = endpoint::bind(dir, id)?;
         let (stopper, acceptor) = endpoint::acceptor(listener)?;
         let stop = Arc::new(AtomicBool::new(false));
@@ -212,7 +225,7 @@ impl Channel {
                         &stop,
                         &alive,
                         &to_the_window,
-                        &read_document,
+                        &services,
                         &wake,
                     )
                 }
@@ -228,7 +241,7 @@ impl Channel {
 
     /// How many of this channel's threads are still running.
     #[cfg(test)]
-    fn alive(&self) -> usize {
+    pub(crate) fn alive(&self) -> usize {
         self.alive.load(Ordering::Relaxed)
     }
 }
@@ -271,7 +284,7 @@ fn accept_until_stopped(
     stop: &Arc<AtomicBool>,
     alive: &Arc<AtomicUsize>,
     to_the_window: &SyncSender<Delivery>,
-    read_document: &Option<ReadDocument>,
+    services: &Services,
     wake: &Arc<dyn Fn() + Send + Sync>,
 ) {
     let next = AtomicU64::new(0);
@@ -312,7 +325,7 @@ fn accept_until_stopped(
                     stop,
                     alive,
                     to_the_window,
-                    read_document,
+                    services,
                     wake,
                 );
             }
@@ -353,7 +366,7 @@ fn serve(
     stop: &Arc<AtomicBool>,
     alive: &Arc<AtomicUsize>,
     to_the_window: &SyncSender<Delivery>,
-    read_document: &Option<ReadDocument>,
+    services: &Services,
     wake: &Arc<dyn Fn() + Send + Sync>,
 ) {
     // The acceptor itself is one of the living, so the comparison is against the cap plus it.
@@ -372,6 +385,10 @@ fn serve(
         return;
     }
 
+    let peer = services
+        .session
+        .as_ref()
+        .map(|_| Peer::capture(&stream).map_err(|_| "verified socket peer unavailable".to_owned()));
     alive.fetch_add(1, Ordering::Relaxed);
     let mut refusable = stream.try_clone().ok();
     let spawned = std::thread::Builder::new()
@@ -380,7 +397,7 @@ fn serve(
             let stop = Arc::clone(stop);
             let alive = Arc::clone(alive);
             let to_the_window = to_the_window.clone();
-            let read_document = read_document.clone();
+            let services = services.clone();
             let wake = Arc::clone(wake);
             move || {
                 converse(
@@ -388,7 +405,8 @@ fn serve(
                     connection,
                     &stop,
                     &to_the_window,
-                    &read_document,
+                    &services,
+                    peer,
                     &wake,
                 );
                 alive.fetch_sub(1, Ordering::Relaxed);
@@ -427,7 +445,8 @@ fn converse(
     connection: Connection,
     stop: &AtomicBool,
     to_the_window: &SyncSender<Delivery>,
-    read_document: &Option<ReadDocument>,
+    services: &Services,
+    peer: Option<Result<Peer, String>>,
     wake: &Arc<dyn Fn() + Send + Sync>,
 ) {
     let mut stream = stream;
@@ -455,6 +474,8 @@ fn converse(
     let mut framing = Framing::default();
     let mut chunk = [0_u8; 4096];
     let mut closing_read_answered = false;
+    let mut used_panel_protocol = false;
+    let mut saw_session = false;
 
     'connected: loop {
         let closing = stop.load(Ordering::Relaxed);
@@ -507,7 +528,34 @@ fn converse(
                 }
                 closing_read_answered = true;
             }
-            let (reply, last) = answer(incoming, connection, to_the_window, read_document, wake);
+            if let Incoming::Session(request) = incoming {
+                saw_session = true;
+                let reply = match (request, &services.session, &peer) {
+                    (Err(why), _, _) => {
+                        serde_json::json!({"ok":false,"error":"invalid_request","message":why})
+                    }
+                    (Ok(request), Some(handler), Some(Ok(peer))) if peer.is_alive() => {
+                        handler(peer.clone(), request)
+                    }
+                    (Ok(_), Some(_), _) => serde_json::json!({"ok":false,"error":"unauthorized"}),
+                    (Ok(_), None, _) => serde_json::json!({"ok":false,"error":"disabled"}),
+                };
+                if stream
+                    .write_all(&crate::session::reply_line(reply))
+                    .and_then(|()| stream.flush())
+                    .is_err()
+                {
+                    break 'connected;
+                }
+                continue;
+            }
+            // Session helpers never acquire panel ownership, enqueue a close, or wake the UI.
+            // Malformed session traffic likewise cannot create an owner to release.
+            if matches!(&incoming, Incoming::Request(request) if !matches!(request, Request::NotServed(_)))
+            {
+                used_panel_protocol = true;
+            }
+            let (reply, last) = answer(incoming, connection, to_the_window, &services.reader, wake);
             if write_reply(&mut stream, &reply).is_err() || last {
                 break 'connected;
             }
@@ -519,13 +567,15 @@ fn converse(
 
     // **The hold dies with the connection, and this is the only place that says so.** Without it a
     // crashed agent would freeze its pane's panel for ever and the file would never be read again.
-    let (answering, _unheard) = sync_channel(1);
-    let _ = to_the_window.send(Delivery {
-        connection,
-        what: What::Closed,
-        answer: answering,
-    });
-    wake();
+    if used_panel_protocol || !saw_session {
+        let (answering, _unheard) = sync_channel(1);
+        let _ = to_the_window.send(Delivery {
+            connection,
+            what: What::Closed,
+            answer: answering,
+        });
+        wake();
+    }
 }
 
 /// Only one read already received is admitted after shutdown starts.
@@ -542,6 +592,7 @@ fn answer(
     wake: &Arc<dyn Fn() + Send + Sync>,
 ) -> (Reply, bool) {
     match incoming {
+        Incoming::Session(_) => (Reply::Failed("session service unavailable".into()), false),
         Incoming::Request(Request::PanelSet { source, document }) => {
             match panel_contract::parse_document_noting(&document) {
                 Ok((panel, dropped)) => (

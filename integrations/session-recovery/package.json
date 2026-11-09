@@ -1,0 +1,9 @@
+{
+  "name": "ivy-session-recovery",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --test --test-isolation=none tests/*.test.js"
+  }
+}

@@ -102,6 +102,8 @@ pub struct StoredLeaf {
         deserialize_with = "read_directory"
     )]
     pub cwd: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume: Option<panel_control::session::Identity>,
 }
 
 fn read_directory<'de, D: serde::Deserializer<'de>>(
@@ -220,7 +222,14 @@ impl Validated {
     /// The tabs of the document, in order.
     pub(crate) fn without_directories(mut self) -> Self {
         for tab in &mut self.document.tabs {
-            clear_directories(&mut tab.root);
+            clear_context(&mut tab.root, true);
+        }
+        self
+    }
+
+    pub(crate) fn without_sessions(mut self) -> Self {
+        for tab in &mut self.document.tabs {
+            clear_context(&mut tab.root, false);
         }
         self
     }
@@ -1171,12 +1180,17 @@ impl crate::Window {
     }
 }
 
-fn clear_directories(node: &mut StoredNode) {
+fn clear_context(node: &mut StoredNode, directories: bool) {
     match node {
-        StoredNode::Leaf(leaf) => leaf.cwd = None,
+        StoredNode::Leaf(leaf) => {
+            leaf.resume = None;
+            if directories {
+                leaf.cwd = None;
+            }
+        }
         StoredNode::Branch { children, .. } => {
             for child in children {
-                clear_directories(&mut child.node);
+                clear_context(&mut child.node, directories);
             }
         }
     }
@@ -1248,6 +1262,7 @@ mod tests {
 
     fn leaf(width: usize) -> StoredNode {
         StoredNode::Leaf(StoredLeaf {
+            resume: None,
             cwd: None,
             label: None,
             panel_width: width,
@@ -1315,6 +1330,7 @@ mod tests {
                                 StoredChild {
                                     weight: 2.0,
                                     node: StoredNode::Leaf(StoredLeaf {
+                                        resume: None,
                                         cwd: None,
                                         label: None,
                                         panel_width: 36,
@@ -1526,6 +1542,7 @@ mod ceiling_tests {
                         .map(|weight| StoredChild {
                             weight: *weight,
                             node: StoredNode::Leaf(StoredLeaf {
+                                resume: None,
                                 cwd: None,
                                 label: None,
                                 panel_width: 36,
@@ -1688,6 +1705,7 @@ mod ceiling_tests {
                             StoredChild {
                                 weight: 1.0,
                                 node: StoredNode::Leaf(StoredLeaf {
+                                    resume: None,
                                     cwd: None,
                                     label: None,
                                     panel_width: 36,
@@ -1697,6 +1715,7 @@ mod ceiling_tests {
                             StoredChild {
                                 weight: 1.0,
                                 node: StoredNode::Leaf(StoredLeaf {
+                                    resume: None,
                                     cwd: None,
                                     label: None,
                                     panel_width: 36,
@@ -1709,6 +1728,7 @@ mod ceiling_tests {
                 StoredTab {
                     label: None,
                     root: StoredNode::Leaf(StoredLeaf {
+                        resume: None,
                         cwd: None,
                         label: None,
                         panel_width: 36,
@@ -1782,6 +1802,7 @@ mod file_tests {
                         StoredChild {
                             weight: 3.0,
                             node: StoredNode::Leaf(StoredLeaf {
+                                resume: None,
                                 cwd: None,
                                 label: None,
                                 panel_width: 52,
@@ -1791,6 +1812,7 @@ mod file_tests {
                         StoredChild {
                             weight: 1.0,
                             node: StoredNode::Leaf(StoredLeaf {
+                                resume: None,
                                 cwd: None,
                                 label: None,
                                 panel_width: 24,

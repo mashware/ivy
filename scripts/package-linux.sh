@@ -29,7 +29,7 @@ repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 binary_dir=$(cd "$binary_dir" && pwd)
 mkdir -p "$output_dir"
 output_dir=$(cd "$output_dir" && pwd)
-for binary in app panel-mcp; do
+for binary in app panel-mcp ivy-session; do
     path=$binary_dir/$binary
     [[ -f $path && -x $path ]] || { echo "Missing executable: $path" >&2; exit 1; }
     header=$(readelf -h "$path") || { echo "Not an ELF binary: $path" >&2; exit 1; }
@@ -45,9 +45,11 @@ mkdir -p "$stage/debian" "$stage/root/DEBIAN" "$stage/root/usr/lib/ivy-terminal"
     "$stage/root/usr/bin" "$stage/root/usr/share/applications" \
     "$stage/root/usr/share/icons/hicolor/512x512/apps" \
     "$stage/root/usr/share/icons/hicolor/scalable/apps"
-install -m 755 "$binary_dir/app" "$binary_dir/panel-mcp" "$stage/root/usr/lib/ivy-terminal/"
+install -m 755 "$binary_dir/app" "$binary_dir/panel-mcp" "$binary_dir/ivy-session" "$stage/root/usr/lib/ivy-terminal/"
+cp -R "$repo/integrations/session-recovery" "$stage/root/usr/lib/ivy-terminal/session-recovery"
 ln -s /usr/lib/ivy-terminal/app "$stage/root/usr/bin/ivy"
 ln -s /usr/lib/ivy-terminal/panel-mcp "$stage/root/usr/bin/panel-mcp"
+ln -s /usr/lib/ivy-terminal/ivy-session "$stage/root/usr/bin/ivy-session"
 install -m 644 "$repo/packaging/linux/Ivy.desktop" "$stage/root/usr/share/applications/"
 install -m 644 "$repo/resources/branding/ivy.png" "$stage/root/usr/share/icons/hicolor/512x512/apps/ivy.png"
 install -m 644 "$repo/resources/branding/ivy.svg" "$stage/root/usr/share/icons/hicolor/scalable/apps/ivy.svg"
@@ -72,7 +74,7 @@ Package: ivy-terminal
 Architecture: amd64
 Description: Terminal for hosting agents
 CONTROL
-shlibs=$(cd "$stage" && dpkg-shlibdeps -O -e root/usr/lib/ivy-terminal/app -e root/usr/lib/ivy-terminal/panel-mcp)
+shlibs=$(cd "$stage" && dpkg-shlibdeps -O -e root/usr/lib/ivy-terminal/app -e root/usr/lib/ivy-terminal/panel-mcp -e root/usr/lib/ivy-terminal/ivy-session)
 shlibs=${shlibs#shlibs:Depends=}
 [[ -n $shlibs ]] || { echo 'Could not determine shared library dependencies' >&2; exit 1; }
 # Window-system, graphics and font libraries are opened at runtime and therefore
@@ -89,6 +91,8 @@ Depends: $shlibs, $runtime
 Description: Terminal for hosting agents
  Ivy hosts independent consoles with a status panel for each one.
 CONTROL
+# Include helper and adapter bytes in the installed package integrity checks.
+(cd "$stage/root" && find usr -type f -print0 | sort -z | xargs -0 md5sum) > "$stage/root/DEBIAN/md5sums"
 # SOURCE_DATE_EPOCH, when supplied by the build, fixes package entry timestamps.
 if [[ -n ${SOURCE_DATE_EPOCH:-} ]]; then
     find "$stage/root" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +

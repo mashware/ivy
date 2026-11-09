@@ -444,6 +444,7 @@ mod tests {
                 super::super::StartupRestore::None => "none",
                 super::super::StartupRestore::Layout => "layout",
                 super::super::StartupRestore::Directories => "directories",
+                super::super::StartupRestore::Sessions => "sessions",
             };
             fs::write(&fixture.config, format!("startup.restore = {value}\n")).unwrap();
             fixture
@@ -455,6 +456,7 @@ mod tests {
                 tabs: vec![crate::session::StoredTab {
                     label: None,
                     root: crate::session::StoredNode::Leaf(crate::session::StoredLeaf {
+                        resume: None,
                         panel_width: 37,
                         folded: true,
                         label: Some("Saved console".into()),

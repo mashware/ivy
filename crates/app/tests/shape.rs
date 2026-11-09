@@ -48,6 +48,39 @@ use std::path::Path;
 /// guard with no file to look at reads exactly like a clean one.
 const MODULES: &[(&str, &str)] = &[
     (
+        "src/control/channel.rs",
+        include_str!("../src/control/channel.rs"),
+    ),
+    (
+        "src/ai_sessions/mod.rs",
+        include_str!("../src/ai_sessions/mod.rs"),
+    ),
+    (
+        "src/ai_sessions/programs.rs",
+        include_str!("../src/ai_sessions/programs.rs"),
+    ),
+    (
+        "src/ai_sessions/protocol.rs",
+        include_str!("../src/ai_sessions/protocol.rs"),
+    ),
+    (
+        "src/ai_sessions/tests.rs",
+        include_str!("../src/ai_sessions/tests.rs"),
+    ),
+    (
+        "src/ai_sessions/verify.rs",
+        include_str!("../src/ai_sessions/verify.rs"),
+    ),
+    (
+        "src/ai_sessions/worker.rs",
+        include_str!("../src/ai_sessions/worker.rs"),
+    ),
+    (
+        "src/chrome/connection/recovery.rs",
+        include_str!("../src/chrome/connection/recovery.rs"),
+    ),
+    ("src/resume.rs", include_str!("../src/resume.rs")),
+    (
         "src/chrome/typography.rs",
         include_str!("../src/chrome/typography.rs"),
     ),

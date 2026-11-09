@@ -50,6 +50,14 @@ assert all(a.get('jsonrpc') == '2.0' and 'error' not in a and not a['result'].ge
 assert answers[0]['result']['serverInfo']['version'] == os.environ['IVY_SMOKE_VERSION'], answers[0]
 assert {t['name'] for t in answers[1]['result']['tools']} == {
     'panel_set', 'panel_get', 'panel_patch', 'panel_retire', 'split_open', 'split_read', 'split_close'}
+helper_env = dict(os.environ)
+if not runtime:
+    helper_env.pop('PANEL_ID', None)
+    helper_env.pop('PANEL_DIR', None)
+helper = subprocess.run(['/usr/bin/ivy-session', 'attach', 'claude'], env=helper_env,
+                        text=True, capture_output=True, timeout=5)
+assert helper.returncode == 1 and len(helper.stdout.encode()) <= 16385, helper
+assert json.loads(helper.stdout).get('error') == ('disabled' if runtime else 'outside_ivy'), helper.stdout
 if runtime:
     assert 'IVY_PACKAGE_MCP_OK' in json.dumps(answers[3]['result']['content']), answers[3]
     with open(os.path.join(os.environ['IVY_SMOKE_DIR'], 'proof'), 'x') as proof:

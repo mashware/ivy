@@ -960,7 +960,7 @@ impl Window {
                         pane.pty_output.dismiss_the_silence(pane.pty.ending());
                     }
                     Some(crate::painter::notices::Silence::RestoreDirectory) => {
-                        pane.restoration.take_over();
+                        crate::resume::dismiss_failure(pane);
                     }
                     Some(crate::painter::notices::Silence::Refused) => {
                         pane.pty_output.dismiss_the_refusal(pane.pty.backlog());

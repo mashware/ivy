@@ -1018,7 +1018,7 @@ impl crate::Pane {
         // window looks hung. It goes here and not in every key because the condition is exactly
         // this one — that something has gone out towards the program.
         self.screen.scroll_by(Scroll::ToBottom);
-        if let Err(failure) = self.pty.write(&self.keystrokes) {
+        if let Err(failure) = crate::resume::write_keys(self) {
             // What has just been typed has not arrived. A key lost in silence is one of the
             // failures that take longest to understand from the other side of the screen.
             eprintln!("the keystrokes could not be sent to the program: {failure}");
@@ -1083,7 +1083,7 @@ impl crate::Pane {
             return;
         };
         let bytes = held.send_anyway(self.screen.bracketed_paste());
-        if let Err(failure) = self.pty.write(&bytes) {
+        if let Err(failure) = crate::resume::write(self, &bytes) {
             eprintln!(
                 "the held paste could not be sent to the program, and is still held: {failure}"
             );

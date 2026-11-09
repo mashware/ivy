@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import plistlib
+import shutil
 from runpy import run_path
 import tempfile
 import unittest
@@ -27,7 +28,7 @@ class MacPackageTest(unittest.TestCase):
             (contents / "MacOS").mkdir(parents=True)
             with (contents / "Info.plist").open("wb") as file:
                 plistlib.dump(MAC["info"]("0.1.0-alpha.3"), file)
-            for name in ("app", "panel-mcp"):
+            for name in MAC["EXECUTABLES"]:
                 path = contents / "MacOS" / name
                 path.write_bytes(b"portable content fixture, not Mach-O")
                 path.chmod(0o755)
@@ -39,10 +40,29 @@ class MacPackageTest(unittest.TestCase):
                 path = resources / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(b"fixture original text\r\n")
+            shutil.copytree(Path(__file__).resolve().parent.parent / "integrations/session-recovery",
+                            resources / "session-recovery")
             check = MAC["check_contents"]
             check(bundle, "0.1.0-alpha.3")
             with self.assertRaises(ValueError):
                 check(bundle, "0.1.0-alpha.4")
+            helper = contents / "MacOS/ivy-session"
+            helper.unlink()
+            with self.assertRaisesRegex(ValueError, "missing executable: ivy-session"):
+                check(bundle, "0.1.0-alpha.3")
+            helper.write_bytes(b"portable helper fixture, not Mach-O")
+            helper.chmod(0o755)
+            metadata = resources / "session-recovery/.claude-plugin/plugin.json"
+            original = metadata.read_bytes()
+            metadata.write_bytes(original + b"tampered")
+            with self.assertRaisesRegex(ValueError, "session recovery resources differ"):
+                check(bundle, "0.1.0-alpha.3")
+            metadata.write_bytes(original)
+            metadata.unlink()
+            with self.assertRaisesRegex(ValueError, "session recovery resources differ"):
+                check(bundle, "0.1.0-alpha.3")
+            metadata.write_bytes(original)
+            check(bundle, "0.1.0-alpha.3")
             bridge = contents / "MacOS/panel-mcp"
             bridge.chmod(0o644)
             with self.assertRaisesRegex(ValueError, "missing executable"):

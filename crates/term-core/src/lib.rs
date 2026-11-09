@@ -24,8 +24,10 @@ use std::time::Instant;
 
 use portable_pty::{Child, CommandBuilder, MasterPty, native_pty_system};
 
+mod foreground;
 #[cfg(target_os = "linux")]
 mod nonblocking;
+pub use foreground::{Argument, ForegroundAncestry, ForegroundScope, NativeProcess};
 #[cfg(any(test, feature = "testing"))]
 pub mod received;
 mod screen;
@@ -443,6 +445,21 @@ const RETRY: Duration = Duration::from_millis(1);
 pub const FIXED_ENV: [(&str, &str); 2] = [("TERM", "xterm-256color"), ("COLORTERM", "truecolor")];
 
 impl Pty {
+    /// An owned native scope for verification away from the drawing thread.
+    pub fn foreground_scope(&self) -> std::io::Result<ForegroundScope> {
+        foreground::scope(self)
+    }
+
+    /// A confirmed child exit status, independent of the output reader's ending.
+    pub fn exit_success(&mut self) -> Option<bool> {
+        self.child
+            .as_mut()?
+            .try_wait()
+            .ok()
+            .flatten()
+            .map(|status| status.success())
+    }
+
     /// Opens a pseudoterminal, launches `program` inside and returns the channel of its output.
     ///
     /// The channel is handed back separately, not hung off the `Pty`, because whoever consumes it may

@@ -76,6 +76,47 @@ use std::path::Path;
 /// entry down.
 const SOURCES: &[(&str, &str, usize)] = &[
     (
+        "src/control/channel.rs",
+        include_str!("../src/control/channel.rs"),
+        1,
+    ),
+    (
+        "src/ai_sessions/mod.rs",
+        include_str!("../src/ai_sessions/mod.rs"),
+        1,
+    ),
+    (
+        "src/ai_sessions/programs.rs",
+        include_str!("../src/ai_sessions/programs.rs"),
+        0,
+    ),
+    (
+        "src/ai_sessions/protocol.rs",
+        include_str!("../src/ai_sessions/protocol.rs"),
+        1,
+    ),
+    (
+        "src/ai_sessions/tests.rs",
+        include_str!("../src/ai_sessions/tests.rs"),
+        1,
+    ),
+    (
+        "src/ai_sessions/verify.rs",
+        include_str!("../src/ai_sessions/verify.rs"),
+        2,
+    ),
+    (
+        "src/ai_sessions/worker.rs",
+        include_str!("../src/ai_sessions/worker.rs"),
+        5,
+    ),
+    (
+        "src/chrome/connection/recovery.rs",
+        include_str!("../src/chrome/connection/recovery.rs"),
+        1,
+    ),
+    ("src/resume.rs", include_str!("../src/resume.rs"), 1),
+    (
         "src/chrome/typography.rs",
         include_str!("../src/chrome/typography.rs"),
         1,

@@ -8991,3 +8991,49 @@ idle window for a dead one. A named-workspace registry and restoring every windo
 selector outside this delivery. Prompt parsing and replaying shell commands violate the existing
 metadata/input boundary. AI recovery is a separate delivery of #19: this change neither advertises
 a sessions mode nor installs client integrations.
+
+
+## D82 — AI recovery uses declared IDs and fixed client launches
+
+Startup sessions mode extends D81 only when explicitly enabled. Save an allowlisted client and
+validated exact ID beside the local directory; never save a program path, argument list, environment,
+prompt or transcript. Restore with the installed official client’s fixed resume arguments and
+existing authentication. Resolve trusted absolute PATH entries before applying the restored cwd.
+An unavailable target remains inspectable, with a notice and a retained retry target until takeover.
+
+**Why.** A person wants the same conversation across restarts, while a saved file is not authority
+to execute an arbitrary command. Titles and painted output are display data, not canonical IDs.
+Registration is separate from panel publication and never claims or retires another producer’s panel.
+The endpoint scopes the pane; native peer/ancestry/foreground/birth/lifetime evidence scopes its
+reporter. Unsupported native or remote topologies remain unverified rather than guessing.
+
+Codex 0.167.0 communicates SessionStart at a turn, not every visible conversation selection. The user
+explicitly accepted last-hook recovery on 9 November 2026: switching without sending a message may
+restore an earlier reported conversation. Settings and setup instructions disclose that limitation.
+No hook birth ordering is presented as a canonical Codex UI revision. Root death still invalidates
+that root’s registration; stale roots cannot overwrite a newer invocation.
+
+Claude 2.1.319 uses an explicitly installed official Mods live-session getter; OpenCode 1.18.31 uses
+its official TUI route getter. Serialized producer reads assign their own monotonic sequence before
+asynchronous delivery. A bounded client-side probe publishes only changed state or a requested
+final challenge; unchanged probes do not request an Ivy repaint. A clean exit requests a fresh
+acknowledged read before tearing down PTYs, with one shared deadline. If it cannot be confirmed,
+keep the usable directory rather than recording an unconfirmed conversation. Crash recovery uses
+the last successfully saved snapshot. No HUD/StatusLine replacement or silent client setup occurs.
+
+**Discarded.** Latest-server-session and title guessing can reopen unrelated work. Generic hooks
+do not prove current UI selection; Claude’s pre-spawn awaits can reorder helper births and Codex
+can emit no hook on an idle switch. Provider APIs change the subscription path. Per-provider keys,
+permission bypasses, prompt replay and arbitrary persisted arguments are outside this feature. A
+modified Codex client would expand scope beyond the user’s accepted last-hook limitation.
+
+**Evidence boundary.** Source contracts and installed versions establish the selected approach;
+real packaged adapters and client lifecycle probes must pass before functional support is claimed.
+
+The helper is located through an absolute `IVY_SESSION_HELPER` path supplied by Ivy, not a bare
+name searched from a client’s potentially relative PATH. It is a transient executable-location hint,
+not a credential and never saved in the snapshot. The existing PANEL_ID/PANEL_DIR endpoint resolver
+remains the routing contract. A reporter attach proves a process binding, not a sampled identity;
+only a subsequent live sample can confirm a pending restoration. Verified client-declared cwd takes
+precedence over a launch wrapper’s stale directory in sessions mode, with the explicit remote or
+unusable-directory veto preserved. Ordinary-shell D78 precedence remains unchanged.

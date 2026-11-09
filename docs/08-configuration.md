@@ -1,18 +1,37 @@
 # The settings file
 
 Where it goes: **`$XDG_CONFIG_HOME/agent-terminal/config`** — or `~/.config/agent-terminal/config` if
-you do not have that variable set. Next to `layout.json`, which is where the terminal saves only how
-you left the windows; this one can be written by hand or through Settings.
+you do not have that variable set. Next to `layout.json`, which stores the opted-in arrangement and recovery context; this file can be written by hand or through Settings.
 
 **If it does not exist, the terminal opens one fresh console.** You do not have to create it.
 
 ## Startup restoration
 
-Choose Startup in Settings or write `startup.restore = none`, `layout`, or `directories`.
+Choose Startup in Settings or write `startup.restore = none`, `layout`, `directories`, or `sessions`.
 The default `none` opens one fresh console and preserves any previously saved layout. `layout`
-restores the saved arrangement with fresh shells; `directories` also restores local working
-directories when available. Changes apply on the next launch. Additional windows are temporary:
-they open fresh and do not save the primary window’s layout.
+restores the arrangement with fresh shells; `directories` also restores local working directories.
+`sessions` adds the explicitly connected Codex, Claude Code and OpenCode integrations. Additional
+windows open fresh and never replace the initial window’s snapshot, even after that window closes.
+
+Open **Connect agents → Recover AI sessions** for the actual reporter status and the packaged
+[adapter setup instructions](../integrations/session-recovery/README.md). Setup is explicit and
+preserves existing hooks, plugins, authentication and HUD. Verified native capture currently requires
+Linux; unsupported hosts or client topologies remain unverified. Ivy supplies the absolute
+`IVY_SESSION_HELPER` location to each console and uses its existing `PANEL_ID`/`PANEL_DIR` endpoint;
+never persist these per-console values in client configuration.
+
+**Codex 0.167.0 restores its last hook-reported context.** Changing the visible conversation without
+sending a message can leave the previous conversation recorded. Use the supported direct local
+`--no-daemon` form. Claude Code 2.1.319 uses an official Mods live getter; OpenCode 1.18.31 uses an
+official TUI plugin. No prompt is sent when restoring, and custom client flags, profiles and models
+are not replayed. Only a fixed client and validated exact ID are saved, with a usable local directory.
+
+Changes do not restart running consoles. Disabling recovery preserves the last saved snapshot;
+lowering to directories removes AI metadata from the next successful save. A clean exit asks active
+Claude/OpenCode reporters for a fresh read within one shared deadline; a missing confirmation keeps
+the directory rather than recording an unconfirmed conversation. An unavailable saved target leaves
+a fresh console with an explanation and a retained retry target until typing, clicking its notice or
+closing the console takes over. A crash recovers the last successfully saved snapshot.
 
 ## Directory of a new split
 
@@ -234,7 +253,7 @@ It is the same thing Kitty and Ghostty do.
 | `tab.label_size` | tab-label size in points; 8–32, default 12 |
 | `font` | the font family it paints with, by its name |
 | `font.ligatures` | programming ligatures from the selected compatible font: `on` or `off`; omitted means `off` |
-| `startup.restore` | what the primary window restores on its next launch: `none`, `layout`, or `directories` |
+| `startup.restore` | what the primary window restores on its next launch: `none`, `layout`, `directories`, or `sessions` |
 | `cursor.blink` | whether the cursor blinks: `on` always, `off` never. Leave the line out and the program inside decides, over a default of «yes» |
 
 Colours are written **`#rrggbb`**, in hexadecimal, and it makes no difference whether in upper or

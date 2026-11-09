@@ -33,6 +33,7 @@
 pub mod client;
 pub mod endpoint;
 pub mod listener;
+pub mod session;
 pub mod wire;
 
 pub use client::{Answered, Producer};

@@ -1,5 +1,6 @@
 import hashlib
 import json
+import shutil
 from pathlib import Path
 from runpy import run_path
 import subprocess
@@ -261,6 +262,56 @@ class ReleaseTest(unittest.TestCase):
                 else:
                     self.assertIn(f"Unsupported release version: {value}", result.stderr)
                     self.assertNotIn("Missing executable:", result.stderr)
+
+
+    @unittest.skipUnless(all(shutil.which(tool) for tool in ("dpkg-deb", "dpkg-shlibdeps", "readelf", "true")),
+                         "Linux package fixture requires Debian packaging tools")
+    def test_linux_package_requires_helper_and_binds_complete_adapter_bytes(self):
+        binaries = self.root / "fixture-binaries"
+        binaries.mkdir()
+        native_fixture = shutil.which("true")
+        for name in ("app", "panel-mcp"):
+            shutil.copy2(native_fixture, binaries / name)
+        fonts = binaries / "notices/epaint_default_fonts-fixture/fonts"
+        fonts.mkdir(parents=True)
+        for name in ("OFL.txt", "UFL.txt", "Hack-Regular.txt", "emoji-icon-font-mit-license.txt"):
+            (fonts / name).write_bytes(b"prepared fixture font terms\r\n")
+        output = self.root / "linux-dist"
+        builder = ["bash", str(SCRIPT.with_name("package-linux.sh")), "--binary-dir", str(binaries),
+                   "--output-dir", str(output), "--version", "0.1.0-alpha.1"]
+        missing = subprocess.run(builder, capture_output=True, text=True)
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn("Missing executable:", missing.stderr)
+        self.assertIn("ivy-session", missing.stderr)
+        shutil.copy2(native_fixture, binaries / "ivy-session")
+        built = subprocess.run(builder, capture_output=True, text=True)
+        self.assertEqual(built.returncode, 0, built.stderr)
+        package = output / self.package.name
+        validator = ["bash", str(SCRIPT.with_name("test-linux-package.sh")), str(package),
+                     "0.1.0-alpha.1", str(binaries / "notices")]
+        valid = subprocess.run(validator, capture_output=True, text=True)
+        self.assertEqual(valid.returncode, 0, valid.stdout + valid.stderr)
+        extracted = self.root / "altered-payload"
+        subprocess.run(["dpkg-deb", "-R", str(package), str(extracted)], check=True, capture_output=True)
+        sums = dict(line.split("  ", 1)[::-1]
+                    for line in (extracted / "DEBIAN/md5sums").read_text().splitlines())
+        payload = extracted / "usr/lib/ivy-terminal"
+        checked = [payload / name for name in ("app", "panel-mcp", "ivy-session")]
+        checked.extend(path for path in (payload / "session-recovery").rglob("*") if path.is_file())
+        for path in checked:
+            relative = path.relative_to(extracted).as_posix()
+            self.assertEqual(sums[relative], hashlib.md5(path.read_bytes(), usedforsecurity=False).hexdigest())
+        adapter = payload / "session-recovery/.claude-plugin/plugin.json"
+        original = adapter.read_bytes()
+        adapter.write_bytes(original + b"altered adapter content")
+        subprocess.run(["dpkg-deb", "--root-owner-group", "--build", str(extracted), str(package)],
+                       check=True, capture_output=True)
+        self.assertNotEqual(subprocess.run(validator, capture_output=True).returncode, 0)
+        adapter.write_bytes(original)
+        (extracted / "usr/lib/ivy-terminal/ivy-session").unlink()
+        subprocess.run(["dpkg-deb", "--root-owner-group", "--build", str(extracted), str(package)],
+                       check=True, capture_output=True)
+        self.assertNotEqual(subprocess.run(validator, capture_output=True).returncode, 0)
 
 
     def test_supported_versions_preserve_debian_upgrade_order(self):

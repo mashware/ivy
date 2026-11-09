@@ -45,3 +45,7 @@ libc = "0.2"
 [[bin]]
 name = "panel-mcp"
 path = "src/bin/panel-mcp.rs"
+
+[[bin]]
+name = "ivy-session"
+path = "src/bin/ivy-session.rs"

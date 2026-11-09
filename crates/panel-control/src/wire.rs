@@ -157,6 +157,8 @@ pub enum Request {
 /// What one complete line produced.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Incoming {
+    /// Metadata traffic, including validation failures, never enters the UI ownership protocol.
+    Session(Result<crate::session::Request, String>),
     /// A request to answer.
     Request(Request),
     /// The line could not be understood. The connection survives: one malformed line from an agent
@@ -308,6 +310,11 @@ fn interpret(line: &[u8]) -> Incoming {
     };
 
     match envelope.tool.as_str() {
+        "session_observe" | "session_attach" | "session_probe" | "session_update" => {
+            Incoming::Session(crate::session::Request::parse(
+                text.trim_end_matches('\n').as_bytes(),
+            ))
+        }
         "panel_set" => panel_set(&envelope),
         "panel_get" => Incoming::Request(Request::PanelGet),
         "panel_retire" => Incoming::Request(Request::PanelRetire),
