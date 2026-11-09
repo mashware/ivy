@@ -38,6 +38,8 @@ fn canonical(key: &str) -> Option<String> {
         "font",
         "font.ligatures",
         "size",
+        "pane.title_size",
+        "tab.label_size",
         "theme",
         "cursor.blink",
         "background",
@@ -58,6 +60,8 @@ impl Document {
             "font",
             "font.ligatures",
             "size",
+            "pane.title_size",
+            "tab.label_size",
             "theme",
             "cursor.blink",
             "background",
@@ -220,6 +224,26 @@ mod tests {
     fn set(doc: &mut Document, key: &str, value: &str) {
         doc.fields.iter_mut().find(|f| f.key == key).unwrap().value = value.into();
     }
+    #[test]
+    fn title_sizes_preserve_other_lines_and_reset_independently() {
+        let source = "# keep\npane.title_size = 14\ntab.label_size = 10\nunknown = value\n";
+        let mut doc = Document::new(source.into());
+        assert_eq!(doc.text(), source);
+        set(&mut doc, "pane.title_size", "24");
+        let text = doc.text();
+        assert!(text.contains("# keep\n"));
+        assert!(text.contains("tab.label_size = 10\n"));
+        assert!(text.contains("unknown = value\n"));
+        let (settings, warnings) = super::super::interpret(&text).unwrap();
+        assert_eq!(settings.pane_title_size, Some(24.0));
+        assert_eq!(settings.tab_label_size, Some(10.0));
+        assert_eq!(warnings.kept.len(), 1);
+        set(&mut doc, "pane.title_size", "");
+        let (settings, _) = super::super::interpret(&doc.text()).unwrap();
+        assert_eq!(settings.pane_title_size, None);
+        assert_eq!(settings.tab_label_size, Some(10.0));
+    }
+
     #[test]
     fn ligature_edits_preserve_comments_unknown_keys_and_restore_the_off_default() {
         let source =

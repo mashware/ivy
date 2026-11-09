@@ -244,6 +244,10 @@ pub struct Settings {
     /// people type and is published contract; `font_size` is what the rest of the code calls this
     /// number. The translation happens **once**, where the key is parsed, and not on every jump.
     pub font_size: Option<f32>,
+    /// Pane title size in points; absent uses 12.
+    pub pane_title_size: Option<f32>,
+    /// Tab label size in points; absent uses 12.
+    pub tab_label_size: Option<f32>,
     /// Use the selected compatible font's programming ligatures; absent means off.
     pub ligatures: Option<bool>,
     /// The shortcuts the file changes: the action and its new chord, or `None` to unbind it.
@@ -567,6 +571,10 @@ impl Settings {
         // A complete document replaces the preceding configuration. Omitting an override must
         // restore the same defaults as a fresh startup, including shortcuts previously unbound.
         window.font_size = self.font_size.unwrap_or(crate::DEFAULT_FONT_SIZE);
+        window.chrome.title_sizes = crate::chrome::typography::Sizes::new(
+            self.pane_title_size.unwrap_or(12.0),
+            self.tab_label_size.unwrap_or(12.0),
+        );
         window.copy_enabled = self.copy.unwrap_or(true);
         window.ligatures = self.ligatures.unwrap_or(false);
         window.blink.ceiling = self.blink;
@@ -674,6 +682,22 @@ fn apply(settings: &mut Settings, key: &str, value: &str) -> Result<(), Missing>
             crate::theme::NamedTheme::from_written(value)
                 .ok_or_else(|| Missing::UnknownTheme(value.to_owned()))?,
         );
+        return Ok(());
+    }
+    if matches!(key, "pane.title_size" | "tab.label_size") {
+        let amount = value
+            .parse::<f32>()
+            .ok()
+            .filter(|c| c.is_finite() && (8.0..=32.0).contains(c))
+            .ok_or_else(|| Missing::InvalidValue {
+                key: key.to_owned(),
+                value: value.to_owned(),
+            })?;
+        if key == "pane.title_size" {
+            settings.pane_title_size = Some(amount);
+        } else {
+            settings.tab_label_size = Some(amount);
+        }
         return Ok(());
     }
     if key == "size" {
@@ -1153,6 +1177,27 @@ mod tests {
             "«this one wins» was said of a line whose value was not even understood: {:?}",
             warnings.kept()
         );
+    }
+
+    #[test]
+    fn title_sizes_are_independent_and_validate_boundaries() {
+        let (settings, warnings) = interpret("pane.title_size = 8\ntab.label_size = 32\n").unwrap();
+        assert!(warnings.kept.is_empty());
+        assert_eq!(settings.pane_title_size, Some(8.0));
+        assert_eq!(settings.tab_label_size, Some(32.0));
+        for key in ["pane.title_size", "tab.label_size"] {
+            for value in ["7.99", "32.01", "NaN", "inf", "-inf"] {
+                let (settings, warnings) = interpret(&format!("{key} = {value}\n")).unwrap();
+                assert_eq!(warnings.kept.len(), 1, "{key}={value}");
+                assert_eq!(settings.pane_title_size, None);
+                assert_eq!(settings.tab_label_size, None);
+            }
+        }
+        let (settings, warnings) =
+            interpret("pane.title_size = 24\npane.title_size = 9\ntab.label_size = 10\n").unwrap();
+        assert_eq!(settings.pane_title_size, Some(9.0));
+        assert_eq!(settings.tab_label_size, Some(10.0));
+        assert_eq!(warnings.kept.len(), 1);
     }
 
     #[test]
@@ -1748,10 +1793,10 @@ mod tests {
             .collect();
         // **Without a floor this test passes by being empty**, which is how a guard that reads another
         // file dies: someone changes the table's header, the walk does not hook, and nothing is
-        // left to check. Thirteen is what the table publishes today.
+        // left to check. Fifteen is what the table publishes today.
         assert_eq!(
             published.len(),
-            13,
+            15,
             "the document's key table gave {} rows: either the document changed shape, or this \
              walk stopped finding it and the test is not looking at anything — {published:?}",
             published.len()
@@ -1798,7 +1843,7 @@ mod tests {
         // blocks, this test passes by being empty.
         assert_eq!(
             examples.len(),
-            15,
+            17,
             "the document's example blocks gave {} configuration lines: either the document \
              changed shape, or this walk stopped finding them — {examples:?}",
             examples.len()

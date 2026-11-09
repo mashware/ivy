@@ -566,6 +566,48 @@ mod tests {
     }
 
     #[test]
+    fn title_sizes_save_apply_and_cancel_independently() {
+        let file = File::new("# preserved\npane.title_size=12\ntab.label_size=12\n");
+        let ctx = egui::Context::default();
+        let mut window = window(&file);
+        frame(&mut window, &ctx);
+        let original = file.read();
+        assert_eq!(
+            original,
+            "# preserved\npane.title_size=12\ntab.label_size=12\n"
+        );
+        set(&mut window, "pane.title_size", "24");
+        set(&mut window, "tab.label_size", "10");
+        save(&mut window);
+        frame(&mut window, &ctx);
+        frame(&mut window, &ctx);
+        assert_eq!(window.chrome.title_sizes.pane_size(), 24.0);
+        assert_eq!(window.chrome.title_sizes.tab_size(), 10.0);
+        let saved = file.read();
+        assert!(saved.contains("# preserved"));
+        let (reopened, _) = crate::settings::interpret(&saved).unwrap();
+        assert_eq!(reopened.pane_title_size, Some(24.0));
+        assert_eq!(reopened.tab_label_size, Some(10.0));
+        set(&mut window, "pane.title_size", "30");
+        one_frame_in(
+            &mut window,
+            &ctx,
+            area_of(1200.0),
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        frame(&mut window, &ctx);
+        assert_eq!(file.read(), saved);
+        assert_eq!(window.chrome.title_sizes.pane_size(), 24.0);
+        assert_eq!(window.chrome.title_sizes.tab_size(), 10.0);
+    }
+
+    #[test]
     fn repeated_save_in_the_same_frame_preserves_success_and_next_frame_checks_conflicts() {
         let file = File::new("size=14\n");
         let ctx = egui::Context::default();

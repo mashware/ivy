@@ -229,7 +229,9 @@ It is the same thing Kitty and Ghostty do.
 | `focus` | what marks out the console that has the keyboard |
 | `panel` | the status panel's background |
 | `theme` | a built-in set of all twenty-two colours; see the catalog below |
-| `size` | the font size, in points |
+| `size` | the terminal font size, in points |
+| `pane.title_size` | pane-title size in points; 8–32, default 12 |
+| `tab.label_size` | tab-label size in points; 8–32, default 12 |
 | `font` | the font family it paints with, by its name |
 | `font.ligatures` | programming ligatures from the selected compatible font: `on` or `off`; omitted means `off` |
 | `startup.restore` | what the primary window restores on its next launch: `none`, `layout`, or `directories` |
@@ -244,6 +246,27 @@ hundred three columns fit.
 
 Changing the size **changes how many rows and columns** fit in your window, so the programs running
 inside notice.
+
+### Pane titles and tab labels
+
+The two title sizes are independent of the font and size inside a console:
+
+```
+pane.title_size = 24
+tab.label_size = 10
+```
+
+Both accept finite point sizes from 8 through 32 and default to 12. Appearance → Typography
+provides separate fields and samples. Blank fields inherit the defaults. Save applies the sizes
+without restarting consoles and preserves them for the next launch; Cancel applies nothing.
+
+The title strips grow with their measured text height, including the grids of consoles in
+background tabs. Text is clipped before the existing control targets. Console numbering keeps
+its previous size. Historical measurement runs keep their original chrome geometry.
+
+Braille patterns in titles, including Codex's activity glyphs such as `⠸`, are drawn as dots rather
+than requested from the installed font. This preserves the published title's text and animation;
+it does not interpret a pattern as agent activity.
 
 ### The blink, if you want it settled
 
