@@ -155,7 +155,7 @@ impl CellMetrics {
             // bury the error output of a program that has done nothing wrong.
             SAID_THE_LETTERS_DIFFER.call_once(|| {
                 eprintln!(
-                    "agent-terminal: the font in use is not of fixed width, so the columns will not \
+                    "ivy: the font in use is not of fixed width, so the columns will not \
                      line up: every cell keeps the width of an 'M' and each letter carries its own."
                 );
             });

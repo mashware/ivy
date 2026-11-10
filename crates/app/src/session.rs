@@ -531,7 +531,7 @@ fn check(
 // ── The file: where it lives, how it is read and how it is replaced ──────────────────────────────
 
 /// The dedicated directory inside the user's configuration one.
-pub const DIRECTORY: &str = "agent-terminal";
+pub const DIRECTORY: &str = "ivy";
 
 /// The file name, **fixed**.
 ///
@@ -1679,14 +1679,11 @@ mod ceiling_tests {
         assert_eq!(validated.leaves(), 4, "the four consoles of batch L");
 
         // **And where it leaves it, which is the other half and was slipping away.** The script writes
-        // to `<config>/agent-terminal/layout.json` with those two names put in by hand; renaming either
+        // to `<config>/ivy/layout.json` with those two names put in by hand; renaming either
         // of the two constants would leave the suite green while **every run of the batch would open
         // factory-fresh**, because the application would look for its file elsewhere and would find
         // nothing.
-        assert_eq!(
-            DIRECTORY, "agent-terminal",
-            "the script seeds in this directory"
-        );
+        assert_eq!(DIRECTORY, "ivy", "the script seeds in this directory");
         assert_eq!(FILE, "layout.json", "and with this file name");
     }
 
@@ -1756,8 +1753,7 @@ mod file_tests {
 
     impl TestDir {
         fn new(name: &str) -> Self {
-            let path = std::env::temp_dir()
-                .join(format!("agent-terminal-test-{}-{name}", std::process::id()));
+            let path = std::env::temp_dir().join(format!("ivy-test-{}-{name}", std::process::id()));
             let _ = std::fs::remove_dir_all(&path);
             std::fs::create_dir_all(&path).expect("create the test directory");
             Self(path)
@@ -1867,7 +1863,7 @@ mod file_tests {
     fn the_path_comes_out_of_the_configuration_directory() {
         assert_eq!(
             path_from(Some(OsStr::new("/home/config")), Some(OsStr::new("/home"))),
-            Some(PathBuf::from("/home/config/agent-terminal/layout.json"))
+            Some(PathBuf::from("/home/config/ivy/layout.json"))
         );
     }
 
@@ -1875,7 +1871,7 @@ mod file_tests {
     fn with_no_configuration_directory_it_falls_back_to_home() {
         assert_eq!(
             path_from(None, Some(OsStr::new("/home"))),
-            Some(PathBuf::from("/home/.config/agent-terminal/layout.json"))
+            Some(PathBuf::from("/home/.config/ivy/layout.json"))
         );
     }
 
@@ -1886,7 +1882,7 @@ mod file_tests {
         for variable in ["", "config", "./config", "~/config"] {
             assert_eq!(
                 path_from(Some(OsStr::new(variable)), Some(OsStr::new("/home"))),
-                Some(PathBuf::from("/home/.config/agent-terminal/layout.json")),
+                Some(PathBuf::from("/home/.config/ivy/layout.json")),
                 "with {variable:?} it did not fall back to home"
             );
         }
@@ -2329,7 +2325,7 @@ mod file_tests {
         // process**: what the name avoids is that two instances share a temporary and that a temporary
         // orphaned by a violent death leaves the session that receives that same process number unable to
         // save.
-        let path = PathBuf::from("/home/.config/agent-terminal/layout.json");
+        let path = PathBuf::from("/home/.config/ivy/layout.json");
         let pid = std::process::id();
 
         let first = temp_path_for(&path, 1).expect("it has a name");
@@ -2337,7 +2333,7 @@ mod file_tests {
 
         assert_eq!(
             first,
-            PathBuf::from(format!("/home/.config/agent-terminal/layout.json.{pid}.1"))
+            PathBuf::from(format!("/home/.config/ivy/layout.json.{pid}.1"))
         );
         assert_ne!(first, second, "two attempts share a temporary");
         assert_eq!(

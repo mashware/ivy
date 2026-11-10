@@ -1171,7 +1171,7 @@ impl Drop for Pty {
                             let _ = child.wait();
                         });
                     // **Not `eprintln!`**, which panics when standard error is a closed pipe
-                    // (`agent-terminal | head`) — and a panic here is inside the interface pass,
+                    // (`ivy | head`) — and a panic here is inside the interface pass,
                     // or an abort if this drop runs while unwinding.
                     //
                     // **"May", because this is written before the last copy of the master closes.**

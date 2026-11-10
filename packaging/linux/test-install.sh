@@ -17,7 +17,7 @@ dpkg-deb -x "$package" "$tmp/old"
 dpkg-deb -e "$package" "$tmp/old/DEBIAN"
 sed -i 's/^Version:.*/Version: 0~fixture/' "$tmp/old/DEBIAN/control"
 dpkg-deb --root-owner-group --build "$tmp/old" "$tmp/old.deb" >/dev/null
-config=${XDG_CONFIG_HOME:-$HOME/.config}/agent-terminal
+config=${XDG_CONFIG_HOME:-$HOME/.config}/ivy
 [[ ! -e $config ]] || { echo 'Disposable test requires a fresh Ivy configuration directory' >&2; exit 1; }
 mkdir -p "$config"
 printf 'fixture settings\n' > "$config/config"

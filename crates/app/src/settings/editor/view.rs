@@ -210,7 +210,7 @@ fn form(
         ui.painter().text(
             side.left_bottom() + egui::vec2(28.0, -24.0),
             egui::Align2::LEFT_BOTTOM,
-            "agent-terminal",
+            "Ivy",
             egui::FontId::proportional(11.0),
             egui::Color32::from_rgb(105, 115, 134),
         );

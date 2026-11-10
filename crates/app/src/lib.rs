@@ -444,7 +444,7 @@ struct Pump {
 /// **It is a layout and not a number of panes.** Four consoles in a row and four in a square are
 /// the same quantity and **two different measurements**: in a row each one keeps a quarter of the
 /// width and the panel does not fit —which is literally the open question of
-/// [#33](https://github.com/mashware/agent-terminal/issues/33)—, and in a square each one has half
+/// [#33](https://github.com/mashware/ivy-history-private/issues/33)—, and in a square each one has half
 /// the width and the panel goes in. A single number would force inventing which of the two is
 /// measured. **Both axes are strictly positive, and the type guarantees it** — that is why the
 /// constructor returns `Option` instead of correcting a zero. Zero columns or zero rows is not a
@@ -7320,6 +7320,13 @@ mod tests {
             "the program was not told where to publish its panel"
         );
 
+        assert_eq!(
+            std::path::Path::new(of_the_child["PANEL_DIR"])
+                .file_name()
+                .unwrap(),
+            std::ffi::OsStr::new(&format!("ivy-{}", of_the_child["PANEL_ID"]))
+        );
+
         // And nothing else changes with respect to what this process already had. The comparison is
         // by the complete pair, so it catches both a new variable and one whose value was trampled.
         let expected = ["TERM", "COLORTERM", "SHELL"]
@@ -10486,7 +10493,7 @@ mod tests {
         let pane = &mut window.active_mut().panes_mut()[0];
 
         let dir = std::env::temp_dir().join(format!(
-            "agent-terminal-console-within-{}-{}",
+            "ivy-console-within-{}-{}",
             std::process::id(),
             pane.name
         ));
@@ -15993,10 +16000,7 @@ mod tests {
         //
         // With this case declaring itself vetoed, a broken veto would pass for a good run. A review
         // caught it by mutating the error branch with the suite green.
-        let dir = std::env::temp_dir().join(format!(
-            "agent-terminal-with-no-file-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("ivy-with-no-file-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create the test's directory");
 
@@ -16091,7 +16095,7 @@ mod tests {
         // **The previous delivery left the veto in place in the code with nothing tying it down**,
         // and it was declared as the gap the milestone could not be closed without plugging. This
         // plugs it.
-        let dir = std::env::temp_dir().join(format!("agent-terminal-veto-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ivy-veto-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create the test's directory");
         let file = dir.join("config");
@@ -23811,10 +23815,7 @@ mod tests {
 
     /// A directory of its own, and the window pointing at a file inside it.
     fn a_window_that_saves(name: &str) -> (Window, std::path::PathBuf, std::path::PathBuf) {
-        let base = std::env::temp_dir().join(format!(
-            "agent-terminal-saved-{}-{name}",
-            std::process::id()
-        ));
+        let base = std::env::temp_dir().join(format!("ivy-saved-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).expect("create the test's directory");
         let path = session::path_from(Some(base.join("config").as_os_str()), None)
@@ -23923,10 +23924,8 @@ mod tests {
         // thing **seen** —that way a non-writable directory does not keep the window awake— and the
         // write goes against the last thing **written successfully** —that way a failure is retried
         // with the next change, without storing the error or inventing any wait—.
-        let base = std::env::temp_dir().join(format!(
-            "agent-terminal-saved-{}-impossible",
-            std::process::id()
-        ));
+        let base =
+            std::env::temp_dir().join(format!("ivy-saved-{}-impossible", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).expect("create the test's directory");
         // A file where the directory should go: creating the directory fails and there is no way to
@@ -24453,10 +24452,8 @@ mod tests {
         // processes under the label of reading a file, which is the mislabelled number this project
         // has already paid for.
         let ctx = egui::Context::default();
-        let base = std::env::temp_dir().join(format!(
-            "agent-terminal-restored-from-file-{}",
-            std::process::id()
-        ));
+        let base =
+            std::env::temp_dir().join(format!("ivy-restored-from-file-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).expect("create the test's directory");
         let path = session::path_from(Some(base.join("config").as_os_str()), None)
@@ -25809,7 +25806,7 @@ mod tests {
             // `remove_dir_all` falls between another's `write` and `refresh`, the latter's panel
             // never gets to be seen and its strip —what the test exists to exercise— disappears.
             let dir = std::env::temp_dir().join(format!(
-                "agent-terminal-mouse-{}-{case}-{}",
+                "ivy-mouse-{}-{case}-{}",
                 std::process::id(),
                 pane.name
             ));
@@ -27549,10 +27546,7 @@ mod tests {
         // The panel is made visible by publishing a real one, and the grid is derived from the same
         // tiling the window uses: a panel nobody published takes up no columns, so without this the
         // console keeps the whole pane and the strip this test presses in does not exist.
-        let dir = std::env::temp_dir().join(format!(
-            "agent-terminal-button-{}-panel",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("ivy-button-{}-panel", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create the test panel's directory");
         std::fs::write(

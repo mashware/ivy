@@ -398,7 +398,7 @@ pub(crate) fn to_use(
         // environment without an absolute path would write a file that is never applied; the
         // sibling module already has that same verb.
         eprintln!(
-            "agent-terminal: there is nowhere to look for the settings (neither $XDG_CONFIG_HOME nor $HOME \
+            "ivy: there is nowhere to look for the settings (neither $XDG_CONFIG_HOME nor $HOME \
              gives an absolute path). Opening with the factory ones."
         );
         return (
@@ -413,11 +413,11 @@ pub(crate) fn to_use(
             // the extra ones without saying how many they were would make you believe that beyond
             // the ceiling the file is fine.
             for warning in warnings.kept() {
-                eprintln!("agent-terminal: {warning}");
+                eprintln!("ivy: {warning}");
             }
             if warnings.unlisted() > 0 {
                 eprintln!(
-                    "agent-terminal: and {} more line(s) with problems, which are not listed",
+                    "ivy: and {} more line(s) with problems, which are not listed",
                     warnings.unlisted()
                 );
             }
@@ -434,7 +434,7 @@ pub(crate) fn to_use(
             // it, so that this branch and any other that reads the file do not stop agreeing.
             if problem.warrants_warning() {
                 eprintln!(
-                    "agent-terminal: {} could not be used: {problem}. Opening with the factory ones.",
+                    "ivy: {} could not be used: {problem}. Opening with the factory ones.",
                     path.display()
                 );
             }
@@ -603,7 +603,7 @@ impl Settings {
                 // reassigns a chord that already had an owner loses the other shortcut without
                 // noticing, and finds out the day they need it.
                 eprintln!(
-                    "agent-terminal: '{}' is left without a shortcut: its chord goes to '{}', which comes later",
+                    "ivy: '{}' is left without a shortcut: its chord goes to '{}', which comes later",
                     displaced.as_written(),
                     action.as_written()
                 );
@@ -1753,10 +1753,8 @@ mod tests {
 
     impl TestDir {
         fn new(name: &str) -> Self {
-            let path = std::env::temp_dir().join(format!(
-                "agent-terminal-settings-{}-{name}",
-                std::process::id()
-            ));
+            let path =
+                std::env::temp_dir().join(format!("ivy-settings-{}-{name}", std::process::id()));
             let _ = std::fs::remove_dir_all(&path);
             std::fs::create_dir_all(&path).expect("create the test directory");
             Self(path)
@@ -1875,7 +1873,7 @@ mod tests {
             .into_iter()
             // The lines of the blocks that are not `key = value` —the on-screen messages— are not
             // configuration examples and are not passed to the parser.
-            .filter(|line| line.contains(" = ") && !line.starts_with("agent-terminal:"))
+            .filter(|line| line.contains(" = ") && !line.starts_with("ivy:"))
             .collect();
         // Same floor and for the same reason as its sibling guard: if the walk stops hooking the
         // blocks, this test passes by being empty.
@@ -1975,7 +1973,7 @@ mod tests {
     /// they expected, so translating them in the code and not in the document —or the other way around— leaves published a
     /// sentence the terminal never says. It is the same coupling as the key table
     /// above, in the half that one leaves out **on purpose**: its walk discards the lines
-    /// that start with `agent-terminal:`, and until here no one picked them up.
+    /// that start with `ivy:`, and until here no one picked them up.
     ///
     /// **The two line warnings are reproduced by the real parser**, writing on the line
     /// the document points to what the document tells happened there. The third is printed rather
@@ -1991,7 +1989,7 @@ mod tests {
         let published: Vec<&str> = markdown::fenced(DOCUMENT)
             .code
             .into_iter()
-            .filter(|line| line.starts_with("agent-terminal: "))
+            .filter(|line| line.starts_with("ivy: "))
             .collect();
         // Same floor and for the same reason as the two sibling guards above: without it, a document
         // that stopped publishing messages leaves this test passing by looking at nothing.
@@ -2030,7 +2028,7 @@ mod tests {
                 "«{text}» had to give exactly one warning and gave {}",
                 warnings.kept().len()
             );
-            format!("agent-terminal: {}", warnings.kept()[0])
+            format!("ivy: {}", warnings.kept()[0])
         };
         let ours = [
             written_by_the_terminal(3, "key.copy = ctrl+shift+e"),
@@ -2638,13 +2636,13 @@ mod tests {
             .expect("an absolute path has to give a location");
         assert_eq!(
             path,
-            PathBuf::from("/home/config/agent-terminal/config"),
+            PathBuf::from("/home/config/ivy/config"),
             "the file is not looked for where the document says"
         );
 
         assert_eq!(
             path_from(None, Some(std::ffi::OsStr::new("/home"))),
-            Some(PathBuf::from("/home/.config/agent-terminal/config")),
+            Some(PathBuf::from("/home/.config/ivy/config")),
             "without the dedicated variable it does not fall back to the home's «.config»"
         );
         assert_eq!(

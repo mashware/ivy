@@ -98,7 +98,7 @@ fn main() -> eframe::Result {
     }
 
     eframe::run_native(
-        "agent-terminal — repaint bench",
+        "Ivy — repaint bench",
         eframe::NativeOptions {
             // Maximized: the bench needs all the room the screen gives, and how much that is cannot be
             // known from here. With a size chosen by eye, on a screen with a high scale factor the two

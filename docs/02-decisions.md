@@ -259,7 +259,7 @@ looked at the milliseconds would give a false impression of «this is ready»:
    asks for the glyph—; the one that does not have it is the font. Registering system fonts at
    startup is pending work, and it is what separates this from being usable daily.
 2. **The output queue has no ceiling**
-   ([#20](https://github.com/mashware/agent-terminal/issues/20)): a program that writes without
+   ([#20](https://github.com/mashware/ivy-history-private/issues/20)): a program that writes without
    stopping —`yes`, `cat /dev/urandom`— exhausts memory. The only real brake is to stop reading the
    pseudoterminal, and that lives in `term-core`.
 
@@ -341,7 +341,7 @@ contradiction.
   the painting scales** from one to two. And it is not an avoidable oversight: since F1.4 the window
   opens **always two** consoles, so the 1-against-2 comparison stopped being measurable from inside.
   The instrument that would give it is the bench with real tiling, which is not built
-  ([#33](https://github.com/mashware/agent-terminal/issues/33)).
+  ([#33](https://github.com/mashware/ivy-history-private/issues/33)).
 - **«Enqueuing» is not egui's cost: it is this project's painter**, which is still the most naive
   one possible —one cell at a time, with no cache and no tracking of what changed— calling
   `rect_filled` and `text`. Of the 3.21 ms of drawing, the only thing attributable to the framework
@@ -509,7 +509,7 @@ nobody raises it again.
   give 57 columns each, four would give around **28 before discounting the panel** — and the panel
   takes **36**. That is, with four panes the panel **does not fit**, and the tiling would have to do
   something it does not do today. The number cannot be multiplied
-  ([#33](https://github.com/mashware/agent-terminal/issues/33)).
+  ([#33](https://github.com/mashware/ivy-history-private/issues/33)).
 
 **What it means for this decision.** **D3 does not change, and the change of suspect the previous
 annex announced is confirmed and grows.** With both panels on top, what is demonstrably attributable
@@ -703,13 +703,13 @@ Implemented in F1.5. The decision does not change; what follows pins down what t
 open, and **departs from it in two things**, each one with its reason.
 
 ```
-PANEL_ID=3f2a9c14   PANEL_DIR=/run/user/1000/agent-terminal-3f2a9c14
+PANEL_ID=3f2a9c14   PANEL_DIR=/run/user/1000/ivy-3f2a9c14
 ```
 
 | | What was chosen | Why |
 |---|---|---|
 | Where | `$XDG_RUNTIME_DIR`, and the system's temporary directory when that variable is not there | The user's runtime directory is theirs and theirs alone, it lives in memory and **the system empties it when the session closes**. It is missing on macOS and in a Linux session without a manager, and there the temporary directory is the only alternative that exists everywhere |
-| **Without the `panels/` span** | A single new component: `agent-terminal-<id>` | An intermediate span has to be created — and it is the only piece of the path with a **fixed name**, that is, the only one another user can leave prepared in advance in a shared temporary directory, where the mode of the leaf directory no longer protects from a foreign parent. Without it, both things disappear |
+| **Without the `panels/` span** | A single new component: `ivy-<id>` | An intermediate span has to be created — and it is the only piece of the path with a **fixed name**, that is, the only one another user can leave prepared in advance in a shared temporary directory, where the mode of the leaf directory no longer protects from a foreign parent. Without it, both things disappear |
 | **Eight digits and not four** | 32 bits of `getrandom` | Four digits are 65 536 names. Creation **fails if the name already exists** — so uniqueness is not checked, it is obtained — and at that size a collision would leave a pane without identity. Widening it costs the same |
 | Permissions | An explicit `0700` | Measured: without setting it the mode comes out of the session's mask, `0775` on the reference machine. Under the runtime directory it would not be reached, but the fallback may be a shared temporary directory, and a file that tells what the user is up to is going to live there |
 | Who deletes | The value itself, when it dies | It covers three paths that a sweep at shutdown does not cover: the half-built error of whoever launches the console, the **panic** — where the interface framework does not run its shutdown hook, checked in its source, but destructors do run — and closing a pane without closing the window, which arrives in Phase 2 |
@@ -977,7 +977,7 @@ small widths, where the `ref` column has to go on without pushing the text out o
 
 **When it would stop being valid.** The matter of the four panes is already measured and answered in
 the annex of this very decision, and the issue
-[#33](https://github.com/mashware/agent-terminal/issues/33) was closed with those numbers. And the
+[#33](https://github.com/mashware/ivy-history-private/issues/33) was closed with those numbers. And the
 cost of the gesture itself is measured too: see «Measured — what the panel's gesture costs», below.
 
 ### Measured — what the panel's gesture costs (19 August 2026)
@@ -1138,7 +1138,7 @@ that pastes as plain text.
   build on that system is F2.7 and it will have to review this.
 - **Pasting can hang the window** for as long as the program inside does not read its input. It is
   not pasting's doing: it is that writing to the pseudoterminal blocks with no ceiling
-  ([#50](https://github.com/mashware/agent-terminal/issues/50)). Pasting only makes it reachable.
+  ([#50](https://github.com/mashware/ivy-history-private/issues/50)). Pasting only makes it reachable.
   **Corrected on 28 September 2026: it no longer can.** Since **D29** the write goes to a thread of
   its own per console and the window does not wait for the program, and since **D60** a write
   arriving once too much is already owed is refused and said over the console, never waited for.
@@ -1220,7 +1220,7 @@ to have.
 
 **When to reopen this.** If a way appears of knowing what the program wants **without** lying to it
 about the state of its terminal. Today there is none, and the issue
-[#27](https://github.com/mashware/agent-terminal/issues/27) is left with this autopsy inside it.
+[#27](https://github.com/mashware/ivy-history-private/issues/27) is left with this autopsy inside it.
 
 ## D13 — Tabs are a list of layouts, and the ones you cannot see work just the same
 
@@ -1323,7 +1323,7 @@ enqueueing and the panel **do not move**, which is what confirms that there is n
   comparison is between batches, not against the budget of a refresh.
 - **It says nothing about four tabs.** All of this is with one and with two. With four visible panes
   the panel would eat the whole console and it would have to be measured again
-  ([#33](https://github.com/mashware/agent-terminal/issues/33)).
+  ([#33](https://github.com/mashware/ivy-history-private/issues/33)).
 - **The grid of these batches is 21 columns per console**, not 57: the panel takes 36. They are not
   comparable with the D3 annexes from before the panels.
 
@@ -1466,7 +1466,7 @@ frame» —tessellating, drawing and egui's scaffolding— stays between **402 a
 runs, and the variation between the two runs of one and the same batch (444 → 402 in C, 503 → 463 in
 I) is of the same order as the variation between batches. It is the same conclusion the D13 annex
 drew for the tabs, now for the panes, and it **closes the question the issue
-[#33](https://github.com/mashware/agent-terminal/issues/33) left open**. The three batches have
+[#33](https://github.com/mashware/ivy-history-private/issues/33) left open**. The three batches have
 almost the same number of cells in total (3 744 to 3 920), which is exactly what makes them
 comparable: what changes is how many consoles they are shared out among. 2. **What the background
 work costs is paid in the queue.** The full round trip goes from ~52 ms with two consoles dumping to
@@ -1496,7 +1496,7 @@ away from the console.
   the two runs of the same batch I. It is published for completeness, not so that trends can be read
   into it.
 - **It does not measure splitting or closing live.** The batches open the layout and dump; the ~100
-  ms freeze on closing ([#62](https://github.com/mashware/agent-terminal/issues/62)) is still
+  ms freeze on closing ([#62](https://github.com/mashware/ivy-history-private/issues/62)) is still
   unmeasured with panes, and this milestone goes down that path far more often than before.
 - **It is not a 120 Hz frame.** With four consoles dumping at full load the full round trip is well
   above the 8.3 ms slot: it describes the **sustained worst case**, not normal use. The valid
@@ -1648,7 +1648,7 @@ through the same door the real mouse comes in by. The spans are those of **pane 
 - **It does not measure a person's gesture.** It measures a synthetic gesture that grabs the center
   of a console, crosses in two frames and drops. A human drag lasts longer and moves more slowly.
 - **It does not measure splitting or closing live**, just like the previous annex: the ~100 ms
-  freeze on closing ([#62](https://github.com/mashware/agent-terminal/issues/62)) still goes
+  freeze on closing ([#62](https://github.com/mashware/ivy-history-private/issues/62)) still goes
   unmeasured with panes.
 
 **Two things the first version of the batch got wrong, and they stay written down because the
@@ -1665,7 +1665,7 @@ through. Both were caught by this PR's review, not by the measurement.
 
 **What was decided.** On closing the window and opening it again, back come **the tabs, the tree of
 panes with their weights, and for each console the width of its panel and whether it was folded**.
-It is saved in a JSON file of its own, `$XDG_CONFIG_HOME/agent-terminal/layout.json` —falling
+It is saved in a JSON file of its own, `$XDG_CONFIG_HOME/ivy/layout.json` —falling
 back to `$HOME/.config/…`—, and **nothing else**: not each console's working directory, not the size
 of the window, not which tab was active. Nine decisions define it:
 
@@ -1746,7 +1746,7 @@ behind it:
   by the window manager or by a signal, and **closing one console freezes the window for a median of
   50.7 ms** —a tab of two consoles, around 101 ms; and **404 ms that same console** if the program
   inside ignores the hang-up signal— and it can hang it
-  ([#62](https://github.com/mashware/agent-terminal/issues/62)). Saving only on the way out would
+  ([#62](https://github.com/mashware/ivy-history-private/issues/62)). Saving only on the way out would
   have lost the whole session in the normal case. **The «can hang it» half stopped being true with
   D32**, which bounds the wait; the freeze this annex measures is the other half, and **D55** took it
   from ~50 ms per console to 1.20–1.37 ms.
@@ -3290,7 +3290,7 @@ precisely what that costs.
 not
 understood is ignored, it is said **with its number**, and the rest of the file is applied.
 
-It lives in `$XDG_CONFIG_HOME/agent-terminal/config`, **next to** the layout and not inside it: that
+It lives in `$XDG_CONFIG_HOME/ivy/config`, **next to** the layout and not inside it: that
 one is written by the application, this one is written by a person.
 
 ### This does NOT reopen D16: it is the side D16 already resolved
@@ -4524,7 +4524,7 @@ exactly what the previous annex announced —«the remaining deliveries are goin
 fewer»— and the first confirmation with numbers: **the milestone's last mechanical delivery fixes
 citations from the second to last**.
 
-### Amended on 28 September 2026: the documents' names, which the milestone closed without ([#150](https://github.com/mashware/agent-terminal/issues/150))
+### Amended on 28 September 2026: the documents' names, which the milestone closed without ([#150](https://github.com/mashware/ivy-history-private/issues/150))
 
 F2.12 closed on 5 September with every document English **inside** and six of them Spanish **by
 name**, plus the `prototipos/` directory: `02-decisiones`, `03-arquitectura`, `04-contrato-panel`,
@@ -4792,7 +4792,7 @@ at all.** Its methods left for satellite `impl Window` blocks in `pointer.rs`, `
 and `session.rs`, so summed across the crate the type went **1 124 → 1 138 production lines, over seven
 blocks in five files**: it grew by fourteen. The order published «1 110 → 489» and that figure is a
 **block**, not a type; the guard measures blocks and cannot see a type at all, which is
-[#187](https://github.com/mashware/agent-terminal/issues/187). What is true without qualification is the
+[#187](https://github.com/mashware/ivy-history-private/issues/187). What is true without qualification is the
 module: this file went from 3 119 to 1 434. The ticket asked for «about 1 400» and never showed
 its arithmetic; the plan re-derived it by reading and said ~1 577; the real answer is **1 434**, and it
 is lower than the re-derivation because two of the five pieces came out bigger than they were priced.
@@ -4880,7 +4880,7 @@ it chose the shape the defect lived in. PR #197 said the ceiling had shaped the 
 first amendment (#170), the record a later reader opens, never mentions the mark or the ceiling, so
 a reader of the decision could not tell that this shape had been forced rather than chosen.
 
-**The other half of the same pressure is [#187](https://github.com/mashware/agent-terminal/issues/187).**
+**The other half of the same pressure is [#187](https://github.com/mashware/ivy-history-private/issues/187).**
 The `impl` ceiling measures blocks, not types, so a type can pay it by spreading into more blocks
 without shrinking at all. That is how `impl Window` ended up across five files by the time #187 was
 filed — twelve when it was closed — while `lib.rs`'s number went down, as the section above records.
@@ -5004,7 +5004,7 @@ report say so. The second figure existed *because* the write waited.
   this investigation was caught doing exactly that once. **Answered as observed behaviour by #159**,
   below — the mechanism still is not traced.
 
-### Amended on 26 September 2026: on Linux the master is non-blocking ([#159](https://github.com/mashware/agent-terminal/issues/159))
+### Amended on 26 September 2026: on Linux the master is non-blocking ([#159](https://github.com/mashware/ivy-history-private/issues/159))
 
 **The new signal is a measurement.** On Linux 7.0, a blocking write to a master whose buffer toward the
 program is full **does not end when the program dies and every copy of the slave is closed**: the
@@ -5109,7 +5109,7 @@ the effect it has— in its sharpest form: **the effect was real and the author 
   raw string carrying a quote of its own. Both leave the same footprint, and a test fails on any line
   that names a mode command and yields no literal at all. Declared rather than papered over.
 
-### Extended on 28 September 2026: a fourth disguise — the premise is proved by whoever holds it ([#191](https://github.com/mashware/agent-terminal/issues/191))
+### Extended on 28 September 2026: a fourth disguise — the premise is proved by whoever holds it ([#191](https://github.com/mashware/ivy-history-private/issues/191))
 
 This decision is where the project keeps the ways a test covers nothing while staying green. The
 record numbers three of them: asserting on the place a value is recorded instead of on the effect it
@@ -5321,7 +5321,7 @@ the held paste, and a bare press on the question still discards it. #199.
   exactly under the dismissing click, so a double click, or egui running the same press through a
   second pass, sent the paste.
 
-  **Amended on 26 September 2026** ([#290](https://github.com/mashware/agent-terminal/issues/290)):
+  **Amended on 26 September 2026** ([#290](https://github.com/mashware/ivy-history-private/issues/290)):
   **egui 0.36 does not run the same press through a second pass.** Before every pass it moves the
   frame's events out of the raw input (egui 0.36.1, `data/input/raw_input.rs:137`, called at
   `context.rs:854`), so a pass repeated after a discard sees no press **event** — what it carries
@@ -5841,7 +5841,7 @@ the hottest path in the project.
 > **And the status panel would not have been covered either way.** It hands each row to the engine in
 > one go instead of cell by cell, and it notes the whole row's text, so a producer that publishes
 > `░░░░░░░░░░` in its summary still gets the font's dither, moiré and all. It is the same shape as
-> [#178](https://github.com/mashware/agent-terminal/issues/178) — the panel is the one surface that
+> [#178](https://github.com/mashware/ivy-history-private/issues/178) — the panel is the one surface that
 > lays out text as text — and it is out of this delivery for the same reason: making the panel paint
 > cell by cell is a different piece of work.
 
@@ -5895,7 +5895,7 @@ of tracked here, so nothing new is kept between frames.
 **Why the cursor did not blink, and it does now: see D37.** This entry deferred blinking rather than
 refusing it, and named the price: a settings key of its own, a declared repaint path in the report,
 and a decision about what the batches do with it. All three were paid by
-[#210](https://github.com/mashware/agent-terminal/issues/210), so what is left here is the shape of
+[#210](https://github.com/mashware/ivy-history-private/issues/210), so what is left here is the shape of
 the argument — a cursor that blinks is a timer, and a timer is **work at rest**, which is exactly
 what every published control batch of `scripts/measure-frame.sh` measures. **One line of this
 paragraph was wrong and it is worth keeping the correction visible**: it said the key would be «off
@@ -6419,7 +6419,7 @@ producer.
 |---|---|
 | **A confirmation dialog on press** | The command is already on screen. A second gesture buys nothing the painting does not already give, and Part I promises answering without typing |
 | **A button that arms on the first press and fires on the second** | Two presses per button is the ergonomics of a dialog with none of its clarity, and the press that answers a painted question in this window is already a bare click |
-| **Reusing the held paste's question** (`Ctrl+Enter`) | It is keyboard-only, it holds one pending per console, and it drags [#170](https://github.com/mashware/agent-terminal/issues/170) with it — every pane painting a question only the focused one can answer |
+| **Reusing the held paste's question** (`Ctrl+Enter`) | It is keyboard-only, it holds one pending per console, and it drags [#170](https://github.com/mashware/ivy-history-private/issues/170) with it — every pane painting a question only the focused one can answer |
 | **Cleaning the command instead of refusing it** | It makes the painted text a lie, which is the whole mitigation. And a remove-the-bad-characters pass is one refactor away from a search-and-delete, which this repository has already measured being slipped past |
 | **Keeping the paste's two exceptions** (tab, line breaks) | A paste is a document somebody copied and its lines are the point. A button is one command |
 | **A per-action flag choosing between running and only writing** | A second thing a producer can get wrong, for a case the roadmap's own three examples do not include |
@@ -6572,7 +6572,7 @@ and pointing is exactly what the transport refused to allow.
 that asked — and its two siblings keep the prefix so the three read as one surface. They are names
 on the wire, declared by the channel's crate, and nothing in D27's rules turns them away. Renaming
 them would change the wire contract, not correct a translation, so on 28 September 2026 they were
-kept ([#147](https://github.com/mashware/agent-terminal/issues/147)). *Discarded:* `pane_open` /
+kept ([#147](https://github.com/mashware/ivy-history-private/issues/147)). *Discarded:* `pane_open` /
 `pane_read` / `pane_close`, which buys consistency with the noun at the price of a change across the
 wire, the MCP binary, the application and four documents, for a first verb that already reads right.
 
@@ -6787,7 +6787,7 @@ the rightmost one's button pressed lost **two** programs to one click: the survi
 and the new rightmost strip puts its button on the same abscissa the press is still sitting at. Two
 consoles hide it, because the survivor of the first close carries no button at all.
 
-**Amended on 26 September 2026** ([#290](https://github.com/mashware/agent-terminal/issues/290)):
+**Amended on 26 September 2026** ([#290](https://github.com/mashware/ivy-history-private/issues/290)):
 **the second pass does not read the same press.** egui 0.36 moves a frame's events out of the raw
 input before each pass (egui 0.36.1, `data/input/raw_input.rs:137`, called at `context.rs:854`), so a
 pass repeated after a discard receives no events; the pointer's position and held buttons, the keys
@@ -7275,7 +7275,7 @@ A bare console press keeps selecting text or reporting the mouse to the hosted p
 link label needs no modifier. Both effects cross one once-per-frame barrier before selection or
 mouse reporting: a second egui pass cannot turn one physical press into two browser requests.
 
-**Amended on 26 September 2026** ([#290](https://github.com/mashware/agent-terminal/issues/290)):
+**Amended on 26 September 2026** ([#290](https://github.com/mashware/ivy-history-private/issues/290)):
 that sentence states what the barrier guarantees, and it stays true — but egui 0.36 does not hand a
 repeated pass the frame's events at all (egui 0.36.1, `data/input/raw_input.rs:137`), so today the barrier is
 **defence** against an egui that starts replaying. It is kept for the reason D31's and D46's
@@ -7599,7 +7599,7 @@ in a knowledge card — and was fixed the day it was met in use.
 
 ## D55 — Closing a console hangs up its program itself, looking every millisecond, and keeps the library's grace
 
-**Decided on 25 September 2026** ([#196](https://github.com/mashware/agent-terminal/issues/196)).
+**Decided on 25 September 2026** ([#196](https://github.com/mashware/ivy-history-private/issues/196)).
 `Drop for Pty` no longer calls `portable-pty`'s `kill` on Unix. It sends SIGHUP to the child's pid,
 looks with `try_wait` every **1 ms** for up to **200 ms**, and sends SIGKILL if the program is still
 there. Windows keeps the library's `kill`, which is `TerminateProcess` at once and never had a grid.
@@ -7656,7 +7656,7 @@ work (**D13**). No batch closes a console by hand, so no published frame figure 
 
 ## D56 — A program the system will not let us signal is left running, waited for off the interface pass, and said once
 
-**Decided on 25 September 2026** ([#271](https://github.com/mashware/agent-terminal/issues/271)).
+**Decided on 25 September 2026** ([#271](https://github.com/mashware/ivy-history-private/issues/271)).
 When closing a console, the hang-up (D55) is **refused** by the system — any failure of `kill` but
 «no such process» — `Drop for Pty` no longer waits for the child inline. It hands the child to a
 thread that does nothing but `wait` for it, writes **one line to standard error** naming its pid and
@@ -7673,7 +7673,7 @@ life on the interface pass, and nothing this process can send shortens it. The k
 would not rescue the wait either: it needs every descriptor of the master closed, and the reader thread
 still holds a clone at that point.
 
-**Amended on 26 September 2026** ([#288](https://github.com/mashware/agent-terminal/issues/288)):
+**Amended on 26 September 2026** ([#288](https://github.com/mashware/ivy-history-private/issues/288)):
 **«left running» is what happens at the moment of the close, not what happens after it.** The rest of
 the close drops every copy of the master — the reader's once it ends, the console's own, and the
 writer thread's, which is never joined and can be the last. That last close makes the kernel hang the
@@ -7720,7 +7720,7 @@ the console at once, kept answering, and printed the line.
 
 ## D57 — Every blocking wait in production code is bounded or declared abandoned, and a test enforces it
 
-**Decided on 25 September 2026** ([#190](https://github.com/mashware/agent-terminal/issues/190)).
+**Decided on 25 September 2026** ([#190](https://github.com/mashware/ivy-history-private/issues/190)).
 `crates/app/tests/waits.rs` walks the production source of **every crate** under `crates/` and fails
 on any call named `recv`, `wait` or `wait_while`, and on any argument-less `join`. Such a call passes
 only when a comment **opens** with one of two cases, its reason on the same line. That comment is
@@ -7776,11 +7776,11 @@ by the kill a hang-up falls through to, except for a program in uninterruptible 
 only when its system call returns. On Windows, and on the Unix path with no pid (reasoned
 unreachable), a refused kill is not seen and that wait lasts as long as the program lives. Its
 declaration states each case and points at
-[#273](https://github.com/mashware/agent-terminal/issues/273), which is the Windows one.
+[#273](https://github.com/mashware/ivy-history-private/issues/273), which is the Windows one.
 
 ## D58 — A publication over the channel that lost a word is still taken, and its reply says which
 
-**Decided on 26 September 2026** ([#255](https://github.com/mashware/agent-terminal/issues/255)).
+**Decided on 26 September 2026** ([#255](https://github.com/mashware/ivy-history-private/issues/255)).
 When `panel_set` or `panel_patch` carries a value none of the three closed vocabularies knows —an
 `attention`, a line's `mark`, a line's `style`— or a value there that is not even a word, the
 document is read exactly as before: the value is dropped, the line stands, the panel paints. What
@@ -7829,7 +7829,7 @@ window did not answer in time*, so what it lost is never said.
 
 ## D59 — A named theme is a built-in base; explicit colors always override it
 
-**Decided for [#179](https://github.com/mashware/agent-terminal/issues/179).** The first catalog
+**Decided for [#179](https://github.com/mashware/ivy-history-private/issues/179).** The first catalog
 ships two complete named themes, `tokyonight` and `gruvbox-dark`, inside the binary. Names ignore
 ASCII case, as `font` already does. A `theme = name`
 line chooses the base for all twenty-two colors. Every explicit `color.N`, `background`,
@@ -7861,7 +7861,7 @@ colors for the terminal's own interface are choices made here.
 
 ## D60 — The input queue's honest ceiling refuses, it does not block; and it refuses on what is already owed, never on a write's own size
 
-**Decided for [#161](https://github.com/mashware/agent-terminal/issues/161).** `Pty::write`
+**Decided for [#161](https://github.com/mashware/ivy-history-private/issues/161).** `Pty::write`
 (term-core) refuses once `MAX_OWED` (256 KiB) is already owed to the program, checked **before**
 this write's own bytes are added — so a single write, however large, is always accepted whole when
 the queue has room, and only a write arriving once the queue is *already* full is turned away.
@@ -7925,7 +7925,7 @@ precision.
 
 ## D61 — Searching the scrollback: the focused console, literal text, and the match is the selection
 
-**Decided for [#177](https://github.com/mashware/agent-terminal/issues/177), F2.13.** `Ctrl+Shift+F`
+**Decided for [#177](https://github.com/mashware/ivy-history-private/issues/177), F2.13.** `Ctrl+Shift+F`
 (`key.search`, and `none` hands it back to the program) opens a search **in the focused console**.
 What is typed builds the query, which is **literal text** — a `.` or a `(` means that character —
 with the engine's case rule: insensitive unless the query holds an uppercase letter. `Enter` walks
@@ -8119,7 +8119,7 @@ prove stable brightness. Native desktop observation remains separate from that r
 
 **The restart-only Save boundary is superseded by D64 when #324 is delivered.** The staged editing, shared-file preservation and historical measurements below remain their original record.
 
-**7 November 2026 — F2.15, [#322](https://github.com/mashware/agent-terminal/issues/322).** Settings
+**7 November 2026 — F2.15, [#322](https://github.com/mashware/ivy-history-private/issues/322).** Settings
 belongs to the whole window, so its entry is global and visible with one tab. Its dialog groups
 appearance, cursor and shortcuts, while every console keeps its existing pump budget.
 
@@ -8202,7 +8202,7 @@ panels had already published and the report passes every witness guard. No faile
 
 ## D64 — Saved settings replace the complete runtime configuration
 
-**7 November 2026 — [#324](https://github.com/mashware/agent-terminal/issues/324).** The user approved
+**7 November 2026 — [#324](https://github.com/mashware/ivy-history-private/issues/324).** The user approved
 the Compact Settings proposal and asked to remove the restart required by D63. The global gear
 shares the tab strip, including a single-tab window; the system titlebar remains native.
 
@@ -8295,7 +8295,7 @@ even when grids match; missing-family reports cannot justify an average.
 
 ## D65 — Theme browsing stays in the settings draft; palettes are converted before shipping
 
-**Decided for [#327](https://github.com/mashware/agent-terminal/issues/327).** A named theme remains a
+**Decided for [#327](https://github.com/mashware/ivy-history-private/issues/327).** A named theme remains a
 base for all twenty-two colors, with explicit overrides above it (D59). The catalog is still part of
 the binary. Additional terminal palettes are converted from a pinned external source during
 development, with their original license notices and attribution shipped alongside them. The
@@ -8348,7 +8348,7 @@ Discarded: a unified `NSToolbar`, which centres the buttons by itself but whose 
 
 ## D67 — Appearance groups a theme with its overrides and keeps saving in a fixed footer
 
-**Decided for [#331](https://github.com/mashware/agent-terminal/issues/331)** after the user approved
+**Decided for [#331](https://github.com/mashware/ivy-history-private/issues/331)** after the user approved
 `prototypes/settings-appearance.html`. Theme selection and explicit terminal colors are one visual
 group. The selected theme shows how many colors are customized; the editable colors stay behind
 Customize colors, with the ANSI palette still expandable inside it. The effective console/panel
@@ -8437,7 +8437,7 @@ number is claimed before valid repeated measurements exist. Cross-platform proof
 
 ## D69 — A pane without a manual name follows its program's terminal title
 
-**Decided for [#334](https://github.com/mashware/agent-terminal/issues/334).** The user wants pane
+**Decided for [#334](https://github.com/mashware/ivy-history-private/issues/334).** The user wants pane
 names to follow agent session names and explicitly accepted the terminal title each client publishes,
 including its prefixes and shortening. This is the new signal extending D66's manual-only display
 labels: standard OSC title metadata is an explicit declaration, not meaning extracted from a TUI.
@@ -8479,7 +8479,7 @@ watcher or lower budget for hidden panes, and no new performance claim without v
 
 ## D70 — Optional programming ligatures reuse the font shaper without changing terminal cells
 
-**Design for [#335](https://github.com/mashware/agent-terminal/issues/335), 8 November 2026.** The user
+**Design for [#335](https://github.com/mashware/ivy-history-private/issues/335), 8 November 2026.** The user
 explicitly requested programming ligatures after discussing the terminal's adoption priorities. That
 is the new signal revisiting D19's exclusion for this feature alone; it neither changes the scope
 of a completed Phase 2 milestone nor introduces Kitty's graphics protocol.
@@ -8580,22 +8580,24 @@ regression and the full suite, not by a claimed timing for selecting an alias.
 
 ## D71 — Ivy is the public product name
 
-**Decided for [#339](https://github.com/mashware/agent-terminal/issues/339).** The project owner
+**Internal-name retention superseded by D87 on 10 November 2026.**
+
+**Decided for [#339](https://github.com/mashware/ivy-history-private/issues/339).** The project owner
 selected **Ivy** and approved the green-to-teal logo with three hanging leaves. Keep that SVG as
 the editable source and embed a transparent PNG rendering for the application title bar and native
 window icon. The integrated title bar shows the logo beside the name, without moving its controls
 or taking space from the consoles. Decode the PNG and create its texture before the first frame;
 paint enqueueing stays inside the existing integrated-chrome timing span.
 
-The repository, binary and Cargo package names, panel contract, and `agent-terminal` configuration
-and layout paths retain their identifiers. A public name must not reset a person's terminal or
+The original branding delivery retained repository, binary, Cargo package, panel contract and
+configuration identifiers. A public name must not reset a person's terminal or
 break existing scripts. Native task-switcher and launcher icon support belongs to the platform:
 X11 and Windows accept the window icon, while Wayland needs desktop-entry integration and macOS
 needs an application bundle for the Dock. Packaging those is separate work, not something a
 viewport icon alone proves.
 
 **Discarded, with reasons:**
-- A global replacement of `agent-terminal`: it would mix public branding with persisted paths,
+- A global replacement of the former product name: it would mix public branding with persisted paths,
   shell integration and historical measurements, requiring an unrelated migration.
 - Loading or rasterizing SVG inside the frame: the approved PNG can be embedded and decoded once,
   without adding an SVG renderer or disk access to the painting path.
@@ -8757,7 +8759,7 @@ notes; this feature does not publish releases or build installers.
 ## D76 — Native packages make Ivy available for explicit experimental trials
 
 **8 November 2026 — #343.** Installers wrap the existing terminal and MCP bridge without changing
-Cargo target names or the `agent-terminal` user-data namespace retained by D71. The first delivery
+Cargo target names or the user-data namespace originally retained by D71 (superseded by D87). The first delivery
 is an Ubuntu 24.04-baseline x86_64 `.deb`, usable on the approved Ubuntu 24.04 and 26.04 targets;
 macOS 15+ ARM64/Intel and Windows 11 x86_64 follow as separate coherent deliveries. Native runtime
 and desktop evidence, including upgrade and uninstall, decides what is actually supported.
@@ -9286,3 +9288,29 @@ bound, not a measured performance claim; a query flood can exceed it and receive
 file, through the application's console pump; screen output cannot impersonate those bytes.
 Chunk-boundary, resize, refusal, flood and non-reflection checks cover the bridge separately.
 No application-specific failure or macOS/Windows behavior is claimed from the Linux reproduction.
+
+## D87 — Ivy owns its runtime and configuration names
+
+**New signal, 10 November 2026:** the owner found the former product name in `PANEL_DIR`
+and requested that it disappear throughout Ivy. This supersedes D71's retained internal names.
+
+New consoles use `ivy-<PANEL_ID>` runtime directories and the Windows endpoint uses the same
+prefix. MCP identifies the server as `ivy panel`; diagnostics, examples and Settings use Ivy.
+The open contract keeps `PANEL_ID`, `PANEL_DIR`, `panel.json` and `control.sock` unchanged:
+producers discover their endpoint through the inherited directory, not a hard-coded prefix.
+Already-running consoles retain the directory they were launched with until they close.
+
+Configuration and layout use `$XDG_CONFIG_HOME/ivy/` (or `~/.config/ivy/`). Before normal
+startup reads either file, if the Ivy directory is absent, move the former product's entire
+configuration directory into place. This preserves settings, layout, recovery and other files
+without interpreting or rewriting them. An existing Ivy directory wins and is never merged or
+overwritten. Failure to move stops startup with an error rather than opening factory-fresh and
+risking a subsequent overwrite. Measurement sessions skip migration and retain their existing
+settings and persistence gates. Migration is the only production compatibility use of the former
+name; historical knowledge and negative regression assertions are not product branding.
+
+**Discarded:** retaining old paths (the reported defect); starting with empty preferences (data
+loss); persistent aliases or reading both namespaces (keeps the old identity alive); merging two
+configuration directories (no safe rule for choosing between conflicting settings or layouts).
+Historical issue links point to `ivy-history-private`, where those original numbers belong,
+rather than unrelated issues with the same numbers in the current public repository.

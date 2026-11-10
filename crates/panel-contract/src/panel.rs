@@ -1023,7 +1023,7 @@ mod tests {
         {"text": "F1.4: two splits side by side", "style": "title"},
         "",
         {"ref": "#1", "text": "extract Division from the window", "mark": "done",
-         "link": "https://github.com/mashware/agent-terminal/pull/31"},
+         "link": "https://github.com/mashware/ivy-history-private/pull/31"},
         {"ref": "#1–#11", "text": "the knowledge", "mark": "wait"},
         {"ref": "Now", "text": "milestone closed", "mark": "info", "style": "ok"},
         "a loose line"

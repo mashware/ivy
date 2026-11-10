@@ -196,7 +196,7 @@ fn initialized(message: &serde_json::Value) -> serde_json::Value {
     serde_json::json!({
         "protocolVersion": asked_for,
         "capabilities": {"tools": {}},
-        "serverInfo": {"name": "agent-terminal panel", "version": env!("CARGO_PKG_VERSION")},
+        "serverInfo": {"name": "ivy panel", "version": env!("CARGO_PKG_VERSION")},
     })
 }
 
@@ -746,6 +746,7 @@ mod tests {
              \"params\":{\"protocolVersion\":\"2024-11-05\"}}");
 
         assert_eq!(answered["result"]["protocolVersion"], "2024-11-05");
+        assert_eq!(answered["result"]["serverInfo"]["name"], "ivy panel");
         assert!(answered["result"]["capabilities"]["tools"].is_object());
     }
 

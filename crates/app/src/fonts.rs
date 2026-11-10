@@ -663,7 +663,7 @@ impl Discoverer {
             // rest of the project declares its limits with instead of keeping them quiet.
             if !self.said_the_ceiling {
                 eprintln!(
-                    "agent-terminal: there are already {MAX_FAMILIES} system fonts registered, which is the \
+                    "ivy: there are already {MAX_FAMILIES} system fonts registered, which is the \
                      ceiling. Characters the factory ones do not cover will keep coming out as boxes."
                 );
                 self.said_the_ceiling = true;
@@ -751,7 +751,7 @@ impl Discoverer {
         // would enumerate again on every round, spending the whole cost for nothing.
         if collection.family_names().next().is_none() {
             eprintln!(
-                "agent-terminal: no system font was found. Characters the \
+                "ivy: no system font was found. Characters the \
                  factory fonts do not cover will keep coming out as boxes."
             );
             self.no_system_fonts = true;

@@ -86,7 +86,7 @@ impl PanelDir {
     /// be created first, nor that a third party could leave prepared in a shared temporary.
     pub fn create() -> io::Result<Self> {
         let id = generate_id()?;
-        let path = base_dir().join(format!("agent-terminal-{id}"));
+        let path = base_dir().join(format!("ivy-{id}"));
         create_dir(&path)?;
 
         Ok(Self { id, path })
@@ -250,7 +250,7 @@ mod tests {
             .to_string_lossy()
             .into_owned();
 
-        assert_eq!(last, format!("agent-terminal-{}", panel.id()));
+        assert_eq!(last, format!("ivy-{}", panel.id()));
     }
 
     #[test]
