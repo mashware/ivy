@@ -9,7 +9,7 @@ $BinaryDir = (Resolve-Path $BinaryDir).Path
 $Root = Join-Path $env:RUNNER_TEMP ('ivy-install-' + [guid]::NewGuid())
 $Destination = Join-Path $Root 'Ivy'
 $env:XDG_CONFIG_HOME = Join-Path $Root 'preferences'
-$Preferences = Join-Path $env:XDG_CONFIG_HOME 'agent-terminal'
+$Preferences = Join-Path $env:XDG_CONFIG_HOME 'ivy'
 New-Item -ItemType Directory -Path $Preferences -Force | Out-Null
 [IO.File]::WriteAllText((Join-Path $Preferences 'config'), "# preserve preferences`n")
 [IO.File]::WriteAllText((Join-Path $Preferences 'layout.json'), '{"fixture":"preserve"}')

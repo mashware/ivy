@@ -257,8 +257,8 @@ Hold `Shift` to select text when a terminal program has requested the mouse.
 Open **Preferences** from the application menu to choose a theme, font, size, cursor behavior and
 shortcuts. Saved changes apply to the running terminal. Cancel discards the draft.
 
-The settings file is `$XDG_CONFIG_HOME/agent-terminal/config`, or
-`~/.config/agent-terminal/config` when `XDG_CONFIG_HOME` is unset. For example:
+The settings file is `$XDG_CONFIG_HOME/ivy/config`, or
+`~/.config/ivy/config` when `XDG_CONFIG_HOME` is unset. For example:
 
 ```ini
 version = 1

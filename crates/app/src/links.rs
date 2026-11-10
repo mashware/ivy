@@ -112,7 +112,7 @@ fn safe_for_the_opener(address: &str) -> String {
 /// The line a click the opener refused leaves on standard error.
 fn could_not_open(target: &WebTarget, why: &std::io::Error) -> String {
     format!(
-        "agent-terminal: no opener could be started for {}: {why}",
+        "ivy: no opener could be started for {}: {why}",
         target.as_str()
     )
 }
@@ -226,7 +226,7 @@ mod tests {
         let why = std::io::Error::new(std::io::ErrorKind::NotFound, "no browser found");
         assert_eq!(
             could_not_open(&target, &why),
-            "agent-terminal: no opener could be started for https://example.test/said: no browser found"
+            "ivy: no opener could be started for https://example.test/said: no browser found"
         );
     }
 

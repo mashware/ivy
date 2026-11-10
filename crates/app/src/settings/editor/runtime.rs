@@ -344,7 +344,7 @@ fn run_probe(window: &mut Window, ctx: &egui::Context) {
             settings.font_size = Some(22.0);
             // Separate negative preparation from the cold requested-family preparation.
             window.settings_editor.application.prepared += 1;
-            let bogus = "agent-terminal-probe-no-such-family-67184";
+            let bogus = "ivy-probe-no-such-family-67184";
             probe.failure = prepare_probe(window, &mut probe, 0, Some(bogus)).is_err();
             if probe.failure {
                 window.settings_editor.application.failed += 1;

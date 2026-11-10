@@ -687,14 +687,14 @@ done
 # even if it deleted nothing, a second window competes for the machine and the frame's stopwatch is
 # a wall clock.
 if pgrep -x app > /dev/null 2>&1; then
-    echo "there is an agent-terminal window open: close it before measuring" >&2
+    echo "there is an Ivy window open: close it before measuring" >&2
     exit 1
 fi
 
 # Now yes: whatever is left is from a previous run. An old panel would falsify the whole of batch A
 # — which is the reference — and in the others would give a panel that is not the one this run wants
 # to measure.
-rm -rf /run/user/"$(id -u)"/agent-terminal-* 2>/dev/null || true
+rm -rf /run/user/"$(id -u)"/ivy-* 2>/dev/null || true
 
 # **And the run has its own configuration directory, for two different reasons.** It goes down here
 # and not next to the turns one **on purpose**: this deletes, and the script deletes nothing until
@@ -707,7 +707,7 @@ rm -rf /run/user/"$(id -u)"/agent-terminal-* 2>/dev/null || true
 # measuring a layout nobody asked it for.
 #
 # **What it isolates is this project's layout file** — the one D16 puts in
-# `$XDG_CONFIG_HOME/agent-terminal/` — and not «the configuration» in general. Said that way because
+# `$XDG_CONFIG_HOME/ivy/` — and not «the configuration» in general. Said that way because
 # the persistence `eframe` brings out of the box resolves another variable, `XDG_DATA_HOME`
 # (`eframe/src/native/file_storage.rs`), and **it is deliberately not covered**: D16 discarded that
 # store, so covering it would be a mechanism with no scenario. If it were ever used, **this line
@@ -797,8 +797,8 @@ seed_layout() {
         n=$((n + 1))
     done
 
-    mkdir -p "$CONFIG/agent-terminal"
-    printf '{"v":2,"tabs":[%s]}\n' "$list" > "$CONFIG/agent-terminal/layout.json"
+    mkdir -p "$CONFIG/ivy"
+    printf '{"v":2,"tabs":[%s]}\n' "$list" > "$CONFIG/ivy/layout.json"
 }
 
 if [ "$RESTORES" = 1 ]; then
@@ -1022,7 +1022,7 @@ of $LARGE_FLOOR: this batch would publish a medium panel under the ceiling's nam
         # A here-document reaches `cat` on its standard input, and a pipe carries it on, so the
         # document is never an argument of anything and that limit never applies.
         document_of "$which" | "$PUBLISHER" \
-            "$d" "${d##*agent-terminal-}" "bench" \
+            "$d" "${d##*ivy-}" "bench" \
             3600 1000 "$verb" "$OPS" >&2 &
         publishers="$publishers $!"
     done
@@ -1054,12 +1054,12 @@ seed() {
     # four depending on how the race fell — a batch with some consoles having a panel and others
     # not, that is, with the regime mixed, and published as good because the witness was written all
     # the same.
-    while [ "$(ls -d /run/user/"$(id -u)"/agent-terminal-* 2>/dev/null | wc -l)" -lt "$DIRECTORIES" ]; do
+    while [ "$(ls -d /run/user/"$(id -u)"/ivy-* 2>/dev/null | wc -l)" -lt "$DIRECTORIES" ]; do
         waited=$((waited + 1))
         [ "$waited" -gt 100 ] && { echo "the $DIRECTORIES panel directories did not show up" >&2; return 1; }
         sleep 0.1
     done
-    dirs=$(ls -d /run/user/"$(id -u)"/agent-terminal-*)
+    dirs=$(ls -d /run/user/"$(id -u)"/ivy-*)
     count=$(echo "$dirs" | wc -l)
     if [ "$count" -ne "$DIRECTORIES" ]; then
         echo "$count panel directories showed up and $DIRECTORIES were expected: nothing is seeded" >&2

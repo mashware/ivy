@@ -236,7 +236,7 @@ mod tests {
             "!42 ↗"
         );
         assert_eq!(
-            link_label("https://github.com/mashware/agent-terminal/pull/257"),
+            link_label("https://github.com/mashware/ivy-history-private/pull/257"),
             "#257 ↗"
         );
         assert_eq!(

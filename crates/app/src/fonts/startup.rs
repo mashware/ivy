@@ -31,7 +31,7 @@ pub(crate) fn choose_the_font(
         // somewhere different: to fix what they typed, to fix what is installed, or nowhere at all.
         super::Chosen::NotInstalled => {
             eprintln!(
-                "agent-terminal: the font '{asked_for}' is not installed on this machine. Painting \
+                "ivy: the font '{asked_for}' is not installed on this machine. Painting \
                  with the built-in ones."
             );
             measure::ChoosingTheFont::Missing {
@@ -41,7 +41,7 @@ pub(crate) fn choose_the_font(
         }
         super::Chosen::Unusable => {
             eprintln!(
-                "agent-terminal: the font '{asked_for}' is installed and none of its files can be \
+                "ivy: the font '{asked_for}' is installed and none of its files can be \
                  read. Painting with the built-in ones."
             );
             measure::ChoosingTheFont::Unusable {

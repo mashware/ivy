@@ -39,6 +39,7 @@ fn customized_count_includes_all_twenty_two_slots_even_invalid_draft_values() {
     }
     paint(&mut editor, &ctx, size, vec![]);
     let text = paint(&mut editor, &ctx, size, vec![]);
+    assert!(text.iter().any(|(s, _)| s == "Ivy"));
     assert!(
         text.iter()
             .any(|(s, _)| s.ends_with("21 colors customized"))

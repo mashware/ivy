@@ -8,7 +8,7 @@ set -euo pipefail
 package=$(realpath "$1")
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-config=${XDG_CONFIG_HOME:-$HOME/.config}/agent-terminal
+config=${XDG_CONFIG_HOME:-$HOME/.config}/ivy
 [[ ! -e $config ]] || { echo 'Disposable test requires fresh configuration' >&2; exit 1; }
 mkdir -p "$config" "$tmp/old"
 printf 'fixture settings\n' > "$config/config"

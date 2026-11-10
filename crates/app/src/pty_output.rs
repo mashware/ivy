@@ -215,7 +215,7 @@ impl PtyOutput {
         // here, the bytes are owed to a program that is not asking for them.
         //
         // **Neither line may take the window down, and `eprintln!` would.** It panics when the
-        // write fails, so `agent-terminal | head` — a closed pipe on standard error — killed the
+        // write fails, so `ivy | head` — a closed pipe on standard error — killed the
         // window at the exact moment a console had something to say. The failure predates this
         // delivery by one statement and is fixed in both, because leaving one of two adjacent lines
         // able to panic is worse than the shape it protects.
@@ -386,7 +386,7 @@ impl Silences {
 /// it**.
 ///
 /// `eprintln!` panics when the write fails — a closed pipe on standard error, which is all
-/// `agent-terminal | head` takes — and a window that dies because it had something to say is worse
+/// `ivy | head` takes — and a window that dies because it had something to say is worse
 /// than the silence the sentence was written against. What cannot be delivered is dropped: there is
 /// no third channel to complain on.
 fn say(sentence: &str) {
@@ -487,11 +487,11 @@ impl QuietConsole {
         // Measured, and recorded in **D38**.
         Some(match os_error {
             Some(number) => format!(
-                "agent-terminal: this console stopped receiving: read failed ({kind:?}, os error \
+                "ivy: this console stopped receiving: read failed ({kind:?}, os error \
                  {number})"
             ),
             None => {
-                format!("agent-terminal: this console stopped receiving: read failed ({kind:?})")
+                format!("ivy: this console stopped receiving: read failed ({kind:?})")
             }
         })
     }
@@ -1201,7 +1201,7 @@ mod tests {
         assert_eq!(
             quiet.look(failed(70)).as_deref(),
             Some(
-                "agent-terminal: this console stopped receiving: read failed (Uncategorized, os \
+                "ivy: this console stopped receiving: read failed (Uncategorized, os \
                  error 70)"
             )
         );
@@ -1216,7 +1216,7 @@ mod tests {
 
         assert_eq!(
             quiet.look(failed_namelessly()).as_deref(),
-            Some("agent-terminal: this console stopped receiving: read failed (InvalidData)")
+            Some("ivy: this console stopped receiving: read failed (InvalidData)")
         );
     }
 
@@ -1626,13 +1626,13 @@ impl DeafConsole {
         self.said = true;
         Some(if backlog.gave_up {
             format!(
-                "agent-terminal: this console can no longer be typed into: the program stopped \
+                "ivy: this console can no longer be typed into: the program stopped \
                  accepting input with {} byte(s) still owed to it",
                 backlog.bytes
             )
         } else {
             format!(
-                "agent-terminal: the program in this console is not taking what you type: {} \
+                "ivy: the program in this console is not taking what you type: {} \
                  byte(s) have been waiting {:?}. Everything typed since then, Ctrl+C included, is \
                  queued behind it",
                 backlog.bytes, backlog.waiting

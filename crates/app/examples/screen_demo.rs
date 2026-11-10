@@ -25,7 +25,7 @@ use term_core::{Screen, Size};
 
 /// What is written into the grid. Fixed: two executions have to give the same screen.
 const SCRIPT: &str = concat!(
-    "\x1b[1;33magent-terminal\x1b[0m — pantalla de prueba del pintor\r\n",
+    "\x1b[1;33mIvy\x1b[0m — pantalla de prueba del pintor\r\n",
     "\r\n",
     "Colores con nombre:  ",
     "\x1b[31mrojo \x1b[32mverde \x1b[33mamarillo \x1b[34mazul \x1b[35mmagenta \x1b[36mcian\x1b[0m\r\n",
@@ -76,7 +76,7 @@ fn main() -> eframe::Result {
     screen.advance(SCRIPT.as_bytes());
 
     eframe::run_native(
-        "agent-terminal — pantalla de prueba",
+        "Ivy — pantalla de prueba",
         eframe::NativeOptions::default(),
         Box::new(|_cc| {
             Ok(Box::new(Demo {
