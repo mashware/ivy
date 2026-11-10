@@ -1,6 +1,13 @@
-# Ivy 0.1.0-alpha.5
+# Ivy 0.1.0-alpha.6
 
 ## New in this alpha
+
+- Start Codex by typing `codex` in an Ivy console: its status panel now stays attached to that console, even when another Codex client is already running. New conversations and local resume work without changing Codex's global settings.
+- New installers include the helper needed for this integration in Bash, Zsh and Fish. Restart Ivy after upgrading and use Connect agents for the existing MCP setup.
+- Ivy now answers terminal capability queries used by clients such as Codex.
+- Preferences and saved layouts now use Ivy's configuration directory, with migration from the previous agent-terminal directory.
+
+## Since 0.1.0-alpha.4
 
 - The Overview is now a **board**: `Ctrl+Shift+O` (or the same menu entry) shows every console grouped into one section per Git repository, with its name and colour, and «Other consoles» at the end for everything outside a repository.
 - Each console is a card with its name and tab, whether it is waiting for you, stuck or finished, its phase, a stale-state warning and the first lines of its panel.
@@ -53,12 +60,12 @@
 
 ## Choose a download
 
-- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.5_amd64.deb`.
-- Arch Linux x86_64: `ivy-terminal-0.1.0alpha5-1-x86_64.pkg.tar.zst`.
-- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.5-macos-arm64.dmg`.
-- macOS 15+ Intel: `Ivy-0.1.0-alpha.5-macos-x86_64.dmg`.
-- Windows 11 x64: `Ivy-0.1.0-alpha.5-windows-x86_64-setup.exe`.
+- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.6_amd64.deb`.
+- Arch Linux x86_64: `ivy-terminal-0.1.0alpha6-1-x86_64.pkg.tar.zst`.
+- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.6-macos-arm64.dmg`.
+- macOS 15+ Intel: `Ivy-0.1.0-alpha.6-macos-x86_64.dmg`.
+- Windows 11 x64: `Ivy-0.1.0-alpha.6-windows-x86_64-setup.exe`.
 
 Download `release-manifest.json` and `SHA256SUMS` with the chosen package and verify its SHA-256
-before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.5/docs/10-installation.md)
+before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.6/docs/10-installation.md)
 for verification, installation, upgrade and removal commands. No Rust toolchain is needed.
