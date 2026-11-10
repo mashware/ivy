@@ -156,13 +156,19 @@ fn paint(
         project,
     } = appearance;
     let painter = ui.painter().with_clip_rect(strip.intersect(ui.clip_rect()));
-    painter.rect_filled(strip, 0.0, theme.panel_background());
+    let (background, foreground, hover, secondary) = if let Some(project) = project {
+        let (foreground, hover) = crate::theme::project_header_colors(project.ink);
+        (project.ink, foreground, hover, foreground)
+    } else {
+        (
+            theme.panel_background(),
+            theme.foreground(),
+            theme.focus().gamma_multiply(0.2),
+            theme.foreground().gamma_multiply(0.65),
+        )
+    };
+    painter.rect_filled(strip, 0.0, background);
     if let Some(project) = project {
-        painter.rect_filled(
-            egui::Rect::from_min_size(strip.min, egui::vec2(3.0, strip.height())),
-            0.0,
-            project.ink,
-        );
         project
             .painted
             .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -188,7 +194,7 @@ fn paint(
             egui::Sense::hover(),
         );
         if response.hovered() {
-            painter.rect_filled(rect, 2.0, theme.focus().gamma_multiply(0.2));
+            painter.rect_filled(rect, 2.0, hover);
         }
         if target == Target::Label
             && let Some(project) = project
@@ -203,16 +209,13 @@ fn paint(
         if target == Target::Label {
             let left = rect.left_center() + egui::vec2(11.0, 0.0);
             let number_text = format!("{number:02}");
-            let number_galley = painter.layout_no_wrap(
-                number_text,
-                egui::FontId::proportional(10.0),
-                theme.foreground().gamma_multiply(0.65),
-            );
+            let number_galley =
+                painter.layout_no_wrap(number_text, egui::FontId::proportional(10.0), secondary);
             let offset = number_galley.size().x + 7.0;
             painter.with_clip_rect(rect).galley(
                 left - egui::vec2(0.0, number_galley.size().y / 2.0),
                 number_galley,
-                theme.foreground(),
+                foreground,
             );
             let mut title_left = left + egui::vec2(offset, 0.0);
             if let Some(agent) = agent {
@@ -226,15 +229,25 @@ fn paint(
                 }
                 title_left.x += 23.0;
                 if agent.waiting {
-                    painter.with_clip_rect(rect).text(
-                        title_left,
-                        egui::Align2::LEFT_CENTER,
-                        "?",
+                    let marker = painter.layout_no_wrap(
+                        "?".into(),
                         egui::FontId::proportional(title_size),
                         theme
                             .color(term_core::TermColor::Indexed(3))
                             .gamma_multiply(if agent.backed { 1.0 } else { 0.45 }),
                     );
+                    let position = title_left - egui::vec2(0.0, marker.size().y / 2.0);
+                    if project.is_some() {
+                        // The semantic yellow can also be this project's header color.
+                        painter.with_clip_rect(rect).rect_filled(
+                            egui::Rect::from_min_size(position, marker.size()).expand(2.0),
+                            2.0,
+                            theme.panel_background(),
+                        );
+                    }
+                    painter
+                        .with_clip_rect(rect)
+                        .galley(position, marker, foreground);
                     title_left.x += title_size * 0.8;
                 }
             }
@@ -243,7 +256,7 @@ fn paint(
                 let galley = painter.layout_no_wrap(
                     project.name.clone(),
                     egui::FontId::proportional(title_size),
-                    theme.foreground(),
+                    foreground,
                 );
                 let width = galley.size().x.min(available * 0.45).min(140.0);
                 let name_rect = egui::Rect::from_min_size(
@@ -254,14 +267,14 @@ fn paint(
                     painter.with_clip_rect(name_rect).galley(
                         name_rect.left_center() - egui::vec2(0.0, galley.size().y / 2.0),
                         galley,
-                        theme.foreground(),
+                        foreground,
                     );
                     let separator = painter.with_clip_rect(rect).text(
                         egui::pos2(name_rect.right(), rect.center().y),
                         egui::Align2::LEFT_CENTER,
                         " | ",
                         egui::FontId::proportional(title_size),
-                        theme.foreground().gamma_multiply(0.65),
+                        secondary,
                     );
                     title_left.x = separator.right();
                 }
@@ -272,11 +285,11 @@ fn paint(
                 egui::Align2::LEFT_CENTER,
                 label,
                 egui::FontId::proportional(title_size),
-                theme.foreground(),
+                foreground,
             );
             continue;
         }
-        paint_icon(&painter, rect.center(), target, zoomed, theme.foreground());
+        paint_icon(&painter, rect.center(), target, zoomed, foreground);
     }
 }
 
@@ -480,7 +493,7 @@ mod tests {
     }
 
     #[test]
-    fn project_badge_paints_its_own_ink_and_retains_the_console_title() {
+    fn project_color_fills_the_whole_header_and_retains_the_console_title() {
         let ctx = egui::Context::default();
         let ink = egui::Color32::from_rgb(67, 192, 113);
         let theme = Theme::default().with_colors(&crate::settings::Colors {
@@ -518,29 +531,33 @@ mod tests {
                 );
             });
             out.textures_delta.clear();
-            assert!(out.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == ink && r.rect.width() == 3.0)));
-            assert!(!out.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == ink.gamma_multiply(0.13))), "project name must not have a colored background");
-            let text: Vec<_> =
-                out.shapes
-                    .iter()
-                    .filter_map(|s| {
-                        if let egui::Shape::Text(text) = &s.shape {
-                            assert!(s.clip_rect.right() <= label_rect.right());
-                            if text.galley.job.text == "Backend" {
-                                assert_ne!(ink, theme.foreground());
-                                assert!(
-                                    text.galley.job.sections.iter().all(|section| {
-                                        section.format.color == theme.foreground()
-                                    }),
-                                    "project text must use normal foreground instead of accent ink"
-                                );
-                            }
-                            Some(text.galley.job.text.as_str())
-                        } else {
-                            None
+            assert!(
+                out.shapes.iter().any(
+                    |s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == ink && r.rect == strip)
+                ),
+                "project color must cover the full header, including the controls"
+            );
+            let text: Vec<_> = out
+                .shapes
+                .iter()
+                .filter_map(|s| {
+                    if let egui::Shape::Text(text) = &s.shape {
+                        assert!(s.clip_rect.right() <= label_rect.right());
+                        if text.galley.job.text == "Backend" {
+                            assert_ne!(ink, theme.foreground());
+                            assert!(
+                                text.galley.job.sections.iter().all(|section| {
+                                    section.format.color == egui::Color32::BLACK
+                                }),
+                                "project text must contrast with the full colored header"
+                            );
                         }
-                    })
-                    .collect();
+                        Some(text.galley.job.text.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
             if width == 500.0 {
                 assert!(text.contains(&"Backend"));
                 assert!(text.contains(&" | "));
@@ -549,6 +566,108 @@ mod tests {
             out.drop_without_applying_deltas();
         }
         assert!(badge.painted.load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[test]
+    fn project_headers_render_contrasting_hover_and_back_the_yellow_waiting_marker() {
+        let theme = Theme::default();
+        let yellow = theme.color(term_core::TermColor::Indexed(3));
+        for (fill, ink, hover) in [
+            (
+                egui::Color32::BLACK,
+                egui::Color32::WHITE,
+                egui::Color32::from_gray(31),
+            ),
+            (
+                egui::Color32::WHITE,
+                egui::Color32::BLACK,
+                egui::Color32::from_gray(224),
+            ),
+            (
+                yellow,
+                egui::Color32::BLACK,
+                crate::theme::project_header_colors(yellow).1,
+            ),
+        ] {
+            let ctx = egui::Context::default();
+            let strip = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(500.0, 33.0));
+            let metrics = CellMetrics::of(8.0, 16.0);
+            let control = targets(strip, &metrics, true)[1].1;
+            let badge = crate::project_view::Badge {
+                key: crate::project::Key::Repository("/work/backend".into()),
+                name: "Backend".into(),
+                details: "/work/backend".into(),
+                ink: fill,
+                painted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            };
+            for backed in [true, false] {
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        events: vec![egui::Event::PointerMoved(control.center())],
+                        ..Default::default()
+                    },
+                    |ui| {
+                        paint(
+                            ui,
+                            strip,
+                            &metrics,
+                            &theme,
+                            Appearance {
+                                agent: Some(crate::agent_signals::View {
+                                    client: crate::agent_signals::Client::Codex,
+                                    busy: false,
+                                    waiting: true,
+                                    backed,
+                                }),
+                                label: "Fix login",
+                                number: 1,
+                                title_size: 12.0,
+                                can_close: true,
+                                zoomed: false,
+                                folded: false,
+                                project: Some(&badge),
+                            },
+                        )
+                    },
+                );
+                output.textures_delta.clear();
+                assert!(output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect == strip && r.fill == fill)));
+                let mut text_count = 0;
+                for (index, shape) in output.shapes.iter().enumerate() {
+                    match &shape.shape {
+                        egui::Shape::Text(text) => {
+                            text_count += 1;
+                            if text.galley.text() == "?" {
+                                let bounds =
+                                    egui::Rect::from_min_size(text.pos, text.galley.size());
+                                assert!(output.shapes[..index].iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == theme.panel_background() && r.rect.contains_rect(bounds))), "waiting marker needs its neutral backing before it is drawn");
+                                assert!(text.galley.job.sections.iter().all(|s| s.format.color
+                                    == yellow.gamma_multiply(if backed { 1.0 } else { 0.45 })));
+                            } else {
+                                assert!(
+                                    text.galley
+                                        .job
+                                        .sections
+                                        .iter()
+                                        .all(|s| s.format.color == ink),
+                                    "ordinary header text must use opaque contrast-selected ink"
+                                );
+                            }
+                        }
+                        egui::Shape::LineSegment { stroke, .. } => assert_eq!(stroke.color, ink),
+                        _ => {}
+                    }
+                }
+                assert!(text_count >= 5);
+                if backed {
+                    // Interaction rectangles are known on the next pass too.
+                    output.drop_without_applying_deltas();
+                    continue;
+                }
+                assert!(output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect == control && r.fill == hover)), "hover must use the contrasting opaque project fill");
+                output.drop_without_applying_deltas();
+            }
+        }
     }
 
     #[test]

@@ -510,6 +510,12 @@ pub(crate) fn project_header_colors(background: Color32) -> (Color32, Color32) {
         },
         0.12,
     );
+    // A pure black or white project fill cannot move farther toward its own pole.
+    let hover = if hover == background {
+        mix(background, foreground, 0.12)
+    } else {
+        hover
+    };
     (foreground, hover)
 }
 
@@ -580,10 +586,18 @@ mod tests {
                 assert_ne!(background, hover);
             }
         }
-        assert_eq!(project_header_colors(Color32::WHITE).0, Color32::BLACK);
-        assert_eq!(project_header_colors(Color32::BLACK).0, Color32::WHITE);
-        assert_eq!(project_header_colors(Color32::from_rgb(224, 175, 104)),
-            (Color32::BLACK, Color32::from_rgb(228, 185, 122)));
+        assert_eq!(
+            project_header_colors(Color32::WHITE),
+            (Color32::BLACK, Color32::from_gray(224))
+        );
+        assert_eq!(
+            project_header_colors(Color32::BLACK),
+            (Color32::WHITE, Color32::from_gray(31))
+        );
+        assert_eq!(
+            project_header_colors(Color32::from_rgb(224, 175, 104)),
+            (Color32::BLACK, Color32::from_rgb(228, 185, 122))
+        );
     }
     #[test]
     fn bundled_catalog_has_unique_stable_names_and_exact_source_colors() {
