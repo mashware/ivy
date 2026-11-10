@@ -23,7 +23,7 @@ grep -qx 'pkgname = ivy-terminal' "$tmp/package/.PKGINFO"
 grep -Fqx "pkgver = $version-1" "$tmp/package/.PKGINFO"
 grep -qx 'arch = x86_64' "$tmp/package/.PKGINFO"
 [[ ! -e $tmp/package/.INSTALL && ! -e $tmp/package/home && ! -e $tmp/package/root ]]
-for binary in app panel-mcp ivy-session; do
+for binary in app panel-mcp ivy-session ivy-codex; do
     [[ -x $tmp/package/usr/lib/ivy-terminal/$binary ]]
     cmp "$tmp/payload/usr/lib/ivy-terminal/$binary" "$tmp/package/usr/lib/ivy-terminal/$binary"
 done
@@ -34,6 +34,7 @@ cmp "$tmp/payload/usr/share/doc/ivy-terminal/LICENSE" "$tmp/package/usr/share/li
 [[ $(readlink "$tmp/package/usr/bin/ivy") == /usr/lib/ivy-terminal/app ]]
 [[ $(readlink "$tmp/package/usr/bin/panel-mcp") == /usr/lib/ivy-terminal/panel-mcp ]]
 [[ $(readlink "$tmp/package/usr/bin/ivy-session") == /usr/lib/ivy-terminal/ivy-session ]]
+[[ $(readlink "$tmp/package/usr/bin/ivy-codex") == /usr/lib/ivy-terminal/ivy-codex ]]
 desktop-file-validate "$tmp/package/usr/share/applications/Ivy.desktop"
 cmp "$tmp/payload/usr/share/applications/Ivy.desktop" "$tmp/package/usr/share/applications/Ivy.desktop"
 diff -r "$tmp/payload/usr/share/icons" "$tmp/package/usr/share/icons"

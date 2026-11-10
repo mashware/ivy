@@ -259,13 +259,17 @@ pub(crate) fn take_over(pane: &mut crate::Pane) -> term_core::Result<()> {
             .as_deref()
             .filter(|path| path.is_dir());
         let size = pane.screen.size();
-        let (pty, output) = term_core::Pty::spawn_with_env_in(
-            &crate::the_users_shell(),
-            &[],
-            size,
-            &identity,
-            directory,
-        )?;
+        let shell = crate::the_users_shell();
+        let integration = opening::prepare_shell(&shell);
+        if let Some(prepared) = &integration {
+            identity.extend(prepared.env());
+        }
+        let args: Vec<&str> = integration
+            .as_ref()
+            .map(|prepared| prepared.args().iter().map(String::as_str).collect())
+            .unwrap_or_default();
+        let (pty, output) =
+            term_core::Pty::spawn_with_env_in(&shell, &args, size, &identity, directory)?;
         pane.restoration.route.set(None);
         pane.restoration.sessions = None;
         pane.restoration.session_revision = 0;
@@ -277,6 +281,7 @@ pub(crate) fn take_over(pane: &mut crate::Pane) -> term_core::Result<()> {
                 wake();
             }
         });
+        pane._shell_integration = integration;
         pane.screen = term_core::Screen::new(size);
         pane.signals.reset_for_new_shell(&mut pane.screen);
         pane.painted_console = None;

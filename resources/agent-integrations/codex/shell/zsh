@@ -1,0 +1,30 @@
+# Restore the original startup context before loading the user's environment.
+if [[ $IVY_ZDOTDIR_WAS_SET == 1 ]]; then
+    export ZDOTDIR="$IVY_ORIGINAL_ZDOTDIR"
+else
+    unset ZDOTDIR
+fi
+if [[ -f ${ZDOTDIR-$HOME}/.zshenv ]]; then
+    source "${ZDOTDIR-$HOME}/.zshenv"
+fi
+function _ivy_install_codex {
+    precmd_functions=("${(@)precmd_functions:#_ivy_install_codex}")
+    if [[ ! -o rcs ]]; then
+        print -u2 -r -- 'Ivy: zsh startup files disabled; automatic panel routing is inactive.'
+    elif (( ${+aliases[codex]} || ${+functions[codex]} )); then
+        print -u2 -r -- 'Ivy: existing codex alias or function preserved; automatic panel routing is inactive.'
+    else
+        function 'codex' {
+            local ivy_real
+            ivy_real=$(whence -p codex) || { print -u2 -r -- 'Ivy: codex executable not found in PATH.'; return 127; }
+            if [[ -x "$IVY_CODEX_HELPER" ]]; then
+                "$IVY_CODEX_HELPER" "$ivy_real" "$@"
+            else
+                print -u2 -r -- 'Ivy: codex helper unavailable; automatic panel routing is inactive.'
+                "$ivy_real" "$@"
+            fi
+        }
+    fi
+    unfunction _ivy_install_codex
+}
+precmd_functions+=(_ivy_install_codex)

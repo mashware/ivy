@@ -18,7 +18,7 @@ def main():
         raise SystemExit("Usage on macOS: test-install.py DMG SEMVER ARCH NOTICES_DIR EXECUTABLE_HASHES.json")
     dmg, version, arch, notices, hashes = sys.argv[1:]
     expected_binaries = json.loads(Path(hashes).read_text(encoding="utf-8"))
-    assert set(expected_binaries) == {"app", "panel-mcp", "ivy-session"}
+    assert set(expected_binaries) == {"app", "panel-mcp", "ivy-session", "ivy-codex"}
     repo = Path(__file__).resolve().parents[2]
     # A short runtime path keeps the fixture's Unix socket below Darwin's path limit.
     with tempfile.TemporaryDirectory(prefix="ivy-mac-", dir="/tmp") as temp:

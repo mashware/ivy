@@ -1,0 +1,16 @@
+# Ivy's private non-login rc; the user's rc retains its usual place.
+[[ -f "$HOME/.bashrc" ]] && source "$HOME/.bashrc"
+if alias codex >/dev/null 2>&1 || declare -F codex >/dev/null; then
+    printf '%s\n' 'Ivy: existing codex alias or function preserved; automatic panel routing is inactive.' >&2
+else
+    function codex {
+        local ivy_real
+        ivy_real=$(type -P codex) || { printf '%s\n' 'Ivy: codex executable not found in PATH.' >&2; return 127; }
+        if [[ -x "$IVY_CODEX_HELPER" ]]; then
+            "$IVY_CODEX_HELPER" "$ivy_real" "$@"
+        else
+            printf '%s\n' 'Ivy: codex helper unavailable; automatic panel routing is inactive.' >&2
+            "$ivy_real" "$@"
+        fi
+    }
+fi

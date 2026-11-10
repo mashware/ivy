@@ -360,10 +360,9 @@ pub(crate) fn open_leaf(
         }
     }
     let directory = leaf.cwd.as_deref().filter(|path| path.is_dir());
-    let opened = crate::opening::launch_pane_in(
+    let opened = crate::opening::launch_shell_in(
         ctx,
         program,
-        &[],
         crate::panel_or_none(panel_contract::PanelDir::create()),
         name,
         reads.clone(),
@@ -372,10 +371,9 @@ pub(crate) fn open_leaf(
     let (mut pane, failed) = match opened {
         Ok(pane) => (pane, leaf.cwd.is_some() && directory.is_none()),
         Err(_) if directory.is_some() => (
-            crate::opening::launch_pane_in(
+            crate::opening::launch_shell_in(
                 ctx,
                 program,
-                &[],
                 crate::panel_or_none(panel_contract::PanelDir::create()),
                 name,
                 reads,

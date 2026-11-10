@@ -14,6 +14,9 @@ use crate::painter::CellMetrics;
 use crate::*;
 use eframe::egui;
 
+#[cfg(all(test, unix))]
+mod codex_tests;
+
 pub(crate) fn native_window(
     cc: &eframe::CreationContext<'_>,
     with_what: OpenWith,
@@ -41,7 +44,7 @@ impl Pane {
         name: usize,
         reads: control::ReadActivity,
     ) -> term_core::Result<Self> {
-        Self::launching_counting_reads(ctx, &the_users_shell(), name, reads)
+        new_in_directory(ctx, name, reads, None)
     }
 
     #[cfg(test)]
@@ -50,22 +53,13 @@ impl Pane {
         program: &str,
         name: usize,
     ) -> term_core::Result<Self> {
-        Self::launching_counting_reads(ctx, program, name, control::ReadActivity::default())
-    }
-
-    pub(crate) fn launching_counting_reads(
-        ctx: &egui::Context,
-        program: &str,
-        name: usize,
-        reads: control::ReadActivity,
-    ) -> term_core::Result<Self> {
         launch_pane(
             ctx,
             program,
             &[],
             panel_or_none(PanelDir::create()),
             name,
-            reads,
+            control::ReadActivity::default(),
         )
     }
 
@@ -473,14 +467,69 @@ pub(crate) fn new_in_directory(
     reads: control::ReadActivity,
     directory: Option<&std::path::Path>,
 ) -> term_core::Result<Pane> {
-    launch_pane_in(
+    launch_shell_in(
         ctx,
         &the_users_shell(),
-        &[],
         panel_or_none(PanelDir::create()),
         name,
         reads,
         directory,
+    )
+}
+
+pub(crate) fn prepare_shell(program: &str) -> Option<shell_integration::Prepared> {
+    let helper = shell_integration::helper_path();
+    match shell_integration::Prepared::prepare(program, helper.as_deref()) {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            eprintln!("Ivy's automatic Codex integration could not be prepared: {error}");
+            None
+        }
+    }
+}
+
+pub(crate) fn requested_console(
+    ctx: &egui::Context,
+    program: Option<&str>,
+    args: &[String],
+    name: usize,
+    reads: control::ReadActivity,
+) -> term_core::Result<Pane> {
+    if program.is_none() && args.is_empty() {
+        Pane::new_counting_reads(ctx, name, reads)
+    } else {
+        Pane::launching_with_args_counting_reads(
+            ctx,
+            program.unwrap_or(&the_users_shell()),
+            args,
+            name,
+            reads,
+        )
+    }
+}
+
+pub(crate) fn launch_shell_in(
+    ctx: &egui::Context,
+    program: &str,
+    panel: Option<PanelDir>,
+    name: usize,
+    reads: control::ReadActivity,
+    directory: Option<&std::path::Path>,
+) -> term_core::Result<Pane> {
+    let integration = prepare_shell(program);
+    launch(
+        ctx,
+        Launch {
+            program,
+            args: &[],
+            directory,
+            path: None,
+        },
+        panel,
+        name,
+        reads,
+        true,
+        integration,
     )
 }
 
@@ -516,6 +565,7 @@ pub(crate) fn launch_pane_in(
         name,
         reads,
         true,
+        None,
     )
 }
 
@@ -533,7 +583,7 @@ pub(crate) fn launch_exact(
     name: usize,
     reads: control::ReadActivity,
 ) -> term_core::Result<Pane> {
-    launch(ctx, program, panel, name, reads, false)
+    launch(ctx, program, panel, name, reads, false, None)
 }
 
 fn launch(
@@ -543,6 +593,7 @@ fn launch(
     name: usize,
     reads: control::ReadActivity,
     fallback: bool,
+    integration: Option<shell_integration::Prepared>,
 ) -> term_core::Result<Pane> {
     let Launch {
         program,
@@ -550,6 +601,9 @@ fn launch(
         directory,
         path,
     } = program;
+    let args = integration
+        .as_ref()
+        .map_or(args, |prepared| prepared.args());
     let mut identity: Vec<_> = identity_of(panel.as_ref()).into_iter().collect();
     let helper = crate::resume::helper_path();
     identity.push((
@@ -558,6 +612,9 @@ fn launch(
     ));
     if let Some(path) = path {
         identity.push(("PATH", Some(path)));
+    }
+    if let Some(prepared) = &integration {
+        identity.extend(prepared.env());
     }
     let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
     let (pty, output) =
@@ -596,6 +653,7 @@ fn launch(
         restoration,
         pty,
         pty_output,
+        _shell_integration: integration,
         panel,
         control,
         panel_state,

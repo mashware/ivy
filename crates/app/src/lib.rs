@@ -67,6 +67,8 @@ mod restoration;
 mod search;
 pub mod session;
 pub mod settings;
+mod shell_integration;
+use shell_integration::the_users_shell;
 mod startup;
 mod tab_bar;
 pub mod theme;
@@ -539,22 +541,6 @@ pub fn run() -> eframe::Result {
     startup::run()
 }
 
-/// The program that opens a console: the shell of whoever launched the application.
-///
-/// **It is what a terminal does**: without this a shell opens with no prompt and no history, and
-/// this project exists to look at what comes out on screen. It is still not outside input —it is
-/// the user's own session—, but the day the program comes from **configuration** or from a file
-/// from outside, this line becomes sensitive surface and has to be reviewed as such. That is why
-/// saved labels and directories **never supply a program**: there is nothing
-/// to connect here.
-///
-/// **It has been in a function of its own since restoring exists**, and not for pleasure: restoring
-/// opens N consoles at once, and reading the environment inside each one would read it a hundred
-/// and twenty-eight times in the worst case.
-fn the_users_shell() -> String {
-    std::env::var("SHELL").unwrap_or_else(|_| FALLBACK_SHELL.to_owned())
-}
-
 /// A console and everything needed to hold it up.
 ///
 /// Every field in here was a field of [`Window`] when there was only one console. Grouping them is
@@ -583,6 +569,8 @@ struct Pane {
     /// thread and a queue with no owner, growing.
     pty: Pty,
     pty_output: PtyOutput,
+    /// Startup assets stay alive until the console's shell no longer needs them.
+    _shell_integration: Option<shell_integration::Prepared>,
     /// The directory where this console's program publishes its state, and the identifier it is
     /// known by. It is deleted when the console is dropped, because the type deletes it when it
     /// dies.
@@ -6645,6 +6633,7 @@ mod tests {
             signals: Default::default(),
             pty,
             pty_output: PtyOutput::new(output, || {}),
+            _shell_integration: None,
             panel: None,
             control: None,
             panel_state: panel::PanelState::default(),

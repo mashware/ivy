@@ -28,7 +28,8 @@ check_commands() {
     [[ $(readlink -f /usr/bin/ivy) == /usr/lib/ivy-terminal/app ]]
     [[ $(readlink -f /usr/bin/panel-mcp) == /usr/lib/ivy-terminal/panel-mcp ]]
     [[ $(readlink -f /usr/bin/ivy-session) == /usr/lib/ivy-terminal/ivy-session ]]
-    [[ -x /usr/bin/ivy && -x /usr/bin/panel-mcp && -x /usr/bin/ivy-session ]]
+    [[ $(readlink -f /usr/bin/ivy-codex) == /usr/lib/ivy-terminal/ivy-codex ]]
+    [[ -x /usr/bin/ivy && -x /usr/bin/panel-mcp && -x /usr/bin/ivy-session && -x /usr/bin/ivy-codex ]]
     diff -r "$(dirname "$(realpath "$0")")/../../integrations/session-recovery" /usr/lib/ivy-terminal/session-recovery
     [[ -z $(dpkg -V ivy-terminal) ]]
 }
@@ -42,6 +43,6 @@ check_commands
 "$(dirname "$(realpath "$0")")/test-runtime.sh"
 dpkg -r ivy-terminal
 check_data
-[[ ! -e /usr/bin/ivy && ! -e /usr/bin/panel-mcp && ! -e /usr/bin/ivy-session ]]
+[[ ! -e /usr/bin/ivy && ! -e /usr/bin/panel-mcp && ! -e /usr/bin/ivy-session && ! -e /usr/bin/ivy-codex ]]
 [[ ! -e /usr/lib/ivy-terminal/session-recovery ]]
 echo 'Install, upgrade and removal preserved user data.'

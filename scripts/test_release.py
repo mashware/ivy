@@ -301,6 +301,9 @@ class ReleaseTest(unittest.TestCase):
         self.assertIn("Missing executable:", missing.stderr)
         self.assertIn("ivy-session", missing.stderr)
         shutil.copy2(native_fixture, binaries / "ivy-session")
+        missing = subprocess.run(builder, capture_output=True, text=True)
+        self.assertIn("ivy-codex", missing.stderr)
+        shutil.copy2(native_fixture, binaries / "ivy-codex")
         built = subprocess.run(builder, capture_output=True, text=True)
         self.assertEqual(built.returncode, 0, built.stderr)
         package = output / self.package.name
@@ -313,7 +316,7 @@ class ReleaseTest(unittest.TestCase):
         sums = dict(line.split("  ", 1)[::-1]
                     for line in (extracted / "DEBIAN/md5sums").read_text().splitlines())
         payload = extracted / "usr/lib/ivy-terminal"
-        checked = [payload / name for name in ("app", "panel-mcp", "ivy-session")]
+        checked = [payload / name for name in ("app", "panel-mcp", "ivy-session", "ivy-codex")]
         checked.extend(path for path in (payload / "session-recovery").rglob("*") if path.is_file())
         for path in checked:
             relative = path.relative_to(extracted).as_posix()

@@ -13,7 +13,7 @@ import tempfile
 
 VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(alpha|beta|rc)\.(0|[1-9][0-9]*))?")
 ARCHES = ("arm64", "x86_64")
-EXECUTABLES = ("app", "panel-mcp", "ivy-session")
+EXECUTABLES = ("app", "panel-mcp", "ivy-session", "ivy-codex")
 
 
 def info(version):

@@ -27,7 +27,7 @@ use crate::measure::Control;
 use crate::painter::CellMetrics;
 use crate::panel::{PanelState, Retirement};
 use crate::tiling::{Side, can_split};
-use crate::{Pane, Window, the_users_shell};
+use crate::{Pane, Window};
 
 mod applying;
 mod channel;
@@ -642,9 +642,9 @@ impl Window {
         };
 
         let name = self.next_pane_name;
-        let opened = Pane::launching_with_args_counting_reads(
+        let opened = crate::opening::requested_console(
             ctx,
-            program.as_deref().unwrap_or(&the_users_shell()),
+            program.as_deref(),
             &args,
             name,
             self.control.read_activity(),

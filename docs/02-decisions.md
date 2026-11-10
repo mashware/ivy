@@ -9247,3 +9247,7 @@ once (D13); no performance figure is claimed before repeated valid runs.
 
 Discarded for B1: a new module beside the Overview (it would re-prove the input rules), grouping by
 display name, sections for folders, and variable-height cards (they arrive with B3's blocks).
+
+### Codex console-local startup
+
+Ordinary supported shells install a console-local `codex` function after user startup and delegate to the bundled `ivy-codex` launcher. The launcher checks client capability before adding `--no-daemon` to local interactive launches. Existing aliases and functions retain precedence; explicit bypasses remain available. MCP identity forwarding is still required. This avoids changing global shell or Codex configuration and leaves existing recovery intact.

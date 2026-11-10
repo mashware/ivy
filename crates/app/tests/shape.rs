@@ -455,6 +455,14 @@ const MODULES: &[(&str, &str)] = &[
     ),
     ("src/mouse.rs", include_str!("../src/mouse.rs")),
     ("src/opening.rs", include_str!("../src/opening.rs")),
+    (
+        "src/opening/codex_tests.rs",
+        include_str!("../src/opening/codex_tests.rs"),
+    ),
+    (
+        "src/shell_integration.rs",
+        include_str!("../src/shell_integration.rs"),
+    ),
     ("src/pointer.rs", include_str!("../src/pointer.rs")),
     (
         "src/pointer/links.rs",
@@ -523,7 +531,7 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
     ),
     (
         "impl Pane",
-        533,
+        525,
         "a console with its panel, its keys and its mouse. On the day it was recorded it was six \
          blocks in six files: the keyboard and mouse passes (157 each), how a pane is opened (112) \
          and how it gets its panel (120), and 45 more in `lib.rs` and `control.rs`. **The search \
@@ -531,7 +539,7 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
          leftovers became a free function of `closing.rs`, 10 lines out, and the keyboard pass \
          spent ten — nine asking the search about each key, one seeding a new pane's search \
          record — with the rules themselves in `search.rs`, outside the type. **591 - 10 + 10 \
-         leaves 591.** Session takeover now delegates to a free function, leaving 538. Delegating the shared signal-aware pump and geometry work leaves534 after integrating startup recovery and clipboard changes. Sharing effective input modes with recovery leaves533.",
+         leaves 591.** Session takeover now delegates to a free function, leaving 538. Delegating the shared signal-aware pump and geometry work leaves534 after integrating startup recovery and clipboard changes. Sharing effective input modes with recovery leaves533. Ordinary shell startup now uses the shared module route; removing the obsolete test-only launch wrapper leaves525.",
     ),
     (
         "impl PanelState",

@@ -1,0 +1,17 @@
+if functions -q codex
+    echo 'Ivy: existing codex alias or function preserved; automatic panel routing is inactive.' >&2
+else
+    function codex
+        set -l ivy_real (command --search codex)
+        if test -z "$ivy_real"
+            echo 'Ivy: codex executable not found in PATH.' >&2
+            return 127
+        end
+        if test -x "$IVY_CODEX_HELPER"
+            "$IVY_CODEX_HELPER" "$ivy_real" $argv
+        else
+            echo 'Ivy: codex helper unavailable; automatic panel routing is inactive.' >&2
+            "$ivy_real" $argv
+        end
+    end
+end
