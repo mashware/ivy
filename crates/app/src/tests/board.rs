@@ -290,6 +290,13 @@ mod tests {
             card(3).top() < facq_at,
             "the second Ivy console left its section"
         );
+        let mut report = Vec::new();
+        window.board.timing.publish(&mut report).unwrap();
+        let report = String::from_utf8(report).unwrap();
+        assert!(
+            report.contains("repositories=2, ungrouped=0,"),
+            "the report counted «Other consoles» as a repository, or missed one: {report}"
+        );
     }
 
     #[test]
