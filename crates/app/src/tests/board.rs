@@ -210,10 +210,21 @@ mod tests {
         );
         frame(&mut window, &ctx, chord_with(egui::Key::O));
         let shapes = frame(&mut window, &ctx, vec![]);
+        // The console panels under the board paint the same claim and warning, so only text that
+        // starts inside the console's own card counts.
+        let on_card = |pane: usize, needle: &str| {
+            let card = window.board.card_rect(pane).expect("card painted");
+            shapes.iter().any(|s| {
+                matches!(&s.shape, egui::Shape::Text(t)
+                    if t.galley.text().contains(needle) && card.contains(t.pos))
+            })
+        };
+        let asking = window.tabs[0].panes()[0].name;
         assert!(
-            the_text_queued_up(&shapes, "it is waiting for you"),
+            on_card(asking, "it is waiting for you"),
             "the claim is not on its card"
         );
+        let stale = window.tabs[1].panes()[1].name;
         let warning = crate::panel::summary::snapshot(
             &window.tabs[1].panes()[1].panel_state,
             SystemTime::now(),
@@ -222,7 +233,7 @@ mod tests {
         .expect("the publication is stale");
         let start: String = warning.chars().take(12).collect();
         assert!(
-            the_text_queued_up(&shapes, &start),
+            on_card(stale, &start),
             "the warning {warning:?} is not on its card"
         );
     }
