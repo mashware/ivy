@@ -198,7 +198,7 @@ mod tests {
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 4]);
         integrated(&mut window);
         let ctx = egui::Context::default();
-        let small = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 480.0));
+        let small = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 560.0));
         for pane in window.all_panes_mut() {
             pane.project = Some(crate::project_view::Badge {
                 key: Key::Repository("/work/ivy/.git".into()),
@@ -225,7 +225,25 @@ mod tests {
         pass(&mut window, vec![]);
         assert!(
             window.board.card_rect(names[0]).is_none(),
-            "eight cards in two columns do not fit 480 points, so End must scroll the first away"
+            "eight cards in two columns do not fit 560 points, so End must scroll the first away"
+        );
+        // The last row sits at the bottom of the screen; its neighbour is in sight there too, and
+        // aligning it to the top would be the jump this test exists to forbid.
+        let bottom = window
+            .board
+            .card_rect(names[7])
+            .expect("last card on screen");
+        assert!(
+            window.board.card_rect(names[5]).is_some(),
+            "End aligned the last row to the top instead of scrolling the least"
+        );
+        pass(&mut window, vec![key(egui::Key::ArrowLeft)]);
+        pass(&mut window, vec![]);
+        assert_eq!(window.board.selected(), Some(names[6]));
+        assert_eq!(
+            window.board.card_rect(names[7]),
+            Some(bottom),
+            "moving to a card in sight at the bottom scrolled the board"
         );
         pass(&mut window, vec![key(egui::Key::Home)]);
         let shapes = pass(&mut window, vec![]);
@@ -244,9 +262,19 @@ mod tests {
             .board
             .card_rect(names[0])
             .expect("first card on screen");
-        pass(&mut window, vec![key(egui::Key::ArrowRight)]);
+        // The second row is on screen whole under the first; aligning it to the top would move
+        // the first card off, which is what an unremembered viewport does.
+        // Painted rects are clipped to the screen, so a whole card is one as tall as the first.
+        assert!(
+            window
+                .board
+                .card_rect(names[2])
+                .is_some_and(|card| card.height() == before.height()),
+            "the fixture needs the second row fully in sight"
+        );
+        pass(&mut window, vec![key(egui::Key::ArrowDown)]);
         pass(&mut window, vec![]);
-        assert_eq!(window.board.selected(), Some(names[1]));
+        assert_eq!(window.board.selected(), Some(names[2]));
         assert_eq!(
             window.board.card_rect(names[0]),
             Some(before),
