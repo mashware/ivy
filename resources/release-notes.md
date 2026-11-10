@@ -1,6 +1,13 @@
-# Ivy 0.1.0-alpha.4
+# Ivy 0.1.0-alpha.5
 
 ## New in this alpha
+
+- The Overview is now a **board**: `Ctrl+Shift+O` (or the same menu entry) shows every console grouped into one section per Git repository, with its name and colour, and «Other consoles» at the end for everything outside a repository.
+- Each console is a card with its name and tab, whether it is waiting for you, stuck or finished, its phase, a stale-state warning and the first lines of its panel.
+- Sections that need you come first. Arrow keys move through the cards as they are laid out, and Enter or a click opens the console.
+- The shortcut setting is now `key.board`; `key.overview` is reported as an unknown key.
+
+## Since 0.1.0-alpha.3
 
 - Reopen your AI conversations: opt into **Layout, directories and AI sessions** and each pane brings back its Codex, Claude Code or OpenCode conversation in its saved directory. Connect agents sets it up explicitly.
 - On macOS, the window title no longer shows twice and the red, yellow and green buttons line up with the header icons.
@@ -30,7 +37,7 @@
 ## Keep track of your agents
 
 - Each console has a status panel published by its agent or another tool.
-- Tab indicators and Overview bring waiting, blocked and finished work together.
+- Tab indicators and the board bring waiting, blocked and finished work together.
 - Use Connect agents for a setup prompt and diagnostics for your AI client.
 
 ## Make it yours
@@ -46,12 +53,12 @@
 
 ## Choose a download
 
-- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.4_amd64.deb`.
-- Arch Linux x86_64: `ivy-terminal-0.1.0alpha4-1-x86_64.pkg.tar.zst`.
-- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.4-macos-arm64.dmg`.
-- macOS 15+ Intel: `Ivy-0.1.0-alpha.4-macos-x86_64.dmg`.
-- Windows 11 x64: `Ivy-0.1.0-alpha.4-windows-x86_64-setup.exe`.
+- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.5_amd64.deb`.
+- Arch Linux x86_64: `ivy-terminal-0.1.0alpha5-1-x86_64.pkg.tar.zst`.
+- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.5-macos-arm64.dmg`.
+- macOS 15+ Intel: `Ivy-0.1.0-alpha.5-macos-x86_64.dmg`.
+- Windows 11 x64: `Ivy-0.1.0-alpha.5-windows-x86_64-setup.exe`.
 
 Download `release-manifest.json` and `SHA256SUMS` with the chosen package and verify its SHA-256
-before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.4/docs/10-installation.md)
+before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.5/docs/10-installation.md)
 for verification, installation, upgrade and removal commands. No Rust toolchain is needed.
