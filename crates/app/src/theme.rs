@@ -493,6 +493,26 @@ pub(crate) fn project_accents(theme: &Theme) -> Vec<Color32> {
     colors
 }
 
+pub(crate) fn project_header_colors(background: Color32) -> (Color32, Color32) {
+    let foreground = if project_ink_contrast(Color32::BLACK, background)
+        >= project_ink_contrast(Color32::WHITE, background)
+    {
+        Color32::BLACK
+    } else {
+        Color32::WHITE
+    };
+    let hover = mix(
+        background,
+        if foreground == Color32::BLACK {
+            Color32::WHITE
+        } else {
+            Color32::BLACK
+        },
+        0.12,
+    );
+    (foreground, hover)
+}
+
 pub(crate) fn project_inks_distinct(a: Color32, b: Color32) -> bool {
     let distance = |a: u8, b: u8| (i32::from(a) - i32::from(b)).pow(2);
     distance(a.r(), b.r()) + distance(a.g(), b.g()) + distance(a.b(), b.b()) >= 48 * 48
@@ -538,6 +558,33 @@ fn mix(a: Color32, b: Color32, p: f32) -> Color32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn project_headers_keep_opaque_contrast_in_factory_catalog_and_overrides() {
+        use super::*;
+        let custom = Theme::default().with_colors(&crate::settings::Colors {
+            panel: Some(Color32::WHITE),
+            foreground: Some(Color32::BLACK),
+            palette: [Some(Color32::from_rgb(224, 175, 104)); 16],
+            ..Default::default()
+        });
+        for theme in std::iter::once(Theme::default())
+            .chain(NamedTheme::ALL.iter().map(|theme| theme.theme()))
+            .chain(std::iter::once(custom))
+        {
+            for background in project_accents(&theme) {
+                let (ink, hover) = project_header_colors(background);
+                assert!(ink == Color32::BLACK || ink == Color32::WHITE);
+                assert!(project_ink_contrast(ink, background) >= 4.5);
+                assert!(project_ink_contrast(ink, hover) >= 4.5);
+                assert!(project_ink_contrast(ink, hover) >= project_ink_contrast(ink, background));
+                assert_ne!(background, hover);
+            }
+        }
+        assert_eq!(project_header_colors(Color32::WHITE).0, Color32::BLACK);
+        assert_eq!(project_header_colors(Color32::BLACK).0, Color32::WHITE);
+        assert_eq!(project_header_colors(Color32::from_rgb(224, 175, 104)),
+            (Color32::BLACK, Color32::from_rgb(228, 185, 122)));
+    }
     #[test]
     fn bundled_catalog_has_unique_stable_names_and_exact_source_colors() {
         use super::{NamedTheme, catalog};
