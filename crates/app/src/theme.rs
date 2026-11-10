@@ -493,6 +493,71 @@ pub(crate) fn project_accents(theme: &Theme) -> Vec<Color32> {
     colors
 }
 
+pub(crate) struct ProjectHeaderColors {
+    pub left: Color32,
+    pub right: Color32,
+    pub foreground: Color32,
+    pub hover_left: Color32,
+    pub hover_right: Color32,
+}
+
+pub(crate) fn project_header_colors(theme: &Theme, accent: Color32) -> ProjectHeaderColors {
+    let base = theme.panel_background();
+    let foreground = if project_ink_contrast(Color32::WHITE, base)
+        >= project_ink_contrast(Color32::BLACK, base)
+    {
+        Color32::WHITE
+    } else {
+        Color32::BLACK
+    };
+    let opposite = if foreground == Color32::WHITE {
+        Color32::BLACK
+    } else {
+        Color32::WHITE
+    };
+    let hover = |color| {
+        let shifted = mix(color, opposite, 0.12);
+        if shifted == color {
+            mix(color, foreground, 0.12)
+        } else {
+            shifted
+        }
+    };
+    let mut colors = ProjectHeaderColors {
+        left: base,
+        right: base,
+        foreground,
+        hover_left: hover(base),
+        hover_right: hover(base),
+    };
+    for strength in [1.0, 0.75, 0.5, 0.25, 0.0] {
+        colors.left = mix(base, accent, 0.28 * strength);
+        colors.right = mix(base, accent, 0.06 * strength);
+        colors.hover_left = hover(colors.left);
+        colors.hover_right = hover(colors.right);
+        // Component bounds include every interpolated shade, not just the two endpoints.
+        let channel = |get: fn(Color32) -> u8| {
+            let values = [
+                colors.left,
+                colors.right,
+                colors.hover_left,
+                colors.hover_right,
+            ]
+            .map(get);
+            if foreground == Color32::WHITE {
+                *values.iter().max().unwrap()
+            } else {
+                *values.iter().min().unwrap()
+            }
+        };
+        let bound = Color32::from_rgb(channel(|c| c.r()), channel(|c| c.g()), channel(|c| c.b()));
+        if project_ink_contrast(foreground, bound) >= 4.5 {
+            break;
+        }
+    }
+    colors
+}
+
 pub(crate) fn project_inks_distinct(a: Color32, b: Color32) -> bool {
     let distance = |a: u8, b: u8| (i32::from(a) - i32::from(b)).pow(2);
     distance(a.r(), b.r()) + distance(a.g(), b.g()) + distance(a.b(), b.b()) >= 48 * 48
@@ -538,6 +603,57 @@ fn mix(a: Color32, b: Color32, p: f32) -> Color32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn project_headers_keep_opaque_contrast_in_factory_catalog_and_overrides() {
+        use super::*;
+        let custom = Theme::default().with_colors(&crate::settings::Colors {
+            panel: Some(Color32::from_gray(118)),
+            palette: [Some(Color32::BLACK); 16],
+            ..Default::default()
+        });
+        let reduced = project_header_colors(&custom, Color32::BLACK);
+        assert_eq!(reduced.left, Color32::from_gray(118));
+        assert_eq!(reduced.right, Color32::from_gray(118));
+        for theme in std::iter::once(Theme::default())
+            .chain(NamedTheme::ALL.iter().map(|theme| theme.theme()))
+            .chain(std::iter::once(custom))
+        {
+            for accent in project_accents(&theme) {
+                let colors = project_header_colors(&theme, accent);
+                for step in 0..=100 {
+                    for (left, right) in [
+                        (colors.left, colors.right),
+                        (colors.hover_left, colors.hover_right),
+                    ] {
+                        assert!(
+                            project_ink_contrast(
+                                colors.foreground,
+                                mix(left, right, step as f32 / 100.0)
+                            ) >= 4.5
+                        );
+                    }
+                }
+                assert_ne!(colors.left, colors.hover_left);
+                assert_ne!(colors.right, colors.hover_right);
+            }
+        }
+        let dark = Theme::default().with_colors(&crate::settings::Colors {
+            panel: Some(Color32::BLACK),
+            ..Default::default()
+        });
+        let colors = project_header_colors(&dark, Color32::from_rgb(100, 150, 200));
+        assert_eq!(colors.left, Color32::from_rgb(28, 42, 56));
+        assert_eq!(colors.right, Color32::from_rgb(6, 9, 12));
+        assert_eq!(colors.foreground, Color32::WHITE);
+        let light = Theme::default().with_colors(&crate::settings::Colors {
+            panel: Some(Color32::WHITE),
+            ..Default::default()
+        });
+        assert_eq!(
+            project_header_colors(&light, Color32::from_rgb(100, 150, 200)).foreground,
+            Color32::BLACK
+        );
+    }
     #[test]
     fn bundled_catalog_has_unique_stable_names_and_exact_source_colors() {
         use super::{NamedTheme, catalog};

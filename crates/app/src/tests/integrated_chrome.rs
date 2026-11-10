@@ -127,6 +127,55 @@ mod tests {
         }
     }
 
+    #[test]
+    fn same_project_headers_keep_their_fill_when_focus_changes_and_unknown_stays_neutral() {
+        let ctx = egui::Context::default();
+        chrome::prepare(&ctx);
+        let mut window = window_with("sleep 30", "sleep 30");
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        let ink = egui::Color32::from_rgb(224, 175, 104);
+        for pane in window.active_mut().panes_mut() {
+            pane.project = Some(crate::project_view::Badge {
+                key: crate::project::Key::Repository("/work/backend".into()),
+                name: "Backend".into(),
+                details: "/work/backend".into(),
+                ink,
+                painted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            });
+        }
+        let area = area_of(1400.0);
+        let colors = crate::theme::project_header_colors(&window.theme, ink);
+        let headers = |shapes: &[egui::epaint::ClippedShape]| -> Vec<egui::Rect> {
+            shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Mesh(mesh)
+                        if mesh.calc_bounds().width() > 100.0
+                            && mesh.vertices[0].color == colors.left
+                            && mesh.vertices[1].color == colors.right =>
+                    {
+                        Some(mesh.calc_bounds())
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        let baseline = frame(&mut window, &ctx, area, vec![]);
+        let rects = headers(&baseline);
+        assert_eq!(
+            rects.len(),
+            2,
+            "both project headers must fill their whole width"
+        );
+        window.active_mut().focus = 1;
+        assert_eq!(headers(&frame(&mut window, &ctx, area, vec![])), rects);
+        window.active_mut().panes_mut()[0].project = None;
+        let neutral = frame(&mut window, &ctx, area, vec![]);
+        assert_eq!(headers(&neutral), vec![rects[1]]);
+        assert!(neutral.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect == rects[0] && r.fill == window.theme.panel_background())));
+    }
+
     fn has_text(shapes: &[egui::epaint::ClippedShape], needle: &str) -> bool {
         fn inside(shape: &egui::Shape, needle: &str) -> bool {
             match shape {
