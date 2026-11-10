@@ -390,9 +390,37 @@ impl Silences {
 /// than the silence the sentence was written against. What cannot be delivered is dropped: there is
 /// no third channel to complain on.
 fn say(sentence: &str) {
+    static REPORTER: std::sync::OnceLock<Option<std::sync::mpsc::SyncSender<String>>> =
+        std::sync::OnceLock::new();
+    if let Some(sender) = REPORTER.get_or_init(|| query_reporter(write_diagnostic)) {
+        let _ = sender.try_send(sentence.to_owned());
+    }
+}
+
+fn write_diagnostic(sentence: &str) {
     use std::io::Write;
 
     let _ = writeln!(std::io::stderr().lock(), "{sentence}");
+}
+
+// A program can flood queries while stderr's reader stops draining. Neither may park the frame.
+fn say_query_error(error: &dyn std::fmt::Display) {
+    say(&format!("ivy: could not answer terminal query: {error}"));
+}
+
+fn query_reporter(
+    mut write: impl FnMut(&str) + Send + 'static,
+) -> Option<std::sync::mpsc::SyncSender<String>> {
+    let (sender, receiver) = std::sync::mpsc::sync_channel::<String>(1);
+    std::thread::Builder::new()
+        .name("terminal-query-errors".into())
+        .spawn(move || {
+            for sentence in receiver {
+                write(&sentence);
+            }
+        })
+        .ok()
+        .map(|_| sender)
 }
 
 /// Decides what is left to say about a console that stopped receiving: whether it has earned a line
@@ -502,7 +530,12 @@ fn pump_pane(pane: &mut crate::Pane, enabled: crate::agent_signals::Enabled) -> 
     // added a reading of its own to the span it was meant to measure.
     let collected_at = Instant::now();
     pane.signals.configure(enabled, &mut pane.screen);
-    pane.screen.advance(&pane.received);
+    if let Err(error) = pane
+        .screen
+        .advance_with_replies(&pane.received, |reply| pane.pty.write(reply))
+    {
+        say_query_error(&error);
+    }
     let queried = pane.signals.sync_native(&mut pane.screen, collected_at);
     // Automatic replies must not consume the backlog reserved for the person's input.
     if pane
@@ -583,6 +616,65 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{Duration, Instant};
     use term_core::{Pty, Size};
+
+    #[test]
+    fn pump_diagnostics_do_not_wait_for_a_full_stderr_pipe() {
+        const CHILD: &str = "IVY_TEST_DIAGNOSTICS_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            let message = "x".repeat(128 * 1024);
+            say_query_error(&message);
+            say(&message);
+            return;
+        }
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "pty_output::tests::pump_diagnostics_do_not_wait_for_a_full_stderr_pipe",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        // Keep stderr open without reading. A synchronous diagnostic cannot finish this write.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                assert!(status.success());
+                break;
+            }
+            if Instant::now() >= deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!("the pump diagnostic waited for an undrained stderr pipe");
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    #[test]
+    fn query_error_reporting_is_bounded_when_the_log_sink_stops_reading() {
+        let (entered, started) = channel();
+        let (release, resume) = channel();
+        let mut first = true;
+        let sender = query_reporter(move |_| {
+            if first {
+                first = false;
+                entered.send(()).unwrap();
+                resume.recv().unwrap();
+            }
+        })
+        .expect("start query error reporter");
+        sender.try_send("first".into()).unwrap();
+        started.recv_timeout(Duration::from_secs(2)).unwrap();
+        sender.try_send("queued".into()).unwrap();
+        assert!(matches!(
+            sender.try_send("overflow".into()),
+            Err(std::sync::mpsc::TrySendError::Full(_))
+        ));
+        release.send(()).unwrap();
+    }
 
     /// Waits for something to hold, with a cap so a failure comes out as a failure and not as a
     /// test hung forever.

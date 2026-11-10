@@ -6668,6 +6668,39 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn terminal_query_replies_reach_the_program_through_the_console_pump() {
+        let received = term_core::received::Received::new("terminal-query-replies");
+        let script = received.script(
+            "stty raw -echo && printf '\\033]2\\073echo injected\\007\\033[3\\0737H\\033[5n\\033[6n\\033[c\\033[>c\\033[18t\\033[?25$p\\033[4$p'",
+        );
+        let mut pane = pane_with(&script, 0);
+        let other_received = term_core::received::Received::new("terminal-query-other-pane");
+        let other_script =
+            other_received.script("stty raw -echo && printf '\\033[4\\07311H\\033[6n'");
+        let mut other_pane = pane_with(&other_script, 1);
+        let other_expected = b"\x1b[4;11R";
+        let expected = format!(
+            "\x1b[0n\x1b[3;7R\x1b[?6c\x1b[>0;2600;1c\x1b[8;{};{}t\x1b[?25;1$y\x1b[4;2$y",
+            INITIAL_GRID.rows, INITIAL_GRID.cols,
+        );
+        received.wait_until_ready(Duration::from_secs(3));
+        other_received.wait_until_ready(Duration::from_secs(3));
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while (received.so_far().len() < expected.len()
+            || other_received.so_far().len() < other_expected.len())
+            && Instant::now() < deadline
+        {
+            pane.pump(Default::default());
+            other_pane.pump(Default::default());
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(received.so_far(), expected.as_bytes());
+        assert_eq!(other_received.so_far(), other_expected);
+        assert_eq!(pane.screen.size(), INITIAL_GRID);
+    }
+
     /// Builds a window with two consoles, each one with its program, without opening any real
     /// window.
     ///
