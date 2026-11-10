@@ -526,7 +526,7 @@ fn exhausted_palette_keeps_distinct_project_names_in_actual_headers() {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         eframe::App::logic(&mut window, &ctx, &mut frame);
-        let output = ctx.run_ui(
+        let mut output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -536,6 +536,7 @@ fn exhausted_palette_keeps_distinct_project_names_in_actual_headers() {
             },
             |ui| eframe::App::ui(&mut window, ui, &mut frame),
         );
+        output.textures_delta.clear();
         let ready = window.projects.resolved == 2;
         if ready {
             let badges: Vec<_> = window
@@ -550,14 +551,15 @@ fn exhausted_palette_keeps_distinct_project_names_in_actual_headers() {
                     output.shapes.iter().any(|shape| matches!(
                         &shape.shape,
                         egui::Shape::Text(text) if text.galley.job.text == badge.name
+                            && text.galley.job.sections.iter().all(|section| section.format.color == Color32::BLACK)
                     )),
                     "project name must remain painted after color exhaustion"
                 );
             }
             assert_eq!(output.shapes.iter().filter(|shape| matches!(
                 &shape.shape,
-                egui::Shape::Rect(rect) if rect.rect.width() == 3.0 && rect.fill == Color32::WHITE
-            )).count(), 2, "both actual header strips must use the resulting ink");
+                egui::Shape::Rect(rect) if rect.rect.width() > 100.0 && rect.fill == Color32::WHITE
+            )).count(), 2, "both full header backgrounds must use the resulting project color");
         }
         output.drop_without_applying_deltas();
         if ready {

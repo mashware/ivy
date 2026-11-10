@@ -722,12 +722,7 @@ mod tests {
                     );
                 },
             );
-            let installed_textures: Vec<_> = output
-                .textures_delta
-                .set
-                .iter()
-                .map(|(id, _)| *id)
-                .collect();
+            let installed_textures: Vec<_> = output.textures_delta.set.keys().copied().collect();
             output.textures_delta.clear();
             let images: Vec<_> = output
                 .shapes
