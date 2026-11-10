@@ -65,6 +65,10 @@ pub(crate) fn center(handle: &impl raw_window_handle::HasWindowHandle, header: f
         return false;
     };
     let mut moved = false;
+    let scale = window.backingScaleFactor();
+    // A zoom that is not a whole number leaves the header between device pixels, and the button
+    // with it unless the container's edge is snapped first.
+    let header = (header * scale).round() / scale;
     let (bottom, height) = container(window.frame().size.height, header);
     let mut wanted = bar.frame();
     if wanted.origin.y != bottom || wanted.size.height != height {
@@ -73,7 +77,6 @@ pub(crate) fn center(handle: &impl raw_window_handle::HasWindowHandle, header: f
         bar.setFrame(wanted);
         moved = true;
     }
-    let scale = window.backingScaleFactor();
     for button in [close, minimize, zoom] {
         let at = button.frame();
         let y = button_y(height, at.size.height, scale);
