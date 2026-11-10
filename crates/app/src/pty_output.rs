@@ -395,6 +395,30 @@ fn say(sentence: &str) {
     let _ = writeln!(std::io::stderr().lock(), "{sentence}");
 }
 
+// A program can flood queries while stderr's reader stops draining. Neither may park the frame.
+fn say_query_error(error: &dyn std::fmt::Display) {
+    static REPORTER: std::sync::OnceLock<Option<std::sync::mpsc::SyncSender<String>>> =
+        std::sync::OnceLock::new();
+    if let Some(sender) = REPORTER.get_or_init(|| query_reporter(say)) {
+        let _ = sender.try_send(format!("ivy: could not answer terminal query: {error}"));
+    }
+}
+
+fn query_reporter(
+    mut write: impl FnMut(&str) + Send + 'static,
+) -> Option<std::sync::mpsc::SyncSender<String>> {
+    let (sender, receiver) = std::sync::mpsc::sync_channel::<String>(1);
+    std::thread::Builder::new()
+        .name("terminal-query-errors".into())
+        .spawn(move || {
+            for sentence in receiver {
+                write(&sentence);
+            }
+        })
+        .ok()
+        .map(|_| sender)
+}
+
 /// Decides what is left to say about a console that stopped receiving: whether it has earned a line
 /// on the developer channel, and whether the sentence over it is still on the glass.
 ///
@@ -502,7 +526,12 @@ fn pump_pane(pane: &mut crate::Pane, enabled: crate::agent_signals::Enabled) -> 
     // added a reading of its own to the span it was meant to measure.
     let collected_at = Instant::now();
     pane.signals.configure(enabled, &mut pane.screen);
-    pane.screen.advance(&pane.received);
+    if let Err(error) = pane
+        .screen
+        .advance_with_replies(&pane.received, |reply| pane.pty.write(reply))
+    {
+        say_query_error(&error);
+    }
     let queried = pane.signals.sync_native(&mut pane.screen, collected_at);
     // Automatic replies must not consume the backlog reserved for the person's input.
     if pane
@@ -583,6 +612,29 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{Duration, Instant};
     use term_core::{Pty, Size};
+
+    #[test]
+    fn query_error_reporting_is_bounded_when_the_log_sink_stops_reading() {
+        let (entered, started) = channel();
+        let (release, resume) = channel();
+        let mut first = true;
+        let sender = query_reporter(move |_| {
+            if first {
+                first = false;
+                entered.send(()).unwrap();
+                resume.recv().unwrap();
+            }
+        })
+        .expect("start query error reporter");
+        sender.try_send("first".into()).unwrap();
+        started.recv_timeout(Duration::from_secs(2)).unwrap();
+        sender.try_send("queued".into()).unwrap();
+        assert!(matches!(
+            sender.try_send("overflow".into()),
+            Err(std::sync::mpsc::TrySendError::Full(_))
+        ));
+        release.send(()).unwrap();
+    }
 
     /// Waits for something to hold, with a cap so a failure comes out as a failure and not as a
     /// test hung forever.

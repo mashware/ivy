@@ -9247,3 +9247,41 @@ once (D13); no performance figure is claimed before repeated valid runs.
 
 Discarded for B1: a new module beside the Overview (it would re-prove the input rules), grouping by
 display name, sections for folders, and variable-height cards (they arrive with B3's blocks).
+
+## D86 — Terminal queries return audited protocol replies through the console's ordered input
+
+**Decided.** The host returns the engine's DSR status/cursor reports, primary and secondary device
+attributes, character dimensions, and numeric mode reports through the same `Pty::write` path as
+keystrokes. Each console pumps its own replies, including consoles outside the visible tab. The
+work stays inside the existing interpretation stopwatch, so it is not attributed to the framework.
+
+**Why.** The engine already produces these replies, but the original screen used a no-op listener
+and the later title listener still discarded them. A raw, echo-disabled program received nothing
+for six query families; positive controls through the existing writer delivered the exact bytes.
+Programs waiting for those responses cannot complete the protocol exchange.
+
+**Trust and bounds.** Only the audited numeric reply shapes are accepted, even if a future engine
+adds another `PtyWrite` origin. No program-controlled title or answerback string returns as input.
+Color, clipboard and pixel-dimension requests remain unanswered. Collection is enabled only during
+the host's reply-aware parse call; passive screen parsing never retains replies. A temporary batch
+has a 16 KiB ceiling. Overflow or an unsupported shape refuses the entire batch; the host reports
+that error through one shared worker with a one-message channel. The frame never waits for stderr;
+when the sink stalls, additional diagnostics are dropped. A worker creation failure disables this
+diagnostic channel. A refused writer reports its existing input refusal and is also logged. Nothing is
+retried later or stored in an unbounded second queue. The 16 KiB limit is a conservative resource
+bound, not a measured performance claim; a query flood can exceed it and receive no replies.
+
+**Discarded:**
+
+- Writing from the PTY reader or directly to the master: bypasses D29's ordering and writer.
+- Returning every event/string the engine provides: turns a future reflection feature into input
+  injection without a host decision.
+- An unbounded pending-reply queue or blocking the frame until space appears: reintroduces the
+  resource growth or freeze D60 and D29 prevent.
+- Keeping overflow for another frame: needs a separate backpressure protocol and ordering policy;
+  this correction keeps the existing writer's explicit refusal model.
+
+**Evidence and limits.** Regression tests assert bytes written by the raw-mode child into its own
+file, through the application's console pump; screen output cannot impersonate those bytes.
+Chunk-boundary, resize, refusal, flood and non-reflection checks cover the bridge separately.
+No application-specific failure or macOS/Windows behavior is claimed from the Linux reproduction.

@@ -1,4 +1,4 @@
-//! Keep only the last explicit title event, without putting a lock in the painter's accessor.
+//! Keep explicit titles and bounded, audited terminal protocol replies.
 
 use alacritty_terminal::event::{Event, EventListener};
 use std::sync::{Arc, Mutex};
@@ -7,9 +7,31 @@ use std::sync::{Arc, Mutex};
 pub(super) struct Listener {
     // Outer None means no update; Some(None) explicitly clears the previously observed title.
     pending: Arc<Mutex<Option<Option<String>>>>,
+    replies: Arc<Mutex<Option<ReplyBatch>>>,
+}
+
+// Program output is an automatic producer, unlike keystrokes. Bound its temporary replies too.
+const REPLY_LIMIT: usize = 16 * 1024;
+
+#[derive(Default)]
+pub(super) struct ReplyBatch {
+    pub(super) bytes: Vec<u8>,
+    pub(super) error: Option<&'static str>,
 }
 
 impl Listener {
+    pub(super) fn begin_replies(&self) {
+        *self.replies.lock().expect("terminal reply slot poisoned") = Some(ReplyBatch::default());
+    }
+
+    pub(super) fn end_replies(&self) -> ReplyBatch {
+        self.replies
+            .lock()
+            .expect("terminal reply slot poisoned")
+            .take()
+            .expect("terminal reply collection was started")
+    }
+
     pub(super) fn take(&self) -> Option<Option<String>> {
         self.pending
             .lock()
@@ -21,6 +43,19 @@ impl Listener {
 impl EventListener for Listener {
     fn send_event(&self, event: Event) {
         let update = match event {
+            Event::PtyWrite(text) => {
+                let mut slot = self.replies.lock().expect("terminal reply slot poisoned");
+                if let Some(batch) = slot.as_mut() {
+                    if !safe_reply(&text) {
+                        batch.error = Some("terminal engine generated an unsupported query reply");
+                    } else if text.len() > REPLY_LIMIT.saturating_sub(batch.bytes.len()) {
+                        batch.error = Some("too many terminal query replies in one output batch");
+                    } else if batch.error.is_none() {
+                        batch.bytes.extend_from_slice(text.as_bytes());
+                    }
+                }
+                return;
+            }
             Event::Title(title) => {
                 let valid = !title.chars().any(char::is_control) && title.chars().count() <= 128;
                 let trimmed = title.trim();
@@ -33,6 +68,38 @@ impl EventListener for Listener {
     }
 }
 
+// Audit the shape, not arbitrary text: a future engine must not turn a title into shell input.
+fn safe_reply(text: &str) -> bool {
+    let Some(body) = text.strip_prefix("\x1b[") else {
+        return false;
+    };
+    fn numbers(text: &str, count: usize) -> bool {
+        text.split(';').count() == count
+            && text
+                .split(';')
+                .all(|n| !n.is_empty() && n.len() <= 10 && n.bytes().all(|b| b.is_ascii_digit()))
+    }
+    if matches!(body, "0n" | "?6c") {
+        return true;
+    }
+    if let Some(args) = body.strip_suffix('R') {
+        return numbers(args, 2);
+    }
+    if let Some(version) = body.strip_prefix(">0;").and_then(|s| s.strip_suffix(";1c")) {
+        return numbers(version, 1);
+    }
+    if let Some(size) = body.strip_prefix("8;").and_then(|s| s.strip_suffix('t')) {
+        return numbers(size, 2);
+    }
+    if let Some(mode) = body.strip_prefix('?').and_then(|s| s.strip_suffix('u')) {
+        return numbers(mode, 1);
+    }
+    if let Some(mode) = body.strip_suffix("$y") {
+        return numbers(mode.strip_prefix('?').unwrap_or(mode), 2);
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -40,6 +107,121 @@ mod tests {
 
     fn screen() -> Screen {
         Screen::new(Size { rows: 8, cols: 40 })
+    }
+
+    #[test]
+    fn query_replies_preserve_order_across_every_input_cut_and_current_dimensions() {
+        let input = b"\x1b[3;7H\x1b[5n\x1b[6n\x1b[c\x1b[>c\x1b[18t\x1b[?25$p\x1b[4$p";
+        let expected = b"\x1b[0n\x1b[3;7R\x1b[?6c\x1b[>0;2600;1c\x1b[8;8;40t\x1b[?25;1$y\x1b[4;2$y";
+        for cut in 0..=input.len() {
+            let mut screen = screen();
+            let mut got = Vec::new();
+            for chunk in [&input[..cut], &input[cut..]] {
+                screen
+                    .advance_with_replies(chunk, |reply| {
+                        got.extend_from_slice(reply);
+                        Ok(())
+                    })
+                    .unwrap();
+            }
+            assert_eq!(got, expected);
+            screen.resize(Size { rows: 9, cols: 51 });
+            got.clear();
+            screen
+                .advance_with_replies(b"\x1b[18t", |reply| {
+                    got.extend_from_slice(reply);
+                    Ok(())
+                })
+                .unwrap();
+            assert_eq!(got, b"\x1b[8;9;51t");
+        }
+    }
+
+    #[test]
+    fn query_replies_cannot_reflect_program_strings_or_cross_screens() {
+        let mut first = screen();
+        let mut second = screen();
+        let mut replies = Vec::new();
+        first
+            .advance_with_replies(
+                b"\x1b]2;echo injected\x07\x1b[21t\x1b]52;c;?\x07\x1b]10;?\x07\x1b[14t\x05",
+                |reply| {
+                    replies.extend_from_slice(reply);
+                    Ok(())
+                },
+            )
+            .unwrap();
+        assert!(replies.is_empty());
+        assert_eq!(first.terminal_title(), Some("echo injected"));
+        second
+            .advance_with_replies(b"\x1b[6n", |reply| {
+                replies.extend_from_slice(reply);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(replies, b"\x1b[1;1R");
+        for text in [
+            "echo injected\n",
+            "\x1b]ltext\x1b\\",
+            "\x1b[1;2R\n",
+            "\x1b[1;echoR",
+            "\x1b[1;;2R",
+        ] {
+            assert!(!safe_reply(text), "untrusted reply: {text:?}");
+        }
+        let listener = Listener::default();
+        listener.begin_replies();
+        listener.send_event(Event::PtyWrite("echo injected\n".into()));
+        let batch = listener.end_replies();
+        assert!(batch.error.is_some());
+        assert!(batch.bytes.is_empty());
+        assert!(safe_reply("\x1b[?0u"));
+    }
+
+    #[test]
+    fn query_reply_flood_is_bounded_and_failure_does_not_replay_later() {
+        let mut screen = screen();
+        let flood = b"\x1b[5n".repeat(REPLY_LIMIT / 4 + 1);
+        let mut wrote = false;
+        assert!(
+            screen
+                .advance_with_replies(&flood, |_| {
+                    wrote = true;
+                    Ok(())
+                })
+                .is_err()
+        );
+        assert!(!wrote);
+        assert_eq!(
+            screen
+                .advance_with_replies(b"\x1b[6n", |_| Err("writer refused".into()))
+                .unwrap_err()
+                .to_string(),
+            "writer refused"
+        );
+        screen
+            .advance_with_replies(b"ordinary text", |_| panic!("a failed reply was replayed"))
+            .unwrap();
+        screen.advance(b"\x1b[5n");
+        screen
+            .advance_with_replies(b"", |_| panic!("passive parsing retained a reply"))
+            .unwrap();
+        let mut recovered = Vec::new();
+        screen
+            .advance_with_replies(b"\x1b[5n", |reply| {
+                recovered.extend_from_slice(reply);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(recovered, b"\x1b[0n");
+        let listener = Listener::default();
+        listener.begin_replies();
+        for _ in 0..REPLY_LIMIT {
+            listener.send_event(Event::PtyWrite("\x1b[0n".into()));
+        }
+        let batch = listener.end_replies();
+        assert!(batch.bytes.len() <= REPLY_LIMIT);
+        assert!(batch.error.is_some());
     }
 
     #[test]
