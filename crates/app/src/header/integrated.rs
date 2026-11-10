@@ -225,6 +225,14 @@ fn paint(
                 )
                 .intersect(rect);
                 if logo.is_positive() {
+                    if project.is_some() {
+                        // A transparent brand mark can match a configured project accent exactly.
+                        painter.with_clip_rect(rect).rect_filled(
+                            logo.expand(2.0),
+                            2.0,
+                            theme.panel_background(),
+                        );
+                    }
                     crate::agent_signals::logos::paint(ui, logo, agent);
                 }
                 title_left.x += 23.0;
@@ -667,6 +675,95 @@ mod tests {
                 assert!(output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect == control && r.fill == hover)), "hover must use the contrasting opaque project fill");
                 output.drop_without_applying_deltas();
             }
+        }
+    }
+
+    #[test]
+    fn claude_logo_keeps_neutral_backing_and_signal_opacity_on_matching_project_fill() {
+        let theme = Theme::default();
+        let badge = crate::project_view::Badge {
+            key: crate::project::Key::Repository("/work/backend".into()),
+            name: "Backend".into(),
+            details: "/work/backend".into(),
+            ink: egui::Color32::from_rgb(0xD9, 0x77, 0x57),
+            painted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        };
+        for (backed, busy, opacity) in [(true, false, 1.0), (true, true, 0.8), (false, true, 0.45)]
+        {
+            let ctx = egui::Context::default();
+            crate::agent_signals::logos::install(&ctx);
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    time: Some(0.0),
+                    focused: true,
+                    ..Default::default()
+                },
+                |ui| {
+                    paint(
+                        ui,
+                        egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(500.0, 33.0)),
+                        &CellMetrics::of(8.0, 16.0),
+                        &theme,
+                        Appearance {
+                            agent: Some(crate::agent_signals::View {
+                                client: crate::agent_signals::Client::Claude,
+                                busy,
+                                waiting: false,
+                                backed,
+                            }),
+                            label: "Fix login",
+                            number: 1,
+                            title_size: 12.0,
+                            can_close: true,
+                            zoomed: false,
+                            folded: false,
+                            project: Some(&badge),
+                        },
+                    );
+                },
+            );
+            let installed_textures: Vec<_> = output
+                .textures_delta
+                .set
+                .iter()
+                .map(|(id, _)| *id)
+                .collect();
+            output.textures_delta.clear();
+            let images: Vec<_> = output
+                .shapes
+                .iter()
+                .enumerate()
+                .filter_map(|(index, shape)| match &shape.shape {
+                    egui::Shape::Mesh(mesh) if mesh.texture_id != egui::TextureId::default() => {
+                        Some((index, mesh))
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                images.len(),
+                1,
+                "the installed Claude logo must actually be painted"
+            );
+            let (index, mesh) = images[0];
+            assert!(installed_textures.contains(&mesh.texture_id));
+            let bounds = mesh.calc_bounds();
+            assert_eq!(bounds.size(), egui::Vec2::splat(16.0));
+            assert!(
+                output.shapes[..index].iter().any(|shape| matches!(
+                    &shape.shape,
+                    egui::Shape::Rect(rect)
+                        if rect.fill == theme.panel_background() && rect.rect.contains_rect(bounds)
+                )),
+                "the real transparent logo needs neutral backing before its image is drawn"
+            );
+            assert!(
+                mesh.vertices
+                    .iter()
+                    .all(|vertex| { vertex.color == egui::Color32::WHITE.gamma_multiply(opacity) }),
+                "fresh, busy and stale logo opacity must survive the project fill"
+            );
+            output.drop_without_applying_deltas();
         }
     }
 
