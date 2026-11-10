@@ -1,4 +1,10 @@
-# Ivy 0.1.0-alpha.3
+# Ivy 0.1.0-alpha.4
+
+## New in this alpha
+
+- Reopen your AI conversations: opt into **Layout, directories and AI sessions** and each pane brings back its Codex, Claude Code or OpenCode conversation in its saved directory. Connect agents sets it up explicitly.
+- On macOS, the window title no longer shows twice and the red, yellow and green buttons line up with the header icons.
+- The Git review shows the changes of the console's own worktree, and says so plainly when a folder is not a Git repository.
 
 ## Experimental installers
 
@@ -40,12 +46,12 @@
 
 ## Choose a download
 
-- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.3_amd64.deb`.
-- Arch Linux x86_64: `ivy-terminal-0.1.0alpha3-1-x86_64.pkg.tar.zst`.
-- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.3-macos-arm64.dmg`.
-- macOS 15+ Intel: `Ivy-0.1.0-alpha.3-macos-x86_64.dmg`.
-- Windows 11 x64: `Ivy-0.1.0-alpha.3-windows-x86_64-setup.exe`.
+- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.4_amd64.deb`.
+- Arch Linux x86_64: `ivy-terminal-0.1.0alpha4-1-x86_64.pkg.tar.zst`.
+- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.4-macos-arm64.dmg`.
+- macOS 15+ Intel: `Ivy-0.1.0-alpha.4-macos-x86_64.dmg`.
+- Windows 11 x64: `Ivy-0.1.0-alpha.4-windows-x86_64-setup.exe`.
 
 Download `release-manifest.json` and `SHA256SUMS` with the chosen package and verify its SHA-256
-before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.3/docs/10-installation.md)
+before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.4/docs/10-installation.md)
 for verification, installation, upgrade and removal commands. No Rust toolchain is needed.
