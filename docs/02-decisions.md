@@ -9265,7 +9265,8 @@ adds another `PtyWrite` origin. No program-controlled title or answerback string
 Color, clipboard and pixel-dimension requests remain unanswered. Collection is enabled only during
 the host's reply-aware parse call; passive screen parsing never retains replies. A temporary batch
 has a 16 KiB ceiling. Overflow or an unsupported shape refuses the entire batch; the host reports
-that error through one shared worker with a one-message channel. The frame never waits for stderr;
+that error through one shared worker with a one-message channel, shared with the existing
+input/output diagnostics: automatic replies can themselves trigger a backlog notice. The frame never waits for stderr;
 when the sink stalls, additional diagnostics are dropped. A worker creation failure disables this
 diagnostic channel. A refused writer reports its existing input refusal and is also logged. Nothing is
 retried later or stored in an unbounded second queue. The 16 KiB limit is a conservative resource

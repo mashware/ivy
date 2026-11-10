@@ -390,6 +390,14 @@ impl Silences {
 /// than the silence the sentence was written against. What cannot be delivered is dropped: there is
 /// no third channel to complain on.
 fn say(sentence: &str) {
+    static REPORTER: std::sync::OnceLock<Option<std::sync::mpsc::SyncSender<String>>> =
+        std::sync::OnceLock::new();
+    if let Some(sender) = REPORTER.get_or_init(|| query_reporter(write_diagnostic)) {
+        let _ = sender.try_send(sentence.to_owned());
+    }
+}
+
+fn write_diagnostic(sentence: &str) {
     use std::io::Write;
 
     let _ = writeln!(std::io::stderr().lock(), "{sentence}");
@@ -397,11 +405,7 @@ fn say(sentence: &str) {
 
 // A program can flood queries while stderr's reader stops draining. Neither may park the frame.
 fn say_query_error(error: &dyn std::fmt::Display) {
-    static REPORTER: std::sync::OnceLock<Option<std::sync::mpsc::SyncSender<String>>> =
-        std::sync::OnceLock::new();
-    if let Some(sender) = REPORTER.get_or_init(|| query_reporter(say)) {
-        let _ = sender.try_send(format!("ivy: could not answer terminal query: {error}"));
-    }
+    say(&format!("ivy: could not answer terminal query: {error}"));
 }
 
 fn query_reporter(
@@ -612,6 +616,42 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{Duration, Instant};
     use term_core::{Pty, Size};
+
+    #[test]
+    fn pump_diagnostics_do_not_wait_for_a_full_stderr_pipe() {
+        const CHILD: &str = "IVY_TEST_DIAGNOSTICS_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            let message = "x".repeat(128 * 1024);
+            say_query_error(&message);
+            say(&message);
+            return;
+        }
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "pty_output::tests::pump_diagnostics_do_not_wait_for_a_full_stderr_pipe",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        // Keep stderr open without reading. A synchronous diagnostic cannot finish this write.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                assert!(status.success());
+                break;
+            }
+            if Instant::now() >= deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!("the pump diagnostic waited for an undrained stderr pipe");
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
 
     #[test]
     fn query_error_reporting_is_bounded_when_the_log_sink_stops_reading() {
