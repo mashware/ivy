@@ -95,6 +95,9 @@ being doing them and becomes knowing which one to go to.
 after using Phase 3 for a while. Before that it is laying out a pretty list with data you do not
 trust.
 
+> **Superseded in November 2026.** The screen this phase delivered (the Overview, D68) is replaced
+> by Phase 6's board. The question it answers survives there, on the board's bar and on each card.
+
 ## Phase 5 — «Somebody watches for you»
 
 **What you see:** Phase 4's list, but ordered and annotated by itself.
@@ -105,6 +108,33 @@ nobody has reviewed it», «this one is running low on context».
 
 **Why it is far off and it does not matter:** it needs no new piece, it is Phase 3 used a different
 way. If it is never done, nothing extra will have been built to get there. That is on purpose.
+
+## Phase 6 — «Everything in flight, on one board»
+
+**What you see:** the Overview screen is gone and a board takes its place. One board for the whole
+window, split into one section per project. Each section opens with that project's roadmap — the
+milestone in progress, the last two finished and the next ones — and below it one card per console
+working in that project: what it is doing, which step it is on, and whether it is waiting for you,
+stuck or finished. The bar on top still says how many consoles are claiming you. A project you have
+a roadmap for shows up even when no console is open in it, with only its roadmap.
+
+**What you can do:** decide what the board shows. You tell Ivy where each project keeps its roadmap
+— once, in your settings — and the board reads it from there and repaints it whenever the file
+changes. What an agent adds to its card is what you ask for in your own skill or instructions: a
+table, a list of steps, a progress bar, a note. Things that change outside any agent — open pull
+requests, a CI run, a deployment — come from a small script running in a console, which keeps them
+current without spending a single token. Click any card to jump to its console.
+
+**Why it replaces Phase 4's screen instead of improving it:** the Overview stacked each console's
+panel and cut it to three lines. It knew nothing the panels did not already say, and it did not let
+you see what you actually wanted to keep an eye on. The question «what needs something from me?»
+stays answered — on the bar and on each card — but the screen around it now shows what *you*
+choose.
+
+**What it does not do:** it does not run anything somebody else published, it does not show web
+pages, and it does not queue tasks that have no console yet (that is still the idea in «Tasks and
+board», with no phase). Charts are not in it either: they can come later as one more kind of block
+without changing anything else.
 
 ## Document views — «Read beside the consoles»
 
@@ -139,6 +169,7 @@ and deliberate limits are recorded in D75 and [09-releases.md](09-releases.md).
 | **Phase 3** | It stops being a screen and becomes a place to work |
 | **Phase 4** | What nobody else has |
 | **Phase 5** | A gift, if it arrives |
+| **Phase 6** | The overview shows what you chose to watch |
 
 ---
 
@@ -159,9 +190,11 @@ built before Phase 2 closed (#226); its completion does not close F2.7.
 | Phase 3 — Bidirectional | done | Phase 1 — Minimal prototype |
 | Phase 4 — Summary view | done | Phase 3 — Bidirectional |
 | Phase 5 — Supervisor | pending | Phase 4 — Summary view |
+| Phase 6 — Board | pending | Phase 4 — Summary view |
 
-Phases 4 and 5 remain headlines, with no actionable items until their work is defined. Their
-closing criteria require an explicit completion mark; an empty item list does not close them.
+Phase 5 remains a headline, with no actionable items until its work is defined; Phase 6 carries
+its milestones. Phase 5's closing criteria require an explicit completion mark; an empty item list
+does not close it.
 
 ---
 
@@ -469,6 +502,51 @@ use the same channel. If it is never done, nothing has been lost.
 > so an agent the app called over the API would be paid for by the user separately — exactly what
 > **D4** exists to avoid. The supervisor has to be **another console agent**, in its own pane,
 > speaking MCP like any other. See [02-decisions.md](02-decisions.md) → D4.
+
+---
+
+## Phase 6 — Board
+
+Done when: the Overview screen no longer exists, and the board shows every configured project with
+its roadmap window and every live console's card, with blocks published by agents over MCP and by
+scripts through the file transport.
+
+The decision, its reasons and what was discarded are in **D85**. Milestones in delivery order; each
+one leaves a usable board.
+
+- [ ] **B1 — The board replaces the Overview.** Same entry points (the global control and
+  `key.overview`, renamed `key.board`, default `ctrl+shift+o`). One global board, sections grouped
+  by project identity (D79: the common Git directory, so worktrees share a section); consoles with no
+  project go to «Other consoles». Every live console gets an automatic card built from its existing
+  panel document: title, claim, phase and its first steps. The bar keeps the claim counts. Activating
+  a card focuses its console, with D68's rules for reordering, vanished targets and maximized
+  layouts. Nothing new is published yet, so this milestone needs no contract change. The Overview's
+  code, its measurement span and its batches are removed or renamed in the same delivery.
+- [ ] **B2 — Project roadmaps from a file.** `roadmap.<name> = <path>` in the settings file and the
+  settings screen; the project is the Git repository that contains the file. Milestones are Markdown
+  task items (`- [x]` / `- [ ]`), the first unchecked one is in progress, and the board shows a
+  window around it — `roadmap.window = 2 3` by default (two done, three next). The file is watched
+  and repainted on change, read off the window thread with a size bound, and rendered inert like the
+  Markdown viewer (D72). A configured project with no open console still has its section. A missing
+  file, or one with no task items, says so in its block.
+- [ ] **B3 — Blocks published by producers.** New MCP tools put and remove a block by an id the
+  producer chooses, scoped by `PANEL_ID` like everything else on that channel; the same document can
+  be written as a file in `PANEL_DIR`, so a script that does not speak MCP publishes too (D17). Five
+  kinds: Markdown, steps, progress, table and a list with states. Each block carries when it was
+  written and how long it stays fresh; an old block is dimmed, never removed. A block belongs to the
+  console that published it and leaves the board when that console closes. The contract is written
+  into [04-panel-contract.md](04-panel-contract.md) before any code reads it.
+- [ ] **B4 — Two real producers.** A script example that publishes open pull requests from
+  `gh pr list` on a loop, and a skill snippet that has an agent publish its work's steps. Both live in
+  the repository and are what the documentation points to.
+
+**Measured like every other screen.** The board's projection, file reading and paint enqueue are
+named in the frame report and subtracted once (D13); its batches declare open and closed regimes the
+way D68's did. No figure is claimed before repeated valid runs.
+
+**Out on purpose.** Charts (a later block kind, with no case yet), per-tab boards (they would be
+mostly empty), web content of any kind, buttons or commands inside blocks, and tasks without a
+console.
 
 ---
 
