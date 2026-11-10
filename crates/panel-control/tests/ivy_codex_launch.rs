@@ -52,6 +52,7 @@ fn interactive_inserts_and_preserves_arguments_environment_and_status() {
         &["-c", "model=exec", "prompt"][..],
         &["--config=model=exec", "prompt"][..],
         &["-mexec", "prompt", "login"][..],
+        &["--model=--remote", "prompt"][..],
     ] {
         let (record, _, status) = run(args, "  --no-daemon  run locally");
         assert_eq!(
@@ -70,6 +71,7 @@ fn passes_through_existing_admin_remote_and_unknown() {
         &["exec", "hello"][..],
         &["resume", "id", "--remote", "ws://host"][..],
         &["--future-flag"][..],
+        &["--model", "--remote", "ws://host"][..],
         &["do work", "--remote", "ws://host"][..],
         &["do work", "--help"][..],
     ] {
@@ -134,5 +136,74 @@ fn preserves_client_signal() {
         .status()
         .unwrap();
     assert_eq!(status.signal(), Some(15));
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn inherits_auth_and_mcp_environment_without_changing_configuration_or_adding_api_keys() {
+    let dir = std::env::temp_dir().join(format!(
+        "ivy-codex-config-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir(&dir).unwrap();
+    let config = dir.join("config.toml");
+    let auth = dir.join("auth.json");
+    let config_bytes =
+        b"# existing user settings\n[mcp_servers.ivy]\nenv_vars = ['PANEL_ID', 'PANEL_DIR']\n";
+    let auth_bytes = b"{\"session\":\"inherited subscription sentinel\"}\n";
+    fs::write(&config, config_bytes).unwrap();
+    fs::write(&auth, auth_bytes).unwrap();
+    let client = dir.join("client");
+    fs::write(&client, "#!/bin/sh\nif [ \"$1\" = --help ]; then echo --no-daemon; exit 0; fi\ncat \"$CODEX_HOME/config.toml\" \"$CODEX_HOME/auth.json\" > \"$READ_CONFIG\"\nprintf '%s\\0' \"$CODEX_HOME\" \"$MCP_AUTH_SENTINEL\" \"$SUBSCRIPTION_SENTINEL\" \"${OPENAI_API_KEY-unset}\" \"${ANTHROPIC_API_KEY-unset}\" \"$@\" > \"$RECORD\"\n").unwrap();
+    fs::set_permissions(&client, fs::Permissions::from_mode(0o755)).unwrap();
+    let record = dir.join("record");
+    let read_config = dir.join("read-config");
+    let output = Command::new(env!("CARGO_BIN_EXE_ivy-codex"))
+        .arg(&client)
+        .args([
+            "-c",
+            "mcp_servers.other.command='existing command'",
+            "resume",
+            "session one",
+        ])
+        .env("CODEX_HOME", &dir)
+        .env("MCP_AUTH_SENTINEL", "existing MCP authentication")
+        .env("SUBSCRIPTION_SENTINEL", "existing subscription")
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("ANTHROPIC_API_KEY")
+        .env("RECORD", &record)
+        .env("READ_CONFIG", &read_config)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let fields = fs::read(record).unwrap();
+    let fields: Vec<&[u8]> = fields.split(|b| *b == 0).collect();
+    assert_eq!(fields[0], dir.as_os_str().as_encoded_bytes());
+    assert_eq!(
+        &fields[1..],
+        &[
+            b"existing MCP authentication".as_slice(),
+            b"existing subscription",
+            b"unset",
+            b"unset",
+            b"--no-daemon",
+            b"-c",
+            b"mcp_servers.other.command='existing command'",
+            b"resume",
+            b"session one",
+            b"",
+        ]
+    );
+    assert_eq!(fs::read(&config).unwrap(), config_bytes);
+    assert_eq!(fs::read(&auth).unwrap(), auth_bytes);
+    assert_eq!(
+        fs::read(read_config).unwrap(),
+        [config_bytes.as_slice(), auth_bytes.as_slice()].concat()
+    );
     fs::remove_dir_all(dir).unwrap();
 }

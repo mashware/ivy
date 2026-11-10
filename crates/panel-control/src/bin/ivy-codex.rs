@@ -55,7 +55,7 @@ fn classify(args: &[OsString]) -> Kind {
         if value_long || value_short {
             if !inline {
                 i += 1;
-                if i == args.len() {
+                if i == args.len() || args[i].to_string_lossy().starts_with('-') {
                     return Kind::Unknown;
                 }
             }
@@ -180,7 +180,15 @@ fn supports(exe: &OsStr) -> bool {
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
             _ => {
                 let _ = child.kill();
-                let _ = child.wait();
+                // Reap only within a bounded grace period. A probe that cannot be
+                // terminated may be abandoned; exec/exit ends our reader threads.
+                let grace = Instant::now() + Duration::from_millis(200);
+                while Instant::now() < grace {
+                    match child.try_wait() {
+                        Ok(Some(_)) | Err(_) => break,
+                        Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+                    }
+                }
                 break None;
             }
         }

@@ -204,7 +204,7 @@ mod tests {
                 .take()
                 .unwrap()
                 .write_all(
-                    b"codex 'one space' 'two'\ncodex 'again' 'done'\necho STILL_ALIVE\nexit\n",
+                    b"codex 'one space' 'two'\ncodex 'again' 'done'\ncommand codex bypass command\n\"$HOME/bin/codex\" bypass path\necho STILL_ALIVE\nexit\n",
                 )
                 .unwrap();
             let output = child.wait_with_output().unwrap();
@@ -216,7 +216,7 @@ mod tests {
             assert!(String::from_utf8_lossy(&output.stdout).contains("STILL_ALIVE"));
             assert_eq!(
                 std::fs::read_to_string(home.join("log")).unwrap(),
-                "helper\nclient:pane-a:one space:two\nhelper\nclient:pane-a:again:done\n",
+                "helper\nclient:pane-a:one space:two\nhelper\nclient:pane-a:again:done\nclient:pane-a:bypass:command\nclient:pane-a:bypass:path\n",
                 "{shell}: {}",
                 String::from_utf8_lossy(&output.stderr)
             );
@@ -335,61 +335,67 @@ mod tests {
                 eprintln!("shell unavailable: {shell}");
                 continue;
             }
-            let mut random = [0; 8];
-            getrandom::fill(&mut random).unwrap();
-            let home =
-                std::env::temp_dir().join(format!("ivy-conflict-{:x}", u64::from_ne_bytes(random)));
-            std::fs::create_dir_all(&home).unwrap();
-            if shell.ends_with("bash") {
-                std::fs::write(home.join(".bashrc"), "alias codex='echo USER_COMMAND'\n").unwrap();
-            } else if shell.ends_with("zsh") {
-                std::fs::write(home.join(".zshrc"), "alias codex='echo USER_COMMAND'\n").unwrap();
-            } else {
-                std::fs::create_dir_all(home.join(".config/fish")).unwrap();
-                std::fs::write(
-                    home.join(".config/fish/config.fish"),
-                    "function codex; echo USER_COMMAND; end\n",
-                )
-                .unwrap();
-            }
-            let prepared = Prepared::prepare_with_zdotdir(shell, Some(Path::new("/bin/sh")), None)
-                .unwrap()
-                .unwrap();
-            let mut command = Command::new(shell);
-            command
-                .args(prepared.args())
-                .arg("-i")
-                .env("HOME", &home)
-                .env("TERM", "dumb")
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-            for (key, value) in prepared.env() {
-                if let Some(value) = value {
-                    command.env(key, value);
+            for user_definition in [
+                "alias codex='echo USER_COMMAND'\n",
+                "codex() { echo USER_COMMAND; }\n",
+            ] {
+                let mut random = [0; 8];
+                getrandom::fill(&mut random).unwrap();
+                let home = std::env::temp_dir()
+                    .join(format!("ivy-conflict-{:x}", u64::from_ne_bytes(random)));
+                std::fs::create_dir_all(&home).unwrap();
+                if shell.ends_with("bash") {
+                    std::fs::write(home.join(".bashrc"), user_definition).unwrap();
+                } else if shell.ends_with("zsh") {
+                    std::fs::write(home.join(".zshrc"), user_definition).unwrap();
                 } else {
-                    command.env_remove(key);
+                    std::fs::create_dir_all(home.join(".config/fish")).unwrap();
+                    std::fs::write(
+                        home.join(".config/fish/config.fish"),
+                        "function codex; echo USER_COMMAND; end\n",
+                    )
+                    .unwrap();
                 }
+                let prepared =
+                    Prepared::prepare_with_zdotdir(shell, Some(Path::new("/bin/sh")), None)
+                        .unwrap()
+                        .unwrap();
+                let mut command = Command::new(shell);
+                command
+                    .args(prepared.args())
+                    .arg("-i")
+                    .env("HOME", &home)
+                    .env("TERM", "dumb")
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped());
+                for (key, value) in prepared.env() {
+                    if let Some(value) = value {
+                        command.env(key, value);
+                    } else {
+                        command.env_remove(key);
+                    }
+                }
+                let mut child = command.spawn().unwrap();
+                child
+                    .stdin
+                    .take()
+                    .unwrap()
+                    .write_all(b"codex\nexit\n")
+                    .unwrap();
+                let output = child.wait_with_output().unwrap();
+                assert!(
+                    String::from_utf8_lossy(&output.stdout).contains("USER_COMMAND"),
+                    "{shell}"
+                );
+                assert!(
+                    String::from_utf8_lossy(&output.stderr)
+                        .contains("existing codex alias or function preserved"),
+                    "{shell}"
+                );
+                drop(prepared);
+                std::fs::remove_dir_all(home).unwrap();
             }
-            let mut child = command.spawn().unwrap();
-            child
-                .stdin
-                .take()
-                .unwrap()
-                .write_all(b"codex\nexit\n")
-                .unwrap();
-            let output = child.wait_with_output().unwrap();
-            assert!(
-                String::from_utf8_lossy(&output.stdout).contains("USER_COMMAND"),
-                "{shell}"
-            );
-            assert!(
-                String::from_utf8_lossy(&output.stderr)
-                    .contains("existing codex alias or function preserved"),
-                "{shell}"
-            );
-            drop(prepared);
-            std::fs::remove_dir_all(home).unwrap();
         }
     }
 
@@ -439,5 +445,217 @@ mod tests {
         assert!(String::from_utf8_lossy(&output.stderr).contains("zsh startup files disabled"));
         drop(prepared);
         std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn fish_preserves_newlines_in_executable_path_and_arguments() {
+        let fish = std::env::var("IVY_TEST_FISH").unwrap_or_else(|_| "/usr/bin/fish".into());
+        if !Path::new(&fish).exists() {
+            eprintln!("fish integration test skipped: {fish} unavailable");
+            return;
+        }
+        let mut random = [0; 8];
+        getrandom::fill(&mut random).unwrap();
+        let home =
+            std::env::temp_dir().join(format!("ivy-fish-newline-{:x}", u64::from_ne_bytes(random)));
+        let bin = home.join("bin\n`touch sentinel`$(touch sentinel)");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(home.join(".config/fish")).unwrap();
+        std::fs::write(
+            home.join(".config/fish/config.fish"),
+            "set -gx PATH $PREPEND_BIN $PATH\n",
+        )
+        .unwrap();
+        let helper = home.join("helper");
+        executable(
+            &helper,
+            "#!/bin/sh\nprintf '%s\\0' \"$@\" > \"$HELPER_LOG\"\nexec \"$@\"\n",
+        );
+        executable(
+            &bin.join("codex"),
+            "#!/bin/sh\nprintf '%s\\0' \"$#\" \"$@\" > \"$CLIENT_LOG\"\n",
+        );
+        let prepared = Prepared::prepare_with_zdotdir(&fish, Some(&helper), None)
+            .unwrap()
+            .unwrap();
+        let mut command = Command::new(&fish);
+        command
+            .args(prepared.args())
+            .arg("-i")
+            .current_dir(&home)
+            .env("HOME", &home)
+            .env("PREPEND_BIN", &bin)
+            .env("HELPER_LOG", home.join("helper-log"))
+            .env("CLIENT_LOG", home.join("client-log"))
+            .env("TERM", "dumb")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        for (key, value) in prepared.env() {
+            if let Some(value) = value {
+                command.env(key, value);
+            } else {
+                command.env_remove(key);
+            }
+        }
+        let mut child = command.spawn().unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"codex '' 'line\nbreak' 'space value'\nexit\n")
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let mut expected = bin.join("codex").as_os_str().as_encoded_bytes().to_vec();
+        expected.extend_from_slice(b"\0\0line\nbreak\0space value\0");
+        assert_eq!(std::fs::read(home.join("helper-log")).unwrap(), expected);
+        assert_eq!(
+            std::fs::read(home.join("client-log")).unwrap(),
+            b"3\0\0line\nbreak\0space value\0"
+        );
+        assert!(!home.join("sentinel").exists());
+        drop(prepared);
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn missing_helper_at_preparation_or_runtime_keeps_real_shells_usable() {
+        let fish = std::env::var("IVY_TEST_FISH").unwrap_or_else(|_| "/usr/bin/fish".into());
+        for shell in ["/bin/bash", "/usr/bin/zsh", fish.as_str()] {
+            if !Path::new(shell).exists() {
+                eprintln!("shell integration test skipped: {shell} unavailable");
+                continue;
+            }
+            for removed_after_preparation in [false, true] {
+                let mut random = [0; 8];
+                getrandom::fill(&mut random).unwrap();
+                let home = std::env::temp_dir().join(format!(
+                    "ivy-missing-helper-{:x}",
+                    u64::from_ne_bytes(random)
+                ));
+                let bin = home.join("bin");
+                std::fs::create_dir_all(&bin).unwrap();
+                let (rc, contents) = if shell.ends_with("bash") {
+                    (home.join(".bashrc"), "export PATH=\"$PREPEND_BIN:$PATH\"\n")
+                } else if shell.ends_with("zsh") {
+                    (home.join(".zshrc"), "export PATH=\"$PREPEND_BIN:$PATH\"\n")
+                } else {
+                    std::fs::create_dir_all(home.join(".config/fish")).unwrap();
+                    (
+                        home.join(".config/fish/config.fish"),
+                        "set -gx PATH $PREPEND_BIN $PATH\n",
+                    )
+                };
+                std::fs::write(&rc, contents).unwrap();
+                let helper = home.join("helper");
+                if removed_after_preparation {
+                    executable(&helper, "#!/bin/sh\nexit 99\n");
+                }
+                let prepared = Prepared::prepare_with_zdotdir(shell, Some(&helper), None).unwrap();
+                assert_eq!(prepared.is_some(), removed_after_preparation);
+                if removed_after_preparation {
+                    std::fs::remove_file(&helper).unwrap();
+                }
+                executable(
+                    &bin.join("codex"),
+                    "#!/bin/sh\nprintf '%s\\0' \"$PANEL_ID\" \"$PANEL_DIR\" \"$@\" > \"$LOG\"\nexit 37\n",
+                );
+                let mut command = Command::new(shell);
+                if let Some(prepared) = &prepared {
+                    command.args(prepared.args());
+                    for (key, value) in prepared.env() {
+                        if let Some(value) = value {
+                            command.env(key, value);
+                        } else {
+                            command.env_remove(key);
+                        }
+                    }
+                } else {
+                    command.env_remove("ZDOTDIR");
+                }
+                command
+                    .arg("-i")
+                    .current_dir(&home)
+                    .env("HOME", &home)
+                    .env("PREPEND_BIN", &bin)
+                    .env("LOG", home.join("log"))
+                    .env("PANEL_ID", "fallback pane")
+                    .env("PANEL_DIR", "fallback directory")
+                    .env("TERM", "dumb")
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped());
+                let mut child = command.spawn().unwrap();
+                let script = if shell.ends_with("fish") {
+                    b"codex resume 'session one' ''\necho CLIENT_STATUS:$status\necho STILL_ALIVE\nexit\n".as_slice()
+                } else {
+                    b"codex resume 'session one' ''\necho CLIENT_STATUS:$?\necho STILL_ALIVE\nexit\n"
+                        .as_slice()
+                };
+                child.stdin.take().unwrap().write_all(script).unwrap();
+                let output = child.wait_with_output().unwrap();
+                let out = String::from_utf8_lossy(&output.stdout);
+                let err = String::from_utf8_lossy(&output.stderr);
+                assert!(output.status.success(), "{shell}: {err}");
+                assert!(out.contains("CLIENT_STATUS:37"), "{shell}: {out}, {err}");
+                assert!(out.contains("STILL_ALIVE"), "{shell}: {out}, {err}");
+                assert_eq!(
+                    std::fs::read(home.join("log")).unwrap(),
+                    b"fallback pane\0fallback directory\0resume\0session one\0\0"
+                );
+                if removed_after_preparation {
+                    assert!(err.contains("codex helper unavailable"), "{shell}: {err}");
+                }
+                assert_eq!(std::fs::read(&rc).unwrap(), contents.as_bytes());
+                drop(prepared);
+                std::fs::remove_dir_all(home).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn unsupported_shell_reports_limitation_and_still_runs_commands() {
+        const CHILD: &str = "IVY_TEST_UNSUPPORTED_SHELL_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            let prepared =
+                Prepared::prepare_with_zdotdir("/bin/sh", Some(Path::new("/bin/sh")), None)
+                    .unwrap();
+            assert!(prepared.is_none());
+            let mut command = Command::new("/bin/sh");
+            command
+                .arg("-i")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            let mut child = command.spawn().unwrap();
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(b"printf '%s\\n' SHELL_USABLE\nexit 0\n")
+                .unwrap();
+            let output = child.wait_with_output().unwrap();
+            assert!(output.status.success());
+            assert!(String::from_utf8_lossy(&output.stdout).contains("SHELL_USABLE"));
+            return;
+        }
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "shell_integration::tests::unsupported_shell_reports_limitation_and_still_runs_commands", "--nocapture"])
+            .env(CHILD, "1")
+            .output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("unsupported shell; automatic Codex panel routing is inactive.")
+        );
     }
 }

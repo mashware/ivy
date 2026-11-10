@@ -2,7 +2,7 @@ if functions -q codex
     echo 'Ivy: existing codex alias or function preserved; automatic panel routing is inactive.' >&2
 else
     function codex
-        set -l ivy_real (command --search codex)
+        set -l ivy_real (command --search codex | string collect)
         if test -z "$ivy_real"
             echo 'Ivy: codex executable not found in PATH.' >&2
             return 127
