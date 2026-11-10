@@ -94,7 +94,7 @@ jobs:
           UBUNTU_VERSION: ${{ matrix.ubuntu }}
         run: |
           docker run --rm --env IVY_DISPOSABLE_CONTAINER=yes \
-            --mount "type=bind,src=$PWD/packaging/linux,dst=/checks,readonly" \
+            --mount "type=bind,src=$PWD,dst=/src,readonly" \
             --mount "type=bind,src=$PWD/dist,dst=/dist,readonly" \
             "ubuntu:$UBUNTU_VERSION" bash -euc '
               set -- /dist/*.deb
@@ -103,7 +103,7 @@ jobs:
               apt-get update -qq
               DEBIAN_FRONTEND=noninteractive apt-get install -y "$package" python3 xvfb xauth xdotool
               dpkg -r ivy-terminal
-              /checks/test-install.sh "$package"
+              /src/packaging/linux/test-install.sh "$package"
             '
 
   arch:
