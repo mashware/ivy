@@ -49,3 +49,7 @@ path = "src/bin/panel-mcp.rs"
 [[bin]]
 name = "ivy-session"
 path = "src/bin/ivy-session.rs"
+
+[[bin]]
+name = "ivy-codex"
+path = "src/bin/ivy-codex.rs"

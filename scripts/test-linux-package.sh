@@ -14,13 +14,14 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 dpkg-deb -x "$package" "$tmp/root"
 dpkg-deb -e "$package" "$tmp/control"
-for binary in app panel-mcp ivy-session; do
+for binary in app panel-mcp ivy-session ivy-codex; do
     [[ -x $tmp/root/usr/lib/ivy-terminal/$binary ]]
     readelf -h "$tmp/root/usr/lib/ivy-terminal/$binary" | grep -q 'Advanced Micro Devices X86-64'
 done
 [[ $(readlink "$tmp/root/usr/bin/ivy") == /usr/lib/ivy-terminal/app ]]
 [[ $(readlink "$tmp/root/usr/bin/panel-mcp") == /usr/lib/ivy-terminal/panel-mcp ]]
 [[ $(readlink "$tmp/root/usr/bin/ivy-session") == /usr/lib/ivy-terminal/ivy-session ]]
+[[ $(readlink "$tmp/root/usr/bin/ivy-codex") == /usr/lib/ivy-terminal/ivy-codex ]]
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 diff -r "$repo/integrations/session-recovery" "$tmp/root/usr/lib/ivy-terminal/session-recovery"
 [[ -s $tmp/control/md5sums ]]

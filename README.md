@@ -170,23 +170,18 @@ command and other settings instead of adding a duplicate. `env_vars` forwards **
 from the launching environment; never save a console's actual `PANEL_ID` or `PANEL_DIR` in `env`.
 See the [official Codex MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
 
-Codex can use a shared background server whose environment lacks the intended console's identity,
-even when its terminal client is already running inside Ivy. Forwarding variables cannot supply
-values missing from that server. A missing-identity error therefore does not by itself mean the
-client was launched outside Ivy, and reopening against the same server can repeat it.
+In a newly opened ordinary Bash, Zsh or Fish console, type `codex`, `codex resume <session-id>`
+or `codex fork <session-id>`. Ivy installs a console-local function after your shell startup and
+uses the external client on your current PATH. For local interactive sessions it checks client help
+and adds `--no-daemon` when supported. Codex 0.167.0 advertises this option; earlier clients without
+it run unchanged with a diagnostic. Ivy changes neither shell startup files nor Codex configuration.
 
-Check `codex --help` for a new session, or `codex resume --help` for a saved session. If the relevant
-command supports `--no-daemon`, run it **inside the intended Ivy console** to bypass the shared server:
-
-```sh
-codex --no-daemon
-# Or resume your saved session, replacing <session-id> with its actual ID:
-codex resume --no-daemon <session-id>
-```
-
-Codex CLI 0.167.0 advertises both forms. If the installed version does not support the option,
-report that client-version limitation instead of passing an unknown flag or hard-coding a console
-identity. Ivy does not modify Codex configuration or restart its processes.
+Existing `codex` aliases or functions take precedence and produce a diagnostic. Explicit
+`command codex`, absolute paths, unsupported shells and shells started with custom arguments bypass
+this integration. Remote mode and administrative commands run unchanged. If automatic integration
+is unavailable, check `codex --help` or `codex resume --help` and use the corresponding
+`--no-daemon` form inside the intended console only when that command advertises it. Never persist
+console identity values or pass an unsupported option.
 
 Tool discovery alone proves no connection to a console. Successful pane-tool calls prove a usable
 connection; observe a test status beside the intended console to confirm the target. To verify

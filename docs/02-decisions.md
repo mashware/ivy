@@ -8698,6 +8698,11 @@ and adding a pane selector to MCP calls (changes the existing endpoint-scoped co
 evidence that it is necessary). Automatic client configuration remains outside this guide.
 
 
+### Codex console-local startup
+
+Ordinary supported shells install a console-local `codex` function after user startup and delegate to the bundled `ivy-codex` launcher. The launcher checks client capability before adding `--no-daemon` to local interactive launches. Existing aliases and functions retain precedence; explicit bypasses remain available. MCP identity forwarding is still required. This avoids changing global shell or Codex configuration and leaves existing recovery intact.
+
+
 ---
 
 ## D74 — Ivy is public free software under GPLv3

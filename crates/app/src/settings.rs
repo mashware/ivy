@@ -2309,7 +2309,7 @@ mod tests {
         /// artifact to satisfy a test, which is the tail wagging the dog.
         const DRAWN_RULE: char = '\u{2500}';
 
-        const SOURCES: [(&str, &str); 48] = [
+        const SOURCES: [(&str, &str); 49] = [
             ("git_process.rs", include_str!("git_process.rs")),
             ("project.rs", include_str!("project.rs")),
             ("project/tests.rs", include_str!("project/tests.rs")),
@@ -2373,6 +2373,7 @@ mod tests {
             ("session.rs", include_str!("session.rs")),
             ("session/ownership.rs", include_str!("session/ownership.rs")),
             ("startup.rs", include_str!("startup.rs")),
+            ("shell_integration.rs", include_str!("shell_integration.rs")),
             ("restoration.rs", include_str!("restoration.rs")),
             ("watcher.rs", include_str!("watcher.rs")),
             ("lib.rs", include_str!("lib.rs")),

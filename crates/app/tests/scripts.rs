@@ -574,6 +574,22 @@ const MODULES: &[(&str, &str)] = &[
     ),
     ("app/src/mouse.rs", include_str!("../src/mouse.rs")),
     ("app/src/opening.rs", include_str!("../src/opening.rs")),
+    (
+        "app/src/opening/codex_tests.rs",
+        include_str!("../src/opening/codex_tests.rs"),
+    ),
+    (
+        "app/src/shell_integration.rs",
+        include_str!("../src/shell_integration.rs"),
+    ),
+    (
+        "panel-control/src/bin/ivy-codex.rs",
+        include_str!("../../panel-control/src/bin/ivy-codex.rs"),
+    ),
+    (
+        "panel-control/tests/ivy_codex_launch.rs",
+        include_str!("../../panel-control/tests/ivy_codex_launch.rs"),
+    ),
     ("app/src/pointer.rs", include_str!("../src/pointer.rs")),
     ("app/src/report.rs", include_str!("../src/report.rs")),
     ("app/src/ligatures.rs", include_str!("../src/ligatures.rs")),

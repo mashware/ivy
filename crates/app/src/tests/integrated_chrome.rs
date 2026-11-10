@@ -490,10 +490,11 @@ mod tests {
             && text.contains("do not assume the client is outside Ivy")
             && text.contains("codex --help")
             && text.contains("codex resume --help")
-            && text.contains("Only if that command supports --no-daemon")
-            && text.contains("run codex --no-daemon or")
-            && text.contains("codex resume --no-daemon <session-id>")
-            && text.contains("client-version limitation")
+            && text.contains("typing codex starts supported local interactive sessions independently")
+            && text.contains("Codex 0.167.0 advertises --no-daemon")
+            && text.contains("use --no-daemon only if supported")
+            && text.contains("Ivy does not edit global shell or Codex configuration")
+            && text.contains("Existing aliases or functions win with a diagnostic")
             && text.contains("not correct-console routing")
             && text.contains("distinct statuses from two separate Codex consoles")
             && text.contains("Never hard-code")
@@ -535,13 +536,11 @@ mod tests {
             "Do not hard-code PANEL_ID or PANEL_DIR",
             "These are variable names, not saved console values.",
             "Tool discovery alone does not prove a connection",
-            "shared background server whose environment lacks this console's identity",
-            "Check codex --help",
-            "codex resume --help",
-            "If that command supports --no-daemon",
+            "type codex normally",
+            "Existing codex aliases or functions take precedence",
+            "check codex --help or codex resume --help",
+            "Only if supported, use --no-daemon",
             "A successful tool call proves a usable connection.",
-            "codex --no-daemon",
-            "codex resume --no-daemon <session-id>",
         ];
         let visible = |shapes: &[egui::epaint::ClippedShape], needle: &str| {
             shapes.iter().any(|clipped| match &clipped.shape {
@@ -555,7 +554,10 @@ mod tests {
             })
         };
         assert!(
-            !visible(&shapes, "codex resume --no-daemon <session-id>"),
+            !visible(
+                &shapes,
+                "A successful tool call proves a usable connection."
+            ),
             "the lower guidance must require scrolling in a normal-height window"
         );
         let mut seen = expected_manual.map(|text| visible(&shapes, text));

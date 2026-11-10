@@ -500,7 +500,7 @@ const SOURCES: &[(&str, &str, usize)] = &[
         include_str!("../src/settings/store.rs"),
         2,
     ),
-    ("src/lib.rs", include_str!("../src/lib.rs"), 6_155),
+    ("src/lib.rs", include_str!("../src/lib.rs"), 6_144),
     (
         "src/startup/migration.rs",
         include_str!("../src/startup/migration.rs"),
@@ -649,6 +649,16 @@ const SOURCES: &[(&str, &str, usize)] = &[
     ),
     ("src/mouse.rs", include_str!("../src/mouse.rs"), 201),
     ("src/opening.rs", include_str!("../src/opening.rs"), 148),
+    (
+        "src/opening/codex_tests.rs",
+        include_str!("../src/opening/codex_tests.rs"),
+        0,
+    ),
+    (
+        "src/shell_integration.rs",
+        include_str!("../src/shell_integration.rs"),
+        11,
+    ),
     // Pointer documentation moved to pointer/header.rs alongside its behavior.
     ("src/pointer.rs", include_str!("../src/pointer.rs"), 623),
     (
