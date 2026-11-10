@@ -131,7 +131,7 @@ pub fn name_of(dir: &Path, id: &str) -> io::Result<Name<'static>> {
     #[cfg(windows)]
     {
         let _ = dir;
-        format!("agent-terminal-{id}").to_ns_name::<GenericNamespaced>()
+        format!("ivy-{id}").to_ns_name::<GenericNamespaced>()
     }
 }
 

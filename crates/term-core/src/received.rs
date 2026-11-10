@@ -35,7 +35,7 @@ impl Received {
         // and two with the same label would otherwise read each other's file.
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "agent-terminal-received-{}-{}-{label}",
+            "ivy-received-{}-{}-{label}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));

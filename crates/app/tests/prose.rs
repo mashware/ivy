@@ -501,6 +501,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         2,
     ),
     ("src/lib.rs", include_str!("../src/lib.rs"), 6_144),
+    (
+        "src/startup/migration.rs",
+        include_str!("../src/startup/migration.rs"),
+        3,
+    ),
     ("src/startup.rs", include_str!("../src/startup.rs"), 51),
     (
         "src/restoration.rs",
@@ -1835,7 +1840,7 @@ fn names_in_spanish(root: &Path) -> Vec<String> {
 /// [`names_in_spanish`] over a tree built for it: what it must report, and what it must leave.
 #[test]
 fn the_names_are_judged_where_the_guard_says() {
-    let root = std::env::temp_dir().join(format!("agent-terminal-names-{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!("ivy-names-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     for dir in ["docs", "prototypes", "prototipos", "pruebas"] {
         std::fs::create_dir_all(root.join(dir)).expect("create a fixture directory");

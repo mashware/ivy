@@ -2094,8 +2094,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn two_consoles_of_the_script_take_different_turns_without_clobbering_each_other() {
-        let root =
-            std::env::temp_dir().join(format!("agent-terminal-turns-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("ivy-turns-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).expect("create the turns directory");
 
@@ -2169,8 +2168,7 @@ mod tests {
             .join("../../scripts/measure-frame.sh")
             .canonicalize()
             .expect("the script lives two levels above this crate");
-        let dir =
-            std::env::temp_dir().join(format!("agent-terminal-compare-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ivy-compare-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create the test directory");
 
@@ -2295,8 +2293,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn every_letter_the_script_offers_goes_through_its_batch_allocation() {
-        let root =
-            std::env::temp_dir().join(format!("agent-terminal-batches-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("ivy-batches-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("scripts")).expect("create the test tree");
         let script = root.join("scripts/measure-frame.sh");

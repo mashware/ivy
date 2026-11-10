@@ -32,7 +32,7 @@ your default terminal, change agent settings, or install agents for you.
 
 To upgrade, close Ivy after saving your work and install the newer `.deb` in the same way. Existing
 programs are not resumed on reopening: the saved layout starts fresh programs. Configuration and
-layout remain in `$XDG_CONFIG_HOME/agent-terminal/`, or `~/.config/agent-terminal/` when the variable
+layout live in `$XDG_CONFIG_HOME/ivy/`, or `~/.config/ivy/` when the variable
 is unset. The installer owns neither location. To remove the package:
 
 ```sh
@@ -247,8 +247,9 @@ Do not disable Gatekeeper globally or remove quarantine attributes as an install
 
 Configure MCP clients with `/Applications/Ivy.app/Contents/MacOS/panel-mcp`, adjusting the prefix
 if the app is installed elsewhere, and launch the client inside Ivy to inherit its pane identity.
-Preferences and layout retain the existing `~/.config/agent-terminal` namespace (or the absolute
-`XDG_CONFIG_HOME` override); this delivery does not migrate them into a different Mac directory.
+Preferences and layout use `~/.config/ivy` (or the absolute `XDG_CONFIG_HOME` override).
+Ivy migrates the previous configuration directory on first launch when the new one is absent;
+see [configuration migration](08-configuration.md).
 
 To update, close Ivy and replace the existing application with the new DMG's Ivy.app. To remove
 it, close it and move Ivy.app to the Trash. Both operations preserve preferences and saved layouts;
@@ -296,7 +297,7 @@ Start. No Rust compiler is required. There is no PATH modification or default-te
 
 Close Ivy before installing a newer version into the same location. Remove it through Windows
 Settings → Apps → Installed apps → Ivy → Uninstall. Preferences and saved layouts are preserved;
-the installer never owns the `agent-terminal` user-data directory. Restoring a layout launches fresh
+the installer never owns the `ivy` user-data directory. Restoring a layout launches fresh
 processes rather than resuming old programs. The Windows MCP/control listener still requires its
 separate portability delivery; the bundled bridge alone does not enable MCP on Windows.
 

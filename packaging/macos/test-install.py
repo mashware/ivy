@@ -32,7 +32,7 @@ def main():
                 raise ValueError("DMG has no Applications drop target")
             installed = root / "Applications/Ivy.app"
             installed.parent.mkdir()
-            config = root / "config/agent-terminal"
+            config = root / "config/ivy"
             config.mkdir(parents=True)
             expected = {"config": b"existing preferences\n", "layout.json": b"existing saved layout\n"}
             for name, content in expected.items():

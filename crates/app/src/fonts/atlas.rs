@@ -142,7 +142,7 @@ impl Glyphs {
             // run out of room to store them.
             if !self.said_the_ceiling {
                 eprintln!(
-                    "agent-terminal: the color glyph atlas ({ATLAS_SIDE}x{ATLAS_SIDE} \
+                    "ivy: the color glyph atlas ({ATLAS_SIDE}x{ATLAS_SIDE} \
                      pixels) has filled. Emojis not already in it will keep coming out in \
                      monochrome."
                 );

@@ -215,7 +215,7 @@ impl PtyOutput {
         // here, the bytes are owed to a program that is not asking for them.
         //
         // **Neither line may take the window down, and `eprintln!` would.** It panics when the
-        // write fails, so `agent-terminal | head` — a closed pipe on standard error — killed the
+        // write fails, so `ivy | head` — a closed pipe on standard error — killed the
         // window at the exact moment a console had something to say. The failure predates this
         // delivery by one statement and is fixed in both, because leaving one of two adjacent lines
         // able to panic is worse than the shape it protects.
@@ -386,13 +386,41 @@ impl Silences {
 /// it**.
 ///
 /// `eprintln!` panics when the write fails — a closed pipe on standard error, which is all
-/// `agent-terminal | head` takes — and a window that dies because it had something to say is worse
+/// `ivy | head` takes — and a window that dies because it had something to say is worse
 /// than the silence the sentence was written against. What cannot be delivered is dropped: there is
 /// no third channel to complain on.
 fn say(sentence: &str) {
+    static REPORTER: std::sync::OnceLock<Option<std::sync::mpsc::SyncSender<String>>> =
+        std::sync::OnceLock::new();
+    if let Some(sender) = REPORTER.get_or_init(|| query_reporter(write_diagnostic)) {
+        let _ = sender.try_send(sentence.to_owned());
+    }
+}
+
+fn write_diagnostic(sentence: &str) {
     use std::io::Write;
 
     let _ = writeln!(std::io::stderr().lock(), "{sentence}");
+}
+
+// A program can flood queries while stderr's reader stops draining. Neither may park the frame.
+fn say_query_error(error: &dyn std::fmt::Display) {
+    say(&format!("ivy: could not answer terminal query: {error}"));
+}
+
+fn query_reporter(
+    mut write: impl FnMut(&str) + Send + 'static,
+) -> Option<std::sync::mpsc::SyncSender<String>> {
+    let (sender, receiver) = std::sync::mpsc::sync_channel::<String>(1);
+    std::thread::Builder::new()
+        .name("terminal-query-errors".into())
+        .spawn(move || {
+            for sentence in receiver {
+                write(&sentence);
+            }
+        })
+        .ok()
+        .map(|_| sender)
 }
 
 /// Decides what is left to say about a console that stopped receiving: whether it has earned a line
@@ -459,11 +487,11 @@ impl QuietConsole {
         // Measured, and recorded in **D38**.
         Some(match os_error {
             Some(number) => format!(
-                "agent-terminal: this console stopped receiving: read failed ({kind:?}, os error \
+                "ivy: this console stopped receiving: read failed ({kind:?}, os error \
                  {number})"
             ),
             None => {
-                format!("agent-terminal: this console stopped receiving: read failed ({kind:?})")
+                format!("ivy: this console stopped receiving: read failed ({kind:?})")
             }
         })
     }
@@ -502,7 +530,12 @@ fn pump_pane(pane: &mut crate::Pane, enabled: crate::agent_signals::Enabled) -> 
     // added a reading of its own to the span it was meant to measure.
     let collected_at = Instant::now();
     pane.signals.configure(enabled, &mut pane.screen);
-    pane.screen.advance(&pane.received);
+    if let Err(error) = pane
+        .screen
+        .advance_with_replies(&pane.received, |reply| pane.pty.write(reply))
+    {
+        say_query_error(&error);
+    }
     let queried = pane.signals.sync_native(&mut pane.screen, collected_at);
     // Automatic replies must not consume the backlog reserved for the person's input.
     if pane
@@ -583,6 +616,65 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{Duration, Instant};
     use term_core::{Pty, Size};
+
+    #[test]
+    fn pump_diagnostics_do_not_wait_for_a_full_stderr_pipe() {
+        const CHILD: &str = "IVY_TEST_DIAGNOSTICS_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            let message = "x".repeat(128 * 1024);
+            say_query_error(&message);
+            say(&message);
+            return;
+        }
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "pty_output::tests::pump_diagnostics_do_not_wait_for_a_full_stderr_pipe",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        // Keep stderr open without reading. A synchronous diagnostic cannot finish this write.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                assert!(status.success());
+                break;
+            }
+            if Instant::now() >= deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!("the pump diagnostic waited for an undrained stderr pipe");
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    #[test]
+    fn query_error_reporting_is_bounded_when_the_log_sink_stops_reading() {
+        let (entered, started) = channel();
+        let (release, resume) = channel();
+        let mut first = true;
+        let sender = query_reporter(move |_| {
+            if first {
+                first = false;
+                entered.send(()).unwrap();
+                resume.recv().unwrap();
+            }
+        })
+        .expect("start query error reporter");
+        sender.try_send("first".into()).unwrap();
+        started.recv_timeout(Duration::from_secs(2)).unwrap();
+        sender.try_send("queued".into()).unwrap();
+        assert!(matches!(
+            sender.try_send("overflow".into()),
+            Err(std::sync::mpsc::TrySendError::Full(_))
+        ));
+        release.send(()).unwrap();
+    }
 
     /// Waits for something to hold, with a cap so a failure comes out as a failure and not as a
     /// test hung forever.
@@ -1109,7 +1201,7 @@ mod tests {
         assert_eq!(
             quiet.look(failed(70)).as_deref(),
             Some(
-                "agent-terminal: this console stopped receiving: read failed (Uncategorized, os \
+                "ivy: this console stopped receiving: read failed (Uncategorized, os \
                  error 70)"
             )
         );
@@ -1124,7 +1216,7 @@ mod tests {
 
         assert_eq!(
             quiet.look(failed_namelessly()).as_deref(),
-            Some("agent-terminal: this console stopped receiving: read failed (InvalidData)")
+            Some("ivy: this console stopped receiving: read failed (InvalidData)")
         );
     }
 
@@ -1534,13 +1626,13 @@ impl DeafConsole {
         self.said = true;
         Some(if backlog.gave_up {
             format!(
-                "agent-terminal: this console can no longer be typed into: the program stopped \
+                "ivy: this console can no longer be typed into: the program stopped \
                  accepting input with {} byte(s) still owed to it",
                 backlog.bytes
             )
         } else {
             format!(
-                "agent-terminal: the program in this console is not taking what you type: {} \
+                "ivy: the program in this console is not taking what you type: {} \
                  byte(s) have been waiting {:?}. Everything typed since then, Ctrl+C included, is \
                  queued behind it",
                 backlog.bytes, backlog.waiting

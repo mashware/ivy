@@ -373,7 +373,7 @@ mod tests {
     impl Temp {
         fn new() -> Self {
             let path = std::env::temp_dir().join(format!(
-                "agent-terminal-viewer-{}-{}",
+                "ivy-viewer-{}-{}",
                 std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));

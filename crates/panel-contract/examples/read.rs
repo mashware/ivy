@@ -254,7 +254,7 @@ struct Filler {
 /// Three ways to spend 256 KiB, from the most realistic to the two extremes.
 fn fillers_at_the_cap() -> Vec<Filler> {
     // The shape a real panel has: objects with reference, text, mark, style and link.
-    let real_line = r##"{"ref": "#12", "text": "extract Division from the window and leave it alone", "mark": "done", "style": "ok", "link": "https://github.com/mashware/agent-terminal/pull/31"}"##;
+    let real_line = r##"{"ref": "#12", "text": "extract Division from the window and leave it alone", "mark": "done", "style": "ok", "link": "https://github.com/mashware/ivy-history-private/pull/31"}"##;
     // The worst case by number of nodes: the smallest object that is still a line.
     let minimal_line = r#"{"text":"x"}"#;
 

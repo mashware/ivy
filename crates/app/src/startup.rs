@@ -5,7 +5,11 @@ use crate::{
     session, settings, size_at_startup,
 };
 
+mod migration;
+
 pub fn run() -> eframe::Result {
+    let measuring = any_measurement_variable(|which| std::env::var_os(which).is_some());
+    migration::prepare(measuring).map_err(|error| eframe::Error::AppCreation(Box::new(error)))?;
     // **The file is read HERE and not inside the first frame**, and it is a decision: reading from
     // disk inside the path that is measured would put a disk wait into the frame in exchange for
     // nothing. What is read comes in through the `move` of the closure below, already interpreted
@@ -29,7 +33,6 @@ pub fn run() -> eframe::Result {
     // rules—, so it could write to disk during the run while its control batch had writing vetoed:
     // two different regimes being compared row by row in the annex. And the script only demands
     // that the writes be declared in the batches that drag, so nobody would have caught that one's.
-    let measuring = any_measurement_variable(|which| std::env::var_os(which).is_some());
     if measuring {
         persistence.forbid_overwrite("a measurement batch asked for this session");
     }

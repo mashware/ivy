@@ -1,6 +1,12 @@
 # The settings file
 
-Where it goes: **`$XDG_CONFIG_HOME/agent-terminal/config`** — or `~/.config/agent-terminal/config` if
+On the first normal launch after the rename, Ivy moves the previous configuration directory to
+`ivy` if `ivy` does not exist. Settings, layout and recovery files move together unchanged. An
+existing `ivy` directory takes precedence; the two directories are never merged. A failed move
+stops startup rather than silently resetting preferences. Measurement runs skip this migration.
+See [D87](02-decisions.md#d87--ivy-owns-its-runtime-and-configuration-names).
+
+Where it goes: **`$XDG_CONFIG_HOME/ivy/config`** — or `~/.config/ivy/config` if
 you do not have that variable set. Next to `layout.json`, which stores the opted-in arrangement and recovery context; this file can be written by hand or through Settings.
 
 **If it does not exist, the terminal opens one fresh console.** You do not have to create it.
@@ -70,7 +76,7 @@ control characters are refused. An observed title is text only, never a command 
 
 ### Client setup
 
-The client must publish its session name in its terminal title. Agent-terminal does not change
+The client must publish its session name in its terminal title. Ivy does not change
 client settings or read private session files to obtain a name.
 
 - **Codex:** run `/title` and include the **thread** item. To keep only that item, the documented
@@ -84,7 +90,7 @@ client settings or read private session files to obtain a name.
   [Claude Code settings](https://code.claude.com/docs/en/settings-reference#terminaltitlefromrename).
 - **OpenCode:** enable terminal-title updates in the client. Current CLI documentation calls the
   setting `terminal.title`; check the documentation matching your installed version. The client
-  can publish a prefix such as `OC |` and shorten long titles, which agent-terminal keeps intact.
+  can publish a prefix such as `OC |` and shorten long titles, which ivy keeps intact.
   See [OpenCode terminal settings](https://opencode.ai/docs/cli/config#terminal) and its
   [title publication code](https://github.com/anomalyco/opencode/blob/dev/packages/tui/src/app.tsx).
 
@@ -176,7 +182,7 @@ The footer stays separate from scrolling content, with **Save and close** as its
 **Save changes** as its secondary action, and Cancel and Restore defaults alongside them. Notices
 and validation errors occupy a bounded area so they do not push saving outside the window.
 
-**Saved changes apply without restarting agent-terminal or its programs.** Opening Settings, editing
+**Saved changes apply without restarting ivy or its programs.** Opening Settings, editing
 and Cancel change neither the running terminal nor the file. Restore defaults stages removal of
 the supported overrides; only Save writes and applies them. Blank fields inherit the built-in default; `none` unbinds an action. Explicit
 colours still override the selected theme. The cursor override retains its focus rules and its
@@ -442,7 +448,7 @@ From then on that chord **reaches the program running inside**. It is what lets 
 **The last one you write wins**, and you are told which one is left with no chord:
 
 ```
-agent-terminal: 'close-pane' is left without a shortcut: its chord goes to 'split-right', which comes later
+ivy: 'close-pane' is left without a shortcut: its chord goes to 'split-right', which comes later
 ```
 
 ### Copy and paste are not rebound: copy is only switched off
@@ -462,7 +468,7 @@ Any other value is rejected and you are told why — giving it another chord wou
 would never work:
 
 ```
-agent-terminal: line 3: the chord for 'key.copy' is the desktop's and cannot be changed; the only thing you can do is turn it off with 'none'
+ivy: line 3: the chord for 'key.copy' is the desktop's and cannot be changed; the only thing you can do is turn it off with 'none'
 ```
 
 ## What happens if you get it wrong
@@ -471,7 +477,7 @@ agent-terminal: line 3: the chord for 'key.copy' is the desktop's and cannot be 
 and what is wrong with it on the error output, and **the rest is applied**:
 
 ```
-agent-terminal: line 7: 'purple' is not valid for 'color.3'
+ivy: line 7: 'purple' is not valid for 'color.3'
 ```
 
 Up to twenty lines with problems are reported; if there are more, you are told how many were left

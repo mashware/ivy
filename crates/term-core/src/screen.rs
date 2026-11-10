@@ -292,6 +292,28 @@ impl Screen {
         }
     }
 
+    /// Interprets output and returns audited protocol replies through the host's ordered writer.
+    ///
+    /// Replies are collected only for this call, with a 16 KiB ceiling. An unsupported reply,
+    /// overflow or refused write is an error; no pending reply queue survives to grow on later calls.
+    /// Color, clipboard, title and pixel-size requests remain unanswered.
+    pub fn advance_with_replies(
+        &mut self,
+        bytes: &[u8],
+        mut write: impl FnMut(&[u8]) -> crate::Result<()>,
+    ) -> crate::Result<()> {
+        self.titles.begin_replies();
+        self.advance(bytes);
+        let batch = self.titles.end_replies();
+        if let Some(error) = batch.error {
+            return Err(error.into());
+        }
+        if !batch.bytes.is_empty() {
+            write(&batch.bytes)?;
+        }
+        Ok(())
+    }
+
     /// The latest usable title explicitly published by this screen's program.
     ///
     /// This is transient terminal metadata, not an authenticated session identity. The parser's
