@@ -23,8 +23,9 @@ pub(crate) struct State {
     activate: Option<usize>,
     /// The cards of the last painting in reading order, with where each sat in the grid.
     order: Vec<layout::Slot>,
-    /// The part of the board that was on screen last frame, in board coordinates.
-    viewport: egui::Rect,
+    /// The part of the board on screen last frame, in board coordinates, with the area it was
+    /// painted in.
+    viewport: Option<(egui::Rect, egui::Rect)>,
     scroll_selected: bool,
     blocked_frame: Option<u64>,
     awaiting_release: bool,
@@ -46,7 +47,7 @@ impl Default for State {
             pressed: None,
             activate: None,
             order: Vec::new(),
-            viewport: egui::Rect::NOTHING,
+            viewport: None,
             scroll_selected: false,
             blocked_frame: None,
             awaiting_release: false,

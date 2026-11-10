@@ -198,7 +198,7 @@
 # Open variants must navigate to a different live focus; deadlines are reported but
 # not required because the dumping load does not isolate an idle deadline wake. Every
 # board batch, closed ones included, runs the project probe over two real repositories,
-# so the open board has two sections; the «Other consoles» path is left to the tests.
+# so the open board has two repository sections; a folder identity is left to the tests.
 # Ligature variants: ligatures-on/off use the same pinned font, fractional size,
 # geometry, ASCII programming scene and load; only the runtime switch differs.
 # Projects variant: four visible panes use two real Git repositories; their directory sources
@@ -326,10 +326,11 @@ check_board_report() {
         [ "$BOARD_WORK" -gt 0 ] && [ "$1" -gt 0 ] && [ "$2" -ge "$DIRECTORIES" ] && [ "$3" -gt 0 ] && [ "$6" -gt 0 ] && [ "$7" -gt 0 ] || invalidate "open Board variant omitted actual open, card, navigation or focus effects"
         # The project probe gives every open run two repositories; fewer means the grouping path was
         # never taken, and the run would be published as the board's cost without it. «Other
-        # consoles» is not counted, so one repository plus Other cannot pass for two. The frames
-        # projected before the projects resolved are declared as `ungrouped`, not invalidated:
-        # every open run has some, because resolving runs in the background.
+        # consoles» is not counted, so one repository plus Other cannot pass for two.
         [ "$4" -ge 2 ] || invalidate "open Board variant grouped its consoles into fewer than two repositories"
+        # Frames projected before the projects resolved carry no repository and are declared as
+        # `ungrouped`; they may be a handful, never half the run, or the span measures the wrong board.
+        [ $(($5 * 2)) -lt "$1" ] || invalidate "open Board variant spent half its open frames before grouping"
         [ "$7" -le "$6" ] || invalidate "Board focus changes exceed accepted navigation"
     else
         [ "$BOARD_COUNTS" = '0 0 0 0 0 0 0 0' ] || invalidate "Board activity leaked into a closed or historical variant"
@@ -391,7 +392,7 @@ validate_project_records() {
                 } else if (batch ~ /^board-/) {
                     # The board covers the headers while open, so no painted floor: resolved identities
                     # are what the grouping needs, one per console.
-                    if (a[1] != "true" || a[2] != "true" || a[4]+0 < consoles || frames < 1) exit 1
+                    if (consoles+0 < 1 || a[1] != "true" || a[2] != "true" || a[4]+0 < consoles || frames < 1) exit 1
                 } else if (a[1] != "false" || a[2] != "false" || a[3]+0 != 0 || a[4]+0 != 0 || a[5]+0 != 0 || frames != 0) exit 1
             }
         }

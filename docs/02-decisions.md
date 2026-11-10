@@ -9239,9 +9239,11 @@ once (D13); no performance figure is claimed before repeated valid runs.
 - **Arrows follow the grid.** ←/→ move one card in reading order, ↑/↓ one grid row in the same
   column, clamped to the last card of a shorter row.
 - **Measured with two projects.** The board batches turn on the existing project probe so the board
-  they measure has two sections with headers — the shape it has in use — rather than one. The
-  grouping cost is inside the board span either way. The probe never produces a folder or an
-  unresolved console, so the «Other consoles» path is covered by tests, not by the bench.
+  they measure has two repository sections with headers — the shape it has in use — rather than
+  one. The report counts repository sections only («Other consoles» never passes for one), as the
+  most any single frame grouped, and declares as `ungrouped` the frames projected before the
+  projects resolved. The grouping cost is inside the board span either way. The probe never
+  produces a folder identity, so that path is covered by tests, not by the bench.
 
 Discarded for B1: a new module beside the Overview (it would re-prove the input rules), grouping by
 display name, sections for folders, and variable-height cards (they arrive with B3's blocks).

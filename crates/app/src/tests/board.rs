@@ -193,6 +193,68 @@ mod tests {
     }
 
     #[test]
+    fn the_board_scrolls_only_to_bring_a_card_and_its_header_into_sight() {
+        use crate::project::Key;
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 4]);
+        integrated(&mut window);
+        let ctx = egui::Context::default();
+        let small = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 480.0));
+        for pane in window.all_panes_mut() {
+            pane.project = Some(crate::project_view::Badge {
+                key: Key::Repository("/work/ivy/.git".into()),
+                name: "Ivy".to_owned(),
+                details: String::new(),
+                ink: egui::Color32::RED,
+                painted: Default::default(),
+            });
+        }
+        let names: Vec<usize> = window.all_panes().map(|pane| pane.name).collect();
+        let pass = |window: &mut Window, events| {
+            ui_pass(
+                window,
+                &ctx,
+                small,
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+            )
+        };
+        pass(&mut window, chord_with(egui::Key::O));
+        pass(&mut window, vec![key(egui::Key::End)]);
+        pass(&mut window, vec![]);
+        assert!(
+            window.board.card_rect(names[0]).is_none(),
+            "eight cards in two columns do not fit 480 points, so End must scroll the first away"
+        );
+        pass(&mut window, vec![key(egui::Key::Home)]);
+        let shapes = pass(&mut window, vec![]);
+        let header_seen = shapes.iter().any(|s| {
+            matches!(&s.shape, egui::Shape::Text(t)
+            if t.galley.text() == "Ivy" && small.contains(t.pos)
+                && t.galley.job.sections.first().is_some_and(|section| {
+                    section.format.font_id.family == egui::FontFamily::Monospace
+                }))
+        });
+        assert!(
+            header_seen,
+            "Home brought the first card back without its section header"
+        );
+        let before = window
+            .board
+            .card_rect(names[0])
+            .expect("first card on screen");
+        pass(&mut window, vec![key(egui::Key::ArrowRight)]);
+        pass(&mut window, vec![]);
+        assert_eq!(window.board.selected(), Some(names[1]));
+        assert_eq!(
+            window.board.card_rect(names[0]),
+            Some(before),
+            "moving to a card already in sight scrolled the board"
+        );
+    }
+
+    #[test]
     fn a_card_paints_its_claim_and_its_warning() {
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
         integrated(&mut window);

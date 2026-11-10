@@ -32,6 +32,7 @@ pub(crate) fn toggle(window: &mut Window, ctx: &egui::Context) {
         window.board.pressed = None;
         window.board.activate = None;
         window.board.order.clear();
+        window.board.viewport = None;
         cancel_gestures(window, ctx);
         window.board.blocked_frame = Some(ctx.cumulative_frame_nr());
     }

@@ -1175,6 +1175,7 @@ fn board_guards_require_real_navigation_and_reject_closed_activity() {
         ("projected=32", "projected=3"),
         ("painted=24", "painted=0"),
         ("repositories=2", "repositories=1"),
+        ("ungrouped=3", "ungrouped=4"),
         ("navigation=2", "navigation=0"),
         ("focus=1", "focus=0"),
         ("focus=1", "focus=3"),

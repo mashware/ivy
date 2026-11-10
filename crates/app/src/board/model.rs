@@ -14,20 +14,26 @@ pub(super) struct Entry {
 }
 
 pub(super) enum Kind {
-    Repository { ink: Color32 },
+    Repository { name: String, ink: Color32 },
     Other,
 }
 
 pub(super) struct Section {
-    pub(super) name: String,
     pub(super) kind: Kind,
     pub(super) entries: Vec<Entry>,
 }
 
 impl Section {
+    pub(super) fn name(&self) -> &str {
+        match &self.kind {
+            Kind::Repository { name, .. } => name,
+            Kind::Other => OTHER,
+        }
+    }
+
     pub(super) fn ink(&self) -> Option<Color32> {
         match self.kind {
-            Kind::Repository { ink } => Some(ink),
+            Kind::Repository { ink, .. } => Some(ink),
             Kind::Other => None,
         }
     }
@@ -80,12 +86,12 @@ pub(super) fn group(consoles: Vec<(Option<Membership>, Entry)>) -> Vec<Section> 
                 sections.push((
                     key,
                     Section {
-                        name: membership
-                            .as_ref()
-                            .map_or_else(|| OTHER.to_owned(), |m| m.name.clone()),
                         kind: membership
                             .as_ref()
-                            .map_or(Kind::Other, |m| Kind::Repository { ink: m.ink }),
+                            .map_or(Kind::Other, |m| Kind::Repository {
+                                name: m.name.clone(),
+                                ink: m.ink,
+                            }),
                         entries: Vec::new(),
                     },
                 ));
@@ -188,7 +194,12 @@ mod tests {
     fn shape(sections: &[Section]) -> Vec<(String, Vec<usize>)> {
         sections
             .iter()
-            .map(|s| (s.name.clone(), s.entries.iter().map(|e| e.pane).collect()))
+            .map(|s| {
+                (
+                    s.name().to_owned(),
+                    s.entries.iter().map(|e| e.pane).collect(),
+                )
+            })
             .collect()
     }
     #[test]

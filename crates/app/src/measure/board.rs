@@ -50,8 +50,8 @@ impl Board {
     /// One projection's repository sections — «Other consoles» never counts. `repositories` keeps
     /// the most any projection grouped: a maximum, not a sum, because summed over frames a board
     /// that grouped one repository would still reach any floor the script sets. `ungrouped` counts
-    /// the projections that grouped none — a board opened before its projects resolved — so the
-    /// frames averaged into the span without the grouping path are declared, not hidden.
+    /// the projections with no repository section — a board opened before its projects resolved,
+    /// or one with none — so the frames averaged into the span without a repository are declared.
     pub(crate) fn grouped(&mut self, repositories: usize) {
         self.repositories = self.repositories.max(repositories);
         self.ungrouped += usize::from(repositories == 0);

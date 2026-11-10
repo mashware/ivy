@@ -2694,6 +2694,18 @@ mod tests {
                 false,
             ),
             ("run", "board-4-closed", disabled.into(), false),
+            (
+                "run",
+                "board-4-open",
+                valid.replace("enabled=true", "enabled=false"),
+                false,
+            ),
+            (
+                "run",
+                "board-4-open",
+                valid.replace("frames=9", "frames=0"),
+                false,
+            ),
             ("compare", "", String::new(), true),
             ("compare", "", valid.clone(), true),
             ("compare", "", format!("{valid}{timing}"), false),

@@ -14,7 +14,7 @@ pub(super) struct Card {
     pub(super) rect: Rect,
     /// What has to be on screen for the card to be seen in context: the card, and its section's
     /// header when the card sits on the section's first row.
-    pub(super) reveal: Rect,
+    pub(super) context: Rect,
     /// Row of the whole board, counted across sections, which is what ↑/↓ move along.
     pub(super) row: usize,
     pub(super) column: usize,
@@ -61,7 +61,7 @@ pub(super) fn layout(counts: &[usize], width: f32, line: f32) -> Layout {
             );
             cards.push(Card {
                 rect,
-                reveal: if row == 0 { rect.union(header) } else { rect },
+                context: if row == 0 { rect.union(header) } else { rect },
                 row: first_row + row,
                 column,
             });
@@ -146,12 +146,12 @@ mod tests {
         );
         assert!(wide.headers[1].top() > wide.cards[2].rect.bottom());
         assert!(
-            wide.cards[3].reveal.contains_rect(wide.headers[1]),
+            wide.cards[3].context.contains_rect(wide.headers[1]),
             "a first-row card brings its header"
         );
         let tall = layout(&[4], 300.0, 17.0);
         assert_eq!(
-            tall.cards[1].reveal, tall.cards[1].rect,
+            tall.cards[1].context, tall.cards[1].rect,
             "a later row brings only itself"
         );
     }

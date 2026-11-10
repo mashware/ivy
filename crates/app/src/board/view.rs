@@ -55,6 +55,13 @@ pub(super) fn paint(window: &mut Window, parent: &mut egui::Ui, area: Rect, sect
         })
         .collect();
     let scroll_selected = std::mem::take(&mut window.board.scroll_selected);
+    // A viewport only describes the screen it was taken on: one from another window size, or from
+    // before the board was last closed, would call an off-screen card visible.
+    let last_viewport = window
+        .board
+        .viewport
+        .filter(|(on, _)| *on == area)
+        .map_or(Rect::NOTHING, |(_, viewport)| viewport);
     window.board.painted.clear();
     let mut scroll = egui::ScrollArea::vertical()
         .id_salt("board-list")
@@ -63,12 +70,12 @@ pub(super) fn paint(window: &mut Window, parent: &mut egui::Ui, area: Rect, sect
         && let Some(offset) = entries()
             .position(|e| Some(e.pane) == selected)
             .and_then(|index| grid.cards.get(index))
-            .and_then(|card| reveal(card.reveal, window.board.viewport))
+            .and_then(|card| reveal(card.context, last_viewport))
     {
         scroll = scroll.vertical_scroll_offset(offset);
     }
     scroll.show_viewport(&mut ui, |ui, viewport| {
-        window.board.viewport = viewport;
+        window.board.viewport = Some((area, viewport));
         let origin = ui.max_rect().min.to_vec2();
         ui.allocate_rect(
             Rect::from_min_size(origin.to_pos2(), egui::vec2(width, grid.height)),
@@ -110,9 +117,9 @@ pub(super) fn paint(window: &mut Window, parent: &mut egui::Ui, area: Rect, sect
     }
 }
 
-/// The scroll offset that brings `target` fully on screen with the least movement, or `None` when
-/// last frame's viewport already shows it — so a selection that is in sight never makes the board
-/// jump.
+/// The scroll offset that brings `target` on screen with the least movement, or `None` when last
+/// frame's viewport already shows it whole, so a selection in sight never makes the board jump. A
+/// target taller than the viewport, or no previous viewport, aligns the target's top.
 fn reveal(target: Rect, viewport: Rect) -> Option<f32> {
     if !viewport.is_positive() {
         return Some(target.top());
@@ -142,11 +149,11 @@ fn paint_header(ui: &egui::Ui, rect: Rect, section: &Section, theme: &Theme, fon
         1 => "1 console".to_owned(),
         n => format!("{n} consoles"),
     };
-    // The count is laid out first so a long project name is the one that gets cut, never the count.
+    // The count is laid out first so a long project name is cut before the count is.
     let count = text(ui, &consoles, rect.right() - x, font, muted(theme));
     let name = text(
         ui,
-        &section.name,
+        section.name(),
         (rect.right() - x - count.size().x - 12.0).max(0.0),
         font,
         theme.foreground(),
@@ -340,6 +347,12 @@ mod tests {
             reveal(card(350.0), Rect::NOTHING),
             Some(350.0),
             "first frame"
+        );
+        let tall = Rect::from_min_size(egui::pos2(0.0, 150.0), egui::vec2(200.0, 400.0));
+        assert_eq!(
+            reveal(tall, viewport),
+            Some(150.0),
+            "taller than the screen: top aligns"
         );
     }
 }
