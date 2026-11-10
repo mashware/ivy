@@ -1330,9 +1330,7 @@ fn no_file_of_a_finished_crate_is_still_named_in_spanish() {
 /// it closed is what makes the guard below safe to break the build with — and the failure message
 /// says so, because the fix for a genuine foreign name is to add it here, not to widen the rule.
 const NOT_OURS: &[&str] = &[
-    // **AppKit and Electron names.** The macOS window-button module cites the class it rejected and
-    // the Electron option whose approach it follows.
-    "NSToolbar",
+    // **An Electron option.** The macOS window-button module cites the one whose approach it follows.
     "trafficLightPosition",
     // **Standard-library waits, not names of this tree.** `waits.rs` cites the ones it judges and the
     // ones it deliberately does not.

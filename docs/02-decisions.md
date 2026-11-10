@@ -8342,6 +8342,10 @@ Native window gestures use viewport commands and explicit edge/corner resize tar
 
 Discarded: rebuilding the tree for zoom (loses restoration), reducing hidden pump budgets (blocks programs), deriving names/state from output (D6), separate hard-coded chrome colors (ignores configuration), and relabelling historical measurements as integrated chrome (D13).
 
+**10 November 2026 — #34, the first sight of it on a Mac.** The integrated titlebar keeps macOS's own close, minimize and zoom buttons, and on a real Mac two things were wrong: AppKit still drew the window title over the header's own logo and name, and it centred the buttons in its ~28-point titlebar, about ten points above the header's icons. The title is hidden (`titleVisibility`), and the buttons are moved into the header: AppKit's titlebar container is grown to the header's height and each button centred in it, on a whole device pixel. AppKit lays that container out again on its own, so the frames are compared every pass, written only when they differ, and a correction asks for one more pass, a few in a row at most. Full screen is left to AppKit, and any hierarchy other than the expected one leaves the buttons alone. The work is chrome work and is timed in its span (D13). It is unverified until seen on a Mac: clicks on the header's own buttons across its whole height, a double-click that zooms once, and the buttons' hover glyphs.
+
+Discarded: a unified `NSToolbar`, which centres the buttons by itself but whose view hit-tests above the content and would take the clicks meant for the header's buttons; shrinking the header to AppKit's 28 points on macOS only, which would make the approved header differ per platform — kept as the fallback if the Mac shows that the grown container takes those clicks; and observing AppKit's layout notifications, which needs an Objective-C observer for a correction a compare-on-every-pass already makes.
+
 ## D67 — Appearance groups a theme with its overrides and keeps saving in a fixed footer
 
 **Decided for [#331](https://github.com/mashware/agent-terminal/issues/331)** after the user approved

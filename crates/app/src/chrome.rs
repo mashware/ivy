@@ -16,6 +16,9 @@ pub(crate) struct Chrome {
     guide: connection::Guide,
     updates: updates::Dialog,
     held: bool,
+    /// Passes in a row that had to move macOS's window buttons back.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    buttons_moved: u8,
     blocked_frame: Option<u64>,
     cost: Duration,
     frame: Duration,
@@ -92,7 +95,6 @@ pub(crate) use crate::opening::chrome_viewport as viewport;
 mod branding;
 mod connection;
 mod menu;
-#[cfg(target_os = "macos")]
 mod traffic_lights;
 pub(crate) mod typography;
 mod updates;

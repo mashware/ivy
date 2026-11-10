@@ -197,7 +197,14 @@ pub(crate) fn begin_pass(window: &mut Window, ui: &mut egui::Ui, frame: &eframe:
     if window.chrome.enabled() {
         let started = Instant::now();
         let header = f64::from(super::HEIGHT * ui.ctx().zoom_factor());
-        super::traffic_lights::center(frame, header);
+        if super::traffic_lights::center(frame, header) {
+            window.chrome.buttons_moved = window.chrome.buttons_moved.saturating_add(1);
+            if window.chrome.buttons_moved <= 3 {
+                ui.ctx().request_repaint();
+            }
+        } else {
+            window.chrome.buttons_moved = 0;
+        }
         window.chrome.record_work(started.elapsed());
     }
     #[cfg(not(target_os = "macos"))]
