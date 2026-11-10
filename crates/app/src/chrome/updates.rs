@@ -35,7 +35,7 @@ impl Dialog {
 
 pub(super) fn open(window: &mut Window, ctx: &egui::Context, check: bool) {
     if window.settings_editor.is_open()
-        || crate::summary::blocked(window, ctx)
+        || crate::board::blocked(window, ctx)
         || window.pane_view.is_modal()
         || window.chrome.guide.blocked(ctx)
     {
@@ -48,7 +48,7 @@ pub(super) fn open(window: &mut Window, ctx: &egui::Context, check: bool) {
     if check {
         window.chrome.updates.service.check(ctx);
     }
-    crate::summary::cancel_gestures(window, ctx);
+    crate::board::cancel_gestures(window, ctx);
     claim_input(ctx);
     ctx.request_repaint();
 }

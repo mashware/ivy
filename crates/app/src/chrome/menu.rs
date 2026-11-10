@@ -42,9 +42,9 @@ pub(super) fn show(
         ("Markdown viewer", Action::Viewer(true), None, true),
         ("Git diff viewer", Action::Viewer(false), None, false),
         (
-            "Overview",
-            Action::Overview,
-            Some(crate::keyboard::Action::Overview),
+            "Board",
+            Action::Board,
+            Some(crate::keyboard::Action::Board),
             true,
         ),
         ("Connect agents", Action::Connect, None, true),

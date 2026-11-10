@@ -378,7 +378,7 @@ impl Window {
         self.viewer.publish(to)?;
         self.projects.publish(to)?;
         self.restoration.publish(to)?;
-        self.summary.timing.publish(to)?;
+        self.board.timing.publish(to)?;
         self.saving.publish(to)?;
         // **And discovery the same: its row goes after the rest because it too is discounted from
         // it.** It is the most expensive span this project adds outside a console, so without
@@ -447,5 +447,5 @@ fn close_views(window: &mut Window) {
     window.settings_editor.close_frame();
     window.chrome.close_frame();
     window.viewer.close_frame();
-    window.summary.timing.close_frame();
+    window.board.timing.close_frame();
 }

@@ -1,5 +1,7 @@
-//! Read-only live Overview. Its state never owns a console or producer authority.
+//! Read-only live board of every console, grouped by project. Its state never owns a console or
+//! producer authority.
 mod input;
+mod layout;
 mod model;
 pub(crate) mod probe;
 mod view;
@@ -19,11 +21,15 @@ pub(crate) struct State {
     painted: Vec<(usize, egui::Rect)>,
     pressed: Option<(usize, egui::Rect)>,
     activate: Option<usize>,
-    order: Vec<usize>,
+    /// The cards of the last painting in reading order, with where each sat in the grid.
+    order: Vec<layout::Slot>,
+    /// The part of the board on screen last frame, in board coordinates, with the area it was
+    /// painted in.
+    viewport: Option<(egui::Rect, egui::Rect)>,
     scroll_selected: bool,
     blocked_frame: Option<u64>,
     awaiting_release: bool,
-    pub(crate) timing: crate::measure::Overview,
+    pub(crate) timing: crate::measure::Board,
 }
 
 impl Default for State {
@@ -41,10 +47,11 @@ impl Default for State {
             pressed: None,
             activate: None,
             order: Vec::new(),
+            viewport: None,
             scroll_selected: false,
             blocked_frame: None,
             awaiting_release: false,
-            timing: crate::measure::Overview::default(),
+            timing: crate::measure::Board::default(),
         }
     }
 }
@@ -58,7 +65,7 @@ impl State {
         self.selected
     }
     #[cfg(test)]
-    pub(crate) fn row_rect(&self, id: usize) -> Option<egui::Rect> {
+    pub(crate) fn card_rect(&self, id: usize) -> Option<egui::Rect> {
         self.painted
             .iter()
             .find(|(name, _)| *name == id)
@@ -70,26 +77,35 @@ pub(crate) use input::{before_keys, blocked, cancel_gestures, toggle};
 
 /// Runs only after active and background panel refresh, preserving normal PTY geometry.
 pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, area: egui::Rect) {
-    if !window.summary.enabled || !window.summary.open {
+    if !window.board.enabled || !window.board.open {
         return;
     }
     let started = Instant::now();
-    let rows = model::project(window, std::time::SystemTime::now());
-    window.summary.timing.saw_open();
-    window.summary.timing.projected(rows.len());
-    window.summary.selected =
-        model::reconcile(window.summary.selected, window.summary.ordinal, &rows);
-    window.summary.order = rows.iter().map(|row| row.pane).collect();
-    window.summary.ordinal = rows
+    let sections = model::sections(window, std::time::SystemTime::now());
+    let panes: Vec<usize> = sections
         .iter()
-        .position(|r| Some(r.pane) == window.summary.selected)
+        .flat_map(|s| &s.entries)
+        .map(|entry| entry.pane)
+        .collect();
+    window.board.timing.saw_open();
+    window.board.timing.projected(panes.len());
+    window.board.timing.grouped(
+        sections
+            .iter()
+            .filter(|s| matches!(s.kind, model::Kind::Repository { .. }))
+            .count(),
+    );
+    window.board.selected = model::reconcile(window.board.selected, window.board.ordinal, &panes);
+    window.board.ordinal = panes
+        .iter()
+        .position(|pane| Some(*pane) == window.board.selected)
         .unwrap_or(0);
-    view::paint(window, ui, area, &rows);
-    if let Some(target) = window.summary.activate.take() {
+    view::paint(window, ui, area, &sections);
+    if let Some(target) = window.board.activate.take() {
         activate(window, ui.ctx(), target);
     }
-    window.summary.timing.record_work(started.elapsed());
-    window.timed_separately += window.summary.timing.take_cost();
+    window.board.timing.record_work(started.elapsed());
+    window.timed_separately += window.board.timing.take_cost();
 }
 
 pub(crate) fn activate(window: &mut crate::Window, ctx: &egui::Context, target: usize) {
@@ -112,7 +128,7 @@ pub(crate) fn activate(window: &mut crate::Window, ctx: &egui::Context, target: 
     {
         window.pane_view.clear(tab.name);
     }
-    window.summary.timing.navigation(changed);
-    window.summary.original = None;
+    window.board.timing.navigation(changed);
+    window.board.original = None;
     input::close(window, ctx);
 }

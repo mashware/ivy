@@ -107,7 +107,7 @@ enum Action {
     SplitDown,
     NewTab,
     Search,
-    Overview,
+    Board,
     Connect,
     Updates(bool),
     Menu,
@@ -187,7 +187,7 @@ pub(crate) fn paint_button_icon(
             p.circle_stroke(at(-1.5, -1.5), 6.5 * scale, stroke);
             line((4.0, 4.0), (9.0, 9.0));
         }
-        "Overview" => {
+        "Board" => {
             outline((-9.0, -8.0), (9.0, 8.0), 2.0);
             for y in [-4.0, 0.0, 4.0] {
                 line((-5.0, y), (5.0, y));
@@ -286,7 +286,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         ("−", "Minimize window", Action::Minimize),
         ("☰", "Menu", Action::Menu),
         ("⌕", "Search console", Action::Search),
-        ("≡", "Overview", Action::Overview),
+        ("≡", "Board", Action::Board),
         ("", "Connect agents", Action::Connect),
     ];
     let skip = if cfg!(target_os = "macos") { 3 } else { 0 };
@@ -407,10 +407,10 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     window.chrome.record_work(elapsed);
     if window.settings_editor.is_open()
         || !ui.is_enabled()
-        || (crate::summary::blocked(window, &ctx)
+        || (crate::board::blocked(window, &ctx)
             && !matches!(
                 action,
-                Some(Action::Overview | Action::Minimize | Action::Maximize | Action::Close)
+                Some(Action::Board | Action::Minimize | Action::Maximize | Action::Close)
             ))
     {
         return owned;
@@ -456,7 +456,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
                 crate::search::apply(&mut pane.search, &mut pane.screen, steps);
             }
         }
-        Some(Action::Overview) => crate::summary::toggle(window, &ctx),
+        Some(Action::Board) => crate::board::toggle(window, &ctx),
         Some(Action::Connect) => connection::open(window, &ctx),
         Some(Action::Updates(check)) => updates::open(window, &ctx, check),
         Some(Action::Menu) => window.chrome.menu = !window.chrome.menu,

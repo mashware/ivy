@@ -2523,7 +2523,7 @@ pub enum Action {
     ScrollToTop,
     ScrollToBottom,
     Search,
-    Overview,
+    Board,
 }
 
 impl Action {
@@ -2542,7 +2542,7 @@ impl Action {
             Self::ScrollToTop => "scroll-to-top",
             Self::ScrollToBottom => "scroll-to-bottom",
             Self::Search => "search",
-            Self::Overview => "overview",
+            Self::Board => "board",
         }
     }
 
@@ -2568,7 +2568,7 @@ pub const ALL: [Action; 13] = [
     Action::ScrollToTop,
     Action::ScrollToBottom,
     Action::Search,
-    Action::Overview,
+    Action::Board,
 ];
 
 /// A chord: the modifier keys needed, and the key.
@@ -2735,7 +2735,7 @@ impl Default for Keymap {
                 (scrollback(Key::End), Action::ScrollToBottom),
                 // WezTerm's and Alacritty's chord for the same thing (D61).
                 (with_the_chord(Key::F), Action::Search),
-                (with_the_chord(Key::O), Action::Overview),
+                (with_the_chord(Key::O), Action::Board),
             ],
         }
     }
@@ -2810,7 +2810,7 @@ mod keymap_tests {
             ("scroll-to-top", "shift+home", Action::ScrollToTop),
             ("scroll-to-bottom", "shift+end", Action::ScrollToBottom),
             ("search", "ctrl+shift+f", Action::Search),
-            ("overview", "ctrl+shift+o", Action::Overview),
+            ("board", "ctrl+shift+o", Action::Board),
         ];
         assert_eq!(
             published.len(),
@@ -2870,7 +2870,7 @@ mod keymap_tests {
             (scrollback(Key::Home), Action::ScrollToTop),
             (scrollback(Key::End), Action::ScrollToBottom),
             (with_the_chord(Key::F), Action::Search),
-            (with_the_chord(Key::O), Action::Overview),
+            (with_the_chord(Key::O), Action::Board),
         ];
 
         for (chord, expected) in factory {

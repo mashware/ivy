@@ -329,7 +329,7 @@ fn initial_window(
         chrome: crate::chrome::Chrome::default(),
         pane_view: crate::pane_view::State::default(),
         clipboard: crate::clipboard::Service::default(),
-        summary: crate::summary::State::default(),
+        board: crate::board::State::default(),
         viewer: crate::viewer::State::default(),
         projects: crate::project_view::State::default(),
         restoration: crate::restoration::State::default(),

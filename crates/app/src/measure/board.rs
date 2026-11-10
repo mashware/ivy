@@ -1,9 +1,9 @@
-//! Overview-only input, projection and paint enqueue work, excluding ordinary pane refresh.
+//! Board-only input, projection and paint enqueue work, excluding ordinary pane refresh.
 use super::Series;
 use std::{io::Write, time::Duration};
 
 #[derive(Default)]
-pub(crate) struct Overview {
+pub(crate) struct Board {
     mode: Option<bool>,
     cost: Duration,
     frame: Duration,
@@ -14,12 +14,14 @@ pub(crate) struct Overview {
     open_frames: usize,
     projected: usize,
     painted: usize,
+    repositories: usize,
+    ungrouped: usize,
     navigations: usize,
     focus_changes: usize,
     deadlines: usize,
 }
 
-impl Overview {
+impl Board {
     pub(crate) fn set_mode(&mut self, mode: &str) {
         self.mode = match mode {
             "closed" => Some(false),
@@ -39,11 +41,20 @@ impl Overview {
     pub(crate) fn saw_open(&mut self) {
         self.open = true;
     }
-    pub(crate) fn projected(&mut self, rows: usize) {
-        self.projected += rows;
+    pub(crate) fn projected(&mut self, cards: usize) {
+        self.projected += cards;
     }
-    pub(crate) fn painted(&mut self, rows: usize) {
-        self.painted += rows;
+    pub(crate) fn painted(&mut self, cards: usize) {
+        self.painted += cards;
+    }
+    /// One projection's repository sections — «Other consoles» never counts. `repositories` keeps
+    /// the most any projection grouped: a maximum, not a sum, because summed over frames a board
+    /// that grouped one repository would still reach any floor the script sets. `ungrouped` counts
+    /// the projections with no repository section — a board opened before its projects resolved,
+    /// or one with none — so the frames averaged into the span without a repository are declared.
+    pub(crate) fn grouped(&mut self, repositories: usize) {
+        self.repositories = self.repositories.max(repositories);
+        self.ungrouped += usize::from(repositories == 0);
     }
     /// Call after resolving and accepting a live identity, with the observed focus transition.
     pub(crate) fn navigation(&mut self, focus_changed: bool) {
@@ -65,7 +76,7 @@ impl Overview {
     pub(crate) fn publish(&self, to: &mut dyn Write) -> std::io::Result<()> {
         writeln!(
             to,
-            "overview mode: {}",
+            "board mode: {}",
             match self.mode {
                 None => "historical",
                 Some(false) => "closed",
@@ -74,15 +85,17 @@ impl Overview {
         )?;
         writeln!(
             to,
-            "overview application: frames={}, total={:?}, {} (input, projection and paint enqueue; excludes pane refresh and tessellation)",
+            "board application: frames={}, total={:?}, {} (input, projection and paint enqueue; excludes pane refresh and tessellation)",
             self.work.total, self.total, self.work
         )?;
         writeln!(
             to,
-            "overview witnesses: open={}, projected={}, painted={}, navigation={}, focus={}, deadlines={}",
+            "board witnesses: open={}, projected={}, painted={}, repositories={}, ungrouped={}, navigation={}, focus={}, deadlines={}",
             self.open_frames,
             self.projected,
             self.painted,
+            self.repositories,
+            self.ungrouped,
             self.navigations,
             self.focus_changes,
             self.deadlines
@@ -95,7 +108,7 @@ mod tests {
     use super::*;
     #[test]
     fn repeated_passes_are_subtracted_once_and_recorded_as_one_frame() {
-        let mut timing = Overview::default();
+        let mut timing = Board::default();
         timing.record_work(Duration::from_micros(7));
         timing.saw_open();
         assert_eq!(timing.take_cost(), Duration::from_micros(7));
@@ -115,6 +128,21 @@ mod tests {
         assert_eq!(
             timing.work.total, 2,
             "sub-clock work is still one actual frame"
+        );
+    }
+
+    #[test]
+    fn repositories_keep_the_most_one_projection_grouped_and_empty_ones_are_declared() {
+        let mut timing = Board::default();
+        for repositories in [0, 1, 1, 0] {
+            timing.grouped(repositories);
+        }
+        let mut report = Vec::new();
+        timing.publish(&mut report).unwrap();
+        let report = String::from_utf8(report).unwrap();
+        assert!(
+            report.contains("repositories=1, ungrouped=2,"),
+            "two one-repository frames must not add up to two repositories: {report}"
         );
     }
 }

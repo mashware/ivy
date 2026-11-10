@@ -514,14 +514,14 @@ scripts through the file transport.
 The decision, its reasons and what was discarded are in **D85**. Milestones in delivery order; each
 one leaves a usable board.
 
-- [ ] **B1 — The board replaces the Overview.** Same entry points (the global control and
+- [x] **B1 — The board replaces the Overview.** Same entry points (the global control and
   `key.overview`, renamed `key.board`, default `ctrl+shift+o`). One global board, sections grouped
   by project identity (D79: the common Git directory, so worktrees share a section); consoles with no
   project go to «Other consoles». Every live console gets an automatic card built from its existing
   panel document: title, claim, phase and its first steps. The bar keeps the claim counts. Activating
   a card focuses its console, with D68's rules for reordering, vanished targets and maximized
   layouts. Nothing new is published yet, so this milestone needs no contract change. The Overview's
-  code, its measurement span and its batches are removed or renamed in the same delivery.
+  code, its measurement span and its batches are removed or renamed in the same delivery. — done (#40)
 - [ ] **B2 — Project roadmaps from a file.** `roadmap.<name> = <path>` in the settings file and the
   settings screen; the project is the Git repository that contains the file. Milestones are Markdown
   task items (`- [x]` / `- [ ]`), the first unchecked one is in progress, and the board shows a

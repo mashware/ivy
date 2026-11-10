@@ -51,8 +51,9 @@ use std::collections::VecDeque;
 use std::fmt;
 use std::time::{Duration, Instant};
 
+mod board;
 mod header;
-mod overview;
+pub(crate) use board::Board;
 /// What the per-session half exports, **named one by one rather than globbed**.
 ///
 /// A glob would let a later item cross the seam without anybody deciding it had, and this module's
@@ -63,7 +64,6 @@ pub use header::{
     Rasterizing, ReadingSettings, Reflow, Restoring, Saving, Searching, SessionHeader,
     SizeInPoints, Strips, TabBar, header, side,
 };
-pub(crate) use overview::Overview;
 
 /// How many samples are kept of each number.
 ///
@@ -2009,7 +2009,7 @@ mod tests {
         typed_into.record_outbound(ms(1));
 
         let mut window_spans = Vec::new();
-        Overview::default()
+        Board::default()
             .publish(&mut window_spans)
             .expect("memory report");
         // Use the real producer so the script's chrome witnesses are tied to its output.
@@ -2674,6 +2674,38 @@ mod tests {
                 false,
             ),
             ("run", "projects", String::new(), false),
+            // The board covers the headers, so it carries no painted floor, only resolved ones.
+            (
+                "run",
+                "board-4-open",
+                valid.replace("painted=8", "painted=0"),
+                true,
+            ),
+            (
+                "run",
+                "board-4-open",
+                valid.replace("resolved=4", "resolved=3"),
+                false,
+            ),
+            (
+                "run",
+                "board-4-closed",
+                valid.replace("probe=true", "probe=false"),
+                false,
+            ),
+            ("run", "board-4-closed", disabled.into(), false),
+            (
+                "run",
+                "board-4-open",
+                valid.replace("enabled=true", "enabled=false"),
+                false,
+            ),
+            (
+                "run",
+                "board-4-open",
+                valid.replace("frames=9", "frames=0"),
+                false,
+            ),
             ("compare", "", String::new(), true),
             ("compare", "", valid.clone(), true),
             ("compare", "", format!("{valid}{timing}"), false),
@@ -2683,6 +2715,7 @@ mod tests {
             let status = std::process::Command::new("sh")
                 .args(["-c", &function, "project-guard", mode, batch])
                 .env("REPORT", &report)
+                .env("DIRECTORIES", "4")
                 .status()
                 .unwrap();
             assert_eq!(

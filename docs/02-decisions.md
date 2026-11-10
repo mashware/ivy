@@ -9217,3 +9217,33 @@ freshness covers.
 **Limits.** Project identity outside Linux depends on OSC 7 reports (D79). A roadmap with no task
 items shows a notice, not a guessed progress. Board work is named in the frame report and subtracted
 once (D13); no performance figure is claimed before repeated valid runs.
+
+**B1 — how the first board is built ([#40](https://github.com/mashware/ivy/issues/40)).**
+
+- **The Overview is renamed in place, not rebuilt beside it.** Its input layer — the screen owns
+  the keyboard and pointer for the whole opening and closing frame, closing restores the original
+  focus, activation goes by stable pane name — is D68's hard-won part and is kept as it is. What
+  changes is the projection (a grouping axis) and the painting (sections of cards instead of rows).
+  `key.overview` becomes `key.board` with no alias: Ivy has no users to migrate.
+- **A section is a Git repository.** The grouping key is the project key D79 already resolves, not
+  its display name, which is a presentation rule. A console whose identity is a plain folder keeps
+  its header badge (D79) but sits under «Other consoles»: D85 defines the project as the repository
+  that contains the roadmap file, and a folder has none. The mismatch between header and board is
+  accepted on purpose.
+- **Order.** Sections by the strongest claim among their consoles, with D68's order of claims; ties
+  by the first console in tab and tree order; «Other consoles» last. Inside a section, D68's order.
+- **Cards have a fixed size.** D68's rule that long metadata cannot grow a row over its neighbours
+  carries over to cards. A card shows the console's name and tab, the claim only when there is one,
+  the phase, the freshness warning and the first three nonempty body lines literally. The filler «No
+  attention requested» is gone; «No published state» stays, because an empty card would say nothing.
+- **Arrows follow the grid.** ←/→ move one card in reading order, ↑/↓ one grid row in the same
+  column, clamped to the last card of a shorter row.
+- **Measured with two projects.** The board batches turn on the existing project probe so the board
+  they measure has two repository sections with headers — the shape it has in use — rather than
+  one. The report counts repository sections only («Other consoles» never passes for one), as the
+  most any single frame grouped, and declares as `ungrouped` the frames projected before the
+  projects resolved. The grouping cost is inside the board span either way. The probe never
+  produces a folder identity, so that path is covered by tests, not by the bench.
+
+Discarded for B1: a new module beside the Overview (it would re-prove the input rules), grouping by
+display name, sections for folders, and variable-height cards (they arrive with B3's blocks).

@@ -45,6 +45,7 @@ pub(crate) mod control;
 mod pane_view;
 mod resume;
 use panel::pane::{identity_of, panel_or_none};
+mod board;
 pub mod fonts;
 mod git_process;
 mod header;
@@ -67,7 +68,6 @@ mod search;
 pub mod session;
 pub mod settings;
 mod startup;
-mod summary;
 mod tab_bar;
 pub mod theme;
 mod tiling;
@@ -326,7 +326,7 @@ const MEASUREMENT_VARIABLES: [&str; 6] = [
     SIZE_VARIABLE,
     DRAGS_VARIABLE,
     GESTURE_VARIABLE,
-    "MEASURE_OVERVIEW",
+    "MEASURE_BOARD",
 ];
 
 /// How many cells the panel's border is pushed **on every drag frame** of the injected gesture.
@@ -909,7 +909,7 @@ struct Window {
     chrome: chrome::Chrome,
     pane_view: pane_view::State,
     clipboard: clipboard::Service,
-    summary: summary::State,
+    board: board::State,
     viewer: viewer::State,
     projects: project_view::State,
     restoration: restoration::State,
@@ -1252,7 +1252,7 @@ impl eframe::App for Window {
     /// it is the path of whoever uses the application.
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         settings::editor::inject(self, raw_input);
-        summary::probe::inject(self, raw_input, ctx);
+        board::probe::inject(self, raw_input, ctx);
         let Some(injected_drags) = self.injected_drags.as_mut() else {
             return;
         };
@@ -1390,10 +1390,10 @@ impl eframe::App for Window {
         clipboard::deliver(self, ui.ctx());
         let metrics = CellMetrics::measure(ui.ctx(), egui::FontId::monospace(self.font_size));
 
-        // Settings claims its input before the console dispatcher. Its named work is discounted
+        // The board claims its input before the console dispatcher. Its named work is discounted
         // from frame accounting; outbound latency still includes this earlier application work.
-        let mut overview_owned = summary::before_keys(self, ui, &metrics);
-        let pane_owned = !overview_owned && pane_view::before_keys(self, ui, &metrics);
+        let mut board_owned = board::before_keys(self, ui, &metrics);
+        let pane_owned = !board_owned && pane_view::before_keys(self, ui, &metrics);
         if pane_owned {
             if !self.pane_view.is_renaming() {
                 ui.style_mut().visuals.disabled_alpha = 1.0;
@@ -1402,9 +1402,8 @@ impl eframe::App for Window {
         }
         let chrome_owned = chrome::before_keys(self, ui, &metrics);
         self.timed_separately += self.chrome.take_cost();
-        overview_owned |= summary::blocked(self, ui.ctx());
-        let (viewer_owned, requests) =
-            viewer::keys(self, ui, &metrics, pane_owned || overview_owned);
+        board_owned |= board::blocked(self, ui.ctx());
+        let (viewer_owned, requests) = viewer::keys(self, ui, &metrics, pane_owned || board_owned);
         let area = ui.max_rect();
 
         // **The order is applied before tiling**, so that what gets painted in this same frame is
@@ -1421,7 +1420,7 @@ impl eframe::App for Window {
         self.answer_the_windows_requests(ui.ctx(), area, &metrics);
 
         pane_view::reconcile(self);
-        let overlay_owns_pointer = viewer_owned || overview_owned || pane_owned || chrome_owned;
+        let overlay_owns_pointer = viewer_owned || board_owned || pane_owned || chrome_owned;
         let header_owns_pointer =
             overlay_owns_pointer || header::menu::pointer_blocked(self, ui.ctx());
         if header_owns_pointer {
@@ -1929,12 +1928,12 @@ mod tests {
         }
     }
     mod agent_signals;
+    #[path = "board.rs"]
+    mod board;
     mod context_clipboard;
     mod header_controls;
     mod integrated_chrome;
     pub(crate) mod markdown;
-    #[path = "overview.rs"]
-    mod overview;
     mod pane_rename;
     mod settings_chrome;
     mod settings_editor;
@@ -6775,7 +6774,7 @@ mod tests {
             chrome: chrome::Chrome::default(),
             pane_view: pane_view::State::default(),
             clipboard: clipboard::Service::default(),
-            summary: summary::State::default(),
+            board: crate::board::State::default(),
             viewer: viewer::State::default(),
             projects: project_view::State::default(),
             restoration: restoration::State::default(),
@@ -15946,7 +15945,7 @@ mod tests {
                 "MEASURE_SIZE",
                 "MEASURE_DRAGS",
                 "MEASURE_GESTURE",
-                "MEASURE_OVERVIEW"
+                "MEASURE_BOARD"
             ],
             "the list the vetoes of a measurement batch hang from is no longer the one the script exports"
         );

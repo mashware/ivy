@@ -54,7 +54,7 @@ New tabs retain their existing directory behaviour.
 ## Pane names and agent session titles
 
 A console without a manual name follows the **terminal title published by its program**. Its
-header and Overview use the same name. A shell or another program can publish a title too; the
+header and the board use the same name. A shell or another program can publish a title too; the
 terminal does not infer which agent or session is running. Client prefixes and shortened names
 are kept as published.
 
@@ -419,7 +419,7 @@ key.close-pane = none
 | `scroll-page-up` · `scroll-page-down` | goes up and down the scrollback | `shift+pageup` · `shift+pagedown` |
 | `scroll-to-top` · `scroll-to-bottom` | goes to the ends of the scrollback | `shift+home` · `shift+end` |
 | `search` | searches the focused console's scrollback; pressed again, closes the search | `ctrl+shift+f` |
-| `overview` | opens or closes the global task summary | `ctrl+shift+o` |
+| `board` | opens or closes the board of every console, grouped by project | `ctrl+shift+o` |
 
 **A chord is written with `+`**, in any order and regardless of case: `ctrl+shift+e`, `shift+prior`,
 `alt+f4`. `ctrl`, `shift` and `alt` are valid, and **at least one is required**: without one you
@@ -540,30 +540,38 @@ console temporarily hides its siblings; restoring reveals their original order a
 Hidden programs keep running. Right-clicking a header retains its console action menu without an overflow button.
 
 
-## Global task Overview
+## Board
 
-The global **Overview** control shows every console in every tab, including a console hidden by
+The global **Board** control shows every console in every tab, including a console hidden by
 maximization or a folded information panel. The default shortcut is **Ctrl+Shift+O**:
 
 ```text
-key.overview = ctrl+shift+o
+key.board = ctrl+shift+o
 ```
 
-Like other bindings, it can be changed or disabled with `key.overview = none`, which returns the
-chord to the program when Overview is closed. The Shortcuts section in Settings edits the same key.
+Like other bindings, it can be changed or disabled with `key.board = none`, which returns the
+chord to the program when the board is closed. The Shortcuts section in Settings edits the same key.
+`key.overview`, the name before the board, is no longer understood and is reported as an unknown key.
 
-Entries put producer-declared waiting work before blocked work, then finished work, then consoles
-with no declared claim. Each entry shows its console and tab names, literal phase, up to three
-nonempty lines of the panel and any warning about old or unreadable state. A missing claim means
-**No attention requested**, not proof that the program is working; a console with no document says
-**No published state**. When no console has a document, the screen says **No task state has been
-published yet** and still lists all consoles.
+The board has one section per Git repository, named as the console header names that project, and
+a last section, **Other consoles**, for consoles outside any repository — a plain folder included,
+even though its header shows a project name. Sections that hold waiting work come before sections
+with blocked work, then finished work, then sections with no declared claim.
 
-Click an entry, or use Up/Down/Home/End and Enter, to open its console. A hidden target restores its
-tab's arrangement before taking focus. Escape, Close or the Overview control returns to the console.
-Opening and closing the screen preserves console dimensions, programs, history and panel ownership.
-All programs continue running. Producer actions and links are inert here; return to the console to
-use them. Settings and Overview open separately so a settings draft is not discarded.
+Each console is a card of fixed size. Inside a section, waiting work comes before blocked work, then
+finished work, then consoles with no declared claim. A card shows the console and tab names, the
+claim when there is one, the literal phase, any warning about old or unreadable state and up to
+three nonempty lines of the panel. A console with no document says **No published state**. When no
+console has a document, the screen says **No task state has been published yet** and still shows
+every console.
+
+Click a card, or move with the arrows and press Enter, to open its console: Left/Right go one card in
+reading order, Up/Down one row of the grid, Home/End to the first and last card. A hidden target
+restores its tab's arrangement before taking focus. Escape, Close or the Board control returns to
+the console. Opening and closing the screen preserves console dimensions, programs, history and
+panel ownership. All programs continue running. Producer actions and links are inert here; return
+to the console to use them. Settings and the board open separately so a settings draft is not
+discarded.
 
 ## Markdown and Git diff viewers
 
