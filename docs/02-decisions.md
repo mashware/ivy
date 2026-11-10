@@ -8393,6 +8393,10 @@ Settings design. The console/panel preview still shows the draft theme and expli
 
 ## D68 — Overview projects live panes and preserves console geometry
 
+> **Superseded by D85 (November 2026).** The Overview screen is replaced by the board. Its input
+> rules — activation by stable pane name, vanished targets, maximized layouts, no PTY geometry
+> change — carry over to the board unchanged; the excerpt of three panel lines does not.
+
 **Decided.** Overview is a read-only window screen over the console area. Each live pane appears
 once, identified by its existing stable name and its current tab. Its display name is the name
 already used by the console strip. The first three nonempty producer lines are shown literally;
@@ -9157,3 +9161,59 @@ is rechecked strictly. Detached helpers cannot promote foreign, background or ne
 A failed live client is distinct from an already opened fallback shell. The former is replaced on
 explicit takeover, including clipboard and mouse paths; stale TUI input modes cannot reach the new
 shell. A held paste remains a pending user question until answered or dismissed explicitly.
+
+## D85 — The board replaces the Overview: project roadmaps from files, blocks owned by their console
+
+**Decided (November 2026).** The Overview screen (D68) is replaced by one global board, grouped by
+project identity (D79). Each project section starts with that project's roadmap and holds one card
+per live console working in it. The board shows three kinds of content, and each kind has exactly
+one owner:
+
+- **A project's roadmap comes from a file in its repository.** The user names it in the settings
+  (`roadmap.<name> = <path>`); the project is the Git repository containing that file. Milestones are
+  Markdown task items, the first unchecked one is in progress, and the board shows a window around it
+  (`roadmap.window`, two done and three next by default). It is repainted when the file changes. A
+  configured project appears even with no console open.
+- **A console's card starts from its existing panel document**, so every console with a panel is on
+  the board without publishing anything new.
+- **Blocks are published by producers**, over MCP or as a file in `PANEL_DIR`, and belong to the
+  console that published them. A producer reaches only its own blocks. A block leaves the board when
+  its console closes, and an old block is dimmed by its declared freshness.
+
+**Why.** The Overview repeated each panel cut to three lines; it knew nothing the panels did not
+already say. The user wants a surface that shows what they chose to watch. The design follows from
+three facts:
+
+- MCP is scoped by `PANEL_ID`, so a shared canvas several agents edit in turns would need either a
+  hole in that rule or a lock nobody can enforce. One owner per block needs neither.
+- A roadmap belongs to a project, not to a console. Several consoles in one project would publish
+  competing copies, and a project with no console would have none. The file in the repository is
+  already the single source; concurrent edits are git's problem, not the app's.
+- An agent acts only on its own turns. State that changes outside it — a pull request merged on the
+  forge — would go stale in an agent's block. A script on a loop keeps it current at no token cost,
+  which is why the file transport is part of the contract and not an afterthought (D17).
+
+The app learns that a console closed from its own close path and from the reading's end (D38); no
+producer has to report it. A console whose agent exited while its shell stays open is the case that
+freshness covers.
+
+**What was discarded, and why:**
+
+- **An embedded web view the agents control.** It runs content somebody else wrote inside the app,
+  with network access, which D72 already refused for the document viewers, and it adds a heavy web
+  engine dependency on three platforms. Blocks are rendered natively and inert.
+- **Turn-based editing of one shared canvas.** It contradicts MCP scoping and needs a lock with no
+  owner. Per-console ownership removes the need.
+- **Per-tab boards.** Most tabs hold one or two consoles; the board would be nearly empty.
+- **A roadmap published by an agent.** Several consoles in one project would compete, and the board
+  would lose the roadmap whenever no agent was working there.
+- **Showing a large roadmap whole, or one chosen section.** A whole file does not fit a block; a
+  section needs a convention every repository would have to adopt. A window of milestones around the
+  one in progress works on any task list.
+- **The app running a refresh command for a block.** It would be code execution from a published
+  document. A script the user starts in a console does the same job inside the existing trust model.
+- **Charts.** No case yet; they can come later as one more block kind.
+
+**Limits.** Project identity outside Linux depends on OSC 7 reports (D79). A roadmap with no task
+items shows a notice, not a guessed progress. Board work is named in the frame report and subtracted
+once (D13); no performance figure is claimed before repeated valid runs.
