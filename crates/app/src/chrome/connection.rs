@@ -192,7 +192,16 @@ fn claim_input(ctx: &egui::Context) {
     });
 }
 
-pub(crate) fn begin_pass(window: &mut Window, ui: &mut egui::Ui) {
+pub(crate) fn begin_pass(window: &mut Window, ui: &mut egui::Ui, frame: &eframe::Frame) {
+    #[cfg(target_os = "macos")]
+    if window.chrome.enabled() {
+        let started = Instant::now();
+        let header = f64::from(super::HEIGHT * ui.ctx().zoom_factor());
+        super::traffic_lights::center(frame, header);
+        window.chrome.record_work(started.elapsed());
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = frame;
     crate::settings::editor::runtime::begin_pass(window, ui.ctx());
     super::typography::begin_pass(window, ui.ctx());
     super::updates::begin_pass(window, ui);

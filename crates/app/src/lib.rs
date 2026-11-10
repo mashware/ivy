@@ -1385,8 +1385,8 @@ impl eframe::App for Window {
         }
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        chrome::begin_pass(self, ui);
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        chrome::begin_pass(self, ui, frame);
         clipboard::deliver(self, ui.ctx());
         let metrics = CellMetrics::measure(ui.ctx(), egui::FontId::monospace(self.font_size));
 

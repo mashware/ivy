@@ -92,6 +92,8 @@ pub(crate) use crate::opening::chrome_viewport as viewport;
 mod branding;
 mod connection;
 mod menu;
+#[cfg(target_os = "macos")]
+mod traffic_lights;
 pub(crate) mod typography;
 mod updates;
 pub(crate) use branding::native_options;

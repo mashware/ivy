@@ -139,6 +139,21 @@ arboard = { version = "3.6.1", default-features = false }
 # unsupported compositors can use arboard's X11/XWayland fallback.
 arboard = { version = "3.6.1", default-features = false, features = ["wayland-data-control"] }
 
+# Centring macOS's own window buttons in the integrated header (`chrome/traffic_lights.rs`). All
+# three are already in the tree through eframe at these versions; only their features are named.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "NSButton",
+    "NSControl",
+    "NSResponder",
+    "NSView",
+    "NSWindow",
+    "objc2-core-foundation",
+] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSGeometry"] }
+raw-window-handle = "0.6.2"
+
 # **A development dependency is not «it does not touch the binary», and this is where that was
 # learnt.** They take part in version resolution: adding `fontique` here — before it moved up to
 # production, above — pushed `windows-sys` from 0.59 to 0.60 for `arboard`, the clipboard, which

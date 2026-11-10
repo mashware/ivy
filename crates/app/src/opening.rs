@@ -705,6 +705,8 @@ pub(crate) fn chrome_viewport(
         builder
             .with_fullsize_content_view(true)
             .with_titlebar_shown(false)
+            // A transparent titlebar still draws the title: the header paints its own.
+            .with_title_shown(false)
     }
     #[cfg(not(target_os = "macos"))]
     {
