@@ -145,11 +145,18 @@ mod tests {
             });
         }
         let area = area_of(1400.0);
+        let colors = crate::theme::project_header_colors(&window.theme, ink);
         let headers = |shapes: &[egui::epaint::ClippedShape]| -> Vec<egui::Rect> {
             shapes
                 .iter()
                 .filter_map(|s| match &s.shape {
-                    egui::Shape::Rect(r) if r.fill == ink && r.rect.width() > 100.0 => Some(r.rect),
+                    egui::Shape::Mesh(mesh)
+                        if mesh.calc_bounds().width() > 100.0
+                            && mesh.vertices[0].color == colors.left
+                            && mesh.vertices[1].color == colors.right =>
+                    {
+                        Some(mesh.calc_bounds())
+                    }
                     _ => None,
                 })
                 .collect()

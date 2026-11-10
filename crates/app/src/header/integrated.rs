@@ -156,18 +156,18 @@ fn paint(
         project,
     } = appearance;
     let painter = ui.painter().with_clip_rect(strip.intersect(ui.clip_rect()));
-    let (background, foreground, hover, secondary) = if let Some(project) = project {
-        let (foreground, hover) = crate::theme::project_header_colors(project.ink);
-        (project.ink, foreground, hover, foreground)
+    let colors = project.map(|project| crate::theme::project_header_colors(theme, project.ink));
+    let foreground = colors.as_ref().map_or(theme.foreground(), |c| c.foreground);
+    let secondary = if project.is_some() {
+        foreground
     } else {
-        (
-            theme.panel_background(),
-            theme.foreground(),
-            theme.focus().gamma_multiply(0.2),
-            theme.foreground().gamma_multiply(0.65),
-        )
+        foreground.gamma_multiply(0.65)
     };
-    painter.rect_filled(strip, 0.0, background);
+    if let Some(colors) = &colors {
+        paint_gradient(&painter, strip, strip, colors.left, colors.right);
+    } else {
+        painter.rect_filled(strip, 0.0, theme.panel_background());
+    }
     if let Some(project) = project {
         project
             .painted
@@ -194,7 +194,17 @@ fn paint(
             egui::Sense::hover(),
         );
         if response.hovered() {
-            painter.rect_filled(rect, 2.0, hover);
+            if let Some(colors) = &colors {
+                paint_gradient(
+                    &painter.with_clip_rect(rect),
+                    strip,
+                    rect,
+                    colors.hover_left,
+                    colors.hover_right,
+                );
+            } else {
+                painter.rect_filled(rect, 2.0, theme.focus().gamma_multiply(0.2));
+            }
         }
         if target == Target::Label
             && let Some(project) = project
@@ -299,6 +309,29 @@ fn paint(
         }
         paint_icon(&painter, rect.center(), target, zoomed, foreground);
     }
+}
+
+fn paint_gradient(
+    painter: &egui::Painter,
+    strip: egui::Rect,
+    clip: egui::Rect,
+    left: egui::Color32,
+    right: egui::Color32,
+) {
+    let mut mesh = egui::Mesh::default();
+    for (pos, color) in [
+        (strip.left_top(), left),
+        (strip.right_top(), right),
+        (strip.right_bottom(), right),
+        (strip.left_bottom(), left),
+    ] {
+        mesh.colored_vertex(pos, color);
+    }
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    painter
+        .with_clip_rect(clip.intersect(painter.clip_rect()))
+        .add(mesh);
 }
 
 /// The prototype's 24-unit SVG paths, drawn inside a 13-point icon box.
@@ -540,9 +573,15 @@ mod tests {
             });
             out.textures_delta.clear();
             assert!(
-                out.shapes.iter().any(
-                    |s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == ink && r.rect == strip)
-                ),
+                out.shapes
+                    .iter()
+                    .any(|s| matches!(&s.shape, egui::Shape::Mesh(mesh)
+                    if mesh.calc_bounds() == strip && mesh.vertices.len() == 4
+                    && mesh.vertices[0].color == egui::Color32::from_rgb(19, 54, 32)
+                    && mesh.vertices[1].color == egui::Color32::from_rgb(4, 12, 7)
+                    && mesh.vertices[2].color == mesh.vertices[1].color
+                    && mesh.vertices[3].color == mesh.vertices[0].color
+                    && mesh.indices == [0, 1, 2, 0, 2, 3])),
                 "project color must cover the full header, including the controls"
             );
             let text: Vec<_> = out
@@ -555,7 +594,7 @@ mod tests {
                             assert_ne!(ink, theme.foreground());
                             assert!(
                                 text.galley.job.sections.iter().all(|section| {
-                                    section.format.color == egui::Color32::BLACK
+                                    section.format.color == egui::Color32::WHITE
                                 }),
                                 "project text must contrast with the full colored header"
                             );
@@ -580,23 +619,9 @@ mod tests {
     fn project_headers_render_contrasting_hover_and_back_the_yellow_waiting_marker() {
         let theme = Theme::default();
         let yellow = theme.color(term_core::TermColor::Indexed(3));
-        for (fill, ink, hover) in [
-            (
-                egui::Color32::BLACK,
-                egui::Color32::WHITE,
-                egui::Color32::from_gray(31),
-            ),
-            (
-                egui::Color32::WHITE,
-                egui::Color32::BLACK,
-                egui::Color32::from_gray(224),
-            ),
-            (
-                yellow,
-                egui::Color32::BLACK,
-                crate::theme::project_header_colors(yellow).1,
-            ),
-        ] {
+        for fill in [egui::Color32::BLACK, egui::Color32::WHITE, yellow] {
+            let colors = crate::theme::project_header_colors(&theme, fill);
+            let ink = colors.foreground;
             let ctx = egui::Context::default();
             let strip = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(500.0, 33.0));
             let metrics = CellMetrics::of(8.0, 16.0);
@@ -639,7 +664,7 @@ mod tests {
                     },
                 );
                 output.textures_delta.clear();
-                assert!(output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect == strip && r.fill == fill)));
+                assert!(output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Mesh(mesh) if mesh.calc_bounds() == strip && mesh.vertices[0].color == colors.left && mesh.vertices[1].color == colors.right)));
                 let mut text_count = 0;
                 for (index, shape) in output.shapes.iter().enumerate() {
                     match &shape.shape {
@@ -672,7 +697,7 @@ mod tests {
                     output.drop_without_applying_deltas();
                     continue;
                 }
-                assert!(output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect == control && r.fill == hover)), "hover must use the contrasting opaque project fill");
+                assert!(output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Mesh(mesh) if s.clip_rect == control && mesh.calc_bounds() == strip && mesh.vertices[0].color == colors.hover_left && mesh.vertices[1].color == colors.hover_right)), "hover must preserve the full-header gradient's direction and use contrasting shades");
                 output.drop_without_applying_deltas();
             }
         }

@@ -551,14 +551,16 @@ fn exhausted_palette_keeps_distinct_project_names_in_actual_headers() {
                     output.shapes.iter().any(|shape| matches!(
                         &shape.shape,
                         egui::Shape::Text(text) if text.galley.job.text == badge.name
-                            && text.galley.job.sections.iter().all(|section| section.format.color == Color32::BLACK)
+                            && text.galley.job.sections.iter().all(|section| section.format.color == Color32::WHITE)
                     )),
                     "project name must remain painted after color exhaustion"
                 );
             }
             assert_eq!(output.shapes.iter().filter(|shape| matches!(
                 &shape.shape,
-                egui::Shape::Rect(rect) if rect.rect.width() > 100.0 && rect.fill == Color32::WHITE
+                egui::Shape::Mesh(mesh) if mesh.calc_bounds().width() > 100.0 && mesh.vertices.len() == 4
+                    && mesh.vertices[0].color == Color32::from_gray(71)
+                    && mesh.vertices[1].color == Color32::from_gray(15)
             )).count(), 2, "both full header backgrounds must use the resulting project color");
         }
         output.drop_without_applying_deltas();

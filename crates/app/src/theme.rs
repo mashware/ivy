@@ -493,30 +493,69 @@ pub(crate) fn project_accents(theme: &Theme) -> Vec<Color32> {
     colors
 }
 
-pub(crate) fn project_header_colors(background: Color32) -> (Color32, Color32) {
-    let foreground = if project_ink_contrast(Color32::BLACK, background)
-        >= project_ink_contrast(Color32::WHITE, background)
+pub(crate) struct ProjectHeaderColors {
+    pub left: Color32,
+    pub right: Color32,
+    pub foreground: Color32,
+    pub hover_left: Color32,
+    pub hover_right: Color32,
+}
+
+pub(crate) fn project_header_colors(theme: &Theme, accent: Color32) -> ProjectHeaderColors {
+    let base = theme.panel_background();
+    let foreground = if project_ink_contrast(Color32::WHITE, base)
+        >= project_ink_contrast(Color32::BLACK, base)
     {
+        Color32::WHITE
+    } else {
+        Color32::BLACK
+    };
+    let opposite = if foreground == Color32::WHITE {
         Color32::BLACK
     } else {
         Color32::WHITE
     };
-    let hover = mix(
-        background,
-        if foreground == Color32::BLACK {
-            Color32::WHITE
+    let hover = |color| {
+        let shifted = mix(color, opposite, 0.12);
+        if shifted == color {
+            mix(color, foreground, 0.12)
         } else {
-            Color32::BLACK
-        },
-        0.12,
-    );
-    // A pure black or white project fill cannot move farther toward its own pole.
-    let hover = if hover == background {
-        mix(background, foreground, 0.12)
-    } else {
-        hover
+            shifted
+        }
     };
-    (foreground, hover)
+    let mut colors = ProjectHeaderColors {
+        left: base,
+        right: base,
+        foreground,
+        hover_left: hover(base),
+        hover_right: hover(base),
+    };
+    for strength in [1.0, 0.75, 0.5, 0.25, 0.0] {
+        colors.left = mix(base, accent, 0.28 * strength);
+        colors.right = mix(base, accent, 0.06 * strength);
+        colors.hover_left = hover(colors.left);
+        colors.hover_right = hover(colors.right);
+        // Component bounds include every interpolated shade, not just the two endpoints.
+        let channel = |get: fn(Color32) -> u8| {
+            let values = [
+                colors.left,
+                colors.right,
+                colors.hover_left,
+                colors.hover_right,
+            ]
+            .map(get);
+            if foreground == Color32::WHITE {
+                *values.iter().max().unwrap()
+            } else {
+                *values.iter().min().unwrap()
+            }
+        };
+        let bound = Color32::from_rgb(channel(|c| c.r()), channel(|c| c.g()), channel(|c| c.b()));
+        if project_ink_contrast(foreground, bound) >= 4.5 {
+            break;
+        }
+    }
+    colors
 }
 
 pub(crate) fn project_inks_distinct(a: Color32, b: Color32) -> bool {
@@ -568,35 +607,51 @@ mod tests {
     fn project_headers_keep_opaque_contrast_in_factory_catalog_and_overrides() {
         use super::*;
         let custom = Theme::default().with_colors(&crate::settings::Colors {
-            panel: Some(Color32::WHITE),
-            foreground: Some(Color32::BLACK),
-            palette: [Some(Color32::from_rgb(224, 175, 104)); 16],
+            panel: Some(Color32::from_gray(118)),
+            palette: [Some(Color32::BLACK); 16],
             ..Default::default()
         });
+        let reduced = project_header_colors(&custom, Color32::BLACK);
+        assert_eq!(reduced.left, Color32::from_gray(118));
+        assert_eq!(reduced.right, Color32::from_gray(118));
         for theme in std::iter::once(Theme::default())
             .chain(NamedTheme::ALL.iter().map(|theme| theme.theme()))
             .chain(std::iter::once(custom))
         {
-            for background in project_accents(&theme) {
-                let (ink, hover) = project_header_colors(background);
-                assert!(ink == Color32::BLACK || ink == Color32::WHITE);
-                assert!(project_ink_contrast(ink, background) >= 4.5);
-                assert!(project_ink_contrast(ink, hover) >= 4.5);
-                assert!(project_ink_contrast(ink, hover) >= project_ink_contrast(ink, background));
-                assert_ne!(background, hover);
+            for accent in project_accents(&theme) {
+                let colors = project_header_colors(&theme, accent);
+                for step in 0..=100 {
+                    for (left, right) in [
+                        (colors.left, colors.right),
+                        (colors.hover_left, colors.hover_right),
+                    ] {
+                        assert!(
+                            project_ink_contrast(
+                                colors.foreground,
+                                mix(left, right, step as f32 / 100.0)
+                            ) >= 4.5
+                        );
+                    }
+                }
+                assert_ne!(colors.left, colors.hover_left);
+                assert_ne!(colors.right, colors.hover_right);
             }
         }
+        let dark = Theme::default().with_colors(&crate::settings::Colors {
+            panel: Some(Color32::BLACK),
+            ..Default::default()
+        });
+        let colors = project_header_colors(&dark, Color32::from_rgb(100, 150, 200));
+        assert_eq!(colors.left, Color32::from_rgb(28, 42, 56));
+        assert_eq!(colors.right, Color32::from_rgb(6, 9, 12));
+        assert_eq!(colors.foreground, Color32::WHITE);
+        let light = Theme::default().with_colors(&crate::settings::Colors {
+            panel: Some(Color32::WHITE),
+            ..Default::default()
+        });
         assert_eq!(
-            project_header_colors(Color32::WHITE),
-            (Color32::BLACK, Color32::from_gray(224))
-        );
-        assert_eq!(
-            project_header_colors(Color32::BLACK),
-            (Color32::WHITE, Color32::from_gray(31))
-        );
-        assert_eq!(
-            project_header_colors(Color32::from_rgb(224, 175, 104)),
-            (Color32::BLACK, Color32::from_rgb(228, 185, 122))
+            project_header_colors(&light, Color32::from_rgb(100, 150, 200)).foreground,
+            Color32::BLACK
         );
     }
     #[test]
