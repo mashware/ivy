@@ -49,7 +49,7 @@ def digest(path):
         return hashlib.file_digest(source, "sha256").hexdigest()
 
 
-def generate(cargo, directory, commit, built_on, tag=None, include_arch=False, include_macos=False):
+def generate(cargo, directory, commit, built_on, tag=None, include_arch=False, include_macos=False, include_windows=False):
     value = version(cargo)
     if not built_on.strip():
         raise ValueError("build environment must not be empty")
@@ -63,11 +63,13 @@ def generate(cargo, directory, commit, built_on, tag=None, include_arch=False, i
         names.append(f"ivy-terminal-{arch_version(value)}-1-x86_64.pkg.tar.zst")
     if include_macos:
         names.extend(f"Ivy-{value}-macos-{arch}.dmg" for arch in ("arm64", "x86_64"))
+    if include_windows:
+        names.append(f"Ivy-{value}-windows-x86_64-setup.exe")
     packages = [directory / name for name in names]
     for package in packages:
         if not package.is_file() or package.stat().st_size == 0:
             raise ValueError(f"missing or empty artifact: {package.name}")
-    actual = {p.name for pattern in ("*.deb", "*.pkg.tar.*", "*.dmg") for p in directory.glob(pattern)}
+    actual = {p.name for pattern in ("*.deb", "*.pkg.tar.*", "*.dmg", "*.exe") for p in directory.glob(pattern)}
     if actual != set(names):
         raise ValueError("artifact set does not match the declared release targets")
     def artifact(package):
@@ -79,6 +81,9 @@ def generate(cargo, directory, commit, built_on, tag=None, include_arch=False, i
             arm = package.name.endswith("-arm64.dmg")
             result["target"] = "aarch64-apple-darwin" if arm else "x86_64-apple-darwin"
             result["built_on"] = "macos-15" if arm else "macos-15-intel"
+        elif package.suffix == ".exe":
+            result["target"] = "x86_64-pc-windows-msvc"
+            result["built_on"] = "windows-2025"
         return result
     manifest = {
         "version": value,
@@ -140,7 +145,7 @@ def notices(metadata, directory):
                           re.match(r"^(?:licen[sc]e|copying|ofl)(?:$|[._-])", file.name, re.I)
                           for file in files) or bool(package.get("license_file"))
         declared = package.get("license")
-        fallback = not has_license and (declared in ("Apache-2.0", "MIT OR Apache-2.0") or
+        fallback = not has_license and (declared in ("Apache-2.0", "MIT OR Apache-2.0", "BSL-1.0") or
                    (font_assets and declared == "(MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0"))
         mac_mit = not has_license and (package["name"], package["version"]) in MAC_MIT_NOTICES and declared in (
             "MIT", "Zlib OR Apache-2.0 OR MIT")
@@ -166,12 +171,15 @@ def notices(metadata, directory):
                 encoding="utf-8")
         if fallback:
             dest.mkdir(parents=True, exist_ok=True)
-            canonical = Path(__file__).resolve().parent.parent / "vendor/egui-winit/LICENSE-APACHE"
-            shutil.copyfile(canonical, dest / "SPDX-FALLBACK-APACHE-2.0")
+            repository_root = Path(__file__).resolve().parent.parent
+            selected_license = "BSL-1.0" if declared == "BSL-1.0" else "Apache-2.0"
+            canonical = (repository_root / "resources/licenses/windows/BSL-1.0.txt" if declared == "BSL-1.0"
+                         else repository_root / "vendor/egui-winit/LICENSE-APACHE")
+            shutil.copyfile(canonical, dest / f"SPDX-FALLBACK-{selected_license.upper()}")
             (dest / "SPDX-FALLBACK-ATTRIBUTION.txt").write_text(
                 "No license text was present in the source distribution.\n"
-                "Apache-2.0 is selected from the declared SPDX expression below;\n"
-                "SPDX-FALLBACK-APACHE-2.0 contains its canonical text.\n"
+                f"{selected_license} is selected from the declared SPDX expression below;\n"
+                f"SPDX-FALLBACK-{selected_license.upper()} contains its canonical text.\n"
                 f"Name: {package['name']}\nVersion: {package['version']}\n"
                 f"License: {package.get('license')}\nRepository: {package.get('repository')}\n"
                 f"Authors: {', '.join(package.get('authors', []))}\n", encoding="utf-8")
@@ -193,6 +201,7 @@ def main():
     parser.add_argument("--tag")
     parser.add_argument("--include-arch", action="store_true")
     parser.add_argument("--include-macos", action="store_true")
+    parser.add_argument("--include-windows", action="store_true")
     args = parser.parse_args()
     try:
         if args.command == "version":
@@ -208,7 +217,7 @@ def main():
             if args.directory is None or args.commit is None or args.built_on is None:
                 parser.error("generate requires --directory, --commit and --built-on")
             generate(args.cargo, args.directory, args.commit, args.built_on, args.tag,
-                     args.include_arch, args.include_macos)
+                     args.include_arch, args.include_macos, args.include_windows)
     except (OSError, ValueError, KeyError, TypeError, tomllib.TOMLDecodeError) as error:
         print(f"release: {error}", file=sys.stderr)
         return 1
