@@ -42,7 +42,7 @@ feature_id: feat_term-core_nx0g1r
 
 **Discarded, with its reason:** a unified `NSToolbar` gives a ~52 pt titlebar with the buttons centred for free, but its view hit-tests above the content and takes the clicks meant for controls painted underneath (and macOS 26 adds a glass container that blocks them too).
 
-**Still unverified at the time of writing**: whether the grown container passes clicks through to the content in its 28–49 pt band, whether a double-click there zooms twice (AppKit's titlebar plus the header's own Maximize), and whether the buttons' hover glyphs follow them — see D66's amendment.
+**Verified on a real Mac (0.1.0-alpha.4, 10 November 2026)**: the grown container passes clicks through to the content across its 28–49 pt band, a double-click on the header zooms once, and the buttons' hover glyphs follow them — so the Electron/Zed approach holds under AppKit as shipped then; see D66's amendment.
 
 ## Where it lives
 
