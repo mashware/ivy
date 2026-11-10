@@ -113,7 +113,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 dependencies = [
  "arboard",
  "eframe",
@@ -1145,7 +1145,7 @@ dependencies = [
 
 [[package]]
 name = "host-load"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 
 [[package]]
 name = "http"
@@ -2081,7 +2081,7 @@ dependencies = [
 
 [[package]]
 name = "panel-contract"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 dependencies = [
  "getrandom 0.3.4",
  "serde_json",
@@ -2089,7 +2089,7 @@ dependencies = [
 
 [[package]]
 name = "panel-control"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 dependencies = [
  "interprocess",
  "libc",
@@ -2885,7 +2885,7 @@ dependencies = [
 
 [[package]]
 name = "term-core"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 dependencies = [
  "alacritty_terminal",
  "libc",
