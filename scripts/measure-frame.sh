@@ -196,7 +196,9 @@
 # Board variants: board-4-closed/open and board-16-closed/open use
 # matched integrated chrome, geometry, ASCII loads and ordinary panel publications.
 # Open variants must navigate to a different live focus; deadlines are reported but
-# not required because the dumping load does not isolate an idle deadline wake.
+# not required because the dumping load does not isolate an idle deadline wake. Every
+# board batch, closed ones included, runs the project probe over two real repositories,
+# so the open board has two sections; the «Other consoles» path is left to the tests.
 # Ligature variants: ligatures-on/off use the same pinned font, fractional size,
 # geometry, ASCII programming scene and load; only the runtime switch differs.
 # Projects variant: four visible panes use two real Git repositories; their directory sources
@@ -317,17 +319,20 @@ check_board_report() {
     BOARD_MODE=$(sed -n 's/^board mode: //p' "$REPORT" | head -1)
     [ "$BOARD_MODE" = "$EXPECTED_BOARD" ] || invalidate "Board mode does not match its variant"
     BOARD_WORK=$(sed -n 's/^board application: frames=\([0-9]*\),.*/\1/p' "$REPORT" | head -1)
-    BOARD_COUNTS=$(sed -n 's/^board witnesses: open=\([0-9]*\), projected=\([0-9]*\), painted=\([0-9]*\), sections=\([0-9]*\), navigation=\([0-9]*\), focus=\([0-9]*\), deadlines=\([0-9]*\)$/\1 \2 \3 \4 \5 \6 \7/p' "$REPORT" | head -1)
+    BOARD_COUNTS=$(sed -n 's/^board witnesses: open=\([0-9]*\), projected=\([0-9]*\), painted=\([0-9]*\), repositories=\([0-9]*\), ungrouped=\([0-9]*\), navigation=\([0-9]*\), focus=\([0-9]*\), deadlines=\([0-9]*\)$/\1 \2 \3 \4 \5 \6 \7 \8/p' "$REPORT" | head -1)
     [ -n "$BOARD_WORK" ] && [ -n "$BOARD_COUNTS" ] || invalidate "Board report omitted its work or witnesses"
     set -- $BOARD_COUNTS
     if [ "$EXPECTED_BOARD" = open ]; then
-        [ "$BOARD_WORK" -gt 0 ] && [ "$1" -gt 0 ] && [ "$2" -ge "$DIRECTORIES" ] && [ "$3" -gt 0 ] && [ "$5" -gt 0 ] && [ "$6" -gt 0 ] || invalidate "open Board variant omitted actual open, card, navigation or focus effects"
-        # The project probe gives every open run two repositories; one section means the grouping
-        # path was never taken and the run would be published as the board's cost without it.
-        [ "$4" -ge 2 ] || invalidate "open Board variant grouped its consoles into fewer than two sections"
-        [ "$6" -le "$5" ] || invalidate "Board focus changes exceed accepted navigation"
+        [ "$BOARD_WORK" -gt 0 ] && [ "$1" -gt 0 ] && [ "$2" -ge "$DIRECTORIES" ] && [ "$3" -gt 0 ] && [ "$6" -gt 0 ] && [ "$7" -gt 0 ] || invalidate "open Board variant omitted actual open, card, navigation or focus effects"
+        # The project probe gives every open run two repositories; fewer means the grouping path was
+        # never taken, and the run would be published as the board's cost without it. «Other
+        # consoles» is not counted, so one repository plus Other cannot pass for two. The frames
+        # projected before the projects resolved are declared as `ungrouped`, not invalidated:
+        # every open run has some, because resolving runs in the background.
+        [ "$4" -ge 2 ] || invalidate "open Board variant grouped its consoles into fewer than two repositories"
+        [ "$7" -le "$6" ] || invalidate "Board focus changes exceed accepted navigation"
     else
-        [ "$BOARD_COUNTS" = '0 0 0 0 0 0 0' ] || invalidate "Board activity leaked into a closed or historical variant"
+        [ "$BOARD_COUNTS" = '0 0 0 0 0 0 0 0' ] || invalidate "Board activity leaked into a closed or historical variant"
     fi
 }
 # End Board report validation.

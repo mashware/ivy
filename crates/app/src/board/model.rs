@@ -13,11 +13,24 @@ pub(super) struct Entry {
     pub(super) snapshot: Snapshot,
 }
 
+pub(super) enum Kind {
+    Repository { ink: Color32 },
+    Other,
+}
+
 pub(super) struct Section {
     pub(super) name: String,
-    /// The project's accent; `None` for «Other consoles».
-    pub(super) ink: Option<Color32>,
+    pub(super) kind: Kind,
     pub(super) entries: Vec<Entry>,
+}
+
+impl Section {
+    pub(super) fn ink(&self) -> Option<Color32> {
+        match self.kind {
+            Kind::Repository { ink } => Some(ink),
+            Kind::Other => None,
+        }
+    }
 }
 
 /// The repository a console belongs to, as its header already resolved it.
@@ -27,7 +40,7 @@ pub(super) struct Membership {
     pub(super) ink: Color32,
 }
 
-pub(super) fn project(window: &Window, now: SystemTime) -> Vec<Section> {
+pub(super) fn sections(window: &Window, now: SystemTime) -> Vec<Section> {
     let mut consoles = Vec::new();
     for tab in &window.tabs {
         for pane in tab.panes() {
@@ -70,7 +83,9 @@ pub(super) fn group(consoles: Vec<(Option<Membership>, Entry)>) -> Vec<Section> 
                         name: membership
                             .as_ref()
                             .map_or_else(|| OTHER.to_owned(), |m| m.name.clone()),
-                        ink: membership.as_ref().map(|m| m.ink),
+                        kind: membership
+                            .as_ref()
+                            .map_or(Kind::Other, |m| Kind::Repository { ink: m.ink }),
                         entries: Vec::new(),
                     },
                 ));
@@ -143,7 +158,7 @@ pub(super) fn excerpt(
 mod tests {
     use super::*;
     use panel_contract::Attention::{Block, Done, Wait};
-    fn row(pane: usize) -> Entry {
+    fn entry(pane: usize) -> Entry {
         Entry {
             pane,
             console_label: String::new(),
@@ -156,7 +171,7 @@ mod tests {
         }
     }
     fn claiming(pane: usize, class: panel_contract::Attention) -> Entry {
-        let mut entry = row(pane);
+        let mut entry = entry(pane);
         entry.snapshot.attention = Some(crate::panel::AttentionState {
             class,
             backed: true,
@@ -200,7 +215,7 @@ mod tests {
         );
         assert_eq!(lines[0].indent, 2);
         assert_eq!(
-            status(&row(0).snapshot).as_deref(),
+            status(&entry(0).snapshot).as_deref(),
             Some("No published state")
         );
         assert!(
@@ -211,7 +226,15 @@ mod tests {
     }
     #[test]
     fn classes_dominate_backing_and_ties_keep_input_tree_order() {
-        let mut rows = vec![row(0), row(1), row(2), row(3), row(4), row(5), row(6)];
+        let mut rows = vec![
+            entry(0),
+            entry(1),
+            entry(2),
+            entry(3),
+            entry(4),
+            entry(5),
+            entry(6),
+        ];
         for (id, class, backed) in [
             (1, Done, true),
             (2, Wait, false),
@@ -231,10 +254,10 @@ mod tests {
     #[test]
     fn each_repository_is_a_section_and_everything_else_is_the_last_one() {
         let sections = group(vec![
-            (None, row(0)),
-            (repository("ivy"), row(1)),
-            (repository("facq"), row(2)),
-            (repository("ivy"), row(3)),
+            (None, entry(0)),
+            (repository("ivy"), entry(1)),
+            (repository("facq"), entry(2)),
+            (repository("ivy"), entry(3)),
         ]);
         assert_eq!(
             shape(&sections),
@@ -244,15 +267,15 @@ mod tests {
                 (OTHER.to_owned(), vec![0]),
             ]
         );
-        assert_eq!(sections[2].ink, None);
-        assert_eq!(sections[0].ink, Some(Color32::RED));
+        assert_eq!(sections[2].ink(), None);
+        assert_eq!(sections[0].ink(), Some(Color32::RED));
     }
     #[test]
     fn sections_follow_their_strongest_claim_and_ties_keep_the_first_console() {
         let sections = group(vec![
             (None, claiming(0, Wait)),
             (repository("x"), claiming(1, Block)),
-            (repository("y"), row(2)),
+            (repository("y"), entry(2)),
             (repository("y"), claiming(3, Wait)),
             (repository("z"), claiming(4, Block)),
         ]);

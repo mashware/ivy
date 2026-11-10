@@ -1144,7 +1144,7 @@ fn board_guards_require_real_navigation_and_reject_closed_activity() {
             .unwrap()
             .success()
     };
-    let closed = "board mode: closed\nboard application: frames=1, total=1ms\nboard witnesses: open=0, projected=0, painted=0, sections=0, navigation=0, focus=0, deadlines=0\n";
+    let closed = "board mode: closed\nboard application: frames=1, total=1ms\nboard witnesses: open=0, projected=0, painted=0, repositories=0, ungrouped=0, navigation=0, focus=0, deadlines=0\n";
     assert!(accepts("closed", closed));
     assert!(accepts(
         "",
@@ -1154,7 +1154,8 @@ fn board_guards_require_real_navigation_and_reject_closed_activity() {
         "open",
         "projected",
         "painted",
-        "sections",
+        "repositories",
+        "ungrouped",
         "navigation",
         "focus",
         "deadlines",
@@ -1166,14 +1167,14 @@ fn board_guards_require_real_navigation_and_reject_closed_activity() {
             "historical accepted {witness}"
         );
     }
-    let open = "board mode: open\nboard application: frames=9, total=1ms\nboard witnesses: open=8, projected=32, painted=24, sections=2, navigation=2, focus=1, deadlines=0\n";
+    let open = "board mode: open\nboard application: frames=9, total=1ms\nboard witnesses: open=8, projected=32, painted=24, repositories=2, ungrouped=3, navigation=2, focus=1, deadlines=0\n";
     assert!(accepts("open", open));
     for (from, to) in [
         ("frames=9", "frames=0"),
         ("open=8", "open=0"),
         ("projected=32", "projected=3"),
         ("painted=24", "painted=0"),
-        ("sections=2", "sections=1"),
+        ("repositories=2", "repositories=1"),
         ("navigation=2", "navigation=0"),
         ("focus=1", "focus=0"),
         ("focus=1", "focus=3"),

@@ -143,15 +143,87 @@ mod tests {
 
     #[test]
     fn the_name_before_the_board_is_an_unknown_key() {
-        let (_, warnings) = settings::interpret("key.overview=ctrl+shift+o").unwrap();
-        let said = warnings
+        let (_, warnings) = settings::interpret("# mine\nkey.overview=ctrl+shift+o").unwrap();
+        let warning = warnings
             .kept()
-            .iter()
-            .map(ToString::to_string)
-            .collect::<String>();
+            .first()
+            .expect("key.overview was taken silently");
+        assert_eq!(warning.line, 2, "the warning points at the wrong line");
+        assert!(warning.to_string().contains("overview"), "{warning}");
+    }
+
+    #[test]
+    fn up_and_down_cross_into_the_next_section_by_the_grid() {
+        use crate::project::Key;
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
+        integrated(&mut window);
+        let ctx = egui::Context::default();
+        let badge = |path: &str, name: &str| {
+            Some(crate::project_view::Badge {
+                key: Key::Repository(path.into()),
+                name: name.to_owned(),
+                details: String::new(),
+                ink: egui::Color32::RED,
+                painted: Default::default(),
+            })
+        };
+        let names: Vec<usize> = window.all_panes().map(|pane| pane.name).collect();
+        let projects = [
+            badge("/work/ivy/.git", "Ivy"),
+            badge("/work/ivy/.git", "Ivy"),
+            badge("/work/ivy/.git", "Ivy"),
+            badge("/work/facq/.git", "FacQ"),
+        ];
+        for (pane, project) in window.all_panes_mut().zip(projects) {
+            pane.project = project;
+        }
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
+        frame(&mut window, &ctx, vec![key(egui::Key::Home)]);
+        assert_eq!(window.board.selected(), Some(names[0]));
+        frame(&mut window, &ctx, vec![key(egui::Key::ArrowDown)]);
+        assert_eq!(
+            window.board.selected(),
+            Some(names[3]),
+            "↓ from the first Ivy card goes to FacQ's row, where reading order gives the next Ivy card"
+        );
+        frame(&mut window, &ctx, vec![key(egui::Key::ArrowUp)]);
+        assert_eq!(window.board.selected(), Some(names[0]));
+        frame(&mut window, &ctx, vec![key(egui::Key::ArrowRight)]);
+        assert_eq!(window.board.selected(), Some(names[1]));
+    }
+
+    #[test]
+    fn a_card_paints_its_claim_and_its_warning() {
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
+        integrated(&mut window);
+        let ctx = egui::Context::default();
+        {
+            let pane = &mut window.tabs[0].panes_mut()[0];
+            pane.panel = Some(PanelDir::create().unwrap());
+            publish_at(pane, r#"{"attention":"wait","lines":["asking"]}"#);
+            pane.to_reread.raise();
+        }
+        publish_with_timestamp(
+            window.tabs[1].panes_mut()[1],
+            1,
+            SystemTime::UNIX_EPOCH + Duration::from_secs(60),
+        );
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
+        let shapes = frame(&mut window, &ctx, vec![]);
         assert!(
-            said.contains("overview"),
-            "key.overview was taken silently: {said:?}"
+            the_text_queued_up(&shapes, "it is waiting for you"),
+            "the claim is not on its card"
+        );
+        let warning = crate::panel::summary::snapshot(
+            &window.tabs[1].panes()[1].panel_state,
+            SystemTime::now(),
+        )
+        .warning
+        .expect("the publication is stale");
+        let start: String = warning.chars().take(12).collect();
+        assert!(
+            the_text_queued_up(&shapes, &start),
+            "the warning {warning:?} is not on its card"
         );
     }
 
@@ -209,7 +281,7 @@ mod tests {
                 egui::Shape::Text(t) if t.galley.text() == "Downloads" && on_the_board(t))),
             "a folder became a section"
         );
-        let card = |n: usize| window.board.row_rect(names[n]).expect("card painted");
+        let card = |n: usize| window.board.card_rect(names[n]).expect("card painted");
         assert!(
             card(2).top() > other_at,
             "the folder console left «Other consoles»"
@@ -328,7 +400,7 @@ mod tests {
     }
 
     #[test]
-    fn a_pressed_row_removed_before_release_never_opens_its_replacement() {
+    fn a_pressed_card_removed_before_release_never_opens_its_replacement() {
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
         integrated(&mut window);
         let ctx = egui::Context::default();
@@ -337,8 +409,8 @@ mod tests {
         let target = window.tabs[1].panes()[0].name;
         let at = window
             .board
-            .row_rect(target)
-            .expect("target row painted")
+            .card_rect(target)
+            .expect("target card painted")
             .center();
         let pointer = |pressed| egui::Event::PointerButton {
             pos: at,
@@ -362,11 +434,11 @@ mod tests {
         window.tabs[1].focus = survivor;
         // A control-channel removal can repaint while the person still holds the button.
         frame(&mut window, &ctx, vec![]);
-        assert!(window.board.row_rect(survivor).unwrap().contains(at));
+        assert!(window.board.card_rect(survivor).unwrap().contains(at));
         frame(&mut window, &ctx, vec![pointer(false)]);
         assert!(
             window.board.is_open(),
-            "release activated the replacement at the removed row's ordinal"
+            "release activated the replacement at the removed card's ordinal"
         );
         assert_eq!(
             window.active, 0,
@@ -375,7 +447,7 @@ mod tests {
         assert_eq!(
             window.board.selected(),
             Some(survivor),
-            "selection did not clamp to the nearest surviving row"
+            "selection did not clamp to the nearest surviving card"
         );
     }
 
@@ -494,7 +566,7 @@ mod tests {
     }
 
     #[test]
-    fn board_alarm_uses_inactive_and_folded_producers_only_while_their_rows_are_visible() {
+    fn board_alarm_uses_inactive_and_folded_producers_only_while_their_cards_are_visible() {
         let written = SystemTime::UNIX_EPOCH + Duration::from_secs(2_000_000_000);
         let now = written + Duration::from_secs(10);
         for (folded_minutes, background_minutes) in [(1, 3), (3, 1)] {
@@ -531,7 +603,7 @@ mod tests {
     }
 
     #[test]
-    fn long_metadata_at_640_by_480_keeps_rows_separate_and_last_console_reachable() {
+    fn long_metadata_at_640_by_480_keeps_cards_separate_and_last_console_reachable() {
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
         integrated(&mut window);
@@ -564,15 +636,15 @@ mod tests {
         };
         pass(&mut window, chord_with(egui::Key::O));
         let shapes = pass(&mut window, vec![]);
-        let rows: Vec<_> = window
+        let cards: Vec<_> = window
             .all_panes()
-            .filter_map(|pane| window.board.row_rect(pane.name))
+            .filter_map(|pane| window.board.card_rect(pane.name))
             .filter(|r| r.is_positive())
             .collect();
-        assert!(rows.len() >= 2, "small Board did not expose two cards");
+        assert!(cards.len() >= 2, "small Board did not expose two cards");
         // Cards sit side by side as well as one under another, so no pair may share a point.
-        for (n, card) in rows.iter().enumerate() {
-            for other in &rows[n + 1..] {
+        for (n, card) in cards.iter().enumerate() {
+            for other in &cards[n + 1..] {
                 assert!(
                     !card.intersects(*other),
                     "long metadata overlapped card hit targets: {card:?} {other:?}"
@@ -585,9 +657,9 @@ mod tests {
                 && (text.galley.text().contains("Long console")
                     || text.galley.text().contains("long phase")
                     || text.galley.text().contains("long body"))
-                && rows
+                && cards
                     .iter()
-                    .any(|row| row.contains(text.pos) && row.contains_rect(shape.clip_rect))
+                    .any(|card| card.contains(text.pos) && card.contains_rect(shape.clip_rect))
             {
                 checked_slots += 1;
                 assert_eq!(
@@ -603,7 +675,7 @@ mod tests {
         }
         assert!(
             checked_slots >= 2,
-            "long metadata was not painted inside the Board row slots"
+            "long metadata was not painted inside the Board card slots"
         );
         assert!(
             the_text_queued_up(&shapes, "Close"),
@@ -613,7 +685,7 @@ mod tests {
         let target = window.tabs[1].panes()[1].name;
         let rect = window
             .board
-            .row_rect(target)
+            .card_rect(target)
             .expect("End scrolled target into view");
         assert!(
             rect.is_positive() && narrow.contains(rect.center()),

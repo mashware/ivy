@@ -35,6 +35,9 @@ pub(crate) fn inject(window: &mut crate::Window, raw: &mut egui::RawInput, ctx: 
     };
     let key = match tick {
         1 | 13 | 25 if !open => Some((egui::Key::O, chord)),
+        // The grid's arrows walk `layout::vertical`, which Home and End never reach.
+        4 if open => Some((egui::Key::ArrowDown, egui::Modifiers::NONE)),
+        16 if open => Some((egui::Key::ArrowUp, egui::Modifiers::NONE)),
         8 if open => Some((egui::Key::End, egui::Modifiers::NONE)),
         20 if open => Some((egui::Key::Home, egui::Modifiers::NONE)),
         9 | 21 if open => Some((egui::Key::Enter, egui::Modifiers::NONE)),

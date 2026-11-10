@@ -1390,7 +1390,7 @@ impl eframe::App for Window {
         clipboard::deliver(self, ui.ctx());
         let metrics = CellMetrics::measure(ui.ctx(), egui::FontId::monospace(self.font_size));
 
-        // Settings claims its input before the console dispatcher. Its named work is discounted
+        // The board claims its input before the console dispatcher. Its named work is discounted
         // from frame accounting; outbound latency still includes this earlier application work.
         let mut board_owned = board::before_keys(self, ui, &metrics);
         let pane_owned = !board_owned && pane_view::before_keys(self, ui, &metrics);

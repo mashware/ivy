@@ -2674,6 +2674,26 @@ mod tests {
                 false,
             ),
             ("run", "projects", String::new(), false),
+            // The board covers the headers, so it carries no painted floor, only resolved ones.
+            (
+                "run",
+                "board-4-open",
+                valid.replace("painted=8", "painted=0"),
+                true,
+            ),
+            (
+                "run",
+                "board-4-open",
+                valid.replace("resolved=4", "resolved=3"),
+                false,
+            ),
+            (
+                "run",
+                "board-4-closed",
+                valid.replace("probe=true", "probe=false"),
+                false,
+            ),
+            ("run", "board-4-closed", disabled.into(), false),
             ("compare", "", String::new(), true),
             ("compare", "", valid.clone(), true),
             ("compare", "", format!("{valid}{timing}"), false),
@@ -2683,6 +2703,7 @@ mod tests {
             let status = std::process::Command::new("sh")
                 .args(["-c", &function, "project-guard", mode, batch])
                 .env("REPORT", &report)
+                .env("DIRECTORIES", "4")
                 .status()
                 .unwrap();
             assert_eq!(

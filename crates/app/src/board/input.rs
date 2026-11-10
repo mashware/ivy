@@ -188,21 +188,19 @@ fn navigate(state: &mut State, key: egui::Key) {
     let index = state
         .order
         .iter()
-        .position(|id| Some(*id) == state.selected)
+        .position(|slot| Some(slot.pane) == state.selected)
         .unwrap_or(0);
     let last = state.order.len().saturating_sub(1);
-    // The grid is the last painting's; before any painting there is none and ↑/↓ read as ←/→.
-    let painted = state.grid.len() == state.order.len();
     let next = match key {
-        egui::Key::ArrowUp if painted => super::layout::vertical(&state.grid, index, false),
-        egui::Key::ArrowDown if painted => super::layout::vertical(&state.grid, index, true),
-        egui::Key::ArrowLeft | egui::Key::ArrowUp => index.saturating_sub(1),
-        egui::Key::ArrowRight | egui::Key::ArrowDown => (index + 1).min(last),
+        egui::Key::ArrowUp => super::layout::vertical(&state.order, index, false),
+        egui::Key::ArrowDown => super::layout::vertical(&state.order, index, true),
+        egui::Key::ArrowLeft => index.saturating_sub(1),
+        egui::Key::ArrowRight => (index + 1).min(last),
         egui::Key::Home => 0,
         egui::Key::End => last,
         _ => return,
     };
-    state.selected = state.order.get(next).copied();
+    state.selected = state.order.get(next).map(|slot| slot.pane);
     state.ordinal = next;
     state.scroll_selected = true;
 }
@@ -215,7 +213,7 @@ fn pointer(state: &mut State, pos: egui::Pos2, pressed: bool) {
             state.ordinal = state
                 .order
                 .iter()
-                .position(|name| *name == id)
+                .position(|slot| slot.pane == id)
                 .unwrap_or(state.ordinal);
         }
     } else if let Some((id, rect)) = state.pressed.take()
@@ -228,8 +226,16 @@ fn pointer(state: &mut State, pos: egui::Pos2, pressed: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::board::layout::Slot;
+    /// Cards as a painting leaves them: `(pane, row, column)`.
+    fn slots(cards: &[(usize, usize, usize)]) -> Vec<Slot> {
+        cards
+            .iter()
+            .map(|&(pane, row, column)| Slot { pane, row, column })
+            .collect()
+    }
     #[test]
-    fn release_keeps_the_pressed_identity_even_when_rows_reorder() {
+    fn release_keeps_the_pressed_identity_even_when_cards_reorder() {
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(100.0, 100.0));
         let mut state = State {
             painted: vec![(7, rect)],
@@ -243,7 +249,7 @@ mod tests {
     #[test]
     fn enter_freezes_the_selected_identity_before_removal_and_keys_are_ordered() {
         let mut state = State {
-            order: vec![4, 8, 9],
+            order: slots(&[(4, 0, 0), (8, 1, 0), (9, 2, 0)]),
             selected: Some(4),
             ..State::default()
         };
@@ -255,21 +261,27 @@ mod tests {
     #[test]
     fn left_and_right_follow_reading_order_and_up_and_down_follow_the_grid() {
         let mut state = State {
-            order: vec![4, 8, 9, 2],
-            grid: vec![(0, 0), (0, 1), (0, 2), (1, 0)],
-            selected: Some(9),
+            order: slots(&[(4, 0, 0), (8, 0, 1), (9, 0, 2), (2, 1, 0)]),
+            selected: Some(4),
             ..State::default()
         };
+        navigate(&mut state, egui::Key::ArrowDown);
+        assert_eq!(
+            state.selected,
+            Some(2),
+            "one grid row down, where reading order says 8"
+        );
+        navigate(&mut state, egui::Key::ArrowUp);
+        assert_eq!(state.selected, Some(4), "same column, one row up");
+        navigate(&mut state, egui::Key::ArrowLeft);
+        assert_eq!(state.selected, Some(4), "nothing before the first card");
+        state.selected = Some(9);
         navigate(&mut state, egui::Key::ArrowRight);
         assert_eq!(
             state.selected,
             Some(2),
             "reading order crosses into the next row"
         );
-        navigate(&mut state, egui::Key::ArrowUp);
-        assert_eq!(state.selected, Some(4), "same column, one row up");
-        navigate(&mut state, egui::Key::ArrowLeft);
-        assert_eq!(state.selected, Some(4), "nothing before the first card");
         state.selected = Some(9);
         navigate(&mut state, egui::Key::ArrowDown);
         assert_eq!(state.selected, Some(2), "clamped to the shorter row");

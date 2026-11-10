@@ -1,7 +1,7 @@
 //! Sections of fixed-size cards. Producer actions and links have no interactive widgets here.
 use super::{
     input,
-    layout::{self, CARD_PADDING, CARD_SLOTS, Layout},
+    layout::{self, CARD_PADDING, CARD_SLOTS, Slot},
     model::{self, Entry, Section},
 };
 use crate::{Window, theme::Theme};
@@ -43,21 +43,32 @@ pub(super) fn paint(window: &mut Window, parent: &mut egui::Ui, area: Rect, sect
     let counts: Vec<usize> = sections.iter().map(|s| s.entries.len()).collect();
     let width = (ui.available_width() - ui.spacing().scroll.bar_width - 4.0).max(1.0);
     let grid = layout::layout(&counts, width, line);
-    window.board.grid = grid.cards.iter().map(|c| (c.row, c.column)).collect();
+    // Cards and entries are paired by position below; a layout that disagreed would drop cards.
+    debug_assert_eq!(grid.cards.len(), entries().count());
     let selected = window.board.selected;
+    window.board.order = entries()
+        .zip(&grid.cards)
+        .map(|(entry, card)| Slot {
+            pane: entry.pane,
+            row: card.row,
+            column: card.column,
+        })
+        .collect();
     let scroll_selected = std::mem::take(&mut window.board.scroll_selected);
     window.board.painted.clear();
     let mut scroll = egui::ScrollArea::vertical()
         .id_salt("board-list")
         .auto_shrink([false, false]);
     if scroll_selected
-        && let Some(card) = entries()
+        && let Some(offset) = entries()
             .position(|e| Some(e.pane) == selected)
             .and_then(|index| grid.cards.get(index))
+            .and_then(|card| reveal(card.reveal, window.board.viewport))
     {
-        scroll = scroll.vertical_scroll_offset(card.rect.top());
+        scroll = scroll.vertical_scroll_offset(offset);
     }
     scroll.show_viewport(&mut ui, |ui, viewport| {
+        window.board.viewport = viewport;
         let origin = ui.max_rect().min.to_vec2();
         ui.allocate_rect(
             Rect::from_min_size(origin.to_pos2(), egui::vec2(width, grid.height)),
@@ -65,15 +76,14 @@ pub(super) fn paint(window: &mut Window, parent: &mut egui::Ui, area: Rect, sect
         );
         let visible = viewport.translate(origin);
         let clip = ui.clip_rect();
-        let mut index = 0;
+        let mut cards = grid.cards.iter();
         for (section, header) in sections.iter().zip(&grid.headers) {
             let header = header.translate(origin);
             if header.intersects(visible) {
                 paint_header(ui, header, section, &theme, &font);
             }
-            for entry in &section.entries {
-                let rect = card_at(&grid, index).translate(origin);
-                index += 1;
+            for (entry, card) in section.entries.iter().zip(cards.by_ref()) {
+                let rect = card.rect.translate(origin);
                 if !rect.intersects(visible) {
                     continue;
                 }
@@ -86,7 +96,7 @@ pub(super) fn paint(window: &mut Window, parent: &mut egui::Ui, area: Rect, sect
                     ui,
                     rect,
                     entry,
-                    section.ink,
+                    section.ink(),
                     selected == Some(entry.pane),
                     &theme,
                     &font,
@@ -100,17 +110,27 @@ pub(super) fn paint(window: &mut Window, parent: &mut egui::Ui, area: Rect, sect
     }
 }
 
-fn card_at(grid: &Layout, index: usize) -> Rect {
-    grid.cards
-        .get(index)
-        .map_or(Rect::NOTHING, |card| card.rect)
+/// The scroll offset that brings `target` fully on screen with the least movement, or `None` when
+/// last frame's viewport already shows it — so a selection that is in sight never makes the board
+/// jump.
+fn reveal(target: Rect, viewport: Rect) -> Option<f32> {
+    if !viewport.is_positive() {
+        return Some(target.top());
+    }
+    if target.top() < viewport.top() || target.height() > viewport.height() {
+        Some(target.top())
+    } else if target.bottom() > viewport.bottom() {
+        Some(target.bottom() - viewport.height())
+    } else {
+        None
+    }
 }
 
 fn paint_header(ui: &egui::Ui, rect: Rect, section: &Section, theme: &Theme, font: &FontId) {
     let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(rect));
     let y = rect.center().y;
     let mut x = rect.left();
-    if let Some(ink) = section.ink {
+    if let Some(ink) = section.ink() {
         painter.rect_filled(
             Rect::from_center_size(egui::pos2(x + 5.0, y), egui::vec2(10.0, 10.0)),
             2.0,
@@ -122,10 +142,12 @@ fn paint_header(ui: &egui::Ui, rect: Rect, section: &Section, theme: &Theme, fon
         1 => "1 console".to_owned(),
         n => format!("{n} consoles"),
     };
+    // The count is laid out first so a long project name is the one that gets cut, never the count.
+    let count = text(ui, &consoles, rect.right() - x, font, muted(theme));
     let name = text(
         ui,
         &section.name,
-        rect.right() - x,
+        (rect.right() - x - count.size().x - 12.0).max(0.0),
         font,
         theme.foreground(),
     );
@@ -135,7 +157,6 @@ fn paint_header(ui: &egui::Ui, rect: Rect, section: &Section, theme: &Theme, fon
         name,
         theme.foreground(),
     );
-    let count = text(ui, &consoles, rect.right() - after, font, muted(theme));
     painter.galley(
         egui::pos2(after, y - count.size().y / 2.0),
         count,
@@ -224,6 +245,13 @@ fn paint_card(
             0.0,
             slot,
         );
+        // Cut to one line on the card, so the whole warning is offered on hover.
+        ui.interact(
+            slot.intersect(ui.clip_rect()),
+            ui.id().with(("board-warning", entry.pane)),
+            egui::Sense::hover(),
+        )
+        .on_hover_text(warning.as_str());
     }
     for body in document.into_iter().flat_map(model::excerpt) {
         let Some(slot) = slots.next() else { break };
@@ -238,7 +266,10 @@ fn paint_card(
             .map(|s| format!("{} ", bounded(s, slot.width(), font.size)))
             .unwrap_or_default();
         put(
-            &format!("{mark}{reference}{}", body.text),
+            &format!(
+                "{mark}{reference}{}",
+                bounded(&body.text, slot.width(), font.size)
+            ),
             theme.panel_color(body.mark, body.style),
             body.indent as f32 * font.size * 0.6,
             slot,
@@ -283,10 +314,32 @@ fn bounded(text: &str, width: f32, size: f32) -> String {
 mod tests {
     use super::*;
     #[test]
-    fn enormous_metadata_is_bounded_before_layout_and_never_grows_rows() {
+    fn enormous_metadata_is_bounded_before_layout_and_never_grows_cards() {
         let result = bounded(&"界\n".repeat(100_000), 100.0, 14.0);
         assert!(result.chars().count() < 80);
         assert!(!result.contains('\n'));
         assert!(result.ends_with('…'));
+    }
+
+    #[test]
+    fn a_selection_in_sight_does_not_scroll_and_one_out_of_sight_moves_the_least() {
+        let viewport = Rect::from_min_size(egui::pos2(0.0, 100.0), egui::vec2(500.0, 300.0));
+        let card = |top: f32| Rect::from_min_size(egui::pos2(0.0, top), egui::vec2(200.0, 120.0));
+        assert_eq!(reveal(card(150.0), viewport), None, "already on screen");
+        assert_eq!(
+            reveal(card(40.0), viewport),
+            Some(40.0),
+            "above: top aligns"
+        );
+        assert_eq!(
+            reveal(card(350.0), viewport),
+            Some(170.0),
+            "below: bottom aligns"
+        );
+        assert_eq!(
+            reveal(card(350.0), Rect::NOTHING),
+            Some(350.0),
+            "first frame"
+        );
     }
 }

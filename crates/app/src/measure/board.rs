@@ -14,7 +14,8 @@ pub(crate) struct Board {
     open_frames: usize,
     projected: usize,
     painted: usize,
-    sections: usize,
+    repositories: usize,
+    ungrouped: usize,
     navigations: usize,
     focus_changes: usize,
     deadlines: usize,
@@ -40,16 +41,20 @@ impl Board {
     pub(crate) fn saw_open(&mut self) {
         self.open = true;
     }
-    pub(crate) fn projected(&mut self, rows: usize) {
-        self.projected += rows;
+    pub(crate) fn projected(&mut self, cards: usize) {
+        self.projected += cards;
     }
-    pub(crate) fn painted(&mut self, rows: usize) {
-        self.painted += rows;
+    pub(crate) fn painted(&mut self, cards: usize) {
+        self.painted += cards;
     }
-    /// The most sections one projection grouped. A maximum, not a sum: summed over frames, a board
-    /// that never grouped anything would still reach any floor the script sets.
-    pub(crate) fn sections(&mut self, sections: usize) {
-        self.sections = self.sections.max(sections);
+    /// One projection's repository sections — «Other consoles» never counts. `repositories` keeps
+    /// the most any projection grouped: a maximum, not a sum, because summed over frames a board
+    /// that grouped one repository would still reach any floor the script sets. `ungrouped` counts
+    /// the projections that grouped none — a board opened before its projects resolved — so the
+    /// frames averaged into the span without the grouping path are declared, not hidden.
+    pub(crate) fn grouped(&mut self, repositories: usize) {
+        self.repositories = self.repositories.max(repositories);
+        self.ungrouped += usize::from(repositories == 0);
     }
     /// Call after resolving and accepting a live identity, with the observed focus transition.
     pub(crate) fn navigation(&mut self, focus_changed: bool) {
@@ -85,11 +90,12 @@ impl Board {
         )?;
         writeln!(
             to,
-            "board witnesses: open={}, projected={}, painted={}, sections={}, navigation={}, focus={}, deadlines={}",
+            "board witnesses: open={}, projected={}, painted={}, repositories={}, ungrouped={}, navigation={}, focus={}, deadlines={}",
             self.open_frames,
             self.projected,
             self.painted,
-            self.sections,
+            self.repositories,
+            self.ungrouped,
             self.navigations,
             self.focus_changes,
             self.deadlines
@@ -122,6 +128,21 @@ mod tests {
         assert_eq!(
             timing.work.total, 2,
             "sub-clock work is still one actual frame"
+        );
+    }
+
+    #[test]
+    fn repositories_keep_the_most_one_projection_grouped_and_empty_ones_are_declared() {
+        let mut timing = Board::default();
+        for repositories in [0, 1, 1, 0] {
+            timing.grouped(repositories);
+        }
+        let mut report = Vec::new();
+        timing.publish(&mut report).unwrap();
+        let report = String::from_utf8(report).unwrap();
+        assert!(
+            report.contains("repositories=1, ungrouped=2,"),
+            "two one-repository frames must not add up to two repositories: {report}"
         );
     }
 }

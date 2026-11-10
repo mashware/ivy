@@ -5,14 +5,25 @@ use eframe::egui::{Rect, pos2, vec2};
 pub(super) const GAP: f32 = 10.0;
 /// Below this a card stops being readable, so the grid drops a column instead.
 const MIN_CARD_WIDTH: f32 = 260.0;
-/// Name, claim, phase, warning and three body lines. Fixed, so no document can grow its card over
+/// Name, claim or «No published state», phase, warning and three body lines. Fixed, so no document can grow its card over
 /// a neighbour (D68's bounded rows, carried over to cards).
 pub(super) const CARD_SLOTS: usize = 7;
 pub(super) const CARD_PADDING: f32 = 8.0;
 
 pub(super) struct Card {
     pub(super) rect: Rect,
+    /// What has to be on screen for the card to be seen in context: the card, and its section's
+    /// header when the card sits on the section's first row.
+    pub(super) reveal: Rect,
     /// Row of the whole board, counted across sections, which is what ↑/↓ move along.
+    pub(super) row: usize,
+    pub(super) column: usize,
+}
+
+/// One painted card as navigation reads it, all from the same painting so the three never disagree.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct Slot {
+    pub(super) pane: usize,
     pub(super) row: usize,
     pub(super) column: usize,
 }
@@ -35,22 +46,22 @@ pub(super) fn layout(counts: &[usize], width: f32, line: f32) -> Layout {
     let mut y = 0.0;
     let mut first_row = 0;
     for &count in counts {
-        headers.push(Rect::from_min_size(
-            pos2(0.0, y),
-            vec2(width, header_height),
-        ));
+        let header = Rect::from_min_size(pos2(0.0, y), vec2(width, header_height));
+        headers.push(header);
         y += header_height + GAP / 2.0;
         let rows = count.div_ceil(columns);
         for index in 0..count {
             let (row, column) = (index / columns, index % columns);
-            cards.push(Card {
-                rect: Rect::from_min_size(
-                    pos2(
-                        column as f32 * (card_width + GAP),
-                        y + row as f32 * (card_height + GAP),
-                    ),
-                    vec2(card_width, card_height),
+            let rect = Rect::from_min_size(
+                pos2(
+                    column as f32 * (card_width + GAP),
+                    y + row as f32 * (card_height + GAP),
                 ),
+                vec2(card_width, card_height),
+            );
+            cards.push(Card {
+                rect,
+                reveal: if row == 0 { rect.union(header) } else { rect },
                 row: first_row + row,
                 column,
             });
@@ -67,8 +78,8 @@ pub(super) fn layout(counts: &[usize], width: f32, line: f32) -> Layout {
 
 /// The card one row up or down in the same column, clamped to the last card of a shorter row; the
 /// same card when there is no such row.
-pub(super) fn vertical(cards: &[(usize, usize)], from: usize, down: bool) -> usize {
-    let Some(&(row, column)) = cards.get(from) else {
+pub(super) fn vertical(cards: &[Slot], from: usize, down: bool) -> usize {
+    let Some(&Slot { row, column, .. }) = cards.get(from) else {
         return from;
     };
     let Some(target) = (if down {
@@ -78,9 +89,14 @@ pub(super) fn vertical(cards: &[(usize, usize)], from: usize, down: bool) -> usi
     }) else {
         return from;
     };
-    let in_row = || cards.iter().enumerate().filter(|(_, (r, _))| *r == target);
+    let in_row = || {
+        cards
+            .iter()
+            .enumerate()
+            .filter(|(_, slot)| slot.row == target)
+    };
     in_row()
-        .rfind(|(_, (_, c))| *c <= column)
+        .rfind(|(_, slot)| slot.column <= column)
         .or_else(|| in_row().next())
         .map_or(from, |(index, _)| index)
 }
@@ -129,12 +145,25 @@ mod tests {
             "a section starts a row of its own"
         );
         assert!(wide.headers[1].top() > wide.cards[2].rect.bottom());
+        assert!(
+            wide.cards[3].reveal.contains_rect(wide.headers[1]),
+            "a first-row card brings its header"
+        );
+        let tall = layout(&[4], 300.0, 17.0);
+        assert_eq!(
+            tall.cards[1].reveal, tall.cards[1].rect,
+            "a later row brings only itself"
+        );
     }
 
     #[test]
     fn arrows_move_one_grid_row_in_the_same_column_and_clamp_to_a_shorter_row() {
         // Section A: three cards on row 0; section B: two cards on row 1.
-        let grid = [(0, 0), (0, 1), (0, 2), (1, 0), (1, 1)];
+        let grid = [(0, 0), (0, 1), (0, 2), (1, 0), (1, 1)].map(|(row, column)| Slot {
+            pane: 0,
+            row,
+            column,
+        });
         assert_eq!(vertical(&grid, 1, true), 4);
         assert_eq!(
             vertical(&grid, 2, true),
