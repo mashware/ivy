@@ -17,6 +17,8 @@ use std::{
 };
 
 pub(crate) struct Badge {
+    /// The identity itself, so grouping never depends on how its name was disambiguated for display.
+    pub(crate) key: Key,
     pub(crate) name: String,
     pub(crate) details: String,
     pub(crate) ink: Color32,
@@ -201,6 +203,7 @@ pub(crate) fn refresh(window: &mut Window, ctx: &egui::Context) {
         }
         for pane in window.all_panes_mut() {
             pane.project = state.resolver.identity(pane.name).map(|identity| Badge {
+                key: identity.key.clone(),
                 name: badge_name(identity, &identities),
                 details: format!("{}\n{}", identity.name, identity.path.display()),
                 ink: state.assignments[&identity.key],

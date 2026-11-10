@@ -320,25 +320,26 @@ const SOURCES: &[(&str, &str, usize)] = &[
         include_str!("../src/console_input.rs"),
         1,
     ),
-    ("src/summary.rs", include_str!("../src/summary.rs"), 1),
+    ("src/board.rs", include_str!("../src/board.rs"), 1),
     (
-        "src/summary/input.rs",
-        include_str!("../src/summary/input.rs"),
+        "src/board/input.rs",
+        include_str!("../src/board/input.rs"),
         1,
     ),
     (
-        "src/summary/model.rs",
-        include_str!("../src/summary/model.rs"),
+        "src/board/layout.rs",
+        include_str!("../src/board/layout.rs"),
         1,
     ),
     (
-        "src/summary/view.rs",
-        include_str!("../src/summary/view.rs"),
+        "src/board/model.rs",
+        include_str!("../src/board/model.rs"),
         1,
     ),
+    ("src/board/view.rs", include_str!("../src/board/view.rs"), 1),
     (
-        "src/summary/probe.rs",
-        include_str!("../src/summary/probe.rs"),
+        "src/board/probe.rs",
+        include_str!("../src/board/probe.rs"),
         1,
     ),
     (
@@ -347,13 +348,13 @@ const SOURCES: &[(&str, &str, usize)] = &[
         1,
     ),
     (
-        "src/measure/overview.rs",
-        include_str!("../src/measure/overview.rs"),
+        "src/measure/board.rs",
+        include_str!("../src/measure/board.rs"),
         1,
     ),
     (
-        "src/tests/overview.rs",
-        include_str!("../src/tests/overview.rs"),
+        "src/tests/board.rs",
+        include_str!("../src/tests/board.rs"),
         1,
     ),
     (

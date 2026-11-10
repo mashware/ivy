@@ -1,4 +1,4 @@
-//! Overview effects through application dispatch and the real program's input file.
+//! Board effects through application dispatch and the real program's input file.
 #[cfg(test)]
 mod tests {
     use super::super::*;
@@ -39,8 +39,8 @@ mod tests {
     }
 
     #[test]
-    fn overview_open_and_escape_preserve_consoles_and_swallow_the_closing_frames_input() {
-        let received = term_core::received::Received::new("overview-escape");
+    fn board_open_and_escape_preserve_consoles_and_swallow_the_closing_frames_input() {
+        let received = term_core::received::Received::new("board-escape");
         let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
         integrated(&mut window);
         let ctx = egui::Context::default();
@@ -52,8 +52,8 @@ mod tests {
         let grids: Vec<_> = window.active().panes().iter().map(|p| p.measured).collect();
         let shapes = frame(&mut window, &ctx, chord_with(egui::Key::O));
         assert!(
-            window.summary.is_open(),
-            "default shortcut did not open Overview"
+            window.board.is_open(),
+            "default shortcut did not open Board"
         );
         assert!(the_text_queued_up(
             &shapes,
@@ -76,7 +76,7 @@ mod tests {
                 egui::Event::Paste("closing paste".into()),
             ],
         );
-        assert!(!window.summary.is_open());
+        assert!(!window.board.is_open());
         assert_eq!(window.active().root.describe(), layout);
         assert_eq!(window.active().focus, focus);
         assert_eq!(
@@ -101,16 +101,16 @@ mod tests {
         assert_eq!(
             received.wait_for(5, Duration::from_secs(5)),
             b"after",
-            "Overview sent bytes to its program or never released input"
+            "Board sent bytes to its program or never released input"
         );
     }
     #[test]
-    fn configurable_overview_binding_returns_the_disabled_chord_to_the_program() {
+    fn configurable_board_binding_returns_the_disabled_chord_to_the_program() {
         for (config, opening) in [
-            ("key.overview=none", None),
-            ("key.overview=ctrl+shift+u", Some(egui::Key::U)),
+            ("key.board=none", None),
+            ("key.board=ctrl+shift+u", Some(egui::Key::U)),
         ] {
-            let received = term_core::received::Received::new("overview-binding");
+            let received = term_core::received::Received::new("board-binding");
             let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
             integrated(&mut window);
             let ctx = egui::Context::default();
@@ -120,7 +120,7 @@ mod tests {
             settings.apply_to(&mut window);
             frame(&mut window, &ctx, chord_with(egui::Key::O));
             assert!(
-                !window.summary.is_open(),
+                !window.board.is_open(),
                 "the factory chord survived {config}"
             );
             frame(&mut window, &ctx, vec![egui::Event::Text("witness".into())]);
@@ -128,7 +128,7 @@ mod tests {
             if let Some(opening) = opening {
                 frame(&mut window, &ctx, chord_with(opening));
                 assert!(
-                    window.summary.is_open(),
+                    window.board.is_open(),
                     "configured binding was parsed but not dispatched"
                 );
                 frame(&mut window, &ctx, vec![key(egui::Key::Escape)]);
@@ -142,8 +142,87 @@ mod tests {
     }
 
     #[test]
+    fn the_name_before_the_board_is_an_unknown_key() {
+        let (_, warnings) = settings::interpret("key.overview=ctrl+shift+o").unwrap();
+        let said = warnings
+            .kept()
+            .iter()
+            .map(ToString::to_string)
+            .collect::<String>();
+        assert!(
+            said.contains("overview"),
+            "key.overview was taken silently: {said:?}"
+        );
+    }
+
+    #[test]
+    fn consoles_are_grouped_by_repository_and_a_folder_joins_the_other_consoles() {
+        use crate::project::Key;
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
+        integrated(&mut window);
+        let ctx = egui::Context::default();
+        let badge = |key: Key, name: &str| crate::project_view::Badge {
+            key,
+            name: name.to_owned(),
+            details: String::new(),
+            ink: egui::Color32::RED,
+            painted: Default::default(),
+        };
+        let ivy = || Key::Repository("/work/ivy/.git".into());
+        let projects = [
+            Some(badge(ivy(), "Ivy")),
+            Some(badge(Key::Repository("/work/facq/.git".into()), "FacQ")),
+            Some(badge(Key::Folder("/home/me/Downloads".into()), "Downloads")),
+            Some(badge(ivy(), "Ivy")),
+        ];
+        let names: Vec<usize> = window.all_panes().map(|pane| pane.name).collect();
+        for (pane, project) in window.all_panes_mut().zip(projects) {
+            pane.project = project;
+        }
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
+        let shapes = frame(&mut window, &ctx, vec![]);
+        // The console headers under the board paint the same project names, in a proportional face.
+        let on_the_board =
+            |t: &egui::epaint::TextShape| {
+                t.galley.job.sections.first().is_some_and(|section| {
+                    section.format.font_id.family == egui::FontFamily::Monospace
+                })
+            };
+        let header = |name: &str| {
+            shapes
+                .iter()
+                .find_map(|s| match &s.shape {
+                    egui::Shape::Text(t) if t.galley.text() == name && on_the_board(t) => {
+                        Some(t.pos.y)
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("no section header {name:?}"))
+        };
+        let (ivy_at, facq_at, other_at) = (header("Ivy"), header("FacQ"), header("Other consoles"));
+        assert!(
+            ivy_at < facq_at && facq_at < other_at,
+            "sections out of order"
+        );
+        assert!(
+            shapes.iter().all(|s| !matches!(&s.shape,
+                egui::Shape::Text(t) if t.galley.text() == "Downloads" && on_the_board(t))),
+            "a folder became a section"
+        );
+        let card = |n: usize| window.board.row_rect(names[n]).expect("card painted");
+        assert!(
+            card(2).top() > other_at,
+            "the folder console left «Other consoles»"
+        );
+        assert!(
+            card(3).top() < facq_at,
+            "the second Ivy console left its section"
+        );
+    }
+
+    #[test]
     fn enter_restores_a_hidden_target_and_does_not_deliver_trailing_text_or_paste() {
-        let received = term_core::received::Received::new("overview-enter");
+        let received = term_core::received::Received::new("board-enter");
         let script = received.script("stty raw -echo");
         let mut window = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", script.as_str()]]);
         integrated(&mut window);
@@ -166,7 +245,7 @@ mod tests {
                 egui::Event::Paste("paste".into()),
             ],
         );
-        assert!(!window.summary.is_open());
+        assert!(!window.board.is_open());
         assert_eq!(window.active().name, tab);
         assert_eq!(
             window.active().focus,
@@ -185,7 +264,7 @@ mod tests {
 
     #[test]
     fn repeated_egui_closing_passes_cannot_send_the_frames_input_to_a_program() {
-        let received = term_core::received::Received::new("overview-repeat");
+        let received = term_core::received::Received::new("board-repeat");
         let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
         integrated(&mut window);
         let ctx = egui::Context::default();
@@ -207,19 +286,19 @@ mod tests {
                 passes += 1;
                 eframe::App::ui(&mut window, ui, &mut native_frame);
                 if passes == 1 {
-                    ctx.request_discard("repeat the Overview closing frame");
+                    ctx.request_discard("repeat the Board closing frame");
                 }
             },
         )
         .drop_without_applying_deltas();
         assert_eq!(passes, 2);
-        assert!(!window.summary.is_open());
+        assert!(!window.board.is_open());
         frame(&mut window, &ctx, vec![egui::Event::Text("after".into())]);
         assert_eq!(received.wait_for(5, Duration::from_secs(5)), b"after");
     }
 
     #[test]
-    fn quiet_background_folded_panels_refresh_into_the_visible_overview() {
+    fn quiet_background_folded_panels_refresh_into_the_visible_board() {
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
         integrated(&mut window);
         let ctx = egui::Context::default();
@@ -240,7 +319,7 @@ mod tests {
         let shapes = frame(&mut window, &ctx, vec![]);
         assert!(
             the_text_queued_up(&shapes, "Changed without terminal output"),
-            "Overview refreshed only the active or unfolded panes"
+            "Board refreshed only the active or unfolded panes"
         );
         assert!(the_text_queued_up(&shapes, "quiet phase"));
         assert!(!the_text_queued_up(&shapes, "Before quiet publication"));
@@ -257,7 +336,7 @@ mod tests {
         frame(&mut window, &ctx, vec![]);
         let target = window.tabs[1].panes()[0].name;
         let at = window
-            .summary
+            .board
             .row_rect(target)
             .expect("target row painted")
             .center();
@@ -272,7 +351,7 @@ mod tests {
             &ctx,
             vec![egui::Event::PointerMoved(at), pointer(true)],
         );
-        assert_eq!(window.summary.selected(), Some(target));
+        assert_eq!(window.board.selected(), Some(target));
         drop(
             window.tabs[1]
                 .root
@@ -283,10 +362,10 @@ mod tests {
         window.tabs[1].focus = survivor;
         // A control-channel removal can repaint while the person still holds the button.
         frame(&mut window, &ctx, vec![]);
-        assert!(window.summary.row_rect(survivor).unwrap().contains(at));
+        assert!(window.board.row_rect(survivor).unwrap().contains(at));
         frame(&mut window, &ctx, vec![pointer(false)]);
         assert!(
-            window.summary.is_open(),
+            window.board.is_open(),
             "release activated the replacement at the removed row's ordinal"
         );
         assert_eq!(
@@ -294,14 +373,14 @@ mod tests {
             "removed target redirected navigation to a different tab"
         );
         assert_eq!(
-            window.summary.selected(),
+            window.board.selected(),
             Some(survivor),
             "selection did not clamp to the nearest surviving row"
         );
     }
 
     #[test]
-    fn overview_shortcut_cannot_replace_settings_or_a_console_rename() {
+    fn board_shortcut_cannot_replace_settings_or_a_console_rename() {
         for rename in [false, true] {
             let mut window = window_with("sleep 30", "sleep 30");
             integrated(&mut window);
@@ -320,21 +399,21 @@ mod tests {
             }
             frame(&mut window, &ctx, vec![]);
             frame(&mut window, &ctx, chord_with(egui::Key::O));
-            assert!(!window.summary.is_open());
+            assert!(!window.board.is_open());
             assert!(
                 if rename {
                     window.pane_view.is_renaming()
                 } else {
                     window.settings_editor.is_open()
                 },
-                "Overview discarded another modal's draft"
+                "Board discarded another modal's draft"
             );
             assert!(window.all_panes_mut().all(|p| p.keystrokes.is_empty()));
         }
     }
 
     #[test]
-    fn escaping_overview_keeps_the_existing_search_selection_and_scrollback() {
+    fn escaping_board_keeps_the_existing_search_selection_and_scrollback() {
         let mut window = window_with("sleep 30", "sleep 30");
         integrated(&mut window);
         let ctx = egui::Context::default();
@@ -378,7 +457,7 @@ mod tests {
         let pane = window.active().panes()[0];
         assert!(
             pane.search.is_open(),
-            "Overview Escape closed the underlying search"
+            "Board Escape closed the underlying search"
         );
         assert_eq!(
             pane.screen.selected_text().as_deref(),
@@ -387,7 +466,7 @@ mod tests {
         assert_eq!(
             pane.screen.to_text(),
             visible,
-            "Overview changed the console's scroll position"
+            "Board changed the console's scroll position"
         );
         assert!(the_text_queued_up(&shapes, "needle"));
         assert!(!the_text_queued_up(&shapes, "must not edit query"));
@@ -415,7 +494,7 @@ mod tests {
     }
 
     #[test]
-    fn overview_alarm_uses_inactive_and_folded_producers_only_while_their_rows_are_visible() {
+    fn board_alarm_uses_inactive_and_folded_producers_only_while_their_rows_are_visible() {
         let written = SystemTime::UNIX_EPOCH + Duration::from_secs(2_000_000_000);
         let now = written + Duration::from_secs(10);
         for (folded_minutes, background_minutes) in [(1, 3), (3, 1)] {
@@ -431,11 +510,11 @@ mod tests {
             );
             let ctx = egui::Context::default();
             frame(&mut window, &ctx, chord_with(egui::Key::O));
-            assert!(window.summary.is_open());
+            assert!(window.board.is_open());
             assert_eq!(
                 crate::alarms::panel_warning_due(&window, now),
                 Some(Duration::from_secs(50)),
-                "Overview omitted the earliest quiet producer: folded={folded_minutes}, background={background_minutes}"
+                "Board omitted the earliest quiet producer: folded={folded_minutes}, background={background_minutes}"
             );
             assert_eq!(
                 crate::alarms::panel_warning_due(&window, written + Duration::from_secs(65)),
@@ -446,7 +525,7 @@ mod tests {
             assert_eq!(
                 crate::alarms::panel_warning_due(&window, now),
                 Some(Duration::from_secs(230)),
-                "closing Overview left hidden producer alarms armed"
+                "closing Board left hidden producer alarms armed"
             );
         }
     }
@@ -485,21 +564,20 @@ mod tests {
         };
         pass(&mut window, chord_with(egui::Key::O));
         let shapes = pass(&mut window, vec![]);
-        let mut rows: Vec<_> = window
+        let rows: Vec<_> = window
             .all_panes()
-            .filter_map(|pane| window.summary.row_rect(pane.name))
+            .filter_map(|pane| window.board.row_rect(pane.name))
             .filter(|r| r.is_positive())
             .collect();
-        rows.sort_by(|a, b| a.top().total_cmp(&b.top()));
-        assert!(
-            rows.len() >= 2,
-            "small Overview did not expose two list entries"
-        );
-        for pair in rows.windows(2) {
-            assert!(
-                pair[0].bottom() <= pair[1].top(),
-                "long metadata overlapped row hit targets: {pair:?}"
-            );
+        assert!(rows.len() >= 2, "small Board did not expose two cards");
+        // Cards sit side by side as well as one under another, so no pair may share a point.
+        for (n, card) in rows.iter().enumerate() {
+            for other in &rows[n + 1..] {
+                assert!(
+                    !card.intersects(*other),
+                    "long metadata overlapped card hit targets: {card:?} {other:?}"
+                );
+            }
         }
         let mut checked_slots = 0;
         for shape in &shapes {
@@ -519,13 +597,13 @@ mod tests {
                 );
                 assert!(
                     narrow.contains_rect(shape.clip_rect),
-                    "metadata escaped the Overview viewport"
+                    "metadata escaped the Board viewport"
                 );
             }
         }
         assert!(
             checked_slots >= 2,
-            "long metadata was not painted inside the Overview row slots"
+            "long metadata was not painted inside the Board row slots"
         );
         assert!(
             the_text_queued_up(&shapes, "Close"),
@@ -534,7 +612,7 @@ mod tests {
         pass(&mut window, vec![key(egui::Key::End)]);
         let target = window.tabs[1].panes()[1].name;
         let rect = window
-            .summary
+            .board
             .row_rect(target)
             .expect("End scrolled target into view");
         assert!(
@@ -543,11 +621,11 @@ mod tests {
         );
         pass(&mut window, vec![key(egui::Key::Enter)]);
         assert_eq!(window.active().focus, target);
-        assert!(!window.summary.is_open());
+        assert!(!window.board.is_open());
     }
 
     #[test]
-    fn overview_paints_only_three_literal_body_lines_with_their_style_and_indentation() {
+    fn board_paints_only_three_literal_body_lines_with_their_style_and_indentation() {
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
         integrated(&mut window);
         let ctx = egui::Context::default();
@@ -565,7 +643,6 @@ mod tests {
             "#42 first literal",
             "second literal",
             "third literal",
-            "No attention requested",
         ] {
             assert!(
                 the_text_queued_up(&shapes, text),
@@ -574,13 +651,14 @@ mod tests {
         }
         for text in [
             "fourth must stay hidden",
+            "No attention requested",
             "Do not render this action",
             "unsafe command",
             "https://example.test/inert",
         ] {
             assert!(
                 !the_text_queued_up(&shapes, text),
-                "Overview rendered non-excerpt content {text:?}"
+                "Board rendered non-excerpt content {text:?}"
             );
         }
         let text_shape = |needle: &str| {
@@ -616,12 +694,12 @@ mod tests {
     }
 
     #[test]
-    fn one_console_can_open_overview_by_mouse_with_the_shortcut_disabled() {
+    fn one_console_can_open_board_by_mouse_with_the_shortcut_disabled() {
         let mut window = window_with("sleep 30", "sleep 30");
         let removed = window.active().panes()[1].name;
         drop(window.active_mut().root.close(removed).unwrap());
         integrated(&mut window);
-        settings::interpret("key.overview=none")
+        settings::interpret("key.board=none")
             .unwrap()
             .0
             .apply_to(&mut window);
@@ -636,7 +714,7 @@ mod tests {
         let at = egui::pos2(area().right() - from_right, 24.0);
         frame(&mut window, &ctx, click_at(at));
         assert!(
-            window.summary.is_open(),
+            window.board.is_open(),
             "mouse entry depended on a bound shortcut or multiple consoles"
         );
         assert_eq!(window.tabs.len(), 1);

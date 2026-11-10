@@ -9,39 +9,39 @@ use eframe::egui;
 use std::time::Instant;
 
 pub(crate) fn blocked(window: &Window, ctx: &egui::Context) -> bool {
-    window.summary.enabled
-        && (window.summary.open
-            || window.summary.awaiting_release
-            || window.summary.blocked_frame == Some(ctx.cumulative_frame_nr()))
+    window.board.enabled
+        && (window.board.open
+            || window.board.awaiting_release
+            || window.board.blocked_frame == Some(ctx.cumulative_frame_nr()))
 }
 
 pub(crate) fn toggle(window: &mut Window, ctx: &egui::Context) {
-    if !window.summary.enabled || window.settings_editor.is_open() || window.pane_view.is_modal() {
+    if !window.board.enabled || window.settings_editor.is_open() || window.pane_view.is_modal() {
         return;
     }
     let started = Instant::now();
-    if window.summary.open {
+    if window.board.open {
         close(window, ctx);
     } else {
         let selected = window.active().focus;
-        window.summary.open = true;
-        window.summary.original = Some(selected);
-        window.summary.selected = Some(selected);
-        window.summary.ordinal = 0;
-        window.summary.scroll_selected = true;
-        window.summary.pressed = None;
-        window.summary.activate = None;
-        window.summary.order.clear();
+        window.board.open = true;
+        window.board.original = Some(selected);
+        window.board.selected = Some(selected);
+        window.board.ordinal = 0;
+        window.board.scroll_selected = true;
+        window.board.pressed = None;
+        window.board.activate = None;
+        window.board.order.clear();
         cancel_gestures(window, ctx);
-        window.summary.blocked_frame = Some(ctx.cumulative_frame_nr());
+        window.board.blocked_frame = Some(ctx.cumulative_frame_nr());
     }
-    window.summary.timing.record_work(started.elapsed());
-    window.timed_separately += window.summary.timing.take_cost();
+    window.board.timing.record_work(started.elapsed());
+    window.timed_separately += window.board.timing.take_cost();
     ctx.request_repaint();
 }
 
 pub(super) fn close(window: &mut Window, ctx: &egui::Context) {
-    if let Some(original) = window.summary.original.take()
+    if let Some(original) = window.board.original.take()
         && let Some(owner) = window
             .tabs
             .iter()
@@ -50,13 +50,13 @@ pub(super) fn close(window: &mut Window, ctx: &egui::Context) {
         window.active = owner;
         window.tabs[owner].focus = original;
     }
-    window.summary.open = false;
-    window.summary.pressed = None;
-    window.summary.activate = None;
-    window.summary.painted.clear();
-    window.summary.order.clear();
-    window.summary.blocked_frame = Some(ctx.cumulative_frame_nr());
-    window.summary.awaiting_release = ctx.input(|i| i.pointer.any_down());
+    window.board.open = false;
+    window.board.pressed = None;
+    window.board.activate = None;
+    window.board.painted.clear();
+    window.board.order.clear();
+    window.board.blocked_frame = Some(ctx.cumulative_frame_nr());
+    window.board.awaiting_release = ctx.input(|i| i.pointer.any_down());
     cancel_gestures(window, ctx);
     ctx.request_repaint();
 }
@@ -82,14 +82,14 @@ pub(crate) fn cancel_gestures(window: &mut Window, ctx: &egui::Context) {
 }
 
 pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, _metrics: &CellMetrics) -> bool {
-    if !window.summary.enabled || window.settings_editor.is_open() || window.pane_view.is_modal() {
+    if !window.board.enabled || window.settings_editor.is_open() || window.pane_view.is_modal() {
         return false;
     }
     let frame = ui.ctx().cumulative_frame_nr();
-    if window.summary.input_frame == Some(frame) {
+    if window.board.input_frame == Some(frame) {
         return blocked(window, ui.ctx());
     }
-    window.summary.input_frame = Some(frame);
+    window.board.input_frame = Some(frame);
     let scan_started = Instant::now();
     let toggle_pressed = ui.input(|i| {
         i.events.iter().any(|e| match e {
@@ -105,27 +105,27 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, _metrics: &Cel
                     shift: modifiers.shift,
                     alt: modifiers.alt,
                     key: *key,
-                }) == Some(Action::Overview)
+                }) == Some(Action::Board)
             }
             _ => false,
         })
     });
-    window.summary.timing.record_work(scan_started.elapsed());
-    window.timed_separately += window.summary.timing.take_cost();
+    window.board.timing.record_work(scan_started.elapsed());
+    window.timed_separately += window.board.timing.take_cost();
     if !blocked(window, ui.ctx()) && !toggle_pressed {
         return false;
     }
-    let was_open = window.summary.open;
+    let was_open = window.board.open;
     if toggle_pressed {
         toggle(window, ui.ctx());
     }
     let started = Instant::now();
     let events = ui.input(|i| i.events.clone());
-    window.summary.blocked_frame = Some(ui.ctx().cumulative_frame_nr());
+    window.board.blocked_frame = Some(ui.ctx().cumulative_frame_nr());
     window
         .header_input
         .block_for_settings(ui.ctx().cumulative_frame_nr());
-    if window.summary.open && was_open && !toggle_pressed {
+    if window.board.open && was_open && !toggle_pressed {
         for event in &events {
             match event {
                 egui::Event::Key {
@@ -140,28 +140,30 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, _metrics: &Cel
                     key,
                     egui::Key::ArrowUp
                         | egui::Key::ArrowDown
+                        | egui::Key::ArrowLeft
+                        | egui::Key::ArrowRight
                         | egui::Key::Home
                         | egui::Key::End
                         | egui::Key::Enter
                 ) =>
                 {
-                    navigate(&mut window.summary, *key);
+                    navigate(&mut window.board, *key);
                 }
                 egui::Event::PointerButton {
                     pos,
                     button: egui::PointerButton::Primary,
                     pressed,
                     ..
-                } => pointer(&mut window.summary, *pos, *pressed),
+                } => pointer(&mut window.board, *pos, *pressed),
                 _ => {}
             }
-            if !window.summary.open {
+            if !window.board.open {
                 break;
             }
         }
     }
-    if !window.summary.open {
-        window.summary.awaiting_release = ui.input(|i| i.pointer.any_down());
+    if !window.board.open {
+        window.board.awaiting_release = ui.input(|i| i.pointer.any_down());
         // No closing gesture, clipboard event or dropped file reaches a console.
         ui.input_mut(|i| {
             i.events.retain(|e| {
@@ -172,8 +174,8 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, _metrics: &Cel
             })
         });
     }
-    window.summary.timing.record_work(started.elapsed());
-    window.timed_separately += window.summary.timing.take_cost();
+    window.board.timing.record_work(started.elapsed());
+    window.timed_separately += window.board.timing.take_cost();
     true
 }
 
@@ -188,11 +190,16 @@ fn navigate(state: &mut State, key: egui::Key) {
         .iter()
         .position(|id| Some(*id) == state.selected)
         .unwrap_or(0);
+    let last = state.order.len().saturating_sub(1);
+    // The grid is the last painting's; before any painting there is none and ↑/↓ read as ←/→.
+    let painted = state.grid.len() == state.order.len();
     let next = match key {
-        egui::Key::ArrowUp => index.saturating_sub(1),
-        egui::Key::ArrowDown => (index + 1).min(state.order.len().saturating_sub(1)),
+        egui::Key::ArrowUp if painted => super::layout::vertical(&state.grid, index, false),
+        egui::Key::ArrowDown if painted => super::layout::vertical(&state.grid, index, true),
+        egui::Key::ArrowLeft | egui::Key::ArrowUp => index.saturating_sub(1),
+        egui::Key::ArrowRight | egui::Key::ArrowDown => (index + 1).min(last),
         egui::Key::Home => 0,
-        egui::Key::End => state.order.len().saturating_sub(1),
+        egui::Key::End => last,
         _ => return,
     };
     state.selected = state.order.get(next).copied();
@@ -244,5 +251,27 @@ mod tests {
         navigate(&mut state, egui::Key::Enter);
         state.selected = Some(9);
         assert_eq!(state.activate, Some(8));
+    }
+    #[test]
+    fn left_and_right_follow_reading_order_and_up_and_down_follow_the_grid() {
+        let mut state = State {
+            order: vec![4, 8, 9, 2],
+            grid: vec![(0, 0), (0, 1), (0, 2), (1, 0)],
+            selected: Some(9),
+            ..State::default()
+        };
+        navigate(&mut state, egui::Key::ArrowRight);
+        assert_eq!(
+            state.selected,
+            Some(2),
+            "reading order crosses into the next row"
+        );
+        navigate(&mut state, egui::Key::ArrowUp);
+        assert_eq!(state.selected, Some(4), "same column, one row up");
+        navigate(&mut state, egui::Key::ArrowLeft);
+        assert_eq!(state.selected, Some(4), "nothing before the first card");
+        state.selected = Some(9);
+        navigate(&mut state, egui::Key::ArrowDown);
+        assert_eq!(state.selected, Some(2), "clamped to the shorter row");
     }
 }

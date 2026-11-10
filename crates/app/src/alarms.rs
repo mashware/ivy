@@ -200,30 +200,30 @@ impl Window {
             ctx.request_repaint_after(flip);
         }
 
-        let overview = self.summary.is_open();
-        let started = overview.then(Instant::now);
+        let board = self.board.is_open();
+        let started = board.then(Instant::now);
         let missing = panel_warning_due(self, now);
-        if overview {
+        if board {
             let moment = Instant::now();
-            if self.summary.warning_due.is_some_and(|due| due <= moment) {
-                self.summary.timing.deadline_expired();
+            if self.board.warning_due.is_some_and(|due| due <= moment) {
+                self.board.timing.deadline_expired();
             }
-            self.summary.warning_due = missing.and_then(|delay| moment.checked_add(delay));
+            self.board.warning_due = missing.and_then(|delay| moment.checked_add(delay));
         } else {
-            self.summary.warning_due = None;
+            self.board.warning_due = None;
         }
         if let Some(missing) = missing {
             ctx.request_repaint_after(missing);
         }
         if let Some(started) = started {
-            self.summary.timing.record_work(started.elapsed());
-            self.timed_separately += self.summary.timing.take_cost();
+            self.board.timing.record_work(started.elapsed());
+            self.timed_separately += self.board.timing.take_cost();
         }
     }
 }
 
 pub(crate) fn panel_warning_due(window: &Window, now: SystemTime) -> Option<Duration> {
-    if window.summary.is_open() {
+    if window.board.is_open() {
         window
             .all_panes()
             .filter_map(|pane| pane.panel_state.how_long_until_warning(now))

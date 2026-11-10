@@ -256,7 +256,7 @@ pub(crate) fn before_keys(
     ui: &mut egui::Ui,
     metrics: &crate::painter::CellMetrics,
 ) -> bool {
-    if window.settings_editor.is_open() || window.summary.is_open() || window.pane_view.is_modal() {
+    if window.settings_editor.is_open() || window.board.is_open() || window.pane_view.is_modal() {
         return false;
     }
     if !window.viewer.open

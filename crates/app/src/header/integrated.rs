@@ -428,6 +428,7 @@ mod tests {
     fn enlarged_project_prefix_uses_the_title_size_and_full_line_height() {
         let ctx = egui::Context::default();
         let badge = crate::project_view::Badge {
+            key: crate::project::Key::Repository("/work/backend".into()),
             name: "Backend".into(),
             details: "/work/backend".into(),
             ink: egui::Color32::GREEN,
@@ -488,6 +489,7 @@ mod tests {
             ..Default::default()
         });
         let badge = crate::project_view::Badge {
+            key: crate::project::Key::Repository("/work/backend".into()),
             name: "Backend".into(),
             details: "/work/backend".into(),
             ink,

@@ -163,7 +163,7 @@ pub(super) fn open_requested(
 pub(super) fn open(window: &mut Window, ctx: &egui::Context) {
     if window.settings_editor.is_open()
         || window.chrome.updates.blocked(ctx)
-        || crate::summary::blocked(window, ctx)
+        || crate::board::blocked(window, ctx)
         || window.pane_view.is_modal()
     {
         return;
@@ -174,7 +174,7 @@ pub(super) fn open(window: &mut Window, ctx: &egui::Context) {
     window.chrome.guide.copied = None;
     window.chrome.guide.blocked_frame = Some(ctx.cumulative_frame_nr());
     window.chrome.menu = false;
-    crate::summary::cancel_gestures(window, ctx);
+    crate::board::cancel_gestures(window, ctx);
     claim_input(ctx);
     ctx.request_repaint();
 }
@@ -256,7 +256,7 @@ pub(crate) fn begin_pass(window: &mut Window, ui: &mut egui::Ui, frame: &eframe:
 
 /// Paint after every console's refresh, including background tabs (D13).
 pub(crate) fn after_panels(window: &mut Window, ui: &mut egui::Ui, area: Rect) {
-    crate::summary::paint(window, ui, area);
+    crate::board::paint(window, ui, area);
     if !window.chrome.enabled() {
         return;
     }

@@ -51,8 +51,9 @@ use std::collections::VecDeque;
 use std::fmt;
 use std::time::{Duration, Instant};
 
+mod board;
 mod header;
-mod overview;
+pub(crate) use board::Board;
 /// What the per-session half exports, **named one by one rather than globbed**.
 ///
 /// A glob would let a later item cross the seam without anybody deciding it had, and this module's
@@ -63,7 +64,6 @@ pub use header::{
     Rasterizing, ReadingSettings, Reflow, Restoring, Saving, Searching, SessionHeader,
     SizeInPoints, Strips, TabBar, header, side,
 };
-pub(crate) use overview::Overview;
 
 /// How many samples are kept of each number.
 ///
@@ -2009,7 +2009,7 @@ mod tests {
         typed_into.record_outbound(ms(1));
 
         let mut window_spans = Vec::new();
-        Overview::default()
+        Board::default()
             .publish(&mut window_spans)
             .expect("memory report");
         // Use the real producer so the script's chrome witnesses are tied to its output.

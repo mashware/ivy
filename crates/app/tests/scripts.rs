@@ -322,34 +322,38 @@ const MODULES: &[(&str, &str)] = &[
         "app/src/console_input.rs",
         include_str!("../src/console_input.rs"),
     ),
-    ("app/src/summary.rs", include_str!("../src/summary.rs")),
+    ("app/src/board.rs", include_str!("../src/board.rs")),
     (
-        "app/src/summary/input.rs",
-        include_str!("../src/summary/input.rs"),
+        "app/src/board/input.rs",
+        include_str!("../src/board/input.rs"),
     ),
     (
-        "app/src/summary/model.rs",
-        include_str!("../src/summary/model.rs"),
+        "app/src/board/layout.rs",
+        include_str!("../src/board/layout.rs"),
     ),
     (
-        "app/src/summary/view.rs",
-        include_str!("../src/summary/view.rs"),
+        "app/src/board/model.rs",
+        include_str!("../src/board/model.rs"),
     ),
     (
-        "app/src/summary/probe.rs",
-        include_str!("../src/summary/probe.rs"),
+        "app/src/board/view.rs",
+        include_str!("../src/board/view.rs"),
+    ),
+    (
+        "app/src/board/probe.rs",
+        include_str!("../src/board/probe.rs"),
     ),
     (
         "app/src/panel/summary.rs",
         include_str!("../src/panel/summary.rs"),
     ),
     (
-        "app/src/measure/overview.rs",
-        include_str!("../src/measure/overview.rs"),
+        "app/src/measure/board.rs",
+        include_str!("../src/measure/board.rs"),
     ),
     (
-        "app/src/tests/overview.rs",
-        include_str!("../src/tests/overview.rs"),
+        "app/src/tests/board.rs",
+        include_str!("../src/tests/board.rs"),
     ),
     (
         "app/src/settings/editor/view/footer.rs",

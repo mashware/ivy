@@ -164,7 +164,7 @@ mod tests {
     }
 
     #[test]
-    fn terminal_titles_reach_headers_and_overview_including_background_panes() {
+    fn terminal_titles_reach_headers_and_board_including_background_panes() {
         let mut window = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
         window.chrome.enable();
         window.headers = window.headers.integrated(true);
@@ -188,10 +188,7 @@ mod tests {
         assert!(!the_text_queued_up(&shapes, "OC | Feature"));
         let shapes = draw(&mut window, &ctx, chord_with(egui::Key::O));
         for title in ["Ship next", names[1], names[2], names[3]] {
-            assert!(
-                the_text_queued_up(&shapes, title),
-                "Overview omitted {title}"
-            );
+            assert!(the_text_queued_up(&shapes, title), "Board omitted {title}");
         }
         window.tabs[1].panes_mut()[0]
             .screen

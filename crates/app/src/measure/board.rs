@@ -1,9 +1,9 @@
-//! Overview-only input, projection and paint enqueue work, excluding ordinary pane refresh.
+//! Board-only input, projection and paint enqueue work, excluding ordinary pane refresh.
 use super::Series;
 use std::{io::Write, time::Duration};
 
 #[derive(Default)]
-pub(crate) struct Overview {
+pub(crate) struct Board {
     mode: Option<bool>,
     cost: Duration,
     frame: Duration,
@@ -14,12 +14,13 @@ pub(crate) struct Overview {
     open_frames: usize,
     projected: usize,
     painted: usize,
+    sections: usize,
     navigations: usize,
     focus_changes: usize,
     deadlines: usize,
 }
 
-impl Overview {
+impl Board {
     pub(crate) fn set_mode(&mut self, mode: &str) {
         self.mode = match mode {
             "closed" => Some(false),
@@ -45,6 +46,11 @@ impl Overview {
     pub(crate) fn painted(&mut self, rows: usize) {
         self.painted += rows;
     }
+    /// The most sections one projection grouped. A maximum, not a sum: summed over frames, a board
+    /// that never grouped anything would still reach any floor the script sets.
+    pub(crate) fn sections(&mut self, sections: usize) {
+        self.sections = self.sections.max(sections);
+    }
     /// Call after resolving and accepting a live identity, with the observed focus transition.
     pub(crate) fn navigation(&mut self, focus_changed: bool) {
         self.navigations += 1;
@@ -65,7 +71,7 @@ impl Overview {
     pub(crate) fn publish(&self, to: &mut dyn Write) -> std::io::Result<()> {
         writeln!(
             to,
-            "overview mode: {}",
+            "board mode: {}",
             match self.mode {
                 None => "historical",
                 Some(false) => "closed",
@@ -74,15 +80,16 @@ impl Overview {
         )?;
         writeln!(
             to,
-            "overview application: frames={}, total={:?}, {} (input, projection and paint enqueue; excludes pane refresh and tessellation)",
+            "board application: frames={}, total={:?}, {} (input, projection and paint enqueue; excludes pane refresh and tessellation)",
             self.work.total, self.total, self.work
         )?;
         writeln!(
             to,
-            "overview witnesses: open={}, projected={}, painted={}, navigation={}, focus={}, deadlines={}",
+            "board witnesses: open={}, projected={}, painted={}, sections={}, navigation={}, focus={}, deadlines={}",
             self.open_frames,
             self.projected,
             self.painted,
+            self.sections,
             self.navigations,
             self.focus_changes,
             self.deadlines
@@ -95,7 +102,7 @@ mod tests {
     use super::*;
     #[test]
     fn repeated_passes_are_subtracted_once_and_recorded_as_one_frame() {
-        let mut timing = Overview::default();
+        let mut timing = Board::default();
         timing.record_work(Duration::from_micros(7));
         timing.saw_open();
         assert_eq!(timing.take_cost(), Duration::from_micros(7));

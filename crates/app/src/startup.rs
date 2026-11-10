@@ -1,8 +1,8 @@
 //! Startup policy is resolved before any restored process is opened.
 use crate::{
-    APP_NAME, InjectedDrags, PANES_VARIABLE, TABS_VARIABLE, any_measurement_variable, chrome,
-    gesture_at_startup, header, injected, ligatures, opening, project_view, restoration, session,
-    settings, size_at_startup, summary,
+    APP_NAME, InjectedDrags, PANES_VARIABLE, TABS_VARIABLE, any_measurement_variable, board,
+    chrome, gesture_at_startup, header, injected, ligatures, opening, project_view, restoration,
+    session, settings, size_at_startup,
 };
 
 pub fn run() -> eframe::Result {
@@ -111,10 +111,10 @@ pub fn run() -> eframe::Result {
                 std::env::var("MEASURE_SETTINGS").ok().as_deref(),
             );
             window.settings_editor.remember_family(&settings);
-            summary::probe::configure(
+            board::probe::configure(
                 &mut window,
                 measuring,
-                std::env::var("MEASURE_OVERVIEW").ok().as_deref(),
+                std::env::var("MEASURE_BOARD").ok().as_deref(),
             );
             // **The font goes apart from the rest of the settings, and it is not tidiness.** The
             // others put a value on the window; this one talks to the text engine and **costs

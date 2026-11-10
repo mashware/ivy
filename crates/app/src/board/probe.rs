@@ -1,4 +1,4 @@
-//! Deterministic keyboard exercise for matched Overview measurement variants.
+//! Deterministic keyboard exercise for matched Board measurement variants.
 use eframe::egui;
 
 #[derive(Default)]
@@ -8,15 +8,15 @@ pub(crate) struct Probe {
 }
 
 pub(crate) fn configure(window: &mut crate::Window, measuring: bool, mode: Option<&str>) {
-    window.summary.enabled = !measuring || matches!(mode, Some("open" | "closed"));
+    window.board.enabled = !measuring || matches!(mode, Some("open" | "closed"));
     if measuring && let Some(mode) = mode {
-        window.summary.timing.set_mode(mode);
-        window.summary.probe = (mode == "open").then(Probe::default);
+        window.board.timing.set_mode(mode);
+        window.board.probe = (mode == "open").then(Probe::default);
     }
 }
 
 pub(crate) fn inject(window: &mut crate::Window, raw: &mut egui::RawInput, ctx: &egui::Context) {
-    let Some(probe) = &mut window.summary.probe else {
+    let Some(probe) = &mut window.board.probe else {
         return;
     };
     let frame = ctx.cumulative_frame_nr();
@@ -27,7 +27,7 @@ pub(crate) fn inject(window: &mut crate::Window, raw: &mut egui::RawInput, ctx: 
     probe.frame = Some(frame);
     probe.ticks += 1;
     let tick = probe.ticks % 40;
-    let open = window.summary.is_open();
+    let open = window.board.is_open();
     let chord = egui::Modifiers {
         ctrl: true,
         shift: true,

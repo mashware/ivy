@@ -202,35 +202,24 @@ const MODULES: &[(&str, &str)] = &[
         "src/console_input.rs",
         include_str!("../src/console_input.rs"),
     ),
-    ("src/summary.rs", include_str!("../src/summary.rs")),
+    ("src/board.rs", include_str!("../src/board.rs")),
+    ("src/board/input.rs", include_str!("../src/board/input.rs")),
     (
-        "src/summary/input.rs",
-        include_str!("../src/summary/input.rs"),
+        "src/board/layout.rs",
+        include_str!("../src/board/layout.rs"),
     ),
-    (
-        "src/summary/model.rs",
-        include_str!("../src/summary/model.rs"),
-    ),
-    (
-        "src/summary/view.rs",
-        include_str!("../src/summary/view.rs"),
-    ),
-    (
-        "src/summary/probe.rs",
-        include_str!("../src/summary/probe.rs"),
-    ),
+    ("src/board/model.rs", include_str!("../src/board/model.rs")),
+    ("src/board/view.rs", include_str!("../src/board/view.rs")),
+    ("src/board/probe.rs", include_str!("../src/board/probe.rs")),
     (
         "src/panel/summary.rs",
         include_str!("../src/panel/summary.rs"),
     ),
     (
-        "src/measure/overview.rs",
-        include_str!("../src/measure/overview.rs"),
+        "src/measure/board.rs",
+        include_str!("../src/measure/board.rs"),
     ),
-    (
-        "src/tests/overview.rs",
-        include_str!("../src/tests/overview.rs"),
-    ),
+    ("src/tests/board.rs", include_str!("../src/tests/board.rs")),
     (
         "src/settings/editor/view/footer.rs",
         include_str!("../src/settings/editor/view/footer.rs"),
