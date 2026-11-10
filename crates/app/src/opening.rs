@@ -663,7 +663,7 @@ pub(crate) fn create_a_tab(window: &mut Window, ctx: &egui::Context) {
     // retain the shape they were explicitly given.
     let before = Instant::now();
     #[cfg(test)]
-    let before = tests::OperationClock::start(before);
+    let before = crate::tests::OperationClock::start(before);
     let with_what = OpeningLayout {
         columns: 1,
         rows: 1,
@@ -697,17 +697,24 @@ pub(crate) fn chrome_viewport(
     builder: egui::ViewportBuilder,
     enabled: bool,
 ) -> egui::ViewportBuilder {
+    chrome_viewport_on(builder, enabled, cfg!(target_os = "macos"))
+}
+
+// The platform is a parameter so a Linux test can see the macOS branch.
+fn chrome_viewport_on(
+    builder: egui::ViewportBuilder,
+    enabled: bool,
+    macos: bool,
+) -> egui::ViewportBuilder {
     if !enabled {
-        return builder;
-    }
-    #[cfg(target_os = "macos")]
-    {
+        builder
+    } else if macos {
         builder
             .with_fullsize_content_view(true)
             .with_titlebar_shown(false)
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
+            // A transparent titlebar still draws the title: the header paints its own.
+            .with_title_shown(false)
+    } else {
         builder.with_decorations(false)
     }
 }
@@ -732,4 +739,38 @@ pub(crate) fn watch_panes<'a>(
     let waker = ctx.clone();
 
     Watcher::new(move || waker.request_repaint(), &consoles)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn viewport(enabled: bool, macos: bool) -> egui::ViewportBuilder {
+        chrome_viewport_on(egui::ViewportBuilder::default(), enabled, macos)
+    }
+
+    #[test]
+    fn the_mac_window_hides_its_own_title_under_the_integrated_header() {
+        let mac = viewport(true, true);
+        assert_eq!(mac.title_shown, Some(false));
+        assert_eq!(mac.titlebar_shown, Some(false));
+        assert_eq!(mac.fullsize_content_view, Some(true));
+        assert_eq!(mac.decorations, None);
+    }
+
+    #[test]
+    fn other_platforms_drop_the_decorations_and_leave_the_mac_titlebar_alone() {
+        let other = viewport(true, false);
+        assert_eq!(other.decorations, Some(false));
+        assert_eq!(other.title_shown, None);
+        assert_eq!(other.titlebar_shown, None);
+        assert_eq!(other.fullsize_content_view, None);
+    }
+
+    #[test]
+    fn without_the_integrated_header_the_window_keeps_its_native_frame() {
+        for macos in [false, true] {
+            assert_eq!(viewport(false, macos), egui::ViewportBuilder::default());
+        }
+    }
 }

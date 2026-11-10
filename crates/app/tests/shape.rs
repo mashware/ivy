@@ -267,6 +267,10 @@ const MODULES: &[(&str, &str)] = &[
         "src/chrome/connection.rs",
         include_str!("../src/chrome/connection.rs"),
     ),
+    (
+        "src/chrome/traffic_lights.rs",
+        include_str!("../src/chrome/traffic_lights.rs"),
+    ),
     ("src/chrome.rs", include_str!("../src/chrome.rs")),
     (
         "src/header/integrated.rs",
