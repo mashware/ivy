@@ -9334,17 +9334,21 @@ Bellwether, which paints the same contract inside Herdr, had already measured an
 **Decision.** The bridge answers `initialize` with the protocol's optional `instructions` field,
 which harnesses that honour it place in the agent's own instructions. The text asks the agent to
 publish with `panel_set` at the start of a task, before long stretches and at every stop; to keep
-`attention` true; to patch only after publishing on the same connection, and to publish again after
-a restart before patching; and to pass a rendered panel document through as printed. It is sent
-only when the bridge starts with a **whole identity** — `PANEL_ID` present, non-empty and text,
-`PANEL_DIR` present and non-empty — the same rule its tool calls now apply, and never on Windows,
-where the control channel is not bound until F2.7 (D44). Outside those, the key is absent.
+`attention` true; to key the lines it will patch and patch only after publishing on the same
+connection; to publish again after a restart before patching, without a claim nobody holds any
+more; and to pass a rendered panel document through as printed. It is sent only when the bridge
+starts with a **whole identity** — `PANEL_ID` present, non-empty and text, `PANEL_DIR` present and
+absolute — the same rule its tool calls now apply, and only where the control channel binds
+(`endpoint::BINDS`, false on Windows until F2.7, **D43**). Outside those, the key is absent. A tool
+call with a broken identity — one variable set but the identity not whole — is refused with its own
+message, naming the client's forwarding rather than «not in a pane».
 
 **Two rules the text carries because of how harnesses use it.** It names *this server's* tools,
 because a second panel server may be registered beside this one with the same names. And it tells
-an agent another agent launched to leave the panel alone: a harness hands its subagents the same
-instructions, and they share the parent's connection, which holds the pane (D43) — one subagent
-publishing `done` would erase the question its parent is waiting on.
+a subagent working for another agent in the same session to leave the panel alone: a harness hands
+its subagents the same instructions, and they share the parent's connection, which holds the pane
+(D43) — one subagent publishing `done` would erase the question its parent is waiting on. Only
+that case: an agent another agent started in a console of its own has its own identity and panel.
 
 **Discarded:**
 - **Naming all seven verbs** — the `split_*` and retirement descriptions already explain those, and
@@ -9352,8 +9356,9 @@ publishing `done` would erase the question its parent is waiting on.
 - **Presence-only identity, as the tool path had** — two rules in one process: the handshake said
   «no console» for an empty identifier while the first call connected with it; on Windows an empty
   identifier names one machine-wide endpoint. One function, `whole_identity`, now decides for both.
-- **Checking that the endpoint answers before promising a panel** — a stale identity (a
-  multiplexer reattached after Ivy closed) is real but rare, and its first call already says why it
+- **Checking that the endpoint answers before promising a panel** — a stale or borrowed identity
+  (a multiplexer reattached after Ivy closed, a long-lived daemon carrying another console's
+  variables) is real but rare, and its first call already says why it
   failed; probing on every handshake buys a message, not a panel.
 - **Telling the agent to defer to a file producer already painting the pane** — the agent cannot
   tell its own earlier panel from somebody else's after a restart, so the rule would mostly stop
@@ -9361,3 +9366,7 @@ publishing `done` would erase the question its parent is waiting on.
 - **Reading the environment where the reply is built** — a unit test would inherit the identity of
   the console running the suite; the read stays in `main`, covered by a test that starts the binary
   with its own environment.
+- **Accepting an empty or non-text identifier on Unix, where the endpoint ignores it** — the pane's
+  identity is the pair (**D7**), Ivy always sets both, and a rule that depends on the platform is
+  the two-rule split this decision closed. The session helper still reads the pair with a rule of
+  its own; unifying it is outside this decision.

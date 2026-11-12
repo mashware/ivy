@@ -206,9 +206,9 @@ fn answer(line: &str, pane: &mut Option<Producer>, instructions: Option<&str>) -
 /// [`panel_control::client::whole_identity`], the same one the first tool call applies — so the
 /// handshake and the calls never disagree about whether this is a console.
 ///
-/// **And never on Windows**, where the control channel is not bound until F2.7 (D44): every tool
-/// call there fails, and a pane publishes by file only, so telling the agent to call `panel_set`
-/// would be a promise the bridge cannot keep.
+/// **And only where the control channel binds** ([`panel_control::endpoint::BINDS`]): on Windows it
+/// is not bound until F2.7 (D43), every tool call there fails and a pane publishes by file only, so
+/// telling the agent to call `panel_set` would be a promise the bridge cannot keep.
 ///
 /// It takes the values instead of reading them so it can be tested without `set_var`; `main` reads
 /// them, and the binary's integration test covers that line.
@@ -216,7 +216,7 @@ fn instructions_for(
     id: Option<&std::ffi::OsStr>,
     dir: Option<&std::ffi::OsStr>,
 ) -> Option<&'static str> {
-    if cfg!(windows) {
+    if !panel_control::endpoint::BINDS {
         return None;
     }
     panel_control::client::whole_identity(id, dir).map(|_| INSTRUCTIONS)
@@ -231,16 +231,18 @@ fn instructions_for(
 ///   the rest.
 /// - «This server's» is deliberate: a second panel server may be registered beside this one and
 ///   serve the same names.
-/// - Agents launched by another agent are told to leave the panel alone, because a harness hands
-///   its subagents the same instructions and they share this connection, which holds the pane: one
-///   subagent publishing «done» would erase the question its parent is waiting on.
+/// - A subagent is told to leave the panel alone, because a harness hands its subagents the same
+///   instructions and they share this connection, which holds the pane: one subagent publishing
+///   «done» would erase the question its parent is waiting on. Only that case: an agent another
+///   agent started in a console of its own has its own identity and its own panel to keep.
+/// - A patch addresses lines by `key`, so lines meant to be patched are published with one.
 /// - A new connection holds nothing, so after a restart the document read back has to be published
-///   again before any patch.
+///   again before any patch — without a claim the dead session left, which nobody holds any more.
 const INSTRUCTIONS: &str = "\
 This session runs in an Ivy console, and Ivy paints a status panel beside it from what is \
 published for it.
 
-- If another agent launched you (a subagent, a worker, a headless run), leave the panel alone: it \
+- If you are a subagent working for another agent in this same session, leave the panel alone: it \
 belongs to the agent the person is talking to.
 - Otherwise publish with this server's `panel_set` (`source`: your name or your workflow's) when \
 you start a task, before every long stretch and at every stop. The tools may be deferred: load them \
@@ -248,9 +250,10 @@ first.
 - Set `attention` to `wait` when you need the person; `block` when stuck on something else; `done` \
 when finished. Put the question itself on a line marked wait. Leave `attention` out while you work, \
 and republish without it as soon as it stops being true.
-- Once you have published with `panel_set`, update lines by `key` with `panel_patch`. After a \
-restart or a compaction, call `panel_get` and publish that document again with `panel_set` before \
-patching.
+- Give a `key` to every line you will want to change, and once you have published with `panel_set` \
+update those lines with `panel_patch`. After a restart, call `panel_get` and publish that document \
+again with `panel_set` before patching, leaving out an `attention` that is no longer true; after a \
+compaction, call `panel_get` before publishing again.
 - When a tool or workflow you run renders a panel document for you (JSON with `lines`), pass it to \
 `panel_set` as it was printed.";
 
@@ -815,9 +818,9 @@ mod tests {
         );
     }
 
-    /// **The instructions follow the identity rule, and a broken identity gets none.** The rule
-    /// itself is tested beside `whole_identity`; this proves the handshake uses it rather than a
-    /// looser copy of its own, which is how the two disagreed before.
+    /// **The instructions agree with the identity rule on every row**, a broken identity getting
+    /// none. The rule itself is tested beside `whole_identity`; each row here breaks one half in
+    /// one way, so a looser copy of the rule inside the handshake fails at least one of them.
     #[test]
     fn instructions_are_given_only_for_a_whole_identity() {
         use std::ffi::OsStr;
@@ -825,14 +828,37 @@ mod tests {
         let dir = Some(OsStr::new("/run/user/1000/ivy-a1b2c3d4"));
         let empty = Some(OsStr::new(""));
 
-        assert_eq!(instructions_for(id, dir), Some(INSTRUCTIONS));
+        let whole = if panel_control::endpoint::BINDS {
+            Some(INSTRUCTIONS)
+        } else {
+            None
+        };
+        assert_eq!(instructions_for(id, dir), whole);
         assert_eq!(instructions_for(None, dir), None, "no identity");
+        assert_eq!(instructions_for(id, None), None, "no directory");
         assert_eq!(instructions_for(empty, dir), None, "an empty identity");
         assert_eq!(instructions_for(id, empty), None, "an empty directory");
+        assert_eq!(
+            instructions_for(id, Some(OsStr::new("ivy-a1b2c3d4"))),
+            None,
+            "a relative directory"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let not_text = Some(OsStr::from_bytes(b"a1\xffb2"));
+            assert_eq!(
+                instructions_for(not_text, dir),
+                None,
+                "an identifier that is not text"
+            );
+        }
     }
 
-    /// **The handshake carries the instructions it was given and nothing otherwise**, driven
-    /// through `bridge` so the value is proven to travel from the session down to the reply.
+    /// **The handshake carries the instructions it was given, and is otherwise the same reply**,
+    /// driven through `bridge` so the value is proven to travel from the session down to the
+    /// reply. Comparing the two replies whole is what catches a handshake that, inside a console,
+    /// answered with the instructions and lost the rest.
     #[test]
     fn the_handshake_asks_the_agent_to_publish_only_when_given_instructions() {
         let reply = |instructions| -> serde_json::Value {
@@ -846,14 +872,18 @@ mod tests {
             serde_json::from_slice(&written).expect("the answer is JSON")
         };
 
-        assert_eq!(
-            reply(Some(INSTRUCTIONS))["result"]["instructions"],
-            INSTRUCTIONS
-        );
+        let mut inside = reply(Some(INSTRUCTIONS))["result"].clone();
+        let outside = reply(None)["result"].clone();
+        assert_eq!(inside["instructions"], INSTRUCTIONS);
         assert!(
-            reply(None)["result"].get("instructions").is_none(),
-            "outside a console the key is absent, not empty"
+            outside.get("capabilities").is_some() && outside.get("instructions").is_none(),
+            "outside a console the reply is a handshake and the key is absent, not empty: {outside}"
         );
+        inside
+            .as_object_mut()
+            .expect("the result is an object")
+            .remove("instructions");
+        assert_eq!(inside, outside, "the instructions are the only difference");
     }
 
     /// Every snake-case word of the instructions, backticked or not: the tool names they mention.

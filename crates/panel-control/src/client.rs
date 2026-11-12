@@ -13,14 +13,16 @@ use crate::endpoint;
 use crate::wire::{MAX_REQUEST, Side};
 
 /// The pane identity a program inherited, **when it is whole**: `PANEL_ID` present, non-empty and
-/// text, and `PANEL_DIR` present and non-empty.
+/// text, and `PANEL_DIR` present and an absolute path.
 ///
-/// **One rule for every reader of the identity in this binary family**, because two rules in one
-/// process gave two answers: the MCP bridge's handshake said «no console» for an empty identifier
-/// while its first tool call connected with it. Empty counts as absent — a client configuration
-/// that interpolates `${PANEL_ID:-}` produces one, and on Windows an empty identifier names a single
+/// **The one rule the MCP bridge applies, to its handshake and to its tool calls alike**, because
+/// two rules in one process gave two answers: the handshake said «no console» for an empty
+/// identifier while the first tool call connected with it. The session helper still reads the same
+/// variables with a rule of its own. Empty counts as absent — a client configuration that
+/// interpolates `${PANEL_ID:-}` produces one, and on Windows an empty identifier names a single
 /// machine-wide endpoint. An identifier that is not text cannot be one this terminal generated, and
-/// converting it lossily would connect to a mangled name.
+/// converting it lossily would connect to a mangled name. A relative directory cannot be one either:
+/// it would resolve against the working directory and reach whatever socket sits there.
 ///
 /// **It takes the values instead of reading them** so it can be tested without `set_var`, which
 /// is undefined behaviour in a suite that launches processes in parallel.
@@ -29,8 +31,8 @@ pub fn whole_identity<'a>(
     dir: Option<&'a std::ffi::OsStr>,
 ) -> Option<(&'a str, &'a Path)> {
     let id = id?.to_str().filter(|id| !id.is_empty())?;
-    let dir = dir.filter(|dir| !dir.is_empty())?;
-    Some((id, Path::new(dir)))
+    let dir = Path::new(dir?);
+    dir.is_absolute().then_some((id, dir))
 }
 
 /// A connection to one pane's channel.
@@ -48,21 +50,26 @@ impl Producer {
     /// **No third variable, and no identifier on the wire.** Which pane this reaches is decided by
     /// which endpoint was opened, so there is nothing in any message for anybody to trust.
     ///
-    /// **Both variables are required, and neither has a fallback.** Which of the two names the
-    /// endpoint is the platform's business ([`endpoint::name_of`]), so a missing one is a missing
-    /// identity on one platform and harmless on the other — and defaulting the identifier to the
-    /// empty string resolved every pane on Windows to a single machine-wide name. The pane sets the
-    /// two together or removes them together, which is what makes half an identity impossible on the
-    /// other side too.
+    /// **A whole identity or nothing, and never a fallback** ([`whole_identity`]). Which of the two
+    /// variables names the endpoint is the platform's business ([`endpoint::name_of`]), so half an
+    /// identity is a missing one on one platform and harmless on the other — and defaulting the
+    /// identifier to the empty string resolved every pane on Windows to a single machine-wide name.
+    ///
+    /// **Two refusals, because they have two causes.** Neither variable set is a program outside
+    /// any pane. Either one set but the identity not whole is a client that forwards them badly —
+    /// an interpolation of an unset variable, a list of variables missing one — and saying «not in a
+    /// pane» there would send whoever reads it looking in the wrong place.
     pub fn of_this_pane() -> io::Result<Self> {
-        let outside = || {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                "this program is not running inside a pane of this terminal",
-            )
-        };
         let [id, dir] = panel_contract::ENV_NAMES.map(std::env::var_os);
-        let (id, dir) = whole_identity(id.as_deref(), dir.as_deref()).ok_or_else(outside)?;
+        let refusal = if id.is_none() && dir.is_none() {
+            "this program is not running inside a pane of this terminal"
+        } else {
+            "PANEL_ID and PANEL_DIR are set but are not a whole pane identity (one is missing or \
+             empty, the identifier is not text, or the directory is not absolute): check how your \
+             client forwards them"
+        };
+        let (id, dir) = whole_identity(id.as_deref(), dir.as_deref())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, refusal))?;
 
         Self::of(dir, id)
     }
@@ -359,6 +366,14 @@ mod tests {
         assert_eq!(super::whole_identity(id, None), None, "no directory");
         assert_eq!(super::whole_identity(empty, dir), None, "an empty identity");
         assert_eq!(super::whole_identity(id, empty), None, "an empty directory");
+        assert_eq!(
+            super::whole_identity(id, Some(OsStr::new("ivy-a1b2c3d4"))),
+            None,
+            "a relative directory"
+        );
+        // The readers destructure `ENV_NAMES` as `[id, dir]`; swapping the list would hand the
+        // directory in as the identifier and still compile.
+        assert_eq!(panel_contract::ENV_NAMES, ["PANEL_ID", "PANEL_DIR"]);
         #[cfg(unix)]
         {
             use std::os::unix::ffi::OsStrExt;

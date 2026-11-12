@@ -10,7 +10,10 @@ use std::process::{Command, Stdio};
 
 /// Starts the bridge with exactly `env`, sends it one «initialize» request and returns the reply.
 fn handshake(env: &[(&str, &str)]) -> serde_json::Value {
-    exchange(env, b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}\n")
+    exchange(
+        env,
+        b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}\n",
+    )
 }
 
 /// Starts the bridge with exactly `env`, sends it one `message` and returns the reply.
@@ -30,11 +33,13 @@ fn exchange(env: &[(&str, &str)], message: &[u8]) -> serde_json::Value {
         .expect("the message is written");
     // Dropping the input ends it, so the bridge answers and exits.
     let output = bridge.wait_with_output().expect("the bridge exits");
+    // A bridge that answered and then crashed would still have written its reply.
+    assert!(output.status.success(), "the bridge failed: {output:?}");
     serde_json::from_slice(&output.stdout).expect("one JSON reply")
 }
 
-/// **Inside a console the agent is asked to publish; with no identity, or half of one, it is
-/// not.** The directory is never opened by a handshake, so any path stands for one here.
+/// **Inside a console the agent is asked to publish; with no identity, or a broken one, it is
+/// not.** The directory is never opened by a handshake, so any absolute path stands for one here.
 #[test]
 fn the_bridge_asks_for_a_panel_only_when_started_inside_a_console() {
     let inside = handshake(&[
@@ -42,16 +47,16 @@ fn the_bridge_asks_for_a_panel_only_when_started_inside_a_console() {
         ("PANEL_DIR", "/nonexistent/ivy-a1b2c3d4"),
     ]);
     let instructions = inside["result"].get("instructions");
-    if cfg!(windows) {
-        assert!(
-            instructions.is_none(),
-            "Windows has no channel yet: {inside}"
-        );
-    } else {
+    if panel_control::endpoint::BINDS {
         let text = instructions
             .and_then(serde_json::Value::as_str)
             .expect("inside a console the handshake carries instructions");
         assert!(text.contains("`panel_set`"), "{text}");
+    } else {
+        assert!(
+            instructions.is_none(),
+            "no channel binds here yet: {inside}"
+        );
     }
 
     for (env, why) in [
@@ -62,10 +67,22 @@ fn the_bridge_asks_for_a_panel_only_when_started_inside_a_console() {
         ),
         (
             &[("PANEL_DIR", "/nonexistent/ivy-x")][..],
-            "half an identity",
+            "a directory with no identifier",
+        ),
+        (
+            &[("PANEL_ID", "a1b2c3d4")][..],
+            "an identifier with no directory",
+        ),
+        (
+            &[("PANEL_ID", "a1b2c3d4"), ("PANEL_DIR", "ivy-a1b2c3d4")][..],
+            "a relative directory",
         ),
     ] {
         let reply = handshake(env);
+        assert!(
+            reply["result"]["capabilities"].is_object(),
+            "{why}: still a handshake: {reply}"
+        );
         assert!(
             reply["result"].get("instructions").is_none(),
             "{why}: {reply}"
@@ -73,8 +90,8 @@ fn the_bridge_asks_for_a_panel_only_when_started_inside_a_console() {
     }
 }
 
-/// The text of a `panel_get` call's reply, which is a tool error in every case below: no pane is
-/// listening at `/nonexistent`.
+/// The text of a `panel_get` call's reply, which is a tool error in every case below: outside a
+/// pane, a broken identity, or a whole one with nobody listening at `/nonexistent`.
 fn panel_get_refusal(env: &[(&str, &str)]) -> String {
     let reply = exchange(
         env,
@@ -88,14 +105,19 @@ fn panel_get_refusal(env: &[(&str, &str)]) -> String {
         .to_owned()
 }
 
-/// **The first tool call applies the handshake's rule: an empty identity is no console.** Before
-/// `whole_identity`, presence was enough and the call tried a pane named `""`. The control row is
-/// what keeps this honest: with a whole identity the call fails too — nobody listens at the
-/// directory — but for another reason, so the assertion cannot be satisfied by any failure.
+/// **The first tool call applies the handshake's rule, and says which of two things went wrong.**
+/// No identity at all is a program outside any pane; a broken one is a client forwarding the
+/// variables badly, and is told so. Before `whole_identity`, presence was enough and the call tried
+/// a pane named `""`. The control row keeps this honest: with a whole identity the call fails too —
+/// nobody listens at the directory — but with neither refusal, so the assertions cannot be
+/// satisfied by any failure. Handing the identity in with its halves swapped also lands there:
+/// an identifier is not an absolute directory.
 #[test]
 fn a_tool_call_with_a_broken_identity_says_it_is_not_inside_a_pane() {
     const OUTSIDE: &str = "not running inside a pane";
+    const BROKEN: &str = "not a whole pane identity";
 
+    assert!(panel_get_refusal(&[]).contains(OUTSIDE), "no identity");
     for (env, why) in [
         (
             &[("PANEL_ID", ""), ("PANEL_DIR", "/nonexistent/ivy-x")][..],
@@ -106,10 +128,13 @@ fn a_tool_call_with_a_broken_identity_says_it_is_not_inside_a_pane() {
             "an empty directory",
         ),
         (&[("PANEL_ID", "a1b2c3d4")][..], "no directory"),
-        (&[][..], "no identity"),
+        (
+            &[("PANEL_ID", "a1b2c3d4"), ("PANEL_DIR", "ivy-a1b2c3d4")][..],
+            "a relative directory",
+        ),
     ] {
         let refusal = panel_get_refusal(env);
-        assert!(refusal.contains(OUTSIDE), "{why}: {refusal}");
+        assert!(refusal.contains(BROKEN), "{why}: {refusal}");
     }
 
     let whole = panel_get_refusal(&[
@@ -117,7 +142,7 @@ fn a_tool_call_with_a_broken_identity_says_it_is_not_inside_a_pane() {
         ("PANEL_DIR", "/nonexistent/ivy-a1b2c3d4"),
     ]);
     assert!(
-        !whole.contains(OUTSIDE),
+        !whole.contains(OUTSIDE) && !whole.contains(BROKEN),
         "a whole identity is inside a pane: {whole}"
     );
 }
