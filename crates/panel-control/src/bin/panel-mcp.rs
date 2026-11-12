@@ -35,8 +35,12 @@ fn main() {
     // not fail because nothing is listening yet, and an agent's editor lists tools long before it
     // has anything to publish.
     let mut pane: Option<Producer> = None;
+    // **The one read of the environment**, and it stays here: a decision taken further down would
+    // inherit the identity of whatever console runs the test suite.
+    let [id, dir] = panel_contract::ENV_NAMES.map(std::env::var_os);
+    let inside = inside_a_console(id.as_deref(), dir.as_deref());
 
-    bridge(std::io::stdin().lock(), std::io::stdout(), &mut pane);
+    bridge(std::io::stdin().lock(), std::io::stdout(), &mut pane, inside);
 }
 
 /// Answers messages until the input ends.
@@ -44,7 +48,12 @@ fn main() {
 /// **It takes its two ends rather than reaching for the process's**, so what it does with a message
 /// it cannot decode can be asserted. Without that the only way to find out was to run the binary,
 /// which is exactly why the decoding bug below went in unnoticed.
-fn bridge(mut input: impl BufRead, mut output: impl Write, pane: &mut Option<Producer>) {
+fn bridge(
+    mut input: impl BufRead,
+    mut output: impl Write,
+    pane: &mut Option<Producer>,
+    inside: bool,
+) {
     // **The input is taken as bytes and decoded per line, rather than by a decoding iterator.**
     // Reading it as text makes one malformed byte end the whole session: the iterator yields an
     // error the loop cannot answer, so a client that garbled a single message would be left waiting
@@ -112,7 +121,7 @@ fn bridge(mut input: impl BufRead, mut output: impl Write, pane: &mut Option<Pro
         }
         let answered = match std::str::from_utf8(&line) {
             Ok(line) if line.trim().is_empty() => continue,
-            Ok(line) => answer(line, pane),
+            Ok(line) => answer(line, pane, inside),
             Err(failure) => Some(failed(
                 &serde_json::Value::Null,
                 -32700,
@@ -150,7 +159,7 @@ fn swallow_to_newline(input: &mut impl BufRead) -> std::io::Result<()> {
 }
 
 /// Answers one message, or nothing when the message is a notification.
-fn answer(line: &str, pane: &mut Option<Producer>) -> Option<String> {
+fn answer(line: &str, pane: &mut Option<Producer>, inside: bool) -> Option<String> {
     let message: serde_json::Value = match serde_json::from_str(line) {
         Ok(message) => message,
         // **Parse errors are answered without an id**, which is what the protocol asks for and what
@@ -177,7 +186,7 @@ fn answer(line: &str, pane: &mut Option<Producer>) -> Option<String> {
     };
 
     Some(match method {
-        "initialize" => succeeded(&id, initialized(&message)),
+        "initialize" => succeeded(&id, initialized(&message, inside)),
         "tools/list" => succeeded(&id, tools()),
         "tools/call" => called(&id, &message, pane),
         "ping" => succeeded(&id, serde_json::json!({})),
@@ -200,19 +209,47 @@ fn inside_a_console(id: Option<&std::ffi::OsStr>, dir: Option<&std::ffi::OsStr>)
     id.is_some_and(|id| !id.is_empty()) && dir.is_some_and(|dir| !dir.is_empty())
 }
 
-/// What this server says it is.
-fn initialized(message: &serde_json::Value) -> serde_json::Value {
+/// **What every agent is told when it connects inside an Ivy console**, whatever harness or
+/// workflow it runs. The tools alone were not enough: a harness may defer them — listed by name,
+/// no schema — and an agent that never loads them publishes nothing, so the person sees an empty
+/// panel. Harnesses place these words in the agent's own instructions, the one place every agent
+/// reads.
+///
+/// It names only the publishing verbs: the `split_*` and retirement descriptions already explain
+/// the rest, and these words land in every agent's prompt. «This server's tools» is deliberate — a
+/// second panel server may be registered beside this one and serve the same names.
+const INSTRUCTIONS: &str = "\
+This session runs in an Ivy console, and Ivy paints a status panel beside it. It shows only what \
+you publish: publish nothing and the person sees an empty panel.
+
+- Publish with this server's `panel_set` (`source`: your name or your workflow's) when you start a \
+task, before every long stretch and at every stop. The tools may be deferred: load them first.
+- Set `attention` to `wait` whenever you need the person, and put the question on a line marked \
+`wait`; `block` when stuck on something else; `done` when finished. Leave it out while you work, \
+and republish without it as soon as it stops being true.
+- Between publications, update lines by `key` with `panel_patch`. After a restart or a compaction, \
+call `panel_get` before publishing again.
+- When a tool or workflow you run renders a panel document for you (JSON with `lines`), pass it to \
+`panel_set` as it was printed.";
+
+/// What this server says it is, and — only inside a console — what it asks of the agent.
+fn initialized(message: &serde_json::Value, inside: bool) -> serde_json::Value {
     let asked_for = message
         .get("params")
         .and_then(|params| params.get("protocolVersion"))
         .and_then(serde_json::Value::as_str)
         .unwrap_or(PROTOCOL_VERSION);
 
-    serde_json::json!({
+    let mut answer = serde_json::json!({
         "protocolVersion": asked_for,
         "capabilities": {"tools": {}},
         "serverInfo": {"name": "ivy panel", "version": env!("CARGO_PKG_VERSION")},
-    })
+    });
+    // Outside a console the calls are refused, so promising a panel there would be false.
+    if inside {
+        answer["instructions"] = serde_json::Value::from(INSTRUCTIONS);
+    }
+    answer
 }
 
 /// `a, b or c`: a closed vocabulary as the description names it.
@@ -636,7 +673,7 @@ mod tests {
 
     fn ask(message: &str) -> serde_json::Value {
         let mut nowhere = None;
-        let answered = answer(message, &mut nowhere).expect("it deserved an answer");
+        let answered = answer(message, &mut nowhere, false).expect("it deserved an answer");
         serde_json::from_str(&answered).expect("the answer is JSON")
     }
 
@@ -666,7 +703,7 @@ mod tests {
         input.extend_from_slice(b"{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"ping\"}\n");
         let mut written = Vec::new();
 
-        bridge(&input[..], &mut written, &mut None);
+        bridge(&input[..], &mut written, &mut None, false);
 
         let answers: Vec<serde_json::Value> = String::from_utf8(written)
             .expect("the answers are text")
@@ -694,7 +731,7 @@ mod tests {
         input.extend_from_slice(b"{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"ping\"}\n");
         let mut written = Vec::new();
 
-        bridge(&input[..], &mut written, &mut None);
+        bridge(&input[..], &mut written, &mut None, false);
 
         let answers: Vec<serde_json::Value> = String::from_utf8(written)
             .expect("the answers are text")
@@ -724,7 +761,7 @@ mod tests {
         input.extend_from_slice(b"{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"ping\"}\n");
         let mut written = Vec::new();
 
-        bridge(&input[..], &mut written, &mut None);
+        bridge(&input[..], &mut written, &mut None, false);
 
         let answers: Vec<serde_json::Value> = String::from_utf8(written)
             .expect("the answers are text")
@@ -749,7 +786,8 @@ mod tests {
         assert!(
             answer(
                 "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}",
-                &mut nowhere
+                &mut nowhere,
+                false
             )
             .is_none()
         );
@@ -769,6 +807,72 @@ mod tests {
         assert!(!inside_a_console(id, None), "no directory");
         assert!(!inside_a_console(empty, dir), "an empty identity");
         assert!(!inside_a_console(id, empty), "an empty directory");
+    }
+
+    /// **The handshake carries the instructions inside a console and nothing outside**, asserted
+    /// through `answer` so the flag is proven to travel from the session down to the reply, not
+    /// only to work when `initialized` is called by hand.
+    #[test]
+    fn the_handshake_asks_the_agent_to_publish_only_inside_a_console() {
+        let initialize = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}";
+        let reply = |inside| -> serde_json::Value {
+            let answered = answer(initialize, &mut None, inside).expect("answered");
+            serde_json::from_str(&answered).expect("the answer is JSON")
+        };
+
+        assert_eq!(reply(true)["result"]["instructions"], INSTRUCTIONS);
+        assert!(
+            reply(false)["result"].get("instructions").is_none(),
+            "outside a console the key is absent, not empty"
+        );
+    }
+
+    /// The backticked `snake_case` spans of the instructions: the tool names they mention. Every
+    /// verb this bridge serves has an underscore, which is what lets the extraction tell a tool from
+    /// a field such as `attention` or `key`.
+    fn tools_the_instructions_name() -> Vec<&'static str> {
+        INSTRUCTIONS
+            .split('`')
+            .skip(1)
+            .step_by(2)
+            .filter(|span| {
+                span.contains('_') && span.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+            })
+            .collect()
+    }
+
+    /// **The instructions never name a tool this bridge does not serve.** The served names come
+    /// from `tools/list` itself, not from a copy, so a verb renamed there or one added to the text
+    /// — `plan_set` is served by another terminal's bridge, not this one — fails here.
+    #[test]
+    fn the_instructions_name_only_tools_this_bridge_serves() {
+        let listed = ask("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}");
+        let served: Vec<&str> = listed["result"]["tools"]
+            .as_array()
+            .expect("there is a list of tools")
+            .iter()
+            .map(|tool| tool["name"].as_str().expect("every tool is named"))
+            .collect();
+        let named = tools_the_instructions_name();
+
+        for verb in ["panel_set", "panel_get", "panel_patch"] {
+            assert!(named.contains(&verb), "the instructions never name {verb}");
+        }
+        for name in &named {
+            assert!(served.contains(name), "{name} is named but not served");
+        }
+    }
+
+    /// **Each attention the contract accepts is named, backticked**, from the contract's own list,
+    /// so a word added to or renamed in the vocabulary is not left out of what agents are told.
+    #[test]
+    fn the_instructions_name_every_attention_the_contract_accepts() {
+        for attention in Attention::ALL.map(Attention::name) {
+            assert!(
+                INSTRUCTIONS.contains(&format!("`{attention}`")),
+                "{attention} is not in the instructions"
+            );
+        }
     }
 
     #[test]
@@ -1002,7 +1106,7 @@ mod tests {
     #[test]
     fn a_line_that_is_not_json_is_answered_rather_than_swallowed() {
         let mut nowhere = None;
-        let answered = answer("not json", &mut nowhere).expect("it deserved an answer");
+        let answered = answer("not json", &mut nowhere, false).expect("it deserved an answer");
         let answered: serde_json::Value = serde_json::from_str(&answered).expect("JSON");
 
         assert_eq!(answered["error"]["code"], -32700);
