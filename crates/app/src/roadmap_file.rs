@@ -9,7 +9,7 @@ use panel_contract::{
     plan::{Item, Milestone, Plan},
 };
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, mpsc},
@@ -41,9 +41,11 @@ impl Reader {
         let _ = std::thread::Builder::new()
             .name("roadmap-files".into())
             .spawn(move || {
-                let (events_tx, events_rx) = mpsc::channel();
+                let aliases = watch_aliases(&config);
+                let dirty = Arc::new(Mutex::new(BTreeSet::new()));
+                let notified = dirty.clone();
                 let watcher = notify::recommended_watcher(move |event| {
-                    let _ = events_tx.send(event);
+                    record_changes(event, &aliases, &mut notified.lock().unwrap());
                 });
                 let mut watcher = watcher.ok();
                 if let Some(w) = watcher.as_mut() {
@@ -51,7 +53,11 @@ impl Reader {
                     let mut parents = std::collections::BTreeSet::new();
                     for path in config.values() {
                         if let Some(parent) = path.parent() {
-                            parents.insert(parent.to_path_buf());
+                            parents.insert(if parent.as_os_str().is_empty() {
+                                PathBuf::from(".")
+                            } else {
+                                parent.to_path_buf()
+                            });
                         }
                     }
                     for parent in parents {
@@ -64,16 +70,13 @@ impl Reader {
                     if stopped.try_recv().is_ok() {
                         break;
                     }
-                    let mut notified = false;
-                    while events_rx.try_recv().is_ok() {
-                        notified = true;
-                    }
+                    let notified = std::mem::take(&mut *dirty.lock().unwrap());
                     let mut changed = false;
                     for (name, path) in &config {
                         let sig = fs::metadata(path)
                             .ok()
                             .map(|m| (m.len(), m.modified().ok()));
-                        if notified || signatures.get(name) != Some(&sig) {
+                        if notified.contains(name) || signatures.get(name) != Some(&sig) {
                             signatures.insert(name.clone(), sig);
                             let snapshot = load(name, path);
                             worker_latest.lock().unwrap().insert(name.clone(), snapshot);
@@ -108,6 +111,51 @@ impl Drop for Reader {
         if let Some(stop) = self.stop.take() {
             let _ = stop.send(());
         }
+    }
+}
+
+// Aliases are resolved once on the worker: notify may return the canonical parent path.
+fn watch_aliases(config: &BTreeMap<String, PathBuf>) -> BTreeMap<PathBuf, BTreeSet<String>> {
+    let directory = std::env::current_dir().ok();
+    let mut aliases: BTreeMap<PathBuf, BTreeSet<String>> = BTreeMap::new();
+    for (name, path) in config {
+        let absolute = if path.is_absolute() {
+            path.clone()
+        } else {
+            directory
+                .as_ref()
+                .map_or_else(|| path.clone(), |directory| directory.join(path))
+        };
+        aliases
+            .entry(absolute.clone())
+            .or_default()
+            .insert(name.clone());
+        if let (Some(parent), Some(file)) = (absolute.parent(), absolute.file_name())
+            && let Ok(parent) = parent.canonicalize()
+        {
+            aliases
+                .entry(parent.join(file))
+                .or_default()
+                .insert(name.clone());
+        }
+    }
+    aliases
+}
+
+fn record_changes(
+    event: notify::Result<notify::Event>,
+    aliases: &BTreeMap<PathBuf, BTreeSet<String>>,
+    dirty: &mut BTreeSet<String>,
+) {
+    match event {
+        Ok(event) => {
+            for path in event.paths {
+                if let Some(names) = aliases.get(&path) {
+                    dirty.extend(names.iter().cloned());
+                }
+            }
+        }
+        Err(_) => dirty.extend(aliases.values().flatten().cloned()),
     }
 }
 
@@ -379,6 +427,37 @@ mod tests {
         assert!(load("demo", &path).error.unwrap().contains("no task items"));
         fs::write(&path, vec![b'x'; MAX_BYTES as usize + 1]).unwrap();
         assert!(load("demo", &path).error.unwrap().contains("exceeds"));
+    }
+
+    #[test]
+    fn filesystem_event_storm_is_bounded_by_configured_files() {
+        let first = PathBuf::from("/project/roadmap.md");
+        let second = PathBuf::from("/other/roadmap.md");
+        let aliases = BTreeMap::from([
+            (first.clone(), BTreeSet::from(["first".into()])),
+            (second, BTreeSet::from(["second".into()])),
+        ]);
+        let mut dirty = BTreeSet::new();
+        for _ in 0..10000 {
+            record_changes(
+                Ok(notify::Event::new(notify::EventKind::Any).add_path(first.clone())),
+                &aliases,
+                &mut dirty,
+            );
+        }
+        record_changes(
+            Ok(notify::Event::new(notify::EventKind::Any)
+                .add_path("/project/unrelated.log".into())),
+            &aliases,
+            &mut dirty,
+        );
+        assert_eq!(dirty, BTreeSet::from(["first".into()]));
+        record_changes(
+            Err(notify::Error::generic("events lost")),
+            &aliases,
+            &mut dirty,
+        );
+        assert_eq!(dirty.len(), 2);
     }
 
     #[test]
