@@ -110,6 +110,10 @@ pub struct Panel {
     /// a signal. Deducing it from there would be fragile in the silliest way — a "I waited for approval
     /// on Tuesday" would mark the tab forever.
     pub attention: Option<Attention>,
+    /// Project roadmap milestone id, kept as producer data and never changed by patches.
+    pub milestone: Option<String>,
+    /// Project roadmap deliverable id, kept as producer data and never changed by patches.
+    pub deliverable: Option<String>,
     /// The buttons the producer offers, **at the top level and not hanging off a line**.
     ///
     /// The reason is where they are painted. A line's place in the panel is decided by wrapping and
@@ -636,6 +640,8 @@ fn parse_noting(text: &str, mut dropped: Option<&mut Dropped>) -> Result<Panel, 
             Vocabulary::Attention,
             dropped.as_deref_mut(),
         ),
+        milestone: string(&raw, "milestone"),
+        deliverable: string(&raw, "deliverable"),
         actions: raw
             .get("actions")
             .and_then(serde_json::Value::as_array)
@@ -788,6 +794,15 @@ pub fn serialize(panel: &Panel) -> Result<String, Problem> {
     if let Some(attention) = panel.attention {
         comma.before(&mut out);
         out.push_str(&format!("\"attention\":\"{}\"", attention.name()));
+    }
+    for (name, value) in [
+        ("milestone", panel.milestone.as_deref()),
+        ("deliverable", panel.deliverable.as_deref()),
+    ] {
+        if let Some(value) = value {
+            comma.before(&mut out);
+            out.push_str(&format!("\"{name}\":{}", quoted(value)));
+        }
     }
     if !panel.actions.is_empty() {
         comma.before(&mut out);
@@ -1152,6 +1167,8 @@ mod tests {
             // back with a plain division does not come home. See `serialize`.
             stale_after: Duration::from_secs(u64::MAX),
             attention: Some(Attention::Wait),
+            milestone: None,
+            deliverable: None,
             // **No newline in the command, and that is not cosmetic.** `Action::new` refuses any
             // character the panel would not paint as itself, a line break included, so a `send`
             // carrying one is dropped and the list comes out empty — which left the writer's
@@ -1163,6 +1180,28 @@ mod tests {
             lines,
             written_at: None,
         }
+    }
+
+    #[test]
+    fn roadmap_ids_parse_serialize_and_survive_panel_patch() {
+        let panel = parse_document(r#"{"milestone":"H3","deliverable":"TAX-06","lines":["work"]}"#)
+            .expect("panel with roadmap ids");
+        let encoded = serialize(&panel).expect("serializes");
+        let reparsed = parse_document(&encoded).expect("round trips");
+        assert_eq!(reparsed.milestone.as_deref(), Some("H3"));
+        assert_eq!(reparsed.deliverable.as_deref(), Some("TAX-06"));
+        let ops =
+            crate::parse_ops(&serde_json::json!([{"op":"set","field":"phase","value":"build"}]))
+                .expect("supported panel patch");
+        let patched = reparsed.patched_with(&ops).expect("patch applies");
+        assert_eq!(patched.milestone, reparsed.milestone);
+        assert_eq!(patched.deliverable, reparsed.deliverable);
+        assert!(
+            crate::parse_ops(
+                &serde_json::json!([{"op":"set","field":"milestone","value":"other"}])
+            )
+            .is_err()
+        );
     }
 
     /// The property that replaces byte-fidelity, over everything the parser can build.
@@ -1291,6 +1330,8 @@ mod tests {
             header: true,
             stale_after: STALE_AFTER,
             attention: None,
+            milestone: None,
+            deliverable: None,
             actions: Vec::new(),
             lines: vec![Line {
                 text,
@@ -2080,6 +2121,8 @@ mod tests {
             header: true,
             stale_after: STALE_AFTER,
             attention: None,
+            milestone: None,
+            deliverable: None,
             actions: Vec::new(),
             lines: Vec::new(),
             written_at: None,
