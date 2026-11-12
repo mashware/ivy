@@ -211,7 +211,23 @@ fn format_id(random: u32) -> String {
 /// Linux session without a manager— it falls back to the system temporary, which is the only
 /// alternative that exists everywhere.
 fn base_dir() -> PathBuf {
-    base_dir_from(std::env::var_os("XDG_RUNTIME_DIR").as_deref())
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR");
+    // The specification asks for a warning when a set variable is not used; once per process,
+    // because every console created asks again.
+    if runtime
+        .as_deref()
+        .is_some_and(|value| !Path::new(value).is_absolute())
+    {
+        static WARNED: std::sync::Once = std::sync::Once::new();
+        WARNED.call_once(|| {
+            eprintln!(
+                "ivy: XDG_RUNTIME_DIR is set but not an absolute path ({}); consoles use the \
+                 system temporary directory instead",
+                Path::new(runtime.as_deref().unwrap_or_default()).display()
+            );
+        });
+    }
+    base_dir_from(runtime.as_deref(), std::env::temp_dir())
 }
 
 /// The decision, separated from reading the environment so it can be tested without touching it.
@@ -219,11 +235,14 @@ fn base_dir() -> PathBuf {
 /// **Only an absolute path is a runtime directory**, which is what the XDG specification asks of
 /// the variable: an empty or relative value would create the directory inside the application's
 /// working directory — without failing, which is the worst thing it could do — and hand every
-/// console a `PANEL_DIR` its own MCP bridge refuses as no identity (D88).
-fn base_dir_from(value: Option<&OsStr>) -> PathBuf {
+/// console a `PANEL_DIR` its own MCP bridge refuses as not a whole identity (D88). **The fallback
+/// is held to the same rule**: the system temporary is `TMPDIR` as written on Unix, relative or
+/// empty included, and then `/tmp` is the one directory every Unix has.
+fn base_dir_from(value: Option<&OsStr>, temporary: PathBuf) -> PathBuf {
     match value.map(Path::new) {
         Some(path) if path.is_absolute() => path.to_path_buf(),
-        _ => std::env::temp_dir(),
+        _ if temporary.is_absolute() => temporary,
+        _ => PathBuf::from("/tmp"),
     }
 }
 
@@ -402,44 +421,69 @@ mod tests {
         assert_eq!(format_id(u32::MAX), "ffffffff");
     }
 
+    /// An absolute directory written the way this platform writes one: `/run/user/1000` is not
+    /// absolute on Windows, which wants a drive.
+    fn absolute(unix: &'static str, windows: &'static str) -> PathBuf {
+        PathBuf::from(if cfg!(windows) { windows } else { unix })
+    }
+
+    /// The fallback the tests hand in, absolute and distinct from any runtime directory, so a row
+    /// that falls back is told apart from one that does not.
+    fn temporary() -> PathBuf {
+        absolute("/var/tmp-for-test", r"C:\Temp\for-test")
+    }
+
     /// The case that does not fail and does the wrong thing: with the variable **defined and empty**
     /// the path would come out relative, and the panel directory would end up inside the working
     /// directory.
     #[test]
     fn an_empty_environment_variable_does_not_count_as_a_path() {
-        assert_eq!(base_dir_from(Some(OsStr::new(""))), std::env::temp_dir());
+        assert_eq!(
+            base_dir_from(Some(OsStr::new("")), temporary()),
+            temporary()
+        );
     }
 
     #[test]
     fn without_a_runtime_directory_it_falls_back_to_the_system_temporary() {
-        assert_eq!(base_dir_from(None), std::env::temp_dir());
-    }
-
-    /// An absolute directory written the way this platform writes one: `/run/user/1000` is not
-    /// absolute on Windows, which wants a drive.
-    fn an_absolute_runtime_directory() -> &'static str {
-        if cfg!(windows) {
-            r"C:\run\user\1000"
-        } else {
-            "/run/user/1000"
-        }
+        assert_eq!(base_dir_from(None, temporary()), temporary());
     }
 
     #[test]
     fn with_a_runtime_directory_that_one_is_used() {
-        let runtime = an_absolute_runtime_directory();
+        let runtime = absolute("/run/user/1000", r"C:\run\user\1000");
         assert_eq!(
-            base_dir_from(Some(OsStr::new(runtime))),
-            PathBuf::from(runtime)
+            base_dir_from(Some(runtime.as_os_str()), temporary()),
+            runtime
         );
     }
 
     /// **A relative runtime directory is not one**, as the XDG specification says: it would put
     /// every console's directory under the application's working directory, and the MCP bridge
-    /// refuses a relative `PANEL_DIR` as no identity at all.
+    /// refuses a relative `PANEL_DIR` as not a whole identity.
     #[test]
     fn a_relative_runtime_directory_does_not_count_as_one() {
-        assert_eq!(base_dir_from(Some(OsStr::new("run"))), std::env::temp_dir());
+        assert_eq!(
+            base_dir_from(Some(OsStr::new("run")), temporary()),
+            temporary()
+        );
+        #[cfg(windows)]
+        assert_eq!(
+            base_dir_from(Some(OsStr::new(r"\run")), temporary()),
+            temporary(),
+            "a rooted path with no drive is not absolute either"
+        );
+    }
+
+    /// **The fallback is held to the same rule.** `TMPDIR` reaches `temp_dir` as written on Unix,
+    /// and a relative or empty one would land every console in the working directory all the same.
+    #[cfg(unix)]
+    #[test]
+    fn a_relative_system_temporary_falls_back_to_tmp() {
+        for temporary in ["", "tmp"] {
+            let base = base_dir_from(None, PathBuf::from(temporary));
+            assert_eq!(base, PathBuf::from("/tmp"), "TMPDIR={temporary:?}");
+        }
     }
 
     #[test]

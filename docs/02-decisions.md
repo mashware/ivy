@@ -9336,8 +9336,8 @@ which harnesses that honour it place in the agent's own instructions. The text a
 publish with `panel_set` at the start of a task, before long stretches and at every stop; to keep
 `attention` true; to key the lines it will patch and patch only after publishing on the same
 connection; to publish again after a restart before patching, without a claim nobody holds any
-more; and to pass through as printed a panel document a workflow it follows renders, unless it
-carries buttons the agent would not run itself — `actions` are commands for the person's shell, and
+more, and only when the document read back was its own; and to pass through as printed a panel
+document a workflow it follows renders, without the buttons the agent would not run itself — `actions` are commands for the person's shell, and
 a document printed by a script of unknown origin is the untrusted panel the hard rules name. It is sent only when the bridge
 starts with a **whole identity** — `PANEL_ID` present, non-empty and text, `PANEL_DIR` present and
 absolute — the same rule its tool calls now apply, and only where the control channel binds
@@ -9346,7 +9346,9 @@ call with a broken identity — one variable carrying something but the identity
 refused with its own message, naming the client's forwarding rather than «not in a pane»; both
 absent or empty is a program outside any pane. And because Ivy must never hand out a directory its
 own bridge refuses, the runtime directory ignores a relative `XDG_RUNTIME_DIR`, as the XDG
-specification requires, and falls back to the system temporary.
+specification requires — saying so once on standard error — and falls back to the system
+temporary, itself held to the same rule (a relative `TMPDIR` falls back to `/tmp`). A whole
+identity that cannot be reached is refused naming the directory it could not reach.
 
 **Two rules the text carries because of how harnesses use it.** It names *this server's* tools,
 because a second panel server may be registered beside this one with the same names. And it tells
@@ -9377,3 +9379,7 @@ and panel.
   identity is the pair (**D7**), Ivy always sets both, and a rule that depends on the platform is
   the two-rule split this decision closed. The session helper still reads the pair with a rule of
   its own; unifying it is outside this decision.
+- **Withholding the instructions under a terminal multiplexer** (`TMUX`, `STY`, `ZELLIJ` set) —
+  it would mechanise «workers keep off», but a person running their one agent inside tmux in an Ivy
+  console would lose the instructions, and the hold already settles who owns the pane: the first
+  producer keeps it and every other is refused by name (D43).

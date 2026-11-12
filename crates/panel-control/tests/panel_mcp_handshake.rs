@@ -16,10 +16,16 @@ fn handshake(env: &[(&str, &str)]) -> serde_json::Value {
     )
 }
 
-/// Starts the bridge with exactly `env`, sends it one `message` and returns the reply.
+/// Starts the bridge with the suite's environment minus the pane identity, plus `env`, sends it
+/// one `message` and returns the reply. Only the two identity variables are removed: whatever runs
+/// the suite may itself be an Ivy console, and the rest of the environment is what a process needs
+/// to start at all on some platforms.
 fn exchange(env: &[(&str, &str)], message: &[u8]) -> serde_json::Value {
-    let mut bridge = Command::new(env!("CARGO_BIN_EXE_panel-mcp"))
-        .env_clear()
+    let mut bridge = Command::new(env!("CARGO_BIN_EXE_panel-mcp"));
+    for name in panel_contract::ENV_NAMES {
+        bridge.env_remove(name);
+    }
+    let mut bridge = bridge
         .envs(env.iter().copied())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -114,10 +120,11 @@ fn panel_get_refusal(env: &[(&str, &str)]) -> String {
 /// **The first tool call applies the handshake's rule, and says which of two things went wrong.**
 /// Nothing carried by either variable — absent or empty — is a program outside any pane; a broken
 /// identity is a client forwarding the variables badly, and is told so. Before `whole_identity`,
-/// presence was enough and the call tried a pane named `""`. The control row keeps this honest:
-/// with a whole identity the call fails too — nobody listens at the directory — but with neither
-/// refusal, so the assertions cannot be satisfied by any failure. Handing the identity in with its
-/// halves swapped also lands there: an identifier is not an absolute directory.
+/// presence was enough and an empty identifier went through to the endpoint. The control row keeps
+/// this honest: with a whole identity the call fails too — nobody listens at the directory — with
+/// neither refusal but naming the directory it could not reach, so the assertions cannot be
+/// satisfied by any failure. A pair handed in with its halves swapped gets the broken refusal: an
+/// identifier is not an absolute directory.
 #[test]
 fn a_tool_call_tells_a_missing_identity_from_a_broken_one() {
     const OUTSIDE: &str = "not running inside a pane";
@@ -152,12 +159,14 @@ fn a_tool_call_tells_a_missing_identity_from_a_broken_one() {
         assert!(refusal.contains(BROKEN), "{why}: {refusal}");
     }
 
-    let whole = panel_get_refusal(&[
-        ("PANEL_ID", "a1b2c3d4"),
-        ("PANEL_DIR", &nowhere("ivy-a1b2c3d4")),
-    ]);
+    let unreachable = nowhere("ivy-a1b2c3d4");
+    let whole = panel_get_refusal(&[("PANEL_ID", "a1b2c3d4"), ("PANEL_DIR", &unreachable)]);
     assert!(
         !whole.contains(OUTSIDE) && !whole.contains(BROKEN),
         "a whole identity is inside a pane: {whole}"
+    );
+    assert!(
+        whole.contains("could not be reached") && whole.contains(&unreachable),
+        "an unreachable console is named: {whole}"
     );
 }

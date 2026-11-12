@@ -20,8 +20,9 @@ use crate::wire::{MAX_REQUEST, Side};
 /// identifier while the first tool call connected with it. Bringing the session helper under it was
 /// left out of that decision (D88). Empty counts as absent — a client configuration that
 /// interpolates `${PANEL_ID:-}` produces one, and on Windows an empty identifier names a single
-/// machine-wide endpoint. An identifier that is not text cannot be one this terminal generated, and
-/// converting it lossily would connect to a mangled name. A relative directory cannot be one either:
+/// machine-wide endpoint. An identifier that is not text cannot be one this terminal generated: the
+/// identity is the pair (D7), and on Windows, where the identifier names the endpoint, converting
+/// it lossily would connect to a mangled name. A relative directory cannot be one either:
 /// it would resolve against the working directory and reach whatever socket sits there.
 ///
 /// **It takes the values instead of reading them** so it can be tested without `set_var`, which
@@ -65,16 +66,31 @@ impl Producer {
         let unset =
             |value: &Option<std::ffi::OsString>| value.as_deref().is_none_or(|v| v.is_empty());
         let refusal = if unset(&id) && unset(&dir) {
-            "this program is not running inside a pane of this terminal"
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                "this program is not running inside a pane of this terminal",
+            )
         } else {
-            "PANEL_ID or PANEL_DIR is set, but the two are not a whole pane identity (one is \
-             missing or empty, the identifier is not text, or the directory is not absolute): check \
-             how your client forwards them"
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "PANEL_ID or PANEL_DIR is set, but the two are not a whole pane identity (one is \
+                 missing or empty, the identifier is not text, or the directory is not absolute): \
+                 check how your client forwards them",
+            )
         };
-        let (id, dir) = whole_identity(id.as_deref(), dir.as_deref())
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, refusal))?;
+        let (id, dir) = whole_identity(id.as_deref(), dir.as_deref()).ok_or(refusal)?;
 
-        Self::of(dir, id)
+        // A whole identity that cannot be reached is the common real failure — the console closed,
+        // its directory gone — and the bare system error names neither.
+        Self::of(dir, id).map_err(|failure| {
+            io::Error::new(
+                failure.kind(),
+                format!(
+                    "this console's panel could not be reached at {} ({failure})",
+                    dir.display()
+                ),
+            )
+        })
     }
 
     /// The same, for a pane named directly. **What the tests use**, and what a producer that manages
@@ -380,6 +396,12 @@ mod tests {
             super::whole_identity(id, Some(OsStr::new("ivy-a1b2c3d4"))),
             None,
             "a relative directory"
+        );
+        #[cfg(windows)]
+        assert_eq!(
+            super::whole_identity(id, Some(OsStr::new(r"\ivy-a1b2c3d4"))),
+            None,
+            "a rooted directory with no drive"
         );
         // The readers destructure `ENV_NAMES` as `[id, dir]`; swapping the list would hand the
         // directory in as the identifier and still compile.

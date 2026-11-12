@@ -243,7 +243,8 @@ fn instructions_for(
 ///   origin is the untrusted panel the contract warns about.
 /// - A patch addresses lines by `key`, so lines meant to be patched are published with one.
 /// - A new connection holds nothing, so after a restart the document read back has to be published
-///   again before any patch — without a claim the dead session left, which nobody holds any more.
+///   again before any patch — only when it was the agent's own (a file producer may have painted
+///   the pane meanwhile), and without a claim the dead session left, which nobody holds any more.
 const INSTRUCTIONS: &str = "\
 This session runs in an Ivy console, and Ivy paints a status panel beside it from what is \
 published for it.
@@ -258,11 +259,11 @@ when finished. Put the question itself on a line marked wait. Leave `attention` 
 and republish without it as soon as it stops being true.
 - Give a `key` to every line you will want to change, and once you have published with `panel_set` \
 update those lines with `panel_patch`. After a restart, call `panel_get` and publish that document \
-again with `panel_set` before patching, leaving out an `attention` that is no longer true; after a \
-compaction, call `panel_get` before publishing again.
+again with `panel_set` before patching if it is the panel you had published, leaving out an \
+`attention` that is no longer true; after a compaction, call `panel_get` before publishing again.
 - When a workflow you were asked to follow renders a panel document for you (JSON with `lines`), \
-pass it to `panel_set` as it was printed, unless it carries `actions` you would not run yourself: \
-a button sends its command to the person's shell.";
+pass it to `panel_set` as it was printed; if it carries `actions` you would not run yourself, \
+publish it without them, because a button sends its command to the person's shell.";
 
 /// What this server says it is, and — only where [`instructions_for`] gave some — what it asks of
 /// the agent. Absent rather than empty: an empty string is still an instruction to a client.
