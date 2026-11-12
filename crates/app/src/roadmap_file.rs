@@ -130,7 +130,15 @@ fn load(name: &str, path: &Path) -> Snapshot {
         }
         use std::io::Read;
         let mut bytes = Vec::with_capacity(MAX_BYTES as usize + 1);
-        fs::File::open(path)
+        let mut open = fs::OpenOptions::new();
+        open.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            // A path can be replaced between metadata and open. Never let a FIFO stall this worker.
+            open.custom_flags(libc::O_NONBLOCK);
+        }
+        open.open(path)
             .map_err(|e| format!("roadmap file could not be read: {e}"))?
             .take(MAX_BYTES + 1)
             .read_to_end(&mut bytes)
@@ -167,8 +175,19 @@ fn markdown_plan(text: &str) -> Option<Plan> {
     let mut milestones: Vec<Milestone> = Vec::new();
     let mut current: Option<usize> = None;
     let mut group: Option<usize> = None;
+    let mut fence: Option<char> = None;
     for line in text.lines() {
         let trimmed = line.trim();
+        if let Some(marker) = fence {
+            if trimmed.starts_with(&marker.to_string().repeat(3)) {
+                fence = None;
+            }
+            continue;
+        }
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            fence = trimmed.chars().next();
+            continue;
+        }
         let heading_depth = trimmed.bytes().take_while(|b| *b == b'#').count();
         if heading_depth > 0 && trimmed.as_bytes().get(heading_depth) == Some(&b' ') {
             let value = trimmed[heading_depth..].trim();
@@ -191,6 +210,9 @@ fn markdown_plan(text: &str) -> Option<Plan> {
             continue;
         }
         let indent = line.len() - line.trim_start().len();
+        if indent >= 4 {
+            continue;
+        }
         let body = line.trim_start();
         let Some((checked, rest)) = task(body) else {
             continue;
@@ -265,10 +287,29 @@ fn task(line: &str) -> Option<(bool, &str)> {
 mod tests {
     use super::*;
 
+    struct TempDir(PathBuf);
+    impl TempDir {
+        fn new() -> Self {
+            let tick = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let dir =
+                std::env::temp_dir().join(format!("ivy-roadmap-{}-{tick}", std::process::id()));
+            fs::create_dir(&dir).unwrap();
+            Self(dir)
+        }
+    }
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
     #[test]
     fn markdown_tasks_form_milestones_and_heading_groups() {
         let plan = markdown_plan(
-            "# Roadmap\n\n- [x] First\n  - [x] done\n  - [ ] still doing\n- [ ] Second\n\n## Later\n- [ ] One\n- [ ] Two\n",
+            "# Roadmap\n\n```md\n- [ ] sample, not a task\n```\n- [x] First\n  - [x] done\n  - [ ] still doing\n- [ ] Second\n\n## Later\n- [ ] One\n- [ ] Two\n",
         )
         .unwrap();
         assert_eq!(plan.title.as_deref(), Some("Roadmap"));
@@ -276,6 +317,7 @@ mod tests {
         assert_eq!(plan.milestones[0].title, "First");
         assert_eq!(plan.milestones[0].items.len(), 3);
         assert_eq!(plan.milestones[0].items[2].mark, Some(Mark::Current));
+        assert_eq!(plan.milestones[0].items[2].text, "still doing");
         assert_eq!(plan.milestones[1].items[0].mark, Some(Mark::Pending));
         assert_eq!(plan.milestones[2].title, "Later");
         assert_eq!(plan.milestones[2].items.len(), 2);
@@ -287,5 +329,22 @@ mod tests {
         assert!(markdown_plan("# Empty\n- prose\n").is_none());
         let plan = markdown_plan("- [x] done\n").unwrap();
         assert_eq!(plan.milestones[0].items[0].mark, Some(Mark::Done));
+    }
+
+    #[test]
+    fn missing_taskless_and_oversized_files_have_diagnostics() {
+        let dir = TempDir::new();
+        let missing = dir.0.join("missing.md");
+        assert!(
+            load("demo", &missing)
+                .error
+                .unwrap()
+                .contains("unavailable")
+        );
+        let path = dir.0.join("empty.md");
+        fs::write(&path, "# Roadmap\nSome prose, no tasks\n").unwrap();
+        assert!(load("demo", &path).error.unwrap().contains("no task items"));
+        fs::write(&path, vec![b'x'; MAX_BYTES as usize + 1]).unwrap();
+        assert!(load("demo", &path).error.unwrap().contains("exceeds"));
     }
 }
