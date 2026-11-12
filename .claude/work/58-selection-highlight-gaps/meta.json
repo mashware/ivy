@@ -1,0 +1,24 @@
+{
+  "ticket": "#58",
+  "slug": "selection-highlight-gaps",
+  "type": "feat",
+  "title": "Selected terminal text intermittently shows gaps and fragmented highlighting",
+  "branch": "58-selection-highlight-gaps",
+  "stacked_on": null,
+  "worktree": "/home/vioque/Mashware/agent-terminal/.worktrees/58-selection-highlight-gaps",
+  "size": "S",
+  "phase": "design",
+  "phases_done": ["context", "design"],
+  "ticket_deps": [],
+  "handoff": true,
+  "draft_from_conversation": false,
+  "tracker_issue": "https://github.com/mashware/ivy/issues/58",
+  "related_repos": [],
+  "roadmap": null,
+  "defaults_used": [
+    { "key": "start:linked-branch", "default": "skipped: study for handoff, PR train unknown (FLOW notes.feat:start)", "phase": "context" }
+  ],
+  "started_at": "2026-11-12T23:16:24+01:00",
+  "updated_at": "2026-11-12T23:16:24+01:00",
+  "notes": "Ticket is labelled bug but was started through the feature flow with --study. Design (auto): root cause is the optional ligature path scaling shaped runs (on with the reporter's config); fix = translate glyphs onto cells + ligature face without subpixel binning. Size stays S. Design recorded as accepted."
+}
