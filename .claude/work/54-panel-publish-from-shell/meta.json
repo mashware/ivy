@@ -1,0 +1,93 @@
+{
+  "ticket": "#54",
+  "slug": "panel-publish-from-shell",
+  "type": "feat",
+  "title": "Design: publish a panel from a shell command for hooks (panel.publish_cmd)",
+  "branch": "54-panel-publish-from-shell",
+  "stacked_on": null,
+  "worktree": "/home/vioque/Mashware/agent-terminal/.worktrees/54-panel-publish-from-shell",
+  "size": "L",
+  "phase": "plan",
+  "phases_done": [
+    "context",
+    "design",
+    "plan"
+  ],
+  "handoff": true,
+  "draft_from_conversation": false,
+  "tracker_issue": null,
+  "related_repos": [],
+  "roadmap": null,
+  "started_at": "2026-11-12T22:00:00+01:00",
+  "updated_at": "2026-11-12T23:20:00+01:00",
+  "defaults_used": [
+    {
+      "key": "design:codex-macos-args",
+      "default": "KERN_PROCARGS2 taken in auto, then cut by the challenge (identity attestation with check_mode off)",
+      "phase": "design"
+    }
+  ],
+  "notes": "Linked branch (gh issue develop) skipped: a --study work is pushed to ai-study/#54 by handoff, never merged from this branch; a linked remote branch would only mislead the issue's Development panel. | Design: approach A (attested hook publish bound to the holder client root) chosen; owner chose macOS attestation in this work (12 Nov 2026); size M->L because of the second platform backend.",
+  "ticket_deps": [],
+  "followups": [
+    {
+      "id": "F1",
+      "kind": "tooling",
+      "title": "No measurement batch exercises a hook publication",
+      "why": "its frame arm is declared (overlaid/overlays_refused) but never measured",
+      "source": "design",
+      "status": "proposed",
+      "ticket": null,
+      "work": null,
+      "note": ""
+    },
+    {
+      "id": "F4",
+      "kind": "out-of-scope",
+      "title": "Session recovery (D84) on macOS",
+      "why": "this work ports only identity attestation; recovery and relaunch stay Linux-only",
+      "source": "design",
+      "status": "proposed",
+      "ticket": null,
+      "work": null,
+      "note": ""
+    },
+    {
+      "id": "F5",
+      "kind": "risk",
+      "title": "Clients matched by exact executable path, discovered once per pane",
+      "why": "a self-updating client or npm-installed Claude is not attested, so its hooks are refused (inherited from D84)",
+      "source": "design",
+      "status": "proposed",
+      "ticket": null,
+      "work": null,
+      "note": ""
+    }
+  ],
+  "mrs": [
+    {
+      "n": 1,
+      "title": "macOS process attestation",
+      "size": "M",
+      "status": "pending",
+      "phases_done": [],
+      "wave": 1,
+      "depends_on": [],
+      "lines_est": 700,
+      "files_est": 6
+    },
+    {
+      "n": 2,
+      "title": "Hook publishes over its holder's panel",
+      "size": "L",
+      "status": "pending",
+      "phases_done": [],
+      "wave": 2,
+      "depends_on": [
+        1
+      ],
+      "lines_est": 1500,
+      "files_est": 16
+    }
+  ]
+}

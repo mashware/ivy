@@ -1,0 +1,10 @@
+# Security windows per step (#54)
+
+- **Step 1 (hoist):** no window. Nothing on macOS calls the walk yet: `ai_sessions` is Linux-gated and `Peer::capture` returns `Unsupported`. Guard: `lifetime_ended` must keep today's fail-closed rule, where a `poll` error counts as ended (`foreground/linux.rs:190`, `peer.rs:43-44`). Non-Linux `snapshot`/`group`/`lifetime` must stay `Err(Unsupported)`, never default values.
+- **Step 2 (macOS):** this is the real window. Plan step 2 says "widen the cfg gates in ai_sessions". The challenge row cut that to `verify` and `programs` only. `resume.rs:150` installs the session handler on every OS, and only `ai_sessions/mod.rs:122-128` keeps it at "unsupported". Widening `worker`/`protocol` while the macOS `Peer` now captures turns on session registration and relaunch on macOS before AC9 is checked (F3). Fix: keep `worker`, `protocol` and the `callback` arm Linux-only, and pin it with a test that the macOS callback answers `unsupported`. Also, a `kqueue` error must count as ended, same as Linux.
+- **Step 3 (wire + listener + helper), merged without step 4:**
+  - (a) `What::Overlay` needs an app arm to compile. If that placeholder applies the document or reuses the `Publish` path, a hook paints, or takes the hold, with no root re-check. Fix: ship steps 3 and 4 together, or make the step-3 arm refuse.
+  - (b) The holder cell is never written until step 4. If the listener reads the cell before it attests, every publisher, attested or not, gets "nobody holds" and exit 0. That hides AC2's refusal. Fix: attest first (`attest == None` gives the exit-1 refusal), then read the cell. Key the helper's exit 0 on a distinct reply code, not the error text.
+  - (c) The helper's silent exit 0 must come only from missing identity or a compile-time no-endpoint platform. A failed connect with a whole identity is exit 2.
+- **Step 4 (app):** the cell writer and the apply-time re-check must land in the same PR. A stale cell after a close is safe only because of the re-check. The Overlay arm must never take a hold when nobody holds.
+- **Step 5 (docs):** no window.
