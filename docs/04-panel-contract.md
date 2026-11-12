@@ -27,6 +27,8 @@ transports feed it.
   "updated_at": "2026-08-06T18:12:00+02:00",
   "phase": "validate",
   "attention": "wait",
+  "milestone": "H3",
+  "deliverable": "TAX-06",
   "header": true,
   "stale_after_minutes": 30,
   "actions": [
@@ -53,6 +55,8 @@ transports feed it.
 | `updated_at` | recommended | ISO 8601. **It is read and not painted yet** —see Pending— and **the stale notice does not come from here** (see rules) |
 | `phase` | no | What is being run **right now**. Free text, and painted literally — **inside the identity line**, so `header: false` hides it too |
 | `attention` | no | **Whether this pane claims something, and of what kind.** `wait` `block` `done`. Absent = it claims nothing. See below |
+| `milestone` | no | Project roadmap milestone id this console's work belongs to |
+| `deliverable` | no | Deliverable id within that milestone; both ids are required for deliverable placement |
 | `header` | no (`true` by default) | Whether the app adds its identity line at the top: the pane's identifier and its `phase` |
 | `stale_after_minutes` | no (30 by default) | How much silence is legitimate before warning |
 | `actions` | no | **The buttons this pane offers.** Each one is painted with its command underneath, and one click sends it to the program in that pane. See below |
@@ -196,6 +200,50 @@ empty lines) and clips to the height. Multiple spaces are collapsed: they are no
 or inside `ref` is replaced by a space. It is not censorship, it is that they knock the panel's grid
 out of square — a `\n` would make a single line paint several rows on top of the ones below. Whoever
 wants two lines, let them publish two elements in `lines`.
+
+## Project plan document
+
+The board accepts a project plan from `plan_set`. It is parsed into the same model as the settings-file
+Markdown fallback. Unknown or malformed fields are dropped independently; an invalid top-level
+document or one over `MAX_BYTES` is refused whole. Item marks are the closed vocabulary `done`,
+`current`, `pending`, `wait`, and `block`; `info` is not a plan mark. Unknown item marks are dropped
+and reported to the producer.
+
+```json
+{
+  "title": "Ivy",
+  "source": "docs/05-roadmap.md",
+  "milestones": [{
+    "id": "B2", "title": "Project roadmaps", "done_when": "Board shows the roadmap",
+    "depends_on": ["B1"],
+    "items": [{"id": "53", "text": "Publish the contract", "mark": "current",
+               "ref": "#53", "link": "https://example.invalid/53"}]
+  }],
+  "outside": [{"text": "A task outside milestones", "mark": "pending"}]
+}
+```
+
+`milestone` and `deliverable` on a panel are optional strings and are not patchable: republish the
+whole panel document to change them. A matching pair places its card under that deliverable; a
+matching milestone alone places it under the milestone. Everything else appears in **Off the plan**.
+
+## Project plan channel
+
+The project plan verbs use the caller pane's resolved Git project. The optional `repo` argument is
+accepted for producer compatibility and ignored; each response names the project. An unresolved
+project is refused as `this console's project is not known yet`; a resolved plain folder is refused
+as `this console is not in a Git repository`. A published plan replaces the previous plan for that
+project as a whole. It is retained in Ivy's state across restart; `plan_retire` re-exposes the configured
+file fallback. `plan_get` returns only the committed published document, never the file translation.
+
+```text
+plan_set {"document": <plan document>, "repo": <optional path>} -> published for <Project>
+plan_get {"repo": <optional path>} -> <committed document> | no plan published for <Project>
+plan_retire {"repo": <optional path>} -> retired for <Project> | no plan published for <Project>
+```
+
+The settings keys remain `roadmap.<name> = <path>` and `roadmap.window = <done> <next>` (default
+`2 3`). The file is used only when that project has no published plan.
 
 ## Rules of the document
 

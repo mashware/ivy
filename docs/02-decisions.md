@@ -9180,11 +9180,14 @@ project identity (D79). Each project section starts with that project's roadmap 
 per live console working in it. The board shows three kinds of content, and each kind has exactly
 one owner:
 
-- **A project's roadmap comes from a file in its repository.** The user names it in the settings
-  (`roadmap.<name> = <path>`); the project is the Git repository containing that file. Milestones are
-  Markdown task items, the first unchecked one is in progress, and the board shows a window around it
-  (`roadmap.window`, two done and three next by default). It is repainted when the file changes. A
-  configured project appears even with no console open.
+- **A project's roadmap comes from one of two sources.** A plan published by a producer over MCP
+  wins as a whole; the file named in settings (`roadmap.<name> = <path>`) is used only when there is
+  no published plan or it is retired. There is no merge. The published plan is kept in Ivy's state
+  per project and restored after restart. Otherwise, Markdown task items from the configured file
+  form the plan; the first unchecked item is in progress. The board shows a window around it
+  (`roadmap.window`, two done and three next by default). File changes repaint the board. A project
+  named in settings has a section even with no console open; a stored plan alone does not create a
+  section.
 - **A console's card starts from its existing panel document**, so every console with a panel is on
   the board without publishing anything new.
 - **Blocks are published by producers**, over MCP or as a file in `PANEL_DIR`, and belong to the
@@ -9216,8 +9219,9 @@ freshness covers.
 - **Turn-based editing of one shared canvas.** It contradicts MCP scoping and needs a lock with no
   owner. Per-console ownership removes the need.
 - **Per-tab boards.** Most tabs hold one or two consoles; the board would be nearly empty.
-- **A roadmap published by an agent.** Several consoles in one project would compete, and the board
-  would lose the roadmap whenever no agent was working there.
+- **A roadmap published by an agent without a shared project store.** Project-scoped publication
+  avoids competing per-console copies; persistence in Ivy's state keeps the plan after its producer
+  exits and across restart.
 - **Showing a large roadmap whole, or one chosen section.** A whole file does not fit a block; a
   section needs a convention every repository would have to adopt. A window of milestones around the
   one in progress works on any task list.
@@ -9225,9 +9229,13 @@ freshness covers.
   document. A script the user starts in a console does the same job inside the existing trust model.
 - **Charts.** No case yet; they can come later as one more block kind.
 
-**Limits.** Project identity outside Linux depends on OSC 7 reports (D79). A roadmap with no task
-items shows a notice, not a guessed progress. Board work is named in the frame report and subtracted
-once (D13); no performance figure is claimed before repeated valid runs.
+**Limits.** Project identity outside Linux depends on OSC 7 reports (D79); without one, publishing
+is refused until the project resolves. `plan_set`, `plan_get` and `plan_retire` act on the caller's
+pane project; the optional `repo` argument is ignored and replies name that project. Published plans
+use a bounded JSON document with five item marks (`done`, `current`, `pending`, `wait`, `block`),
+while the Markdown fallback has no stable item ids. A roadmap with no items shows a notice, not a
+guessed progress. Board work is named in the frame report and subtracted once (D13); no performance
+figure is claimed before repeated valid runs.
 
 **B1 — how the first board is built ([#40](https://github.com/mashware/ivy/issues/40)).**
 
