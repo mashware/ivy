@@ -8,7 +8,7 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-/// Starts the bridge with exactly `env`, sends it one `initialize` and returns the reply.
+/// Starts the bridge with exactly `env`, sends it one «initialize» request and returns the reply.
 fn handshake(env: &[(&str, &str)]) -> serde_json::Value {
     exchange(env, b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}\n")
 }

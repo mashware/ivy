@@ -233,7 +233,7 @@ fn instructions_for(
 ///   serve the same names.
 /// - Agents launched by another agent are told to leave the panel alone, because a harness hands
 ///   its subagents the same instructions and they share this connection, which holds the pane: one
-///   subagent publishing `done` would erase the question its parent is waiting on.
+///   subagent publishing «done» would erase the question its parent is waiting on.
 /// - A new connection holds nothing, so after a restart the document read back has to be published
 ///   again before any patch.
 const INSTRUCTIONS: &str = "\
@@ -856,7 +856,7 @@ mod tests {
         );
     }
 
-    /// Every `snake_case` word of the instructions, backticked or not: the tool names they mention.
+    /// Every snake-case word of the instructions, backticked or not: the tool names they mention.
     /// Every verb this bridge serves has an underscore, which is what tells a tool from a field such
     /// as `attention` or `key`.
     fn tools_the_instructions_name() -> Vec<&'static str> {
@@ -868,7 +868,7 @@ mod tests {
 
     /// **The instructions never name a tool this bridge does not serve.** The served names come
     /// from `tools/list` itself, not from a copy, so a verb renamed there or one added to the text
-    /// — `plan_set` is served by another terminal's bridge, not this one — fails here.
+    /// — «plan_set» is served by another terminal's bridge, not this one — fails here.
     #[test]
     fn the_instructions_name_only_tools_this_bridge_serves() {
         let listed = ask("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}");
