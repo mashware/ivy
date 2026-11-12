@@ -987,7 +987,7 @@ mod tests {
         );
         let oversized = serde_json::json!({"title": "x".repeat(panel_contract::MAX_BYTES as usize), "milestones": []}).to_string();
         assert!(
-            matches!(producer.publish_plan(&oversized, None).unwrap(), panel_control::Answered::Refused(s) if s == "a plan is over 256 KiB")
+            matches!(producer.publish_plan(&oversized, None).unwrap(), panel_control::Answered::Failed(s) if s == "a plan is over 256 KiB")
         );
         assert!(
             matches!(producer.read_plan(None).unwrap(), panel_control::Answered::Document(s) if s == document)
