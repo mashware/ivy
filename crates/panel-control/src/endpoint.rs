@@ -254,12 +254,13 @@ mod tests {
         let panel = PanelDir::create().expect("create the panel directory");
 
         let bound = bind(panel.path(), panel.id());
-        if BINDS {
-            bound.expect("BINDS says this platform binds, and binding failed");
-        } else {
-            let refusal = bound
-                .err()
-                .expect("BINDS says this platform does not bind, and it bound");
+        let refusal = bound.as_ref().err().map(ToString::to_string);
+        assert_eq!(
+            bound.is_ok(),
+            BINDS,
+            "BINDS disagrees with binding: {refusal:?}"
+        );
+        if let Err(refusal) = bound {
             assert_eq!(refusal.kind(), io::ErrorKind::Unsupported, "{refusal}");
         }
     }
