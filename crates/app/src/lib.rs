@@ -21578,6 +21578,145 @@ mod tests {
         pane.refresh_its_panel(&egui::Context::default());
     }
 
+    #[test]
+    fn a_bare_pointer_press_routes_to_a_painted_header_after_toggle_and_republish() {
+        let ctx = egui::Context::default();
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let area = area_of_cells(200.0);
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+        with_the_panel_in_place(
+            &mut window,
+            0,
+            r#"{"header":false,"lines":[{"text":"MRs","style":"section","summary":"2/4 merged","collapsed":true,"key":"mrs"},"body assertion"]}"#,
+        );
+
+        fn app_frame(
+            window: &mut Window,
+            ctx: &egui::Context,
+            area: egui::Rect,
+            events: Vec<egui::Event>,
+        ) -> Vec<(String, egui::Pos2)> {
+            fn collect(shape: &egui::Shape, text: &mut Vec<(String, egui::Pos2)>) {
+                match shape {
+                    egui::Shape::Text(shape) => {
+                        text.push((shape.galley.job.text.clone(), shape.pos));
+                    }
+                    egui::Shape::Vec(shapes) => {
+                        for shape in shapes {
+                            collect(shape, text);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let mut frame = eframe::Frame::_new_kittest();
+            eframe::App::logic(window, ctx, &mut frame);
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(area),
+                    events,
+                    ..Default::default()
+                },
+                |ui| eframe::App::ui(window, ui, &mut frame),
+            );
+            let mut text = Vec::new();
+            for shape in &output.shapes {
+                collect(&shape.shape, &mut text);
+            }
+            output.drop_without_applying_deltas();
+            text
+        }
+
+        // The first full app frame both paints the panel and yields the visible header's actual
+        // screen position, so the test presses the pixels the person saw.
+        let first = app_frame(&mut window, &ctx, area, Vec::new());
+        assert!(
+            !first
+                .iter()
+                .any(|(text, _)| text.contains("body assertion")),
+            "the producer's collapsed header did not hide its body"
+        );
+        let header = first
+            .iter()
+            .find(|(text, _)| text.starts_with('▸'))
+            .expect("the collapsed header was painted");
+        let header_click = header.1 + egui::vec2(metrics.width() * 0.25, metrics.height() * 0.5);
+
+        let click = |window: &mut Window| {
+            let pressed = app_frame(
+                window,
+                &ctx,
+                area,
+                vec![
+                    egui::Event::PointerMoved(header_click),
+                    egui::Event::PointerButton {
+                        pos: header_click,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+            let released = app_frame(
+                window,
+                &ctx,
+                area,
+                vec![egui::Event::PointerButton {
+                    pos: header_click,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+            if released
+                .iter()
+                .any(|(text, _)| text.contains("body assertion"))
+            {
+                released
+            } else {
+                pressed
+            }
+        };
+
+        let opened = click(&mut window);
+        assert!(
+            opened
+                .iter()
+                .any(|(text, _)| text.contains("body assertion")),
+            "the queued bare press did not open the painted header at {header_click:?}; opened: {opened:?}"
+        );
+        let refolded = click(&mut window);
+        assert!(
+            !refolded
+                .iter()
+                .any(|(text, _)| text.contains("body assertion")),
+            "the immediate repeated queued press did not fold the header"
+        );
+
+        // Republish the producer's original default. The reader's open choice must win, and a
+        // click on that just-repainted header must still be routed to the painted target.
+        let pane = &window.active().panes()[0];
+        publish_at(
+            pane,
+            r#"{"header":false,"lines":[{"text":"MRs","style":"section","summary":"2/4 merged","collapsed":true,"key":"mrs"},"body assertion"]}"#,
+        );
+        window.active_mut().panes_mut()[0].refresh_its_panel(&ctx);
+        let after_publish = app_frame(&mut window, &ctx, area, Vec::new());
+        assert!(
+            !after_publish
+                .iter()
+                .any(|(text, _)| text.contains("body assertion")),
+            "republishing changed the reader's folded choice"
+        );
+        let opened_after_publish = click(&mut window);
+        assert!(
+            opened_after_publish
+                .iter()
+                .any(|(text, _)| text.contains("body assertion")),
+            "the click after republish did not open the header"
+        );
+    }
+
     /// Where a pane's panel border is grabbed, in points.
     ///
     /// **Folded there is no panel and the handle is stuck to the edge**, so the point is computed

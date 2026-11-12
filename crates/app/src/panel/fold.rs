@@ -374,6 +374,50 @@ mod tests {
     }
 
     #[test]
+    fn header_beneath_the_more_marker_is_not_clickable() {
+        let mut state = state(serde_json::json!(["title", header(), "body"]));
+        paint(&mut state, 420.0, 600.0);
+        let previous_area = state.drawn.as_ref().unwrap().headers[0].area;
+
+        // One row fits: the title is visible and the header is counted under the overflow marker.
+        let text = paint(&mut state, 420.0, previous_area.height() * 1.5).join("\n");
+        assert!(text.contains("… 2 more"), "{text}");
+        assert!(state.drawn.as_ref().unwrap().headers.is_empty());
+        assert!(!toggle_header_at(&mut state, previous_area.center()));
+    }
+
+    #[test]
+    fn blank_keyless_header_remembers_its_choice_and_nonheaders_stay_ordinary() {
+        let blank = serde_json::json!({
+            "text":"", "style":"section", "collapsed":true
+        });
+        let mut state = state(serde_json::json!([
+            blank,
+            {"text":"plain body", "summary":"ignored", "collapsed":true}
+        ]));
+        let first = paint(&mut state, 420.0, 600.0).join("\n");
+        assert!(!first.contains("plain body"), "{first}");
+
+        click(&mut state);
+        let opened = paint(&mut state, 420.0, 600.0).join("\n");
+        assert!(opened.contains("plain body"), "{opened}");
+        assert_eq!(
+            state.folds.get(&HeaderId::Text(String::new())),
+            Some(&false)
+        );
+
+        publish(
+            &mut state,
+            serde_json::json!([
+                blank,
+                {"text":"plain body", "summary":"ignored", "collapsed":true}
+            ]),
+        );
+        let republished = paint(&mut state, 420.0, 600.0).join("\n");
+        assert!(republished.contains("plain body"), "{republished}");
+    }
+
+    #[test]
     fn header_ignores_line_adornments_and_nonheaders_ignore_fold_fields() {
         let mut h = header();
         h["collapsed"] = false.into();
@@ -443,6 +487,16 @@ mod tests {
             .iter()
             .find(|(text, _)| text == "日本語")
             .expect("whole summary painted");
+        let title_and_rule = texts
+            .iter()
+            .find(|(text, _)| text.starts_with('▸') || text.starts_with('▾'))
+            .expect("header title and rule painted");
+        assert!(
+            title_and_rule.1.right() <= summary.1.left() + 0.1,
+            "header ink {:?} overlaps summary ink {:?}",
+            title_and_rule.1,
+            summary.1
+        );
         let ctx = eframe::egui::Context::default();
         let output = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
             let metrics = CellMetrics::measure(
