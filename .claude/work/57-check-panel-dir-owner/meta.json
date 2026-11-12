@@ -1,0 +1,24 @@
+{
+  "ticket": "#57",
+  "slug": "check-panel-dir-owner",
+  "type": "feat",
+  "title": "Check the owner of PANEL_DIR before connecting to a console's channel",
+  "branch": "57-check-panel-dir-owner",
+  "stacked_on": null,
+  "worktree": "/home/vioque/Mashware/agent-terminal/.worktrees/57-check-panel-dir-owner",
+  "size": "S",
+  "phase": "design",
+  "phases_done": ["context", "design"],
+  "handoff": true,
+  "draft_from_conversation": false,
+  "tracker_issue": null,
+  "related_repos": [],
+  "roadmap": null,
+  "ticket_deps": [],
+  "started_at": "2026-11-12T23:00:32+01:00",
+  "updated_at": "2026-11-12T23:20:00+01:00",
+  "notes": "Studied here, built elsewhere (--study): the study ends at handoff, pushed to ai-study/#57. Design accepted in auto mode (no high findings; challenger verdict: tight). Size S confirmed after design.",
+  "cost": [
+    {"phase": "design", "at": "2026-11-12T23:20:00+01:00", "reviewers": 4, "source": "not reported"}
+  ]
+}
