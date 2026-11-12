@@ -17,6 +17,18 @@ pub(crate) struct Document {
 
 /// Semantic spelling, including aliases the startup parser already accepts.
 fn canonical(key: &str) -> Option<String> {
+    if key == "roadmap.window" {
+        return Some(key.to_owned());
+    }
+    if let Some(name) = key.strip_prefix("roadmap.")
+        && name != "window"
+        && !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+    {
+        return Some(key.to_owned());
+    }
     if let Some(name) = key.strip_prefix("key.") {
         if name.eq_ignore_ascii_case("copy") {
             return Some("key.copy".into());
@@ -91,6 +103,22 @@ impl Document {
                 original: String::new(),
             })
             .collect();
+        for line in source.lines() {
+            if let Some((key, value)) = line.trim().split_once('=') {
+                let key = key.trim();
+                if key.starts_with("roadmap.")
+                    && let Some(key) = canonical(key)
+                    && !fields.iter().any(|field| field.key == key)
+                    && super::apply(&mut Settings::default(), &key, value.trim()).is_ok()
+                {
+                    fields.push(Field {
+                        key,
+                        value: value.trim().to_owned(),
+                        original: value.trim().to_owned(),
+                    });
+                }
+            }
+        }
         for line in source.strip_prefix('\u{feff}').unwrap_or(&source).lines() {
             if let ConfigLine::Pair(key, value) = classify(line)
                 && apply(&mut Settings::default(), key, value).is_ok()
@@ -229,6 +257,19 @@ mod tests {
     use super::*;
     fn set(doc: &mut Document, key: &str, value: &str) {
         doc.fields.iter_mut().find(|f| f.key == key).unwrap().value = value.into();
+    }
+    #[test]
+    fn configured_roadmap_paths_are_editable_without_losing_names() {
+        let mut doc = Document::new("roadmap.backend = docs/old.md\nroadmap.window = 2 3\n".into());
+        set(&mut doc, "roadmap.backend", "docs/new plan.md");
+        let source = doc.text();
+        assert!(source.contains("roadmap.backend = docs/new plan.md"));
+        let (settings, warnings) = super::super::interpret(&source).unwrap();
+        assert_eq!(warnings.total(), 0);
+        assert_eq!(
+            settings.roadmaps["backend"],
+            std::path::PathBuf::from("docs/new plan.md")
+        );
     }
     #[test]
     fn title_sizes_preserve_other_lines_and_reset_independently() {

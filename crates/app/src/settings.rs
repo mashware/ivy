@@ -25,6 +25,7 @@ pub(crate) mod document;
 pub(crate) mod editor;
 pub(crate) mod store;
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use eframe::egui::Color32;
@@ -278,6 +279,23 @@ pub struct Settings {
     /// desktop before it arrives here —and without saying whether there was Shift—, so the only thing that
     /// can be done with it is to stop attending it, which is what gives `Ctrl+Shift+C` back to `vim`.
     pub copy: Option<bool>,
+    /// Markdown roadmaps keyed by the configured section name.
+    pub roadmaps: BTreeMap<String, PathBuf>,
+    /// Number of completed milestones before and upcoming milestones after the anchor.
+    pub roadmap_window: RoadmapWindow,
+}
+
+/// How many milestones the board shows around its current milestone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RoadmapWindow {
+    pub done: usize,
+    pub next: usize,
+}
+
+impl Default for RoadmapWindow {
+    fn default() -> Self {
+        Self { done: 2, next: 3 }
+    }
 }
 
 /// The least and the most admitted as a font body.
@@ -623,6 +641,35 @@ impl Settings {
 
 /// Puts the value where it belongs, if the key and the value are valid.
 fn apply(settings: &mut Settings, key: &str, value: &str) -> Result<(), Missing> {
+    if let Some(name) = key.strip_prefix("roadmap.") {
+        if name == "window" {
+            let mut pieces = value.split_whitespace();
+            let done = pieces.next().and_then(|n| n.parse::<usize>().ok());
+            let next = pieces.next().and_then(|n| n.parse::<usize>().ok());
+            if let (Some(done), Some(next)) = (done, next)
+                && pieces.next().is_none()
+                && done <= 20
+                && next <= 20
+            {
+                settings.roadmap_window = RoadmapWindow { done, next };
+                return Ok(());
+            }
+            return Err(Missing::InvalidValue {
+                key: key.to_owned(),
+                value: value.to_owned(),
+            });
+        }
+        if valid_roadmap_name(name) && !value.trim().is_empty() {
+            settings
+                .roadmaps
+                .insert(name.to_owned(), PathBuf::from(value));
+            return Ok(());
+        }
+        return Err(Missing::InvalidValue {
+            key: key.to_owned(),
+            value: value.to_owned(),
+        });
+    }
     if let Some(name) = key.strip_prefix("key.") {
         // **Copy still has its key, and it only accepts `none`.** It is the key this terminal already
         // published, and whoever wrote it to give the chord back to `vim` has no reason to find out
@@ -783,6 +830,13 @@ fn apply(settings: &mut Settings, key: &str, value: &str) -> Result<(), Missing>
     Ok(())
 }
 
+fn valid_roadmap_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+}
+
 /// A color written as `#rrggbb`, in uppercase or lowercase.
 fn color_from(value: &str) -> Option<Color32> {
     let digits = value.strip_prefix('#')?;
@@ -822,6 +876,24 @@ fn classify(line: &str) -> ConfigLine<'_> {
 mod tests {
     use super::*;
     use crate::tests::markdown;
+
+    #[test]
+    fn markdown_roadmaps_and_window_are_tolerant_and_defaulted() {
+        let defaults = interpret("").unwrap().0;
+        assert_eq!(defaults.roadmap_window, RoadmapWindow { done: 2, next: 3 });
+        let (settings, warnings) = interpret(
+            "roadmap.backend = docs/roadmap.md\nroadmap.window = 1 4\nroadmap.bad value = x\n",
+        )
+        .unwrap();
+        assert_eq!(warnings.total(), 1);
+        assert_eq!(
+            settings.roadmaps.get("backend"),
+            Some(&PathBuf::from("docs/roadmap.md"))
+        );
+        assert_eq!(settings.roadmap_window, RoadmapWindow { done: 1, next: 4 });
+        assert_eq!(interpret("roadmap.window = 21 1").unwrap().1.total(), 1);
+        assert_eq!(interpret("roadmap.window = 1").unwrap().1.total(), 1);
+    }
 
     /// What parsing a text that is understood in full returns.
     #[test]
