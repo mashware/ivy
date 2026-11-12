@@ -566,7 +566,11 @@ pub(crate) fn resize(pane: &mut crate::Pane) {
     // **The span is the whole body**, telling the program included: it is what attending a
     // resize costs, and splitting it would leave half an operation with no owner.
     let before = Instant::now();
+    #[cfg(test)]
+    let before = crate::tests::OperationClock::start(before);
     pane.screen.resize(pane.measured);
+    #[cfg(test)]
+    crate::tests::completed_operation(crate::tests::OperationWork::ScreenReflow);
     if let Err(failure) = pane.pty.resize(pane.measured) {
         // The grid already changed and the program has not heard about it: what is seen from
         // here on is painted against a size that is not its own. There is no way to fix it from

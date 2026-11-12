@@ -1853,7 +1853,7 @@ impl Window {
 #[cfg(test)]
 mod tests {
     // Only declaration witnesses activate this thread-local clock. Real operations still run;
-    // completed launches and watcher rearms advance distinct units inside their stopwatch.
+    // completed launches, watcher rearms and screen reflows advance units inside their stopwatch.
     // Logical units test complete accounting, not performance; release binaries contain none.
     // Reader/watcher threads cannot advance this clock, and other tests retain their real clock.
     // The guard restores its previous state on panic as well as success.
@@ -1866,6 +1866,7 @@ mod tests {
     pub(crate) enum OperationWork {
         Launch,
         Rearm,
+        ScreenReflow,
     }
 
     pub(crate) fn completed_operation(work: OperationWork) {
@@ -1874,6 +1875,7 @@ mod tests {
                 let units = match work {
                     OperationWork::Launch => 1,
                     OperationWork::Rearm => 10,
+                    OperationWork::ScreenReflow => 10,
                 };
                 time.set(Some(now + std::time::Duration::from_secs(units)));
             }
@@ -27391,17 +27393,18 @@ mod tests {
         );
     }
 
-    /// **The reflow stopwatch has to cover the reflow, not just the notice to the program.**
-    /// Checked by mutating: moving the clock reading up one line —leaving out the screen's
-    /// `resize`, which is where **D21**'s millisecond lives and where the scrollback is walked in
-    /// full— the suite stayed green, because the test above only asks that the total be greater
-    /// than zero. And that is exactly the defect the hard rule describes: the timed region shrinks
-    /// and the work left outside starts being published as the framework's cost.
+    /// **The reflow stopwatch has to cover the screen's resize.** That is where the scrollback is
+    /// walked, and a positive duration alone cannot prove it was timed: other work in the span
+    /// could make the total nonzero. Comparing a populated screen with an empty one was also
+    /// fragile because scheduler noise could outweigh the resize cost. The injected operation
+    /// clock advances exactly when the screen resize runs, so moving the stopwatch's end before
+    /// it makes this assertion fail deterministically. The real wrapped scrollback is still
+    /// reflowed, and the resized grid is checked alongside the clock witness.
+    /// Only this thread uses logical time; concurrent resize tests retain the real clock.
     #[test]
     fn the_reflow_stopwatch_covers_reflowing_the_text_and_not_just_telling_the_program() {
-        // Two consoles alike except in **how much text there is to reflow**: one with scrollback
-        // that wraps and another freshly opened. If the clock covered the same in both, both would
-        // measure the same.
+        let _clock = OperationClockGuard::enter();
+        // Fill scrollback with lines that wrap when the grid narrows.
         let mut with_text = pane_with("sleep 30", 0);
         let wide = with_text.screen.size();
         // Lines longer than the grid, which are the ones that really reflow when narrowing: one
@@ -27412,29 +27415,22 @@ mod tests {
             with_text.screen.advance(b"\r\n");
         }
 
-        let mut empty = pane_with("sleep 30", 1);
-        assert_eq!(
-            empty.screen.size(),
-            wide,
-            "both consoles have to start from the same grid or they do not compare"
-        );
-
         let narrow = term_core::Size {
             rows: wide.rows,
             cols: wide.cols / 2,
         };
-        for pane in [&mut with_text, &mut empty] {
-            pane.measured = narrow;
-            pane.resize();
-        }
+        with_text.measured = narrow;
+        with_text.resize();
 
-        assert!(
-            with_text.reflowed > empty.reflowed * 5,
-            "reflowing {} lines that wrap cost {:?} and doing it with nothing to reflow {:?}: the \
-             stopwatch is not covering the walk of the scrollback",
-            term_core::SCROLLBACK,
+        assert_eq!(
+            with_text.screen.size(),
+            narrow,
+            "the screen was not resized"
+        );
+        assert_eq!(
             with_text.reflowed,
-            empty.reflowed
+            std::time::Duration::from_secs(10),
+            "the screen reflow did not advance the injected clock inside the stopwatch"
         );
     }
 
