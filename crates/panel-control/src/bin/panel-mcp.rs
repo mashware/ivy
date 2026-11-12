@@ -40,7 +40,12 @@ fn main() {
     let [id, dir] = panel_contract::ENV_NAMES.map(std::env::var_os);
     let inside = inside_a_console(id.as_deref(), dir.as_deref());
 
-    bridge(std::io::stdin().lock(), std::io::stdout(), &mut pane, inside);
+    bridge(
+        std::io::stdin().lock(),
+        std::io::stdout(),
+        &mut pane,
+        inside,
+    );
 }
 
 /// Answers messages until the input ends.
