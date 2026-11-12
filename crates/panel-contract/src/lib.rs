@@ -236,7 +236,7 @@ fn base_dir() -> PathBuf {
 /// the variable: an empty or relative value would create the directory inside the application's
 /// working directory — without failing, which is the worst thing it could do — and hand every
 /// console a `PANEL_DIR` its own MCP bridge refuses as not a whole identity (D88). **The fallback
-/// is held to the same rule**: the system temporary is `TMPDIR` as written on Unix, relative or
+/// is held to the same rule**: the system temporary is TMPDIR as written on Unix, relative or
 /// empty included, and then `/tmp` is the one directory every Unix has.
 fn base_dir_from(value: Option<&OsStr>, temporary: PathBuf) -> PathBuf {
     match value.map(Path::new) {
@@ -475,7 +475,7 @@ mod tests {
         );
     }
 
-    /// **The fallback is held to the same rule.** `TMPDIR` reaches `temp_dir` as written on Unix,
+    /// **The fallback is held to the same rule.** TMPDIR reaches `temp_dir` as written on Unix,
     /// and a relative or empty one would land every console in the working directory all the same.
     #[cfg(unix)]
     #[test]
