@@ -148,6 +148,7 @@ fn record_changes(
     dirty: &mut BTreeSet<String>,
 ) {
     match event {
+        Ok(event) if event.need_rescan() => dirty.extend(aliases.values().flatten().cloned()),
         Ok(event) => {
             for path in event.paths {
                 if let Some(names) = aliases.get(&path) {
@@ -454,6 +455,13 @@ mod tests {
         assert_eq!(dirty, BTreeSet::from(["first".into()]));
         record_changes(
             Err(notify::Error::generic("events lost")),
+            &aliases,
+            &mut dirty,
+        );
+        assert_eq!(dirty.len(), 2);
+        dirty.clear();
+        record_changes(
+            Ok(notify::Event::new(notify::EventKind::Other).set_flag(notify::event::Flag::Rescan)),
             &aliases,
             &mut dirty,
         );
