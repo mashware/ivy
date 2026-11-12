@@ -125,8 +125,8 @@ fn panel_get_refusal(env: &[(&str, &str)]) -> String {
 /// presence was enough and an empty identifier went through to the endpoint. The control row keeps
 /// this honest: with a whole identity the call fails too — nobody listens at the directory, or no
 /// channel binds on this platform — with neither identity refusal and saying which, so the
-/// assertions cannot be satisfied by any failure. A pair handed in with its halves swapped gets the broken refusal: an
-/// identifier is not an absolute directory.
+/// assertions cannot be satisfied by any failure. A pair handed in with its halves swapped gets the
+/// broken refusal: an identifier is not an absolute directory.
 #[test]
 fn a_tool_call_tells_a_missing_identity_from_a_broken_one() {
     const OUTSIDE: &str = "not running inside a pane";

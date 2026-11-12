@@ -209,7 +209,7 @@ fn format_id(random: u32) -> String {
 /// The user's runtime directory is the first choice for what it is: theirs and theirs alone, in
 /// memory, and the system empties it when the session closes. When it is unset or not absolute
 /// —macOS, a Linux session without a manager, a mistyped value— it falls back to the system
-/// temporary, held to the same rule ([`base_dir_from`]).
+/// temporary, held to the same rule on Unix ([`base_dir_from`]).
 fn base_dir() -> PathBuf {
     let base = base_dir_from(
         std::env::var_os("XDG_RUNTIME_DIR").as_deref(),
@@ -250,9 +250,9 @@ fn warning(base: &Base) -> Option<String> {
 /// working directory — without failing, which is the worst thing it could do — and hand every
 /// console a `PANEL_DIR` its own MCP bridge refuses as not a whole identity (D88). **The fallback
 /// is held to the same rule**: the system temporary is TMPDIR as written on Unix, relative or
-/// empty included, and then `/tmp` is the one directory every Unix has. Elsewhere there is no
-/// such directory to fall back to, so a relative temporary is used and reported. An empty value
-/// is unset, not ignored: only a non-empty one somebody wrote is reported.
+/// empty included, and then `/tmp` is the one directory every Unix has. Elsewhere the platform's
+/// temporary is taken as it comes: Windows resolves it to a full path itself. An empty value is
+/// unset, not ignored: only a non-empty one somebody wrote is reported.
 fn base_dir_from(value: Option<&OsStr>, temporary: PathBuf) -> Base {
     let mut ignored = Vec::new();
     let runtime = value.filter(|value| !value.is_empty()).map(Path::new);
@@ -265,20 +265,14 @@ fn base_dir_from(value: Option<&OsStr>, temporary: PathBuf) -> Base {
         }
         ignored.push("XDG_RUNTIME_DIR");
     }
-    if temporary.is_absolute() {
+    if temporary.is_absolute() || cfg!(not(unix)) {
         return Base {
             path: temporary,
             ignored,
         };
     }
     if !temporary.as_os_str().is_empty() {
-        ignored.push(if cfg!(unix) { "TMPDIR" } else { "TMP" });
-    }
-    if cfg!(not(unix)) {
-        return Base {
-            path: temporary,
-            ignored,
-        };
+        ignored.push("TMPDIR");
     }
     Base {
         path: PathBuf::from("/tmp"),

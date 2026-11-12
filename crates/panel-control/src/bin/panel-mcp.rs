@@ -39,7 +39,11 @@ fn main() {
     // inherit the identity of whatever console runs the suite. That the first tool call judges the
     // variables by the same rule is D88's decision, and the binary's integration test holds both.
     let [id, dir] = panel_contract::ENV_NAMES.map(std::env::var_os);
-    let instructions = instructions_for(id.as_deref(), dir.as_deref());
+    let instructions = instructions_for(
+        id.as_deref(),
+        dir.as_deref(),
+        panel_control::endpoint::BINDS,
+    );
 
     bridge(
         std::io::stdin().lock(),
@@ -210,13 +214,15 @@ fn answer(line: &str, pane: &mut Option<Producer>, instructions: Option<&str>) -
 /// is not bound until F2.7 (D43), every tool call there fails and a pane publishes by file only, so
 /// telling the agent to call `panel_set` would be a promise the bridge cannot keep.
 ///
-/// It takes the values instead of reading them so it can be tested without `set_var`; `main` reads
-/// them, and the binary's integration test covers that line.
+/// It takes the values — and whether the channel binds — instead of reading them, so both gates
+/// can be tested on any platform without `set_var`; `main` reads them, and the binary's integration
+/// test covers that line.
 fn instructions_for(
     id: Option<&std::ffi::OsStr>,
     dir: Option<&std::ffi::OsStr>,
+    binds: bool,
 ) -> Option<&'static str> {
-    if !panel_control::endpoint::BINDS {
+    if !binds {
         return None;
     }
     panel_control::client::whole_identity(id, dir).map(|_| INSTRUCTIONS)
@@ -841,10 +847,14 @@ mod tests {
         let id = Some(OsStr::new("a1b2c3d4"));
         let dir = Some(OsStr::new(absolute));
 
-        let whole = panel_control::endpoint::BINDS.then_some(INSTRUCTIONS);
-        assert_eq!(instructions_for(id, dir), whole);
-        assert_eq!(instructions_for(None, dir), None, "no identifier");
-        assert_eq!(instructions_for(id, None), None, "no directory");
+        assert_eq!(instructions_for(id, dir, true), Some(INSTRUCTIONS));
+        assert_eq!(
+            instructions_for(id, dir, false),
+            None,
+            "a platform where the channel does not bind"
+        );
+        assert_eq!(instructions_for(None, dir, true), None, "no identifier");
+        assert_eq!(instructions_for(id, None, true), None, "no directory");
     }
 
     /// **The handshake carries the instructions it was given, and is otherwise the same reply**,

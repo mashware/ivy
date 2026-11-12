@@ -57,11 +57,12 @@ impl Producer {
     /// identifier to the empty string resolved every pane on Windows to a single machine-wide name.
     ///
     /// **Two identity refusals, because they have two causes** — a platform with no channel and a
-    /// console that cannot be reached are refused apart, after them. Neither variable carrying anything — absent
-    /// or empty, which is what a client interpolating `${PANEL_ID:-}` outside any pane hands over —
-    /// is a program outside any pane. One carrying something but the identity not whole is a client
-    /// that forwards them badly — a list of variables missing one, a value mangled on the way — and
-    /// saying «not in a pane» there would send whoever reads it looking in the wrong place.
+    /// console that cannot be reached are refused apart, after them. Neither variable carrying
+    /// anything — absent or empty, which is what a client interpolating `${PANEL_ID:-}` outside any
+    /// pane hands over — is a program outside any pane. One carrying something but the identity not
+    /// whole is a client that forwards them badly — a list of variables missing one, a value
+    /// mangled on the way — and saying «not in a pane» there would send whoever reads it looking in
+    /// the wrong place.
     pub fn of_this_pane() -> io::Result<Self> {
         let [id, dir] = panel_contract::ENV_NAMES.map(std::env::var_os);
         let unset =
