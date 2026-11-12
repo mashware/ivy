@@ -9323,3 +9323,41 @@ loss); persistent aliases or reading both namespaces (keeps the old identity ali
 configuration directories (no safe rule for choosing between conflicting settings or layouts).
 Historical issue links point to `ivy-history-private`, where those original numbers belong,
 rather than unrelated issues with the same numbers in the current public repository.
+
+## D88 — The MCP bridge asks its agent to publish, only where it can keep the promise
+
+**Signal, 12 November 2026 (#51):** an agent connected to `panel-mcp` learned nothing about the
+panel unless it loaded the tools, and harnesses may **defer** MCP tools — listed by name, with no
+schema — so an agent that never loaded them published nothing and the person saw an empty panel.
+Bellwether, which paints the same contract inside Herdr, had already measured and fixed this.
+
+**Decision.** The bridge answers `initialize` with the protocol's optional `instructions` field,
+which harnesses that honour it place in the agent's own instructions. The text asks the agent to
+publish with `panel_set` at the start of a task, before long stretches and at every stop; to keep
+`attention` true; to patch only after publishing on the same connection, and to publish again after
+a restart before patching; and to pass a rendered panel document through as printed. It is sent
+only when the bridge starts with a **whole identity** — `PANEL_ID` present, non-empty and text,
+`PANEL_DIR` present and non-empty — the same rule its tool calls now apply, and never on Windows,
+where the control channel is not bound until F2.7 (D44). Outside those, the key is absent.
+
+**Two rules the text carries because of how harnesses use it.** It names *this server's* tools,
+because a second panel server may be registered beside this one with the same names. And it tells
+an agent another agent launched to leave the panel alone: a harness hands its subagents the same
+instructions, and they share the parent's connection, which holds the pane (D43) — one subagent
+publishing `done` would erase the question its parent is waiting on.
+
+**Discarded:**
+- **Naming all seven verbs** — the `split_*` and retirement descriptions already explain those, and
+  the goal is publishing.
+- **Presence-only identity, as the tool path had** — two rules in one process: the handshake said
+  «no console» for an empty identifier while the first call connected with it; on Windows an empty
+  identifier names one machine-wide endpoint. One function, `whole_identity`, now decides for both.
+- **Checking that the endpoint answers before promising a panel** — a stale identity (a
+  multiplexer reattached after Ivy closed) is real but rare, and its first call already says why it
+  failed; probing on every handshake buys a message, not a panel.
+- **Telling the agent to defer to a file producer already painting the pane** — the agent cannot
+  tell its own earlier panel from somebody else's after a restart, so the rule would mostly stop
+  agents publishing at all.
+- **Reading the environment where the reply is built** — a unit test would inherit the identity of
+  the console running the suite; the read stays in `main`, covered by a test that starts the binary
+  with its own environment.

@@ -12,6 +12,27 @@ use interprocess::local_socket::Stream;
 use crate::endpoint;
 use crate::wire::{MAX_REQUEST, Side};
 
+/// The pane identity a program inherited, **when it is whole**: `PANEL_ID` present, non-empty and
+/// text, and `PANEL_DIR` present and non-empty.
+///
+/// **One rule for every reader of the identity in this binary family**, because two rules in one
+/// process gave two answers: the MCP bridge's handshake said «no console» for an empty identifier
+/// while its first tool call connected with it. Empty counts as absent — a client configuration
+/// that interpolates `${PANEL_ID:-}` produces one, and on Windows an empty identifier names a single
+/// machine-wide endpoint. An identifier that is not text cannot be one this terminal generated, and
+/// converting it lossily would connect to a mangled name.
+///
+/// **It takes the values instead of reading them** so it can be tested without `set_var`, which
+/// is undefined behaviour in a suite that launches processes in parallel.
+pub fn whole_identity<'a>(
+    id: Option<&'a std::ffi::OsStr>,
+    dir: Option<&'a std::ffi::OsStr>,
+) -> Option<(&'a str, &'a Path)> {
+    let id = id?.to_str().filter(|id| !id.is_empty())?;
+    let dir = dir.filter(|dir| !dir.is_empty())?;
+    Some((id, Path::new(dir)))
+}
+
 /// A connection to one pane's channel.
 ///
 /// **The hold this delivery gives a source lasts as long as this value does**, which is why it is a
@@ -40,10 +61,10 @@ impl Producer {
                 "this program is not running inside a pane of this terminal",
             )
         };
-        let dir = std::env::var_os(panel_contract::ENV_NAMES[1]).ok_or_else(outside)?;
-        let id = std::env::var_os(panel_contract::ENV_NAMES[0]).ok_or_else(outside)?;
+        let [id, dir] = panel_contract::ENV_NAMES.map(std::env::var_os);
+        let (id, dir) = whole_identity(id.as_deref(), dir.as_deref()).ok_or_else(outside)?;
 
-        Self::of(Path::new(&dir), &id.to_string_lossy())
+        Self::of(dir, id)
     }
 
     /// The same, for a pane named directly. **What the tests use**, and what a producer that manages
@@ -318,6 +339,36 @@ mod tests {
             serde_json::from_str(r#"{"ok":false,"error":"busy","retryable":true}"#).unwrap();
         assert_eq!(parsed.ok, Some(false));
         assert_eq!(parsed.error.unwrap().get(), "\"busy\"");
+    }
+
+    /// **Only a whole identity is one.** Each row breaks one half — absent, empty, or an identifier
+    /// that is not text; a version that checked one variable, or presence only, passes the first
+    /// row and fails one of the rest.
+    #[test]
+    fn an_identity_is_whole_only_with_both_halves_present_non_empty_and_the_id_text() {
+        use std::ffi::OsStr;
+        let id = Some(OsStr::new("a1b2c3d4"));
+        let dir = Some(OsStr::new("/run/user/1000/ivy-a1b2c3d4"));
+        let empty = Some(OsStr::new(""));
+
+        assert_eq!(
+            super::whole_identity(id, dir),
+            Some(("a1b2c3d4", Path::new("/run/user/1000/ivy-a1b2c3d4")))
+        );
+        assert_eq!(super::whole_identity(None, dir), None, "no identity");
+        assert_eq!(super::whole_identity(id, None), None, "no directory");
+        assert_eq!(super::whole_identity(empty, dir), None, "an empty identity");
+        assert_eq!(super::whole_identity(id, empty), None, "an empty directory");
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let not_text = Some(OsStr::from_bytes(b"a1\xffb2"));
+            assert_eq!(
+                super::whole_identity(not_text, dir),
+                None,
+                "an identifier that is not text"
+            );
+        }
     }
 
     use super::*;

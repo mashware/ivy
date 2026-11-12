@@ -35,16 +35,17 @@ fn main() {
     // not fail because nothing is listening yet, and an agent's editor lists tools long before it
     // has anything to publish.
     let mut pane: Option<Producer> = None;
-    // **The one read of the environment**, and it stays here: a decision taken further down would
-    // inherit the identity of whatever console runs the test suite.
+    // **The read that decides the handshake stays here**: taken further down, a unit test would
+    // inherit the identity of whatever console runs the suite. The first tool call reads the same
+    // variables again, through the same rule (`whole_identity`).
     let [id, dir] = panel_contract::ENV_NAMES.map(std::env::var_os);
-    let inside = inside_a_console(id.as_deref(), dir.as_deref());
+    let instructions = instructions_for(id.as_deref(), dir.as_deref());
 
     bridge(
         std::io::stdin().lock(),
         std::io::stdout(),
         &mut pane,
-        inside,
+        instructions,
     );
 }
 
@@ -57,7 +58,7 @@ fn bridge(
     mut input: impl BufRead,
     mut output: impl Write,
     pane: &mut Option<Producer>,
-    inside: bool,
+    instructions: Option<&str>,
 ) {
     // **The input is taken as bytes and decoded per line, rather than by a decoding iterator.**
     // Reading it as text makes one malformed byte end the whole session: the iterator yields an
@@ -126,7 +127,7 @@ fn bridge(
         }
         let answered = match std::str::from_utf8(&line) {
             Ok(line) if line.trim().is_empty() => continue,
-            Ok(line) => answer(line, pane, inside),
+            Ok(line) => answer(line, pane, instructions),
             Err(failure) => Some(failed(
                 &serde_json::Value::Null,
                 -32700,
@@ -164,7 +165,7 @@ fn swallow_to_newline(input: &mut impl BufRead) -> std::io::Result<()> {
 }
 
 /// Answers one message, or nothing when the message is a notification.
-fn answer(line: &str, pane: &mut Option<Producer>, inside: bool) -> Option<String> {
+fn answer(line: &str, pane: &mut Option<Producer>, instructions: Option<&str>) -> Option<String> {
     let message: serde_json::Value = match serde_json::from_str(line) {
         Ok(message) => message,
         // **Parse errors are answered without an id**, which is what the protocol asks for and what
@@ -191,7 +192,7 @@ fn answer(line: &str, pane: &mut Option<Producer>, inside: bool) -> Option<Strin
     };
 
     Some(match method {
-        "initialize" => succeeded(&id, initialized(&message, inside)),
+        "initialize" => succeeded(&id, initialized(&message, instructions)),
         "tools/list" => succeeded(&id, tools()),
         "tools/call" => called(&id, &message, pane),
         "ping" => succeeded(&id, serde_json::json!({})),
@@ -199,46 +200,63 @@ fn answer(line: &str, pane: &mut Option<Producer>, inside: bool) -> Option<Strin
     })
 }
 
-/// Whether this bridge runs inside an Ivy console: both identity variables present **and
-/// non-empty**.
+/// The instructions this bridge sends with its handshake, or none.
 ///
-/// **Empty counts as absent**, which is the rule the session helper and `ivy-session` already
-/// apply to the same two variables: Ivy itself always sets both or neither, but a client
-/// configuration that interpolates `${PANEL_ID:-}` hands the bridge an empty value, and a bridge
-/// that cannot reach a pane must not tell its agent that a panel is waiting for it.
+/// **Only a whole identity is promised a panel** — the rule of
+/// [`panel_control::client::whole_identity`], the same one the first tool call applies — so the
+/// handshake and the calls never disagree about whether this is a console.
 ///
-/// **It takes the values instead of reading them** so it can be tested without `set_var`, which
-/// is undefined behaviour in a suite that launches processes in parallel. `main` is the one place
-/// that reads the environment, and no test covers that line.
-fn inside_a_console(id: Option<&std::ffi::OsStr>, dir: Option<&std::ffi::OsStr>) -> bool {
-    id.is_some_and(|id| !id.is_empty()) && dir.is_some_and(|dir| !dir.is_empty())
+/// **And never on Windows**, where the control channel is not bound until F2.7 (D44): every tool
+/// call there fails, and a pane publishes by file only, so telling the agent to call `panel_set`
+/// would be a promise the bridge cannot keep.
+///
+/// It takes the values instead of reading them so it can be tested without `set_var`; `main` reads
+/// them, and the binary's integration test covers that line.
+fn instructions_for(
+    id: Option<&std::ffi::OsStr>,
+    dir: Option<&std::ffi::OsStr>,
+) -> Option<&'static str> {
+    if cfg!(windows) {
+        return None;
+    }
+    panel_control::client::whole_identity(id, dir).map(|_| INSTRUCTIONS)
 }
 
-/// **What every agent is told when it connects inside an Ivy console**, whatever harness or
-/// workflow it runs. The tools alone were not enough: a harness may defer them — listed by name,
-/// no schema — and an agent that never loads them publishes nothing, so the person sees an empty
-/// panel. Harnesses place these words in the agent's own instructions, the one place every agent
-/// reads.
+/// **What an agent is told when it connects inside an Ivy console**, in the harnesses that pass a
+/// server's instructions on to their model. The tools alone were not enough: a harness may defer
+/// them — listed by name, no schema — and an agent that never loads them publishes nothing, so the
+/// person sees an empty panel. D88.
 ///
-/// It names only the publishing verbs: the `split_*` and retirement descriptions already explain
-/// the rest, and these words land in every agent's prompt. «This server's tools» is deliberate — a
-/// second panel server may be registered beside this one and serve the same names.
+/// - It names only the publishing verbs: the `split_*` and retirement descriptions already explain
+///   the rest.
+/// - «This server's» is deliberate: a second panel server may be registered beside this one and
+///   serve the same names.
+/// - Agents launched by another agent are told to leave the panel alone, because a harness hands
+///   its subagents the same instructions and they share this connection, which holds the pane: one
+///   subagent publishing `done` would erase the question its parent is waiting on.
+/// - A new connection holds nothing, so after a restart the document read back has to be published
+///   again before any patch.
 const INSTRUCTIONS: &str = "\
-This session runs in an Ivy console, and Ivy paints a status panel beside it. It shows only what \
-you publish: publish nothing and the person sees an empty panel.
+This session runs in an Ivy console, and Ivy paints a status panel beside it from what is \
+published for it.
 
-- Publish with this server's `panel_set` (`source`: your name or your workflow's) when you start a \
-task, before every long stretch and at every stop. The tools may be deferred: load them first.
-- Set `attention` to `wait` whenever you need the person, and put the question on a line marked \
-`wait`; `block` when stuck on something else; `done` when finished. Leave it out while you work, \
+- If another agent launched you (a subagent, a worker, a headless run), leave the panel alone: it \
+belongs to the agent the person is talking to.
+- Otherwise publish with this server's `panel_set` (`source`: your name or your workflow's) when \
+you start a task, before every long stretch and at every stop. The tools may be deferred: load them \
+first.
+- Set `attention` to `wait` when you need the person; `block` when stuck on something else; `done` \
+when finished. Put the question itself on a line marked wait. Leave `attention` out while you work, \
 and republish without it as soon as it stops being true.
-- Between publications, update lines by `key` with `panel_patch`. After a restart or a compaction, \
-call `panel_get` before publishing again.
+- Once you have published with `panel_set`, update lines by `key` with `panel_patch`. After a \
+restart or a compaction, call `panel_get` and publish that document again with `panel_set` before \
+patching.
 - When a tool or workflow you run renders a panel document for you (JSON with `lines`), pass it to \
 `panel_set` as it was printed.";
 
-/// What this server says it is, and — only inside a console — what it asks of the agent.
-fn initialized(message: &serde_json::Value, inside: bool) -> serde_json::Value {
+/// What this server says it is, and — only where [`instructions_for`] gave some — what it asks of
+/// the agent. Absent rather than empty: an empty string is still an instruction to a client.
+fn initialized(message: &serde_json::Value, instructions: Option<&str>) -> serde_json::Value {
     let asked_for = message
         .get("params")
         .and_then(|params| params.get("protocolVersion"))
@@ -250,9 +268,8 @@ fn initialized(message: &serde_json::Value, inside: bool) -> serde_json::Value {
         "capabilities": {"tools": {}},
         "serverInfo": {"name": "ivy panel", "version": env!("CARGO_PKG_VERSION")},
     });
-    // Outside a console the calls are refused, so promising a panel there would be false.
-    if inside {
-        answer["instructions"] = serde_json::Value::from(INSTRUCTIONS);
+    if let Some(instructions) = instructions {
+        answer["instructions"] = serde_json::Value::from(instructions);
     }
     answer
 }
@@ -678,7 +695,7 @@ mod tests {
 
     fn ask(message: &str) -> serde_json::Value {
         let mut nowhere = None;
-        let answered = answer(message, &mut nowhere, false).expect("it deserved an answer");
+        let answered = answer(message, &mut nowhere, None).expect("it deserved an answer");
         serde_json::from_str(&answered).expect("the answer is JSON")
     }
 
@@ -708,7 +725,7 @@ mod tests {
         input.extend_from_slice(b"{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"ping\"}\n");
         let mut written = Vec::new();
 
-        bridge(&input[..], &mut written, &mut None, false);
+        bridge(&input[..], &mut written, &mut None, None);
 
         let answers: Vec<serde_json::Value> = String::from_utf8(written)
             .expect("the answers are text")
@@ -736,7 +753,7 @@ mod tests {
         input.extend_from_slice(b"{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"ping\"}\n");
         let mut written = Vec::new();
 
-        bridge(&input[..], &mut written, &mut None, false);
+        bridge(&input[..], &mut written, &mut None, None);
 
         let answers: Vec<serde_json::Value> = String::from_utf8(written)
             .expect("the answers are text")
@@ -766,7 +783,7 @@ mod tests {
         input.extend_from_slice(b"{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"ping\"}\n");
         let mut written = Vec::new();
 
-        bridge(&input[..], &mut written, &mut None, false);
+        bridge(&input[..], &mut written, &mut None, None);
 
         let answers: Vec<serde_json::Value> = String::from_utf8(written)
             .expect("the answers are text")
@@ -792,57 +809,60 @@ mod tests {
             answer(
                 "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}",
                 &mut nowhere,
-                false
+                None
             )
             .is_none()
         );
     }
 
-    /// **Only a whole identity is a console.** Each row breaks one half, absent or empty; a version
-    /// that checked one variable, or presence only, passes the first row and fails one of the rest.
+    /// **The instructions follow the identity rule, and a broken identity gets none.** The rule
+    /// itself is tested beside `whole_identity`; this proves the handshake uses it rather than a
+    /// looser copy of its own, which is how the two disagreed before.
     #[test]
-    fn a_console_is_both_variables_present_and_non_empty() {
+    fn instructions_are_given_only_for_a_whole_identity() {
         use std::ffi::OsStr;
         let id = Some(OsStr::new("a1b2c3d4"));
-        let dir = Some(OsStr::new("/run/user/1000/ivy/a1b2c3d4"));
+        let dir = Some(OsStr::new("/run/user/1000/ivy-a1b2c3d4"));
         let empty = Some(OsStr::new(""));
 
-        assert!(inside_a_console(id, dir));
-        assert!(!inside_a_console(None, dir), "no identity");
-        assert!(!inside_a_console(id, None), "no directory");
-        assert!(!inside_a_console(empty, dir), "an empty identity");
-        assert!(!inside_a_console(id, empty), "an empty directory");
+        assert_eq!(instructions_for(id, dir), Some(INSTRUCTIONS));
+        assert_eq!(instructions_for(None, dir), None, "no identity");
+        assert_eq!(instructions_for(empty, dir), None, "an empty identity");
+        assert_eq!(instructions_for(id, empty), None, "an empty directory");
     }
 
-    /// **The handshake carries the instructions inside a console and nothing outside**, asserted
-    /// through `answer` so the flag is proven to travel from the session down to the reply, not
-    /// only to work when `initialized` is called by hand.
+    /// **The handshake carries the instructions it was given and nothing otherwise**, driven
+    /// through `bridge` so the value is proven to travel from the session down to the reply.
     #[test]
-    fn the_handshake_asks_the_agent_to_publish_only_inside_a_console() {
-        let initialize = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}";
-        let reply = |inside| -> serde_json::Value {
-            let answered = answer(initialize, &mut None, inside).expect("answered");
-            serde_json::from_str(&answered).expect("the answer is JSON")
+    fn the_handshake_asks_the_agent_to_publish_only_when_given_instructions() {
+        let reply = |instructions| -> serde_json::Value {
+            let mut written = Vec::new();
+            bridge(
+                &b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}\n"[..],
+                &mut written,
+                &mut None,
+                instructions,
+            );
+            serde_json::from_slice(&written).expect("the answer is JSON")
         };
 
-        assert_eq!(reply(true)["result"]["instructions"], INSTRUCTIONS);
+        assert_eq!(
+            reply(Some(INSTRUCTIONS))["result"]["instructions"],
+            INSTRUCTIONS
+        );
         assert!(
-            reply(false)["result"].get("instructions").is_none(),
+            reply(None)["result"].get("instructions").is_none(),
             "outside a console the key is absent, not empty"
         );
     }
 
-    /// The backticked `snake_case` spans of the instructions: the tool names they mention. Every
-    /// verb this bridge serves has an underscore, which is what lets the extraction tell a tool from
-    /// a field such as `attention` or `key`.
+    /// Every `snake_case` word of the instructions, backticked or not: the tool names they mention.
+    /// Every verb this bridge serves has an underscore, which is what tells a tool from a field such
+    /// as `attention` or `key`.
     fn tools_the_instructions_name() -> Vec<&'static str> {
         INSTRUCTIONS
-            .split('`')
-            .skip(1)
-            .step_by(2)
-            .filter(|span| {
-                span.contains('_') && span.chars().all(|c| c.is_ascii_lowercase() || c == '_')
-            })
+            .split(|c: char| !(c.is_ascii_lowercase() || c == '_'))
+            .filter(|word| word.contains('_') && !word.starts_with('_') && !word.ends_with('_'))
             .collect()
     }
 
@@ -868,14 +888,20 @@ mod tests {
         }
     }
 
-    /// **Each attention the contract accepts is named, backticked**, from the contract's own list,
-    /// so a word added to or renamed in the vocabulary is not left out of what agents are told.
+    /// **The attention clause names each attention the contract accepts**, from the contract's own
+    /// list. Asserted on the clause and not the whole text: `wait` is also a line mark, and the
+    /// sentence about marks would supply a word the clause had lost.
     #[test]
-    fn the_instructions_name_every_attention_the_contract_accepts() {
+    fn the_attention_clause_names_every_attention_the_contract_accepts() {
+        let clause = INSTRUCTIONS
+            .split_once("Set `attention` to ")
+            .and_then(|(_, rest)| rest.split_once("Put the question"))
+            .expect("the instructions have an attention clause")
+            .0;
         for attention in Attention::ALL.map(Attention::name) {
             assert!(
-                INSTRUCTIONS.contains(&format!("`{attention}`")),
-                "{attention} is not in the instructions"
+                clause.contains(&format!("`{attention}`")),
+                "{attention} is not in the attention clause"
             );
         }
     }
@@ -1111,7 +1137,7 @@ mod tests {
     #[test]
     fn a_line_that_is_not_json_is_answered_rather_than_swallowed() {
         let mut nowhere = None;
-        let answered = answer("not json", &mut nowhere, false).expect("it deserved an answer");
+        let answered = answer("not json", &mut nowhere, None).expect("it deserved an answer");
         let answered: serde_json::Value = serde_json::from_str(&answered).expect("JSON");
 
         assert_eq!(answered["error"]["code"], -32700);
