@@ -140,10 +140,13 @@ cargo build --locked --workspace --release
    Do not hard-code a pane's directory in the client configuration: every console has its own.
 3. The client starts the bridge and discovers its tools through MCP. The tool descriptions and
    parameter schemas tell the model how to call them.
-4. Instruct the agent to publish its progress and attention changes. Tool discovery makes the
-   operations available; it does not schedule status updates on the agent's behalf.
+4. Inside an Ivy console the bridge also answers the MCP handshake with instructions telling the
+   agent to publish its progress and attention changes, so a client that shows server instructions
+   to its model — Claude Code does — needs nothing else. Outside a console it sends none. Those
+   instructions ask; they do not schedule status updates on the agent's behalf.
 
-For example, add this instruction to the agent's session or project instructions:
+For a client that ignores server instructions, add this instruction to the agent's session or
+project instructions:
 
 > Use Ivy's panel tools to publish your current task and update it when the phase or attention changes.
 > Set attention to `wait` when you need my answer, `block` when an external dependency stops the
