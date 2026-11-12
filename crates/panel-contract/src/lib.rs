@@ -216,12 +216,13 @@ fn base_dir() -> PathBuf {
 
 /// The decision, separated from reading the environment so it can be tested without touching it.
 ///
-/// **A variable that is defined and empty is not a path**: letting it through would give a relative
-/// path, and the directory would be created inside the application's working directory — without
-/// failing, which is the worst thing it could do.
+/// **Only an absolute path is a runtime directory**, which is what the XDG specification asks of
+/// the variable: an empty or relative value would create the directory inside the application's
+/// working directory — without failing, which is the worst thing it could do — and hand every
+/// console a `PANEL_DIR` its own MCP bridge refuses as no identity (D88).
 fn base_dir_from(value: Option<&OsStr>) -> PathBuf {
-    match value {
-        Some(path) if !path.is_empty() => PathBuf::from(path),
+    match value.map(Path::new) {
+        Some(path) if path.is_absolute() => path.to_path_buf(),
         _ => std::env::temp_dir(),
     }
 }
@@ -414,12 +415,31 @@ mod tests {
         assert_eq!(base_dir_from(None), std::env::temp_dir());
     }
 
+    /// An absolute directory written the way this platform writes one: `/run/user/1000` is not
+    /// absolute on Windows, which wants a drive.
+    fn an_absolute_runtime_directory() -> &'static str {
+        if cfg!(windows) {
+            r"C:\run\user\1000"
+        } else {
+            "/run/user/1000"
+        }
+    }
+
     #[test]
     fn with_a_runtime_directory_that_one_is_used() {
+        let runtime = an_absolute_runtime_directory();
         assert_eq!(
-            base_dir_from(Some(OsStr::new("/run/user/1000"))),
-            PathBuf::from("/run/user/1000")
+            base_dir_from(Some(OsStr::new(runtime))),
+            PathBuf::from(runtime)
         );
+    }
+
+    /// **A relative runtime directory is not one**, as the XDG specification says: it would put
+    /// every console's directory under the application's working directory, and the MCP bridge
+    /// refuses a relative `PANEL_DIR` as no identity at all.
+    #[test]
+    fn a_relative_runtime_directory_does_not_count_as_one() {
+        assert_eq!(base_dir_from(Some(OsStr::new("run"))), std::env::temp_dir());
     }
 
     #[test]

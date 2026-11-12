@@ -17,8 +17,8 @@ use crate::wire::{MAX_REQUEST, Side};
 ///
 /// **The one rule the MCP bridge applies, to its handshake and to its tool calls alike**, because
 /// two rules in one process gave two answers: the handshake said «no console» for an empty
-/// identifier while the first tool call connected with it. The session helper still reads the same
-/// variables with a rule of its own. Empty counts as absent — a client configuration that
+/// identifier while the first tool call connected with it. Bringing the session helper under it was
+/// left out of that decision (D88). Empty counts as absent — a client configuration that
 /// interpolates `${PANEL_ID:-}` produces one, and on Windows an empty identifier names a single
 /// machine-wide endpoint. An identifier that is not text cannot be one this terminal generated, and
 /// converting it lossily would connect to a mangled name. A relative directory cannot be one either:
@@ -55,18 +55,21 @@ impl Producer {
     /// identity is a missing one on one platform and harmless on the other — and defaulting the
     /// identifier to the empty string resolved every pane on Windows to a single machine-wide name.
     ///
-    /// **Two refusals, because they have two causes.** Neither variable set is a program outside
-    /// any pane. Either one set but the identity not whole is a client that forwards them badly —
-    /// an interpolation of an unset variable, a list of variables missing one — and saying «not in a
-    /// pane» there would send whoever reads it looking in the wrong place.
+    /// **Two refusals, because they have two causes.** Neither variable carrying anything — absent
+    /// or empty, which is what a client interpolating `${PANEL_ID:-}` outside any pane hands over —
+    /// is a program outside any pane. One carrying something but the identity not whole is a client
+    /// that forwards them badly — a list of variables missing one, a value mangled on the way — and
+    /// saying «not in a pane» there would send whoever reads it looking in the wrong place.
     pub fn of_this_pane() -> io::Result<Self> {
         let [id, dir] = panel_contract::ENV_NAMES.map(std::env::var_os);
-        let refusal = if id.is_none() && dir.is_none() {
+        let unset =
+            |value: &Option<std::ffi::OsString>| value.as_deref().is_none_or(|v| v.is_empty());
+        let refusal = if unset(&id) && unset(&dir) {
             "this program is not running inside a pane of this terminal"
         } else {
-            "PANEL_ID and PANEL_DIR are set but are not a whole pane identity (one is missing or \
-             empty, the identifier is not text, or the directory is not absolute): check how your \
-             client forwards them"
+            "PANEL_ID or PANEL_DIR is set, but the two are not a whole pane identity (one is \
+             missing or empty, the identifier is not text, or the directory is not absolute): check \
+             how your client forwards them"
         };
         let (id, dir) = whole_identity(id.as_deref(), dir.as_deref())
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, refusal))?;
@@ -75,7 +78,8 @@ impl Producer {
     }
 
     /// The same, for a pane named directly. **What the tests use**, and what a producer that manages
-    /// several panes of its own would use.
+    /// several panes of its own would use. It takes the pair as given: the rule of
+    /// [`whole_identity`] is the caller's to apply.
     pub fn of(dir: &Path, id: &str) -> io::Result<Self> {
         Ok(Self {
             stream: endpoint::connect(dir, id)?,
@@ -348,19 +352,25 @@ mod tests {
         assert_eq!(parsed.error.unwrap().get(), "\"busy\"");
     }
 
-    /// **Only a whole identity is one.** Each row breaks one half — absent, empty, or an identifier
-    /// that is not text; a version that checked one variable, or presence only, passes the first
-    /// row and fails one of the rest.
+    /// **Only a whole identity is one.** Each row breaks one half — absent, empty, an identifier
+    /// that is not text, or a directory that is not absolute; a version that checked one variable,
+    /// or presence only, passes the first row and fails one of the rest. The whole row's directory
+    /// is written the way this platform writes an absolute path.
     #[test]
-    fn an_identity_is_whole_only_with_both_halves_present_non_empty_and_the_id_text() {
+    fn an_identity_is_whole_only_with_both_halves_present_non_empty_text_and_absolute() {
         use std::ffi::OsStr;
+        let absolute = if cfg!(windows) {
+            r"C:\run\ivy-a1b2c3d4"
+        } else {
+            "/run/user/1000/ivy-a1b2c3d4"
+        };
         let id = Some(OsStr::new("a1b2c3d4"));
-        let dir = Some(OsStr::new("/run/user/1000/ivy-a1b2c3d4"));
+        let dir = Some(OsStr::new(absolute));
         let empty = Some(OsStr::new(""));
 
         assert_eq!(
             super::whole_identity(id, dir),
-            Some(("a1b2c3d4", Path::new("/run/user/1000/ivy-a1b2c3d4")))
+            Some(("a1b2c3d4", Path::new(absolute)))
         );
         assert_eq!(super::whole_identity(None, dir), None, "no identity");
         assert_eq!(super::whole_identity(id, None), None, "no directory");

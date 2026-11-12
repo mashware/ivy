@@ -36,8 +36,8 @@ fn main() {
     // has anything to publish.
     let mut pane: Option<Producer> = None;
     // **The read that decides the handshake stays here**: taken further down, a unit test would
-    // inherit the identity of whatever console runs the suite. The first tool call reads the same
-    // variables again, through the same rule (`whole_identity`).
+    // inherit the identity of whatever console runs the suite. That the first tool call judges the
+    // variables by the same rule is D88's decision, and the binary's integration test holds both.
     let [id, dir] = panel_contract::ENV_NAMES.map(std::env::var_os);
     let instructions = instructions_for(id.as_deref(), dir.as_deref());
 
@@ -227,14 +227,20 @@ fn instructions_for(
 /// them — listed by name, no schema — and an agent that never loads them publishes nothing, so the
 /// person sees an empty panel. D88.
 ///
-/// - It names only the publishing verbs: the `split_*` and retirement descriptions already explain
-///   the rest.
+/// - It names only the verbs publishing needs, `panel_get` included: the `split_*` and retirement
+///   descriptions already explain the rest.
 /// - «This server's» is deliberate: a second panel server may be registered beside this one and
 ///   serve the same names.
-/// - A subagent is told to leave the panel alone, because a harness hands its subagents the same
-///   instructions and they share this connection, which holds the pane: one subagent publishing
-///   «done» would erase the question its parent is waiting on. Only that case: an agent another
-///   agent started in a console of its own has its own identity and its own panel to keep.
+/// - An agent working for another agent in the same console — a subagent sharing this connection,
+///   or a worker process with a bridge of its own — is told to leave the panel alone: the first
+///   would overwrite its parent's document through the connection that holds the pane, the second
+///   would be refused at every stop or, publishing first, hold the pane against its parent (D43).
+///   Only that case: an agent another agent started in a console of its own has its own identity
+///   and its own panel to keep.
+/// - A rendered document is passed through as printed only when it comes from a workflow the agent
+///   was asked to follow, and never with buttons the agent would not run itself: a panel's
+///   `actions` are commands for the person's shell, and a document printed by a script of unknown
+///   origin is the untrusted panel the contract warns about.
 /// - A patch addresses lines by `key`, so lines meant to be patched are published with one.
 /// - A new connection holds nothing, so after a restart the document read back has to be published
 ///   again before any patch — without a claim the dead session left, which nobody holds any more.
@@ -242,8 +248,8 @@ const INSTRUCTIONS: &str = "\
 This session runs in an Ivy console, and Ivy paints a status panel beside it from what is \
 published for it.
 
-- If you are a subagent working for another agent in this same session, leave the panel alone: it \
-belongs to the agent the person is talking to.
+- If you work for another agent in this same console (a subagent, or a worker it started), leave \
+the panel alone: it belongs to the agent the person is talking to.
 - Otherwise publish with this server's `panel_set` (`source`: your name or your workflow's) when \
 you start a task, before every long stretch and at every stop. The tools may be deferred: load them \
 first.
@@ -254,8 +260,9 @@ and republish without it as soon as it stops being true.
 update those lines with `panel_patch`. After a restart, call `panel_get` and publish that document \
 again with `panel_set` before patching, leaving out an `attention` that is no longer true; after a \
 compaction, call `panel_get` before publishing again.
-- When a tool or workflow you run renders a panel document for you (JSON with `lines`), pass it to \
-`panel_set` as it was printed.";
+- When a workflow you were asked to follow renders a panel document for you (JSON with `lines`), \
+pass it to `panel_set` as it was printed, unless it carries `actions` you would not run yourself: \
+a button sends its command to the person's shell.";
 
 /// What this server says it is, and — only where [`instructions_for`] gave some — what it asks of
 /// the agent. Absent rather than empty: an empty string is still an instruction to a client.
@@ -818,41 +825,25 @@ mod tests {
         );
     }
 
-    /// **The instructions agree with the identity rule on every row**, a broken identity getting
-    /// none. The rule itself is tested beside `whole_identity`; each row here breaks one half in
-    /// one way, so a looser copy of the rule inside the handshake fails at least one of them.
+    /// **The instructions follow `whole_identity` and `BINDS`, and nothing else.** The identity
+    /// rule has its own table beside it; this holds what `instructions_for` adds — a whole identity
+    /// gets the text where the channel binds, a broken one never does — with one broken row per
+    /// half, so a handshake that judged only one variable fails here.
     #[test]
     fn instructions_are_given_only_for_a_whole_identity() {
         use std::ffi::OsStr;
-        let id = Some(OsStr::new("a1b2c3d4"));
-        let dir = Some(OsStr::new("/run/user/1000/ivy-a1b2c3d4"));
-        let empty = Some(OsStr::new(""));
-
-        let whole = if panel_control::endpoint::BINDS {
-            Some(INSTRUCTIONS)
+        let absolute = if cfg!(windows) {
+            r"C:\run\ivy-a1b2c3d4"
         } else {
-            None
+            "/run/user/1000/ivy-a1b2c3d4"
         };
+        let id = Some(OsStr::new("a1b2c3d4"));
+        let dir = Some(OsStr::new(absolute));
+
+        let whole = panel_control::endpoint::BINDS.then_some(INSTRUCTIONS);
         assert_eq!(instructions_for(id, dir), whole);
-        assert_eq!(instructions_for(None, dir), None, "no identity");
+        assert_eq!(instructions_for(None, dir), None, "no identifier");
         assert_eq!(instructions_for(id, None), None, "no directory");
-        assert_eq!(instructions_for(empty, dir), None, "an empty identity");
-        assert_eq!(instructions_for(id, empty), None, "an empty directory");
-        assert_eq!(
-            instructions_for(id, Some(OsStr::new("ivy-a1b2c3d4"))),
-            None,
-            "a relative directory"
-        );
-        #[cfg(unix)]
-        {
-            use std::os::unix::ffi::OsStrExt;
-            let not_text = Some(OsStr::from_bytes(b"a1\xffb2"));
-            assert_eq!(
-                instructions_for(not_text, dir),
-                None,
-                "an identifier that is not text"
-            );
-        }
     }
 
     /// **The handshake carries the instructions it was given, and is otherwise the same reply**,

@@ -9336,19 +9336,26 @@ which harnesses that honour it place in the agent's own instructions. The text a
 publish with `panel_set` at the start of a task, before long stretches and at every stop; to keep
 `attention` true; to key the lines it will patch and patch only after publishing on the same
 connection; to publish again after a restart before patching, without a claim nobody holds any
-more; and to pass a rendered panel document through as printed. It is sent only when the bridge
+more; and to pass through as printed a panel document a workflow it follows renders, unless it
+carries buttons the agent would not run itself — `actions` are commands for the person's shell, and
+a document printed by a script of unknown origin is the untrusted panel the hard rules name. It is sent only when the bridge
 starts with a **whole identity** — `PANEL_ID` present, non-empty and text, `PANEL_DIR` present and
 absolute — the same rule its tool calls now apply, and only where the control channel binds
 (`endpoint::BINDS`, false on Windows until F2.7, **D43**). Outside those, the key is absent. A tool
-call with a broken identity — one variable set but the identity not whole — is refused with its own
-message, naming the client's forwarding rather than «not in a pane».
+call with a broken identity — one variable carrying something but the identity not whole — is
+refused with its own message, naming the client's forwarding rather than «not in a pane»; both
+absent or empty is a program outside any pane. And because Ivy must never hand out a directory its
+own bridge refuses, the runtime directory ignores a relative `XDG_RUNTIME_DIR`, as the XDG
+specification requires, and falls back to the system temporary.
 
 **Two rules the text carries because of how harnesses use it.** It names *this server's* tools,
 because a second panel server may be registered beside this one with the same names. And it tells
-a subagent working for another agent in the same session to leave the panel alone: a harness hands
-its subagents the same instructions, and they share the parent's connection, which holds the pane
-(D43) — one subagent publishing `done` would erase the question its parent is waiting on. Only
-that case: an agent another agent started in a console of its own has its own identity and panel.
+an agent working for another agent in the same console to leave the panel alone. A subagent shares
+the parent's connection, which holds the pane (D43): one subagent publishing `done` would erase the
+question its parent is waiting on. A worker process the parent starts in the same console brings a
+bridge of its own: it would be refused at every stop or, publishing first, hold the pane against its
+parent. Only that case: an agent another agent started in a console of its own has its own identity
+and panel.
 
 **Discarded:**
 - **Naming all seven verbs** — the `split_*` and retirement descriptions already explain those, and
