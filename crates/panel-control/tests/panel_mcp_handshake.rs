@@ -104,7 +104,8 @@ fn the_bridge_asks_for_a_panel_only_when_started_inside_a_console() {
 }
 
 /// The text of a `panel_get` call's reply, which is a tool error in every case below: outside a
-/// pane, a broken identity, or a whole one with nobody listening at the directory.
+/// pane, a broken identity, or a whole one with nobody listening at the directory — or, where no
+/// channel binds, a platform that has none.
 fn panel_get_refusal(env: &[(&str, &str)]) -> String {
     let reply = exchange(
         env,
@@ -122,9 +123,9 @@ fn panel_get_refusal(env: &[(&str, &str)]) -> String {
 /// Nothing carried by either variable — absent or empty — is a program outside any pane; a broken
 /// identity is a client forwarding the variables badly, and is told so. Before `whole_identity`,
 /// presence was enough and an empty identifier went through to the endpoint. The control row keeps
-/// this honest: with a whole identity the call fails too — nobody listens at the directory — with
-/// neither refusal but naming the directory it could not reach, so the assertions cannot be
-/// satisfied by any failure. A pair handed in with its halves swapped gets the broken refusal: an
+/// this honest: with a whole identity the call fails too — nobody listens at the directory, or no
+/// channel binds on this platform — with neither identity refusal and saying which, so the
+/// assertions cannot be satisfied by any failure. A pair handed in with its halves swapped gets the broken refusal: an
 /// identifier is not an absolute directory.
 #[test]
 fn a_tool_call_tells_a_missing_identity_from_a_broken_one() {
@@ -170,8 +171,15 @@ fn a_tool_call_tells_a_missing_identity_from_a_broken_one() {
         !whole.contains(OUTSIDE) && !whole.contains(BROKEN),
         "a whole identity is inside a pane: {whole}"
     );
-    assert!(
-        whole.contains("could not be reached") && whole.contains(&unreachable),
-        "an unreachable console is named: {whole}"
-    );
+    if panel_control::endpoint::BINDS {
+        assert!(
+            whole.contains("could not be reached") && whole.contains(&unreachable),
+            "an unreachable console is named: {whole}"
+        );
+    } else {
+        assert!(
+            whole.contains("no control channel"),
+            "where nothing binds, the platform is named, not the console: {whole}"
+        );
+    }
 }

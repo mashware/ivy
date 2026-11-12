@@ -56,7 +56,8 @@ impl Producer {
     /// identity is a missing one on one platform and harmless on the other — and defaulting the
     /// identifier to the empty string resolved every pane on Windows to a single machine-wide name.
     ///
-    /// **Two refusals, because they have two causes.** Neither variable carrying anything — absent
+    /// **Two identity refusals, because they have two causes** — a platform with no channel and a
+    /// console that cannot be reached are refused apart, after them. Neither variable carrying anything — absent
     /// or empty, which is what a client interpolating `${PANEL_ID:-}` outside any pane hands over —
     /// is a program outside any pane. One carrying something but the identity not whole is a client
     /// that forwards them badly — a list of variables missing one, a value mangled on the way — and
@@ -91,9 +92,9 @@ impl Producer {
             ));
         }
 
-        // A whole identity that cannot be reached is the common real failure — the console closed,
-        // its directory gone — and the bare system error names neither. Its kind is its own, so a
-        // caller matching on kinds does not read it as «outside any pane».
+        // Any failure to reach a whole identity — most often the console closed and its directory
+        // gone — is said naming the directory, which the bare system error does not. Its kind is
+        // chosen to differ from «outside any pane»; the original error survives only as text.
         Self::of(dir, id).map_err(|failure| {
             io::Error::new(
                 io::ErrorKind::NotConnected,

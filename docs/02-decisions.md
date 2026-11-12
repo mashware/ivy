@@ -9335,21 +9335,21 @@ Bellwether, which paints the same contract inside Herdr, had already measured an
 which harnesses that honour it place in the agent's own instructions. The text asks the agent to
 publish with `panel_set` at the start of a task, before long stretches and at every stop; to keep
 `attention` true; to key the lines it will patch and patch only after publishing on the same
-connection; to publish again after a restart before patching, without a claim nobody holds any
-more, and only when the document read back was its own; and to pass through as printed a panel
-document a workflow it follows renders, without the buttons the agent would not run itself — `actions` are commands for the person's shell, and
-a document printed by a script of unknown origin is the untrusted panel the hard rules name. It is sent only when the bridge
-starts with a **whole identity** — `PANEL_ID` present, non-empty and text, `PANEL_DIR` present and
-absolute — the same rule its tool calls now apply, and only where the control channel binds
-(`endpoint::BINDS`, false on Windows until F2.7, **D43**). Outside those, the key is absent. A tool
-call with a broken identity — one variable carrying something but the identity not whole — is
-refused with its own message, naming the client's forwarding rather than «not in a pane»; both
-absent or empty is a program outside any pane. And because Ivy must never hand out a directory its
-own bridge refuses, the runtime directory ignores a relative `XDG_RUNTIME_DIR`, as the XDG
-specification requires, and falls back to the system
-temporary, itself held to the same rule (a relative `TMPDIR` falls back to `/tmp` on Unix); a
-variable somebody set and Ivy had to ignore is named once on standard error, with the directory
-used instead. Where no channel binds, a tool call says so rather than blaming the console. A whole
+connection; to publish again after a restart before patching, without a claim nobody holds any more,
+and only when the document read back was its own; and to pass through as printed a panel document a
+workflow it follows renders, without the buttons the agent would not run itself — `actions` are
+commands for the person's shell, and a document printed by a script of unknown origin is the
+untrusted panel the hard rules name. It is sent only when the bridge starts with a **whole
+identity** — `PANEL_ID` present, non-empty and text, `PANEL_DIR` present and absolute — the same
+rule its tool calls now apply, and only where the control channel binds (`endpoint::BINDS`, false on
+Windows until F2.7, **D43**). Outside those, the key is absent. A tool call with a broken identity —
+one variable carrying something but the identity not whole — is refused with its own message, naming
+the client's forwarding rather than «not in a pane»; both absent or empty is a program outside any
+pane. And because Ivy must never hand out a directory its own bridge refuses, the runtime directory
+ignores a relative `XDG_RUNTIME_DIR`, as the XDG specification requires, and falls back to the
+system temporary, itself held to the same rule (a relative `TMPDIR` falls back to `/tmp` on Unix); a
+variable somebody set and Ivy had to ignore is named once on standard error, with the directory used
+instead. Where no channel binds, a tool call says so rather than blaming the console. A whole
 identity that cannot be reached is refused naming the directory it could not reach.
 
 **Two rules the text carries because of how harnesses use it.** It names *this server's* tools,

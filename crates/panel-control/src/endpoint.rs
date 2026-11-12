@@ -136,7 +136,8 @@ pub fn name_of(dir: &Path, id: &str) -> io::Result<Name<'static>> {
 }
 
 /// Whether [`bind`] binds on this platform: a producer that has to decide whether to promise a
-/// channel — the MCP bridge's handshake — reads it here instead of restating the platform list.
+/// channel — the MCP bridge's handshake, and `Producer::of_this_pane`, which refuses before
+/// connecting — reads it here instead of restating the platform list.
 /// The day F2.7 binds on Windows this has to change with it, and `binding_is_what_binds_says`
 /// fails there until it does.
 pub const BINDS: bool = cfg!(not(windows));
