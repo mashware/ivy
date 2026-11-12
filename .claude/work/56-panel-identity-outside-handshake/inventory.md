@@ -1,0 +1,18 @@
+# What already exists (inventory) — #56
+
+All paths relative to the worktree `/home/vioque/Mashware/agent-terminal/.worktrees/56-panel-identity-outside-handshake`.
+
+- `crates/panel-control/src/client.rs:30` `whole_identity(id, dir)` — the one identity rule (id non-empty text, dir absolute). `Producer::of_this_pane` (:66) applies it to tool calls and names four refusal causes; `Producer::of(dir, id)` connects via `endpoint::connect`.
+- `crates/panel-control/src/bin/panel-mcp.rs:220` `instructions_for(id, dir, binds)` + `INSTRUCTIONS` (:254) — the handshake text (D88). `main` reads the env at :41. Integration test: `crates/panel-control/tests/panel_mcp_handshake.rs` (starts the real binary per identity case).
+- `crates/panel-control/src/endpoint.rs` — `name_of(dir, id)`, `connect`, `BINDS` (false on Windows until F2.7). The Unix socket is `PANEL_DIR/control.sock`.
+- `crates/panel-control/src/session/peer.rs` — `Peer::capture(stream)`: on Linux, SO_PEERCRED pid + SO_PEERPIDFD + /proc birth time; an unforgeable witness of the connected process. Used today by the session-recovery helper path only; Unsupported off Linux.
+- `crates/panel-control/src/session/helper.rs:70` `exchange` — the session helper (`ivy-session` binary, `src/bin/ivy-session.rs:7`) reads `PANEL_DIR`/`PANEL_ID` with its own rule: non-empty only, relative dir accepted, id converted with `to_string_lossy` (item 4).
+- `crates/app/src/panel/driving.rs` — `PanelState::deliver` (:333) claims the hold on first publish (refuses a different connection naming the holder's source); `patch` (:386); `retire` (:433) — explicit retirement by the holding connection, clears the document and the hold; `release` (:466) — on disconnect, keeps the last document, drops the hold; `Holder` (:208) keeps `connection`, `source`, `file_refused`. While held, `panel.json` is not read (D43); a refused file write is confessed in the app row.
+- Panel contract `attention` (`crates/panel-contract/src/panel.rs:112`) — `wait`/`block`/`done`; the only field the app interprets.
+- `crates/term-core` exposes the pane child's pid (`child.process_id()`, e.g. `src/lib.rs:1039`); `crates/term-core/src/foreground/linux.rs` reads the foreground process.
+- `crates/panel-contract/src/lib.rs:213` `base_dir()` / `base_dir_from` — console directories: absolute `XDG_RUNTIME_DIR`, else temp dir, relative TMPDIR → `/tmp` on Unix, one stderr warning (D88).
+- `crates/app/src/shell_integration.rs:70` — the shell rc dir uses `std::env::temp_dir()` as written (relative TMPDIR not handled) (item 5).
+- `crates/app/src/chrome/connection.rs:431` — the in-app Connect guide's prompt; appends `{PROMPT}` (the manual publishing prompt) for every client; README reserves it for clients that ignore server instructions (item 6).
+- Ivy's shell integration already launches Codex with `--no-daemon` where supported (`crates/panel-control/src/bin/ivy-codex.rs`, `tests/ivy_codex_launch.rs`), which removes the main borrowed-identity source for Codex started through it.
+- Decisions: D7 (identity per pane), D43 (hold per connection, file unread while held, hold dies with the connection; explicit-release-message discarded because a crashed agent sends none), D44 (MCP reaches only the caller's pane), D88 (handshake instructions; discarded: probing the endpoint before promising, withholding under a multiplexer; «a borrowed identity from a console still open publishes into that console, and nothing the bridge can see tells it apart from its own»).
+- Knowledge: `PANEL_ID` is a name, not a credential (any descendant inherits it, any same-uid process reads it).

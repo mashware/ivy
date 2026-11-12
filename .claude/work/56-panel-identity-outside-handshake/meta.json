@@ -1,0 +1,33 @@
+{
+  "ticket": "#56",
+  "slug": "panel-identity-outside-handshake",
+  "type": "feat",
+  "title": "Panel identity and publishing outside the MCP handshake: borrowed identities, stale endpoints, the hold after done",
+  "branch": "56-panel-identity-outside-handshake",
+  "stacked_on": null,
+  "worktree": "/home/vioque/Mashware/agent-terminal/.worktrees/56-panel-identity-outside-handshake",
+  "size": "M",
+  "phase": "plan",
+  "phases_done": ["context", "design", "plan"],
+  "handoff": true,
+  "draft_from_conversation": false,
+  "tracker_issue": null,
+  "related_repos": [],
+  "roadmap": null,
+  "origin": { "work": "51-agents-publish-their-panel (PR #55)", "followup": null },
+  "ticket_deps": [],
+  "defaults_used": [
+    { "key": "git.linked_branch", "default": "skipped at start: the PR split is unknown until plan, and only the PR that completes the work gets `gh issue develop` (notes.feat:start)", "phase": "context" }
+  ],
+  "cost": [
+    { "phase": "design", "at": "2026-11-12T22:10:00+01:00", "reviewers": 6, "usd": null, "source": "not reported" },
+    { "phase": "plan", "at": "2026-11-12T22:20:00+01:00", "reviewers": 1, "usd": null, "source": "not reported" }
+  ],
+  "started_at": "2026-11-12T22:10:00+01:00",
+  "updated_at": "2026-11-12T22:20:00+01:00",
+  "notes": "Invoked as `#55 --study`; #55 is the merged PR whose deferred review findings became #56. The user chose #56. Design (auto): chosen approach = ancestry check as a LABEL, never a refusal (user), on Linux and macOS (user); `done` releases the hold to the file only, the holder may re-claim and still retire (security pass + challenger); stat of control.sock before promising (`socket_present`); session helper, rc dir and Connect guide brought under the shared rules. Reason: the ancestry check is the only signal not derived from the inherited name, and as a label it costs no false refusal. Design accepted in auto (no high challenge). Plan accepted in auto: 2 PRs, one wave. Agents spent 7/12.",
+  "mrs": [
+    { "n": 1, "title": "The hold ends on done, and one rule per identity reader", "size": "M", "status": "pending", "phases_done": [], "wave": 1, "depends_on": [], "lines_est": 550, "files_est": 14 },
+    { "n": 2, "title": "Label a publication made from outside the console (Linux and macOS)", "size": "M", "status": "pending", "phases_done": [], "wave": 1, "depends_on": [], "lines_est": 900, "files_est": 16 }
+  ]
+}
