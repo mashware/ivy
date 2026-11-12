@@ -207,22 +207,76 @@ fn format_id(random: u32) -> String {
 /// Where the splits' directories live.
 ///
 /// The user's runtime directory is the first choice for what it is: theirs and theirs alone, in
-/// memory, and the system empties it when the session closes. When it does not exist —macOS, or a
-/// Linux session without a manager— it falls back to the system temporary, which is the only
-/// alternative that exists everywhere.
+/// memory, and the system empties it when the session closes. When it is unset or not absolute
+/// —macOS, a Linux session without a manager, a mistyped value— it falls back to the system
+/// temporary, held to the same rule on Unix ([`base_dir_from`]).
 fn base_dir() -> PathBuf {
-    base_dir_from(std::env::var_os("XDG_RUNTIME_DIR").as_deref())
+    let base = base_dir_from(
+        std::env::var_os("XDG_RUNTIME_DIR").as_deref(),
+        std::env::temp_dir(),
+    );
+    // Said once per process, because every console created asks again. The XDG specification
+    // only asks for a warning when the variable is unset; a value that was set and had to be
+    // ignored is what somebody would otherwise never find out about.
+    if let Some(warning) = warning(&base) {
+        static WARNED: std::sync::Once = std::sync::Once::new();
+        WARNED.call_once(|| eprintln!("{warning}"));
+    }
+    base.path
+}
+
+/// Where consoles' directories go, and which variables were set but could not be used.
+#[derive(Debug, PartialEq)]
+struct Base {
+    path: PathBuf,
+    ignored: Vec<&'static str>,
+}
+
+/// What a person is told about a [`Base`] that had to ignore something, or nothing.
+fn warning(base: &Base) -> Option<String> {
+    (!base.ignored.is_empty()).then(|| {
+        format!(
+            "ivy: {} set but not an absolute path; consoles use {} instead",
+            base.ignored.join(" and "),
+            base.path.display()
+        )
+    })
 }
 
 /// The decision, separated from reading the environment so it can be tested without touching it.
 ///
-/// **A variable that is defined and empty is not a path**: letting it through would give a relative
-/// path, and the directory would be created inside the application's working directory — without
-/// failing, which is the worst thing it could do.
-fn base_dir_from(value: Option<&OsStr>) -> PathBuf {
-    match value {
-        Some(path) if !path.is_empty() => PathBuf::from(path),
-        _ => std::env::temp_dir(),
+/// **Only an absolute path is a runtime directory**, which is what the XDG specification asks of
+/// the variable: an empty or relative value would create the directory inside the application's
+/// working directory — without failing, which is the worst thing it could do — and hand every
+/// console a `PANEL_DIR` its own MCP bridge refuses as not a whole identity (D88). **The fallback
+/// is held to the same rule**: the system temporary is TMPDIR as written on Unix, relative or
+/// empty included, and then `/tmp` is the one directory every Unix has. Elsewhere the platform's
+/// temporary is taken as it comes: Windows resolves it to a full path itself. An empty value is
+/// unset, not ignored: only a non-empty one somebody wrote is reported.
+fn base_dir_from(value: Option<&OsStr>, temporary: PathBuf) -> Base {
+    let mut ignored = Vec::new();
+    let runtime = value.filter(|value| !value.is_empty()).map(Path::new);
+    if let Some(runtime) = runtime {
+        if runtime.is_absolute() {
+            return Base {
+                path: runtime.to_path_buf(),
+                ignored,
+            };
+        }
+        ignored.push("XDG_RUNTIME_DIR");
+    }
+    if temporary.is_absolute() || cfg!(not(unix)) {
+        return Base {
+            path: temporary,
+            ignored,
+        };
+    }
+    if !temporary.as_os_str().is_empty() {
+        ignored.push("TMPDIR");
+    }
+    Base {
+        path: PathBuf::from("/tmp"),
+        ignored,
     }
 }
 
@@ -401,25 +455,98 @@ mod tests {
         assert_eq!(format_id(u32::MAX), "ffffffff");
     }
 
+    /// An absolute directory written the way this platform writes one: `/run/user/1000` is not
+    /// absolute on Windows, which wants a drive.
+    fn absolute(unix: &'static str, windows: &'static str) -> PathBuf {
+        PathBuf::from(if cfg!(windows) { windows } else { unix })
+    }
+
+    /// The fallback the tests hand in, absolute and distinct from any runtime directory, so a row
+    /// that falls back is told apart from one that does not.
+    fn temporary() -> PathBuf {
+        absolute("/var/tmp-for-test", r"C:\Temp\for-test")
+    }
+
+    fn base(path: PathBuf, ignored: &[&'static str]) -> Base {
+        Base {
+            path,
+            ignored: ignored.to_vec(),
+        }
+    }
+
     /// The case that does not fail and does the wrong thing: with the variable **defined and empty**
     /// the path would come out relative, and the panel directory would end up inside the working
-    /// directory.
+    /// directory. Empty is unset, so nothing is reported.
     #[test]
     fn an_empty_environment_variable_does_not_count_as_a_path() {
-        assert_eq!(base_dir_from(Some(OsStr::new(""))), std::env::temp_dir());
+        assert_eq!(
+            base_dir_from(Some(OsStr::new("")), temporary()),
+            base(temporary(), &[])
+        );
     }
 
     #[test]
     fn without_a_runtime_directory_it_falls_back_to_the_system_temporary() {
-        assert_eq!(base_dir_from(None), std::env::temp_dir());
+        assert_eq!(base_dir_from(None, temporary()), base(temporary(), &[]));
     }
 
     #[test]
     fn with_a_runtime_directory_that_one_is_used() {
+        let runtime = absolute("/run/user/1000", r"C:\run\user\1000");
         assert_eq!(
-            base_dir_from(Some(OsStr::new("/run/user/1000"))),
-            PathBuf::from("/run/user/1000")
+            base_dir_from(Some(runtime.as_os_str()), temporary()),
+            base(runtime, &[])
         );
+    }
+
+    /// **A relative runtime directory is not one**, as the XDG specification says: it would put
+    /// every console's directory under the application's working directory, and the MCP bridge
+    /// refuses a relative `PANEL_DIR` as not a whole identity. Somebody wrote it, so it is reported.
+    #[test]
+    fn a_relative_runtime_directory_does_not_count_as_one() {
+        assert_eq!(
+            base_dir_from(Some(OsStr::new("run")), temporary()),
+            base(temporary(), &["XDG_RUNTIME_DIR"])
+        );
+        #[cfg(windows)]
+        assert_eq!(
+            base_dir_from(Some(OsStr::new(r"\run")), temporary()),
+            base(temporary(), &["XDG_RUNTIME_DIR"]),
+            "a rooted path with no drive is not absolute either"
+        );
+    }
+
+    /// **The fallback is held to the same rule.** TMPDIR reaches `temp_dir` as written on Unix,
+    /// and a relative or empty one would land every console in the working directory all the same
+    /// — whether the runtime variable was absent, empty or relative.
+    #[cfg(unix)]
+    #[test]
+    fn a_relative_system_temporary_falls_back_to_tmp() {
+        let tmp = PathBuf::from("/tmp");
+        assert_eq!(base_dir_from(None, PathBuf::new()), base(tmp.clone(), &[]));
+        assert_eq!(
+            base_dir_from(None, PathBuf::from("tmp")),
+            base(tmp.clone(), &["TMPDIR"])
+        );
+        assert_eq!(
+            base_dir_from(Some(OsStr::new("")), PathBuf::from("tmp")),
+            base(tmp.clone(), &["TMPDIR"])
+        );
+        assert_eq!(
+            base_dir_from(Some(OsStr::new("run")), PathBuf::from("tmp")),
+            base(tmp, &["XDG_RUNTIME_DIR", "TMPDIR"])
+        );
+    }
+
+    /// **A person is told only when a variable they wrote was ignored**, and is told which one and
+    /// where the consoles went instead.
+    #[test]
+    fn the_warning_names_what_was_ignored_and_what_was_used() {
+        assert_eq!(warning(&base(temporary(), &[])), None);
+        let told = warning(&base(PathBuf::from("/tmp"), &["XDG_RUNTIME_DIR", "TMPDIR"]))
+            .expect("an ignored variable is said");
+        assert!(told.contains("XDG_RUNTIME_DIR and TMPDIR"), "{told}");
+        assert!(told.contains("/tmp"), "{told}");
     }
 
     #[test]

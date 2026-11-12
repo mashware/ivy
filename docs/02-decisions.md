@@ -708,7 +708,7 @@ PANEL_ID=3f2a9c14   PANEL_DIR=/run/user/1000/ivy-3f2a9c14
 
 | | What was chosen | Why |
 |---|---|---|
-| Where | `$XDG_RUNTIME_DIR`, and the system's temporary directory when that variable is not there | The user's runtime directory is theirs and theirs alone, it lives in memory and **the system empties it when the session closes**. It is missing on macOS and in a Linux session without a manager, and there the temporary directory is the only alternative that exists everywhere |
+| Where | `$XDG_RUNTIME_DIR`, and the system's temporary directory when that variable is not there or not absolute — on Unix, `/tmp` when the temporary is not absolute either (**D88**) | The user's runtime directory is theirs and theirs alone, it lives in memory and **the system empties it when the session closes**. It is missing on macOS and in a Linux session without a manager, and there the temporary directory is the only alternative that exists everywhere |
 | **Without the `panels/` span** | A single new component: `ivy-<id>` | An intermediate span has to be created — and it is the only piece of the path with a **fixed name**, that is, the only one another user can leave prepared in advance in a shared temporary directory, where the mode of the leaf directory no longer protects from a foreign parent. Without it, both things disappear |
 | **Eight digits and not four** | 32 bits of `getrandom` | Four digits are 65 536 names. Creation **fails if the name already exists** — so uniqueness is not checked, it is obtained — and at that size a collision would leave a pane without identity. Widening it costs the same |
 | Permissions | An explicit `0700` | Measured: without setting it the mode comes out of the session's mask, `0775` on the reference machine. Under the runtime directory it would not be reached, but the fallback may be a shared temporary directory, and a file that tells what the user is up to is going to live there |
@@ -9323,3 +9323,67 @@ loss); persistent aliases or reading both namespaces (keeps the old identity ali
 configuration directories (no safe rule for choosing between conflicting settings or layouts).
 Historical issue links point to `ivy-history-private`, where those original numbers belong,
 rather than unrelated issues with the same numbers in the current public repository.
+
+## D88 — The MCP bridge asks its agent to publish, only where it can keep the promise
+
+**Signal, 12 November 2026 (#51):** an agent connected to `panel-mcp` learned nothing about the
+panel unless it loaded the tools, and harnesses may **defer** MCP tools — listed by name, with no
+schema — so an agent that never loaded them published nothing and the person saw an empty panel.
+Bellwether, which paints the same contract inside Herdr, had already measured and fixed this.
+
+**Decision.** The bridge answers `initialize` with the protocol's optional `instructions` field,
+which harnesses that honour it place in the agent's own instructions. The text asks the agent to
+publish with `panel_set` at the start of a task, before long stretches and at every stop; to keep
+`attention` true; to key the lines it will patch and patch only after publishing on the same
+connection; to publish again after a restart before patching, without a claim nobody holds any more,
+and only when the document read back was its own; and to pass through as printed a panel document a
+workflow it follows renders, without the buttons the agent would not run itself — `actions` are
+commands for the person's shell, and a document printed by a script of unknown origin is the
+untrusted panel the hard rules name. It is sent only when the bridge starts with a **whole
+identity** — `PANEL_ID` present, non-empty and text, `PANEL_DIR` present and absolute — the same
+rule its tool calls now apply, and only where the control channel binds (`endpoint::BINDS`, false on
+Windows until F2.7, **D43**). Outside those, the key is absent. A tool call with a broken identity —
+one variable carrying something but the identity not whole — is refused with its own message, naming
+the client's forwarding rather than «not in a pane»; both absent or empty is a program outside any
+pane. And because Ivy must never hand out a directory its own bridge refuses, the runtime directory
+ignores a relative `XDG_RUNTIME_DIR`, as the XDG specification requires, and falls back to the
+system temporary, itself held to the same rule (a relative `TMPDIR` falls back to `/tmp` on Unix); a
+variable somebody set and Ivy had to ignore is named once on standard error, with the directory used
+instead. Where no channel binds, a tool call says so rather than blaming the console. A whole
+identity that cannot be reached is refused naming the directory it could not reach.
+
+**Two rules the text carries because of how harnesses use it.** It names *this server's* tools,
+because a second panel server may be registered beside this one with the same names. And it tells
+an agent working for another agent in the same console to leave the panel alone. A subagent shares
+the parent's connection, which holds the pane (D43): one subagent publishing `done` would erase the
+question its parent is waiting on. A worker process the parent starts in the same console brings a
+bridge of its own: it would be refused at every stop or, publishing first, hold the pane against its
+parent. Only that case: an agent another agent started in a console of its own has its own identity
+and panel.
+
+**Discarded:**
+- **Naming all seven verbs** — the `split_*` and retirement descriptions already explain those, and
+  the goal is publishing.
+- **Presence-only identity, as the tool path had** — two rules in one process: the handshake said
+  «no console» for an empty identifier while the first call connected with it; on Windows an empty
+  identifier names one machine-wide endpoint. One function, `whole_identity`, now decides for both.
+- **Checking that the endpoint answers before promising a panel** — a stale or borrowed identity
+  (a multiplexer reattached after Ivy closed, an editor or daemon started from another console) is
+  real but rare. A stale one fails at its first call, naming the directory it could not reach; a
+  borrowed one from a console still open publishes into that console, and nothing the bridge can
+  see tells it apart from its own: it is the launcher that carried the wrong variables. Probing on
+  every handshake would buy a message for the first case and nothing for the second.
+- **Telling the agent never to publish while a file producer paints the pane** — it would mostly
+  stop agents publishing at all. What the text asks instead, after a restart, is to republish only
+  a document it recognises as its own: `panel_get` names no source, so the agent judges by content.
+- **Reading the environment where the reply is built** — a unit test would inherit the identity of
+  the console running the suite; the read stays in `main`, covered by a test that starts the binary
+  with its own environment.
+- **Accepting an empty or non-text identifier on Unix, where the endpoint ignores it** — the pane's
+  identity is the pair (**D7**), Ivy always sets both, and a rule that depends on the platform is
+  the two-rule split this decision closed. The session helper still reads the pair with a rule of
+  its own; unifying it is outside this decision.
+- **Withholding the instructions under a terminal multiplexer** (`TMUX`, `STY`, `ZELLIJ` set) —
+  it would mechanise «workers keep off», but a person running their one agent inside tmux in an Ivy
+  console would lose the instructions, and the hold already settles who owns the pane: the first
+  producer keeps it and every other is refused by name (D43).

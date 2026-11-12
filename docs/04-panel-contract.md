@@ -607,7 +607,11 @@ only verbs that name another pane:
 
 `panel-mcp`, a binary that ships with the terminal, speaks this channel over MCP for an agent that
 would rather call a tool than open a socket. It is a client of this transport and not the transport
-itself.
+itself. When it starts with a whole identity — `PANEL_ID` set, non-empty and text, and `PANEL_DIR`
+set and absolute, the same rule its tool calls apply — its answer to `initialize` carries
+`instructions` asking the agent to publish its panel and keep `attention` true. Without one, and on
+Windows until the channel is bound there, it carries none: the bridge does not promise a panel it
+cannot reach. **D88**.
 
 ### Rules of this transport
 

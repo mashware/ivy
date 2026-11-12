@@ -135,6 +135,13 @@ pub fn name_of(dir: &Path, id: &str) -> io::Result<Name<'static>> {
     }
 }
 
+/// Whether [`bind`] binds on this platform: a producer that has to decide whether to promise a
+/// channel — the MCP bridge's handshake, and `Producer::of_this_pane`, which refuses before
+/// connecting — reads it here instead of restating the platform list.
+/// The day F2.7 binds on Windows this has to change with it, and `binding_is_what_binds_says`
+/// fails there until it does.
+pub const BINDS: bool = cfg!(not(windows));
+
 /// Binds a pane's endpoint, ready to accept.
 ///
 /// **It does not bind on Windows, and that is a decision rather than an omission.** A named pipe
@@ -155,6 +162,8 @@ pub fn name_of(dir: &Path, id: &str) -> io::Result<Name<'static>> {
 /// wakes it without polling at rest or opening a client connection. The streams it hands out are
 /// blocking, which is what lets a receive timeout be put on them (see [`crate::listener`]).
 pub fn bind(dir: &Path, id: &str) -> io::Result<Listener> {
+    // `BINDS` says the same thing to callers that must not promise a channel; the test
+    // `binding_is_what_binds_says` ties the two together.
     #[cfg(windows)]
     {
         let _ = (dir, id);
@@ -236,6 +245,25 @@ mod tests {
 
         drop(client);
         drop(accepted);
+    }
+
+    /// **`BINDS` is what `bind` does, on whatever platform this runs.** The constant is the one a
+    /// producer reads to decide whether to promise a channel; a `bind` that started working on
+    /// Windows with the constant left false would keep agents there without instructions.
+    #[test]
+    fn binding_is_what_binds_says() {
+        let panel = PanelDir::create().expect("create the panel directory");
+
+        let bound = bind(panel.path(), panel.id());
+        let refusal = bound.as_ref().err().map(ToString::to_string);
+        assert_eq!(
+            bound.is_ok(),
+            BINDS,
+            "BINDS disagrees with binding: {refusal:?}"
+        );
+        if let Err(refusal) = bound {
+            assert_eq!(refusal.kind(), io::ErrorKind::Unsupported, "{refusal}");
+        }
     }
 
     /// Two panes are two channels, asserted by **connecting** rather than by comparing names: a

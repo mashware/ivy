@@ -205,6 +205,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../../panel-control/tests/session_helper.rs"),
     ),
     (
+        "panel-control/tests/panel_mcp_handshake.rs",
+        include_str!("../../panel-control/tests/panel_mcp_handshake.rs"),
+    ),
+    (
         "term-core/src/foreground.rs",
         include_str!("../../term-core/src/foreground.rs"),
     ),
