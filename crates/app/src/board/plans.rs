@@ -150,10 +150,16 @@ fn apply(bank: &Bank, disk: &mut disk::Disk, identity: &Identity, what: What) ->
 }
 
 pub(crate) fn identity(window: &crate::Window, origin: usize) -> Result<Identity, String> {
-    let pane = window.all_panes().find(|p| p.name == origin);
-    let badge = pane
-        .and_then(|p| p.project.as_ref())
-        .ok_or("this console's project is not known yet")?;
+    from_badge(
+        window
+            .all_panes()
+            .find(|p| p.name == origin)
+            .and_then(|p| p.project.as_ref()),
+    )
+}
+
+fn from_badge(badge: Option<&crate::project_view::Badge>) -> Result<Identity, String> {
+    let badge = badge.ok_or("this console's project is not known yet")?;
     match &badge.key {
         Key::Repository(path) => Ok(Identity {
             key: badge.key.clone(),
@@ -185,45 +191,31 @@ pub(crate) fn dispatch(
 }
 
 pub(crate) fn refresh_readers(window: &mut crate::Window) {
-    let readers: Vec<_> = window
-        .all_panes()
-        .filter_map(|pane| {
-            let identity = identity(window, pane.name);
-            if pane
-                .control
-                .as_ref()
-                .is_some_and(|c| c.plan_identity.as_ref() == Some(&identity))
-            {
-                return None;
-            }
-            let remembered = identity.clone();
-            let bank = window.board.plans.bank.clone();
-            let read: panel_control::listener::ReadPlan = Arc::new(move || {
-                let identity = match &identity {
-                    Ok(identity) => identity,
-                    Err(why) => return panel_control::Reply::Failed(why.clone()),
-                };
-                let published = bank.lock().unwrap().get(&identity.key).cloned();
-                match published {
-                    Some(plan) => panel_control::Reply::Document(plan.document.clone()),
-                    None => panel_control::Reply::Text(format!(
-                        "no plan published for {}",
-                        identity.name
-                    )),
-                }
-            });
-            Some((pane.name, remembered, read))
-        })
-        .collect();
-    for (pane, identity, reader) in readers {
-        if let Some(control) = window
-            .all_panes_mut()
-            .find(|p| p.name == pane)
-            .and_then(|p| p.control.as_mut())
-        {
-            control.plan_identity = Some(identity);
-            control.install_plan_reader(reader);
+    let bank = window.board.plans.bank.clone();
+    for pane in window.all_panes_mut() {
+        let identity = from_badge(pane.project.as_ref());
+        let Some(control) = pane.control.as_mut() else {
+            continue;
+        };
+        if control.plan_identity.as_ref() == Some(&identity) {
+            continue;
         }
+        control.plan_identity = Some(identity.clone());
+        let bank = bank.clone();
+        let read: panel_control::listener::ReadPlan = Arc::new(move || {
+            let identity = match &identity {
+                Ok(identity) => identity,
+                Err(why) => return panel_control::Reply::Failed(why.clone()),
+            };
+            let published = bank.lock().unwrap().get(&identity.key).cloned();
+            match published {
+                Some(plan) => panel_control::Reply::Document(plan.document.clone()),
+                None => {
+                    panel_control::Reply::Text(format!("no plan published for {}", identity.name))
+                }
+            }
+        });
+        control.install_plan_reader(read);
     }
 }
 
