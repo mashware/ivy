@@ -185,6 +185,21 @@ fn answer(line: &str, pane: &mut Option<Producer>) -> Option<String> {
     })
 }
 
+/// Whether this bridge runs inside an Ivy console: both identity variables present **and
+/// non-empty**.
+///
+/// **Empty counts as absent**, which is the rule the session helper and `ivy-session` already
+/// apply to the same two variables: Ivy itself always sets both or neither, but a client
+/// configuration that interpolates `${PANEL_ID:-}` hands the bridge an empty value, and a bridge
+/// that cannot reach a pane must not tell its agent that a panel is waiting for it.
+///
+/// **It takes the values instead of reading them** so it can be tested without `set_var`, which
+/// is undefined behaviour in a suite that launches processes in parallel. `main` is the one place
+/// that reads the environment, and no test covers that line.
+fn inside_a_console(id: Option<&std::ffi::OsStr>, dir: Option<&std::ffi::OsStr>) -> bool {
+    id.is_some_and(|id| !id.is_empty()) && dir.is_some_and(|dir| !dir.is_empty())
+}
+
 /// What this server says it is.
 fn initialized(message: &serde_json::Value) -> serde_json::Value {
     let asked_for = message
@@ -738,6 +753,22 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    /// **Only a whole identity is a console.** Each row breaks one half, absent or empty; a version
+    /// that checked one variable, or presence only, passes the first row and fails one of the rest.
+    #[test]
+    fn a_console_is_both_variables_present_and_non_empty() {
+        use std::ffi::OsStr;
+        let id = Some(OsStr::new("a1b2c3d4"));
+        let dir = Some(OsStr::new("/run/user/1000/ivy/a1b2c3d4"));
+        let empty = Some(OsStr::new(""));
+
+        assert!(inside_a_console(id, dir));
+        assert!(!inside_a_console(None, dir), "no identity");
+        assert!(!inside_a_console(id, None), "no directory");
+        assert!(!inside_a_console(empty, dir), "an empty identity");
+        assert!(!inside_a_console(id, empty), "an empty directory");
     }
 
     #[test]
