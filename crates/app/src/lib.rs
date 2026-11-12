@@ -21693,6 +21693,13 @@ mod tests {
             "the immediate repeated queued press did not fold the header"
         );
 
+        let reopened = click(&mut window);
+        assert!(
+            reopened
+                .iter()
+                .any(|(text, _)| text.contains("body assertion"))
+        );
+
         // Republish the producer's original default. The reader's open choice must win, and a
         // click on that just-repainted header must still be routed to the painted target.
         let pane = &window.active().panes()[0];
@@ -21703,17 +21710,17 @@ mod tests {
         window.active_mut().panes_mut()[0].refresh_its_panel(&ctx);
         let after_publish = app_frame(&mut window, &ctx, area, Vec::new());
         assert!(
-            !after_publish
+            after_publish
                 .iter()
                 .any(|(text, _)| text.contains("body assertion")),
-            "republishing changed the reader's folded choice"
+            "republishing discarded the reader's open choice"
         );
-        let opened_after_publish = click(&mut window);
+        let folded_after_publish = click(&mut window);
         assert!(
-            opened_after_publish
+            !folded_after_publish
                 .iter()
                 .any(|(text, _)| text.contains("body assertion")),
-            "the click after republish did not open the header"
+            "the click after republish did not fold the header"
         );
     }
 
