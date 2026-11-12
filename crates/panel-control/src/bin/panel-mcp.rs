@@ -239,7 +239,7 @@ fn instructions_for(
 ///   and its own panel to keep.
 /// - A rendered document is passed through as printed only when it comes from a workflow the agent
 ///   was asked to follow, and never with buttons the agent would not run itself: a panel's
-///   `actions` are commands for the person's shell, and a document printed by a script of unknown
+///   «actions» are commands for the person's shell, and a document printed by a script of unknown
 ///   origin is the untrusted panel the contract warns about.
 /// - A patch addresses lines by `key`, so lines meant to be patched are published with one.
 /// - A new connection holds nothing, so after a restart the document read back has to be published
