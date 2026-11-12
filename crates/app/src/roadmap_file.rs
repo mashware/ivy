@@ -380,4 +380,55 @@ mod tests {
         fs::write(&path, vec![b'x'; MAX_BYTES as usize + 1]).unwrap();
         assert!(load("demo", &path).error.unwrap().contains("exceeds"));
     }
+
+    #[test]
+    fn reader_reloads_atomic_replacement_deletion_and_reappearance() {
+        let dir = TempDir::new();
+        let path = dir.0.join("roadmap.md");
+        let replacement = dir.0.join("replacement.md");
+        fs::write(&path, "# First\n- [ ] alpha\n").unwrap();
+        let mut config = BTreeMap::new();
+        config.insert("demo".into(), path.clone());
+        let ctx = egui::Context::default();
+        let mut reader = Reader::new(config, ctx);
+        let wait_for = |reader: &mut Reader, expected: Option<&str>, error: bool| {
+            let until = std::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                let snapshots = reader.snapshots();
+                if let Some(snapshot) = snapshots.iter().find(|s| s.name == "demo")
+                    && (expected.is_some_and(|text| {
+                        snapshot.plan.as_ref().is_some_and(|p| {
+                            p.milestones
+                                .iter()
+                                .flat_map(|m| &m.items)
+                                .any(|i| i.text == text)
+                        })
+                    }) || (expected.is_none() && error && snapshot.plan.is_none()))
+                {
+                    return snapshot.clone();
+                }
+                assert!(
+                    std::time::Instant::now() < until,
+                    "reader did not reach expected snapshot"
+                );
+                std::thread::sleep(Duration::from_millis(25));
+            }
+        };
+        assert!(wait_for(&mut reader, Some("alpha"), false).plan.is_some());
+
+        fs::write(&replacement, "# Second\n- [ ] beta\n").unwrap();
+        fs::rename(&replacement, &path).unwrap();
+        assert!(wait_for(&mut reader, Some("beta"), false).plan.is_some());
+
+        fs::remove_file(&path).unwrap();
+        assert!(
+            wait_for(&mut reader, None, true)
+                .error
+                .unwrap()
+                .contains("unavailable")
+        );
+
+        fs::write(&path, "# Third\n- [ ] gamma\n").unwrap();
+        assert!(wait_for(&mut reader, Some("gamma"), false).plan.is_some());
+    }
 }
