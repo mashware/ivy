@@ -20,22 +20,20 @@ pub(super) struct PaintedHeader {
     header: Header,
 }
 
-impl PanelState {
-    pub(crate) fn toggle_header_at(&mut self, point: Pos2) -> bool {
-        let Some(header) = self.drawn.as_ref().and_then(|drawn| {
-            drawn
-                .headers
-                .iter()
-                .find(|header| header.area.contains(point))
-        }) else {
-            return false;
-        };
-        // Both identity and value belong to the pixels, even if a new document already arrived.
-        let (id, folded) = &header.header;
-        self.folds.insert(id.clone(), !folded);
-        self.layout = None;
-        true
-    }
+pub(crate) fn toggle_header_at(state: &mut PanelState, point: Pos2) -> bool {
+    let Some(header) = state.drawn.as_ref().and_then(|drawn| {
+        drawn
+            .headers
+            .iter()
+            .find(|header| header.area.contains(point))
+    }) else {
+        return false;
+    };
+    // Both identity and value belong to the pixels, even if a new document already arrived.
+    let (id, folded) = &header.header;
+    state.folds.insert(id.clone(), !folded);
+    state.layout = None;
+    true
 }
 
 pub(super) fn is_gap(line: &Line) -> bool {
@@ -103,13 +101,11 @@ pub(super) fn record_header(
     headers: &mut Vec<PaintedHeader>,
     row: &Row,
     index: usize,
-    whole: usize,
     rect: Rect,
     metrics: &CellMetrics,
     overflowed: bool,
 ) {
-    if index < whole
-        && !row.text.is_empty()
+    if !row.text.is_empty()
         && rect.width() > 0.0
         && !overflowed
         && let Some(header) = &row.header
@@ -198,7 +194,7 @@ mod tests {
 
     fn click(state: &mut PanelState) {
         let area = state.drawn.as_ref().unwrap().headers[0].area;
-        assert!(state.toggle_header_at(area.center()));
+        assert!(toggle_header_at(state, area.center()));
     }
 
     #[test]
@@ -299,11 +295,11 @@ mod tests {
         let area = state.drawn.as_ref().unwrap().headers[0].area;
         paint(&mut state, 420.0, area.top() + area.height() * 0.5);
         assert!(state.drawn.as_ref().unwrap().headers.is_empty());
-        assert!(!state.toggle_header_at(area.center()));
+        assert!(!toggle_header_at(&mut state, area.center()));
         paint(&mut state, 420.0, 600.0);
-        assert!(!state.toggle_header_at(Pos2::new(10.0, 2.0)));
+        assert!(!toggle_header_at(&mut state, Pos2::new(10.0, 2.0)));
         state.nothing_was_drawn();
-        assert!(!state.toggle_header_at(area.center()));
+        assert!(!toggle_header_at(&mut state, area.center()));
         paint(&mut state, 0.0, 600.0);
         assert!(state.drawn.as_ref().unwrap().headers.is_empty());
     }

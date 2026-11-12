@@ -30,6 +30,7 @@ mod driving;
 mod fold;
 #[cfg(test)]
 use fold::lay_out;
+pub(crate) use fold::toggle_header_at;
 mod links;
 pub(crate) mod pane;
 pub(crate) mod summary;
@@ -1180,7 +1181,6 @@ pub fn paint(
             &mut headers,
             row,
             n,
-            whole,
             rect,
             metrics,
             overflowed.contains(&row.role),

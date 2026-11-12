@@ -893,12 +893,8 @@ impl Window {
             // coordinates, so this asks a question about a point instead of measuring a rectangle —
             // and it asks it of the panel that drew, which is what makes a press on pane A's strip
             // write into pane A's program wherever the keyboard happens to be.
-            if pane.panel_state.toggle_header_at(bare.at) {
-                ui.ctx().request_repaint();
-                let mut rest = queue;
-                rest.remove(which);
-                self.the_press_went_to_the_program = false;
-                return rest;
+            if crate::panel::toggle_header_at(&mut pane.panel_state, bare.at) {
+                return spend_press(self, ui, queue, which);
             }
             if let Some(action) = pane.panel_state.button_at(bare.at) {
                 let bytes = crate::keyboard::what_a_button_sends(action.send());
@@ -925,10 +921,7 @@ impl Window {
                         eprintln!("the button could not write to the program: {failure}");
                     }
                 }
-                let mut rest = queue;
-                rest.remove(which);
-                self.the_press_went_to_the_program = false;
-                return rest;
+                return spend_press(self, ui, queue, which);
             }
 
             // **A few reads and no allocation**, which is the shape this loop already had for one
@@ -1273,4 +1266,16 @@ impl Window {
             .rect_filled(half(target, side), 0.0, self.theme.drop_target());
         self.timed_separately += started.elapsed();
     }
+}
+
+fn spend_press(
+    window: &mut Window,
+    ui: &egui::Ui,
+    mut queue: Vec<ButtonPress>,
+    which: usize,
+) -> Vec<ButtonPress> {
+    ui.ctx().request_repaint();
+    queue.remove(which);
+    window.the_press_went_to_the_program = false;
+    queue
 }
