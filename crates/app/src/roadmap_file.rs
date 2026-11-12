@@ -175,132 +175,124 @@ fn load(name: &str, path: &Path) -> Snapshot {
     }
 }
 
-/// Read task lists as inert text. A heading groups milestones; top-level tasks start milestones
-/// and indented task items become their deliverables.
+/// The Markdown parser owns task recognition, nesting, and inert inline text.
 fn markdown_plan(text: &str) -> Option<Plan> {
+    use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+    struct Task {
+        parent: Option<usize>,
+        group: Option<usize>,
+        checked: Option<bool>,
+        text: String,
+    }
+    let mut tasks: Vec<Task> = Vec::new();
+    let mut stack: Vec<usize> = Vec::new();
+    let mut groups: Vec<String> = Vec::new();
+    let mut group = None;
     let mut title = None;
-    let mut milestones: Vec<Milestone> = Vec::new();
-    let mut current: Option<usize> = None;
-    let mut group: Option<usize> = None;
-    let mut task_lines = std::collections::HashSet::new();
-    let mut heading_lines = std::collections::HashSet::new();
-    for (event, range) in
-        pulldown_cmark::Parser::new_ext(text, pulldown_cmark::Options::ENABLE_TASKLISTS)
-            .into_offset_iter()
-    {
-        let line_start = text[..range.start].rfind('\n').map_or(0, |n| n + 1);
+    let mut heading: Option<(HeadingLevel, String)> = None;
+    for event in Parser::new_ext(text, Options::ENABLE_TASKLISTS) {
         match event {
-            pulldown_cmark::Event::TaskListMarker(_) => {
-                task_lines.insert(line_start);
+            Event::Start(Tag::Heading { level, .. }) if stack.is_empty() => {
+                heading = Some((level, String::new()));
             }
-            pulldown_cmark::Event::Start(pulldown_cmark::Tag::Heading { .. }) => {
-                heading_lines.insert(line_start);
+            Event::End(TagEnd::Heading(_)) => {
+                if let Some((level, text)) = heading.take() {
+                    if level == HeadingLevel::H1 && title.is_none() {
+                        title = Some(text);
+                    } else {
+                        group = Some(groups.len());
+                        groups.push(text);
+                    }
+                }
+            }
+            Event::Start(Tag::Item) => {
+                tasks.push(Task {
+                    parent: stack.last().copied(),
+                    group,
+                    checked: None,
+                    text: String::new(),
+                });
+                stack.push(tasks.len() - 1);
+            }
+            Event::End(TagEnd::Item) => {
+                stack.pop();
+            }
+            Event::TaskListMarker(checked) => {
+                if let Some(&at) = stack.last() {
+                    tasks[at].checked = Some(checked);
+                }
+            }
+            Event::Text(text) | Event::Code(text) => {
+                if let Some((_, heading)) = &mut heading {
+                    heading.push_str(&text);
+                } else if let Some(&at) = stack.last() {
+                    tasks[at].text.push_str(&text);
+                }
+            }
+            Event::SoftBreak | Event::HardBreak | Event::End(TagEnd::Paragraph) => {
+                if let Some((_, heading)) = &mut heading {
+                    heading.push(' ');
+                } else if let Some(&at) = stack.last() {
+                    tasks[at].text.push(' ');
+                }
             }
             _ => {}
         }
     }
-    for (start, line) in text.split_inclusive('\n').scan(0, |offset, line| {
-        let start = *offset;
-        *offset += line.len();
-        Some((start, line))
-    }) {
-        let trimmed = line.trim();
-        let heading_depth = trimmed.bytes().take_while(|b| *b == b'#').count();
-        if heading_lines.contains(&start)
-            && heading_depth > 0
-            && trimmed.as_bytes().get(heading_depth) == Some(&b' ')
-        {
-            let value = trimmed[heading_depth..].trim();
-            if !value.is_empty() {
-                if heading_depth == 1 && title.is_none() {
-                    title = Some(value.to_owned());
-                } else if heading_depth >= 2 {
-                    let index = milestones.len();
-                    milestones.push(Milestone {
-                        id: None,
-                        title: value.to_owned(),
-                        done_when: None,
-                        depends_on: Vec::new(),
-                        items: Vec::new(),
-                    });
-                    current = Some(index);
-                    group = Some(index);
+    let mut milestones: Vec<Milestone> = Vec::new();
+    let mut group_to_milestone = BTreeMap::new();
+    let mut task_to_milestone = BTreeMap::new();
+    let mut current = false;
+    for (at, task) in tasks.iter().enumerate() {
+        let Some(checked) = task.checked else {
+            continue;
+        };
+        let milestone = if let Some(group) = task.group {
+            *group_to_milestone.entry(group).or_insert_with(|| {
+                milestones.push(Milestone {
+                    title: groups[group].clone(),
+                    ..Default::default()
+                });
+                milestones.len() - 1
+            })
+        } else {
+            let mut parent = task.parent;
+            let mut ancestor = None;
+            while let Some(at) = parent {
+                if let Some(milestone) = task_to_milestone.get(&at) {
+                    ancestor = Some(*milestone);
+                    break;
                 }
+                parent = tasks[at].parent;
             }
-            continue;
-        }
-        let indent = line.len() - line.trim_start().len();
-        if !task_lines.contains(&start) {
-            continue;
-        }
-        let body = line.trim_start();
-        let Some((checked, rest)) = task(body) else {
-            continue;
+            ancestor.unwrap_or_else(|| {
+                milestones.push(Milestone {
+                    title: task.text.trim().into(),
+                    ..Default::default()
+                });
+                milestones.len() - 1
+            })
         };
-        let item = Item {
-            id: None,
-            text: rest.to_owned(),
-            mark: Some(if checked { Mark::Done } else { Mark::Pending }),
-            reference: None,
-            link: None,
+        task_to_milestone.insert(at, milestone);
+        let mark = if checked {
+            Mark::Done
+        } else if !current {
+            current = true;
+            Mark::Current
+        } else {
+            Mark::Pending
         };
-        if indent == 0 && group.is_none() {
-            let index = milestones.len();
-            milestones.push(Milestone {
-                id: None,
-                title: rest.to_owned(),
-                done_when: None,
-                depends_on: Vec::new(),
-                items: vec![item],
-            });
-            current = Some(index);
-        } else if let Some(index) = group.or(current) {
-            milestones[index].items.push(item);
-        }
+        milestones[milestone].items.push(Item {
+            text: task.text.trim().into(),
+            mark: Some(mark),
+            ..Default::default()
+        });
     }
-    milestones.retain(|milestone| !milestone.items.is_empty());
-    if milestones.is_empty() {
-        return None;
-    }
-    let mut anchored = false;
-    for milestone in &mut milestones {
-        if !anchored
-            && milestone
-                .items
-                .iter()
-                .any(|item| item.mark != Some(Mark::Done))
-        {
-            let item = milestone
-                .items
-                .iter_mut()
-                .find(|item| item.mark != Some(Mark::Done))
-                .unwrap();
-            item.mark = Some(Mark::Current);
-            anchored = true;
-        }
-    }
-    Some(Plan {
+    (!milestones.is_empty()).then_some(Plan {
         title,
-        source: None,
         milestones,
-        outside: Vec::new(),
+        ..Default::default()
     })
-}
-
-fn task(line: &str) -> Option<(bool, &str)> {
-    let marker = line.find("[")?;
-    if marker > 5 || !line[..marker].trim_end().ends_with(['-', '*', '+']) {
-        return None;
-    }
-    let bytes = line.as_bytes();
-    if bytes.get(marker + 2) != Some(&b']')
-        || !matches!(bytes.get(marker + 1), Some(b' ' | b'x' | b'X'))
-    {
-        return None;
-    }
-    let rest = line.get(marker + 3..)?.trim();
-    let checked = matches!(bytes.get(marker + 1), Some(b'x' | b'X'));
-    Some((checked, rest))
 }
 
 #[cfg(test)]
@@ -358,6 +350,18 @@ mod tests {
         assert_eq!(plan.milestones[0].items.len(), 2);
         assert_eq!(plan.milestones[0].items[1].text, "Nested");
         assert_eq!(plan.milestones[0].items[1].mark, Some(Mark::Current));
+    }
+
+    #[test]
+    fn markdown_events_handle_ordered_tasks_and_strip_inline_markup() {
+        let plan = markdown_plan(
+            "## **Phase**\n1. [ ] Write **code** and [review](https://example.com)\n2. [x] Done\n",
+        )
+        .unwrap();
+        assert_eq!(plan.milestones[0].title, "Phase");
+        assert_eq!(plan.milestones[0].items[0].text, "Write code and review");
+        assert_eq!(plan.milestones[0].items[0].mark, Some(Mark::Current));
+        assert!(plan.milestones[0].items[0].link.is_none());
     }
 
     #[test]

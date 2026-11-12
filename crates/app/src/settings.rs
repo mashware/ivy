@@ -649,8 +649,6 @@ fn apply(settings: &mut Settings, key: &str, value: &str) -> Result<(), Missing>
             let next = pieces.next().and_then(|n| n.parse::<usize>().ok());
             if let (Some(done), Some(next)) = (done, next)
                 && pieces.next().is_none()
-                && done <= 20
-                && next <= 20
             {
                 settings.roadmap_window = RoadmapWindow { done, next };
                 return Ok(());
@@ -892,7 +890,10 @@ mod tests {
             Some(&PathBuf::from("docs/roadmap.md"))
         );
         assert_eq!(settings.roadmap_window, RoadmapWindow { done: 1, next: 4 });
-        assert_eq!(interpret("roadmap.window = 21 1").unwrap().1.total(), 1);
+        assert_eq!(
+            interpret("roadmap.window = 21 1").unwrap().0.roadmap_window,
+            RoadmapWindow { done: 21, next: 1 }
+        );
         assert_eq!(interpret("roadmap.window = 1").unwrap().1.total(), 1);
     }
 
