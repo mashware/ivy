@@ -314,7 +314,7 @@ impl Theme {
             Style::Dim => self.toward_background(self.foreground),
             // The title is the only thing painted lighter than normal text. It carries no color of its own:
             // a colored title would compete with the marks, which do use it to say something.
-            Style::Title => self.palette[15],
+            Style::Title | Style::Section => self.palette[15],
             Style::Accent => self.palette[4],
             Style::Ok => self.palette[2],
             Style::Warn => self.palette[3],

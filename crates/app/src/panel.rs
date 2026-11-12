@@ -27,6 +27,9 @@ use cache::PanelLayout;
 mod color;
 mod document;
 mod driving;
+mod fold;
+#[cfg(test)]
+use fold::lay_out;
 mod links;
 pub(crate) mod pane;
 pub(crate) mod summary;
@@ -222,6 +225,7 @@ pub struct PanelState {
     /// every frame, and wrapping the panel to the width would be recalculated sixty times per second
     /// without its file having changed.
     layout: Option<PanelLayout>,
+    folds: fold::Folds,
     /// Why the last read failed, if it failed. It is what tells apart «there is no producer here» from
     /// «there is one and it is broken», which look the same and are not the same thing.
     problem: Option<Problem>,
@@ -338,6 +342,7 @@ struct Drawn {
     /// new document after this frame and before its press is routed. Looking the target up by line
     /// number then would let new bytes retarget old pixels.
     links: Vec<PaintedLink>,
+    headers: Vec<fold::PaintedHeader>,
 }
 
 /// A button as it was drawn: which action it is, and the rectangle it occupied.
@@ -799,6 +804,7 @@ struct Row {
     /// What this row is **for**, which is what lets the painting know which rectangle belongs to
     /// which button without laying the panel out a second time.
     role: RowRole,
+    header: Option<(fold::HeaderId, bool)>,
     /// A compact link label painted on this row, independently of its body text.
     link: Option<LaidOutLink>,
     /// Which of its characters go to color, as ranges of character indices, set once the whole layout
@@ -814,6 +820,7 @@ impl Row {
             text,
             color,
             role: RowRole::Text,
+            header: None,
             link: None,
             color_spans: Vec::new(),
         }
@@ -833,6 +840,7 @@ enum RowRole {
     ButtonLabel(usize),
     /// A row carrying part of the command that button sends.
     ButtonBody(usize),
+    Fold(usize),
 }
 
 /// Turns a panel into the rows that are going to be painted, at the given width in cells.
@@ -841,7 +849,7 @@ enum RowRole {
 /// the result between frames: as long as the file and the width do not change, the layout is the same.
 /// Without it, wrapping the panel would be recalculated sixty times per second while the console beside it
 /// dumps.
-fn lay_out(
+fn lay_out_head(
     panel: Option<&Panel>,
     id: &str,
     width: usize,
@@ -953,30 +961,6 @@ fn lay_out(
         rows.push(Row::text(0, String::new(), Color32::TRANSPARENT));
     }
 
-    let Some(panel) = panel else {
-        return rows;
-    };
-
-    for block in blocks(&panel.lines) {
-        // **The column's width is computed per block, and that is the contract's rule.** With a global
-        // width, a single block with a long reference would displace the text of all the others, and what
-        // the panel gains by aligning it would lose in wasted margin.
-        // **And the column is bounded against the panel's width.** The contract puts no ceiling on the
-        // reference, so a single very long one would fix a column width that pushes the text of its whole
-        // block outside the rectangle. What does not fit is cut, as the text is cut.
-        let column = block
-            .iter()
-            .filter_map(|line| line.reference.as_deref())
-            .map(|reference| sanitize(reference).chars().count())
-            .max()
-            .unwrap_or(0)
-            .min(width.saturating_sub(MINIMUM_SLOT).saturating_sub(3));
-
-        for line in block {
-            rows.extend(lay_out_line(line, column, width, theme));
-        }
-    }
-
     rows
 }
 
@@ -987,7 +971,7 @@ fn lay_out(
 fn blocks(lines: &[Line]) -> Vec<Vec<&Line>> {
     let mut blocks = vec![Vec::new()];
     for line in lines {
-        let slot = line.text.is_empty() && line.reference.is_none() && line.mark.is_none();
+        let slot = fold::is_gap(line);
         blocks
             .last_mut()
             .expect("there is always one open")
@@ -1171,6 +1155,7 @@ pub fn paint(
     let mut overflowed: std::collections::BTreeSet<RowRole> = std::collections::BTreeSet::new();
     let mut links_painted = Vec::new();
     let mut color_glyphs = Vec::new();
+    let mut headers = Vec::new();
     for (n, row) in visible.iter().enumerate() {
         let x = text_left + row.column as f32 * metrics.width();
         let y = rect.top() + n as f32 * metrics.height();
@@ -1190,6 +1175,16 @@ pub fn paint(
                 overflowed.insert(row.role);
             }
         }
+
+        fold::record_header(
+            &mut headers,
+            row,
+            n,
+            whole,
+            rect,
+            metrics,
+            overflowed.contains(&row.role),
+        );
 
         if let Some(link) = &row.link {
             links_painted.push(links::paint_label(
@@ -1230,6 +1225,7 @@ pub fn paint(
         settled,
         buttons: drawn,
         links,
+        headers,
     });
     links::disclose_hovered(painter, state.drawn.as_ref(), id);
     walked
@@ -2321,6 +2317,7 @@ mod tests {
             .lay_out_if_needed("a1b2", 40, &Theme::default(), None, None)
             .expect("there is a layout");
         state.drawn = Some(Drawn {
+            headers: Vec::new(),
             settled: true,
             buttons: vec![PaintedButton {
                 action: 0,

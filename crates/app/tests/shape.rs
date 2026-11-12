@@ -292,6 +292,7 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/tab_bar/chrome.rs"),
     ),
     ("src/panel/cache.rs", include_str!("../src/panel/cache.rs")),
+    ("src/panel/fold.rs", include_str!("../src/panel/fold.rs")),
     (
         "src/settings/editor/runtime.rs",
         include_str!("../src/settings/editor/runtime.rs"),

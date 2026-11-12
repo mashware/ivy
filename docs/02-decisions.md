@@ -9388,7 +9388,7 @@ and panel.
   console would lose the instructions, and the hold already settles who owns the pane: the first
   producer keeps it and every other is refused by name (D43).
 
-## D88 — The block's fold belongs to the reader
+## D89 — The block's fold belongs to the reader
 
 A section header's `collapsed` is its initial state. Clicking its row sets a per-console choice,
 in memory only, identified by `key` or, without one, its text. That choice wins across whole-document

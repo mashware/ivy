@@ -893,6 +893,13 @@ impl Window {
             // coordinates, so this asks a question about a point instead of measuring a rectangle —
             // and it asks it of the panel that drew, which is what makes a press on pane A's strip
             // write into pane A's program wherever the keyboard happens to be.
+            if pane.panel_state.toggle_header_at(bare.at) {
+                ui.ctx().request_repaint();
+                let mut rest = queue;
+                rest.remove(which);
+                self.the_press_went_to_the_program = false;
+                return rest;
+            }
             if let Some(action) = pane.panel_state.button_at(bare.at) {
                 let bytes = crate::keyboard::what_a_button_sends(action.send());
                 match pane.pty.write(&bytes) {

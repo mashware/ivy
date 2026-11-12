@@ -173,7 +173,7 @@ its reference does not widen the block's reference column. On other lines, `summ
 painted header opens or folds it, including immediately after a republish or toggle. A clipped
 header is inert. The choice belongs to this console, in memory only, keyed by the header's `key`
 when present, otherwise its text. Duplicate identities share a choice. The reader's choice wins
-over the producer's default across republishes and disappears when the console closes (D88).
+over the producer's default across republishes and disappears when the console closes (D89).
 
 #### `link`
 
@@ -201,8 +201,8 @@ over the producer's default across republishes and disappears when the console c
 - The decision, with what was discarded, in [02-decisions.md](02-decisions.md) → D51.
 
 **A line with no `key` is a line.** Nothing about publishing changes if you never write one, and
-nothing about how a panel is painted changes if you do — the field exists for what a channel can say
-about a document, not for what the document looks like. And **it is deliberately not `ref`**: that one
+on ordinary lines it changes no painting. On section headers it also identifies the reader’s fold
+choice across republishes. And **it is deliberately not `ref`**: that one
 is painted, clipped to the width of its column, and legitimately repeated —`#1` twice in one panel is
 ordinary— so an address built on it would change whenever the text did.
 
