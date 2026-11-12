@@ -7,6 +7,8 @@ license.workspace = true
 [dependencies]
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 semver = "1"
+# Header truncation preserves grapheme clusters while fitting the font’s measured width.
+unicode-segmentation = "1"
 eframe.workspace = true
 pulldown-cmark = { version = "0.13", default-features = false }
 term-core = { path = "../term-core" }

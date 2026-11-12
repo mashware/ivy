@@ -31,7 +31,7 @@ impl PanelLayout {
             state.holder.as_ref().map(|held| held.source.as_str()),
         );
         if let Some(panel) = state.last_good.as_deref() {
-            fold::body(&mut rows, panel, &state.folds, width, theme);
+            fold::append_blocks(&mut rows, panel, &state.folds, width, theme);
         }
         color::flag(&mut rows);
         Self {

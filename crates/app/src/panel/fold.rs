@@ -3,7 +3,8 @@ use std::collections::HashMap;
 
 use super::{Line, Panel, PanelState, Row, RowRole, Style, Theme, blocks, lay_out_line, sanitize};
 use crate::painter::CellMetrics;
-use eframe::egui::{Pos2, Rect};
+use eframe::egui::{Painter, Pos2, Rect};
+use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(super) enum HeaderId {
@@ -11,13 +12,19 @@ pub(super) enum HeaderId {
     Text(String),
 }
 
-type Header = (HeaderId, bool);
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct Header {
+    id: HeaderId,
+    folded: bool,
+    summary: String,
+}
 pub(super) type Folds = HashMap<HeaderId, bool>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct PaintedHeader {
     area: Rect,
-    header: Header,
+    id: HeaderId,
+    folded: bool,
 }
 
 pub(crate) fn toggle_header_at(state: &mut PanelState, point: Pos2) -> bool {
@@ -30,8 +37,7 @@ pub(crate) fn toggle_header_at(state: &mut PanelState, point: Pos2) -> bool {
         return false;
     };
     // Both identity and value belong to the pixels, even if a new document already arrived.
-    let (id, folded) = &header.header;
-    state.folds.insert(id.clone(), !folded);
+    state.folds.insert(header.id.clone(), !header.folded);
     state.layout = None;
     true
 }
@@ -43,7 +49,13 @@ pub(super) fn is_gap(line: &Line) -> bool {
         && line.mark.is_none()
 }
 
-pub(super) fn body(rows: &mut Vec<Row>, panel: &Panel, folds: &Folds, width: usize, theme: &Theme) {
+pub(super) fn append_blocks(
+    rows: &mut Vec<Row>,
+    panel: &Panel,
+    folds: &Folds,
+    width: usize,
+    theme: &Theme,
+) {
     for block in blocks(&panel.lines) {
         let column = block
             .iter()
@@ -63,11 +75,15 @@ pub(super) fn body(rows: &mut Vec<Row>, panel: &Panel, folds: &Folds, width: usi
                 hidden = folds.get(&id).copied().unwrap_or(line.collapsed);
                 let mut row = Row::text(
                     0,
-                    header_text(line, hidden, width),
+                    sanitize(&line.text),
                     theme.panel_color(None, Some(Style::Section)),
                 );
                 row.role = RowRole::Fold(rows.len());
-                row.header = Some((id, hidden));
+                row.header = Some(Header {
+                    id,
+                    folded: hidden,
+                    summary: sanitize(line.summary.as_deref().unwrap_or("")),
+                });
                 rows.push(row);
             } else if !hidden || is_gap(line) {
                 rows.extend(lay_out_line(line, column, width, theme));
@@ -76,25 +92,78 @@ pub(super) fn body(rows: &mut Vec<Row>, panel: &Panel, folds: &Folds, width: usi
     }
 }
 
-fn header_text(line: &Line, folded: bool, width: usize) -> String {
-    if width == 0 {
-        return String::new();
-    }
-    let indicator = if folded { '▸' } else { '▾' };
-    let summary = sanitize(line.summary.as_deref().unwrap_or(""));
-    let summary: String = summary.chars().take(width.saturating_sub(2)).collect();
-    let remaining = width.saturating_sub(2 + summary.chars().count());
-    let title: String = sanitize(&line.text)
-        .chars()
-        .take(remaining.saturating_sub(3))
-        .collect();
-    let rule = "─".repeat(remaining.saturating_sub(title.chars().count() + 2));
-    let text = if title.is_empty() {
-        format!("{indicator} {}{summary}", "─".repeat(remaining))
-    } else {
-        format!("{indicator} {title} {rule} {summary}")
+pub(super) fn paint_header(
+    painter: &Painter,
+    origin: Pos2,
+    row: &Row,
+    metrics: &CellMetrics,
+    width: usize,
+    discoverer: &mut crate::fonts::Discoverer,
+    glyphs: &mut Vec<crate::painter::ColorGlyph>,
+) -> Option<Rect> {
+    let header = row.header.as_ref()?;
+    let measure = |text: &str| {
+        painter
+            .layout_no_wrap(text.to_owned(), metrics.font(), row.color)
+            .size()
+            .x
     };
-    text.chars().take(width).collect()
+    let width = width as f32 * metrics.width();
+    let prefix = if header.folded { "▸ " } else { "▾ " };
+    let prefix = fit(prefix, width, &measure);
+    let summary = fit(
+        &header.summary,
+        (width - measure(prefix)).max(0.0),
+        &measure,
+    );
+    let left_width = (width - measure(summary)).max(0.0);
+    let title_room = (left_width - measure(prefix) - measure(" ─ ")).max(0.0);
+    let title = fit(&row.text, title_room, &measure);
+    let mut head = format!("{prefix}{title}");
+    let rule_width = (left_width - measure(&head) - measure("  ")).max(0.0);
+    let rule = "─".repeat((rule_width / measure("─")) as usize);
+    head.push_str(&format!(" {rule}"));
+    let head = fit(&head, left_width, &measure).to_owned();
+    let mut pieces = [
+        Row::text(0, head, row.color),
+        Row::text(0, summary.to_owned(), row.color),
+    ];
+    super::color::flag(&mut pieces);
+    let mut inked = Rect::NOTHING;
+    for (piece, x) in pieces
+        .iter()
+        .zip([origin.x, origin.x + width - measure(summary)])
+    {
+        discoverer.note_text(&piece.text);
+        inked = inked.union(super::color::paint_text(
+            painter,
+            Pos2::new(x, origin.y),
+            piece,
+            metrics,
+            discoverer,
+            glyphs,
+        ));
+    }
+    Some(inked)
+}
+
+fn fit<'a>(text: &'a str, width: f32, measure: &impl Fn(&str) -> f32) -> &'a str {
+    let boundaries: Vec<usize> = text
+        .grapheme_indices(true)
+        .map(|(at, _)| at)
+        .chain(std::iter::once(text.len()))
+        .collect();
+    let mut low = 0;
+    let mut high = boundaries.len();
+    while low + 1 < high {
+        let mid = (low + high) / 2;
+        if measure(&text[..boundaries[mid]]) <= width {
+            low = mid;
+        } else {
+            high = mid;
+        }
+    }
+    &text[..boundaries[low]]
 }
 
 pub(super) fn record_header(
@@ -105,8 +174,7 @@ pub(super) fn record_header(
     metrics: &CellMetrics,
     overflowed: bool,
 ) {
-    if !row.text.is_empty()
-        && rect.width() > 0.0
+    if (rect.width() / metrics.width()) as usize > 2 * super::MARGIN as usize
         && !overflowed
         && let Some(header) = &row.header
     {
@@ -116,7 +184,8 @@ pub(super) fn record_header(
                 Pos2::new(rect.left(), top),
                 Pos2::new(rect.right(), top + metrics.height()),
             ),
-            header: header.clone(),
+            id: header.id.clone(),
+            folded: header.folded,
         });
     }
 }
@@ -133,7 +202,7 @@ pub(super) fn lay_out(
 ) -> Vec<Row> {
     let mut rows = super::lay_out_head(panel, id, width, theme, warning, attention, held_by);
     if let Some(panel) = panel {
-        body(&mut rows, panel, &Folds::default(), width, theme);
+        append_blocks(&mut rows, panel, &Folds::default(), width, theme);
     }
     rows
 }
@@ -339,9 +408,68 @@ mod tests {
             let text = paint(&mut state, width, 600.0).join("\n");
             assert!(text.ends_with("2/4 merged"), "{width}: {text}");
             let layout = state.layout.as_ref().unwrap();
-            assert_eq!(layout.rows[0].text.chars().count(), layout.width);
+            assert_eq!(layout.rows[0].text, "MRs");
             assert_eq!(state.drawn.as_ref().unwrap().headers.len(), 1);
         }
+    }
+
+    #[test]
+    fn measured_summary_stays_whole_and_right_aligned_with_wide_text() {
+        let mut h = header();
+        h["text"] = "日本語の長い見出し".into();
+        h["summary"] = "日本語".into();
+        let mut state = state(serde_json::json!([h, "body"]));
+        let place = Rect::from_min_size(Pos2::ZERO, vec2(180.0, 600.0));
+        let shapes = paint_the_state(&mut state, place, SystemTime::now());
+        fn text_shapes(shape: &Shape, found: &mut Vec<(String, Rect)>) {
+            match shape {
+                Shape::Text(text) => found.push((
+                    text.galley.job.text.clone(),
+                    text.galley.rect.translate(text.pos.to_vec2()),
+                )),
+                Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        text_shapes(shape, found);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut texts = Vec::new();
+        for shape in &shapes {
+            text_shapes(shape, &mut texts);
+        }
+        let summary = texts
+            .iter()
+            .find(|(text, _)| text == "日本語")
+            .expect("whole summary painted");
+        let ctx = eframe::egui::Context::default();
+        let output = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+            let metrics = CellMetrics::measure(
+                ui.ctx(),
+                eframe::egui::FontId::monospace(crate::DEFAULT_FONT_SIZE),
+            )
+            .for_panel(ui.ctx());
+            let width = ((place.width() / metrics.width()) as usize).saturating_sub(2);
+            let right = metrics.width() * (1 + width) as f32;
+            assert!(
+                (summary.1.right() - right).abs() < 0.1,
+                "{:?} vs {right}",
+                summary.1
+            );
+        });
+        output.drop_without_applying_deltas();
+        assert_eq!(state.drawn.as_ref().unwrap().headers.len(), 1);
+        click(&mut state);
+        assert!(paint(&mut state, 180.0, 600.0).join("\n").contains("body"));
+    }
+
+    #[test]
+    fn truncation_keeps_combining_sequences_together() {
+        let text = "a\u{301}b";
+        let measured = |text: &str| text.chars().count() as f32;
+        assert_eq!(fit(text, 1.0, &measured), "");
+        assert_eq!(fit(text, 2.0, &measured), "a\u{301}");
     }
 
     #[test]

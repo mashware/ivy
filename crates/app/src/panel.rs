@@ -805,7 +805,7 @@ struct Row {
     /// What this row is **for**, which is what lets the painting know which rectangle belongs to
     /// which button without laying the panel out a second time.
     role: RowRole,
-    header: Option<(fold::HeaderId, bool)>,
+    header: Option<fold::Header>,
     /// A compact link label painted on this row, independently of its body text.
     link: Option<LaidOutLink>,
     /// Which of its characters go to color, as ranges of character indices, set once the whole layout
@@ -1160,13 +1160,24 @@ pub fn paint(
     for (n, row) in visible.iter().enumerate() {
         let x = text_left + row.column as f32 * metrics.width();
         let y = rect.top() + n as f32 * metrics.height();
-        if !row.text.is_empty() {
+        if !row.text.is_empty() || row.header.is_some() {
             // **The panel discovers fonts too.** What it shows is what its producer publishes —free
             // text, in any language—, and without noting it a summary in Japanese stayed as boxes
             // forever because nothing triggered the search.
             discoverer.note_text(&row.text);
             let at = Pos2::new(x, y);
-            let inked = color::paint_text(painter, at, row, metrics, discoverer, &mut color_glyphs);
+            let inked = fold::paint_header(
+                painter,
+                at,
+                row,
+                metrics,
+                width,
+                discoverer,
+                &mut color_glyphs,
+            )
+            .unwrap_or_else(|| {
+                color::paint_text(painter, at, row, metrics, discoverer, &mut color_glyphs)
+            });
             // **What a row really measures is asked of whoever drew it**, and that closes the last
             // way a press could send a command nobody could read. This module lays text out counting
             // characters, and a character is not a column: twenty-nine kanji are fifty-eight columns,
