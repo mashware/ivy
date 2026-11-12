@@ -85,6 +85,11 @@ pub fn run() -> eframe::Result {
             let mut window =
                 opening::native_window(cc, with_what, requested, persistence, measuring)?;
             window.restoration = restoration;
+            window.board.plans = board::plans::Store::at(
+                session::path().and_then(|p| p.parent().map(|p| p.join("plans"))),
+                !measuring,
+                cc.egui_ctx.clone(),
+            );
             // Only a measurement batch asks for them, so they are set here and not in the
             // constructor. The cell gets measured later on: the panel gesture counts its travel in
             // cells and its hook runs before the pass that measures the font.

@@ -22,7 +22,7 @@ const MAX_BYTES: u64 = 256 * 1024;
 pub(crate) struct Snapshot {
     pub name: String,
     pub identity: Option<crate::project::Identity>,
-    pub plan: Option<Plan>,
+    pub plan: Option<Arc<Plan>>,
     pub error: Option<String>,
     pub path: PathBuf,
 }
@@ -114,6 +114,13 @@ impl Drop for Reader {
 fn load(name: &str, path: &Path) -> Snapshot {
     let identity = path
         .parent()
+        .map(|p| {
+            if p.as_os_str().is_empty() {
+                Path::new(".")
+            } else {
+                p
+            }
+        })
         .and_then(|parent| crate::project::resolve(parent).ok())
         .map(|mut id| {
             id.name = name.to_owned();
@@ -154,7 +161,7 @@ fn load(name: &str, path: &Path) -> Snapshot {
         Ok(plan) => Snapshot {
             name: name.to_owned(),
             identity,
-            plan: Some(plan),
+            plan: Some(Arc::new(plan)),
             error: None,
             path: path.to_path_buf(),
         },
@@ -175,21 +182,34 @@ fn markdown_plan(text: &str) -> Option<Plan> {
     let mut milestones: Vec<Milestone> = Vec::new();
     let mut current: Option<usize> = None;
     let mut group: Option<usize> = None;
-    let mut fence: Option<char> = None;
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if let Some(marker) = fence {
-            if trimmed.starts_with(&marker.to_string().repeat(3)) {
-                fence = None;
+    let mut task_lines = std::collections::HashSet::new();
+    let mut heading_lines = std::collections::HashSet::new();
+    for (event, range) in
+        pulldown_cmark::Parser::new_ext(text, pulldown_cmark::Options::ENABLE_TASKLISTS)
+            .into_offset_iter()
+    {
+        let line_start = text[..range.start].rfind('\n').map_or(0, |n| n + 1);
+        match event {
+            pulldown_cmark::Event::TaskListMarker(_) => {
+                task_lines.insert(line_start);
             }
-            continue;
+            pulldown_cmark::Event::Start(pulldown_cmark::Tag::Heading { .. }) => {
+                heading_lines.insert(line_start);
+            }
+            _ => {}
         }
-        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-            fence = trimmed.chars().next();
-            continue;
-        }
+    }
+    for (start, line) in text.split_inclusive('\n').scan(0, |offset, line| {
+        let start = *offset;
+        *offset += line.len();
+        Some((start, line))
+    }) {
+        let trimmed = line.trim();
         let heading_depth = trimmed.bytes().take_while(|b| *b == b'#').count();
-        if heading_depth > 0 && trimmed.as_bytes().get(heading_depth) == Some(&b' ') {
+        if heading_lines.contains(&start)
+            && heading_depth > 0
+            && trimmed.as_bytes().get(heading_depth) == Some(&b' ')
+        {
             let value = trimmed[heading_depth..].trim();
             if !value.is_empty() {
                 if heading_depth == 1 && title.is_none() {
@@ -210,7 +230,7 @@ fn markdown_plan(text: &str) -> Option<Plan> {
             continue;
         }
         let indent = line.len() - line.trim_start().len();
-        if indent >= 4 {
+        if !task_lines.contains(&start) {
             continue;
         }
         let body = line.trim_start();
@@ -329,6 +349,15 @@ mod tests {
         assert!(markdown_plan("# Empty\n- prose\n").is_none());
         let plan = markdown_plan("- [x] done\n").unwrap();
         assert_eq!(plan.milestones[0].items[0].mark, Some(Mark::Done));
+    }
+
+    #[test]
+    fn nested_markdown_tasks_count_but_code_examples_do_not() {
+        let plan = markdown_plan("- [x] Milestone\n    - [ ] Nested\n\n    code\n\n~~~~~~~~md\n- [ ] example\n~~~\n- [ ] still code\n~~~~~~~~\n").unwrap();
+        assert_eq!(plan.milestones.len(), 1);
+        assert_eq!(plan.milestones[0].items.len(), 2);
+        assert_eq!(plan.milestones[0].items[1].text, "Nested");
+        assert_eq!(plan.milestones[0].items[1].mark, Some(Mark::Current));
     }
 
     #[test]

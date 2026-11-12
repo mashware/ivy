@@ -900,4 +900,123 @@ mod tests {
         assert_eq!(window.tabs.len(), 1);
         assert_eq!(window.active().panes().len(), 1);
     }
+
+    #[test]
+    fn project_plan_calls_refuse_unknown_and_folder_projects_without_changing_a_plan() {
+        let mut window = window_with("sleep 30", "sleep 30");
+        let ctx = egui::Context::default();
+        let origin = window.active().focus;
+        attach_a_channel(&mut window, origin);
+        let answer = ask_the_window(
+            &mut window,
+            &ctx,
+            origin,
+            1,
+            panel_control::What::PlanRetire,
+        );
+        assert!(
+            matches!(answer, panel_control::Answer::Refused(s) if s == "this console's project is not known yet")
+        );
+        let pane = window.all_panes_mut().find(|p| p.name == origin).unwrap();
+        pane.project = Some(crate::project_view::Badge {
+            key: crate::project::Key::Folder("/plain".into()),
+            name: "Plain".into(),
+            details: String::new(),
+            ink: egui::Color32::RED,
+            painted: Default::default(),
+        });
+        let answer = ask_the_window(&mut window, &ctx, origin, 1, panel_control::What::PlanGet);
+        assert!(
+            matches!(answer, panel_control::Answer::Refused(s) if s == "this console is not in a Git repository")
+        );
+    }
+
+    #[test]
+    fn project_plan_is_shared_by_panes_and_painted_with_source_and_progress() {
+        let mut window = window_with("sleep 30", "sleep 30");
+        integrated(&mut window);
+        let ctx = egui::Context::default();
+        let origins: Vec<_> = window.all_panes().map(|p| p.name).collect();
+        for pane in window.all_panes_mut() {
+            pane.project = Some(crate::project_view::Badge {
+                key: crate::project::Key::Repository("/sample/.git".into()),
+                name: "Sample".into(),
+                details: String::new(),
+                ink: egui::Color32::RED,
+                painted: Default::default(),
+            });
+        }
+        for origin in &origins {
+            attach_a_channel(&mut window, *origin);
+        }
+        let document = r#"{"title":"Delivery","source":"roadmap.md","milestones":[{"id":"H3","title":"Build","items":[{"id":"D","text":"Feature","mark":"current"}]}]}"#;
+        let (plan, dropped) = panel_contract::plan::parse_document_noting(document).unwrap();
+        let answer = ask_the_window(
+            &mut window,
+            &ctx,
+            origins[0],
+            1,
+            panel_control::What::PlanSet {
+                document: document.into(),
+                plan,
+                dropped,
+            },
+        );
+        assert!(
+            matches!(answer, panel_control::Answer::Text(s) if s.starts_with("published for Sample"))
+        );
+        let answer = ask_the_window(
+            &mut window,
+            &ctx,
+            origins[1],
+            2,
+            panel_control::What::PlanGet,
+        );
+        assert!(matches!(answer, panel_control::Answer::Document(s) if s == document));
+        crate::board::plans::refresh_readers(&mut window);
+        let dir = window
+            .all_panes()
+            .find(|p| p.name == origins[1])
+            .unwrap()
+            .panel
+            .as_ref()
+            .unwrap();
+        let mut producer = panel_control::Producer::of(dir.path(), dir.id()).unwrap();
+        assert!(
+            matches!(producer.read_plan(Some("/another/repo")).unwrap(), panel_control::Answered::Document(s) if s == document)
+        );
+        let panel = panel_contract::parse_document(
+            r#"{"milestone":"H3","deliverable":"D","lines":["working"]}"#,
+        )
+        .unwrap();
+        window
+            .all_panes_mut()
+            .find(|p| p.name == origins[0])
+            .unwrap()
+            .panel_state
+            .deliver(1, "flow", panel, SystemTime::now())
+            .unwrap();
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
+        let shapes = frame(&mut window, &ctx, vec![]);
+        for expected in [
+            "published ",
+            "roadmap.md",
+            "Build - 0/1",
+            "Feature",
+            "Off the plan",
+        ] {
+            assert!(the_text_queued_up(&shapes, expected), "missing {expected}");
+        }
+        let first = window.board.card_rect(origins[0]).unwrap();
+        let second = window.board.card_rect(origins[1]).unwrap();
+        assert!(
+            first.top() < second.top(),
+            "deliverable card must precede the off-plan card"
+        );
+        let mut report = Vec::new();
+        window.board.timing.publish(&mut report).unwrap();
+        let report = String::from_utf8(report).unwrap();
+        assert!(report.contains("board plan projection:"));
+        assert!(report.contains("board plan paint enqueue:"));
+    }
 }

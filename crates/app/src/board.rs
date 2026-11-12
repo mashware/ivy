@@ -1,15 +1,25 @@
 //! Read-only live board of every console, grouped by project. Its state never owns a console or
 //! producer authority.
+#[path = "roadmap_file.rs"]
+mod files;
 mod input;
 mod layout;
 mod model;
+pub(crate) mod plans;
 pub(crate) mod probe;
+mod roadmap;
 mod view;
 
 use eframe::egui;
 use std::time::Instant;
 
 pub(crate) struct State {
+    pub(crate) plans: plans::Store,
+    files: Option<files::Reader>,
+    file_snapshots: Vec<files::Snapshot>,
+    file_config: std::collections::BTreeMap<String, std::path::PathBuf>,
+    file_reload: bool,
+    roadmap_window: (usize, usize),
     pub(crate) enabled: bool,
     pub(crate) probe: Option<probe::Probe>,
     input_frame: Option<u64>,
@@ -35,6 +45,12 @@ pub(crate) struct State {
 impl Default for State {
     fn default() -> Self {
         Self {
+            plans: plans::Store::default(),
+            files: None,
+            file_snapshots: Vec::new(),
+            file_config: Default::default(),
+            file_reload: false,
+            roadmap_window: (2, 3),
             enabled: true,
             probe: None,
             input_frame: None,
@@ -81,7 +97,11 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, area: egui::R
         return;
     }
     let started = Instant::now();
-    let sections = model::sections(window, std::time::SystemTime::now());
+    let mut sections = model::sections(window, std::time::SystemTime::now());
+    let plan_started = Instant::now();
+    roadmap::refresh_files(window, ui.ctx());
+    roadmap::enrich(window, &mut sections, std::time::SystemTime::now());
+    window.board.timing.plan_projection(plan_started.elapsed());
     let panes: Vec<usize> = sections
         .iter()
         .flat_map(|s| &s.entries)
@@ -131,4 +151,12 @@ pub(crate) fn activate(window: &mut crate::Window, ctx: &egui::Context, target: 
     window.board.timing.navigation(changed);
     window.board.original = None;
     input::close(window, ctx);
+}
+
+pub(crate) fn configure(window: &mut crate::Window, settings: &crate::settings::Settings) {
+    if window.board.file_config != settings.roadmaps {
+        window.board.file_config = settings.roadmaps.clone();
+        window.board.file_reload = true;
+    }
+    window.board.roadmap_window = (settings.roadmap_window.done, settings.roadmap_window.next);
 }

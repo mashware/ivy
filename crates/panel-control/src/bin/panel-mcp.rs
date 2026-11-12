@@ -8,8 +8,8 @@
 //! ticket's day, and a second workspace member costs entries in six guard lists this delivery
 //! already has to pay.
 //!
-//! **It exposes the panel and split verbs the channel serves**, plus `plan_set`, `plan_get`, and
-//! `plan_retire` for project roadmaps: `panel_set`, `panel_get`, `panel_patch`, the
+//! **It exposes the panel and split verbs the channel serves**, plus plan_set, plan_get, and
+//! plan_retire for project roadmaps: `panel_set`, `panel_get`, `panel_patch`, the
 //! retirement verb, and the three `split_*` that let an agent open, read and close a console of its
 //! own. Each one is advertised because each one is answered; their authority lives on the window's
 //! side of the channel.

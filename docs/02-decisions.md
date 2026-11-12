@@ -9200,9 +9200,9 @@ three facts:
 
 - MCP is scoped by `PANEL_ID`, so a shared canvas several agents edit in turns would need either a
   hole in that rule or a lock nobody can enforce. One owner per block needs neither.
-- A roadmap belongs to a project, not to a console. Several consoles in one project would publish
-  competing copies, and a project with no console would have none. The file in the repository is
-  already the single source; concurrent edits are git's problem, not the app's.
+- A roadmap belongs to a project, not to a console. Several consoles in one project share the
+  published plan; the repository file remains the fallback for projects without a publication.
+  Concurrent edits to that file are git's problem, not the app's.
 - An agent acts only on its own turns. State that changes outside it — a pull request merged on the
   forge — would go stale in an agent's block. A script on a loop keeps it current at no token cost,
   which is why the file transport is part of the contract and not an afterthought (D17).

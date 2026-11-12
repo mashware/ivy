@@ -29,6 +29,7 @@ use crate::wire::{AgentSnapshot, Framing, Incoming, Reply, Request, Side, write_
 struct Services {
     reader: Option<ReadDocument>,
     session: Option<SessionHandler>,
+    plan_reader: Arc<std::sync::Mutex<Option<ReadPlan>>>,
 }
 
 /// How long a publication waits for the window to take it.
@@ -76,6 +77,9 @@ const MAX_CONNECTIONS: usize = 8;
 pub type Connection = u64;
 
 /// Reads the last document committed by this pane without asking the window to run a pass.
+/// Reads a committed project plan on the connection thread.
+pub type ReadPlan = Arc<dyn Fn() -> Reply + Send + Sync>;
+
 pub type ReadDocument = Arc<dyn Fn() -> Result<String, String> + Send + Sync>;
 
 /// What a connection asks of the window.
@@ -160,6 +164,7 @@ pub enum Answer {
 
 /// A pane's listening channel. Ends when it is dropped.
 pub struct Channel {
+    plan_reader: Arc<std::sync::Mutex<Option<ReadPlan>>>,
     stop: Arc<AtomicBool>,
     /// How many threads this channel still has alive, acceptor included.
     ///
@@ -214,7 +219,9 @@ impl Channel {
         let services = Services {
             reader: read_document,
             session: session_handler,
+            plan_reader: Arc::default(),
         };
+        let plan_reader = services.plan_reader.clone();
         let listener = endpoint::bind(dir, id)?;
         let (stopper, acceptor) = endpoint::acceptor(listener)?;
         let stop = Arc::new(AtomicBool::new(false));
@@ -244,11 +251,17 @@ impl Channel {
             })?;
 
         Ok(Self {
+            plan_reader,
             stop,
             alive,
             acceptor: Some(acceptor),
             stopper: Some(stopper),
         })
+    }
+
+    /// Updates the pane-scoped capability after project discovery changes.
+    pub fn set_plan_reader(&self, reader: ReadPlan) {
+        *self.plan_reader.lock().unwrap() = Some(reader);
     }
 
     /// How many of this channel's threads are still running.
@@ -567,7 +580,15 @@ fn converse(
             {
                 used_panel_protocol = true;
             }
-            let (reply, last) = answer(incoming, connection, to_the_window, &services.reader, wake);
+            let plan_reader = if matches!(incoming, Incoming::Request(Request::PlanGet)) {
+                services.plan_reader.lock().unwrap().clone()
+            } else {
+                None
+            };
+            let (reply, last) = match plan_reader {
+                Some(read) => (read(), false),
+                None => answer(incoming, connection, to_the_window, &services.reader, wake),
+            };
             if write_reply(&mut stream, &reply).is_err() || last {
                 break 'connected;
             }
@@ -641,6 +662,13 @@ fn answer(
                         to_the_window,
                         wake,
                     ),
+                    false,
+                ),
+                Err(panel_contract::Problem::TooBig) => (
+                    Reply::Failed(format!(
+                        "a plan is over {} KiB",
+                        panel_contract::MAX_BYTES / 1024
+                    )),
                     false,
                 ),
                 Err(problem) => (Reply::Failed(problem.to_string()), false),

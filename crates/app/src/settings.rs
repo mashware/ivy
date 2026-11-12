@@ -595,6 +595,7 @@ impl Settings {
     /// span: taking it inside would force passing it through three constructors with dozens of
     /// calls, and none of them configures anything.
     pub(crate) fn apply_to(&self, window: &mut crate::Window) {
+        crate::board::configure(window, self);
         window.chrome.agent_preferences = crate::agent_signals::Enabled {
             claude: self.agent_claude,
             codex: self.agent_codex,
@@ -2381,7 +2382,11 @@ mod tests {
         /// artifact to satisfy a test, which is the tail wagging the dog.
         const DRAWN_RULE: char = '\u{2500}';
 
-        const SOURCES: [(&str, &str); 49] = [
+        const SOURCES: [(&str, &str); 53] = [
+            ("board/plans.rs", include_str!("board/plans.rs")),
+            ("board/plans/disk.rs", include_str!("board/plans/disk.rs")),
+            ("board/roadmap.rs", include_str!("board/roadmap.rs")),
+            ("roadmap_file.rs", include_str!("roadmap_file.rs")),
             ("git_process.rs", include_str!("git_process.rs")),
             ("project.rs", include_str!("project.rs")),
             ("project/tests.rs", include_str!("project/tests.rs")),

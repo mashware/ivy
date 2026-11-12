@@ -21,16 +21,22 @@ pub(crate) fn open_with_sessions(
         sessions,
         Arc::clone(&wake),
     ) {
-        Ok(channel) => Some(PaneControl {
-            _channel: channel,
-            inbox,
-            #[cfg(test)]
-            test_sender,
-            wake,
-            waiting_on_the_window: Vec::new(),
-            did: Control::default(),
-            reads,
-        }),
+        Ok(channel) => {
+            channel.set_plan_reader(Arc::new(|| {
+                panel_control::Reply::Failed("this console's project is not known yet".into())
+            }));
+            Some(PaneControl {
+                plan_identity: None,
+                _channel: channel,
+                inbox,
+                #[cfg(test)]
+                test_sender,
+                wake,
+                waiting_on_the_window: Vec::new(),
+                did: Control::default(),
+                reads,
+            })
+        }
         // **Binding nothing on a platform that cannot assert who may connect is policy, not a
         // fault, so it is not reported.** Said once per pane at every start it reads as a broken
         // terminal, and the person reading it has nothing to do about it: the platform gets its
@@ -43,5 +49,11 @@ pub(crate) fn open_with_sessions(
             );
             None
         }
+    }
+}
+
+impl PaneControl {
+    pub(crate) fn install_plan_reader(&self, reader: panel_control::listener::ReadPlan) {
+        self._channel.set_plan_reader(reader);
     }
 }
