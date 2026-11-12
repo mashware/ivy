@@ -630,19 +630,16 @@ fn answer(
         Incoming::Request(Request::PlanSet { document }) => {
             match panel_contract::plan::parse_document_noting(&document) {
                 Ok((plan, dropped)) => (
-                    with_what_fell(
-                        ask_the_window(
-                            Wants::Text,
-                            What::PlanSet {
-                                document,
-                                plan,
-                                dropped: dropped.clone(),
-                            },
-                            connection,
-                            to_the_window,
-                            wake,
-                        ),
-                        &dropped,
+                    ask_the_window(
+                        Wants::Text,
+                        What::PlanSet {
+                            document,
+                            plan,
+                            dropped,
+                        },
+                        connection,
+                        to_the_window,
+                        wake,
                     ),
                     false,
                 ),
@@ -1624,10 +1621,11 @@ mod tests {
         };
         assert!(document.contains("\"mark\":\"info\""));
         assert_eq!(plan.title.as_deref(), Some("Roadmap"));
-        assert!(dropped.sentence().unwrap().contains("info"));
+        let dropped_note = dropped.sentence().unwrap();
+        assert!(dropped_note.contains("info"));
         delivery
             .answer
-            .send(Answer::Text("published for Demo".into()))
+            .send(Answer::Text(format!("published for Demo; {dropped_note}")))
             .unwrap();
         let reply = read_reply(&mut client);
         assert!(reply.contains("published for Demo"), "{reply}");
