@@ -48,6 +48,8 @@ impl Store {
                 let restored = disk.restore();
                 *shared.lock().unwrap() = restored;
                 ctx.request_repaint();
+                // Bounded: dropping the Store drops its sole sender; after queued jobs drain,
+                // `recv` returns disconnected. The worker is not joined, so the UI does not wait.
                 while let Ok(job) = receiver.recv() {
                     let answer = apply(&shared, &mut disk, &job.identity, job.what);
                     let _ = job.answer.send(answer);
