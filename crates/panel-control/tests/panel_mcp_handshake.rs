@@ -8,7 +8,8 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-/// Starts the bridge with exactly `env`, sends it one «initialize» request and returns the reply.
+/// Starts the bridge with `env` as its pane identity (see [`exchange`]), sends it one «initialize»
+/// request and returns the reply.
 fn handshake(env: &[(&str, &str)]) -> serde_json::Value {
     exchange(
         env,
@@ -150,6 +151,10 @@ fn a_tool_call_tells_a_missing_identity_from_a_broken_one() {
         ),
         (&[("PANEL_ID", "a1b2c3d4")][..], "no directory"),
         (&[("PANEL_DIR", dir)][..], "a directory with no identifier"),
+        (
+            &[("PANEL_ID", dir), ("PANEL_DIR", "a1b2c3d4")][..],
+            "the halves swapped",
+        ),
         (
             &[("PANEL_ID", "a1b2c3d4"), ("PANEL_DIR", "ivy-a1b2c3d4")][..],
             "a relative directory",

@@ -65,26 +65,38 @@ impl Producer {
         let [id, dir] = panel_contract::ENV_NAMES.map(std::env::var_os);
         let unset =
             |value: &Option<std::ffi::OsString>| value.as_deref().is_none_or(|v| v.is_empty());
-        let refusal = if unset(&id) && unset(&dir) {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                "this program is not running inside a pane of this terminal",
-            )
-        } else {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "PANEL_ID or PANEL_DIR is set, but the two are not a whole pane identity (one is \
-                 missing or empty, the identifier is not text, or the directory is not absolute): \
-                 check how your client forwards them",
-            )
-        };
-        let (id, dir) = whole_identity(id.as_deref(), dir.as_deref()).ok_or(refusal)?;
+        let outside = unset(&id) && unset(&dir);
+        let (id, dir) = whole_identity(id.as_deref(), dir.as_deref()).ok_or_else(|| {
+            if outside {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "this program is not running inside a pane of this terminal",
+                )
+            } else {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "PANEL_ID or PANEL_DIR is set, but the two are not a whole pane identity (one \
+                     is missing or empty, the identifier is not text, or the directory is not \
+                     absolute): check how your client forwards them",
+                )
+            }
+        })?;
+        // Where no channel binds, a live console is unreachable by construction: say that, not
+        // that the console went away.
+        if !endpoint::BINDS {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "this platform has no control channel yet: publish this console's panel as a file \
+                 in PANEL_DIR",
+            ));
+        }
 
         // A whole identity that cannot be reached is the common real failure — the console closed,
-        // its directory gone — and the bare system error names neither.
+        // its directory gone — and the bare system error names neither. Its kind is its own, so a
+        // caller matching on kinds does not read it as «outside any pane».
         Self::of(dir, id).map_err(|failure| {
             io::Error::new(
-                failure.kind(),
+                io::ErrorKind::NotConnected,
                 format!(
                     "this console's panel could not be reached at {} ({failure})",
                     dir.display()

@@ -253,7 +253,15 @@ mod tests {
     fn binding_is_what_binds_says() {
         let panel = PanelDir::create().expect("create the panel directory");
 
-        assert_eq!(bind(panel.path(), panel.id()).is_ok(), BINDS);
+        let bound = bind(panel.path(), panel.id());
+        if BINDS {
+            bound.expect("BINDS says this platform binds, and binding failed");
+        } else {
+            let refusal = bound
+                .err()
+                .expect("BINDS says this platform does not bind, and it bound");
+            assert_eq!(refusal.kind(), io::ErrorKind::Unsupported, "{refusal}");
+        }
     }
 
     /// Two panes are two channels, asserted by **connecting** rather than by comparing names: a

@@ -9346,8 +9346,10 @@ call with a broken identity — one variable carrying something but the identity
 refused with its own message, naming the client's forwarding rather than «not in a pane»; both
 absent or empty is a program outside any pane. And because Ivy must never hand out a directory its
 own bridge refuses, the runtime directory ignores a relative `XDG_RUNTIME_DIR`, as the XDG
-specification requires — saying so once on standard error — and falls back to the system
-temporary, itself held to the same rule (a relative `TMPDIR` falls back to `/tmp`). A whole
+specification requires, and falls back to the system
+temporary, itself held to the same rule (a relative `TMPDIR` falls back to `/tmp` on Unix); a
+variable somebody set and Ivy had to ignore is named once on standard error, with the directory
+used instead. Where no channel binds, a tool call says so rather than blaming the console. A whole
 identity that cannot be reached is refused naming the directory it could not reach.
 
 **Two rules the text carries because of how harnesses use it.** It names *this server's* tools,
@@ -9366,12 +9368,14 @@ and panel.
   «no console» for an empty identifier while the first call connected with it; on Windows an empty
   identifier names one machine-wide endpoint. One function, `whole_identity`, now decides for both.
 - **Checking that the endpoint answers before promising a panel** — a stale or borrowed identity
-  (a multiplexer reattached after Ivy closed, a long-lived daemon carrying another console's
-  variables) is real but rare, and its first call already says why it
-  failed; probing on every handshake buys a message, not a panel.
-- **Telling the agent to defer to a file producer already painting the pane** — the agent cannot
-  tell its own earlier panel from somebody else's after a restart, so the rule would mostly stop
-  agents publishing at all.
+  (a multiplexer reattached after Ivy closed, an editor or daemon started from another console) is
+  real but rare. A stale one fails at its first call, naming the directory it could not reach; a
+  borrowed one from a console still open publishes into that console, and nothing the bridge can
+  see tells it apart from its own: it is the launcher that carried the wrong variables. Probing on
+  every handshake would buy a message for the first case and nothing for the second.
+- **Telling the agent never to publish while a file producer paints the pane** — it would mostly
+  stop agents publishing at all. What the text asks instead, after a restart, is to republish only
+  a document it recognises as its own: `panel_get` names no source, so the agent judges by content.
 - **Reading the environment where the reply is built** — a unit test would inherit the identity of
   the console running the suite; the read stays in `main`, covered by a test that starts the binary
   with its own environment.
