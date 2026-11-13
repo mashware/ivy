@@ -29,6 +29,7 @@ use crate::wire::{AgentSnapshot, Framing, Incoming, Reply, Request, Side, write_
 struct Services {
     reader: Option<ReadDocument>,
     session: Option<SessionHandler>,
+    publisher: Option<PublishHandler>,
     plan_reader: Arc<std::sync::Mutex<Option<ReadPlan>>>,
 }
 
@@ -82,6 +83,15 @@ pub type ReadPlan = Arc<dyn Fn() -> Reply + Send + Sync>;
 
 pub type ReadDocument = Arc<dyn Fn() -> Result<String, String> + Send + Sync>;
 
+/// Handles an attested publication on its connection thread and returns an admission result.
+/// Implementations should use a bounded nonblocking queue and must not wait for a UI pass.
+pub type PublishHandler = Arc<dyn Fn(Peer, Connection, String) -> Reply + Send + Sync>;
+
+/// Authority that must still be current when an admitted overlay reaches the window.
+pub trait OverlayAuthority: std::fmt::Debug + Send + Sync {
+    fn current(&self) -> bool;
+}
+
 /// What a connection asks of the window.
 #[derive(Debug)]
 pub struct Delivery {
@@ -103,6 +113,19 @@ pub enum What {
     AgentSignal(Option<AgentSnapshot>),
     /// Publish this, under this source.
     Publish { source: String, panel: Panel },
+    /// Ordinary holder publication with the optional native peer witness for hook authorization.
+    PublishAttested {
+        source: String,
+        panel: Panel,
+        peer: Arc<Peer>,
+    },
+    /// An authenticated hook overlay admitted off-frame for apply beside ordinary panel writes.
+    Overlay {
+        panel: Panel,
+        holder: Connection,
+        incarnation: u64,
+        authority: Arc<dyn OverlayAuthority>,
+    },
     /// Publish the parsed plan document for the project of this caller's pane.
     PlanSet {
         document: String,
@@ -216,9 +239,31 @@ impl Channel {
         session_handler: Option<SessionHandler>,
         wake: Arc<dyn Fn() + Send + Sync>,
     ) -> io::Result<Self> {
+        Self::open_with_authorization_services(
+            dir,
+            id,
+            to_the_window,
+            read_document,
+            session_handler,
+            None,
+            wake,
+        )
+    }
+
+    /// Adds an independent panel authorization service, available regardless of session recovery.
+    pub fn open_with_authorization_services(
+        dir: &Path,
+        id: &str,
+        to_the_window: SyncSender<Delivery>,
+        read_document: Option<ReadDocument>,
+        session_handler: Option<SessionHandler>,
+        publisher: Option<PublishHandler>,
+        wake: Arc<dyn Fn() + Send + Sync>,
+    ) -> io::Result<Self> {
         let services = Services {
             reader: read_document,
             session: session_handler,
+            publisher,
             plan_reader: Arc::default(),
         };
         let plan_reader = services.plan_reader.clone();
@@ -410,9 +455,8 @@ fn serve(
         return;
     }
 
-    let peer = services
-        .session
-        .as_ref()
+    let peer = (services.session.is_some() || services.publisher.is_some())
+        .then_some(())
         .map(|_| Peer::capture(&stream).map_err(|_| "verified socket peer unavailable".to_owned()));
     alive.fetch_add(1, Ordering::Relaxed);
     let mut refusable = stream.try_clone().ok();
@@ -501,6 +545,7 @@ fn converse(
     let mut closing_read_answered = false;
     let mut used_panel_protocol = false;
     let mut saw_session = false;
+    let mut saw_publish = false;
 
     'connected: loop {
         let closing = stop.load(Ordering::Relaxed);
@@ -574,6 +619,19 @@ fn converse(
                 }
                 continue;
             }
+            if let Incoming::Request(Request::PanelPublish { document }) = &incoming {
+                saw_publish = true;
+                let reply = match (&services.publisher, &peer) {
+                    (Some(handler), Some(Ok(peer))) if peer.is_alive() => {
+                        handler(peer.clone(), connection, document.clone())
+                    }
+                    _ => Reply::Failed("publisher identity is unavailable".into()),
+                };
+                if write_reply(&mut stream, &reply).is_err() {
+                    break 'connected;
+                }
+                continue;
+            }
             // Session helpers never acquire panel ownership, enqueue a close, or wake the UI.
             // Malformed session traffic likewise cannot create an owner to release.
             if matches!(&incoming, Incoming::Request(request) if !matches!(request, Request::NotServed(_)))
@@ -587,7 +645,18 @@ fn converse(
             };
             let (reply, last) = match plan_reader {
                 Some(read) => (read(), false),
-                None => answer(incoming, connection, to_the_window, &services.reader, wake),
+                None => answer(
+                    incoming,
+                    connection,
+                    to_the_window,
+                    &services.reader,
+                    services
+                        .publisher
+                        .is_some()
+                        .then(|| peer.as_ref().and_then(|p| p.as_ref().ok()).cloned())
+                        .flatten(),
+                    wake,
+                ),
             };
             if write_reply(&mut stream, &reply).is_err() || last {
                 break 'connected;
@@ -600,7 +669,7 @@ fn converse(
 
     // **The hold dies with the connection, and this is the only place that says so.** Without it a
     // crashed agent would freeze its pane's panel for ever and the file would never be read again.
-    if used_panel_protocol || !saw_session {
+    if used_panel_protocol || (!saw_session && !saw_publish) {
         let (answering, _unheard) = sync_channel(1);
         let _ = to_the_window.send(Delivery {
             connection,
@@ -622,6 +691,7 @@ fn answer(
     connection: Connection,
     to_the_window: &SyncSender<Delivery>,
     read_document: &Option<ReadDocument>,
+    holder_peer: Option<Peer>,
     wake: &Arc<dyn Fn() + Send + Sync>,
 ) -> (Reply, bool) {
     match incoming {
@@ -640,7 +710,14 @@ fn answer(
             match panel_contract::parse_document_noting(&document) {
                 Ok((panel, dropped)) => (
                     with_what_fell(
-                        publish(panel, source, connection, to_the_window, wake),
+                        publish(
+                            panel,
+                            source,
+                            connection,
+                            holder_peer.clone(),
+                            to_the_window,
+                            wake,
+                        ),
                         &dropped,
                     ),
                     false,
@@ -648,6 +725,10 @@ fn answer(
                 Err(problem) => (Reply::Failed(problem.to_string()), false),
             }
         }
+        Incoming::Request(Request::PanelPublish { .. }) => (
+            Reply::Failed("publication service unavailable".into()),
+            false,
+        ),
         Incoming::Request(Request::PlanSet { document }) => {
             match panel_contract::plan::parse_document_noting(&document) {
                 Ok((plan, dropped)) => (
@@ -804,12 +885,20 @@ fn publish(
     panel: Panel,
     source: String,
     connection: Connection,
+    peer: Option<Peer>,
     to_the_window: &SyncSender<Delivery>,
     wake: &Arc<dyn Fn() + Send + Sync>,
 ) -> Reply {
     ask_the_window(
         Wants::Taken,
-        What::Publish { source, panel },
+        match peer {
+            Some(peer) => What::PublishAttested {
+                source,
+                panel,
+                peer: Arc::new(peer),
+            },
+            None => What::Publish { source, panel },
+        },
         connection,
         to_the_window,
         wake,
@@ -1041,6 +1130,47 @@ mod tests {
         assert!(matches!(closed.what, What::Closed));
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn panel_publish_is_admitted_off_frame_and_publisher_disconnect_is_silent() {
+        let dir = PanelDir::create().unwrap();
+        let (sender, inbox) = sync_channel(8);
+        let (called_tx, called_rx) = sync_channel(1);
+        let channel = Channel::open_with_authorization_services(
+            dir.path(),
+            dir.id(),
+            sender,
+            None,
+            None,
+            Some(Arc::new(move |_peer, _connection, document| {
+                called_tx.send(document).unwrap();
+                Reply::PublishAccepted
+            })),
+            Arc::new(|| {}),
+        )
+        .unwrap();
+        let mut stream = endpoint::connect(dir.path(), dir.id()).unwrap();
+        stream
+            .write_all(b"{\"tool\":\"panel_publish\",\"document\":{\"lines\":[\"hook\"]}}\n")
+            .unwrap();
+        assert_eq!(read_reply(&mut stream), r#"{"ok":true}"#);
+        assert_eq!(
+            called_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            r#"{"lines":["hook"]}"#
+        );
+        assert!(
+            inbox.try_recv().is_err(),
+            "publisher waited on or entered the window inbox"
+        );
+        drop(stream);
+        std::thread::sleep(Duration::from_millis(30));
+        assert!(
+            inbox.try_recv().is_err(),
+            "publisher-only close enqueued Closed"
+        );
+        drop(channel);
+    }
+
     #[test]
     fn agent_signal_queue_full_replies_retryable_over_the_socket_but_panel_does_not() {
         let dir = PanelDir::create().unwrap();
@@ -1136,7 +1266,7 @@ mod tests {
 
         let panel = panel_contract::parse_document("{\"lines\":[]}").expect("a panel");
         let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(|| {});
-        let reply = publish(panel, "flow".to_owned(), 1, &to_the_window, &wake);
+        let reply = publish(panel, "flow".to_owned(), 1, None, &to_the_window, &wake);
 
         assert!(
             matches!(&reply, Reply::Failed(why) if why.contains("not draining")),

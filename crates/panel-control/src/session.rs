@@ -3,7 +3,7 @@
 mod helper;
 mod peer;
 
-pub use helper::{exchange, hook_request, update_request};
+pub use helper::{exchange, exchange_line, hook_request, publish_document, update_request};
 pub use peer::Peer;
 
 use std::path::Path;
