@@ -3,11 +3,11 @@
 #![cfg(target_os = "linux")]
 
 use panel_contract::PanelDir;
-use panel_control::{Channel, Reply, session};
+use panel_control::{session, Channel, Reply};
 use std::io::Write;
 use std::process::{Command, Stdio};
-use std::sync::Arc;
 use std::sync::mpsc::sync_channel;
+use std::sync::Arc;
 use std::time::Duration;
 
 #[test]
@@ -134,7 +134,11 @@ fn publish_cli_is_silent_without_identity_and_rejects_bad_input_before_connect()
 fn publish_cli_maps_unheld_and_policy_refusal_to_the_declared_output() {
     let dir = PanelDir::create().unwrap();
     let (sender, inbox) = sync_channel(1);
-    let callback = Arc::new(|_peer, _connection, _document| Reply::PublishUnheld);
+    let (document_sender, document_receiver) = sync_channel(1);
+    let callback = Arc::new(move |_peer, _connection, document| {
+        document_sender.send(document).unwrap();
+        Reply::PublishUnheld
+    });
     let _channel = Channel::open_with_authorization_services(
         dir.path(),
         dir.id(),
@@ -167,6 +171,12 @@ fn publish_cli_maps_unheld_and_policy_refusal_to_the_declared_output() {
         "{\"ok\":false,\"code\":\"unheld\",\"message\":\"this panel has no holder\"}\n"
     );
     assert!(output.stderr.is_empty());
+    assert_eq!(
+        document_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap(),
+        "{\"lines\":[\"x\"]}"
+    );
     assert!(inbox.try_recv().is_err());
 
     let dir = PanelDir::create().unwrap();

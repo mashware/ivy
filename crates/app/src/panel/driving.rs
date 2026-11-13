@@ -343,6 +343,8 @@ impl PanelState {
             return Err(held_by_somebody_else(&holder.source));
         }
 
+        self.overlay.replace(connection, source);
+        self.hook_source = None;
         self.holder = Some(Holder {
             connection,
             source: source.to_owned(),
@@ -446,6 +448,7 @@ impl PanelState {
         self.problem = None;
         self.drawn = None;
         self.holder = None;
+        self.overlay.clear();
         self.file_seen = match &baseline.file {
             FileGeneration::Missing => None,
             FileGeneration::Present { modified, .. } => Some(*modified),
@@ -472,6 +475,7 @@ impl PanelState {
             return Released::Nothing;
         }
         self.holder = None;
+        self.overlay.clear();
         self.layout = None;
         Released::Given
     }
@@ -479,6 +483,10 @@ impl PanelState {
     /// The source driving this panel, when one is.
     pub fn held_by(&self) -> Option<&str> {
         self.holder.as_ref().map(|held| held.source.as_str())
+    }
+
+    pub(super) fn displayed_source(&self) -> Option<&str> {
+        self.hook_source.as_deref().or_else(|| self.held_by())
     }
 
     /// Whether the connection holding this panel has had a file publication refused.

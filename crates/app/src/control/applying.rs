@@ -23,6 +23,44 @@ impl PaneControl {
     ) {
         while let Ok(delivery) = self.inbox.try_recv() {
             match delivery.what {
+                What::Overlay {
+                    panel,
+                    holder,
+                    incarnation,
+                    authority,
+                } => {
+                    if state.accepts_overlay(holder, incarnation)
+                        && authority.current()
+                        && state.apply_overlay(panel, now).is_ok()
+                    {
+                        self.did.overlaid += 1;
+                    } else {
+                        self.did.overlays_refused += 1;
+                        state.overlay_refused();
+                    }
+                }
+
+                What::PublishAttested {
+                    source,
+                    panel,
+                    peer,
+                } => {
+                    let answer = match state.deliver(delivery.connection, &source, panel, now) {
+                        Ok(()) => {
+                            if let Some(authority) = &self.authority {
+                                authority.capture(state, delivery.connection, &peer);
+                            }
+                            self.did.applied += 1;
+                            Answer::Taken
+                        }
+                        Err(why) => {
+                            self.did.refused += 1;
+                            Answer::Refused(why)
+                        }
+                    };
+                    let _ = delivery.answer.send(answer);
+                }
+
                 What::AgentSignal(snapshot) => {
                     let answer = signals
                         .receive(delivery.connection, snapshot, std::time::Instant::now())

@@ -17,17 +17,23 @@ use crate::painter::CellMetrics;
 use crate::tiling::{DIVIDER_THICKNESS, Orientation};
 use crate::{PANEL_GRIP, Pane, panel};
 
-/// Creates the interface-owned panel state before its channel receives the weak read capability.
-pub(crate) fn state_and_control_with_sessions(
+/// Creates the interface-owned state before its channel receives read and attestation capabilities.
+pub(crate) fn state_and_control_with_authority(
     ctx: &egui::Context,
     dir: Option<&PanelDir>,
     reads: crate::control::ReadActivity,
     sessions: Option<panel_control::session::SessionHandler>,
+    authority: Option<std::sync::Arc<panel::overlay::Authority>>,
 ) -> (panel::PanelState, Option<crate::control::PaneControl>) {
     let state = panel::PanelState::default();
     let control = dir.and_then(|dir| {
         let waker = ctx.clone();
         let wake = move || waker.request_repaint();
+        if let Some(authority) = authority {
+            return crate::control::open_with_authority(
+                dir, &state, reads, sessions, authority, wake,
+            );
+        }
         match sessions {
             Some(sessions) => {
                 crate::control::open_with_sessions(dir, state.reader(), reads, Some(sessions), wake)
