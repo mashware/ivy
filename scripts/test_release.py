@@ -304,7 +304,7 @@ class ReleaseTest(unittest.TestCase):
         missing = subprocess.run(builder, capture_output=True, text=True)
         self.assertIn("ivy-codex", missing.stderr)
         shutil.copy2(native_fixture, binaries / "ivy-codex")
-        built = subprocess.run(builder, capture_output=True, text=True)
+        built = subprocess.run(builder, capture_output=True, text=True, umask=0o077)
         self.assertEqual(built.returncode, 0, built.stderr)
         package = output / self.package.name
         validator = ["bash", str(SCRIPT.with_name("test-linux-package.sh")), str(package),

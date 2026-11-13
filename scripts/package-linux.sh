@@ -8,6 +8,8 @@ usage() {
 }
 binary_dir='' output_dir='' version=''
 export LC_ALL=C
+# Installed directories and control metadata must not inherit a private caller umask.
+umask 022
 while (($#)); do
     (($# >= 2)) || usage
     case "$1" in
