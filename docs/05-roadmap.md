@@ -522,13 +522,14 @@ one leaves a usable board.
   a card focuses its console, with D68's rules for reordering, vanished targets and maximized
   layouts. Nothing new is published yet, so this milestone needs no contract change. The Overview's
   code, its measurement span and its batches are removed or renamed in the same delivery. — done (#40)
-- [ ] **B2 — Project roadmaps from a file.** `roadmap.<name> = <path>` in the settings file and the
-  settings screen; the project is the Git repository that contains the file. Milestones are Markdown
-  task items (`- [x]` / `- [ ]`), the first unchecked one is in progress, and the board shows a
-  window around it — `roadmap.window = 2 3` by default (two done, three next). The file is watched
-  and repainted on change, read off the window thread with a size bound, and rendered inert like the
-  Markdown viewer (D72). A configured project with no open console still has its section. A missing
-  file, or one with no task items, says so in its block.
+- [x] **B2 — Project roadmaps from a file and published plans.** `roadmap.<name> = <path>` and
+  `roadmap.window = 2 3` (two done, three next by default). Markdown task items (`- [x]` / `- [ ]`)
+  form the fallback plan; the first unchecked one is in progress. A configured project's section
+  shows its published plan when present, otherwise its file plan. The published plan wins whole and
+  is persisted per project; `plan_retire` re-exposes the file. The file is watched and repainted on
+  change, read off the window thread with a size bound, and rendered inert like the Markdown viewer
+  (D72). A configured project with no open console still has its section. A missing file, or one
+  with no task items, says so in its block. — done (#53)
 - [ ] **B3 — Blocks published by producers.** New MCP tools put and remove a block by an id the
   producer chooses, scoped by `PANEL_ID` like everything else on that channel; the same document can
   be written as a file in `PANEL_DIR`, so a script that does not speak MCP publishes too (D17). Five

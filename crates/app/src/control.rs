@@ -255,6 +255,7 @@ fn measured_reader(reader: crate::panel::DocumentReader, reads: ReadActivity) ->
 
 /// What a pane keeps of its channel.
 pub struct PaneControl {
+    pub(crate) plan_identity: Option<Result<crate::project::Identity, String>>,
     /// Kept for its destructor: dropping it is what asks this pane's threads to end.
     _channel: Channel,
     /// What its connections have handed over and nobody has applied yet.
@@ -506,80 +507,7 @@ impl Window {
         whole_window: egui::Rect,
         metrics: &CellMetrics,
     ) {
-        // **What this costs is declared, and it is not zeal**: opening a console is a `fork`/`exec`
-        // and a graft inside the interface pass, and the frame's cost is split by subtraction — so
-        // whatever is not declared here is published as the framework's cost, the figure D3 judges
-        // egui by (**D13**). It goes to `timed_separately`, which is the window's own work and is
-        // already subtracted, exactly where the chord's split puts the same two jobs.
-        let before = std::time::Instant::now();
-        // Only panes queued by an earlier pass are reaped. A retirement accepted below therefore
-        // has its answer sent in this pass before any of its detached PTYs can be destroyed.
-        self.reap_one_retired();
-        // **Handles that name a console nobody is holding are dropped here, once per pass.** A pane
-        // can go by the chord, by a tab, or by the tree collapsing it, and every one of those paths
-        // would otherwise have to remember to prune: keeping the two in step by hand is exactly how a
-        // map comes to name a console that is gone.
-        let living: Vec<usize> = self.all_panes().map(|pane| pane.name).collect();
-        self.opened_by_agents.keep_only(&living);
-
-        let mut waiting: Vec<(usize, Delivery)> = Vec::new();
-        for pane in self.all_panes_mut() {
-            let name = pane.name;
-            let Some(control) = pane.control.as_mut() else {
-                continue;
-            };
-            for delivery in control.take_waiting_on_the_window() {
-                waiting.push((name, delivery));
-            }
-        }
-
-        for (origin, delivery) in waiting {
-            let answer = match delivery.what {
-                What::Open {
-                    side,
-                    program,
-                    args,
-                } => self
-                    .opening_for_a_connection(
-                        origin,
-                        delivery.connection,
-                        side,
-                        program,
-                        args,
-                        &OnScreen {
-                            ctx,
-                            whole_window,
-                            metrics,
-                        },
-                    )
-                    .map_or_else(Answer::Refused, Answer::Opened),
-                What::Read { pane, scrollback } => {
-                    self.reading_for_a_connection(origin, delivery.connection, &pane, scrollback)
-                }
-                What::Close { pane } => {
-                    self.closing_for_a_connection(origin, delivery.connection, &pane, ctx)
-                }
-                What::Retire => self.retiring_for_a_connection(origin, delivery.connection, ctx),
-                // **A closed connection takes its handles with it**, which is what D44 promises and
-                // what keeps the map bounded: an agent that opens consoles and dies must not leave
-                // names behind for as long as the window lives.
-                What::Closed => {
-                    self.opened_by_agents
-                        .forget_the_connection(origin, delivery.connection);
-                    // Nothing waits on a release —the thread that sends it is on its way out— so
-                    // there is nobody to answer and nothing to say.
-                    continue;
-                }
-                What::Publish { .. } | What::Get | What::Patch { .. } | What::AgentSignal(_) => {
-                    Answer::Refused("that request is not the window's".to_owned())
-                }
-            };
-            let _ = delivery.answer.send(answer);
-        }
-        if self.control.has_retired() {
-            ctx.request_repaint();
-        }
-        self.timed_separately += before.elapsed();
+        answer_windows_requests(self, ctx, whole_window, metrics);
     }
 
     /// Opens a console beside the one that asked, **without moving the focus**.
@@ -755,6 +683,96 @@ impl Window {
             Err(why) => Answer::Refused(why),
         }
     }
+}
+
+fn answer_windows_requests(
+    window: &mut Window,
+    ctx: &egui::Context,
+    whole_window: egui::Rect,
+    metrics: &CellMetrics,
+) {
+    // **What this costs is declared, and it is not zeal**: opening a console is a `fork`/`exec`
+    // and a graft inside the interface pass, and the frame's cost is split by subtraction — so
+    // whatever is not declared here is published as the framework's cost, the figure D3 judges
+    // egui by (**D13**). It goes to `timed_separately`, which is the window's own work and is
+    // already subtracted, exactly where the chord's split puts the same two jobs.
+    let before = std::time::Instant::now();
+    // Only panes queued by an earlier pass are reaped. A retirement accepted below therefore
+    // has its answer sent in this pass before any of its detached PTYs can be destroyed.
+    window.reap_one_retired();
+    // **Handles that name a console nobody is holding are dropped here, once per pass.** A pane
+    // can go by the chord, by a tab, or by the tree collapsing it, and every one of those paths
+    // would otherwise have to remember to prune: keeping the two in step by hand is exactly how a
+    // map comes to name a console that is gone.
+    let living: Vec<usize> = window.all_panes().map(|pane| pane.name).collect();
+    window.opened_by_agents.keep_only(&living);
+
+    let mut waiting: Vec<(usize, Delivery)> = Vec::new();
+    for pane in window.all_panes_mut() {
+        let name = pane.name;
+        let Some(control) = pane.control.as_mut() else {
+            continue;
+        };
+        for delivery in control.take_waiting_on_the_window() {
+            waiting.push((name, delivery));
+        }
+    }
+
+    for (origin, delivery) in waiting {
+        let Some(delivery) = crate::board::plans::dispatch(window, origin, delivery, ctx) else {
+            continue;
+        };
+        let answer = match delivery.what {
+            What::Open {
+                side,
+                program,
+                args,
+            } => window
+                .opening_for_a_connection(
+                    origin,
+                    delivery.connection,
+                    side,
+                    program,
+                    args,
+                    &OnScreen {
+                        ctx,
+                        whole_window,
+                        metrics,
+                    },
+                )
+                .map_or_else(Answer::Refused, Answer::Opened),
+            What::Read { pane, scrollback } => {
+                window.reading_for_a_connection(origin, delivery.connection, &pane, scrollback)
+            }
+            What::Close { pane } => {
+                window.closing_for_a_connection(origin, delivery.connection, &pane, ctx)
+            }
+            What::Retire => window.retiring_for_a_connection(origin, delivery.connection, ctx),
+            // **A closed connection takes its handles with it**, which is what D44 promises and
+            // what keeps the map bounded: an agent that opens consoles and dies must not leave
+            // names behind for as long as the window lives.
+            What::Closed => {
+                window
+                    .opened_by_agents
+                    .forget_the_connection(origin, delivery.connection);
+                // Nothing waits on a release —the thread that sends it is on its way out— so
+                // there is nobody to answer and nothing to say.
+                continue;
+            }
+            What::Publish { .. }
+            | What::Get
+            | What::Patch { .. }
+            | What::AgentSignal(_)
+            | What::PlanSet { .. }
+            | What::PlanGet
+            | What::PlanRetire => Answer::Refused("that request is not the window's".to_owned()),
+        };
+        let _ = delivery.answer.send(answer);
+    }
+    if window.control.has_retired() {
+        ctx.request_repaint();
+    }
+    window.timed_separately += before.elapsed();
 }
 
 #[cfg(test)]

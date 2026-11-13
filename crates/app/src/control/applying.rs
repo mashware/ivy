@@ -91,7 +91,12 @@ impl PaneControl {
                     self.defer_retirement(delivery);
                     break;
                 }
-                What::Open { .. } | What::Read { .. } | What::Close { .. } => {
+                What::Open { .. }
+                | What::Read { .. }
+                | What::Close { .. }
+                | What::PlanSet { .. }
+                | What::PlanGet
+                | What::PlanRetire => {
                     self.waiting_on_the_window.push(delivery);
                     (self.wake)();
                 }

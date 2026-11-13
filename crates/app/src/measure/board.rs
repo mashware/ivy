@@ -5,6 +5,8 @@ use std::{io::Write, time::Duration};
 #[derive(Default)]
 pub(crate) struct Board {
     mode: Option<bool>,
+    plan_projection: Series,
+    plan_paint: Series,
     cost: Duration,
     frame: Duration,
     touched: bool,
@@ -22,6 +24,12 @@ pub(crate) struct Board {
 }
 
 impl Board {
+    pub(crate) fn plan_projection(&mut self, cost: Duration) {
+        self.plan_projection.record(cost);
+    }
+    pub(crate) fn plan_paint(&mut self, cost: Duration) {
+        self.plan_paint.record(cost);
+    }
     pub(crate) fn set_mode(&mut self, mode: &str) {
         self.mode = match mode {
             "closed" => Some(false),
@@ -87,6 +95,16 @@ impl Board {
             to,
             "board application: frames={}, total={:?}, {} (input, projection and paint enqueue; excludes pane refresh and tessellation)",
             self.work.total, self.total, self.work
+        )?;
+        writeln!(
+            to,
+            "board plan projection: {} (included in board application, subtracted once)",
+            self.plan_projection
+        )?;
+        writeln!(
+            to,
+            "board plan paint enqueue: {} (included in board application, subtracted once)",
+            self.plan_paint
         )?;
         writeln!(
             to,

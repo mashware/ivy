@@ -8,7 +8,8 @@
 //! ticket's day, and a second workspace member costs entries in six guard lists this delivery
 //! already has to pay.
 //!
-//! **It exposes the seven verbs the channel serves**: `panel_set`, `panel_get`, `panel_patch`, the
+//! **It exposes the panel and split verbs the channel serves**, plus plan_set, plan_get, and
+//! plan_retire for project roadmaps: `panel_set`, `panel_get`, `panel_patch`, the
 //! retirement verb, and the three `split_*` that let an agent open, read and close a console of its
 //! own. Each one is advertised because each one is answered; their authority lives on the window's
 //! side of the channel.
@@ -25,7 +26,7 @@ use panel_control::{Answered, MAX_REQUEST, Producer, Side};
 /// The version answered when the client does not ask for one.
 ///
 /// **What a client asks for is echoed back when it asks**, which is unusual enough to say why: this
-/// server has no behaviour that varies with the version — it advertises the same seven operations
+/// server has no behaviour that varies with the version — it advertises the same operations
 /// and forwards each call through the pane's channel — so refusing a client over a date would break
 /// the connection for a difference that does not exist anywhere in this file.
 const PROTOCOL_VERSION: &str = "2025-06-18";
@@ -304,7 +305,7 @@ fn listed(words: &[&str]) -> String {
     }
 }
 
-/// The seven tools this build serves, with the shape of what each takes.
+/// The tools this build serves, with the shape of what each takes.
 fn tools() -> serde_json::Value {
     serde_json::json!({
         "tools": [
@@ -356,6 +357,28 @@ fn tools() -> serde_json::Value {
                                 its panel and close auxiliary consoles this connection still owns, \
                                 while preserving consoles the person has taken over.",
                 "inputSchema": {"type": "object", "properties": {}},
+            },
+            {
+                "name": "plan_set",
+                "description": "Publish the complete roadmap for this console's project. The project is always the project of the pane this server belongs to; the optional repo argument is accepted for compatibility and ignored. The published plan takes precedence over the configured roadmap file until plan_retire removes it, and Ivy persists the published document across restarts. Item marks use the closed vocabulary done, current, pending, wait or block; other marks are dropped and named in the reply.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "document": {"type": "object", "description": "The complete plan document, with milestones and items."},
+                        "repo": {"type": "string", "description": "Accepted for compatibility; project scope is always this console's project."}
+                    },
+                    "required": ["document"]
+                }
+            },
+            {
+                "name": "plan_get",
+                "description": "Read the published roadmap document for this console's project. The optional repo argument is accepted and ignored; scope comes from this console's pane. Returns only the published plan, which takes precedence over the configured file roadmap and is persisted across Ivy restarts, or reports that none is published.",
+                "inputSchema": {"type": "object", "properties": {"repo": {"type": "string"}}}
+            },
+            {
+                "name": "plan_retire",
+                "description": "Remove the published roadmap for this console's project so the configured file roadmap can show again. The optional repo argument is accepted and ignored; scope comes from this console's pane. Published plans persist across Ivy restarts until retired.",
+                "inputSchema": {"type": "object", "properties": {"repo": {"type": "string"}}}
             },
             {
                 "name": "panel_patch",
@@ -462,6 +485,9 @@ enum Ask {
     Publish(String, String),
     ReadTheDocument,
     Retire,
+    PlanSet(String, Option<String>),
+    PlanGet(Option<String>),
+    PlanRetire(Option<String>),
     Patch(String),
     Open(Side, Option<String>, Vec<String>),
     Read(String, bool),
@@ -481,7 +507,13 @@ fn what_it_did(ask: &Ask) -> &'static str {
         Ask::Close(_) => "closed",
         Ask::Patch(_) => "patched",
         Ask::Retire => "retired",
-        Ask::Publish(..) | Ask::ReadTheDocument | Ask::Open(..) | Ask::Read(..) => "published",
+        Ask::PlanRetire(..) => "retired",
+        Ask::PlanGet(..) => "read",
+        Ask::Publish(..)
+        | Ask::PlanSet(..)
+        | Ask::ReadTheDocument
+        | Ask::Open(..)
+        | Ask::Read(..) => "published",
     }
 }
 
@@ -503,6 +535,9 @@ fn called(
         "panel_set"
             | "panel_get"
             | "panel_retire"
+            | "plan_set"
+            | "plan_get"
+            | "plan_retire"
             | "panel_patch"
             | "split_open"
             | "split_read"
@@ -531,6 +566,31 @@ fn called(
         "panel_get" => Ask::ReadTheDocument,
         // Like `panel_get`, it takes no arguments; unknown arguments reach nothing and are ignored.
         "panel_retire" => Ask::Retire,
+        "plan_set" => {
+            let arguments = params.get("arguments").unwrap_or(&serde_json::Value::Null);
+            let Some(document) = arguments.get("document") else {
+                return succeeded(id, refusal("plan_set needs a \"document\""));
+            };
+            let repo = match arguments.get("repo") {
+                None => None,
+                Some(serde_json::Value::String(repo)) => Some(repo.clone()),
+                Some(_) => return succeeded(id, refusal("plan_set's \"repo\" is not text")),
+            };
+            Ask::PlanSet(document.to_string(), repo)
+        }
+        "plan_get" | "plan_retire" => {
+            let arguments = params.get("arguments").unwrap_or(&serde_json::Value::Null);
+            let repo = match arguments.get("repo") {
+                None => None,
+                Some(serde_json::Value::String(repo)) => Some(repo.clone()),
+                Some(_) => return succeeded(id, refusal("the optional \"repo\" is not text")),
+            };
+            if name == "plan_get" {
+                Ask::PlanGet(repo)
+            } else {
+                Ask::PlanRetire(repo)
+            }
+        }
         "panel_patch" => {
             let arguments = params.get("arguments").unwrap_or(&serde_json::Value::Null);
             // **Its presence and its shape are checked here, and what each op says is not**: the
@@ -619,6 +679,9 @@ fn called(
         Ask::Publish(source, document) => producer.publish(&source, &document),
         Ask::ReadTheDocument => producer.read_the_document(),
         Ask::Retire => producer.retire(),
+        Ask::PlanSet(document, repo) => producer.publish_plan(&document, repo.as_deref()),
+        Ask::PlanGet(repo) => producer.read_plan(repo.as_deref()),
+        Ask::PlanRetire(repo) => producer.retire_plan(repo.as_deref()),
         Ask::Patch(ops) => producer.patch(&ops),
         Ask::Open(side, program, args) => producer.open_a_pane(side, program.as_deref(), &args),
         Ask::Read(handle, scrollback) => producer.read_a_pane(&handle, scrollback),
@@ -965,11 +1028,11 @@ mod tests {
         );
     }
 
-    /// **This build advertises the seven verbs it serves**, and the assertion is on the whole list rather
+    /// **This build advertises every verb it serves**, and the assertion is on the whole list rather
     /// than on the presence of one: a tool advertised before it is answered is a promise taken back
     /// later, and an answered tool left unadvertised is one no client will ever call.
     #[test]
-    fn the_seven_verbs_this_build_serves_are_advertised() {
+    fn every_served_verb_is_advertised() {
         let answered = ask("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}");
 
         let tools = answered["result"]["tools"]
@@ -985,6 +1048,9 @@ mod tests {
                 "panel_set",
                 "panel_get",
                 "panel_retire",
+                "plan_set",
+                "plan_get",
+                "plan_retire",
                 "panel_patch",
                 "split_open",
                 "split_read",
@@ -1080,6 +1146,77 @@ mod tests {
             described("panel_patch").contains("named in the reply"),
             "panel_patch's description does not say a dropped word is named"
         );
+    }
+
+    #[test]
+    fn roadmap_tool_schemas_and_descriptions_pin_the_cross_repository_contract() {
+        let answered = ask("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}");
+        let tools = answered["result"]["tools"].as_array().unwrap();
+        let tool = |name: &str| tools.iter().find(|tool| tool["name"] == name).unwrap();
+        assert_eq!(
+            tool("plan_set")["inputSchema"]["required"],
+            serde_json::json!(["document"])
+        );
+        assert_eq!(
+            tool("plan_set")["inputSchema"]["properties"]["repo"]["type"],
+            "string"
+        );
+        for (name, clauses) in [
+            (
+                "plan_set",
+                vec![
+                    "this console's project",
+                    "ignored",
+                    "takes precedence",
+                    "persists",
+                    "done, current, pending, wait or block",
+                ],
+            ),
+            (
+                "plan_get",
+                vec!["this console's pane", "takes precedence", "persisted"],
+            ),
+            (
+                "plan_retire",
+                vec!["this console's pane", "configured file roadmap", "persist"],
+            ),
+        ] {
+            let description = tool(name)["description"].as_str().unwrap();
+            for clause in clauses {
+                assert!(
+                    description.contains(clause),
+                    "{name} misses {clause:?}: {description}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn roadmap_tools_are_dispatched_and_validate_required_documents_before_connecting() {
+        let missing = ask("{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\
+             \"params\":{\"name\":\"plan_set\",\"arguments\":{\"repo\":\"/ignored\"}}}");
+        assert_eq!(missing["result"]["isError"], true);
+        assert!(
+            missing["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("document")
+        );
+        let dispatched = ask("{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\
+             \"params\":{\"name\":\"plan_set\",\"arguments\":{\"document\":{\"milestones\":[]},\"repo\":\"/ignored\"}}}");
+        assert!(
+            dispatched.get("error").is_none(),
+            "plan_set was advertised but not dispatched: {dispatched}"
+        );
+        for name in ["plan_get", "plan_retire"] {
+            let dispatched = ask(&format!(
+                "{{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{{\"name\":\"{name}\",\"arguments\":{{\"repo\":\"/ignored\"}}}}}}"
+            ));
+            assert!(
+                dispatched.get("error").is_none(),
+                "{name} was advertised but not dispatched: {dispatched}"
+            );
+        }
     }
 
     /// The MCP result is a literal cross-repository contract, including its count labels.

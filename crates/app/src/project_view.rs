@@ -219,6 +219,7 @@ pub(crate) fn refresh(window: &mut Window, ctx: &egui::Context) {
         }
         state.theme = Some(window.theme);
     }
+    crate::board::plans::refresh_readers(window);
     let cost = started.elapsed();
     state.pending += cost;
     window.timed_separately += cost;

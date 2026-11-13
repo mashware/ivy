@@ -188,6 +188,40 @@ impl Producer {
         self.ask(serde_json::json!({"tool": "panel_get"}))
     }
 
+    /// Publishes a project plan document. The endpoint's pane determines the project; `repo` is
+    /// carried for producer compatibility but is intentionally ignored by the receiver.
+    pub fn publish_plan(&mut self, document: &str, repo: Option<&str>) -> io::Result<Answered> {
+        let document: serde_json::Value = serde_json::from_str(document).map_err(|failure| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("the plan is not JSON ({failure})"),
+            )
+        })?;
+        let mut request = serde_json::json!({"tool": "plan_set", "document": document});
+        if let Some(repo) = repo {
+            request["repo"] = serde_json::Value::String(repo.to_owned());
+        }
+        self.ask(request)
+    }
+
+    /// Reads the published project plan for this pane's project.
+    pub fn read_plan(&mut self, repo: Option<&str>) -> io::Result<Answered> {
+        let mut request = serde_json::json!({"tool": "plan_get"});
+        if let Some(repo) = repo {
+            request["repo"] = serde_json::Value::String(repo.to_owned());
+        }
+        self.ask(request)
+    }
+
+    /// Retires the published project plan for this pane's project.
+    pub fn retire_plan(&mut self, repo: Option<&str>) -> io::Result<Answered> {
+        let mut request = serde_json::json!({"tool": "plan_retire"});
+        if let Some(repo) = repo {
+            request["repo"] = serde_json::Value::String(repo.to_owned());
+        }
+        self.ask(request)
+    }
+
     /// Changes part of the document this connection published, leaving the rest of it alone.
     ///
     /// **It needs the hold that a publication takes**, unlike [`Producer::read_the_document`]: there

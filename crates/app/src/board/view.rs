@@ -40,7 +40,10 @@ pub(super) fn paint(window: &mut Window, parent: &mut egui::Ui, area: Rect, sect
     ui.separator();
     let font = egui::TextStyle::Monospace.resolve(ui.style());
     let line = ui.fonts_mut(|f| f.row_height(&font)).max(1.0) + 3.0;
-    let counts: Vec<usize> = sections.iter().map(|s| s.entries.len()).collect();
+    let counts: Vec<usize> = sections
+        .iter()
+        .flat_map(|s| s.bands.iter().map(|b| b.count))
+        .collect();
     let width = (ui.available_width() - ui.spacing().scroll.bar_width - 4.0).max(1.0);
     let grid = layout::layout(&counts, width, line);
     // Cards and entries are paired by position below; a layout that disagreed would drop cards.
@@ -84,31 +87,42 @@ pub(super) fn paint(window: &mut Window, parent: &mut egui::Ui, area: Rect, sect
         let visible = viewport.translate(origin);
         let clip = ui.clip_rect();
         let mut cards = grid.cards.iter();
-        for (section, header) in sections.iter().zip(&grid.headers) {
-            let header = header.translate(origin);
-            if header.intersects(visible) {
-                paint_header(ui, header, section, &theme, &font);
-            }
-            for (entry, card) in section.entries.iter().zip(cards.by_ref()) {
-                let rect = card.rect.translate(origin);
-                if !rect.intersects(visible) {
-                    continue;
+        let mut headers = grid.headers.iter();
+        for section in sections {
+            let mut entries = section.entries.iter();
+            for band in &section.bands {
+                let header = headers.next().unwrap().translate(origin);
+                if header.intersects(visible) {
+                    if let Some(title) = &band.title {
+                        let plan_paint_started = std::time::Instant::now();
+                        let galley = text(ui, title, header.width(), &font, theme.foreground());
+                        ui.painter().galley(header.min, galley, theme.foreground());
+                        window.board.timing.plan_paint(plan_paint_started.elapsed());
+                    } else {
+                        paint_header(ui, header, section, &theme, &font);
+                    }
                 }
-                window.board.timing.painted(1);
-                window
-                    .board
-                    .painted
-                    .push((entry.pane, rect.intersect(clip)));
-                paint_card(
-                    ui,
-                    rect,
-                    entry,
-                    section.ink(),
-                    selected == Some(entry.pane),
-                    &theme,
-                    &font,
-                    line,
-                );
+                for (entry, card) in entries.by_ref().take(band.count).zip(cards.by_ref()) {
+                    let rect = card.rect.translate(origin);
+                    if !rect.intersects(visible) {
+                        continue;
+                    }
+                    window.board.timing.painted(1);
+                    window
+                        .board
+                        .painted
+                        .push((entry.pane, rect.intersect(clip)));
+                    paint_card(
+                        ui,
+                        rect,
+                        entry,
+                        section.ink(),
+                        selected == Some(entry.pane),
+                        &theme,
+                        &font,
+                        line,
+                    );
+                }
             }
         }
     });

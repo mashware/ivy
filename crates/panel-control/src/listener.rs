@@ -29,6 +29,7 @@ use crate::wire::{AgentSnapshot, Framing, Incoming, Reply, Request, Side, write_
 struct Services {
     reader: Option<ReadDocument>,
     session: Option<SessionHandler>,
+    plan_reader: Arc<std::sync::Mutex<Option<ReadPlan>>>,
 }
 
 /// How long a publication waits for the window to take it.
@@ -76,6 +77,9 @@ const MAX_CONNECTIONS: usize = 8;
 pub type Connection = u64;
 
 /// Reads the last document committed by this pane without asking the window to run a pass.
+/// Reads a committed project plan on the connection thread.
+pub type ReadPlan = Arc<dyn Fn() -> Reply + Send + Sync>;
+
 pub type ReadDocument = Arc<dyn Fn() -> Result<String, String> + Send + Sync>;
 
 /// What a connection asks of the window.
@@ -99,6 +103,16 @@ pub enum What {
     AgentSignal(Option<AgentSnapshot>),
     /// Publish this, under this source.
     Publish { source: String, panel: Panel },
+    /// Publish the parsed plan document for the project of this caller's pane.
+    PlanSet {
+        document: String,
+        plan: panel_contract::plan::Plan,
+        dropped: Dropped,
+    },
+    /// Read the last published plan for the project of this caller's pane.
+    PlanGet,
+    /// Remove the published plan for the project of this caller's pane.
+    PlanRetire,
     /// Compatibility path for callers that still let the pane answer `panel_get` in its pass.
     Get,
     /// Change part of this pane's published document, leaving the rest of it alone.
@@ -150,6 +164,7 @@ pub enum Answer {
 
 /// A pane's listening channel. Ends when it is dropped.
 pub struct Channel {
+    plan_reader: Arc<std::sync::Mutex<Option<ReadPlan>>>,
     stop: Arc<AtomicBool>,
     /// How many threads this channel still has alive, acceptor included.
     ///
@@ -204,7 +219,9 @@ impl Channel {
         let services = Services {
             reader: read_document,
             session: session_handler,
+            plan_reader: Arc::default(),
         };
+        let plan_reader = services.plan_reader.clone();
         let listener = endpoint::bind(dir, id)?;
         let (stopper, acceptor) = endpoint::acceptor(listener)?;
         let stop = Arc::new(AtomicBool::new(false));
@@ -234,11 +251,17 @@ impl Channel {
             })?;
 
         Ok(Self {
+            plan_reader,
             stop,
             alive,
             acceptor: Some(acceptor),
             stopper: Some(stopper),
         })
+    }
+
+    /// Updates the pane-scoped capability after project discovery changes.
+    pub fn set_plan_reader(&self, reader: ReadPlan) {
+        *self.plan_reader.lock().unwrap() = Some(reader);
     }
 
     /// How many of this channel's threads are still running.
@@ -557,7 +580,15 @@ fn converse(
             {
                 used_panel_protocol = true;
             }
-            let (reply, last) = answer(incoming, connection, to_the_window, &services.reader, wake);
+            let plan_reader = if matches!(incoming, Incoming::Request(Request::PlanGet)) {
+                services.plan_reader.lock().unwrap().clone()
+            } else {
+                None
+            };
+            let (reply, last) = match plan_reader {
+                Some(read) => (read(), false),
+                None => answer(incoming, connection, to_the_window, &services.reader, wake),
+            };
             if write_reply(&mut stream, &reply).is_err() || last {
                 break 'connected;
             }
@@ -617,6 +648,52 @@ fn answer(
                 Err(problem) => (Reply::Failed(problem.to_string()), false),
             }
         }
+        Incoming::Request(Request::PlanSet { document }) => {
+            match panel_contract::plan::parse_document_noting(&document) {
+                Ok((plan, dropped)) => (
+                    ask_the_window(
+                        Wants::Text,
+                        What::PlanSet {
+                            document,
+                            plan,
+                            dropped,
+                        },
+                        connection,
+                        to_the_window,
+                        wake,
+                    ),
+                    false,
+                ),
+                Err(panel_contract::Problem::TooBig) => (
+                    Reply::Failed(format!(
+                        "a plan is over {} KiB",
+                        panel_contract::MAX_BYTES / 1024
+                    )),
+                    false,
+                ),
+                Err(problem) => (Reply::Failed(problem.to_string()), false),
+            }
+        }
+        Incoming::Request(Request::PlanGet) => (
+            ask_the_window(
+                Wants::PlanRead,
+                What::PlanGet,
+                connection,
+                to_the_window,
+                wake,
+            ),
+            false,
+        ),
+        Incoming::Request(Request::PlanRetire) => (
+            ask_the_window(
+                Wants::Text,
+                What::PlanRetire,
+                connection,
+                to_the_window,
+                wake,
+            ),
+            false,
+        ),
         // **The three `split_*` verbs travel to the window and are scoped there**, which is the only
         // party that can see two connections at once and that owns the tree a pane lives in.
         Incoming::Request(Request::SplitOpen {
@@ -713,6 +790,11 @@ fn answer(
 fn with_what_fell(reply: Reply, dropped: &Dropped) -> Reply {
     match reply {
         Reply::Ok => dropped.sentence().map_or(Reply::Ok, Reply::Lossy),
+        Reply::Text(text) => dropped
+            .sentence()
+            .map_or(Reply::Text(text.clone()), |sentence| {
+                Reply::Text(format!("{text}; {sentence}"))
+            }),
         other => other,
     }
 }
@@ -748,6 +830,8 @@ enum Wants {
     Opened,
     Read,
     Document,
+    Text,
+    PlanRead,
 }
 
 impl Wants {
@@ -759,6 +843,8 @@ impl Wants {
             Self::Opened => "an open",
             Self::Read => "a read",
             Self::Document => "a document read",
+            Self::Text => "a text reply",
+            Self::PlanRead => "a plan read",
         }
     }
 }
@@ -807,7 +893,13 @@ fn ask_the_window(
         }
         Ok(Answer::Opened(handle)) if matches!(wants, Wants::Opened) => Reply::Opened(handle),
         Ok(Answer::Text(text)) if matches!(wants, Wants::Read) => Reply::Text(text),
+        Ok(Answer::Text(text)) if matches!(wants, Wants::Text | Wants::PlanRead) => {
+            Reply::Text(text)
+        }
         Ok(Answer::Document(document)) if matches!(wants, Wants::Document) => {
+            Reply::Document(document)
+        }
+        Ok(Answer::Document(document)) if matches!(wants, Wants::PlanRead) => {
             Reply::Document(document)
         }
         // **A mismatched answer is refused rather than reshaped**, and only its *name* travels: a
@@ -1536,6 +1628,62 @@ mod tests {
             .send(Answer::Taken)
             .expect("answer the close");
         assert_eq!(read_reply(&mut client), "{\"ok\":true}");
+    }
+
+    #[test]
+    fn plan_verbs_parse_off_the_frame_and_forward_project_scope_operations() {
+        let pane = a_pane();
+        let mut client = pane.connect();
+        client.write_all(b"{\"tool\":\"plan_set\",\"repo\":\"/ignored\",\"document\":{\"title\":\"Roadmap\",\"milestones\":[{\"title\":\"M1\",\"items\":[{\"text\":\"work\",\"mark\":\"info\"}]}]}}\n").unwrap();
+        let delivery = pane.next_delivery();
+        let What::PlanSet {
+            document,
+            plan,
+            dropped,
+        } = delivery.what
+        else {
+            panic!(
+                "the window was not asked to publish a plan: {:?}",
+                delivery.what
+            );
+        };
+        assert!(document.contains("\"mark\":\"info\""));
+        assert_eq!(plan.title.as_deref(), Some("Roadmap"));
+        let dropped_note = dropped.sentence().unwrap();
+        assert!(dropped_note.contains("info"));
+        delivery
+            .answer
+            .send(Answer::Text(format!("published for Demo; {dropped_note}")))
+            .unwrap();
+        let reply = read_reply(&mut client);
+        assert!(reply.contains("published for Demo"), "{reply}");
+        assert!(
+            reply.contains("info"),
+            "dropped mark was not reported: {reply}"
+        );
+
+        client
+            .write_all(b"{\"tool\":\"plan_get\",\"repo\":\"/ignored\"}\n")
+            .unwrap();
+        let delivery = pane.next_delivery();
+        assert!(matches!(delivery.what, What::PlanGet));
+        delivery
+            .answer
+            .send(Answer::Document("{\"title\":\"Roadmap\"}".into()))
+            .unwrap();
+        assert_eq!(
+            read_reply(&mut client),
+            "{\"ok\":true,\"document\":{\"title\":\"Roadmap\"}}"
+        );
+
+        client.write_all(b"{\"tool\":\"plan_retire\"}\n").unwrap();
+        let delivery = pane.next_delivery();
+        assert!(matches!(delivery.what, What::PlanRetire));
+        delivery
+            .answer
+            .send(Answer::Text("retired for Demo".into()))
+            .unwrap();
+        assert!(read_reply(&mut client).contains("retired for Demo"));
     }
 
     /// Retirement keeps the connection identity and returns the window's exact outcome counts.

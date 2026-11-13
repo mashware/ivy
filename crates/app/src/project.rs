@@ -252,7 +252,7 @@ fn record_error(state: &mut Observation, error: String) {
     state.last_error = Some(error);
 }
 
-fn resolve(directory: &std::path::Path) -> Result<Identity, String> {
+pub(crate) fn resolve(directory: &std::path::Path) -> Result<Identity, String> {
     resolve_with_git(directory, std::ffi::OsStr::new("git"))
 }
 fn resolve_with_git(
