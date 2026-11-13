@@ -1,4 +1,4 @@
-use super::{ForegroundAncestry, NativeProcess};
+use super::{Ancestry, ForegroundAncestry, NativeProcess};
 use std::io::{self, BufRead, Read};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::path::Path;
@@ -43,6 +43,34 @@ pub(super) fn scope(pty: &crate::Pty) -> io::Result<Scope> {
 }
 
 impl Scope {
+    pub(super) fn classify_ancestry(&self, pid: u32) -> Ancestry {
+        self.diagnostic_ancestry(pid).unwrap_or(Ancestry::Unknown)
+    }
+
+    fn diagnostic_ancestry(&self, pid: u32) -> io::Result<Ancestry> {
+        if pid == 0 || !self.is_open() {
+            return Err(denied());
+        }
+        let peer = stat(pid)?;
+        let peer_lifetime = lifetime(pid, peer.birth)?;
+        if !self.is_open() || stat(self.child.pid)? != self.child {
+            return Err(denied());
+        }
+        let verdict = super::classify_snapshots(
+            pid,
+            (self.child.pid, self.child.parent, self.child.birth),
+            |process| stat(process).map(|s| (s.pid, s.parent, s.birth)),
+        )?;
+        if !self.is_open()
+            || stat(self.child.pid)? != self.child
+            || stat(pid)? != peer
+            || !alive(&peer_lifetime)
+        {
+            return Err(denied());
+        }
+        Ok(verdict)
+    }
+
     pub(super) fn is_open(&self) -> bool {
         self.stop
             .upgrade()

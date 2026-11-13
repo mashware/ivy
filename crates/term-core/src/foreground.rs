@@ -10,6 +10,150 @@ mod macos;
 #[cfg(all(test, target_os = "linux"))]
 mod tests;
 
+#[cfg(test)]
+mod ancestry_tests {
+    use super::{Ancestry, classify_snapshots};
+    use std::{cell::Cell, collections::HashMap, io};
+
+    #[test]
+    fn snapshot_walk_distinguishes_inside_and_outside_chains() {
+        let inside = HashMap::from([(1, (1, 0, 10)), (2, (2, 1, 20)), (3, (3, 2, 30))]);
+        assert_eq!(
+            classify_snapshots(3, inside[&2], |pid| inside
+                .get(&pid)
+                .copied()
+                .ok_or_else(|| io::ErrorKind::NotFound.into()))
+            .unwrap(),
+            Ancestry::Inside
+        );
+        let outside = HashMap::from([(1, (1, 0, 10)), (7, (7, 1, 70))]);
+        assert_eq!(
+            classify_snapshots(7, (2, 0, 20), |pid| {
+                if pid == 2 {
+                    Ok((2, 0, 20))
+                } else {
+                    outside
+                        .get(&pid)
+                        .copied()
+                        .ok_or_else(|| io::ErrorKind::NotFound.into())
+                }
+            })
+            .unwrap(),
+            Ancestry::Outside
+        );
+    }
+
+    #[test]
+    fn snapshot_walk_rejects_missing_reparented_reused_exited_and_deep_chains() {
+        let missing = HashMap::from([(2, (2, 1, 20)), (3, (3, 99, 30))]);
+        assert!(
+            classify_snapshots(3, (2, 1, 20), |pid| missing
+                .get(&pid)
+                .copied()
+                .ok_or_else(|| io::ErrorKind::NotFound.into()))
+            .is_err()
+        );
+
+        let reads = Cell::new(0);
+        assert!(
+            classify_snapshots(3, (2, 1, 20), |pid| {
+                if pid == 3 {
+                    let n = reads.get();
+                    reads.set(n + 1);
+                    Ok(if n == 0 { (3, 2, 30) } else { (3, 1, 30) })
+                } else if pid == 2 {
+                    Ok((2, 1, 20))
+                } else {
+                    Ok((1, 0, 10))
+                }
+            })
+            .is_err(),
+            "a changed parent link is uncertain"
+        );
+
+        let reused = HashMap::from([(1, (1, 0, 10)), (2, (2, 1, 21)), (3, (3, 2, 30))]);
+        assert!(
+            classify_snapshots(3, (2, 1, 20), |pid| reused
+                .get(&pid)
+                .copied()
+                .ok_or_else(|| io::ErrorKind::NotFound.into()))
+            .is_err(),
+            "root birth mismatch is uncertain"
+        );
+        assert!(
+            classify_snapshots(3, (2, 1, 20), |_| Err(io::ErrorKind::NotFound.into())).is_err(),
+            "exit during inspection is uncertain"
+        );
+
+        let mut deep = HashMap::from([(1, (1, 0, 1))]);
+        for pid in 2..=67 {
+            deep.insert(pid, (pid, pid - 1, pid as i32));
+        }
+        assert!(
+            classify_snapshots(67, (100, 0, 100), |pid| deep
+                .get(&pid)
+                .copied()
+                .or_else(|| (pid == 100).then_some((100, 0, 100)))
+                .ok_or_else(|| io::ErrorKind::NotFound.into()),)
+            .is_err(),
+            "more than 64 hops is uncertain"
+        );
+    }
+}
+
+/// Best-effort ancestry observation for diagnostics. Unknown never affects authorization.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ancestry {
+    Inside,
+    Outside,
+    Unknown,
+}
+
+fn classify_snapshots<B: Copy + Eq>(
+    peer: u32,
+    root: (u32, u32, B),
+    mut read: impl FnMut(u32) -> io::Result<(u32, u32, B)>,
+) -> io::Result<Ancestry> {
+    if peer == 0 || root.0 == 0 || read(root.0)? != root {
+        return Err(io::ErrorKind::InvalidData.into());
+    }
+    let first = read(peer)?;
+    let mut snapshots = Vec::new();
+    let mut current = first;
+    let verdict = loop {
+        if current.0 == 0 || snapshots.len() == 64 {
+            return Err(io::ErrorKind::InvalidData.into());
+        }
+        snapshots.push(current);
+        if current.0 == root.0 {
+            if current != root {
+                return Err(io::ErrorKind::InvalidData.into());
+            }
+            break Ancestry::Inside;
+        }
+        if current.0 == 1 {
+            break Ancestry::Outside;
+        }
+        if current.1 == 0 || current.1 == current.0 {
+            return Err(io::ErrorKind::InvalidData.into());
+        }
+        let parent = read(current.1)?;
+        if parent.0 != current.1 || read(current.0)? != current {
+            return Err(io::ErrorKind::InvalidData.into());
+        }
+        current = parent;
+    };
+    for snapshot in snapshots {
+        if read(snapshot.0)? != snapshot {
+            return Err(io::ErrorKind::InvalidData.into());
+        }
+    }
+    if read(peer)? != first || read(root.0)? != root {
+        return Err(io::ErrorKind::InvalidData.into());
+    }
+    Ok(verdict)
+}
+
 /// Owns its descriptor while borrowing the console's revocable lifetime.
 pub struct ForegroundScope {
     #[cfg(target_os = "linux")]
@@ -61,6 +205,20 @@ pub(crate) fn scope(pty: &crate::Pty) -> io::Result<ForegroundScope> {
 }
 
 impl ForegroundScope {
+    /// Classifies process ancestry without foreground-group or executable restrictions.
+    /// Callers should supply a PID obtained from native socket credentials.
+    pub fn classify_ancestry(&self, pid: u32) -> Ancestry {
+        #[cfg(target_os = "linux")]
+        return self.native.classify_ancestry(pid);
+        #[cfg(target_os = "macos")]
+        return self.native.classify_ancestry(pid);
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            let _ = pid;
+            Ancestry::Unknown
+        }
+    }
+
     pub fn is_open(&self) -> bool {
         #[cfg(target_os = "linux")]
         return self.native.is_open();
