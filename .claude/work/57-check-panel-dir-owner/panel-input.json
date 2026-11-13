@@ -1,1 +1,1 @@
-{"phase": "ship", "now": "Validated draft handed to the orchestrator", "next": "Orchestrator publishes the draft for review", "attention": "done"}
+{"phase": "ship", "now": "Start routing complete: published PR awaits merge", "next": "Merge confirmation", "attention": "done"}

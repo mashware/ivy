@@ -1,8 +1,8 @@
 {
-  "kind": "failed",
-  "note": "publish of 57-check-panel-dir-owner refused: the branch already exists and is not this ticket's work branch",
+  "kind": "done",
+  "summary": "# Ticket 57 — waiting for merge\n\nThe single PR is already recorded as published. No further work is required in this start run. Review and merge the published PR; the orchestrator should then relaunch ticket 57 with why=merged.",
   "branch": null,
   "head": null,
-  "workflow": "flow",
-  "after_study": "recommended"
+  "after_study": "recommended",
+  "workflow": "flow"
 }

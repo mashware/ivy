@@ -1,6 +1,6 @@
 # 57 — Refuse unsafe inherited console directories
-Size M; phase ship; branch 57-check-panel-dir-owner; 0/1 PR shipped before handoff.
-One atomic PR handed to the orchestrator for publication; merge remains pending.
+Size M; phase ship; branch 57-check-panel-dir-owner; 1/1 PR published; merge pending.
+The single PR is recorded as published. This start run has no further work; waiting for merge.
 Rust bridge/helper and direct OpenCode plugin validate directory owner, mode and type.
 Symlink slash/dot forms refused; original path and gone/error diagnostics retained.
 All six acceptance criteria proven by tests; wire/handshake contracts verified.
