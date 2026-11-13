@@ -7,7 +7,7 @@ use std::{path::PathBuf, time::Instant};
 const APPLYING_PREFERENCES: &str = "Saved. Applying settings...";
 const BRIDGE_KEY: &str = "ivy-mcp-bridge-location";
 const CODEX_ENV: &str = "env_vars = [\"PANEL_ID\", \"PANEL_DIR\"]";
-const PROMPT: &str = "Use Ivy's panel tools to publish your current task and update it when the phase or attention changes. Set attention to wait when you need my answer, block when an external dependency stops the task, and done when the work is finished. Omit attention during ordinary progress.";
+const PROMPT: &str = "If this client did not pass you the bridge's server instructions, use Ivy's panel tools to publish your current task and update it when the phase or attention changes. Set attention to wait when you need my answer, block when an external dependency stops the task, and done when the work is finished. Omit attention during ordinary progress. An agent working for another agent in the same console must leave the panel alone. An agent started in a console of its own keeps its own panel.";
 
 #[derive(Clone, Default)]
 struct Bridge {
