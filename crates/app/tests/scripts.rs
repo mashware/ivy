@@ -670,6 +670,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/painter/ligatures/tests.rs"),
     ),
     (
+        "app/src/painter/background_tests.rs",
+        include_str!("../src/painter/background_tests.rs"),
+    ),
+    (
         "app/src/painter/pane.rs",
         include_str!("../src/painter/pane.rs"),
     ),

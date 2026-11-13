@@ -411,6 +411,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/painter/ligatures/tests.rs"),
     ),
     (
+        "src/painter/background_tests.rs",
+        include_str!("../src/painter/background_tests.rs"),
+    ),
+    (
         "src/pointer/header.rs",
         include_str!("../src/pointer/header.rs"),
     ),
