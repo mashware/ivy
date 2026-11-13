@@ -376,6 +376,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         2,
     ),
     (
+        "src/painter/background_tests.rs",
+        include_str!("../src/painter/background_tests.rs"),
+        6,
+    ),
+    (
         "src/console_input.rs",
         include_str!("../src/console_input.rs"),
         1,

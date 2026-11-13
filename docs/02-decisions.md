@@ -5737,7 +5737,8 @@ It said antialiasing paints every boundary as a half-covered pixel, and named tw
 background meeting there. **Backgrounds never had it**: epaint aligns every filled rectangle to the
 pixel grid on its own —`round_rects_to_pixels`, on by default, and its own documentation says it is
 what «makes filled rectangles tile perfectly (without feathering)»— so two contiguous cells share a
-rounded boundary whatever fraction they were asked for at.
+rounded boundary whatever fraction they were asked for at. **The shared-edge assumption in this
+statement was corrected in November 2026; see the amendment below.**
 
 **What the defect actually is: the engine rounds each glyph's origin, separately.**
 `round_text_to_pixels` is on by default too, and this painter queues **one glyph per cell**, so over a
@@ -5765,6 +5766,27 @@ the pane survives the engine's rounding as the same offset for all of them: meas
 from a corner at `101.37` gives rounded origins `100, 108, 116, 124, 132, 140`, which is one step. What
 has to be whole is the **step**, not where the run starts. It had a guard demanding it, which is how a
 mechanism with no scenario stays: the guard was written from the same wrong model as the code.
+
+**Amended in November 2026 — selected backgrounds can still expose a one-pixel crack.** The
+whole-device-pixel step stays. At a fractional scale its point representation is inexact, and
+`(origin + column * width) + width` need not equal `origin + (column + 1) * width` in `f32`.
+If those two edges straddle a half-device-pixel tie, the tessellator rounds them to different
+pixels. Actual egui tessellation reproduces this with two identical blank fills, with antialiasing
+on and off: at scale 1.5, width `7 / 1.5`, origin 1, columns 5/6 end at pixels 43/44; at scale
+1.75, width `9 / 1.75`, origin 2, columns 11/12 end at 111/112. Neither glyph shaping nor different
+selection colors is needed. The glyph-placement repair in #58's first PR (#64) left this path
+unchanged; a later alpha.8 screenshot exposed the remaining background cracks.
+
+**Both sides now name the same grid boundary.** A cell's far corner uses the next column and row
+coordinates, through exactly the same expressions as its neighbors' near corners. Its near corner
+and the floored step do not move, so glyph placement and selection-color inversion keep their
+existing rules. Snapping the whole origin is still unnecessary. Inflating every rectangle would
+hide a crack by overlapping different colors; merging same-color runs would not solve the boundary
+between different colors or rows. Disabling antialiasing does not solve the reproduced gap.
+Regression coverage must inspect the production painter's tessellated backgrounds at fractional
+scales and nonzero origins; a whole-pixel width assertion alone cannot see this defect. The exact
+scale and origin of the reporter's screenshot remain unmeasured, so the deterministic cases do not
+claim to predict its fifteen crack positions. No new frame-cost measurement is claimed.
 
 **What was discarded, and why.**
 
