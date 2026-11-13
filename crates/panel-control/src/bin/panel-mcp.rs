@@ -44,6 +44,8 @@ fn main() {
         id.as_deref(),
         dir.as_deref(),
         panel_control::endpoint::BINDS,
+        dir.as_deref()
+            .is_some_and(|dir| panel_control::endpoint::socket_present(std::path::Path::new(dir))),
     );
 
     bridge(
@@ -222,8 +224,9 @@ fn instructions_for(
     id: Option<&std::ffi::OsStr>,
     dir: Option<&std::ffi::OsStr>,
     binds: bool,
+    socket_present: bool,
 ) -> Option<&'static str> {
-    if !binds {
+    if !binds || !socket_present {
         return None;
     }
     panel_control::client::whole_identity(id, dir).map(|_| INSTRUCTIONS)
@@ -910,14 +913,19 @@ mod tests {
         let id = Some(OsStr::new("a1b2c3d4"));
         let dir = Some(OsStr::new(absolute));
 
-        assert_eq!(instructions_for(id, dir, true), Some(INSTRUCTIONS));
+        assert_eq!(instructions_for(id, dir, true, true), Some(INSTRUCTIONS));
         assert_eq!(
-            instructions_for(id, dir, false),
+            instructions_for(id, dir, false, true),
             None,
             "a platform where the channel does not bind"
         );
-        assert_eq!(instructions_for(None, dir, true), None, "no identifier");
-        assert_eq!(instructions_for(id, None, true), None, "no directory");
+        assert_eq!(instructions_for(id, dir, true, false), None, "no socket");
+        assert_eq!(
+            instructions_for(None, dir, true, true),
+            None,
+            "no identifier"
+        );
+        assert_eq!(instructions_for(id, None, true, true), None, "no directory");
     }
 
     /// **The handshake carries the instructions it was given, and is otherwise the same reply**,

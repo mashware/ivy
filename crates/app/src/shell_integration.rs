@@ -67,7 +67,7 @@ impl Prepared {
         let mut random = [0u8; 16];
         getrandom::fill(&mut random).map_err(|error| io::Error::other(error.to_string()))?;
         let suffix: String = random.iter().map(|b| format!("{b:02x}")).collect();
-        let dir = std::env::temp_dir().join(format!("ivy-shell-{suffix}"));
+        let dir = panel_contract::base_dir().join(format!("ivy-shell-{suffix}"));
         #[cfg(unix)]
         {
             use std::os::unix::fs::DirBuilderExt;
@@ -134,6 +134,51 @@ mod tests {
     fn executable(path: &Path, body: &str) {
         std::fs::write(path, body).unwrap();
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[test]
+    fn relative_tmpdir_uses_absolute_shared_base_and_warns_once() {
+        const CHILD: &str = "IVY_TEST_RELATIVE_TMPDIR_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            for _ in 0..3 {
+                assert_eq!(panel_contract::base_dir(), PathBuf::from("/tmp"));
+            }
+            let prepared = Prepared::prepare_with_zdotdir("bash", Some(Path::new("/bin/sh")), None)
+                .unwrap()
+                .unwrap();
+            assert!(
+                prepared.dir.starts_with("/tmp"),
+                "{}",
+                prepared.dir.display()
+            );
+            return;
+        }
+
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "shell_integration::tests::relative_tmpdir_uses_absolute_shared_base_and_warns_once",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .env("TMPDIR", "relative-temp")
+            .env_remove("XDG_RUNTIME_DIR")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(
+            stderr
+                .matches("TMPDIR set but not an absolute path")
+                .count(),
+            1,
+            "{stderr}"
+        );
+        assert!(!stderr.contains("XDG_RUNTIME_DIR set"), "{stderr}");
     }
 
     #[test]

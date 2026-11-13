@@ -158,7 +158,7 @@ impl Pane {
         let started = std::time::Instant::now();
         let deferred_probe_is_due = self.panel_state.retired_probe_is_due();
         if let (true, Some(dir)) = (
-            self.to_reread.take() || deferred_probe_is_due,
+            self.to_reread.take() || deferred_probe_is_due || self.panel_state.file_probe_pending(),
             self.panel.as_ref(),
         ) {
             // **A refusal gives the notice back, and without that the publication is lost for
@@ -592,7 +592,9 @@ fn warning_about_the_panel(state: &panel::PanelState, now: SystemTime) -> Option
     // unreachable for the whole life of the hold: an agent that wedged with its socket open kept
     // painting a claim as fresh, and D43 promises the panel goes stale where a person can read
     // that it has. They are joined rather than one chosen, because they say different things.
-    if let Some(holder) = &state.holder {
+    if let Some(holder) = &state.holder
+        && !holder.yielded
+    {
         let mut said: Vec<String> = Vec::new();
         if holder.file_refused {
             said.push(format!(

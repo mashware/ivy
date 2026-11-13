@@ -551,6 +551,37 @@ mod tests {
             && text.contains("reconnecting or restarting")
             && text.contains("panel_get and panel_set")
             && text.contains("Report success only after the tool calls succeed"))));
+        let copied_prompt = output
+            .platform_output
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                egui::OutputCommand::CopyText(text) => Some(text.as_str()),
+                _ => None,
+            })
+            .expect("setup prompt is copied");
+        assert!(
+            copied_prompt
+                .contains("If this client did not pass you the bridge's server instructions")
+        );
+        assert!(copied_prompt.contains(
+            "An agent working for another agent in the same console must leave the panel alone"
+        ));
+        assert!(
+            copied_prompt.contains("An agent started in a console of its own keeps its own panel")
+        );
+        let readme = include_str!("../../../../README.md")
+            .lines()
+            .map(|line| line.trim_start().trim_start_matches("> "))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            readme.contains("If this client did not pass you the bridge's server instructions")
+        );
+        assert!(readme.contains(
+            "An agent working for another agent in the same console must leave the panel alone"
+        ));
+        assert!(readme.contains("An agent started in a console of its own keeps its own panel"));
         assert!(
             has_text(&output.shapes, "Copied"),
             "copy has no visible confirmation"

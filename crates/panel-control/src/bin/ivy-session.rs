@@ -4,22 +4,21 @@ use panel_control::session::{self, Client, Request};
 use std::io::{Read, Write};
 
 fn main() {
+    use panel_control::client::whole_identity;
+
+    let [id, dir] = panel_contract::ENV_NAMES.map(std::env::var_os);
+    if whole_identity(id.as_deref(), dir.as_deref()).is_none() {
+        println!("{{\"ok\":false,\"error\":\"outside_ivy\"}}");
+        std::process::exit(1);
+    }
     let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
     if args.as_slice() == [std::ffi::OsString::from("publish")] {
         publish(std::io::stdin().lock());
         return;
     }
-    let result = if panel_contract::ENV_NAMES
-        .iter()
-        .any(|name| std::env::var_os(name).is_none_or(|v| v.is_empty()))
-    {
-        Ok(serde_json::json!({"ok":false,"error":"outside_ivy"}))
-    } else {
-        request(args, std::io::stdin().lock()).and_then(|request| {
-            session::exchange(&request)
-                .map_err(|_| "cannot reach this pane's session service".into())
-        })
-    };
+    let result = request(args, std::io::stdin().lock()).and_then(|request| {
+        session::exchange(&request).map_err(|_| "cannot reach this pane's session service".into())
+    });
     let reply = match result {
         Ok(reply) => reply,
         Err(message) => {
@@ -35,9 +34,7 @@ fn main() {
 }
 
 fn publish(mut input: impl Read) {
-    use panel_control::client::whole_identity;
-    let [id, dir] = panel_contract::ENV_NAMES.map(std::env::var_os);
-    if !panel_control::endpoint::BINDS || whole_identity(id.as_deref(), dir.as_deref()).is_none() {
+    if !panel_control::endpoint::BINDS {
         return;
     }
     let bytes = match read_input(&mut input, panel_contract::MAX_BYTES as usize) {
