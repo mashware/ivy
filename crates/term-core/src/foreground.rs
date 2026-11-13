@@ -5,6 +5,8 @@ use std::path::PathBuf;
 
 #[cfg(target_os = "linux")]
 mod linux;
+#[cfg(target_os = "macos")]
+mod macos;
 #[cfg(all(test, target_os = "linux"))]
 mod tests;
 
@@ -12,6 +14,8 @@ mod tests;
 pub struct ForegroundScope {
     #[cfg(target_os = "linux")]
     native: linux::Scope,
+    #[cfg(target_os = "macos")]
+    native: macos::Scope,
 }
 
 /// Process identity includes kernel birth ticks so a recycled PID cannot inherit authority.
@@ -47,7 +51,9 @@ pub enum Argument<'a> {
 pub(crate) fn scope(pty: &crate::Pty) -> io::Result<ForegroundScope> {
     #[cfg(target_os = "linux")]
     return linux::scope(pty).map(|native| ForegroundScope { native });
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    return macos::scope(pty).map(|native| ForegroundScope { native });
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         let _ = pty;
         Err(io::ErrorKind::Unsupported.into())
@@ -58,7 +64,9 @@ impl ForegroundScope {
     pub fn is_open(&self) -> bool {
         #[cfg(target_os = "linux")]
         return self.native.is_open();
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(target_os = "macos")]
+        return self.native.is_open();
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         false
     }
 
@@ -66,7 +74,9 @@ impl ForegroundScope {
     pub fn inspect(&self, pid: u32, birth: u64) -> io::Result<ForegroundAncestry> {
         #[cfg(target_os = "linux")]
         return self.native.inspect(pid, birth);
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(target_os = "macos")]
+        return self.native.inspect(pid, birth, false);
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         {
             let _ = (pid, birth);
             Err(io::ErrorKind::Unsupported.into())
@@ -78,11 +88,29 @@ impl ForegroundScope {
     pub fn inspect_descendant(&self, pid: u32, birth: u64) -> io::Result<ForegroundAncestry> {
         #[cfg(target_os = "linux")]
         return self.native.inspect_descendant(pid, birth);
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(target_os = "macos")]
+        return self.native.inspect(pid, birth, true);
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         {
             let _ = (pid, birth);
             Err(io::ErrorKind::Unsupported.into())
         }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl NativeProcess {
+    pub fn working_directory(&self) -> io::Result<PathBuf> {
+        macos::working_directory(self)
+    }
+    pub fn matches_arguments(&self, shapes: &[&[Argument<'_>]]) -> io::Result<bool> {
+        macos::matches_arguments(self, shapes)
+    }
+    pub fn runs_script(&self, expected: &std::path::Path) -> io::Result<bool> {
+        macos::runs_script(self, expected)
+    }
+    pub fn lifetime(&self) -> io::Result<std::os::fd::OwnedFd> {
+        macos::lifetime(self.pid, self.birth)
     }
 }
 

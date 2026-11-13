@@ -245,3 +245,8 @@ impl Shared {
 fn error(kind: &str) -> serde_json::Value {
     serde_json::json!({"ok":false,"error":kind})
 }
+
+#[cfg(target_os = "linux")]
+pub(crate) fn reap_later() {
+    worker::reap_later();
+}

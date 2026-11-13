@@ -38,6 +38,8 @@ mod agent_signals;
 mod ai_sessions;
 mod alarms;
 mod chrome;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod client_attestation;
 mod clipboard;
 mod closing;
 mod console_input;

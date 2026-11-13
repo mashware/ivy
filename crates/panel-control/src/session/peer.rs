@@ -5,6 +5,11 @@ use std::io;
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
 #[cfg(target_os = "linux")]
 use std::sync::Arc;
+#[cfg(target_os = "macos")]
+use std::{
+    os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd},
+    sync::Arc,
+};
 
 use interprocess::local_socket::Stream;
 
@@ -14,6 +19,8 @@ pub struct Peer {
     pid: u32,
     birth: u64,
     #[cfg(target_os = "linux")]
+    lifetime: Arc<OwnedFd>,
+    #[cfg(target_os = "macos")]
     lifetime: Arc<OwnedFd>,
 }
 
@@ -45,7 +52,19 @@ impl Peer {
         }
         #[cfg(not(target_os = "linux"))]
         {
-            false
+            #[cfg(target_os = "macos")]
+            {
+                let mut p = libc::pollfd {
+                    fd: self.lifetime.as_raw_fd(),
+                    events: libc::POLLIN,
+                    revents: 0,
+                };
+                unsafe { libc::poll(&mut p, 1, 0) == 0 && p.revents == 0 }
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                false
+            }
         }
     }
 
@@ -81,13 +100,137 @@ impl Peer {
         }
         #[cfg(not(target_os = "linux"))]
         {
-            let _ = stream;
-            Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "verified session peers require Linux",
-            ))
+            #[cfg(target_os = "macos")]
+            {
+                return capture_macos(stream);
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = stream;
+                Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "verified session peers require Linux",
+                ))
+            }
         }
     }
+}
+
+#[cfg(target_os = "macos")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct AuditToken {
+    val: [u32; 8],
+}
+#[cfg(target_os = "macos")]
+fn capture_macos(stream: &Stream) -> io::Result<Peer> {
+    let Stream::UdSocket(stream) = stream;
+    let fd = stream.as_fd().as_raw_fd();
+    let token: AuditToken = socket_option_macos(fd, 6 /* LOCAL_PEERTOKEN */)?;
+    let pid = token.val[5];
+    let version = token.val[7];
+    if pid == 0 || version == 0 {
+        return Err(io::Error::other("invalid local peer token"));
+    }
+    let birth = unique_identity(pid, version)?;
+    let lifetime = Arc::new(macos_lifetime(pid, version, birth)?);
+    let peer = Peer {
+        pid,
+        birth,
+        lifetime,
+    };
+    if !peer.is_alive() || unique_identity(pid, version)? != birth || !peer.is_alive() {
+        return Err(io::Error::other(
+            "peer identity changed during verification",
+        ));
+    }
+    Ok(peer)
+}
+#[cfg(target_os = "macos")]
+fn socket_option_macos<T: Copy>(fd: libc::c_int, option: libc::c_int) -> io::Result<T> {
+    let mut value = std::mem::MaybeUninit::<T>::uninit();
+    let mut len = std::mem::size_of::<T>() as libc::socklen_t;
+    if unsafe { libc::getsockopt(fd, 0, option, value.as_mut_ptr().cast(), &mut len) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if len as usize != std::mem::size_of::<T>() {
+        return Err(io::Error::other("invalid local peer token size"));
+    }
+    Ok(unsafe { value.assume_init() })
+}
+#[cfg(target_os = "macos")]
+#[repr(C)]
+struct UniqueIdentity {
+    uuid: [u8; 16],
+    unique: u64,
+    parent_unique: u64,
+    pidversion: i32,
+    parent_pidversion: i32,
+    reserve2: u64,
+    reserve3: u64,
+}
+#[cfg(target_os = "macos")]
+#[link(name = "proc")]
+unsafe extern "C" {
+    fn proc_pidinfo(pid: i32, flavor: i32, arg: u64, buf: *mut libc::c_void, size: i32) -> i32;
+    fn kqueue() -> i32;
+    fn kevent(
+        kq: i32,
+        changelist: *const libc::kevent,
+        nchanges: i32,
+        eventlist: *mut libc::kevent,
+        nevents: i32,
+        timeout: *const libc::timespec,
+    ) -> i32;
+}
+#[cfg(target_os = "macos")]
+fn unique_identity(pid: u32, version: u32) -> io::Result<u64> {
+    let mut bsd = [0u8; 136];
+    let n = unsafe { proc_pidinfo(pid as i32, 3, 0, bsd.as_mut_ptr().cast(), bsd.len() as i32) };
+    if n != bsd.len() as i32 {
+        return Err(io::Error::other("peer PID identity unavailable"));
+    }
+    let queried_pid = unsafe { std::ptr::read_unaligned(bsd.as_ptr().cast::<u32>().add(3)) };
+    if queried_pid != pid {
+        return Err(io::Error::other(
+            "queried PID does not match local peer token",
+        ));
+    }
+    let mut info = std::mem::MaybeUninit::<UniqueIdentity>::uninit();
+    let size = std::mem::size_of::<UniqueIdentity>() as i32;
+    let n = unsafe { proc_pidinfo(pid as i32, 17, 0, info.as_mut_ptr().cast(), size) };
+    if n != size {
+        return Err(io::Error::other("process unique identity unavailable"));
+    };
+    let i = unsafe { info.assume_init() };
+    if i.pidversion < 0 || i.pidversion as u32 != version || i.unique == 0 {
+        return Err(io::Error::other(
+            "local peer token does not match process identity",
+        ));
+    };
+    Ok(i.unique)
+}
+#[cfg(target_os = "macos")]
+fn macos_lifetime(pid: u32, version: u32, birth: u64) -> io::Result<OwnedFd> {
+    let fd = unsafe { kqueue() };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    };
+    let q = unsafe { OwnedFd::from_raw_fd(fd) };
+    let ev = libc::kevent {
+        ident: pid as _,
+        filter: -5,
+        flags: 1 | 4,
+        fflags: 0x80000000 | 0x20000000,
+        data: 0,
+        udata: std::ptr::null_mut(),
+    };
+    if unsafe { kevent(fd, &ev, 1, std::ptr::null_mut(), 0, std::ptr::null()) } < 0
+        || unique_identity(pid, version)? != birth
+    {
+        return Err(io::Error::other("peer exited during lifetime registration"));
+    };
+    Ok(q)
 }
 
 #[cfg(target_os = "linux")]
