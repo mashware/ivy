@@ -94,8 +94,92 @@ fn absent_inherited_identity_is_a_distinct_bounded_error() {
     assert!(output.stdout.len() <= session::MAX_REPLY + 1);
 }
 
+#[cfg(unix)]
 #[test]
-fn publish_cli_is_silent_without_identity_and_rejects_bad_input_before_connect() {
+fn invalid_whole_identity_exits_before_reading_stdin_or_connecting() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    let bad_id = OsString::from_vec(vec![b'p', b'a', b'n', b'e', 0xff]);
+    for (id, dir) in [
+        (OsString::from("pane"), OsString::from("relative")),
+        (bad_id, std::env::temp_dir().into_os_string()),
+    ] {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_ivy-session"))
+            .args(["hook", "codex"])
+            .env("PANEL_ID", id)
+            .env("PANEL_DIR", dir)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let _held_open_stdin = child.stdin.take().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                assert_eq!(status.code(), Some(1));
+                break;
+            }
+            if Instant::now() >= deadline {
+                child.kill().unwrap();
+                panic!("ivy-session read stdin before rejecting its identity");
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        let output = child.wait_with_output().unwrap();
+        assert_eq!(output.stdout, b"{\"ok\":false,\"error\":\"outside_ivy\"}\n");
+        assert!(output.stderr.is_empty());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn session_exchange_rejects_invalid_identity_before_connecting() {
+    const CHILD: &str = "IVY_TEST_DIRECT_EXCHANGE_CHILD";
+    if std::env::var_os(CHILD).is_some() {
+        let request = session::Request::Attach {
+            client: session::Client::Claude,
+        };
+        assert_eq!(
+            session::exchange(&request).unwrap_err().kind(),
+            std::io::ErrorKind::NotFound
+        );
+        return;
+    }
+
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    for (id, dir) in [
+        (OsString::from("pane"), OsString::from("relative")),
+        (
+            OsString::from_vec(vec![b'p', b'a', b'n', b'e', 0xff]),
+            std::env::temp_dir().into_os_string(),
+        ),
+    ] {
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "session_exchange_rejects_invalid_identity_before_connecting",
+            ])
+            .env(CHILD, "1")
+            .env("PANEL_ID", id)
+            .env("PANEL_DIR", dir)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
+fn publish_cli_rejects_invalid_identity_and_bad_input_before_connect() {
     let output = Command::new(env!("CARGO_BIN_EXE_ivy-session"))
         .arg("publish")
         .env_remove("PANEL_DIR")
@@ -108,8 +192,8 @@ fn publish_cli_is_silent_without_identity_and_rejects_bad_input_before_connect()
     let mut child = output;
     child.stdin.take().unwrap().write_all(b"not json").unwrap();
     let output = child.wait_with_output().unwrap();
-    assert!(output.status.success());
-    assert!(output.stdout.is_empty());
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.stdout, b"{\"ok\":false,\"error\":\"outside_ivy\"}\n");
     assert!(output.stderr.is_empty());
 
     let dir = PanelDir::create().unwrap();

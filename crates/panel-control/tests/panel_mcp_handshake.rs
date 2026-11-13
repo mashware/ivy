@@ -55,25 +55,16 @@ fn nowhere(name: &str) -> String {
     }
 }
 
-/// **Inside a console the agent is asked to publish; with no identity, or a broken one, it is
-/// not.** The directory is never opened by a handshake, so any absolute path stands for one here.
+/// A whole identity with no bound socket still gets a normal handshake, without instructions.
 #[test]
 fn the_bridge_asks_for_a_panel_only_when_started_inside_a_console() {
     let dir = nowhere("ivy-a1b2c3d4");
     let dir = dir.as_str();
-    let inside = handshake(&[("PANEL_ID", "a1b2c3d4"), ("PANEL_DIR", dir)]);
-    let instructions = inside["result"].get("instructions");
-    if panel_control::endpoint::BINDS {
-        let text = instructions
-            .and_then(serde_json::Value::as_str)
-            .expect("inside a console the handshake carries instructions");
-        assert!(text.contains("`panel_set`"), "{text}");
-    } else {
-        assert!(
-            instructions.is_none(),
-            "no channel binds here yet: {inside}"
-        );
-    }
+    let outside = handshake(&[("PANEL_ID", "a1b2c3d4"), ("PANEL_DIR", dir)]);
+    assert!(
+        outside["result"].get("instructions").is_none(),
+        "a missing socket must not be promised: {outside}"
+    );
 
     for (env, why) in [
         (&[][..], "no identity"),
@@ -101,6 +92,31 @@ fn the_bridge_asks_for_a_panel_only_when_started_inside_a_console() {
             "{why}: {reply}"
         );
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn instructions_require_socket_metadata_without_connecting() {
+    use std::os::unix::net::UnixListener;
+
+    let panel = panel_contract::PanelDir::create().unwrap();
+    let socket_path = panel.path().join(panel_contract::CONTROL_SOCKET);
+    let listener = UnixListener::bind(&socket_path).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let dir = panel.path().to_str().unwrap();
+    let bound = handshake(&[("PANEL_ID", panel.id()), ("PANEL_DIR", dir)]);
+    assert!(bound["result"].get("instructions").is_some(), "{bound}");
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock,
+        "the metadata check connected"
+    );
+    drop(listener);
+
+    std::fs::remove_file(&socket_path).unwrap();
+    std::fs::write(&socket_path, b"regular file").unwrap();
+    let regular = handshake(&[("PANEL_ID", panel.id()), ("PANEL_DIR", dir)]);
+    assert!(regular["result"].get("instructions").is_none(), "{regular}");
 }
 
 /// The text of a `panel_get` call's reply, which is a tool error in every case below: outside a
