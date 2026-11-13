@@ -32,7 +32,9 @@ use crate::{Pane, Window};
 mod applying;
 mod channel;
 mod retiring;
-pub(crate) use channel::{open_with_authority, open_with_sessions};
+pub(crate) use channel::open_with_authority;
+#[cfg(test)]
+pub(crate) use channel::open_with_sessions;
 
 /// How many deliveries a pane's inbox may hold before a publication is refused.
 ///
@@ -298,6 +300,7 @@ impl PaneControl {
     /// **A pane with no channel is a complete pane.** It publishes by file, exactly as every pane
     /// did before this milestone, which is the same decision a pane whose directory could not be
     /// created already gets.
+    #[cfg(test)]
     pub fn open(
         dir: &PanelDir,
         reader: crate::panel::DocumentReader,

@@ -24,22 +24,15 @@ pub(crate) fn state_and_control_with_authority(
     reads: crate::control::ReadActivity,
     sessions: Option<panel_control::session::SessionHandler>,
     authority: Option<std::sync::Arc<panel::overlay::Authority>>,
+    inspector: panel_control::PublicationInspector,
 ) -> (panel::PanelState, Option<crate::control::PaneControl>) {
     let state = panel::PanelState::default();
     let control = dir.and_then(|dir| {
         let waker = ctx.clone();
         let wake = move || waker.request_repaint();
-        if let Some(authority) = authority {
-            return crate::control::open_with_authority(
-                dir, &state, reads, sessions, authority, wake,
-            );
-        }
-        match sessions {
-            Some(sessions) => {
-                crate::control::open_with_sessions(dir, state.reader(), reads, Some(sessions), wake)
-            }
-            None => crate::control::PaneControl::open(dir, state.reader(), reads, wake),
-        }
+        crate::control::open_with_authority(
+            dir, &state, reads, sessions, authority, inspector, wake,
+        )
     });
     (state, control)
 }

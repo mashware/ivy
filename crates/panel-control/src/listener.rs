@@ -21,6 +21,7 @@ use interprocess::TryClone;
 use interprocess::local_socket::{Stream, prelude::*};
 use panel_contract::{Dropped, Panel, Patch};
 
+use crate::diagnostic_peer::DiagnosticPeer;
 use crate::endpoint;
 use crate::session::{Peer, SessionHandler};
 use crate::wire::{AgentSnapshot, Framing, Incoming, Reply, Request, Side, write_reply};
@@ -31,7 +32,17 @@ struct Services {
     session: Option<SessionHandler>,
     publisher: Option<PublicationServices>,
     plan_reader: Arc<std::sync::Mutex<Option<ReadPlan>>>,
+    inspector: Option<PublicationInspector>,
 }
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PublicationOrigin {
+    Inside,
+    Outside,
+    #[default]
+    Unknown,
+}
+pub type PublicationInspector = Arc<dyn Fn(&DiagnosticPeer) -> PublicationOrigin + Send + Sync>;
 
 /// How long a publication waits for the window to take it.
 ///
@@ -113,6 +124,7 @@ pub trait OverlayAuthority: std::fmt::Debug + Send + Sync {
 pub struct Delivery {
     pub connection: Connection,
     pub what: What,
+    pub origin: PublicationOrigin,
     /// Where the answer goes.
     ///
     /// **Capacity one, so the window never blocks on it**: it answers once per request and returns,
@@ -276,11 +288,37 @@ impl Channel {
         publisher: Option<PublicationServices>,
         wake: Arc<dyn Fn() + Send + Sync>,
     ) -> io::Result<Self> {
+        Self::open_with_publication_inspector(
+            dir,
+            id,
+            to_the_window,
+            read_document,
+            session_handler,
+            publisher,
+            None,
+            wake,
+        )
+    }
+
+    /// Installs a diagnostic-only peer classifier before the endpoint begins accepting connections.
+    // Keep the established service entry points compatible while adding one independent callback.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_with_publication_inspector(
+        dir: &Path,
+        id: &str,
+        to_the_window: SyncSender<Delivery>,
+        read_document: Option<ReadDocument>,
+        session_handler: Option<SessionHandler>,
+        publisher: Option<PublicationServices>,
+        inspector: Option<PublicationInspector>,
+        wake: Arc<dyn Fn() + Send + Sync>,
+    ) -> io::Result<Self> {
         let services = Services {
             reader: read_document,
             session: session_handler,
             publisher,
             plan_reader: Arc::default(),
+            inspector,
         };
         let plan_reader = services.plan_reader.clone();
         let listener = endpoint::bind(dir, id)?;
@@ -485,6 +523,15 @@ fn serve(
             let services = services.clone();
             let wake = Arc::clone(wake);
             move || {
+                // Capture and classify before this worker parses any request bytes.
+                let origin =
+                    services
+                        .inspector
+                        .as_ref()
+                        .map_or(PublicationOrigin::Unknown, |inspect| {
+                            DiagnosticPeer::capture(&stream)
+                                .map_or(PublicationOrigin::Unknown, |peer| inspect(&peer))
+                        });
                 converse(
                     stream,
                     connection,
@@ -492,6 +539,7 @@ fn serve(
                     &to_the_window,
                     &services,
                     peer,
+                    origin,
                     &wake,
                 );
                 alive.fetch_sub(1, Ordering::Relaxed);
@@ -525,6 +573,8 @@ fn serve(
 /// next byte would ever wake. A timeout returns control to the loop to look at the stop flag,
 /// without the eager five-millisecond polling an earlier version used to catch a request split
 /// across reads: a blocking read already returns as soon as the rest of the request arrives.
+// Connection evidence stays separate from the shared services and their authorization callbacks.
+#[allow(clippy::too_many_arguments)]
 fn converse(
     stream: Stream,
     connection: Connection,
@@ -532,6 +582,7 @@ fn converse(
     to_the_window: &SyncSender<Delivery>,
     services: &Services,
     peer: Option<Result<Peer, String>>,
+    origin: PublicationOrigin,
     wake: &Arc<dyn Fn() + Send + Sync>,
 ) {
     let mut stream = stream;
@@ -676,6 +727,7 @@ fn converse(
                         .is_some()
                         .then(|| peer.as_ref().and_then(|p| p.as_ref().ok()).cloned())
                         .flatten(),
+                    origin,
                     wake,
                 ),
             };
@@ -695,6 +747,7 @@ fn converse(
         let _ = to_the_window.send(Delivery {
             connection,
             what: What::Closed,
+            origin,
             answer: answering,
         });
         wake();
@@ -713,6 +766,7 @@ fn answer(
     to_the_window: &SyncSender<Delivery>,
     read_document: &Option<ReadDocument>,
     holder_peer: Option<Peer>,
+    origin: PublicationOrigin,
     wake: &Arc<dyn Fn() + Send + Sync>,
 ) -> (Reply, bool) {
     match incoming {
@@ -722,6 +776,7 @@ fn answer(
                 Wants::AgentSignal,
                 What::AgentSignal(snapshot),
                 connection,
+                origin,
                 to_the_window,
                 wake,
             ),
@@ -736,6 +791,7 @@ fn answer(
                             source,
                             connection,
                             holder_peer.clone(),
+                            origin,
                             to_the_window,
                             wake,
                         ),
@@ -761,6 +817,7 @@ fn answer(
                             dropped,
                         },
                         connection,
+                        origin,
                         to_the_window,
                         wake,
                     ),
@@ -781,6 +838,7 @@ fn answer(
                 Wants::PlanRead,
                 What::PlanGet,
                 connection,
+                origin,
                 to_the_window,
                 wake,
             ),
@@ -791,6 +849,7 @@ fn answer(
                 Wants::Text,
                 What::PlanRetire,
                 connection,
+                origin,
                 to_the_window,
                 wake,
             ),
@@ -811,6 +870,7 @@ fn answer(
                     args,
                 },
                 connection,
+                origin,
                 to_the_window,
                 wake,
             ),
@@ -821,6 +881,7 @@ fn answer(
                 Wants::Read,
                 What::Read { pane, scrollback },
                 connection,
+                origin,
                 to_the_window,
                 wake,
             ),
@@ -831,6 +892,7 @@ fn answer(
                 Wants::Taken,
                 What::Close { pane },
                 connection,
+                origin,
                 to_the_window,
                 wake,
             ),
@@ -845,7 +907,14 @@ fn answer(
                     Ok(document) => Reply::Document(document),
                     Err(why) => Reply::Failed(why),
                 },
-                None => ask_the_window(Wants::Document, What::Get, connection, to_the_window, wake),
+                None => ask_the_window(
+                    Wants::Document,
+                    What::Get,
+                    connection,
+                    origin,
+                    to_the_window,
+                    wake,
+                ),
             },
             false,
         ),
@@ -857,6 +926,7 @@ fn answer(
                     Wants::Taken,
                     What::Patch { ops },
                     connection,
+                    origin,
                     to_the_window,
                     wake,
                 ),
@@ -869,6 +939,7 @@ fn answer(
                 Wants::Retired,
                 What::Retire,
                 connection,
+                origin,
                 to_the_window,
                 wake,
             ),
@@ -907,6 +978,7 @@ fn publish(
     source: String,
     connection: Connection,
     peer: Option<Peer>,
+    origin: PublicationOrigin,
     to_the_window: &SyncSender<Delivery>,
     wake: &Arc<dyn Fn() + Send + Sync>,
 ) -> Reply {
@@ -921,6 +993,7 @@ fn publish(
             None => What::Publish { source, panel },
         },
         connection,
+        origin,
         to_the_window,
         wake,
     )
@@ -972,6 +1045,7 @@ fn ask_the_window(
     wants: Wants,
     what: What,
     connection: Connection,
+    origin: PublicationOrigin,
     to_the_window: &SyncSender<Delivery>,
     wake: &Arc<dyn Fn() + Send + Sync>,
 ) -> Reply {
@@ -983,6 +1057,7 @@ fn ask_the_window(
     match to_the_window.try_send(Delivery {
         connection,
         what,
+        origin,
         answer: answering,
     }) {
         Ok(()) => {}
@@ -1151,6 +1226,55 @@ mod tests {
         assert!(matches!(closed.what, What::Closed));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn diagnostic_peer_is_the_connected_process() {
+        let pane = a_pane();
+        let stream = pane.connect();
+        let peer = DiagnosticPeer::capture(&stream).expect("capture local peer");
+        assert_eq!(peer.pid(), std::process::id());
+        assert!(peer.is_alive());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn inspector_runs_once_and_its_observation_reaches_each_delivery() {
+        let dir = PanelDir::create().unwrap();
+        let (sender, inbox) = sync_channel(8);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let seen = Arc::clone(&calls);
+        let channel = Channel::open_with_publication_inspector(
+            dir.path(),
+            dir.id(),
+            sender,
+            None,
+            None,
+            None,
+            Some(Arc::new(move |peer| {
+                assert_eq!(peer.pid(), std::process::id());
+                seen.fetch_add(1, Ordering::Relaxed);
+                PublicationOrigin::Outside
+            })),
+            Arc::new(|| {}),
+        )
+        .unwrap();
+        let mut client = endpoint::connect(dir.path(), dir.id()).unwrap();
+        let request = publication("test", r#"{"lines":[]}"#);
+        client.write_all(request.as_bytes()).unwrap();
+        let first = inbox.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(first.origin, PublicationOrigin::Outside);
+        first.answer.send(Answer::Taken).unwrap();
+        let _ = read_reply(&mut client);
+        client.write_all(request.as_bytes()).unwrap();
+        let second = inbox.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(second.origin, PublicationOrigin::Outside);
+        second.answer.send(Answer::Taken).unwrap();
+        let _ = read_reply(&mut client);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        drop(client);
+        drop(channel);
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn panel_publish_is_admitted_off_frame_and_publisher_disconnect_is_silent() {
@@ -1203,6 +1327,7 @@ mod tests {
             .try_send(Delivery {
                 connection: 99,
                 what: What::Closed,
+                origin: PublicationOrigin::Unknown,
                 answer,
             })
             .unwrap();
@@ -1283,13 +1408,22 @@ mod tests {
             .try_send(Delivery {
                 connection: 0,
                 what: What::Closed,
+                origin: PublicationOrigin::Unknown,
                 answer: answering,
             })
             .expect("fill the queue");
 
         let panel = panel_contract::parse_document("{\"lines\":[]}").expect("a panel");
         let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(|| {});
-        let reply = publish(panel, "flow".to_owned(), 1, None, &to_the_window, &wake);
+        let reply = publish(
+            panel,
+            "flow".to_owned(),
+            1,
+            None,
+            PublicationOrigin::Unknown,
+            &to_the_window,
+            &wake,
+        );
 
         assert!(
             matches!(&reply, Reply::Failed(why) if why.contains("not draining")),
@@ -1307,6 +1441,7 @@ mod tests {
             .try_send(Delivery {
                 connection: 7,
                 what: What::Closed,
+                origin: PublicationOrigin::Unknown,
                 answer: answering,
             })
             .expect("fill the window queue");

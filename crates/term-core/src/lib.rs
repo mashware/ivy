@@ -27,7 +27,7 @@ use portable_pty::{Child, CommandBuilder, MasterPty, native_pty_system};
 mod foreground;
 #[cfg(target_os = "linux")]
 mod nonblocking;
-pub use foreground::{Argument, ForegroundAncestry, ForegroundScope, NativeProcess};
+pub use foreground::{Ancestry, Argument, ForegroundAncestry, ForegroundScope, NativeProcess};
 #[cfg(any(test, feature = "testing"))]
 pub mod received;
 mod screen;

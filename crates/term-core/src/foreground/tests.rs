@@ -16,6 +16,20 @@ fn console(script: &str) -> (Pty, Receiver<Vec<u8>>, u32) {
 const LIVE: &str = "import os; print(os.getpid(), flush=True); input()";
 
 #[test]
+fn ancestry_diagnostic_is_tristate_and_ignores_foreground_rules() {
+    use super::Ancestry;
+    let (pty, _output, pane_child) = console(LIVE);
+    let (other, _other_output, other_child) = console(LIVE);
+    let scope = pty.foreground_scope().unwrap();
+    assert_eq!(scope.classify_ancestry(pane_child), Ancestry::Inside);
+    assert_eq!(scope.classify_ancestry(other_child), Ancestry::Outside);
+    assert_eq!(scope.classify_ancestry(0), Ancestry::Unknown);
+    drop(pty);
+    assert_eq!(scope.classify_ancestry(pane_child), Ancestry::Unknown);
+    drop(other);
+}
+
+#[test]
 fn native_process_directory_checks_birth_executable_and_live_process() {
     let (mut pty, _output, pid) =
         console("import os; os.chdir('/tmp'); print(os.getpid(), flush=True); input()");
@@ -151,6 +165,7 @@ fn detached_helper_is_attested_only_as_a_descendant_of_the_live_foreground_pane(
     );
     let scope = pty.foreground_scope().unwrap();
     let birth = super::linux::stat(helper).unwrap().birth;
+    assert_eq!(scope.classify_ancestry(helper), super::Ancestry::Inside);
     assert!(
         scope.inspect(helper, birth).is_err(),
         "strict inspection cannot turn a detached helper into a foreground process"

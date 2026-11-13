@@ -1,4 +1,4 @@
-use super::{ForegroundAncestry, NativeProcess};
+use super::{Ancestry, ForegroundAncestry, NativeProcess};
 use std::{
     io,
     os::fd::{AsRawFd, FromRawFd, OwnedFd},
@@ -67,6 +67,7 @@ unsafe extern "C" {
 pub(super) struct Scope {
     master: OwnedFd,
     child: Stat,
+    diagnostic_child: DiagnosticStat,
     child_life: OwnedFd,
     stop: Weak<AtomicBool>,
 }
@@ -87,6 +88,10 @@ pub(super) fn scope(pty: &crate::Pty) -> io::Result<Scope> {
         .and_then(|c| c.process_id())
         .ok_or_else(denied)? as u32;
     let child = stat(pid)?;
+    let diagnostic_child = diagnostic_stat(pid)?;
+    if stat(pid)? != child || diagnostic_stat(pid)? != diagnostic_child {
+        return Err(denied());
+    }
     let child_life = watch(pid, child.birth, false)?;
     let raw = unsafe {
         libc::fcntl(
@@ -102,11 +107,36 @@ pub(super) fn scope(pty: &crate::Pty) -> io::Result<Scope> {
     Ok(Scope {
         master,
         child,
+        diagnostic_child,
         child_life,
         stop: Arc::downgrade(&pty.stop),
     })
 }
 impl Scope {
+    pub(super) fn classify_ancestry(&self, pid: u32) -> Ancestry {
+        self.diagnostic_ancestry(pid).unwrap_or(Ancestry::Unknown)
+    }
+
+    fn diagnostic_ancestry(&self, pid: u32) -> io::Result<Ancestry> {
+        if pid == 0 || !self.is_open() {
+            return Err(denied());
+        }
+        let root = self.diagnostic_child;
+        if !self.is_open() {
+            return Err(denied());
+        }
+        let verdict = super::classify_snapshots(pid, (root.pid, root.parent, root.birth()), |p| {
+            diagnostic_stat(p).map(|s| (s.pid, s.parent, s.birth()))
+        })?;
+        if !self.is_open()
+            || diagnostic_stat(root.pid)? != root
+            || stat(self.child.pid)? != self.child
+        {
+            return Err(denied());
+        }
+        Ok(verdict)
+    }
+
     pub(super) fn is_open(&self) -> bool {
         self.stop
             .upgrade()
@@ -175,6 +205,43 @@ impl Scope {
         }
         Err(denied())
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DiagnosticStat {
+    pid: u32,
+    parent: u32,
+    start_sec: u64,
+    start_usec: u64,
+}
+
+impl DiagnosticStat {
+    fn birth(self) -> (u64, u64) {
+        (self.start_sec, self.start_usec)
+    }
+}
+
+fn diagnostic_stat(pid: u32) -> io::Result<DiagnosticStat> {
+    let mut info = BsdInfo::default();
+    let size = std::mem::size_of::<BsdInfo>() as i32;
+    let count = unsafe {
+        proc_pidinfo(
+            pid as i32,
+            PROC_PIDTBSDINFO,
+            0,
+            (&mut info as *mut BsdInfo).cast(),
+            size,
+        )
+    };
+    if count != size || info.pid != pid || info.status == 5 {
+        return Err(denied());
+    }
+    Ok(DiagnosticStat {
+        pid,
+        parent: info.ppid,
+        start_sec: info.start_sec,
+        start_usec: info.start_usec,
+    })
 }
 fn stat(pid: u32) -> io::Result<Stat> {
     let mut b = BsdInfo::default();

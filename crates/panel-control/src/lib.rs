@@ -35,13 +35,16 @@
 //! handle (**D44**). All six are advertised, because all six are answered.
 
 pub mod client;
+pub mod diagnostic_peer;
 pub mod endpoint;
 pub mod listener;
 pub mod session;
 pub mod wire;
 
 pub use client::{Answered, Producer};
+pub use diagnostic_peer::DiagnosticPeer;
 pub use listener::{
-    Answer, Channel, Connection, Delivery, OverlayAuthority, PublishHandler, ReadDocument, What,
+    Answer, Channel, Connection, Delivery, OverlayAuthority, PublicationInspector,
+    PublicationOrigin, PublishHandler, ReadDocument, What,
 };
 pub use wire::{Activity, AgentSnapshot, MAX_REQUEST, Reply, Request, Side};

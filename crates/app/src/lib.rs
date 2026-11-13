@@ -5784,6 +5784,7 @@ mod tests {
             .and_then(|pane| pane.control.as_mut())
             .expect("that console keeps its channel")
             .push_for_the_tests(panel_control::Delivery {
+                origin: panel_control::PublicationOrigin::Unknown,
                 connection,
                 what,
                 answer: answering,
@@ -6290,11 +6291,13 @@ mod tests {
         let (closing, _closed) = std::sync::mpsc::sync_channel(1);
         let control = origin.control.as_mut().expect("the pane has its channel");
         control.enqueue_for_tests(panel_control::Delivery {
+            origin: panel_control::PublicationOrigin::Unknown,
             connection,
             what: panel_control::What::Retire,
             answer: retiring,
         });
         control.enqueue_for_tests(panel_control::Delivery {
+            origin: panel_control::PublicationOrigin::Unknown,
             connection,
             what: panel_control::What::Closed,
             answer: closing,
@@ -6372,11 +6375,13 @@ mod tests {
         let (publishing, published) = std::sync::mpsc::sync_channel(1);
         let control = origin.control.as_mut().expect("the pane has its channel");
         control.enqueue_for_tests(panel_control::Delivery {
+            origin: panel_control::PublicationOrigin::Unknown,
             connection,
             what: panel_control::What::Retire,
             answer: retiring,
         });
         control.enqueue_for_tests(panel_control::Delivery {
+            origin: panel_control::PublicationOrigin::Unknown,
             connection,
             what: panel_control::What::Publish {
                 source: "flow".to_owned(),
@@ -6481,6 +6486,7 @@ mod tests {
             .expect("the origin console");
         let control = origin.control.as_mut().expect("the pane has its channel");
         control.enqueue_for_tests(panel_control::Delivery {
+            origin: panel_control::PublicationOrigin::Unknown,
             connection,
             what: panel_control::What::Closed,
             answer: closing,
