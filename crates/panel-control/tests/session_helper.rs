@@ -140,24 +140,34 @@ fn invalid_whole_identity_exits_before_reading_stdin_or_connecting() {
 fn session_exchange_rejects_invalid_identity_before_connecting() {
     const CHILD: &str = "IVY_TEST_DIRECT_EXCHANGE_CHILD";
     if std::env::var_os(CHILD).is_some() {
-        let request = session::Request::Attach {
-            client: session::Client::Claude,
-        };
-        assert_eq!(
-            session::exchange(&request).unwrap_err().kind(),
-            std::io::ErrorKind::NotFound
-        );
+        for client in [session::Client::Claude, session::Client::Codex] {
+            // Codex attach is itself invalid; identity must be checked before request validation.
+            let request = session::Request::Attach { client };
+            assert_eq!(
+                session::exchange(&request).unwrap_err().kind(),
+                std::io::ErrorKind::NotFound
+            );
+        }
         return;
     }
 
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
+    use std::os::unix::net::UnixListener;
+
+    // If identity validation regresses, both invalid identities still resolve to this real
+    // endpoint: Unix routing uses PANEL_DIR, and the relative spelling is rooted at `/` below.
+    let panel = PanelDir::create().unwrap();
+    let socket_path = panel.path().join(panel_contract::CONTROL_SOCKET);
+    let listener = UnixListener::bind(&socket_path).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let relative_dir = panel.path().strip_prefix("/").unwrap().as_os_str();
 
     for (id, dir) in [
-        (OsString::from("pane"), OsString::from("relative")),
+        (OsString::from("pane"), OsString::from(relative_dir)),
         (
             OsString::from_vec(vec![b'p', b'a', b'n', b'e', 0xff]),
-            std::env::temp_dir().into_os_string(),
+            panel.path().as_os_str().to_owned(),
         ),
     ] {
         let output = Command::new(std::env::current_exe().unwrap())
@@ -168,12 +178,18 @@ fn session_exchange_rejects_invalid_identity_before_connecting() {
             .env(CHILD, "1")
             .env("PANEL_ID", id)
             .env("PANEL_DIR", dir)
+            .current_dir("/")
             .output()
             .unwrap();
         assert!(
             output.status.success(),
             "{}",
             String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock,
+            "invalid identity reached the bound inherited endpoint"
         );
     }
 }

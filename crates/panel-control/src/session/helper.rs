@@ -91,11 +91,16 @@ pub fn publish_document(bytes: &[u8]) -> Result<String, String> {
 
 /// Opens only the endpoint inherited by this pane. No arbitrary endpoint or pane selector exists.
 pub fn exchange(request: &Request) -> io::Result<serde_json::Value> {
-    exchange_line(&request.line().map_err(io::Error::other)?)
+    let endpoint = inherited_endpoint()?;
+    exchange_at(&request.line().map_err(io::Error::other)?, endpoint)
 }
 
 /// Exchanges a prebuilt, bounded newline JSON request over this pane's inherited endpoint.
 pub fn exchange_line(line: &[u8]) -> io::Result<serde_json::Value> {
+    exchange_at(line, inherited_endpoint()?)
+}
+
+fn inherited_endpoint() -> io::Result<interprocess::local_socket::Name<'static>> {
     let outside = || {
         io::Error::new(
             io::ErrorKind::NotFound,
@@ -105,9 +110,16 @@ pub fn exchange_line(line: &[u8]) -> io::Result<serde_json::Value> {
     let [id, dir] = panel_contract::ENV_NAMES.map(std::env::var_os);
     let (id, dir) =
         crate::client::whole_identity(id.as_deref(), dir.as_deref()).ok_or_else(outside)?;
+    crate::endpoint::name_of(dir, id)
+}
+
+fn exchange_at(
+    line: &[u8],
+    endpoint: interprocess::local_socket::Name<'static>,
+) -> io::Result<serde_json::Value> {
     let deadline = Instant::now() + Duration::from_secs(2);
     let mut stream = interprocess::local_socket::ConnectOptions::new()
-        .name(crate::endpoint::name_of(dir, id)?)
+        .name(endpoint)
         .wait_mode(interprocess::ConnectWaitMode::Timeout(remaining(deadline)?))
         .connect_sync()?;
     let mut unwritten = line;

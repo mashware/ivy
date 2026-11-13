@@ -813,9 +813,11 @@ The helper reads a JSON object (at most 262144 stdin bytes), compacts it to one 
 {"tool":"panel_publish","document":{"lines":["Updated step"],"phase":"build"}}
 ```
 
-This helper-only verb is not advertised as an MCP tool. Without complete PANEL_ID/PANEL_DIR,
-or on a platform without an endpoint, it exits successfully and silently. Invalid input inside
-an identity exits 2 before connecting. An unreachable supported endpoint is an error, exit 1.
+This helper-only verb is not advertised as an MCP tool. Without a whole console identity (a
+nonempty UTF-8 `PANEL_ID` and absolute `PANEL_DIR`), it prints
+`{"ok":false,"error":"outside_ivy"}` and exits 1 before reading stdin. With a whole identity on a
+platform without an endpoint it exits successfully and silently. Invalid input inside an identity
+exits 2 before connecting. An unreachable supported endpoint is an error, exit 1.
 
 An accepted publication prints `{"ok":true}` and exits 0 as soon as the bounded queue accepts it,
 even while the window is minimized. No holder prints
