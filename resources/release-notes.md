@@ -1,6 +1,15 @@
-# Ivy 0.1.0-alpha.7
+# Ivy 0.1.0-alpha.8
 
 ## New in this alpha
+
+- The board now shows persistent project roadmaps, published by agents or read from a configured Markdown file, with console cards grouped under milestones and deliverables.
+- Open and fold individual panel block headers to keep the information you need in view.
+- Agents started in an Ivy console are prompted to publish their status panel.
+- Hooks from the active agent can refresh progress and clear an obsolete waiting claim while the agent keeps its panel connection.
+- Completed agents release their panel so file publishers can take over, and publications from processes outside the console are labelled.
+- Selecting text no longer shifts shaped terminal text at selection boundaries.
+
+## Since 0.1.0-alpha.6
 
 - Each console header now carries a subtle project-color gradient, making consoles in the same project easy to recognize without tinting terminal output. Text, controls and agent indicators remain readable in light and dark themes.
 
@@ -64,12 +73,12 @@
 
 ## Choose a download
 
-- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.7_amd64.deb`.
-- Arch Linux x86_64: `ivy-terminal-0.1.0alpha7-1-x86_64.pkg.tar.zst`.
-- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.7-macos-arm64.dmg`.
-- macOS 15+ Intel: `Ivy-0.1.0-alpha.7-macos-x86_64.dmg`.
-- Windows 11 x64: `Ivy-0.1.0-alpha.7-windows-x86_64-setup.exe`.
+- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.8_amd64.deb`.
+- Arch Linux x86_64: `ivy-terminal-0.1.0alpha8-1-x86_64.pkg.tar.zst`.
+- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.8-macos-arm64.dmg`.
+- macOS 15+ Intel: `Ivy-0.1.0-alpha.8-macos-x86_64.dmg`.
+- Windows 11 x64: `Ivy-0.1.0-alpha.8-windows-x86_64-setup.exe`.
 
 Download `release-manifest.json` and `SHA256SUMS` with the chosen package and verify its SHA-256
-before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.7/docs/10-installation.md)
+before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.8/docs/10-installation.md)
 for verification, installation, upgrade and removal commands. No Rust toolchain is needed.
