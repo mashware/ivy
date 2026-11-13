@@ -1,31 +1,49 @@
-//! Optional shaped ASCII runs, adapted once to the terminal's fixed column step.
+//! Optional shaped ASCII runs, placed on the terminal's fixed column step.
 use super::*;
 use eframe::egui::epaint::text::Galley;
 use std::sync::Arc;
 
 /// Clone before transforming: epaint owns and shares its cached layout and texel UVs.
-fn on_grid(source: &Arc<Galley>, advance: f32, metrics: &CellMetrics) -> Arc<Galley> {
-    let ratio = metrics.width / advance;
+fn on_grid(source: &Arc<Galley>, metrics: &CellMetrics) -> Arc<Galley> {
     let mut galley = (**source).clone();
-    let scale_rect = |rect: &mut Rect| {
-        rect.min.x *= ratio;
-        rect.max.x *= ratio;
-    };
-    scale_rect(&mut galley.rect);
-    scale_rect(&mut galley.mesh_bounds);
     for placed in &mut galley.rows {
-        placed.pos.x *= ratio;
         let row = Arc::make_mut(&mut placed.row);
-        row.size.x *= ratio;
-        for glyph in &mut row.glyphs {
-            glyph.pos.x *= ratio;
-            glyph.advance_width *= ratio;
+        for (source_col, glyph) in row.glyphs.iter_mut().enumerate() {
+            let logical_x = source_col as f32 * metrics.width;
+            let pixel = metrics.a_pixel();
+            let target_x = (logical_x / pixel).round() * pixel;
+            glyph.pos.x = target_x;
+            glyph.advance_width = metrics.width;
+            if glyph.uv_rect.is_nothing() {
+                continue;
+            }
+            let start = glyph.first_vertex as usize;
+            let Some(vertices) = row.visuals.mesh.vertices.get_mut(start..start + 4) else {
+                continue;
+            };
+            let left = ((target_x + glyph.uv_rect.offset.x) / pixel).round() * pixel;
+            for (index, vertex) in vertices.iter_mut().enumerate() {
+                vertex.pos.x = left
+                    + if index % 2 == 1 {
+                        glyph.uv_rect.size.x
+                    } else {
+                        0.0
+                    };
+            }
         }
-        for vertex in &mut row.visuals.mesh.vertices {
-            vertex.pos.x *= ratio;
-        }
-        scale_rect(&mut row.visuals.mesh_bounds);
+        row.size.x = row.glyphs.len() as f32 * metrics.width;
+        row.visuals.mesh_bounds = row.visuals.mesh.calc_bounds();
     }
+    galley.rect.max.x = galley
+        .rows
+        .iter()
+        .map(|p| p.pos.x + p.row.size.x)
+        .fold(0.0, f32::max);
+    galley.mesh_bounds = galley
+        .rows
+        .iter()
+        .map(|p| p.row.visuals.mesh_bounds.translate(p.pos.to_vec2()))
+        .fold(Rect::NOTHING, Rect::union);
     Arc::new(galley)
 }
 
@@ -47,11 +65,20 @@ fn layout(
             return None;
         }
         let expected = text.len() as f32 * advance;
+        let source_chars = text.chars().count();
         let shaped = fonts.layout_no_wrap(text, font, color);
-        if shaped.rows.len() != 1 || (shaped.rows[0].size.x - expected).abs() > metrics.a_pixel() {
+        if shaped.rows.len() != 1
+            || shaped.rows[0].glyphs.len() != source_chars
+            || shaped.rows[0]
+                .glyphs
+                .iter()
+                .map(|glyph| glyph.chr)
+                .ne(shaped.job.text.chars())
+            || (shaped.rows[0].size.x - expected).abs() > metrics.a_pixel()
+        {
             return None;
         }
-        Some(on_grid(&shaped, advance, metrics))
+        Some(on_grid(&shaped, metrics))
     })
 }
 
@@ -163,12 +190,13 @@ mod tests {
     pub(super) fn context() -> Context {
         let ctx = Context::default();
         let mut definitions = eframe::egui::FontDefinitions::default();
-        definitions.font_data.insert(
-            "fixture".into(),
-            Arc::new(eframe::egui::FontData::from_static(include_bytes!(
-                "../../tests/fixtures/ligatures/JetBrainsMono-Regular.ttf"
-            ))),
-        );
+        let mut fixture = eframe::egui::FontData::from_static(include_bytes!(
+            "../../tests/fixtures/ligatures/JetBrainsMono-Regular.ttf"
+        ));
+        fixture.tweak.subpixel_binning = Some(false);
+        definitions
+            .font_data
+            .insert("fixture".into(), Arc::new(fixture));
         definitions.families.insert(
             eframe::egui::FontFamily::Name("fixture".into()),
             vec!["fixture".into()],
@@ -179,7 +207,7 @@ mod tests {
     #[test]
     fn real_ligature_ink_and_fixed_grid_survive_fractional_sizes_scales_and_long_runs() {
         for scale in [1.0, 1.25, 1.5, 2.0] {
-            for size in [13.0, 14.7, 17.3] {
+            for size in [13.0, 14.0, 14.7, 17.3] {
                 let ctx = context();
                 ctx.set_pixels_per_point(scale);
                 ctx.run_ui(Default::default(), |ui| {
@@ -263,7 +291,6 @@ mod tests {
                             f.layout_no_wrap(text.clone(), font.clone(), Color32::WHITE)
                         });
                         let before = (*source).clone();
-                        let advance = ctx.fonts_mut(|f| f.glyph_width(&font, 'M'));
                         let transformed = layout(
                             ui.painter(),
                             text.clone(),
@@ -273,6 +300,14 @@ mod tests {
                         )
                         .unwrap();
                         assert_eq!(*source, before, "shared cached galley mutated");
+                        for (column, glyph) in transformed.rows[0].glyphs.iter().enumerate() {
+                            assert!(
+                                ((glyph.pos.x - column as f32 * metrics.width) * scale).abs()
+                                    < 0.001,
+                                "glyph pen left its source cell"
+                            );
+                            assert_eq!(glyph.advance_width, metrics.width);
+                        }
                         let right = transformed.rows[0].size.x;
                         assert!(
                             (right - text.len() as f32 * metrics.width).abs() <= metrics.a_pixel(),
@@ -282,11 +317,44 @@ mod tests {
                             .visuals
                             .mesh
                             .vertices
-                            .iter()
-                            .zip(&transformed.rows[0].visuals.mesh.vertices)
+                            .chunks_exact(4)
+                            .zip(transformed.rows[0].visuals.mesh.vertices.chunks_exact(4))
                         {
-                            assert_eq!(a.uv, b.uv, "texel UV changed");
-                            assert_eq!(b.pos.x, a.pos.x * (metrics.width / advance));
+                            let rect = |quad: &[eframe::egui::epaint::Vertex]| {
+                                let min_x =
+                                    quad.iter().map(|v| v.pos.x).fold(f32::INFINITY, f32::min);
+                                let max_x = quad
+                                    .iter()
+                                    .map(|v| v.pos.x)
+                                    .fold(f32::NEG_INFINITY, f32::max);
+                                let min_y =
+                                    quad.iter().map(|v| v.pos.y).fold(f32::INFINITY, f32::min);
+                                let max_y = quad
+                                    .iter()
+                                    .map(|v| v.pos.y)
+                                    .fold(f32::NEG_INFINITY, f32::max);
+                                Rect::from_min_max(pos2(min_x, min_y), pos2(max_x, max_y))
+                            };
+                            assert_eq!(
+                                a.iter().map(|v| v.uv).collect::<Vec<_>>(),
+                                b.iter().map(|v| v.uv).collect::<Vec<_>>(),
+                                "texel UV changed"
+                            );
+                            assert!(
+                                (rect(a).width() - rect(b).width()).abs() < 0.001,
+                                "glyph raster width changed"
+                            );
+                            assert!(
+                                (rect(a).height() - rect(b).height()).abs() < 0.001,
+                                "glyph raster height changed"
+                            );
+                            for vertex in b {
+                                let device_x = vertex.pos.x * scale;
+                                assert!(
+                                    (device_x - device_x.round()).abs() < 0.01,
+                                    "quad edge is off device pixel: {device_x}"
+                                );
+                            }
                         }
                     }
                 })
@@ -299,3 +367,7 @@ mod tests {
 #[cfg(test)]
 #[path = "ligatures/tests.rs"]
 mod integration_tests;
+
+#[cfg(test)]
+#[path = "ligatures/grid_tests.rs"]
+mod grid_tests;
