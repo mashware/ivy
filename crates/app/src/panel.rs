@@ -29,7 +29,7 @@ mod document;
 mod driving;
 mod fold;
 pub(crate) mod overlay;
-mod provenance;
+pub(crate) mod provenance;
 pub(crate) mod provenance_route;
 #[cfg(test)]
 use fold::lay_out;

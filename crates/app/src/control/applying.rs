@@ -45,7 +45,8 @@ impl PaneControl {
                     panel,
                     peer,
                 } => {
-                    let answer = match state.deliver_observed(
+                    let answer = match crate::panel::provenance::deliver_observed(
+                        state,
                         delivery.connection,
                         &source,
                         panel,
@@ -74,7 +75,8 @@ impl PaneControl {
                     let _ = delivery.answer.send(answer);
                 }
                 What::Publish { source, panel } => {
-                    let answer = match state.deliver_observed(
+                    let answer = match crate::panel::provenance::deliver_observed(
+                        state,
                         delivery.connection,
                         &source,
                         panel,

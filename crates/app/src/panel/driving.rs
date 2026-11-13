@@ -458,14 +458,10 @@ impl PanelState {
             return Ok(result);
         }
 
-        self.published_by = panel_control::PublicationOrigin::Unknown;
         self.channel_publication = None;
         self.file_probe_pending = false;
-        self.last_good = None;
-        self.committed.clear();
-        self.layout = None;
+        super::document::clear(self);
         self.problem = None;
-        self.drawn = None;
         self.holder = None;
         self.hook_source = None;
         self.overlay.clear();

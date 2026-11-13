@@ -7,20 +7,18 @@ use super::{Panel, PanelState, Row, Style, Theme};
 
 const OUTSIDE: &str = "published from a process outside this console";
 
-impl PanelState {
-    /// A failed publication cannot replace the current document's observation.
-    pub(crate) fn deliver_observed(
-        &mut self,
-        connection: Connection,
-        source: &str,
-        panel: Panel,
-        now: SystemTime,
-        origin: PublicationOrigin,
-    ) -> Result<(), String> {
-        self.deliver(connection, source, panel, now)?;
-        self.published_by = origin;
-        Ok(())
-    }
+/// A failed publication cannot replace the current document's observation.
+pub(crate) fn deliver_observed(
+    state: &mut PanelState,
+    connection: Connection,
+    source: &str,
+    panel: Panel,
+    now: SystemTime,
+    origin: PublicationOrigin,
+) -> Result<(), String> {
+    state.deliver(connection, source, panel, now)?;
+    state.published_by = origin;
+    Ok(())
 }
 
 pub(super) fn append_row(rows: &mut Vec<Row>, state: &PanelState, width: usize, theme: &Theme) {
@@ -60,9 +58,15 @@ mod tests {
         let at = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
         let dir = PanelDir::create().unwrap();
         let mut state = PanelState::default();
-        state
-            .deliver_observed(1, "agent", panel(true), at, PublicationOrigin::Outside)
-            .unwrap();
+        deliver_observed(
+            &mut state,
+            1,
+            "agent",
+            panel(true),
+            at,
+            PublicationOrigin::Outside,
+        )
+        .unwrap();
         assert!(!state.document().unwrap().contains(OUTSIDE));
         state.release(1);
         for (text, stamp) in [
@@ -83,17 +87,29 @@ mod tests {
     fn patches_keep_observation_refusals_do_not_change_it_and_full_publications_replace_it() {
         let at = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
         let mut state = PanelState::default();
-        state
-            .deliver_observed(1, "agent", panel(false), at, PublicationOrigin::Outside)
-            .unwrap();
+        deliver_observed(
+            &mut state,
+            1,
+            "agent",
+            panel(false),
+            at,
+            PublicationOrigin::Outside,
+        )
+        .unwrap();
         let ops = parse_ops(&serde_json::json!([{"op":"set","field":"attention","value":"done"}]))
             .unwrap();
         state.patch(1, &ops, at).unwrap();
         assert_eq!(state.published_by, PublicationOrigin::Outside);
         assert!(
-            state
-                .deliver_observed(2, "other", panel(false), at, PublicationOrigin::Inside)
-                .is_err()
+            deliver_observed(
+                &mut state,
+                2,
+                "other",
+                panel(false),
+                at,
+                PublicationOrigin::Inside
+            )
+            .is_err()
         );
         assert_eq!(state.published_by, PublicationOrigin::Outside);
         for origin in [
@@ -101,9 +117,7 @@ mod tests {
             PublicationOrigin::Unknown,
             PublicationOrigin::Outside,
         ] {
-            state
-                .deliver_observed(1, "agent", panel(false), at, origin)
-                .unwrap();
+            deliver_observed(&mut state, 1, "agent", panel(false), at, origin).unwrap();
             assert_eq!(state.published_by, origin);
         }
     }
@@ -113,9 +127,15 @@ mod tests {
         let at = SystemTime::now();
         let theme = Theme::default();
         let mut state = PanelState::default();
-        state
-            .deliver_observed(1, "agent", panel(true), at, PublicationOrigin::Outside)
-            .unwrap();
+        deliver_observed(
+            &mut state,
+            1,
+            "agent",
+            panel(true),
+            at,
+            PublicationOrigin::Outside,
+        )
+        .unwrap();
         let (rows, cached) = state
             .lay_out_if_needed("pane", 100, &theme, None, None)
             .unwrap();
@@ -128,9 +148,15 @@ mod tests {
                 .unwrap()
                 .1
         );
-        state
-            .deliver_observed(1, "agent", panel(true), at, PublicationOrigin::Unknown)
-            .unwrap();
+        deliver_observed(
+            &mut state,
+            1,
+            "agent",
+            panel(true),
+            at,
+            PublicationOrigin::Unknown,
+        )
+        .unwrap();
         let (rows, cached) = state
             .lay_out_if_needed("pane", 100, &theme, None, None)
             .unwrap();
@@ -142,15 +168,15 @@ mod tests {
     fn retirement_clears_observation() {
         let dir = PanelDir::create().unwrap();
         let mut state = PanelState::default();
-        state
-            .deliver_observed(
-                1,
-                "agent",
-                panel(true),
-                SystemTime::now(),
-                PublicationOrigin::Outside,
-            )
-            .unwrap();
+        deliver_observed(
+            &mut state,
+            1,
+            "agent",
+            panel(true),
+            SystemTime::now(),
+            PublicationOrigin::Outside,
+        )
+        .unwrap();
         state
             .retire(
                 1,

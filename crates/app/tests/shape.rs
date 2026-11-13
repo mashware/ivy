@@ -593,10 +593,10 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
     ),
     (
         "impl PanelState",
-        360,
+        358,
         "what a pane holds of its panel. On the day it was recorded it was split over `panel.rs` \
          and its child modules for the document, links, driving and the pane, to pay the block \
-         ceiling. Cache construction belongs to the resolved-colour cache. Pure warning and hook-refusal presentation now belong to their policy functions, keeping363 after hook state transitions and provenance revocation. File arbitration now lives in the driving policy function, leaving360 after done-yield ownership transitions.",
+         ceiling. Cache construction belongs to the resolved-colour cache. Pure warning and hook-refusal presentation now belong to their policy functions, keeping363 after hook state transitions and provenance revocation. File arbitration now lives in the driving policy function, leaving360 after done-yield ownership transitions. Retirement document/provenance clearing is now shared in document.rs, leaving358.",
     ),
     (
         "impl InjectedDrags",
