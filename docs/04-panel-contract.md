@@ -788,3 +788,41 @@ cannot reach. **D88**.
       the flag is read from the `panel.json` itself, its default value does not look at any
       neighboring file, and whoever paints honors it. **What it does not hide is the application's
       notice**, and that is deliberate
+
+
+### Hook publications over an existing hold
+
+Inside Ivy, configure flow’s optional local setting as:
+
+```yaml
+panel.publish_cmd: exec "${IVY_SESSION_HELPER:-true}" publish
+```
+
+The helper reads a JSON object (at most 262144 stdin bytes), compacts it to one wire line and sends:
+
+```json
+{"tool":"panel_publish","document":{"lines":["Updated step"],"phase":"build"}}
+```
+
+This helper-only verb is not advertised as an MCP tool. Without complete PANEL_ID/PANEL_DIR,
+or on a platform without an endpoint, it exits successfully and silently. Invalid input inside
+an identity exits 2 before connecting. An unreachable supported endpoint is an error, exit 1.
+
+An accepted publication prints `{"ok":true}` and exits 0 as soon as the bounded queue accepts it,
+even while the window is minimized. No holder prints
+`{"ok":false,"code":"unheld","message":"this panel has no holder"}` and also exits 0.
+A script-held pane, foreign client, nested client or full queue exits 1 with `ivy-session: <reason>`
+on stderr. The holder must be a live supported native client, and the hook must descend from that
+same invocation. Copying the inherited pane identity does not prove descent.
+
+Hook lines, phase, attention and freshness replace those fields in the current document; missing
+attention clears the pane/tab claim. Header and roadmap identity remain holder-owned. Incoming
+hook actions are ignored; holder actions remain only while the new attention says `wait`.
+The identity row shows `flow · hook` for a flow holder. A later set replaces everything; a patch
+uses the overlaid document; disconnect retains it; retire clears it. Queued stale authority is
+refused at application time and confessed on the identity row (D90).
+
+Linux and macOS process backends use native birth/lifetime and foreground evidence. Session
+recovery remains Linux-only. Native Mac AC1/AC2 checks for each supported client require real
+hardware verification; compile checks are not runtime evidence. Exact executable recognition
+fails closed for unsupported installations and updated paths.

@@ -632,6 +632,10 @@ pub struct Control {
     /// pixels and costs the parse and the refusal instead of the walk — and it would be published as
     /// the cost of patching.
     pub patches_refused: usize,
+    /// Hook overlays committed during the window control span.
+    pub overlaid: usize,
+    /// Admitted overlays rejected at apply time; excludes off-frame admission failures.
+    pub overlays_refused: usize,
     /// The largest document this run wrote out, in bytes.
     ///
     /// **Without it a run publishes a cost with no size attached to it**, and a reader extrapolates
@@ -673,6 +677,8 @@ impl Control {
             read_refused: self.read_refused + other.read_refused,
             patched: self.patched + other.patched,
             patches_refused: self.patches_refused + other.patches_refused,
+            overlaid: self.overlaid + other.overlaid,
+            overlays_refused: self.overlays_refused + other.overlays_refused,
             largest_serialized: self.largest_serialized.max(other.largest_serialized),
             retired: self.retired + other.retired,
             auxiliary_closed: self.auxiliary_closed + other.auxiliary_closed,
@@ -1081,6 +1087,11 @@ pub fn header(
     )?;
     writeln!(
         a,
+        "overlays:     {} overlaid, {} overlays_refused (admitted, rejected during apply)",
+        control.overlaid, control.overlays_refused
+    )?;
+    writeln!(
+        a,
         "retirement:   {} committed, {} auxiliary closed, {} preserved, {} reaped · {:?} transition · {:?} reaping",
         control.retired,
         control.auxiliary_closed,
@@ -1199,6 +1210,8 @@ mod tests {
             released: 2,
             read_back: 4,
             read_refused: 2,
+            overlaid: 2,
+            overlays_refused: 3,
             patched: 7,
             patches_refused: 1,
             largest_serialized: 900,
@@ -1210,6 +1223,8 @@ mod tests {
             released: 1,
             read_back: 6,
             read_refused: 3,
+            overlaid: 4,
+            overlays_refused: 1,
             patched: 2,
             patches_refused: 4,
             largest_serialized: 120,
@@ -1223,6 +1238,8 @@ mod tests {
         assert_eq!(both.released, 3);
         assert_eq!(both.read_back, 10);
         assert_eq!(both.read_refused, 5);
+        assert_eq!(both.overlaid, 6);
+        assert_eq!(both.overlays_refused, 4);
         assert_eq!(both.patched, 9);
         assert_eq!(both.patches_refused, 5);
         assert_eq!(
