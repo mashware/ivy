@@ -223,7 +223,7 @@ fn executable(pid: u32) -> io::Result<PathBuf> {
     if n <= 0 || n as usize >= b.len() {
         return Err(denied());
     };
-    let s = std::ffi::CStr::from_bytes_until_nul(&b[..n as usize]).map_err(|_| denied())?;
+    let s = std::ffi::CStr::from_bytes_with_nul(&b[..=n as usize]).map_err(|_| denied())?;
     let p = PathBuf::from(std::ffi::OsStr::from_bytes(s.to_bytes()));
     if !p.is_absolute() {
         return Err(denied());
@@ -436,6 +436,14 @@ fn denied() -> io::Error {
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn current_process_executable_matches_the_native_path() {
+        assert_eq!(
+            executable(std::process::id()).unwrap(),
+            std::env::current_exe().unwrap()
+        );
+    }
 
     #[test]
     fn shell_exec_preserves_pane_lifetime_and_revokes_client_lifetime() {
