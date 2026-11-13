@@ -1,14 +1,7 @@
 //! Who is publishing to a panel, when it is not its file.
 //!
-//! **This is D17's answer to «who rules», and the whole of it.** The contract has two transports and
-//! the file cannot identify its producer, so authority cannot be given to it: while a connection
-//! holds a pane it is the only writer, the file is not read at all, and a second source is refused
-//! by name. There is no sequence number anywhere and none is needed — one connection's
-//! newline-framed requests cannot reorder themselves, and with the file unread there is nobody else
-//! to order against.
-//!
-//! It sits beside the panel rather than inside it for the reason the size rule gives (**D28**): what
-//! the panel is and how it is painted is one subject, and who is allowed to write it is another.
+//! A connection reserves the panel until disconnect or retirement. `done` yields only the file
+//! suppression: a newer file may paint, but another connection still cannot claim the reservation.
 
 use std::io::{self, Read as _};
 use std::path::Path;
@@ -203,6 +196,12 @@ pub(super) enum RetirementState {
     },
 }
 
+#[derive(Debug)]
+pub(super) struct ChannelPublication {
+    pub(super) written_at: SystemTime,
+    pub(super) owns_document: bool,
+}
+
 /// Who is driving a panel, and under what name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Holder {
@@ -220,9 +219,20 @@ pub(crate) struct Holder {
     /// file really changed, the confession is as long-lived as the refusal it describes. Not read by
     /// [`PanelState::refresh`]'s own module: the panel asks for it to build the warning.
     pub(super) file_refused: bool,
+    pub(super) yielded: bool,
 }
 
 impl PanelState {
+    pub(super) fn channel_owns_document(&self) -> bool {
+        self.channel_publication
+            .as_ref()
+            .is_some_and(|channel| channel.owns_document)
+    }
+
+    pub(crate) fn file_probe_pending(&self) -> bool {
+        self.file_probe_pending
+    }
+
     /// Snapshots the current file generation for an intentional retirement.
     ///
     /// Missing is a real generation: there was no file to resurrect. Other metadata failures are
@@ -349,7 +359,9 @@ impl PanelState {
             connection,
             source: source.to_owned(),
             file_refused: false,
+            yielded: false,
         });
+        record_channel_write(self, &panel, now);
         self.commit(Panel {
             written_at: Some(now),
             ..panel
@@ -361,12 +373,10 @@ impl PanelState {
 
     /// Applies a patch to what this connection published, **or changes nothing at all**.
     ///
-    /// **It needs the hold, and one check answers two of the cases the ticket names.** `deliver`
-    /// sets the holder and the document together, so there is no state where a connection holds a
-    /// pane and there is nothing to patch: *nothing has been published yet* and *the file rules this
-    /// panel* are the same refusal. The sentence names the second, because that is the one a
-    /// producer can act on, and it says the move — which is what keeps a publication the ground
-    /// state a patch is measured against.
+    /// **The reservation and the current document are separate.** A holder that yielded to a
+    /// file still owns its connection reservation and can retire or republish, but cannot patch
+    /// what the file wrote. Only a full publication can reclaim that document. Checking both here
+    /// keeps a patch from accidentally applying a producer's line keys to somebody else's text.
     ///
     /// **Either every op applies or none does**, and the ceiling is part of that: the patched
     /// document is written out before it is installed, so a patch whose own request is small and
@@ -402,6 +412,10 @@ impl PanelState {
             return Err(held_by_somebody_else(&holder.source));
         }
 
+        if !self.channel_owns_document() {
+            return Err(ITS_FILES.to_owned());
+        }
+
         let patched = published
             .patched_with(ops)
             .map_err(|problem| problem.to_string())?;
@@ -413,6 +427,7 @@ impl PanelState {
         // twice what it does.
         let written = panel_contract::serialize(&patched).map_err(|problem| problem.to_string())?;
 
+        record_channel_write(self, &patched, now);
         self.commit(Panel {
             written_at: Some(now),
             ..patched
@@ -442,6 +457,8 @@ impl PanelState {
             return Ok(result);
         }
 
+        self.channel_publication = None;
+        self.file_probe_pending = false;
         self.last_good = None;
         self.committed.clear();
         self.layout = None;
@@ -488,7 +505,9 @@ impl PanelState {
     }
 
     pub(super) fn displayed_source(&self) -> Option<&str> {
-        self.hook_source.as_deref().or_else(|| self.held_by())
+        self.channel_owns_document()
+            .then(|| self.hook_source.as_deref().or_else(|| self.held_by()))
+            .flatten()
     }
 
     /// Whether the connection holding this panel has had a file publication refused.
@@ -497,8 +516,107 @@ impl PanelState {
     /// is true: a flag raised by a rearm or the blind watcher must not keep this panel looking every
     /// frame for the rest of the hold, and it must not turn into a confession either.
     pub(crate) fn refused_the_file(&self) -> bool {
-        self.holder.as_ref().is_some_and(|held| held.file_refused)
+        self.holder
+            .as_ref()
+            .is_some_and(|held| !held.yielded && held.file_refused)
     }
+}
+
+pub(super) fn record_channel_write(state: &mut PanelState, panel: &Panel, now: SystemTime) {
+    state.channel_publication = Some(ChannelPublication {
+        written_at: now,
+        owns_document: true,
+    });
+    if let Some(holder) = &mut state.holder {
+        holder.yielded = panel.attention == Some(panel_contract::Attention::Done);
+        if holder.yielded {
+            holder.file_refused = false;
+            state.file_probe_pending = true;
+        }
+    }
+}
+
+pub(super) fn refresh_file(state: &mut PanelState, dir: &Path) -> super::Refreshed {
+    state.file_probe_pending = false;
+    // **The return is before the file is read, and that is the invariant rather than an
+    // optimisation.** While an active connection holds this pane there is exactly one writer, and reading
+    // the file would put a second one back — settled, as it was before D17, by whichever of the
+    // two wrote last. What it does do is **look at the file's date**, because the look-again flag
+    // alone cannot say whether the file changed: a split, an open tab or the blind watcher raise
+    // it on every pane, and latching the confession from it made a held panel say «the file is not
+    // being read» for the rest of its life over a file nobody wrote.
+    // The layout is not thrown away here: what this changes is the warning, and the warning is
+    // in the cache's key — so a hundred writes to a file nobody reads redo the layout once.
+    //
+    // **Saying «declined» rather than just returning is what lets the caller keep the notice.**
+    // A refusal that looked like a read would throw that publication away for ever: the file's
+    // date never changes again on its own.
+    if let Some(holder) = &mut state.holder
+        && !holder.yielded
+    {
+        if file_mtime(dir) != state.file_seen {
+            holder.file_refused = true;
+        }
+        return super::Refreshed::Declined;
+    }
+
+    match state.refresh_after_retirement(dir) {
+        RetirementRefresh::NotRetired => {}
+        RetirementRefresh::Read => return super::Refreshed::Read,
+        RetirementRefresh::Deferred(delay) => return super::Refreshed::Deferred(delay),
+    }
+
+    let seen = state.last_good.as_ref().and_then(|panel| panel.written_at);
+
+    // The contract reader skips equal dates only. Both the stat and the actual read must
+    // respect this stricter boundary, including a rename between them.
+    let cutoff = state
+        .channel_publication
+        .as_ref()
+        .map(|channel| seen.map_or(channel.written_at, |seen| seen.max(channel.written_at)));
+    if let (Some(cutoff), Some(written_at)) = (cutoff, file_mtime(dir))
+        && written_at <= cutoff
+    {
+        return super::Refreshed::Read;
+    }
+
+    match panel_contract::read_if_newer(dir, seen) {
+        Ok(Some(panel)) => {
+            if cutoff.is_some_and(|cutoff| panel.written_at.is_none_or(|at| at <= cutoff)) {
+                return super::Refreshed::Read;
+            }
+            if let Some(channel) = &mut state.channel_publication {
+                channel.owns_document = false;
+            }
+            state.hook_source = None;
+            if let Some(holder) = &mut state.holder {
+                holder.file_refused = false;
+            }
+            // The file's own date, kept as the baseline a later hold compares against. The
+            // contract's parser already carries it on the panel, so this is not a second read.
+            state.file_seen = panel.written_at;
+            state.commit(panel);
+            state.problem = None;
+            state.layout = None;
+        }
+        // **What there is stays valid, and that includes clearing the previous problem.** That the
+        // read reaches here means the file could be asked about and that its date is that of the panel
+        // already held: what is shown **is** the latest, and a failure from a while ago no longer
+        // describes reality. Without this, a passing stumble —running out of descriptors, a network
+        // mount that flickers— would accuse the producer forever, because its file is not going to
+        // change its date again on its own.
+        Ok(None) => state.problem = None,
+        Err(problem) => {
+            // A file that is not there is the baseline «nothing», so a file that appears during a
+            // later hold reads as a change and is confessed. Any other failure leaves the last date
+            // it had, which is still the file's date.
+            if matches!(problem, panel_contract::Problem::Missing) {
+                state.file_seen = None;
+            }
+            state.problem = Some(problem);
+        }
+    }
+    super::Refreshed::Read
 }
 
 fn snapshot(dir: &Path) -> io::Result<FileGeneration> {
@@ -572,4 +690,190 @@ fn open_snapshot(path: &Path) -> io::Result<std::fs::File> {
         ));
     }
     std::fs::File::open(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use panel_contract::{PANEL_FILE, PanelDir, parse_document, parse_ops};
+
+    fn panel(done: bool) -> Panel {
+        parse_document(if done {
+            r#"{"attention":"done","lines":["channel"]}"#
+        } else {
+            r#"{"lines":["channel"]}"#
+        })
+        .unwrap()
+    }
+
+    fn patch(value: serde_json::Value) -> Patch {
+        parse_ops(&value).unwrap()
+    }
+
+    fn file(dir: &PanelDir, text: &str, at: SystemTime) {
+        let path = dir.path().join(PANEL_FILE);
+        std::fs::write(&path, text).unwrap();
+        std::fs::File::open(path).unwrap().set_modified(at).unwrap();
+    }
+
+    fn newer_file(dir: &PanelDir, at: SystemTime) {
+        file(dir, r#"{"lines":["file"]}"#, at);
+    }
+
+    #[test]
+    fn done_by_publish_or_patch_yields_only_the_document() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        for by_patch in [false, true] {
+            let dir = PanelDir::create().unwrap();
+            let mut state = PanelState::default();
+            state.deliver(7, "holder", panel(!by_patch), now).unwrap();
+            if by_patch {
+                state
+                    .patch(
+                        7,
+                        &patch(serde_json::json!([
+                            {"op":"set","field":"attention","value":"done"}
+                        ])),
+                        now,
+                    )
+                    .unwrap();
+            }
+            assert!(state.file_probe_pending());
+            newer_file(&dir, now + Duration::from_secs(1));
+            assert_eq!(state.refresh(dir.path()), super::super::Refreshed::Read);
+            assert!(!state.file_probe_pending());
+            assert_eq!(state.last_understood().unwrap().lines[0].text, "file");
+            assert!(state.displayed_source().is_none());
+            let refusal = state.deliver(8, "holder", panel(false), now).unwrap_err();
+            assert!(refusal.contains("holder"));
+            let before = state.document().unwrap();
+            assert_eq!(
+                state
+                    .patch(
+                        7,
+                        &patch(
+                            serde_json::json!([{ "op":"set", "field":"attention", "value":"done" }])
+                        ),
+                        now
+                    )
+                    .unwrap_err(),
+                ITS_FILES
+            );
+            assert!(state.apply_overlay(panel(false), now).is_err());
+            assert_eq!(state.document().unwrap(), before);
+            state
+                .deliver(7, "holder", panel(false), now + Duration::from_secs(2))
+                .unwrap();
+            newer_file(&dir, now + Duration::from_secs(3));
+            assert_eq!(state.refresh(dir.path()), super::super::Refreshed::Declined);
+            assert_eq!(state.last_understood().unwrap().lines[0].text, "channel");
+        }
+    }
+
+    #[test]
+    fn done_never_resurrects_equal_or_older_files_even_after_disconnect() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        for disconnect in [false, true] {
+            let dir = PanelDir::create().unwrap();
+            let mut state = PanelState::default();
+            state.deliver(7, "holder", panel(true), now).unwrap();
+            if disconnect {
+                state.release(7);
+            }
+            for stamp in [now - Duration::from_secs(1), now] {
+                newer_file(&dir, stamp);
+                state.refresh(dir.path());
+                assert_eq!(state.last_understood().unwrap().lines[0].text, "channel");
+            }
+            newer_file(&dir, now + Duration::from_secs(2));
+            state.refresh(dir.path());
+            assert_eq!(state.last_understood().unwrap().lines[0].text, "file");
+            for stamp in [now + Duration::from_secs(1), now + Duration::from_secs(2)] {
+                file(&dir, r#"{"lines":["obsolete"]}"#, stamp);
+                state.refresh(dir.path());
+                assert_eq!(state.last_understood().unwrap().lines[0].text, "file");
+            }
+        }
+    }
+
+    #[test]
+    fn malformed_newer_file_keeps_the_channel_patchable_and_does_not_end_yield() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        let dir = PanelDir::create().unwrap();
+        let mut state = PanelState::default();
+        state.deliver(7, "holder", panel(true), now).unwrap();
+        file(&dir, "{", now + Duration::from_secs(1));
+        state.refresh(dir.path());
+        assert!(state.problem.is_some());
+        assert!(state.channel_owns_document());
+        state
+            .patch(
+                7,
+                &patch(serde_json::json!([{ "op":"set", "field":"attention", "value":"done" }])),
+                now + Duration::from_secs(2),
+            )
+            .unwrap();
+        assert!(state.file_probe_pending());
+        newer_file(&dir, now + Duration::from_secs(3));
+        state.refresh(dir.path());
+        assert_eq!(state.last_understood().unwrap().lines[0].text, "file");
+    }
+
+    #[test]
+    fn a_patch_can_end_yield_and_failed_patches_do_not_move_its_cutoff() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        let dir = PanelDir::create().unwrap();
+        let mut state = PanelState::default();
+        state.deliver(7, "holder", panel(true), now).unwrap();
+        assert!(
+            state
+                .patch(
+                    7,
+                    &patch(serde_json::json!([
+                        {"op":"delete","key":"absent"}
+                    ])),
+                    now + Duration::from_secs(9)
+                )
+                .is_err()
+        );
+        assert_eq!(state.channel_publication.as_ref().unwrap().written_at, now);
+        state
+            .patch(
+                7,
+                &patch(serde_json::json!([
+                    {"op":"set","field":"attention","value":null}
+                ])),
+                now + Duration::from_secs(1),
+            )
+            .unwrap();
+        newer_file(&dir, now + Duration::from_secs(2));
+        assert_eq!(state.refresh(dir.path()), super::super::Refreshed::Declined);
+    }
+
+    #[test]
+    fn retirement_remains_authorized_after_done_and_after_file_takeover() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        for takeover in [false, true] {
+            let dir = PanelDir::create().unwrap();
+            let mut state = PanelState::default();
+            state.deliver(7, "holder", panel(true), now).unwrap();
+            newer_file(&dir, now + Duration::from_secs(1));
+            if takeover {
+                state.refresh(dir.path());
+            }
+            let baseline = PanelState::retirement_baseline(dir.path()).unwrap();
+            let result = Retirement {
+                closed: 2,
+                preserved: 1,
+            };
+            assert_eq!(state.retire(7, baseline.clone(), result).unwrap(), result);
+            assert_eq!(
+                state.retire(7, baseline, Retirement::default()).unwrap(),
+                result
+            );
+            state.refresh(dir.path());
+            assert!(state.last_understood().is_none());
+            assert!(state.channel_publication.is_none());
+        }
+    }
 }

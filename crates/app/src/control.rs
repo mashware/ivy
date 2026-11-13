@@ -1427,6 +1427,14 @@ mod tests {
             b"{\"lines\":[\"written during the hold\"]}",
         )
         .expect("publish by file");
+        // File takeover is strictly newer than the last channel publication, even on filesystems
+        // whose write timestamp is rounded below the application's clock.
+        std::fs::File::open(pane.dir.path().join(panel_contract::PANEL_FILE))
+            .unwrap()
+            .set_modified(
+                pane.state.last_understood().unwrap().written_at.unwrap() + Duration::from_secs(1),
+            )
+            .unwrap();
         // The refusal happens here, with the hold still standing.
         pane.control.apply(
             &mut pane.state,
@@ -1479,6 +1487,14 @@ mod tests {
             b"{\"lines\":[\"the file again\"]}",
         )
         .expect("publish by file");
+        // File takeover is strictly newer than the last channel publication, even on filesystems
+        // whose write timestamp is rounded below the application's clock.
+        std::fs::File::open(pane.dir.path().join(panel_contract::PANEL_FILE))
+            .unwrap()
+            .set_modified(
+                pane.state.last_understood().unwrap().written_at.unwrap() + Duration::from_secs(1),
+            )
+            .unwrap();
         pane.state.refresh(pane.dir.path());
         assert_eq!(
             pane.state
