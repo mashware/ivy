@@ -1,0 +1,9 @@
+# Architecture recommendation
+
+Put `pub fn private_to_this_user(dir: &Path) -> io::Result<()>` in `crates/panel-control/src/endpoint.rs`. On Unix, use `symlink_metadata` (lstat semantics), require `file_type().is_dir()`, `uid() == geteuid()`, and `mode() & 0o077 == 0`. Report missing paths distinctly, naming the path; report all other refusals with the path and `not a private directory of this user`. On Windows return `Ok(())` while channel binding remains unsupported. Keep a small internal predicate/helper that accepts the expected uid so tests can cover a foreign owner without root.
+
+Call the guard in `Producer::of_this_pane` after `whole_identity` succeeds and before `Self::of` (`client.rs:66-115`), and in `session::helper::exchange` after reading the inherited identity and before `ConnectOptions::connect_sync` (`session/helper.rs:69-91`). Preserve the guard's error through `ivy-session.rs:17-20`. Do not put it in `Producer::of` or `endpoint::connect`, which also serve explicit app-owned connections.
+
+In `ivy-opencode.tsx`, use `lstatSync` plus `process.geteuid()` at the start of every `connect()` attempt; on missing, symlink, wrong type, owner, or mode failure, log the path/error and schedule `connect` after one second without calling `createConnection`. This makes each retry revalidate.
+
+Tests: endpoint unit cases for genuine `PanelDir`, 0755, injected foreign uid, symlink, and missing path/error wording; bridge and helper integration cases assert refusal before connection and surfaced path/message; OpenCode mocked socket cases assert no connect on invalid directory and fresh validation on retry. Run the three focused commands listed in `inventory.md`. Document D7 and the security table as scoped in the study. Compatibility cost: inherited `sudo -E` identities fail closed; check-then-connect remains a narrow replacement race.

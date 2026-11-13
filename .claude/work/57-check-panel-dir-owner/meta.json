@@ -1,0 +1,67 @@
+{
+  "ticket": "57",
+  "slug": "check-panel-dir-owner",
+  "type": "feat",
+  "title": "Check the owner of PANEL_DIR before connecting to a console's channel",
+  "branch": "57-check-panel-dir-owner",
+  "base": "main",
+  "stacked_on": null,
+  "worktree": null,
+  "size": "M",
+  "phase": "plan",
+  "phases_done": [
+    "context",
+    "design",
+    "plan"
+  ],
+  "draft_from_conversation": false,
+  "tracker_issue": "https://github.com/mashware/ivy/issues/57",
+  "related_repos": [],
+  "roadmap": null,
+  "started_at": "2026-11-13T01:09:15.890110+00:00",
+  "updated_at": "2026-11-13T01:15:11.223436+00:00",
+  "notes": "Chosen shared private-directory guard at inherited doors; Rust and JS equivalent. Study only. Final slash/dot symlink bypass included in predicate and tests.",
+  "pending": null,
+  "defaults_used": [
+    {
+      "key": "unattended:branch",
+      "default": "Created from explicit main, no upstream",
+      "phase": "context"
+    },
+    {
+      "key": "unattended:size",
+      "default": "M: Rust and JS modules, security boundary, tests and docs",
+      "phase": "context"
+    },
+    {
+      "key": "unattended:approach",
+      "default": "Shared guard; longer IDs cannot authenticate learned paths",
+      "phase": "design"
+    },
+    {
+      "key": "unattended:design-review",
+      "default": "Recorded accepted for study routing; no code approval",
+      "phase": "design"
+    },
+    {
+      "key": "unattended:plan-review",
+      "default": "One atomic PR accepted for study routing; no build begun",
+      "phase": "plan"
+    }
+  ],
+  "ticket_deps": [],
+  "followups": [],
+  "mrs": [
+    {
+      "n": 1,
+      "title": "Reject unsafe inherited panel directories",
+      "size": "M",
+      "status": "pending",
+      "phases_done": [],
+      "wave": 1,
+      "depends_on": [],
+      "lines_est": 350,
+      "files_est": 11
+    }
+  ]
+}
