@@ -1,0 +1,31 @@
+
+> ivy-session-recovery@1.0.0 test
+> node --test --test-isolation=none tests/*.test.js
+
+✔ Claude registers only a metadata timer, keeps next(event), and uses exact argv/stdin (3.62583ms)
+✔ Claude unverified versions do not start reporters (1.282885ms)
+✔ Claude installed globally does nothing outside Ivy (0.234556ms)
+✔ Claude headless/SDK surface cannot attach even with inherited pane variables (0.257569ms)
+✔ missing, relative or control-bearing helper locator never starts Claude work (1.041406ms)
+✔ OpenCode accepts native/Bun direct restore, declines unsupported topology (0.498126ms)
+✔ OpenCode reads route metadata only and withdraws children/workspaces/home (0.32264ms)
+✔ actual child runner passes literal argv/stdin and captures helper output (25.861131ms)
+✔ Codex static guarded command uses the absolute locator literally and never PATH (73.282547ms)
+✔ unchanged identity probes but does not republish (0.596889ms)
+✔ new close challenge requires a fresh official read even for an unchanged ID (0.347777ms)
+✔ read occurs after the probe has returned its challenge (0.259262ms)
+✔ stale generation discards the old sample and reads again after attaching (0.321107ms)
+✔ timer overlap is serialized and a route change gets a fresh follow-up (0.415543ms)
+✔ stop during a delayed probe prevents later read and publication (0.244133ms)
+✔ outside-Ivy response stops permanently, disabled response remains retryable (0.240086ms)
+✔ invalid identities withdraw and extra client content never leaves the adapter (0.287785ms)
+✔ helper replies are bounded, typed, and consistent with their exit status (0.298014ms)
+✔ missing generation cannot become the literal string undefined (0.212004ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 129.505434

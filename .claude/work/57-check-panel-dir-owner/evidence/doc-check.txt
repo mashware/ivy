@@ -1,0 +1,291 @@
+    Checking panel-contract v0.1.0-alpha.7 (/work/repo/crates/panel-contract)
+    Checking term-core v0.1.0-alpha.7 (/work/repo/crates/term-core)
+ Documenting term-core v0.1.0-alpha.7 (/work/repo/crates/term-core)
+ Documenting panel-contract v0.1.0-alpha.7 (/work/repo/crates/panel-contract)
+    Checking panel-control v0.1.0-alpha.7 (/work/repo/crates/panel-control)
+ Documenting panel-control v0.1.0-alpha.7 (/work/repo/crates/panel-control)
+warning: public documentation for `serialize` links to private item `parse`
+   --> crates/panel-contract/src/panel.rs:737:74
+    |
+737 | /// promises. It cannot hand back the bytes its producer sent, because [`parse`] is lossy on purpose
+    |                                                                          ^^^^^ this item is private
+    |
+    = note: this link resolves only because you passed `--document-private-items`, but will break without
+    = note: `#[warn(rustdoc::private_intra_doc_links)]` on by default
+
+warning: public documentation for `serialize` links to private item `parse`
+   --> crates/panel-contract/src/panel.rs:746:23
+    |
+746 | /// for every panel [`parse`] can produce — so a document that has made one round trip never changes
+    |                       ^^^^^ this item is private
+    |
+    = note: this link resolves only because you passed `--document-private-items`, but will break without
+
+warning: public documentation for `CONTROL_SOCKET` links to private item `remove`
+  --> crates/panel-contract/src/lib.rs:51:17
+   |
+51 | /// also what [`remove`] has to know about — see that function for what a second name in this
+   |                 ^^^^^^ this item is private
+   |
+   = note: this link resolves only because you passed `--document-private-items`, but will break without
+
+warning: `panel-contract` (lib doc) generated 3 warnings
+ Documenting host-load v0.1.0-alpha.7 (/work/repo/crates/host-load)
+warning: public documentation for `mark_matches` links to private item `MARKING_REACH`
+   --> crates/term-core/src/screen.rs:683:80
+    |
+683 |     /// bottom edge is marked on the part that shows — **but never more than [`MARKING_REACH`] lines
+    |                                                                                ^^^^^^^^^^^^^ this item is private
+    |
+    = note: this link resolves only because you passed `--document-private-items`, but will break without
+    = note: `#[warn(rustdoc::private_intra_doc_links)]` on by default
+
+warning: public documentation for `refused` links to private item `Input::refused`
+   --> crates/term-core/src/lib.rs:243:68
+    |
+243 |     /// ceiling. Clears on the next write that is accepted — see [`Input::refused`].
+    |                                                                    ^^^^^^^^^^^^^^ this item is private
+    |
+    = note: this link resolves only because you passed `--document-private-items`, but will break without
+
+warning: public documentation for `refusals` links to private item `Input::refusals`
+   --> crates/term-core/src/lib.rs:245:80
+    |
+245 |     /// How many writes have been refused so far. It only ever goes up — see [`Input::refusals`].
+    |                                                                                ^^^^^^^^^^^^^^^ this item is private
+    |
+    = note: this link resolves only because you passed `--document-private-items`, but will break without
+
+warning: public documentation for `spawn` links to private item `READS_IN_FLIGHT`
+   --> crates/term-core/src/lib.rs:474:11
+    |
+474 |     /// [`READS_IN_FLIGHT`]. Whoever drains the channel without ever stopping —a `for` over it, with no
+    |           ^^^^^^^^^^^^^^^ this item is private
+    |
+    = note: this link resolves only because you passed `--document-private-items`, but will break without
+
+warning: public documentation for `write` links to private item `MAX_OWED`
+   --> crates/term-core/src/lib.rs:733:38
+    |
+733 |     /// **The queue has a ceiling, [`MAX_OWED`], checked against what is already owed.** Past it,
+    |                                      ^^^^^^^^ this item is private
+    |
+    = note: this link resolves only because you passed `--document-private-items`, but will break without
+
+ Documenting app v0.1.0-alpha.7 (/work/repo/crates/app)
+warning: `term-core` (lib doc) generated 5 warnings
+warning: public documentation for `write_reply` links to private item `REPLY_DEADLINE`
+   --> crates/panel-control/src/wire.rs:708:7
+    |
+708 | /// [`REPLY_DEADLINE`] as its send timeout where it is armed, so a full buffer comes back as an error
+    |       ^^^^^^^^^^^^^^ this item is private
+    |
+    = note: this link resolves only because you passed `--document-private-items`, but will break without
+    = note: `#[warn(rustdoc::private_intra_doc_links)]` on by default
+
+warning: public documentation for `drop` links to private item `RECV_TIMEOUT`
+   --> crates/panel-control/src/listener.rs:339:11
+    |
+339 |     /// [`RECV_TIMEOUT`]; one parked on the window's answer takes at most [`ANSWER_DEADLINE`] longer,
+    |           ^^^^^^^^^^^^ this item is private
+    |
+    = note: this link resolves only because you passed `--document-private-items`, but will break without
+
+warning: public documentation for `drop` links to private item `ANSWER_DEADLINE`
+   --> crates/panel-control/src/listener.rs:339:77
+    |
+339 |     /// [`RECV_TIMEOUT`]; one parked on the window's answer takes at most [`ANSWER_DEADLINE`] longer,
+    |                                                                             ^^^^^^^^^^^^^^^ this item is private
+    |
+    = note: this link resolves only because you passed `--document-private-items`, but will break without
+
+warning: public documentation for `drop` links to private item `crate::wire::REPLY_DEADLINE`
+   --> crates/panel-control/src/listener.rs:341:11
+    |
+341 |     /// [`crate::wire::REPLY_DEADLINE`] on top of that — **the worst case is the sum of the two**, and
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^ this item is private
+    |
+    = note: this link resolves only because you passed `--document-private-items`, but will break without
+
+warning: redundant explicit link target
+  --> crates/panel-control/src/wire.rs:58:40
+   |
+58 | /// [`panel_contract::parse_document`](panel_contract::parse_document), and this number is only what
+   |      --------------------------------  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ explicit target is redundant
+   |      |
+   |      because label contains path that resolves to same destination
+   |
+   = note: when a link's destination is not specified,
+           the label is used to resolve intra-doc links
+   = note: `#[warn(rustdoc::redundant_explicit_links)]` on by default
+help: remove explicit link target
+   |
+58 - /// [`panel_contract::parse_document`](panel_contract::parse_document), and this number is only what
+58 + /// [`panel_contract::parse_document`], and this number is only what
+   |
+
+warning: `panel-control` (lib doc) generated 5 warnings
+warning: public documentation for `ICON_FAMILY` links to private item `Discoverer::hand_over_the_faces`
+   --> crates/app/src/fonts.rs:211:36
+    |
+211 | /// choose which to request. See [`Discoverer::hand_over_the_faces`].
+    |                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this item is private
+    |
+    = note: this link resolves only because you passed `--document-private-items`, but will break without
+    = note: `#[warn(rustdoc::private_intra_doc_links)]` on by default
+
+warning: public documentation for `Registered` links to private item `CHOSEN_PREFIX`
+   --> crates/app/src/fonts.rs:352:51
+    |
+352 |     /// typed. What the engine is keyed by adds [`CHOSEN_PREFIX`] in front of it, so the family cannot
+    |                                                   ^^^^^^^^^^^^^ this item is private
+    |
+    = note: this link resolves only because you passed `--document-private-items`, but will break without
+
+warning: public documentation for `painted_this_run` links to private item `crate::header::Headers`
+   --> crates/app/src/measure/header.rs:771:11
+    |
+771 |     /// [`crate::header::Headers`], which asserts «this session paints strips»; the report is
+    |           ^^^^^^^^^^^^^^^^^^^^^^ this item is private
+    |
+    = note: this link resolves only because you passed `--document-private-items`, but will break without
+
+warning: public documentation for `painted_this_run` links to private item `crate::header::HEADER_VARIABLE`
+   --> crates/app/src/measure/header.rs:774:45
+    |
+774 |     /// What a batch asked is the knob at [`crate::header::HEADER_VARIABLE`], and the only reader
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this item is private
+    |
+    = note: this link resolves only because you passed `--document-private-items`, but will break without
+
+warning: public documentation for `record_round` links to private item `Spans::and_also`
+   --> crates/app/src/measure.rs:342:11
+    |
+342 |     /// [`Spans::and_also`] for why the wait is not summed.
+    |           ^^^^^^^^^^^^^^^ this item is private
+    |
+    = note: this link resolves only because you passed `--document-private-items`, but will break without
+
+warning: public documentation for `cells_in` links to private item `CEILING`
+   --> crates/app/src/painter.rs:217:74
+    |
+217 |     /// **Never fewer than one row and one column, and never more than [`CEILING`].** The floor is
+    |                                                                          ^^^^^^^ this item is private
+    |
+    = note: this link resolves only because you passed `--document-private-items`, but will break without
+
+warning: public documentation for `retire` links to private item `PanelState::commit`
+   --> crates/app/src/panel/driving.rs:434:44
+    |
+434 |     /// or file publication goes through [`PanelState::commit`] and ends that idempotent generation.
+    |                                            ^^^^^^^^^^^^^^^^^^ this item is private
+    |
+    = note: this link resolves only because you passed `--document-private-items`, but will break without
+
+warning: public documentation for `link_at` links to private item `Drawn`
+  --> crates/app/src/panel/links.rs:34:41
+   |
+34 |     /// Returning the target owned by [`Drawn`] is what makes this lookup independent of a newer
+   |                                         ^^^^^ this item is private
+   |
+   = note: this link resolves only because you passed `--document-private-items`, but will break without
+
+warning: public documentation for `PanelTiling` links to private item `crate::tiling::Tiling`
+   --> crates/app/src/panel.rs:102:62
+    |
+102 | /// It has a name, and is not a tuple, for the same reason [`crate::tiling::Tiling`] has one, which does the same
+    |                                                              ^^^^^^^^^^^^^^^^^^^^^ this item is private
+    |
+    = note: this link resolves only because you passed `--document-private-items`, but will break without
+
+warning: public documentation for `pick_up` links to private item `QUEUE_CEILING`
+   --> crates/app/src/pty_output.rs:206:56
+    |
+206 |     /// bounds the work of a frame, and the ceiling ([`QUEUE_CEILING`]) bounds the memory. Picking
+    |                                                        ^^^^^^^^^^^^^ this item is private
+    |
+    = note: this link resolves only because you passed `--document-private-items`, but will break without
+
+warning: public documentation for `session` links to private item `crate::tree::Node::materialize`
+ --> crates/app/src/session.rs:7:7
+  |
+7 | //! [`crate::tree::Node::materialize`] walks the shape, and the `fork` itself is one call in
+  |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this item is private
+  |
+  = note: this link resolves only because you passed `--document-private-items`, but will break without
+
+warning: public documentation for `session` links to private item `crate::Pane`
+ --> crates/app/src/session.rs:8:7
+  |
+8 | //! [`crate::Pane`]'s launching. **This sentence named only `crate::tree` and that sent the reader to
+  |       ^^^^^^^^^^^ this item is private
+  |
+  = note: this link resolves only because you passed `--document-private-items`, but will break without
+
+warning: public documentation for `session` links to private item `crate::tree::Node`
+  --> crates/app/src/session.rs:20:7
+   |
+20 | //! [`crate::tree::Node`] tree must not change what is written on anyone's disk; the price is one
+   |       ^^^^^^^^^^^^^^^^^ this item is private
+   |
+   = note: this link resolves only because you passed `--document-private-items`, but will break without
+
+warning: public documentation for `session` links to private item `Persistence::save`
+  --> crates/app/src/session.rs:28:30
+   |
+28 | //! to leave it half done ([`Persistence::save`]). It is here and not in whoever starts up because the
+   |                              ^^^^^^^^^^^^^^^^^ this item is private
+   |
+   = note: this link resolves only because you passed `--document-private-items`, but will break without
+
+warning: public documentation for `StoredOrientation` links to private item `crate::tiling::Orientation`
+   --> crates/app/src/session.rs:138:41
+    |
+138 | /// **It is a type of its own and not [`crate::tiling::Orientation`], on purpose.** The names of this enum are
+    |                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^ this item is private
+    |
+    = note: this link resolves only because you passed `--document-private-items`, but will break without
+
+warning: public documentation for `weight` links to private item `crate::tiling::Weight`
+   --> crates/app/src/session.rs:172:16
+    |
+172 |     /// over [`crate::tiling::Weight`] **would skip its constructor**, which is the only thing that makes a sum of
+    |                ^^^^^^^^^^^^^^^^^^^^^ this item is private
+    |
+    = note: this link resolves only because you passed `--document-private-items`, but will break without
+
+warning: public documentation for `Validated` links to private item `crate::tiling::Weight`
+   --> crates/app/src/session.rs:210:31
+    |
+210 | /// is the same doctrine as [`crate::tiling::Weight`] one level up, and for the same reason: this project has
+    |                               ^^^^^^^^^^^^^^^^^^^^^ this item is private
+    |
+    = note: this link resolves only because you passed `--document-private-items`, but will break without
+
+warning: public documentation for `kept` links to private item `MAX_WARNINGS`
+   --> crates/app/src/settings.rs:332:56
+    |
+332 |     /// The ones that were kept, which are the first [`MAX_WARNINGS`].
+    |                                                        ^^^^^^^^^^^^ this item is private
+    |
+    = note: this link resolves only because you passed `--document-private-items`, but will break without
+
+warning: public documentation for `run` links to private item `Window::with_tabs`
+   --> crates/app/src/lib.rs:536:59
+    |
+536 | /// **The environment is read here, and nowhere else.** [`Window::with_tabs`] receives the number
+    |                                                           ^^^^^^^^^^^^^^^^^ this item is private
+    |
+    = note: this link resolves only because you passed `--document-private-items`, but will break without
+
+warning: public documentation for `run` links to private item `open_with`
+   --> crates/app/src/lib.rs:539:14
+    |
+539 | /// `1` of [`open_with`] for a fixed value would leave the whole suite green and the measurement
+    |              ^^^^^^^^^ this item is private
+    |
+    = note: this link resolves only because you passed `--document-private-items`, but will break without
+
+warning: `app` (lib doc) generated 20 warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.53s
+   Generated /opt/cargo-target/doc/app/index.html and 7 other files

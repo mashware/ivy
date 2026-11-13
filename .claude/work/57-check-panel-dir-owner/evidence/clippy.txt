@@ -1,0 +1,2 @@
+    Checking app v0.1.0-alpha.7 (/work/repo/crates/app)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.60s

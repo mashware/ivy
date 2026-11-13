@@ -20,11 +20,11 @@ Wave 1: #1 — start after study approval. No dependency or later wave.
 - **files_est**: ~11 (soft range 9–13, not a limit).
 
 ### Plan #1
-- [ ] Implement checker and permission/type/uid/spelling/error matrix.
-- [ ] Guard both Rust inherited entry points; preserve binary errors; prove no connection and genuine-client success.
-- [ ] Guard direct JS plugin on every attempt; verify no-connect/recheck/repair/disposal.
-- [ ] Update D7, architecture table and endpoint explanation.
-- [ ] Review contracts and run focused/full validation checks named in the design.
+- [x] Implement checker and permission/type/uid/spelling/error matrix.
+- [x] Guard both Rust inherited entry points; preserve binary errors; prove no connection and genuine-client success.
+- [x] Guard direct JS plugin on every attempt; verify no-connect/recheck/repair/disposal.
+- [x] Update D7, architecture table and endpoint explanation.
+- [x] Review contracts and run focused/full validation checks named in the design.
 
 ## Dependencies between PRs
 None. No ticket dependencies. Existing base supplies PanelDir, inherited identity logic and all target consumers.

@@ -8,19 +8,23 @@
   "stacked_on": null,
   "worktree": null,
   "size": "M",
-  "phase": "plan",
+  "phase": "ship",
   "phases_done": [
     "context",
     "design",
-    "plan"
+    "plan",
+    "build",
+    "review",
+    "validate",
+    "ship"
   ],
   "draft_from_conversation": false,
   "tracker_issue": "https://github.com/mashware/ivy/issues/57",
   "related_repos": [],
   "roadmap": null,
   "started_at": "2026-11-13T01:09:15.890110+00:00",
-  "updated_at": "2026-11-13T01:15:11.223436+00:00",
-  "notes": "Chosen shared private-directory guard at inherited doors; Rust and JS equivalent. Study only. Final slash/dot symlink bypass included in predicate and tests.",
+  "updated_at": "2026-11-13T09:10:35.998011+00:00",
+  "notes": "Implemented approved study; Rust/JS directory metadata check, fresh plugin retries, diagnostics, tests and docs. All six criteria proven. Full workspace 2101 passed, 7 existing ignored; no unresolved review findings.",
   "pending": null,
   "defaults_used": [
     {
@@ -47,6 +51,21 @@
       "key": "unattended:plan-review",
       "default": "One atomic PR accepted for study routing; no build begun",
       "phase": "plan"
+    },
+    {
+      "key": "unattended:rehomed",
+      "default": "57-check-panel-dir-owner \u2192 57-check-panel-dir-owner from main",
+      "phase": "run"
+    },
+    {
+      "key": "unattended:brief",
+      "default": "Approved study scope recorded before code",
+      "phase": "build"
+    },
+    {
+      "key": "unattended:validate-red-loop",
+      "default": "round 1, 1 red: the_list_still_names_every_module; repaired source audit registry",
+      "phase": "validate"
     }
   ],
   "ticket_deps": [],
@@ -56,12 +75,61 @@
       "n": 1,
       "title": "Reject unsafe inherited panel directories",
       "size": "M",
-      "status": "pending",
-      "phases_done": [],
+      "status": "published",
+      "phases_done": [
+        "build",
+        "review",
+        "validate",
+        "ship"
+      ],
       "wave": 1,
       "depends_on": [],
       "lines_est": 350,
-      "files_est": 11
+      "files_est": 11,
+      "candidate_sha": "ca90853218a3862cdc2c5fadf8e8ab68f69e260a",
+      "reviewed_sha": "ca90853218a3862cdc2c5fadf8e8ab68f69e260a",
+      "fixed_sha": "",
+      "validated_sha": "ca90853218a3862cdc2c5fadf8e8ab68f69e260a"
     }
-  ]
+  ],
+  "candidate_sha": "ca90853218a3862cdc2c5fadf8e8ab68f69e260a",
+  "reviewed_sha": "ca90853218a3862cdc2c5fadf8e8ab68f69e260a",
+  "fixed_sha": "",
+  "review_findings": [],
+  "cost": [
+    {
+      "phase": "review",
+      "at": "2026-11-13T09:01:56.356Z",
+      "round": 1,
+      "tier": "proportional",
+      "effective_size": "S",
+      "agents": {
+        "panel:security": 1,
+        "panel:correctness": 1,
+        "contract": 1
+      },
+      "reviewers": 3,
+      "usd": null,
+      "source": "not reported"
+    },
+    {
+      "phase": "review",
+      "at": "2026-11-13T09:08:23.788Z",
+      "round": 2,
+      "tier": "proportional",
+      "effective_size": "XS",
+      "agents": {
+        "panel:correctness": 1
+      },
+      "reviewers": 1,
+      "usd": null,
+      "source": "not reported"
+    }
+  ],
+  "validated_sha": "ca90853218a3862cdc2c5fadf8e8ab68f69e260a",
+  "knowledge": {
+    "status": "later",
+    "phase": "ship",
+    "files": []
+  }
 }

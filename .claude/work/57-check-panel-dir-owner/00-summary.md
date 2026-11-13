@@ -1,11 +1,12 @@
-# 57 — Study complete: reject unsafe inherited panel directories
-Size M; phase plan; branch 57-check-panel-dir-owner; 0/1 PR shipped.
-One atomic PR pending: Rust check/callers, direct JS plugin, tests and security docs.
-Study for approval: done-summary.md; contracts: 03-design.md; plan: 04-mr-plan.md.
-Real directory, effective uid, zero group/other bits; fresh check per connection attempt.
-Final symlink slash/dot bypass confirmed locally and covered by planned spelling rule/tests.
-Missing directory says gone; preserve original path and existing response/handshake contracts.
-No schema changes, cross-repo work or ticket dependencies.
-Design and security findings addressed; full test suite planned, not executed in study.
-No production code changes or commits.
-Next: owner study approval through orchestrator, then build.
+# 57 — Refuse unsafe inherited console directories
+Size M; phase ship; branch 57-check-panel-dir-owner; 0/1 PR shipped before handoff.
+One atomic PR handed to the orchestrator for publication; merge remains pending.
+Rust bridge/helper and direct OpenCode plugin validate directory owner, mode and type.
+Symlink slash/dot forms refused; original path and gone/error diagnostics retained.
+All six acceptance criteria proven by tests; wire/handshake contracts verified.
+Workspace: 2101 passed, 0 failed, 7 existing ignored. Clippy, fmt and doc-check passed.
+Plugin simulated/real socket: 2 each; Node24 recovery: 19; Python packaging: 23.
+Initial suite exposed missing script-audit row for new test; fixed and full rerun passed.
+Review: no findings; cost 4/12 review subagent runs across initial/delta review.
+No migrations, dependencies, cross-repo work or outstanding questions.
+Accepted limits: pathname race, ancestor hardening, arbitrary file producers; Linux runtime checks only.

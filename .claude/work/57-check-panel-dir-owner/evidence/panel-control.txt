@@ -1,0 +1,179 @@
+   Compiling panel-control v0.1.0-alpha.7 (/work/repo/crates/panel-control)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.12s
+     Running unittests src/lib.rs (/opt/cargo-target/debug/deps/panel_control-9751a49eb5f95b6f)
+
+running 82 tests
+test client::tests::a_document_written_across_several_lines_still_arrives_as_one_request ... ok
+test client::tests::a_document_comes_back_in_the_order_the_pane_sent_it ... ok
+test client::tests::a_producer_is_told_what_fell_away_and_nothing_when_nothing_did ... ok
+test client::tests::a_producer_publishes_and_reads_what_the_window_decided ... ok
+test client::tests::an_identity_is_whole_only_with_both_halves_present_non_empty_text_and_absolute ... ok
+test client::tests::a_producer_retires_and_reads_the_auxiliary_console_outcome ... ok
+test client::tests::legacy_reply_reader_ignores_retryable_extension ... ok
+test client::tests::a_source_carrying_quotes_does_not_break_the_request ... ok
+test client::tests::an_open_with_no_addressable_identity_comes_back_as_an_open ... ok
+test endpoint::tests::a_pane_cannot_be_reached_through_another_panes_endpoint ... ok
+test endpoint::tests::binding_is_what_binds_says ... ok
+test client::tests::the_split_verbs_travel_and_their_payloads_come_back ... ok
+test endpoint::tests::nothing_outside_this_user_can_reach_the_endpoint ... ok
+test endpoint::tests::inherited_directory_requires_private_mode_type_and_effective_owner ... ok
+test endpoint::tests::the_endpoint_lives_inside_the_panes_own_directory ... ok
+test endpoint::tests::what_was_bound_is_what_gets_connected_to ... ok
+test listener::tests::a_connection_that_dies_releases_what_it_held ... ok
+test listener::tests::a_document_is_read_while_the_window_queue_is_full_and_nobody_is_woken ... ok
+test listener::tests::a_document_that_is_not_a_panel_never_reaches_the_window ... ok
+test listener::tests::a_mismatched_answer_is_refused_rather_than_reshaped ... ok
+test listener::tests::a_patch_travels_to_the_pane_with_its_ops_already_read ... ok
+test listener::tests::a_publication_is_refused_when_the_window_is_not_draining ... ok
+test listener::tests::a_taken_patch_names_what_its_lines_dropped_and_a_refused_one_does_not ... ok
+test listener::tests::a_taken_publication_names_what_it_dropped_and_a_refused_one_does_not ... ok
+test listener::tests::agent_signal_crosses_the_socket_and_disconnect_is_reported ... ok
+test listener::tests::agent_signal_queue_full_replies_retryable_over_the_socket_but_panel_does_not ... ok
+test listener::tests::an_unknown_tool_is_refused_by_name_and_the_connection_lives_on ... ok
+test client::tests::a_document_that_is_not_json_never_leaves_the_producer ... ok
+test listener::tests::a_pane_serves_as_many_connections_as_it_serves_and_no_more ... ok
+test listener::tests::closing_after_the_endpoint_path_is_removed_still_ends_the_acceptor ... ok
+test listener::tests::panel_publish_is_admitted_off_frame_and_publisher_disconnect_is_silent ... ok
+test listener::tests::plan_verbs_parse_off_the_frame_and_forward_project_scope_operations ... ok
+test listener::tests::publishing_wakes_the_window ... ok
+test listener::tests::retirement_travels_to_the_window_and_its_counts_return ... ok
+test listener::tests::shutdown_admits_one_buffered_document_read_and_no_more ... ok
+test listener::tests::the_original_channel_api_still_hands_panel_get_to_its_owner ... ok
+test listener::tests::the_split_verbs_travel_to_the_window_and_its_answer_returns ... ok
+test listener::tests::the_window_s_answer_is_what_the_caller_reads ... ok
+test listener::tests::timeout_classification_is_specific_to_agent_signals ... ok
+test listener::tests::two_connections_are_heard_at_the_same_time ... ok
+test listener::tests::what_is_published_over_the_channel_reaches_the_window_and_no_file_is_written ... ok
+test session::helper::publish_tests::publish_input_requires_object_and_compacts_with_byte_ceilings ... ok
+test session::helper::publish_tests::publish_silence_gate_requires_a_whole_identity_and_supported_endpoint ... ok
+test session::tests::exact_ids_are_client_typed_and_never_shell_text ... ok
+test session::tests::hook_discards_content_and_update_refuses_it ... ok
+test session::tests::literal_requests_round_trip_and_unknown_authority_is_refused ... ok
+test session::tests::metadata_fields_and_complete_request_are_bounded ... ok
+test session::tests::sockets::real_session_socket_bypasses_full_ui_inbox_and_cannot_spoof_peer ... ok
+test session::tests::sockets::session_helper_cannot_release_or_replace_existing_panel_connection ... ok
+test wire::agent_signal_tests::accepts_only_complete_strict_opencode_v1_snapshots ... ok
+test wire::agent_signal_tests::retryable_reply_is_escaped_and_legacy_failure_shape_is_unchanged ... ok
+test wire::tests::a_complete_line_over_the_ceiling_is_caught_in_one_feed ... ok
+test wire::tests::a_handle_and_a_read_travel_as_escaped_payloads ... ok
+test wire::tests::a_legal_request_does_not_lift_the_ceiling_for_what_follows_it ... ok
+test wire::tests::a_line_fed_one_byte_at_a_time_is_taken_out_whole ... ok
+test wire::tests::a_line_that_is_not_understood_does_not_end_the_connection ... ok
+test wire::tests::a_long_conversation_of_small_requests_never_reaches_the_ceiling ... ok
+test wire::tests::a_lossy_reply_is_an_ok_that_carries_what_fell_away_escaped ... ok
+test wire::tests::a_patch_the_wire_can_refuse_refuses_the_line_and_not_the_connection ... ok
+test wire::tests::a_pretty_document_over_the_ceiling_is_not_compacted_under_it ... ok
+test wire::tests::a_publication_carries_its_source_and_its_document ... ok
+test wire::tests::a_refusal_carrying_quotes_stays_one_line_of_json ... ok
+test wire::tests::a_reply_is_one_terminated_line ... ok
+test wire::tests::a_reply_reaches_an_end_that_takes_one_byte_at_a_time ... ok
+test wire::tests::a_request_over_the_ceiling_is_not_held_whole ... ok
+test wire::tests::a_request_split_across_chunks_is_taken_out_whole_and_only_then ... ok
+test wire::tests::a_retirement_reply_carries_closed_and_preserved_counts ... ok
+test wire::tests::a_source_over_the_bound_is_refused_without_ending_the_connection ... ok
+test wire::tests::a_split_open_carrying_an_env_field_does_not_carry_it_anywhere ... ok
+test wire::tests::a_split_open_with_a_field_it_cannot_read_is_malformed ... ok
+test wire::tests::an_unknown_tool_comes_back_named ... ok
+test wire::tests::once_the_ceiling_is_passed_nothing_else_is_read ... ok
+test wire::tests::panel_publish_accepts_only_a_document_object_and_has_no_source_field ... ok
+test wire::tests::panel_retire_is_read_as_the_zero_argument_request ... ok
+test wire::tests::plan_documents_at_the_contract_ceiling_fit_inside_the_wire_envelope ... ok
+test wire::tests::plan_requests_keep_the_document_text_and_ignore_repo_for_scope ... ok
+test listener::tests::closing_the_pane_ends_every_thread_it_had ... ok
+test wire::tests::several_requests_in_one_chunk_come_out_one_by_one ... ok
+test wire::tests::the_three_split_verbs_are_understood ... ok
+test listener::tests::one_read_is_answered_after_the_pane_closes_and_no_more ... ok
+test wire::tests::the_envelope_does_not_count_against_the_document_s_ceiling ... ok
+test client::tests::ops_that_are_not_json_never_leave_the_producer ... ok
+
+test result: ok. 82 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.20s
+
+     Running unittests src/bin/ivy-codex.rs (/opt/cargo-target/debug/deps/ivy_codex-c164d1bb43692b2a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/ivy-session.rs (/opt/cargo-target/debug/deps/ivy_session-9c739f41c41e38dd)
+
+running 2 tests
+test tests::inherited_endpoint_has_no_command_line_override ... ok
+test tests::input_is_bounded_before_json_parsing ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/panel-mcp.rs (/opt/cargo-target/debug/deps/panel_mcp-115560fd1d91db33)
+
+running 24 tests
+test tests::a_line_that_is_not_json_is_answered_rather_than_swallowed ... ok
+test tests::a_lossy_answer_is_the_verbs_word_and_then_what_fell_away ... ok
+test tests::a_call_missing_its_document_comes_back_as_a_tool_error ... ok
+test tests::a_message_that_is_not_utf8_is_answered_and_the_next_one_still_is ... ok
+test tests::a_notification_is_not_answered ... ok
+test tests::a_request_with_an_id_and_no_method_is_answered_rather_than_taken_for_a_notification ... ok
+test tests::a_patch_whose_ops_are_missing_or_not_a_list_comes_back_as_a_tool_error ... ok
+test tests::a_split_open_missing_its_side_comes_back_as_a_tool_error ... ok
+test tests::a_message_of_exactly_the_ceiling_does_not_eat_the_next_one ... ok
+test tests::a_tool_that_was_never_advertised_is_a_protocol_error ... ok
+test tests::an_open_answers_with_its_handle_or_says_it_has_none ... ok
+test tests::a_message_over_the_ceiling_is_answered_and_the_next_one_still_is ... ok
+test tests::an_unknown_side_is_refused_by_name_without_reaching_the_pane ... ok
+test tests::each_verb_that_answers_an_empty_ok_says_which_one_it_was ... ok
+test tests::instructions_are_given_only_for_a_whole_identity ... ok
+test tests::retirement_result_names_both_outcomes_exactly ... ok
+test tests::the_attention_clause_names_every_attention_the_contract_accepts ... ok
+test tests::the_handshake_answers_with_the_tools_capability ... ok
+test tests::roadmap_tools_are_dispatched_and_validate_required_documents_before_connecting ... ok
+test tests::the_handshake_asks_the_agent_to_publish_only_when_given_instructions ... ok
+test tests::every_served_verb_is_advertised ... ok
+test tests::roadmap_tool_schemas_and_descriptions_pin_the_cross_repository_contract ... ok
+test tests::the_instructions_name_only_tools_this_bridge_serves ... ok
+test tests::the_publishing_description_names_each_vocabulary_under_its_own_field ... ok
+
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/inherited_directory.rs (/opt/cargo-target/debug/deps/inherited_directory-a8be778ed38c842e)
+
+running 1 test
+test unsafe_inherited_directories_never_reach_a_listening_socket ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/ivy_codex_launch.rs (/opt/cargo-target/debug/deps/ivy_codex_launch-e406ccc646283adf)
+
+running 7 tests
+test preserves_client_signal ... ok
+test refuses_recursive_executable ... ok
+test inherits_auth_and_mcp_environment_without_changing_configuration_or_adding_api_keys ... ok
+test passes_through_existing_admin_remote_and_unknown ... ok
+test unsupported_client_preserves_arguments_and_reports_limitation ... ok
+test interactive_inserts_and_preserves_arguments_environment_and_status ... ok
+test stalled_probe_falls_back_in_bounded_time ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.03s
+
+     Running tests/panel_mcp_handshake.rs (/opt/cargo-target/debug/deps/panel_mcp_handshake-249b4c96b58a340b)
+
+running 2 tests
+test the_bridge_asks_for_a_panel_only_when_started_inside_a_console ... ok
+test a_tool_call_tells_a_missing_identity_from_a_broken_one ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/session_helper.rs (/opt/cargo-target/debug/deps/session_helper-2339a641656ebb7f)
+
+running 5 tests
+test helper_reports_only_allowed_metadata_with_its_actual_kernel_identity ... ok
+test absent_inherited_identity_is_a_distinct_bounded_error ... ok
+test publish_cli_is_silent_without_identity_and_rejects_bad_input_before_connect ... ok
+test publish_cli_rejects_oversized_stdin_before_endpoint_connect ... ok
+test publish_cli_maps_unheld_and_policy_refusal_to_the_declared_output ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+   Doc-tests panel_control
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

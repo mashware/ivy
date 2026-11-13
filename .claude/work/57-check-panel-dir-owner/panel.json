@@ -1,15 +1,15 @@
 {
-  "updated_at": "2026-11-13T01:15:42.417Z",
-  "phase": "plan",
+  "updated_at": "2026-11-13T09:10:36.584Z",
+  "phase": "ship",
   "header": true,
   "attention": "done",
   "lines": [
     {"key":"title","text":"Check the owner of PANEL_DIR before connecting to a console's channel","style":"title"},
     "",
     {"key":"mrs","text":"PRs","style":"section","summary":"0/1 merged","collapsed":true},
-    {"key":"mr-1","ref":"#1","text":"Reject unsafe inherited panel directories","mark":"pending"},
+    {"key":"mr-1","ref":"#1","text":"Reject unsafe inherited panel directories","mark":"current"},
     "",
-    {"key":"now","ref":"Now","text":"Study complete; design and one-PR plan ready for approval","mark":"info"},
-    {"key":"next","ref":"Next","text":"Build after study approval","mark":"info"}
+    {"key":"now","ref":"Now","text":"Validated draft handed to the orchestrator","mark":"info"},
+    {"key":"next","ref":"Next","text":"Orchestrator publishes the draft for review","mark":"info"}
   ]
 }

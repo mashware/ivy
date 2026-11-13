@@ -1,0 +1,13 @@
+   Compiling app v0.1.0-alpha.7 (/work/repo/crates/app)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.72s
+     Running tests/scripts.rs (/opt/cargo-target/debug/deps/scripts-2d42784acd7625be)
+
+running 5 tests
+test the_list_still_names_every_module ... ok
+test no_line_naming_a_mode_command_escapes_the_scanner ... ok
+test the_rule_reports_the_defect_and_nothing_else ... ok
+test the_semicolon_that_is_loop_syntax_is_still_let_through ... ok
+test no_script_can_print_its_marker_when_the_mode_command_failed ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+

@@ -1,1 +1,1 @@
-{"phase": "plan", "now": "Study complete; design and one-PR plan ready for approval", "next": "Build after study approval", "attention": "done"}
+{"phase": "ship", "now": "Validated draft handed to the orchestrator", "next": "Orchestrator publishes the draft for review", "attention": "done"}

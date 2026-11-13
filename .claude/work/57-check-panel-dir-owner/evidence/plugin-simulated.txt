@@ -1,0 +1,22 @@
+TAP version 13
+# Subtest: route bootstrap, displayed request, cancellation, navigation and disposal
+ok 1 - route bootstrap, displayed request, cancellation, navigation and disposal
+  ---
+  duration_ms: 15086.484091
+  type: 'test'
+  ...
+# Subtest: private directory check precedes every connection and disposal cancels retries
+ok 2 - private directory check precedes every connection and disposal cancels retries
+  ---
+  duration_ms: 16.569038
+  type: 'test'
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 2
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 15191.159692
