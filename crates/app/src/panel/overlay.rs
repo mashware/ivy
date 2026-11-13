@@ -446,4 +446,19 @@ mod tests {
         assert!(!panel.is_stale_at(now + std::time::Duration::from_secs(119)));
         assert!(panel.is_stale_at(now + std::time::Duration::from_secs(121)));
     }
+
+    #[test]
+    fn disconnect_keeps_the_document_and_retires_hook_provenance() {
+        let mut state = held();
+        state
+            .apply_overlay(
+                parse_document(r#"{"lines":["Hook"]}"#).unwrap(),
+                SystemTime::now(),
+            )
+            .unwrap();
+        let before = state.document().unwrap();
+        state.release(7);
+        assert_eq!(state.document().unwrap(), before);
+        assert!(state.displayed_source().is_none());
+    }
 }

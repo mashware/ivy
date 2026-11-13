@@ -129,10 +129,12 @@ impl ClientFixture {
             .recv_timeout(Duration::from_secs(3))
             .expect("holder publication reaches the panel inbox");
         let connection = delivery.connection;
-        let What::PublishAttested { peer, .. } = delivery.what else {
+        let What::PublishAttested { peer, panel, .. } = delivery.what else {
             panic!("panel_set carries its captured peer witness")
         };
-        self.state.overlay.replace(connection, source);
+        self.state
+            .deliver(connection, source, panel, SystemTime::now())
+            .unwrap();
         if attest {
             self.authority.capture(&self.state, connection, &peer);
         }

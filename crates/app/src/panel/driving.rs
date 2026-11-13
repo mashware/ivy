@@ -448,6 +448,7 @@ impl PanelState {
         self.problem = None;
         self.drawn = None;
         self.holder = None;
+        self.hook_source = None;
         self.overlay.clear();
         self.file_seen = match &baseline.file {
             FileGeneration::Missing => None,
@@ -475,6 +476,7 @@ impl PanelState {
             return Released::Nothing;
         }
         self.holder = None;
+        self.hook_source = None;
         self.overlay.clear();
         self.layout = None;
         Released::Given
