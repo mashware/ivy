@@ -218,3 +218,31 @@ fn publish_cli_maps_unheld_and_policy_refusal_to_the_declared_output() {
         "ivy-session: publisher does not descend from this panel's holding client\n"
     );
 }
+
+#[test]
+fn publish_cli_rejects_oversized_stdin_before_endpoint_connect() {
+    let dir = PanelDir::create().unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ivy-session"))
+        .arg("publish")
+        .env("PANEL_DIR", dir.path())
+        .env("PANEL_ID", dir.id())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    // No endpoint is bound: an attempted connection would exit 1 instead of the input error.
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(&vec![b' '; panel_contract::MAX_BYTES as usize + 1])
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stderr).unwrap(),
+        "ivy-session: session metadata goes over the ceiling\n"
+    );
+}
