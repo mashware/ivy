@@ -64,6 +64,14 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/panel/overlay.rs"),
     ),
     (
+        "src/panel/provenance_route.rs",
+        include_str!("../src/panel/provenance_route.rs"),
+    ),
+    (
+        "src/panel/provenance.rs",
+        include_str!("../src/panel/provenance.rs"),
+    ),
+    (
         "src/panel/overlay/tests.rs",
         include_str!("../src/panel/overlay/tests.rs"),
     ),

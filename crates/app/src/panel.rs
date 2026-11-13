@@ -29,6 +29,8 @@ mod document;
 mod driving;
 mod fold;
 pub(crate) mod overlay;
+mod provenance;
+pub(crate) mod provenance_route;
 #[cfg(test)]
 use fold::lay_out;
 pub(crate) use fold::toggle_header_at;
@@ -215,6 +217,8 @@ impl PartialOrd for AttentionState {
 #[derive(Default)]
 pub struct PanelState {
     last_good: Option<Arc<Panel>>,
+    /// Observation belongs to the document, so disconnect does not erase it.
+    published_by: panel_control::PublicationOrigin,
     /// The producer document a connection may recover without asking the window to run a pass.
     ///
     /// **A pointer behind a mutex, not panel state behind a lock.** Painting, holds and presses stay

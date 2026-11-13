@@ -353,6 +353,7 @@ impl PanelState {
             return Err(held_by_somebody_else(&holder.source));
         }
 
+        self.published_by = panel_control::PublicationOrigin::Unknown;
         self.overlay.replace(connection, source);
         self.hook_source = None;
         self.holder = Some(Holder {
@@ -457,6 +458,7 @@ impl PanelState {
             return Ok(result);
         }
 
+        self.published_by = panel_control::PublicationOrigin::Unknown;
         self.channel_publication = None;
         self.file_probe_pending = false;
         self.last_good = None;
@@ -594,6 +596,7 @@ pub(super) fn refresh_file(state: &mut PanelState, dir: &Path) -> super::Refresh
             }
             // The file's own date, kept as the baseline a later hold compares against. The
             // contract's parser already carries it on the panel, so this is not a second read.
+            state.published_by = panel_control::PublicationOrigin::Unknown;
             state.file_seen = panel.written_at;
             state.commit(panel);
             state.problem = None;

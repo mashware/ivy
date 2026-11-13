@@ -1,6 +1,7 @@
 //! Optional off-frame services share the pane endpoint without changing panel ownership.
 use super::*;
 
+#[cfg(test)]
 pub(crate) fn open_with_sessions(
     dir: &PanelDir,
     reader: crate::panel::DocumentReader,
@@ -8,7 +9,7 @@ pub(crate) fn open_with_sessions(
     sessions: Option<panel_control::session::SessionHandler>,
     wake: impl Fn() + Send + Sync + 'static,
 ) -> Option<PaneControl> {
-    open_services(dir, reader, reads, sessions, None, wake)
+    open_services(dir, reader, reads, sessions, None, None, wake)
 }
 
 pub(crate) fn open_with_authority(
@@ -16,7 +17,8 @@ pub(crate) fn open_with_authority(
     state: &PanelState,
     reads: ReadActivity,
     sessions: Option<panel_control::session::SessionHandler>,
-    authority: Arc<crate::panel::overlay::Authority>,
+    authority: Option<Arc<crate::panel::overlay::Authority>>,
+    inspector: panel_control::PublicationInspector,
     wake: impl Fn() + Send + Sync + 'static,
 ) -> Option<PaneControl> {
     open_services(
@@ -24,7 +26,8 @@ pub(crate) fn open_with_authority(
         state.reader(),
         reads,
         sessions,
-        Some((state, authority)),
+        authority.map(|authority| (state, authority)),
+        Some(inspector),
         wake,
     )
 }
@@ -35,6 +38,7 @@ fn open_services(
     reads: ReadActivity,
     sessions: Option<panel_control::session::SessionHandler>,
     authorization: Option<(&PanelState, Arc<crate::panel::overlay::Authority>)>,
+    inspector: Option<panel_control::PublicationInspector>,
     wake: impl Fn() + Send + Sync + 'static,
 ) -> Option<PaneControl> {
     let (sender, inbox) = sync_channel(MAX_PENDING);
@@ -51,15 +55,28 @@ fn open_services(
         );
         (Some(handler), Some(authority))
     });
-    match Channel::open_with_authorization_services(
-        dir.path(),
-        dir.id(),
-        sender,
-        Some(read_document),
-        sessions,
-        publisher,
-        Arc::clone(&wake),
-    ) {
+    let opened = match inspector {
+        Some(inspector) => Channel::open_with_publication_inspector(
+            dir.path(),
+            dir.id(),
+            sender,
+            Some(read_document),
+            sessions,
+            publisher,
+            Some(inspector),
+            Arc::clone(&wake),
+        ),
+        None => Channel::open_with_authorization_services(
+            dir.path(),
+            dir.id(),
+            sender,
+            Some(read_document),
+            sessions,
+            publisher,
+            Arc::clone(&wake),
+        ),
+    };
+    match opened {
         Ok(channel) => {
             channel.set_plan_reader(Arc::new(|| {
                 panel_control::Reply::Failed("this console's project is not known yet".into())

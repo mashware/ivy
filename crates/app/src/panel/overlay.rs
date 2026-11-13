@@ -230,6 +230,7 @@ fn admit(
     });
     let (answer, _) = sync_channel(1);
     match sender.try_send(Delivery {
+        origin: panel_control::PublicationOrigin::Unknown,
         connection: hold.connection,
         what: What::Overlay {
             panel,
@@ -418,6 +419,7 @@ mod tests {
         for (incarnation, live) in [(old.incarnation, true), (current.incarnation, false)] {
             let (answer, _) = sync_channel(1);
             control.enqueue_for_tests(Delivery {
+                origin: panel_control::PublicationOrigin::Unknown,
                 connection: 7,
                 what: What::Overlay {
                     panel: parse_document(r#"{"lines":["Must not paint"]}"#).unwrap(),
