@@ -301,9 +301,10 @@ mod tests {
                         .unwrap();
                         assert_eq!(*source, before, "shared cached galley mutated");
                         for (column, glyph) in transformed.rows[0].glyphs.iter().enumerate() {
+                            let source_pixel = column as f32 * (metrics.width * scale).round();
+                            let tolerance = 2.0 * f32::EPSILON * source_pixel.max(1.0);
                             assert!(
-                                ((glyph.pos.x - column as f32 * metrics.width) * scale).abs()
-                                    < 0.001,
+                                (glyph.pos.x * scale - source_pixel).abs() <= tolerance,
                                 "glyph pen left its source cell"
                             );
                             assert_eq!(glyph.advance_width, metrics.width);
