@@ -186,4 +186,101 @@ mod tests {
             .unwrap();
         assert_eq!(state.published_by, PublicationOrigin::Unknown);
     }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn opened_pane_labels_outside_socket_and_accepts_its_shell_descendant_without_session_capture()
+    {
+        use eframe::egui;
+        use std::thread;
+
+        let ctx = egui::Context::default();
+        let dir = PanelDir::create().expect("panel directory");
+        let endpoint = dir.path().to_owned();
+        let id = dir.id().to_owned();
+        let mut pane = crate::opening::launch_exact(
+            &ctx,
+            crate::opening::Launch {
+                program: "/bin/sh",
+                args: &[],
+                directory: None,
+                path: None,
+            },
+            Some(dir),
+            0,
+            crate::control::ReadActivity::default(),
+        )
+        .expect("open pane through the application path");
+        crate::resume::set_capture(&mut pane, false);
+        assert!(pane.restoration.sessions.is_none());
+
+        let outside_dir = endpoint.clone();
+        let outside_id = id.clone();
+        let outside = thread::spawn(move || {
+            panel_control::Producer::of(&outside_dir, &outside_id)
+                .expect("outside producer")
+                .publish("outside", r#"{"header":false,"lines":["outside body"]}"#)
+        });
+        drive_pane_until(&mut pane, &ctx, |_| outside.is_finished());
+        outside
+            .join()
+            .expect("outside worker")
+            .expect("outside publish accepted");
+        let (rows, _) = pane
+            .panel_state
+            .lay_out_if_needed("pane", 100, &Theme::default(), None, None)
+            .expect("outside document layout");
+        assert!(rows.iter().any(|row| row.text == OUTSIDE));
+        assert!(
+            pane.panel_state
+                .document()
+                .unwrap()
+                .contains("outside body")
+        );
+        drive_pane_until(&mut pane, &ctx, |pane| pane.panel_state.held_by().is_none());
+
+        let executable = std::env::current_exe().expect("test executable");
+        let executable = executable.to_string_lossy().replace('\'', "'\\''");
+        let command = format!(
+            "IVY_PROVENANCE_CHILD=1 '{}' --exact panel::provenance_route::tests::publish_from_pane_child --nocapture\n",
+            executable
+        );
+        pane.pty
+            .write(command.as_bytes())
+            .expect("launch pane descendant");
+        drive_pane_until(&mut pane, &ctx, |pane| {
+            pane.panel_state
+                .last_good
+                .as_ref()
+                .is_some_and(|panel| panel.lines.iter().any(|line| line.text == "inside"))
+        });
+        let (rows, _) = pane
+            .panel_state
+            .lay_out_if_needed("pane", 100, &Theme::default(), None, None)
+            .expect("inside document layout");
+        assert!(!rows.iter().any(|row| row.text == OUTSIDE));
+    }
+
+    #[cfg(target_os = "linux")]
+    fn drive_pane_until(
+        pane: &mut crate::Pane,
+        ctx: &eframe::egui::Context,
+        mut ready: impl FnMut(&crate::Pane) -> bool,
+    ) {
+        use std::{
+            thread,
+            time::{Duration, Instant},
+        };
+
+        let deadline = Instant::now() + Duration::from_secs(8);
+        while !ready(pane) {
+            pane.refresh_its_panel(ctx);
+            assert!(
+                Instant::now() < deadline,
+                "pane did not reach expected state"
+            );
+            thread::yield_now();
+        }
+        pane.refresh_its_panel(ctx);
+    }
 }

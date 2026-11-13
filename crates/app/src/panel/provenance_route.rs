@@ -29,7 +29,8 @@ pub(crate) fn unavailable() -> PublicationInspector {
     Arc::new(|_: &DiagnosticPeer| PublicationOrigin::Unknown)
 }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
+#[cfg(target_os = "linux")]
 mod tests {
     use super::*;
     use std::sync::mpsc::sync_channel;
