@@ -387,7 +387,17 @@ mod tests {
         }
     }
     fn git(path: &Path, args: &[&str]) {
-        let status = Command::new("git")
+        let mut command = Command::new("git");
+        for (key, _) in std::env::vars_os() {
+            if key
+                .to_string_lossy()
+                .to_ascii_uppercase()
+                .starts_with("GIT_")
+            {
+                command.env_remove(key);
+            }
+        }
+        let status = command
             .arg("-C")
             .arg(path)
             .args(args)
@@ -396,6 +406,17 @@ mod tests {
             .status()
             .unwrap();
         assert!(status.success());
+    }
+
+    fn index_path(path: &Path) -> PathBuf {
+        let mut command = git_command(path);
+        command.args(["rev-parse", "--git-path", "index"]);
+        let resolved = PathBuf::from(run_git(command, GIT_TIMEOUT).unwrap().trim());
+        if resolved.is_absolute() {
+            resolved
+        } else {
+            path.join(resolved)
+        }
     }
     #[test]
     fn non_repository_message_is_clear_without_hiding_other_git_errors() {
@@ -437,7 +458,22 @@ mod tests {
             &temp.0,
             &["-c", "commit.gpgsign=false", "commit", "-qm", "base"],
         );
-        let linked = temp.0.join("linked");
+        // Git names linked-worktree admin directories from the worktree path's basename. Give
+        // another worktree that basename first so the target's admin directory is not `linked`.
+        let first_linked = temp.0.join("first-parent/linked");
+        let linked = temp.0.join("target-parent/linked");
+        fs::create_dir_all(first_linked.parent().unwrap()).unwrap();
+        fs::create_dir_all(linked.parent().unwrap()).unwrap();
+        git(
+            &temp.0,
+            &[
+                "worktree",
+                "add",
+                "-qb",
+                "linked-first",
+                first_linked.to_str().unwrap(),
+            ],
+        );
         git(
             &temp.0,
             &["worktree", "add", "-qb", "linked", linked.to_str().unwrap()],
@@ -446,8 +482,17 @@ mod tests {
         fs::write(linked.join("tracked"), "WORKTREE_ONLY_CHANGE\n").unwrap();
         fs::write(temp.0.join("main-new"), "main untracked\n").unwrap();
         fs::write(linked.join("linked-new"), "linked untracked\n").unwrap();
-        let main_index = fs::read(temp.0.join(".git/index")).unwrap();
-        let linked_index = fs::read(temp.0.join(".git/worktrees/linked/index")).unwrap();
+        fs::write(linked.join("target-index-only"), "target index\n").unwrap();
+        git(&linked, &["add", "target-index-only"]);
+        let main_index_path = index_path(&temp.0);
+        let linked_index_path = index_path(&linked);
+        assert_ne!(
+            linked_index_path,
+            temp.0.join(".git/worktrees/linked/index"),
+            "the fixture must exercise a non-default linked-worktree admin name"
+        );
+        let main_index = fs::read(&main_index_path).unwrap();
+        let linked_index = fs::read(&linked_index_path).unwrap();
         // A child process isolates inherited environment without mutating the parallel test runner.
         let output = Command::new(std::env::current_exe().unwrap())
             .args([
@@ -467,11 +512,8 @@ mod tests {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
-        assert_eq!(main_index, fs::read(temp.0.join(".git/index")).unwrap());
-        assert_eq!(
-            linked_index,
-            fs::read(temp.0.join(".git/worktrees/linked/index")).unwrap()
-        );
+        assert_eq!(main_index, fs::read(&main_index_path).unwrap());
+        assert_eq!(linked_index, fs::read(&linked_index_path).unwrap());
     }
 
     #[test]

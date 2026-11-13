@@ -312,10 +312,9 @@ Which one exists and why, with the five candidates compared and the three discar
 | **MCP** (`panel_set`) | Phase 3 | The agent that also wants to pilot the app. It delivers the document **without writing the file** |
 | **OSC over the PTY** | candidate, after F2.7 | Whoever is on the other side of an `ssh` or inside a container with no mounted volume |
 
-**And every delivery brings a source and an order**, so that two producers on the same pane are not
-decided by chance. **How they are expressed is undecided** — D17 leaves it open on purpose, because
-with a single live transport it would be inventing the shape before having the second case in front
-of us.
+**Every delivery has a source and an order**, so two producers on the same pane are not decided by
+chance. The channel reservation and file-yield rules are specified under
+[Rules of this transport](#rules-of-this-transport) and in D43.
 
 ## Transport 1 — the file
 
@@ -331,6 +330,11 @@ running inside the pane.
 The prototype discovers the file by convention; the app does it by pane identity (see
 [02-decisions.md](02-decisions.md) → D7), since F1.5 for the directory and F1.6 for the reading.
 **The document is the same**, only where it is looked for changes.
+
+Consumers share the strict identity pair: `PANEL_ID` must be non-empty UTF-8 text and `PANEL_DIR`
+must be absolute. These values route a producer; they are not credentials. Unix runtime-directory
+selection is exposed as `panel_contract::base_dir()` so shell integration shares the same absolute
+fallback and one-time warning.
 
 ### Rules of this transport
 
@@ -470,6 +474,15 @@ only reason it exists. Three things follow, and they are the whole of it:
   comes back is yours.
 - **Reading changes nothing.** It takes no hold, so it does not stop the file being read, it does not
   refuse anybody else, and a panel driven by its `panel.json` goes on being driven by it.
+
+**Publication provenance is application-owned.** On Linux and macOS a connection whose kernel
+peer is confirmed outside the console's original program tree adds the row
+`published from a process outside this console`. It stays visible with `header: false` and
+folded producer blocks. An ordinary descendant has no label; uncertainty also has no label and
+never refuses a publication. The observation is made once per connection, off the frame, and is
+not session authorization. It stays with the displayed document after disconnect and through
+patches, and is replaced on a successful full publication, valid newer file takeover or retirement.
+Neither producer JSON nor `panel_get` contains this annotation.
 
 **A read does not wait for the window to paint or run an interface pass.** The channel answers from
 the last document the application committed for that pane, so `panel_get` remains available while
@@ -672,11 +685,12 @@ only verbs that name another pane:
 
 `panel-mcp`, a binary that ships with the terminal, speaks this channel over MCP for an agent that
 would rather call a tool than open a socket. It is a client of this transport and not the transport
-itself. When it starts with a whole identity — `PANEL_ID` set, non-empty and text, and `PANEL_DIR`
-set and absolute, the same rule its tool calls apply — its answer to `initialize` carries
-`instructions` asking the agent to publish its panel and keep `attention` true. Without one, and on
-Windows until the channel is bound there, it carries none: the bridge does not promise a panel it
-cannot reach. **D88**.
+itself. When it starts with a whole identity — `PANEL_ID` set, non-empty and UTF-8, and `PANEL_DIR`
+set and absolute, the same rule its tool calls apply — and metadata identifies
+`PANEL_DIR/control.sock` as a socket, its answer to `initialize` carries `instructions` asking the
+agent to publish its panel and keep `attention` true. This checks socket presence only: it does not
+connect, prove liveness or check path length. Otherwise, including Windows until the channel is
+bound there, `instructions` is absent. **D88**.
 
 ### Rules of this transport
 
@@ -687,14 +701,18 @@ cannot reach. **D88**.
   connection opened**, by an **opaque handle** the window handed back — never a pane id, never a
   name anybody could guess. What stops a producer reaching somebody else's pane is that the words do
   not exist.
-- **The first publication claims the pane under its `source`, and the claim lasts as long as the
-  connection does.** While it is held, that pane's `panel.json` **is not read at all**, and a second
-  source is refused with an error naming the one holding it. The panel says who is driving it on its
-  identity row, and confesses a file publication it refused. **D43**.
-- **The hold ends when the connection closes** — including when the producer dies, which is the case
-  it exists for. What was last published stays on screen; the file takes over from its next
-  publication. An intentional `panel_retire` is the separate exception: it clears the session state
-  and the untouched auxiliary consoles its own connection still controls (**D50**).
+- **The first publication claims the pane under its `source`, and the reservation lasts as long as
+  the connection does.** While active, that pane's `panel.json` **is not read at all**, and another
+  connection is refused with an error naming the holder's source. A successful publish or patch
+  whose resulting attention is `done` yields file reads, but retains the reservation, named
+  refusals and retirement authority. Files can take over only with filesystem mtime strictly newer
+  than the last successful channel write. A later channel write reclaims the document and resets
+  the cutoff. **D43**.
+- **A file takeover changes document ownership, not the reservation.** The holder's patch is refused
+  until it sends a full publication. Disconnect releases the reservation but keeps the last channel
+  document's cutoff, so an old file cannot replace it; a strictly newer valid file may. An
+  intentional `panel_retire` remains a separate operation and clears the session state and the
+  untouched auxiliary consoles its own connection still controls (**D50**).
 - **There is no sequence number and there is not going to be one.** One endpoint per pane plus the
   file unread means exactly one writer, and one connection's requests cannot reorder themselves.
 - **A document delivered carries no date, so the application stamps its arrival.** That is what keeps
@@ -804,9 +822,11 @@ The helper reads a JSON object (at most 262144 stdin bytes), compacts it to one 
 {"tool":"panel_publish","document":{"lines":["Updated step"],"phase":"build"}}
 ```
 
-This helper-only verb is not advertised as an MCP tool. Without complete PANEL_ID/PANEL_DIR,
-or on a platform without an endpoint, it exits successfully and silently. Invalid input inside
-an identity exits 2 before connecting. An unreachable supported endpoint is an error, exit 1.
+This helper-only verb is not advertised as an MCP tool. Without a whole console identity (a
+nonempty UTF-8 `PANEL_ID` and absolute `PANEL_DIR`), it prints
+`{"ok":false,"error":"outside_ivy"}` and exits 1 before reading stdin. With a whole identity on a
+platform without an endpoint it exits successfully and silently. Invalid input inside an identity
+exits 2 before connecting. An unreachable supported endpoint is an error, exit 1.
 
 An accepted publication prints `{"ok":true}` and exits 0 as soon as the bounded queue accepts it,
 even while the window is minimized. No holder prints

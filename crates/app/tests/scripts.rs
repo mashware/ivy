@@ -91,6 +91,14 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/panel/overlay.rs"),
     ),
     (
+        "app/src/panel/provenance_route.rs",
+        include_str!("../src/panel/provenance_route.rs"),
+    ),
+    (
+        "app/src/panel/provenance.rs",
+        include_str!("../src/panel/provenance.rs"),
+    ),
+    (
         "app/src/panel/overlay/tests.rs",
         include_str!("../src/panel/overlay/tests.rs"),
     ),
@@ -190,6 +198,10 @@ const MODULES: &[(&str, &str)] = &[
     (
         "panel-control/src/listener.rs",
         include_str!("../../panel-control/src/listener.rs"),
+    ),
+    (
+        "panel-control/src/diagnostic_peer.rs",
+        include_str!("../../panel-control/src/diagnostic_peer.rs"),
     ),
     (
         "panel-control/src/wire.rs",

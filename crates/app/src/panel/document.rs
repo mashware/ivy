@@ -108,6 +108,15 @@ impl Acquired {
     }
 }
 
+/// Retirement clears the producer document, its observation, and the geometry painted for it.
+pub(super) fn clear(state: &mut PanelState) {
+    state.published_by = panel_control::PublicationOrigin::Unknown;
+    state.last_good = None;
+    state.committed.clear();
+    state.layout = None;
+    state.drawn = None;
+}
+
 impl PanelState {
     /// A capability that reads the last complete producer document without keeping this pane alive.
     pub(crate) fn reader(&self) -> Reader {

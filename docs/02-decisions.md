@@ -747,6 +747,9 @@ this one myself», which is the dangerous variety of deletion.
 
 **A warning for Phase 2:** if `PANEL_ID` becomes the token with which the MCP server authorizes, 32
 bits **are not enough** and it will have to be widened there. Here it is not a token: it is a name.
+The pair is an address and routing metadata only. Consumers share the same strict rule: a non-empty
+UTF-8 `PANEL_ID` and an absolute `PANEL_DIR`; neither value authenticates a caller. Runtime-directory
+selection is shared through `panel_contract::base_dir()` so clients do not invent local path rules.
 
 ---
 
@@ -6506,7 +6509,8 @@ own. What is compared is **the connection and never the source**: two connection
 the same thing are two producers, and letting the second one through because the name matched is
 exactly the collision this exists to stop.
 
-**2. While it holds the pane, its `panel.json` is not read at all.**
+**2. While it holds the pane, its `panel.json` is not read at all, unless the holder yields file
+refresh after declaring `attention: done`.**
 
 Not read and compared — **not read**. The file cannot identify its producer, which is the property
 that made D17 necessary in the first place, so authority cannot be handed to it: with both being
@@ -6518,6 +6522,15 @@ And because refusing in silence is indistinguishable from being broken, a file p
 actually refused is **confessed** in the application's own row, naming the source that is driving the
 panel. Nothing is said until a file has really been refused: a standing warning over a panel that is
 working perfectly is noise.
+
+The done state yields only file reads; it does not release the connection reservation or its source.
+The file can take over only when its filesystem modification time is strictly newer than the last
+successful channel write. Each successful publish or patch stamps that cutoff. A later channel
+write reclaims the document and resumes suppressing files. Once a valid newer file is painted,
+patches are refused until a full channel publication; the holder still retains retirement authority
+and other connections are still refused by the holder's source. Disconnect drops the reservation
+but keeps the cutoff with the painted channel document, so an old file cannot replace it. A valid
+strictly newer file may take over after disconnect.
 
 **3. The hold dies with the connection, and there is no sequence number anywhere.**
 
@@ -9366,9 +9379,11 @@ and only when the document read back was its own; and to pass through as printed
 workflow it follows renders, without the buttons the agent would not run itself — `actions` are
 commands for the person's shell, and a document printed by a script of unknown origin is the
 untrusted panel the hard rules name. It is sent only when the bridge starts with a **whole
-identity** — `PANEL_ID` present, non-empty and text, `PANEL_DIR` present and absolute — the same
-rule its tool calls now apply, and only where the control channel binds (`endpoint::BINDS`, false on
-Windows until F2.7, **D43**). Outside those, the key is absent. A tool call with a broken identity —
+identity** — `PANEL_ID` present, non-empty and UTF-8, `PANEL_DIR` present and absolute — the same
+rule its tool calls apply, where the control channel binds, and metadata says `PANEL_DIR/control.sock`
+is a socket. This metadata check is presence only: it does not connect, check liveness or path
+length. Outside those conditions, `instructions` is absent. On Windows the channel does not bind
+until F2.7 (**D43**). A tool call with a broken identity —
 one variable carrying something but the identity not whole — is refused with its own message, naming
 the client's forwarding rather than «not in a pane»; both absent or empty is a program outside any
 pane. And because Ivy must never hand out a directory its own bridge refuses, the runtime directory
@@ -9386,6 +9401,10 @@ question its parent is waiting on. A worker process the parent starts in the sam
 bridge of its own: it would be refused at every stop or, publishing first, hold the pane against its
 parent. Only that case: an agent another agent started in a console of its own has its own identity
 and panel.
+
+The Connect guide asks for this manual prompt only `if this client did not pass you the bridge's
+server instructions`. The copied setup prompt and the README quote both carry the same-console
+subagent rule and say that an agent started in its own console keeps its own panel.
 
 **Discarded:**
 - **Naming all seven verbs** — the `split_*` and retirement descriptions already explain those, and
@@ -9407,8 +9426,8 @@ and panel.
   with its own environment.
 - **Accepting an empty or non-text identifier on Unix, where the endpoint ignores it** — the pane's
   identity is the pair (**D7**), Ivy always sets both, and a rule that depends on the platform is
-  the two-rule split this decision closed. The session helper still reads the pair with a rule of
-  its own; unifying it is outside this decision.
+  the two-rule split this decision closed. The session helper shares the same strict whole-identity
+  rule. Runtime-directory selection is shared through `panel_contract::base_dir()`.
 - **Withholding the instructions under a terminal multiplexer** (`TMUX`, `STY`, `ZELLIJ` set) —
   it would mechanise «workers keep off», but a person running their one agent inside tmux in an Ivy
   console would lose the instructions, and the hold already settles who owns the pane: the first
@@ -9458,3 +9477,29 @@ manual verification; cross-compilation alone establishes no runtime claim.
 `overlaid` counts committed overlays; `overlays_refused` counts admitted overlays refused in the
 window. Admission refusals cost no frame and are excluded. Application belongs to the existing
 control span. No hook workload has measured its frame cost yet.
+
+## D91 — A borrowed publisher is labelled by ancestry, never refused
+
+A daemon or multiplexer can carry another console's panel identity. Environment values select an
+endpoint; they do not show whether its publisher belongs to that console. On Linux and macOS the
+listener therefore captures its kernel peer once and asks a revocable, pane-bound ancestry callback
+off the frame. A stable walk to the original PTY child is inside; a stable chain reaching the native
+root without that child is outside; failed or unstable evidence is unknown. The walk is bounded to
+64 hops, checks parent and birth identities, and rechecks peer/root liveness before returning.
+
+Only outside adds `published from a process outside this console`. Unknown allows publication
+without a label. Session authorization is unchanged. The label belongs to the accepted document,
+not its connection reservation: disconnect preserves it, patches keep it, a newer valid file or
+full publication replaces it, and retirement clears it. It is an application row even when the
+producer hides its header, and it is absent from serialized producer documents.
+
+**Accepted limits.** An editor still descended from console A can borrow A's identity without a
+label. A multiplexer detached from that ancestry can label an intended publisher outside. Native
+snapshots cannot make the whole process tree atomic, especially on macOS; detected instability is
+unknown. A same-user ptrace-capable process may counterfeit evidence and can already write the
+unlabelled panel file. These are diagnostic limits, not authority grants. Windows remains file-only.
+
+**Discarded:** refusing foreign ancestry (breaks intended detached publishers); using foreground
+session authorization (rejects ordinary background descendants and conflates failure with outside);
+producer-supplied PID or labels (untrusted); storing the label on the holder (loses it on disconnect);
+process scans or per-frame inspection (unbounded or frame-blocking work without a consumer need).

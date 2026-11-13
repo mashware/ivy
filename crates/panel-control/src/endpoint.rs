@@ -142,6 +142,24 @@ pub fn name_of(dir: &Path, id: &str) -> io::Result<Name<'static>> {
 /// fails there until it does.
 pub const BINDS: bool = cfg!(not(windows));
 
+/// Whether the Unix control socket currently has socket metadata at the contract path.
+///
+/// This is a presence hint for MCP instructions, not a liveness check: connecting here would
+/// consume a listener resource and turn initialization into an endpoint probe.
+#[cfg(unix)]
+pub fn socket_present(dir: &Path) -> bool {
+    use std::os::unix::fs::FileTypeExt;
+
+    std::fs::symlink_metadata(dir.join(panel_contract::CONTROL_SOCKET))
+        .is_ok_and(|metadata| metadata.file_type().is_socket())
+}
+
+/// Windows has no filesystem socket until its control channel is implemented.
+#[cfg(windows)]
+pub fn socket_present(_dir: &Path) -> bool {
+    false
+}
+
 /// Binds a pane's endpoint, ready to accept.
 ///
 /// **It does not bind on Windows, and that is a decision rather than an omission.** A named pipe

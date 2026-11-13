@@ -45,7 +45,14 @@ impl PaneControl {
                     panel,
                     peer,
                 } => {
-                    let answer = match state.deliver(delivery.connection, &source, panel, now) {
+                    let answer = match crate::panel::provenance::deliver_observed(
+                        state,
+                        delivery.connection,
+                        &source,
+                        panel,
+                        now,
+                        delivery.origin,
+                    ) {
                         Ok(()) => {
                             if let Some(authority) = &self.authority {
                                 authority.capture(state, delivery.connection, &peer);
@@ -68,7 +75,14 @@ impl PaneControl {
                     let _ = delivery.answer.send(answer);
                 }
                 What::Publish { source, panel } => {
-                    let answer = match state.deliver(delivery.connection, &source, panel, now) {
+                    let answer = match crate::panel::provenance::deliver_observed(
+                        state,
+                        delivery.connection,
+                        &source,
+                        panel,
+                        now,
+                        delivery.origin,
+                    ) {
                         Ok(()) => {
                             self.did.applied += 1;
                             Answer::Taken

@@ -29,6 +29,8 @@ mod document;
 mod driving;
 mod fold;
 pub(crate) mod overlay;
+pub(crate) mod provenance;
+pub(crate) mod provenance_route;
 #[cfg(test)]
 use fold::lay_out;
 pub(crate) use fold::toggle_header_at;
@@ -215,6 +217,8 @@ impl PartialOrd for AttentionState {
 #[derive(Default)]
 pub struct PanelState {
     last_good: Option<Arc<Panel>>,
+    /// Observation belongs to the document, so disconnect does not erase it.
+    published_by: panel_control::PublicationOrigin,
     /// The producer document a connection may recover without asking the window to run a pass.
     ///
     /// **A pointer behind a mutex, not panel state behind a lock.** Painting, holds and presses stay
@@ -248,15 +252,18 @@ pub struct PanelState {
     /// The connection driving this panel, when one is.
     ///
     /// **This is D17's answer to «who rules», and the whole of it.** The contract has two transports
-    /// and the file cannot identify its producer, so authority cannot be given to it: while a
-    /// connection holds a pane it is the only writer, the file is not read at all, and a second
-    /// source is refused by name. There is no sequence number anywhere and none is needed — one
-    /// connection's newline-framed requests cannot reorder themselves, and with the file unread
-    /// there is nobody else to order against.
+    /// and the file cannot identify its producer, so authority cannot be given to it: while an
+    /// active connection holds a pane it is the only writer and a second source is refused by name.
+    /// When the holder finishes it yields the document to a newer file, while reserving its right
+    /// to publish again. A file cannot take that reservation or patch a channel document; neither
+    /// can the holder patch the file's document without first publishing a complete one.
     ///
     /// **It dies with the connection**, which is not a detail: without a release, an agent that
     /// crashed would freeze this pane's panel for ever and its file would never be read again.
     holder: Option<Holder>,
+    /// Kept after disconnect so an older file cannot resurrect over a channel document.
+    channel_publication: Option<driving::ChannelPublication>,
+    file_probe_pending: bool,
     overlay: overlay::HoldCell,
     hook_source: Option<String>,
     /// The last intentional retirement, until another document is successfully committed.
@@ -366,65 +373,7 @@ impl PanelState {
     /// painting. Two clocks for a stretch that is published as one is the easiest way for the number to
     /// stop meaning what it says.
     pub fn refresh(&mut self, dir: &std::path::Path) -> Refreshed {
-        self.refresh_file(dir)
-    }
-
-    fn refresh_file(&mut self, dir: &std::path::Path) -> Refreshed {
-        // **The return is before the file is read, and that is the invariant rather than an
-        // optimisation.** While a connection holds this pane there is exactly one writer, and reading
-        // the file would put a second one back — settled, as it was before D17, by whichever of the
-        // two wrote last. What it does do is **look at the file's date**, because the look-again flag
-        // alone cannot say whether the file changed: a split, an open tab or the blind watcher raise
-        // it on every pane, and latching the confession from it made a held panel say «the file is not
-        // being read» for the rest of its life over a file nobody wrote.
-        // The layout is not thrown away here: what this changes is the warning, and the warning is
-        // in the cache's key — so a hundred writes to a file nobody reads redo the layout once.
-        //
-        // **Saying «declined» rather than just returning is what lets the caller keep the notice.**
-        // A refusal that looked like a read would throw that publication away for ever: the file's
-        // date never changes again on its own.
-        if let Some(holder) = &mut self.holder {
-            if driving::file_mtime(dir) != self.file_seen {
-                holder.file_refused = true;
-            }
-            return Refreshed::Declined;
-        }
-
-        match self.refresh_after_retirement(dir) {
-            driving::RetirementRefresh::NotRetired => {}
-            driving::RetirementRefresh::Read => return Refreshed::Read,
-            driving::RetirementRefresh::Deferred(delay) => return Refreshed::Deferred(delay),
-        }
-
-        let seen = self.last_good.as_ref().and_then(|panel| panel.written_at);
-
-        match panel_contract::read_if_newer(dir, seen) {
-            Ok(Some(panel)) => {
-                // The file's own date, kept as the baseline a later hold compares against. The
-                // contract's parser already carries it on the panel, so this is not a second read.
-                self.file_seen = panel.written_at;
-                self.commit(panel);
-                self.problem = None;
-                self.layout = None;
-            }
-            // **What there is stays valid, and that includes clearing the previous problem.** That the
-            // read reaches here means the file could be asked about and that its date is that of the panel
-            // already held: what is shown **is** the latest, and a failure from a while ago no longer
-            // describes reality. Without this, a passing stumble —running out of descriptors, a network
-            // mount that flickers— would accuse the producer forever, because its file is not going to
-            // change its date again on its own.
-            Ok(None) => self.problem = None,
-            Err(problem) => {
-                // A file that is not there is the baseline «nothing», so a file that appears during a
-                // later hold reads as a change and is confessed. Any other failure leaves the last date
-                // it had, which is still the file's date.
-                if matches!(problem, Problem::Missing) {
-                    self.file_seen = None;
-                }
-                self.problem = Some(problem);
-            }
-        }
-        Refreshed::Read
+        driving::refresh_file(self, dir)
     }
 
     /// The last panel that was understood, if there is one.
@@ -528,7 +477,7 @@ impl PanelState {
             .as_ref()
             .is_some_and(|panel| panel.is_stale_at(now));
         let backed = nothing_to_confess
-            || (self.holder.is_some() && !stale)
+            || (self.channel_owns_document() && self.holder.is_some() && !stale)
             || (class == Attention::Done && self.problem.is_none());
         Some(AttentionState { class, backed })
     }

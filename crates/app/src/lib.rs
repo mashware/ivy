@@ -5509,6 +5509,23 @@ mod tests {
             b"{\"lines\":[\"written during the hold\"]}",
         )
         .expect("publish by file");
+        std::fs::File::open(
+            pane.panel
+                .as_ref()
+                .unwrap()
+                .path()
+                .join(panel_contract::PANEL_FILE),
+        )
+        .unwrap()
+        .set_modified(
+            pane.panel_state
+                .last_understood()
+                .unwrap()
+                .written_at
+                .unwrap()
+                + Duration::from_secs(1),
+        )
+        .unwrap();
         pane.to_reread.raise();
         pane.refresh_its_panel(&egui::Context::default());
         assert!(
@@ -5533,6 +5550,80 @@ mod tests {
             "written during the hold",
             "the publication made during the hold was thrown away"
         );
+    }
+
+    #[test]
+    fn done_probes_the_file_after_a_watcher_notice_was_consumed() {
+        let ctx = egui::Context::default();
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        for by_patch in [false, true] {
+            for notice_before_done in [false, true] {
+                let mut pane = pane_with("sleep 30", 0);
+                pane.panel = Some(PanelDir::create().unwrap());
+                pane.panel_state
+                    .deliver(
+                        7,
+                        "flow",
+                        panel_contract::parse_document(r#"{"lines":["agent"]}"#).unwrap(),
+                        now,
+                    )
+                    .unwrap();
+                pane.to_reread.raise();
+                pane.refresh_its_panel(&ctx);
+                let path = pane
+                    .panel
+                    .as_ref()
+                    .unwrap()
+                    .path()
+                    .join(panel_contract::PANEL_FILE);
+                std::fs::write(&path, r#"{"lines":["later file"]}"#).unwrap();
+                std::fs::File::open(&path)
+                    .unwrap()
+                    .set_modified(now + Duration::from_secs(2))
+                    .unwrap();
+                if notice_before_done {
+                    pane.to_reread.raise();
+                    pane.refresh_its_panel(&ctx);
+                    assert_eq!(
+                        pane.panel_state.last_understood().unwrap().lines[0].text,
+                        "agent"
+                    );
+                    pane.to_reread.take();
+                }
+                if by_patch {
+                    let ops = panel_contract::parse_ops(&serde_json::json!([
+                        {"op":"set","field":"attention","value":"done"}
+                    ]))
+                    .unwrap();
+                    pane.panel_state
+                        .patch(7, &ops, now + Duration::from_secs(1))
+                        .unwrap();
+                } else {
+                    pane.panel_state
+                        .deliver(
+                            7,
+                            "flow",
+                            panel_contract::parse_document(
+                                r#"{"attention":"done","lines":["done"]}"#,
+                            )
+                            .unwrap(),
+                            now + Duration::from_secs(1),
+                        )
+                        .unwrap();
+                }
+                pane.refresh_its_panel(&ctx);
+                assert_eq!(
+                    pane.panel_state.last_understood().unwrap().lines[0].text,
+                    "later file"
+                );
+                assert_eq!(pane.panel_state.held_by(), Some("flow"));
+                assert!(
+                    !pane.to_reread.take(),
+                    "a yielded file must not cause a per-frame probe"
+                );
+                assert!(!pane.panel_state.file_probe_pending());
+            }
+        }
     }
 
     /// Binds a control channel to the console called `name`, so a request can reach the window.
@@ -5693,6 +5784,7 @@ mod tests {
             .and_then(|pane| pane.control.as_mut())
             .expect("that console keeps its channel")
             .push_for_the_tests(panel_control::Delivery {
+                origin: panel_control::PublicationOrigin::Unknown,
                 connection,
                 what,
                 answer: answering,
@@ -5919,6 +6011,16 @@ mod tests {
     /// publication is a new generation and makes the panel visible again.
     #[test]
     fn retiring_a_session_clears_its_panel_and_only_its_untouched_consoles() {
+        check_session_retirement(None);
+    }
+
+    #[test]
+    fn a_done_holder_can_retire_its_auxiliaries_even_after_a_file_takes_the_document() {
+        check_session_retirement(Some(false));
+        check_session_retirement(Some(true));
+    }
+
+    fn check_session_retirement(file_takeover: Option<bool>) {
         let ctx = egui::Context::default();
         let mut window = window_with("sleep 8", "sleep 8");
         attach_a_channel(&mut window, 0);
@@ -5992,6 +6094,35 @@ mod tests {
                 .is_visible(SystemTime::now()),
             "a refused retirement changed the panel"
         );
+
+        if let Some(file_takeover) = file_takeover {
+            let pane = window.all_panes_mut().find(|pane| pane.name == 0).unwrap();
+            let now = SystemTime::now();
+            pane.panel_state
+                .deliver(
+                    connection,
+                    "flow",
+                    panel_contract::parse_document(r#"{"attention":"done","lines":["finished"]}"#)
+                        .unwrap(),
+                    now,
+                )
+                .unwrap();
+            if file_takeover {
+                let path = pane
+                    .panel
+                    .as_ref()
+                    .unwrap()
+                    .path()
+                    .join(panel_contract::PANEL_FILE);
+                std::fs::write(&path, r#"{"lines":["later file"]}"#).unwrap();
+                std::fs::File::open(&path)
+                    .unwrap()
+                    .set_modified(now + Duration::from_secs(1))
+                    .unwrap();
+                pane.refresh_its_panel(&ctx);
+                assert!(pane.panel_state.document().unwrap().contains("later file"));
+            }
+        }
 
         let retiring_watcher = window.watcher.blindness_witness();
         let retirements = window.watcher.retirement_witness();
@@ -6160,11 +6291,13 @@ mod tests {
         let (closing, _closed) = std::sync::mpsc::sync_channel(1);
         let control = origin.control.as_mut().expect("the pane has its channel");
         control.enqueue_for_tests(panel_control::Delivery {
+            origin: panel_control::PublicationOrigin::Unknown,
             connection,
             what: panel_control::What::Retire,
             answer: retiring,
         });
         control.enqueue_for_tests(panel_control::Delivery {
+            origin: panel_control::PublicationOrigin::Unknown,
             connection,
             what: panel_control::What::Closed,
             answer: closing,
@@ -6242,11 +6375,13 @@ mod tests {
         let (publishing, published) = std::sync::mpsc::sync_channel(1);
         let control = origin.control.as_mut().expect("the pane has its channel");
         control.enqueue_for_tests(panel_control::Delivery {
+            origin: panel_control::PublicationOrigin::Unknown,
             connection,
             what: panel_control::What::Retire,
             answer: retiring,
         });
         control.enqueue_for_tests(panel_control::Delivery {
+            origin: panel_control::PublicationOrigin::Unknown,
             connection,
             what: panel_control::What::Publish {
                 source: "flow".to_owned(),
@@ -6351,6 +6486,7 @@ mod tests {
             .expect("the origin console");
         let control = origin.control.as_mut().expect("the pane has its channel");
         control.enqueue_for_tests(panel_control::Delivery {
+            origin: panel_control::PublicationOrigin::Unknown,
             connection,
             what: panel_control::What::Closed,
             answer: closing,

@@ -211,7 +211,7 @@ fn format_id(random: u32) -> String {
 /// memory, and the system empties it when the session closes. When it is unset or not absolute
 /// —macOS, a Linux session without a manager, a mistyped value— it falls back to the system
 /// temporary, held to the same rule on Unix ([`base_dir_from`]).
-fn base_dir() -> PathBuf {
+pub fn base_dir() -> PathBuf {
     let base = base_dir_from(
         std::env::var_os("XDG_RUNTIME_DIR").as_deref(),
         std::env::temp_dir(),

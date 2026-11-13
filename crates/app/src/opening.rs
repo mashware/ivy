@@ -642,6 +642,12 @@ fn launch(
         ..Default::default()
     };
     let callback = restoration.route.callback();
+    // Diagnostic attribution has its own lifetime and is installed regardless of whether session
+    // restoration is enabled. The listener starts below, after the PTY root already exists.
+    let provenance_inspector = pty
+        .foreground_scope()
+        .map(panel::provenance_route::inspector)
+        .unwrap_or_else(|_| panel::provenance_route::unavailable());
     let (panel_state, control) = panel::pane::state_and_control_with_authority(
         ctx,
         panel.as_ref(),
@@ -650,6 +656,7 @@ fn launch(
         pty.foreground_scope()
             .ok()
             .map(crate::panel::overlay::Authority::new),
+        provenance_inspector,
     );
 
     Ok(Pane {

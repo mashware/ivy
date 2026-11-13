@@ -230,6 +230,7 @@ fn admit(
     });
     let (answer, _) = sync_channel(1);
     match sender.try_send(Delivery {
+        origin: panel_control::PublicationOrigin::Unknown,
         connection: hold.connection,
         what: What::Overlay {
             panel,
@@ -255,6 +256,12 @@ impl super::PanelState {
     }
 
     pub(crate) fn apply_overlay(&mut self, hook: Panel, now: SystemTime) -> Result<(), String> {
+        if !self.channel_owns_document() {
+            return Err(
+                "this console's panel is its file's: publish with panel_set before patching"
+                    .to_owned(),
+            );
+        }
         let mut merged = self.last_good.as_deref().ok_or("no held document")?.clone();
         merged.lines = hook.lines;
         merged.attention = hook.attention;
@@ -267,6 +274,7 @@ impl super::PanelState {
         }
         panel_contract::serialize(&merged).map_err(|e| e.to_string())?;
         self.hook_source = self.held_by().map(|source| format!("{source} · hook"));
+        super::driving::record_channel_write(self, &merged, now);
         self.commit(merged);
         self.problem = None;
         self.layout = None;
@@ -411,6 +419,7 @@ mod tests {
         for (incarnation, live) in [(old.incarnation, true), (current.incarnation, false)] {
             let (answer, _) = sync_channel(1);
             control.enqueue_for_tests(Delivery {
+                origin: panel_control::PublicationOrigin::Unknown,
                 connection: 7,
                 what: What::Overlay {
                     panel: parse_document(r#"{"lines":["Must not paint"]}"#).unwrap(),

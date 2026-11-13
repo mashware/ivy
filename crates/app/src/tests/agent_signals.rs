@@ -77,6 +77,7 @@ fn delivered(pane: &mut Pane, connection: u64, what: panel_control::What) -> pan
         .as_ref()
         .unwrap()
         .enqueue_for_tests(panel_control::Delivery {
+            origin: panel_control::PublicationOrigin::Unknown,
             connection,
             what,
             answer,
@@ -293,6 +294,7 @@ fn unexpected_opencode_close_retains_unconfirmed_wait_until_complete_replacement
         .as_ref()
         .unwrap()
         .enqueue_for_tests(panel_control::Delivery {
+            origin: panel_control::PublicationOrigin::Unknown,
             connection: 81,
             what: panel_control::What::Closed,
             answer,
