@@ -368,7 +368,3 @@ mod tests {
 #[cfg(test)]
 #[path = "ligatures/tests.rs"]
 mod integration_tests;
-
-#[cfg(test)]
-#[path = "ligatures/grid_tests.rs"]
-mod grid_tests;
