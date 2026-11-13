@@ -18,7 +18,14 @@ pub(super) enum Kind {
     Other,
 }
 
+pub(super) struct Band {
+    pub(super) title: Option<String>,
+    pub(super) count: usize,
+}
+
 pub(super) struct Section {
+    pub(super) key: Option<Key>,
+    pub(super) bands: Vec<Band>,
     pub(super) kind: Kind,
     pub(super) entries: Vec<Entry>,
 }
@@ -86,6 +93,8 @@ pub(super) fn group(consoles: Vec<(Option<Membership>, Entry)>) -> Vec<Section> 
                 sections.push((
                     key,
                     Section {
+                        key: membership.as_ref().map(|m| m.key.clone()),
+                        bands: Vec::new(),
                         kind: membership
                             .as_ref()
                             .map_or(Kind::Other, |m| Kind::Repository {
@@ -102,6 +111,10 @@ pub(super) fn group(consoles: Vec<(Option<Membership>, Entry)>) -> Vec<Section> 
     }
     for (_, section) in &mut sections {
         order(&mut section.entries);
+        section.bands.push(Band {
+            title: None,
+            count: section.entries.len(),
+        });
     }
     // Stable: equal sections keep the order of their first console. After `order`, a section's
     // first entry carries its strongest claim.

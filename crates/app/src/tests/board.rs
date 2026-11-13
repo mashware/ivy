@@ -900,4 +900,303 @@ mod tests {
         assert_eq!(window.tabs.len(), 1);
         assert_eq!(window.active().panes().len(), 1);
     }
+
+    #[test]
+    fn project_plan_calls_refuse_unknown_and_folder_projects_without_changing_a_plan() {
+        let mut window = window_with("sleep 30", "sleep 30");
+        let ctx = egui::Context::default();
+        let origin = window.active().focus;
+        attach_a_channel(&mut window, origin);
+        let answer = ask_the_window(
+            &mut window,
+            &ctx,
+            origin,
+            1,
+            panel_control::What::PlanRetire,
+        );
+        assert!(
+            matches!(answer, panel_control::Answer::Refused(s) if s == "this console's project is not known yet")
+        );
+        let pane = window.all_panes_mut().find(|p| p.name == origin).unwrap();
+        pane.project = Some(crate::project_view::Badge {
+            key: crate::project::Key::Folder("/plain".into()),
+            name: "Plain".into(),
+            details: String::new(),
+            ink: egui::Color32::RED,
+            painted: Default::default(),
+        });
+        let answer = ask_the_window(&mut window, &ctx, origin, 1, panel_control::What::PlanGet);
+        assert!(
+            matches!(answer, panel_control::Answer::Refused(s) if s == "this console is not in a Git repository")
+        );
+    }
+
+    #[test]
+    fn project_plan_is_shared_by_panes_and_painted_with_source_and_progress() {
+        let mut window = window_with("sleep 30", "sleep 30");
+        integrated(&mut window);
+        let ctx = egui::Context::default();
+        let origins: Vec<_> = window.all_panes().map(|p| p.name).collect();
+        for pane in window.all_panes_mut() {
+            pane.project = Some(crate::project_view::Badge {
+                key: crate::project::Key::Repository("/sample/.git".into()),
+                name: "Sample".into(),
+                details: String::new(),
+                ink: egui::Color32::RED,
+                painted: Default::default(),
+            });
+        }
+        for origin in &origins {
+            attach_a_channel(&mut window, *origin);
+        }
+        let document = r#"{"title":"Delivery","source":"roadmap.md","milestones":[{"id":"H3","title":"Build","items":[{"id":"D","text":"Feature","mark":"current"}]}]}"#;
+        let (plan, dropped) = panel_contract::plan::parse_document_noting(document).unwrap();
+        let answer = ask_the_window(
+            &mut window,
+            &ctx,
+            origins[0],
+            1,
+            panel_control::What::PlanSet {
+                document: document.into(),
+                plan,
+                dropped,
+            },
+        );
+        assert!(
+            matches!(answer, panel_control::Answer::Text(s) if s.starts_with("published for Sample"))
+        );
+        let answer = ask_the_window(
+            &mut window,
+            &ctx,
+            origins[1],
+            2,
+            panel_control::What::PlanGet,
+        );
+        assert!(matches!(answer, panel_control::Answer::Document(s) if s == document));
+        crate::board::plans::refresh_readers(&mut window);
+        let dir = window
+            .all_panes()
+            .find(|p| p.name == origins[1])
+            .unwrap()
+            .panel
+            .as_ref()
+            .unwrap();
+        let mut producer = panel_control::Producer::of(dir.path(), dir.id()).unwrap();
+        assert!(
+            matches!(producer.read_plan(Some("/another/repo")).unwrap(), panel_control::Answered::Document(s) if s == document)
+        );
+        let oversized = serde_json::json!({"title": "x".repeat(panel_contract::MAX_BYTES as usize), "milestones": []}).to_string();
+        assert!(
+            matches!(producer.publish_plan(&oversized, None).unwrap(), panel_control::Answered::Failed(s) if s == "a plan is over 256 KiB")
+        );
+        assert!(
+            matches!(producer.read_plan(None).unwrap(), panel_control::Answered::Document(s) if s == document)
+        );
+        let panel = panel_contract::parse_document(
+            r#"{"milestone":"H3","deliverable":"D","lines":["working"]}"#,
+        )
+        .unwrap();
+        window
+            .all_panes_mut()
+            .find(|p| p.name == origins[0])
+            .unwrap()
+            .panel_state
+            .deliver(1, "flow", panel, SystemTime::now())
+            .unwrap();
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
+        let shapes = frame(&mut window, &ctx, vec![]);
+        for expected in [
+            "published ",
+            "roadmap.md",
+            "Build - 0/1",
+            "Feature",
+            "Off the plan",
+        ] {
+            assert!(the_text_queued_up(&shapes, expected), "missing {expected}");
+        }
+        let first = window.board.card_rect(origins[0]).unwrap();
+        let second = window.board.card_rect(origins[1]).unwrap();
+        assert!(
+            first.top() < second.top(),
+            "deliverable card must precede the off-plan card"
+        );
+        let mut report = Vec::new();
+        window.board.timing.publish(&mut report).unwrap();
+        let report = String::from_utf8(report).unwrap();
+        assert!(report.contains("board plan projection:"));
+        assert!(report.contains("board plan paint enqueue:"));
+    }
+
+    #[test]
+    fn published_project_plan_hides_roadmap_file_until_retired() {
+        use std::{fs, process::Command, time::Instant};
+        let root = std::env::temp_dir().join(format!(
+            "ivy-board-roadmap-precedence-{}-{}",
+            std::process::id(),
+            Instant::now().elapsed().as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        assert!(
+            Command::new("git")
+                .args(["init", "-q"])
+                .current_dir(&root)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let roadmap = root.join("roadmap.md");
+        fs::write(&roadmap, "# File roadmap\n- [ ] file only task\n").unwrap();
+
+        let mut window = window_with("sleep 30", "sleep 30");
+        integrated(&mut window);
+        let ctx = egui::Context::default();
+        let origin = window.active().focus;
+        window
+            .all_panes_mut()
+            .find(|p| p.name == origin)
+            .unwrap()
+            .project = Some(crate::project_view::Badge {
+            key: crate::project::Key::Repository(root.join(".git")),
+            name: "RoadmapTest".into(),
+            details: String::new(),
+            ink: egui::Color32::RED,
+            painted: Default::default(),
+        });
+        attach_a_channel(&mut window, origin);
+        settings::interpret(&format!("roadmap.demo={}", roadmap.display()))
+            .unwrap()
+            .0
+            .apply_to(&mut window);
+        let document = r#"{"title":"Published roadmap","milestones":[{"id":"P","title":"Published only","items":[{"text":"published task","mark":"current"}]}]}"#;
+        let (plan, dropped) = panel_contract::plan::parse_document_noting(document).unwrap();
+        assert!(matches!(
+            ask_the_window(
+                &mut window,
+                &ctx,
+                origin,
+                1,
+                panel_control::What::PlanSet {
+                    document: document.into(),
+                    plan,
+                    dropped
+                }
+            ),
+            panel_control::Answer::Text(_)
+        ));
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        let published_shapes = loop {
+            let shapes = frame(&mut window, &ctx, vec![]);
+            if the_text_queued_up(&shapes, "published task") {
+                break shapes;
+            }
+            assert!(Instant::now() < deadline, "published plan was not painted");
+            std::thread::sleep(std::time::Duration::from_millis(40));
+        };
+        assert!(the_text_queued_up(&published_shapes, "Published only"));
+        assert!(!the_text_queued_up(&published_shapes, "file only task"));
+
+        assert!(matches!(
+            ask_the_window(
+                &mut window,
+                &ctx,
+                origin,
+                2,
+                panel_control::What::PlanRetire
+            ),
+            panel_control::Answer::Text(_)
+        ));
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let shapes = frame(&mut window, &ctx, vec![]);
+            if the_text_queued_up(&shapes, "file only task") {
+                assert!(the_text_queued_up(
+                    &shapes,
+                    &format!("from {}", roadmap.display())
+                ));
+                assert!(!the_text_queued_up(&shapes, "published task"));
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "retiring the plan did not reveal the file roadmap"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(40));
+        }
+        drop(window);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn configured_file_creates_a_section_without_console_but_unconfigured_plan_does_not() {
+        use std::{fs, sync::mpsc, time::Instant};
+        let root = std::env::temp_dir().join(format!(
+            "ivy-board-configured-roadmap-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let roadmap = root.join("roadmap.md");
+        fs::write(
+            &roadmap,
+            "# Configured roadmap\n- [ ] visible configured task\n",
+        )
+        .unwrap();
+        let mut window = window_with("sleep 30", "sleep 30");
+        integrated(&mut window);
+        let ctx = egui::Context::default();
+        for pane in window.all_panes_mut() {
+            pane.project = Some(crate::project_view::Badge {
+                key: crate::project::Key::Repository("/live/elsewhere/.git".into()),
+                name: "Elsewhere".into(),
+                details: String::new(),
+                ink: egui::Color32::RED,
+                painted: Default::default(),
+            });
+        }
+        let identity = crate::project::Identity {
+            key: crate::project::Key::Repository(root.join(".git")),
+            path: root.join(".git"),
+            name: "ConfiguredProject".into(),
+        };
+        let document = r#"{"milestones":[{"id":"M","title":"Stored only","items":[{"text":"unconfigured stored task","mark":"current"}]}]}"#;
+        let (plan, dropped) = panel_contract::plan::parse_document_noting(document).unwrap();
+        let (tx, rx) = mpsc::sync_channel(1);
+        window.board.plans.request(
+            Ok(identity),
+            panel_control::What::PlanSet {
+                document: document.into(),
+                plan,
+                dropped,
+            },
+            tx,
+            &ctx,
+        );
+        assert!(matches!(
+            rx.recv_timeout(std::time::Duration::from_secs(3)).unwrap(),
+            panel_control::Answer::Text(_)
+        ));
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
+        let shapes = frame(&mut window, &ctx, vec![]);
+        assert!(!the_text_queued_up(&shapes, "unconfigured stored task"));
+
+        settings::interpret(&format!("roadmap.configured={}", roadmap.display()))
+            .unwrap()
+            .0
+            .apply_to(&mut window);
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let shapes = frame(&mut window, &ctx, vec![]);
+            if the_text_queued_up(&shapes, "visible configured task") {
+                assert!(!the_text_queued_up(&shapes, "unconfigured stored task"));
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "configured project did not get a section without a console"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(40));
+        }
+        drop(window);
+        let _ = fs::remove_dir_all(root);
+    }
 }

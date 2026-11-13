@@ -24,6 +24,7 @@ use std::path::{Path, PathBuf};
 mod dropped;
 mod panel;
 mod patch;
+pub mod plan;
 
 pub use dropped::Dropped;
 pub use panel::{

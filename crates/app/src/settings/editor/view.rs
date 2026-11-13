@@ -512,6 +512,8 @@ fn startup(editor: &mut Editor, ui: &mut egui::Ui) {
     }
     ui.weak("AI recovery needs an explicitly configured client integration. Codex restores its last hook-reported session; switching without sending a message can leave the previous session recorded.");
     ui.add_space(10.0);
+    ui.weak("Markdown roadmaps are configured in the settings file: roadmap.<name> = <path>. Set roadmap.window = <done> <next> to choose the milestone window (default 2 3). Paths are read in the background; Markdown is shown as inert text.");
+    ui.add_space(10.0);
     ui.weak("Changes apply on the next launch. Turning restoration off keeps the previous saved layout. Additional windows are temporary and do not save their layout.");
 }
 

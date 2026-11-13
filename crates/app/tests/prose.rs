@@ -76,6 +76,31 @@ use std::path::Path;
 /// entry down.
 const SOURCES: &[(&str, &str, usize)] = &[
     (
+        "src/board/plans.rs",
+        include_str!("../src/board/plans.rs"),
+        0,
+    ),
+    (
+        "src/board/plans/disk.rs",
+        include_str!("../src/board/plans/disk.rs"),
+        0,
+    ),
+    (
+        "src/board/plans/tests.rs",
+        include_str!("../src/board/plans/tests.rs"),
+        0,
+    ),
+    (
+        "src/board/roadmap.rs",
+        include_str!("../src/board/roadmap.rs"),
+        0,
+    ),
+    (
+        "src/roadmap_file.rs",
+        include_str!("../src/roadmap_file.rs"),
+        0,
+    ),
+    (
         "src/ai_sessions/tests/codex_probe.rs",
         include_str!("../src/ai_sessions/tests/codex_probe.rs"),
         1,

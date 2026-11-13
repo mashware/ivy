@@ -139,6 +139,13 @@ pub enum Request {
     /// start disagreeing field by field. It is the producer's own bytes, kept as a [`RawValue`], so
     /// the parser's ceiling measures what arrived and not a compact re-serialisation of it.
     PanelSet { source: String, document: String },
+    /// Publish a project roadmap document. Project scope is supplied by the caller's pane; `repo`
+    /// is deliberately not part of the request and cannot widen that scope.
+    PlanSet { document: String },
+    /// Read the published roadmap for the caller's pane project.
+    PlanGet,
+    /// Remove the published roadmap for the caller's pane project.
+    PlanRetire,
     /// Hand back the document this pane's panel is showing.
     ///
     /// **It names nothing, and it cannot**: the connection's own endpoint already decided which pane
@@ -306,6 +313,8 @@ struct Envelope<'a> {
     #[serde(default, borrow)]
     document: Option<&'a RawValue>,
     #[serde(default, borrow)]
+    repo: Option<&'a RawValue>,
+    #[serde(default, borrow)]
     side: Option<&'a RawValue>,
     #[serde(default, borrow)]
     program: Option<&'a RawValue>,
@@ -353,6 +362,9 @@ fn interpret(line: &[u8]) -> Incoming {
             ))
         }
         "panel_set" => panel_set(&envelope),
+        "plan_set" => plan_set(&envelope),
+        "plan_get" => Incoming::Request(Request::PlanGet),
+        "plan_retire" => Incoming::Request(Request::PlanRetire),
         "panel_get" => Incoming::Request(Request::PanelGet),
         "panel_retire" => Incoming::Request(Request::PanelRetire),
         "panel_patch" => panel_patch(&envelope),
@@ -361,6 +373,19 @@ fn interpret(line: &[u8]) -> Incoming {
         "split_close" => split_close(&envelope),
         other => Incoming::Request(Request::NotServed(other.to_owned())),
     }
+}
+
+/// The plan document stays as the exact JSON text received, just like a panel publication.
+/// `repo` is accepted as an envelope field for producer parity, but scope always comes from the
+/// endpoint's pane and the value is intentionally ignored.
+fn plan_set(envelope: &Envelope<'_>) -> Incoming {
+    let Some(document) = envelope.document else {
+        return Incoming::Malformed("a plan publication carries no \"document\"".to_owned());
+    };
+    let _ = envelope.repo;
+    Incoming::Request(Request::PlanSet {
+        document: document.get().to_owned(),
+    })
 }
 
 fn agent_signal(text: &str) -> Incoming {
@@ -736,6 +761,52 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn plan_requests_keep_the_document_text_and_ignore_repo_for_scope() {
+        let raw = r#"{ "title" : "Ivy", "milestones": [] }"#;
+        let incoming = one(&format!(
+            "{{\"tool\":\"plan_set\",\"repo\":\"/other/repo\",\"document\":{raw}}}\n"
+        ));
+        assert_eq!(
+            incoming,
+            Incoming::Request(Request::PlanSet {
+                document: raw.to_owned()
+            })
+        );
+        assert_eq!(
+            one("{\"tool\":\"plan_get\",\"repo\":\"/other\"}\n"),
+            Incoming::Request(Request::PlanGet)
+        );
+        assert_eq!(
+            one("{\"tool\":\"plan_retire\"}\n"),
+            Incoming::Request(Request::PlanRetire)
+        );
+        assert!(matches!(
+            one("{\"tool\":\"plan_set\"}\n"),
+            Incoming::Malformed(_)
+        ));
+    }
+
+    #[test]
+    fn plan_documents_at_the_contract_ceiling_fit_inside_the_wire_envelope() {
+        let raw = format!("\"{}\"", "x".repeat(panel_contract::MAX_BYTES as usize - 2));
+        assert_eq!(raw.len(), panel_contract::MAX_BYTES as usize);
+        let line = format!("{{\"tool\":\"plan_set\",\"document\":{raw}}}\n");
+        assert!(line.len() - 1 <= MAX_REQUEST);
+        let Incoming::Request(Request::PlanSet { document }) = one(&line) else {
+            panic!("a plan at the contract ceiling was refused");
+        };
+        assert_eq!(document, raw);
+
+        let raw = format!("\"{}\"", "x".repeat(panel_contract::MAX_BYTES as usize - 1));
+        let line = format!("{{\"tool\":\"plan_set\",\"document\":{raw}}}\n");
+        assert!(line.len() - 1 <= MAX_REQUEST);
+        assert!(matches!(
+            one(&line),
+            Incoming::Request(Request::PlanSet { .. })
+        ));
     }
 
     /// **A tool nobody serves still comes back named**, which is what lets the refusal say what it is
