@@ -1,0 +1,9 @@
+# Architecture role
+
+The selected documentation fallback fits existing surfaces. Put the user-facing distinction in `README.md`’s Codex section and in both Connect render paths in `crates/app/src/chrome/connection.rs`: the visible manual and `setup_prompt`, which is copied to the client. Keep the console-local launch behavior in `crates/panel-control/src/bin/ivy-codex.rs` and shell setup in `crates/app/src/shell_integration.rs` unchanged. The copied prompt is operational guidance, so changing only the visible manual would leave clients receiving stale advice. Add the ticket’s observed failure as version-qualified evidence; describe joint use as unverified and connected status as insufficient proof.
+
+No entities, data model, migration, endpoint, or new API are needed. Reuse the current guide and prompt; make no launcher, recovery, daemon, or MCP changes. `docs/02-decisions.md` is the existing rationale location if the chosen fallback needs durable rationale.
+
+**Test pointer correction:** `crates/app/src/chrome/connection/tests.rs` is not the setup-prompt test location. The exact existing coverage is `crates/app/src/tests/integrated_chrome.rs:487`, `connection_guide_copies_setup_prompt_with_local_path_without_typing_it`. It asserts copied prompt content at lines 531–556, then visible manual guidance at 614 onward; the same test also checks selected README content. The module-level connection tests at `crates/app/src/chrome/connection/tests.rs:56` cover guide UI/version labeling, not the copied prompt. Update the integrated-chrome assertions for the new caveat and false-success distinction; retain editorial cross-check for agreement across all surfaces.
+
+Risk: prose assertions can enforce required claims but cannot prove phone access or two-console routing. Keep those runtime criteria explicitly unverified without real host/device evidence.

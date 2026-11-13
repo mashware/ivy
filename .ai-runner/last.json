@@ -1,0 +1,19 @@
+{
+  "kind": "ask",
+  "id": "69-codex:ab3402edadf1",
+  "question": "Ticket 69 study: decide how to handle the unresolved compatibility evidence.\n\nThe proposed single guidance PR would preserve Ivy’s --no-daemon safeguard and update README, Connect manual instructions, the copied setup prompt, existing integrated-chrome checks, and the existing decision rationale. It would explain the reported active-writer conflict and distinguish remote-control connected status from successfully opening and using a live conversation.\n\nThe independent design review found two high-severity gaps:\n1. The ticket permits a limitation fallback if the installed Codex version cannot support both functions. That condition has not been established: exact Codex 0.167.0 help and generated schemas confirm flags and generic per-thread config, but do not prove or disprove a compatible ordinary-launch path. Invocation-scoped MCP configuration remains an untested candidate.\n2. No real two-console start/resume or phone test has been performed. The Linux conflict is owner-reported; capability checks cannot be published as runtime proof or a general version limit.\n\nRecommended response to both: reopen the design, continue investigating the supported target-version CLI/MCP configuration path before choosing a delivery, keep all runtime acceptance checks open, retain the safeguard and user configuration, and scope every compatibility statement to its evidence. A guidance-only delivery must not be treated as an approved replacement for the original runtime criteria unless you explicitly choose that scope.\n\nSelect “Apply the recommended response to each” to retain the original compatibility investigation. Or provide a response such as “Approve the guidance-only delivery with joint runtime support explicitly unresolved,” or F1/F2-specific responses. This answer applies only to the study design and authorizes no code, configuration change, push or publication.",
+  "options": [
+    {
+      "label": "Apply the recommended response to each",
+      "recommended": true
+    }
+  ],
+  "free_text": true,
+  "gate": "design_challenge",
+  "at": "2026-11-13T15:51:20+00:00",
+  "branch": null,
+  "head": null,
+  "after_study": "recommended",
+  "study": "pending",
+  "workflow": "flow"
+}

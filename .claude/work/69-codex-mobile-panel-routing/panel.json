@@ -1,0 +1,13 @@
+{
+  "updated_at": "2026-11-13T15:51:15.944Z",
+  "phase": "design",
+  "header": true,
+  "attention": "wait",
+  "lines": [
+    {"key":"title","text":"Allow Codex mobile remote control without losing per-console panel routing","style":"title"},
+    "",
+    {"key":"now","ref":"Now","text":"Exact-version capability study and independent design review complete","mark":"info"},
+    {"key":"next","ref":"Next","text":"design after scope decision","mark":"info"},
+    {"key":"decision","ref":"Decision","text":"Retain compatibility investigation or explicitly choose guidance-only scope; runtime checks remain open","mark":"wait"}
+  ]
+}

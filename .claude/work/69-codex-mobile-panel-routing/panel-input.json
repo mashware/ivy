@@ -1,0 +1,6 @@
+{
+  "phase": "design",
+  "now": "Exact-version capability study and independent design review complete",
+  "next": "design after scope decision",
+  "decision": "Retain compatibility investigation or explicitly choose guidance-only scope; runtime checks remain open"
+}

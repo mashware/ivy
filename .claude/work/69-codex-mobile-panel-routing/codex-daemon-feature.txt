@@ -1,0 +1,1 @@
+daemon_auto_start                        stable             true
