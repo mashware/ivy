@@ -76,6 +76,31 @@ use std::path::Path;
 /// entry down.
 const SOURCES: &[(&str, &str, usize)] = &[
     (
+        "src/client_attestation/mod.rs",
+        include_str!("../src/client_attestation/mod.rs"),
+        0,
+    ),
+    (
+        "src/client_attestation/programs.rs",
+        include_str!("../src/client_attestation/programs.rs"),
+        0,
+    ),
+    (
+        "src/client_attestation/verify.rs",
+        include_str!("../src/client_attestation/verify.rs"),
+        2,
+    ),
+    (
+        "src/panel/overlay.rs",
+        include_str!("../src/panel/overlay.rs"),
+        0,
+    ),
+    (
+        "src/panel/overlay/tests.rs",
+        include_str!("../src/panel/overlay/tests.rs"),
+        0,
+    ),
+    (
         "src/board/plans.rs",
         include_str!("../src/board/plans.rs"),
         0,
@@ -106,13 +131,13 @@ const SOURCES: &[(&str, &str, usize)] = &[
         1,
     ),
     (
-        "src/ai_sessions/programs/child.rs",
-        include_str!("../src/ai_sessions/programs/child.rs"),
+        "src/client_attestation/programs/child.rs",
+        include_str!("../src/client_attestation/programs/child.rs"),
         0,
     ),
     (
-        "src/ai_sessions/programs/child/tests.rs",
-        include_str!("../src/ai_sessions/programs/child/tests.rs"),
+        "src/client_attestation/programs/child/tests.rs",
+        include_str!("../src/client_attestation/programs/child/tests.rs"),
         0,
     ),
     ("src/clipboard.rs", include_str!("../src/clipboard.rs"), 0),
@@ -189,7 +214,7 @@ const SOURCES: &[(&str, &str, usize)] = &[
     (
         "src/ai_sessions/verify.rs",
         include_str!("../src/ai_sessions/verify.rs"),
-        2,
+        0,
     ),
     (
         "src/ai_sessions/worker.rs",

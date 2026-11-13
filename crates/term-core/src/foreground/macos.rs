@@ -87,7 +87,7 @@ pub(super) fn scope(pty: &crate::Pty) -> io::Result<Scope> {
         .and_then(|c| c.process_id())
         .ok_or_else(denied)? as u32;
     let child = stat(pid)?;
-    let child_life = lifetime(pid, child.birth)?;
+    let child_life = watch(pid, child.birth, false)?;
     let raw = unsafe {
         libc::fcntl(
             pty.master.as_raw_fd().ok_or_else(denied)?,
@@ -240,6 +240,10 @@ fn foreground(fd: i32) -> io::Result<u32> {
     Ok(p as u32)
 }
 pub(super) fn lifetime(pid: u32, birth: u64) -> io::Result<OwnedFd> {
+    watch(pid, birth, true)
+}
+
+fn watch(pid: u32, birth: u64, client: bool) -> io::Result<OwnedFd> {
     if stat(pid)?.birth != birth {
         return Err(denied());
     };
@@ -252,7 +256,7 @@ pub(super) fn lifetime(pid: u32, birth: u64) -> io::Result<OwnedFd> {
         ident: pid as _,
         filter: libc::EVFILT_PROC,
         flags: libc::EV_ADD | libc::EV_ENABLE | libc::EV_CLEAR,
-        fflags: libc::NOTE_EXIT | libc::NOTE_EXEC,
+        fflags: libc::NOTE_EXIT | if client { libc::NOTE_EXEC } else { 0 },
         data: 0,
         udata: std::ptr::null_mut(),
     };
@@ -426,4 +430,34 @@ pub(super) fn runs_script(p: &NativeProcess, expected: &Path) -> io::Result<bool
 }
 fn denied() -> io::Error {
     io::ErrorKind::PermissionDenied.into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn shell_exec_preserves_pane_lifetime_and_revokes_client_lifetime() {
+        let (mut pty, output) = crate::Pty::spawn(
+            "/bin/sh",
+            &["-c", "echo ready; read next; exec /bin/sleep 30"],
+            crate::Size::default(),
+        )
+        .unwrap();
+        let mut ready = Vec::new();
+        while !ready.windows(5).any(|part| part == b"ready") {
+            ready.extend(output.recv_timeout(Duration::from_secs(2)).unwrap());
+        }
+        let scope = scope(&pty).unwrap();
+        let client = lifetime(scope.child.pid, scope.child.birth).unwrap();
+        pty.write(b"go\n").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !executable(scope.child.pid).is_ok_and(|path| path.ends_with("sleep")) {
+            assert!(Instant::now() < deadline, "shell never executed sleep");
+            std::thread::yield_now();
+        }
+        assert!(scope.is_open(), "exec is not pane closure");
+        assert!(!alive(&client), "exec must revoke the old client witness");
+    }
 }

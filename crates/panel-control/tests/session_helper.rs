@@ -145,7 +145,7 @@ fn publish_cli_maps_unheld_and_policy_refusal_to_the_declared_output() {
         sender,
         None,
         None,
-        Some(callback),
+        Some(panel_control::listener::PublicationServices::new(callback)),
         Arc::new(|| {}),
     )
     .unwrap();
@@ -191,7 +191,7 @@ fn publish_cli_maps_unheld_and_policy_refusal_to_the_declared_output() {
         sender,
         None,
         None,
-        Some(callback),
+        Some(panel_control::listener::PublicationServices::new(callback)),
         Arc::new(|| {}),
     )
     .unwrap();

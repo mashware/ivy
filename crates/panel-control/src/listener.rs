@@ -29,7 +29,7 @@ use crate::wire::{AgentSnapshot, Framing, Incoming, Reply, Request, Side, write_
 struct Services {
     reader: Option<ReadDocument>,
     session: Option<SessionHandler>,
-    publisher: Option<PublishHandler>,
+    publisher: Option<PublicationServices>,
     plan_reader: Arc<std::sync::Mutex<Option<ReadPlan>>>,
 }
 
@@ -86,6 +86,22 @@ pub type ReadDocument = Arc<dyn Fn() -> Result<String, String> + Send + Sync>;
 /// Handles an attested publication on its connection thread and returns an admission result.
 /// Implementations should use a bounded nonblocking queue and must not wait for a UI pass.
 pub type PublishHandler = Arc<dyn Fn(Peer, Connection, String) -> Reply + Send + Sync>;
+
+/// Native discovery runs on the connection thread before an ordinary holder set is queued.
+#[derive(Clone)]
+pub struct PublicationServices {
+    pub publish: PublishHandler,
+    pub prepare_holder: Arc<dyn Fn() + Send + Sync>,
+}
+
+impl PublicationServices {
+    pub fn new(publish: PublishHandler) -> Self {
+        Self {
+            publish,
+            prepare_holder: Arc::new(|| {}),
+        }
+    }
+}
 
 /// Authority that must still be current when an admitted overlay reaches the window.
 pub trait OverlayAuthority: std::fmt::Debug + Send + Sync {
@@ -257,7 +273,7 @@ impl Channel {
         to_the_window: SyncSender<Delivery>,
         read_document: Option<ReadDocument>,
         session_handler: Option<SessionHandler>,
-        publisher: Option<PublishHandler>,
+        publisher: Option<PublicationServices>,
         wake: Arc<dyn Fn() + Send + Sync>,
     ) -> io::Result<Self> {
         let services = Services {
@@ -623,7 +639,7 @@ fn converse(
                 saw_publish = true;
                 let reply = match (&services.publisher, &peer) {
                     (Some(handler), Some(Ok(peer))) if peer.is_alive() => {
-                        handler(peer.clone(), connection, document.clone())
+                        (handler.publish)(peer.clone(), connection, document.clone())
                     }
                     _ => Reply::Failed("publisher identity is unavailable".into()),
                 };
@@ -637,6 +653,11 @@ fn converse(
             if matches!(&incoming, Incoming::Request(request) if !matches!(request, Request::NotServed(_)))
             {
                 used_panel_protocol = true;
+            }
+            if matches!(&incoming, Incoming::Request(Request::PanelSet { .. }))
+                && let Some(service) = &services.publisher
+            {
+                (service.prepare_holder)();
             }
             let plan_reader = if matches!(incoming, Incoming::Request(Request::PlanGet)) {
                 services.plan_reader.lock().unwrap().clone()
@@ -1142,10 +1163,12 @@ mod tests {
             sender,
             None,
             None,
-            Some(Arc::new(move |_peer, _connection, document| {
-                called_tx.send(document).unwrap();
-                Reply::PublishAccepted
-            })),
+            Some(PublicationServices::new(Arc::new(
+                move |_peer, _connection, document| {
+                    called_tx.send(document).unwrap();
+                    Reply::PublishAccepted
+                },
+            ))),
             Arc::new(|| {}),
         )
         .unwrap();

@@ -36,7 +36,7 @@ impl PaneControl {
                         self.did.overlaid += 1;
                     } else {
                         self.did.overlays_refused += 1;
-                        state.overlay_refused();
+                        crate::panel::overlay::refused_at_apply(state);
                     }
                 }
 

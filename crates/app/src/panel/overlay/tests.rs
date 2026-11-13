@@ -68,10 +68,10 @@ impl ClientFixture {
         // The fixture executable is the only recognized client in these isolated process trees.
         let mut authority = authority;
         Arc::get_mut(&mut authority).unwrap().programs =
-            crate::client_attestation::Programs::supplied(vec![(
+            OnceLock::from(crate::client_attestation::Programs::supplied(vec![(
                 Client::Claude,
                 executable.clone(),
-            )]);
+            )]));
         let state = super::super::PanelState::default();
         let (sender, inbox) = sync_channel(8);
         let service = service(
@@ -245,7 +245,7 @@ fn admitted_proof_survives_helper_exit_but_not_hold_replacement_or_root_death() 
         "the publishing helper may exit after admission"
     );
     fixture.state.overlay.replace(holder, "flow");
-    assert!(fixture.state.accepts_overlay(holder, incarnation) == false);
+    assert!(!fixture.state.accepts_overlay(holder, incarnation));
 }
 
 #[test]
@@ -278,4 +278,18 @@ fn foreign_client_root_and_closed_holder_are_refused() {
         !authority.current(),
         "a queued overlay loses authority when its client exits"
     );
+}
+
+#[test]
+fn full_admission_queue_refuses_without_changing_the_document() {
+    let mut fixture = ClientFixture::new();
+    fixture.hold("flow");
+    let before = fixture.state.document().unwrap();
+    for _ in 0..crate::control::MAX_PENDING {
+        assert_eq!(fixture.publish("")["ok"], true);
+    }
+    let reply = fixture.publish("");
+    assert_eq!(reply["code"], "queue_full");
+    assert_eq!(reply["message"], "this panel's publication queue is full");
+    assert_eq!(fixture.state.document().unwrap(), before);
 }

@@ -75,6 +75,30 @@ use std::path::Path;
 /// to.
 const MODULES: &[(&str, &str)] = &[
     (
+        "app/src/client_attestation/mod.rs",
+        include_str!("../src/client_attestation/mod.rs"),
+    ),
+    (
+        "app/src/client_attestation/programs.rs",
+        include_str!("../src/client_attestation/programs.rs"),
+    ),
+    (
+        "app/src/client_attestation/verify.rs",
+        include_str!("../src/client_attestation/verify.rs"),
+    ),
+    (
+        "app/src/panel/overlay.rs",
+        include_str!("../src/panel/overlay.rs"),
+    ),
+    (
+        "app/src/panel/overlay/tests.rs",
+        include_str!("../src/panel/overlay/tests.rs"),
+    ),
+    (
+        "term-core/src/foreground/macos.rs",
+        include_str!("../../term-core/src/foreground/macos.rs"),
+    ),
+    (
         "app/src/board/plans.rs",
         include_str!("../src/board/plans.rs"),
     ),
@@ -99,12 +123,12 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/ai_sessions/tests/codex_probe.rs"),
     ),
     (
-        "app/src/ai_sessions/programs/child.rs",
-        include_str!("../src/ai_sessions/programs/child.rs"),
+        "app/src/client_attestation/programs/child.rs",
+        include_str!("../src/client_attestation/programs/child.rs"),
     ),
     (
-        "app/src/ai_sessions/programs/child/tests.rs",
-        include_str!("../src/ai_sessions/programs/child/tests.rs"),
+        "app/src/client_attestation/programs/child/tests.rs",
+        include_str!("../src/client_attestation/programs/child/tests.rs"),
     ),
     ("app/src/clipboard.rs", include_str!("../src/clipboard.rs")),
     (

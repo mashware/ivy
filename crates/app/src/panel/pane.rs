@@ -565,57 +565,61 @@ impl panel::PanelState {
     /// `panel.rs` takes a piece out of it first (**D28**), and this is the piece: everything the
     /// application has to say about a panel, in one place.
     pub(super) fn warning(&self, now: SystemTime) -> Option<String> {
-        if self.is_retired() {
-            return None;
+        warning(self, now)
+    }
+}
+
+fn warning(state: &panel::PanelState, now: SystemTime) -> Option<String> {
+    if state.is_retired() {
+        return None;
+    }
+    // **The person's line is joined with whatever the panel has to confess**, not chosen over it:
+    // the two say different things, and a console can have been taken over while its file is also
+    // unreadable.
+    match (&state.taken_over, warning_about_the_panel(state, now)) {
+        (None, said) => said,
+        (Some(why), None) => Some(why.clone()),
+        (Some(why), Some(said)) => Some(format!("{why} · {said}")),
+    }
+}
+
+/// The rest of the warning: what this panel has to say about itself.
+fn warning_about_the_panel(state: &panel::PanelState, now: SystemTime) -> Option<String> {
+    // **A held panel's two confessions are independent, and both have to be able to appear.** A
+    // held panel says nothing on its own — the identity row already carries who is driving it,
+    // and a standing warning over a panel that is working perfectly is noise — but it can have two
+    // things to say, and the first version returned the file refusal and made the other
+    // unreachable for the whole life of the hold: an agent that wedged with its socket open kept
+    // painting a claim as fresh, and D43 promises the panel goes stale where a person can read
+    // that it has. They are joined rather than one chosen, because they say different things.
+    if let Some(holder) = &state.holder {
+        let mut said: Vec<String> = Vec::new();
+        if holder.file_refused {
+            said.push(format!(
+                "the file is not being read: \"{}\" is publishing here",
+                holder.source
+            ));
         }
-        // **The person's line is joined with whatever the panel has to confess**, not chosen over it:
-        // the two say different things, and a console can have been taken over while its file is also
-        // unreadable.
-        match (&self.taken_over, self.warning_about_the_panel(now)) {
-            (None, said) => said,
-            (Some(why), None) => Some(why.clone()),
-            (Some(why), Some(said)) => Some(format!("{why} · {said}")),
+        if state.problem.is_none()
+            && let Some(shown) = &state.last_good
+            && shown.is_stale_at(now)
+        {
+            said.push(panel::no_news(shown, now));
         }
+        return (!said.is_empty()).then(|| said.join(" · "));
     }
 
-    /// The rest of the warning: what this panel has to say about itself.
-    fn warning_about_the_panel(&self, now: SystemTime) -> Option<String> {
-        // **A held panel's two confessions are independent, and both have to be able to appear.** A
-        // held panel says nothing on its own — the identity row already carries who is driving it,
-        // and a standing warning over a panel that is working perfectly is noise — but it can have two
-        // things to say, and the first version returned the file refusal and made the other
-        // unreachable for the whole life of the hold: an agent that wedged with its socket open kept
-        // painting a claim as fresh, and D43 promises the panel goes stale where a person can read
-        // that it has. They are joined rather than one chosen, because they say different things.
-        if let Some(holder) = &self.holder {
-            let mut said: Vec<String> = Vec::new();
-            if holder.file_refused {
-                said.push(format!(
-                    "the file is not being read: \"{}\" is publishing here",
-                    holder.source
-                ));
-            }
-            if self.problem.is_none()
-                && let Some(shown) = &self.last_good
-                && shown.is_stale_at(now)
-            {
-                said.push(panel::no_news(shown, now));
-            }
-            return (!said.is_empty()).then(|| said.join(" · "));
-        }
-
-        // **The file that does not exist yet is the exception, and it goes first for that.** The rest
-        // is ordered by what has to be said: first the read failures, which are the most recent thing
-        // known, and only if there is none is the clock looked at.
-        match (&self.problem, &self.last_good) {
-            (Some(problem), _) if panel::is_a_missing_file(problem) => self
-                .last_good
-                .as_ref()
-                .map(|_| "the panel file is no longer there".to_owned()),
-            (Some(problem), Some(_)) => Some(format!("what is shown is not the latest: {problem}")),
-            (Some(problem), None) => Some(format!("no panel: {problem}")),
-            (None, Some(shown)) if shown.is_stale_at(now) => Some(panel::no_news(shown, now)),
-            (None, _) => None,
-        }
+    // **The file that does not exist yet is the exception, and it goes first for that.** The rest
+    // is ordered by what has to be said: first the read failures, which are the most recent thing
+    // known, and only if there is none is the clock looked at.
+    match (&state.problem, &state.last_good) {
+        (Some(problem), _) if panel::is_a_missing_file(problem) => state
+            .last_good
+            .as_ref()
+            .map(|_| "the panel file is no longer there".to_owned()),
+        (Some(problem), Some(_)) => Some(format!("what is shown is not the latest: {problem}")),
+        (Some(problem), None) => Some(format!("no panel: {problem}")),
+        (None, Some(shown)) if shown.is_stale_at(now) => Some(panel::no_news(shown, now)),
+        (None, _) => None,
     }
 }

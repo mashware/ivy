@@ -3,7 +3,7 @@
 use panel_contract::{Attention, Panel};
 use panel_control::{Connection, Delivery, Reply, What, session::Peer};
 use std::sync::mpsc::{SyncSender, sync_channel};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
 use term_core::ForegroundScope;
 
@@ -102,7 +102,7 @@ impl HoldCell {
 pub(crate) struct Authority {
     scope: ForegroundScope,
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    programs: crate::client_attestation::Programs,
+    programs: OnceLock<crate::client_attestation::Programs>,
 }
 
 impl Authority {
@@ -110,14 +110,21 @@ impl Authority {
         Arc::new(Self {
             scope,
             #[cfg(any(target_os = "linux", target_os = "macos"))]
-            programs: crate::client_attestation::Programs::discover(),
+            programs: OnceLock::new(),
         })
+    }
+
+    fn prepare(&self) {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        self.programs
+            .get_or_init(crate::client_attestation::Programs::discover);
     }
 
     fn attest(&self, peer: &Peer) -> Option<Witness> {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         return self
             .programs
+            .get()?
             .root(&self.scope, peer)
             .ok()
             .map(|root| Witness { root });
@@ -161,13 +168,17 @@ pub(crate) fn service(
     authority: Arc<Authority>,
     sender: SyncSender<Delivery>,
     wake: Arc<dyn Fn() + Send + Sync>,
-) -> panel_control::listener::PublishHandler {
+) -> panel_control::listener::PublicationServices {
     let hold = state.overlay.clone();
-    Arc::new(
-        move |peer: Peer, _connection: Connection, document: String| {
-            admit(&hold, &authority, &sender, &peer, &document, &*wake)
-        },
-    )
+    let verifier = Arc::clone(&authority);
+    panel_control::listener::PublicationServices {
+        publish: Arc::new(
+            move |peer: Peer, _connection: Connection, document: String| {
+                admit(&hold, &verifier, &sender, &peer, &document, &*wake)
+            },
+        ),
+        prepare_holder: Arc::new(move || authority.prepare()),
+    }
 }
 
 fn refused(code: &str, message: impl Into<String>) -> Reply {
@@ -262,14 +273,14 @@ impl super::PanelState {
         self.drawn = None;
         Ok(())
     }
+}
 
-    pub(crate) fn overlay_refused(&mut self) {
-        // The admission reply cannot describe a later refusal, so the pane must confess it.
-        self.hook_source = self
-            .held_by()
-            .map(|source| format!("{source} · hook update refused"));
-        self.layout = None;
-    }
+pub(crate) fn refused_at_apply(state: &mut super::PanelState) {
+    // The admission reply cannot describe a later refusal, so the pane must confess it.
+    state.hook_source = state
+        .held_by()
+        .map(|source| format!("{source} · hook update refused"));
+    state.layout = None;
 }
 
 #[cfg(all(test, target_os = "linux"))]
@@ -277,7 +288,7 @@ impl super::PanelState {
 mod native_tests;
 
 #[cfg(test)]
-mod merge_tests {
+mod tests {
     use super::*;
     use panel_contract::parse_document;
 
@@ -370,5 +381,69 @@ mod merge_tests {
         hook.lines = parse_document(&text).unwrap().lines;
         assert!(state.apply_overlay(hook, SystemTime::now()).is_err());
         assert_eq!(state.document().unwrap(), before);
+    }
+
+    #[test]
+    fn apply_refuses_stale_or_revoked_authority_and_reports_each_once() {
+        #[derive(Debug)]
+        struct Current(bool);
+        impl panel_control::OverlayAuthority for Current {
+            fn current(&self) -> bool {
+                self.0
+            }
+        }
+        let mut state = held();
+        let old = state.overlay.snapshot().unwrap();
+        state
+            .deliver(
+                7,
+                "flow",
+                parse_document(r#"{"lines":["Newest holder"]}"#).unwrap(),
+                SystemTime::now(),
+            )
+            .unwrap();
+        let current = state.overlay.snapshot().unwrap();
+        let before = state.document().unwrap();
+        let dir = panel_contract::PanelDir::create().unwrap();
+        let mut control =
+            crate::control::PaneControl::open(&dir, state.reader(), Default::default(), || {})
+                .unwrap();
+        for (incarnation, live) in [(old.incarnation, true), (current.incarnation, false)] {
+            let (answer, _) = sync_channel(1);
+            control.enqueue_for_tests(Delivery {
+                connection: 7,
+                what: What::Overlay {
+                    panel: parse_document(r#"{"lines":["Must not paint"]}"#).unwrap(),
+                    holder: 7,
+                    incarnation,
+                    authority: Arc::new(Current(live)),
+                },
+                answer,
+            });
+        }
+        control.apply(&mut state, &mut Default::default(), SystemTime::now());
+        assert_eq!(state.document().unwrap(), before);
+        assert_eq!(control.did().overlaid, 0);
+        assert_eq!(control.did().overlays_refused, 2);
+        assert_eq!(state.displayed_source(), Some("flow · hook update refused"));
+        control.apply(&mut state, &mut Default::default(), SystemTime::now());
+        assert_eq!(control.did().overlays_refused, 2);
+    }
+
+    #[test]
+    fn overlay_replaces_freshness_and_stamps_actual_arrival() {
+        let mut state = held();
+        let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(123);
+        let hook = parse_document(
+            r#"{"updated_at":"producer time","stale_after_minutes":2,"lines":["Fresh"]}"#,
+        )
+        .unwrap();
+        state.apply_overlay(hook, now).unwrap();
+        let panel = state.last_good.as_deref().unwrap();
+        assert_eq!(panel.written_at, Some(now));
+        assert_eq!(panel.updated_at.as_deref(), Some("producer time"));
+        assert_eq!(panel.stale_after, std::time::Duration::from_secs(120));
+        assert!(!panel.is_stale_at(now + std::time::Duration::from_secs(119)));
+        assert!(panel.is_stale_at(now + std::time::Duration::from_secs(121)));
     }
 }
