@@ -41,10 +41,21 @@ fn runs_stop_at_visual_boundaries_and_keep_the_original_cells() {
         );
         assert_eq!(
             ranges,
-            vec![0..2, 5..7, 10..12, 15..17, 18..19, 20..24]
-                .into_iter()
-                .filter(|r| r.end - r.start >= 2)
-                .collect::<Vec<_>>()
+            vec![
+                0..2,
+                2..3,
+                3..4,
+                5..7,
+                7..8,
+                8..9,
+                10..12,
+                12..13,
+                13..14,
+                15..17,
+                17..18,
+                18..19,
+                20..24
+            ]
         );
         assert_eq!(cells, before);
         assert_eq!(view.cells()[0].c, '=');
@@ -375,6 +386,127 @@ fn ordinary_ascii_matches_per_cell_and_is_invariant_across_selection_splits() {
                 }
             })
             .drop_without_applying_deltas();
+        }
+    }
+}
+
+fn painted_text_quads(output: &eframe::egui::FullOutput) -> Vec<Quad> {
+    let mut result = output
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            eframe::egui::Shape::Text(text) => Some(text),
+            _ => None,
+        })
+        .flat_map(|text| {
+            let mut visible = quads(&text.galley);
+            let origin = text.pos.to_vec2() + text.galley.rows[0].pos.to_vec2();
+            for quad in &mut visible {
+                quad.rect = quad.rect.translate(origin);
+            }
+            visible
+        })
+        .collect::<Vec<_>>();
+    result.sort_by(|a, b| a.rect.min.x.total_cmp(&b.rect.min.x));
+    result
+}
+
+#[test]
+fn selection_does_not_change_unselected_singleton_glyphs_at_either_edge() {
+    let text = "repo/mashware/agent/runner/body/file";
+    let edge_columns = [0, text.len() - 1];
+
+    for scale in [1.0, 1.25, 1.5, 2.0] {
+        for size in [13.0, 14.0, 14.7, 17.3] {
+            let ctx = Context::default();
+            ctx.set_pixels_per_point(scale);
+            let mut discoverer = selected(&ctx);
+            // The queued face becomes active on this pass; both captures then use the same atlas.
+            ctx.run_ui(Default::default(), |_| {})
+                .drop_without_applying_deltas();
+
+            let mut screen = Screen::new(Size {
+                rows: 1,
+                cols: text.len() as u16,
+            });
+            let input = format!("{text}\x1b[?25l");
+            screen.advance(input.as_bytes());
+            let view = screen.view();
+            let before = ctx.run_ui(Default::default(), |ui| {
+                let metrics = CellMetrics::measure(&ctx, FontId::monospace(size));
+                paint_with_ligatures(
+                    ui.painter(),
+                    &view,
+                    &Theme::default(),
+                    &metrics,
+                    Pos2::ZERO,
+                    &mut discoverer,
+                    CursorInk::Filled,
+                    true,
+                );
+            });
+            let before_quads = painted_text_quads(&before);
+            before.drop_without_applying_deltas();
+            assert_eq!(before_quads.len(), text.len(), "unselected row lost glyphs");
+
+            screen.start_selection(term_core::Cell {
+                row: 0,
+                col: 1,
+                half: term_core::Half::Left,
+            });
+            screen.extend_selection(term_core::Cell {
+                row: 0,
+                col: (text.len() - 2) as u16,
+                half: term_core::Half::Right,
+            });
+            let selected_view = screen.view();
+            assert!(!selected_view.cell(0, 0).unwrap().selected);
+            assert!(selected_view.cell(0, 1).unwrap().selected);
+            assert!(
+                selected_view
+                    .cell(0, (text.len() - 2) as u16)
+                    .unwrap()
+                    .selected
+            );
+            assert!(
+                !selected_view
+                    .cell(0, (text.len() - 1) as u16)
+                    .unwrap()
+                    .selected
+            );
+            let after = ctx.run_ui(Default::default(), |ui| {
+                let metrics = CellMetrics::measure(&ctx, FontId::monospace(size));
+                paint_with_ligatures(
+                    ui.painter(),
+                    &selected_view,
+                    &Theme::default(),
+                    &metrics,
+                    Pos2::ZERO,
+                    &mut discoverer,
+                    CursorInk::Filled,
+                    true,
+                );
+            });
+            let after_quads = painted_text_quads(&after);
+            after.drop_without_applying_deltas();
+            assert_eq!(after_quads.len(), text.len(), "selected row lost glyphs");
+
+            for column in edge_columns {
+                let before = &before_quads[column];
+                let after = &after_quads[column];
+                assert_eq!(
+                    before.uv, after.uv,
+                    "size={size}, scale={scale}, unselected edge column {column}: atlas UV changed"
+                );
+                let same_device_edge = |a: f32, b: f32| ((a - b) * scale).abs() <= 0.001;
+                assert!(
+                    same_device_edge(before.rect.min.x, after.rect.min.x)
+                        && same_device_edge(before.rect.max.x, after.rect.max.x)
+                        && same_device_edge(before.rect.min.y, after.rect.min.y)
+                        && same_device_edge(before.rect.max.y, after.rect.max.y),
+                    "size={size}, scale={scale}, unselected edge column {column}: glyph geometry changed"
+                );
+            }
         }
     }
 }

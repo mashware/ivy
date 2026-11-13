@@ -149,33 +149,32 @@ pub(super) fn paint_row(
         {
             end += 1;
         }
-        if end - start >= 2 {
-            cost.eligible_runs += 1;
-            let text: String = cells[start..end].iter().map(|cell| cell.c).collect();
-            let galley = family
-                .as_ref()
-                .filter(|_| crate::fonts::ligature_covers(discoverer, &text))
-                .and_then(|family| {
-                    layout(
-                        painter,
-                        text.clone(),
-                        FontId::new(metrics.font.size, family.clone()),
-                        colors_of(&cells[start], theme).0,
-                        metrics,
-                    )
-                });
-            if let Some(galley) = galley {
-                cost.shaped_runs += 1;
-                cost.vertices += galley.num_vertices;
-                painter.galley(
-                    metrics.cell(origin, row, start as u16).min,
-                    galley,
-                    Color32::WHITE,
-                );
-                drawn.push(start..end);
-            } else {
-                cost.fallback_runs += 1;
-            }
+        // Selection can leave a lone cell; keep its atlas allocation on the same face.
+        cost.eligible_runs += 1;
+        let text: String = cells[start..end].iter().map(|cell| cell.c).collect();
+        let galley = family
+            .as_ref()
+            .filter(|_| crate::fonts::ligature_covers(discoverer, &text))
+            .and_then(|family| {
+                layout(
+                    painter,
+                    text.clone(),
+                    FontId::new(metrics.font.size, family.clone()),
+                    colors_of(&cells[start], theme).0,
+                    metrics,
+                )
+            });
+        if let Some(galley) = galley {
+            cost.shaped_runs += 1;
+            cost.vertices += galley.num_vertices;
+            painter.galley(
+                metrics.cell(origin, row, start as u16).min,
+                galley,
+                Color32::WHITE,
+            );
+            drawn.push(start..end);
+        } else {
+            cost.fallback_runs += 1;
         }
         start = end;
     }
