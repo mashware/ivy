@@ -642,8 +642,15 @@ fn launch(
         ..Default::default()
     };
     let callback = restoration.route.callback();
-    let (panel_state, control) =
-        panel::pane::state_and_control_with_sessions(ctx, panel.as_ref(), reads, Some(callback));
+    let (panel_state, control) = panel::pane::state_and_control_with_authority(
+        ctx,
+        panel.as_ref(),
+        reads,
+        Some(callback),
+        pty.foreground_scope()
+            .ok()
+            .map(crate::panel::overlay::Authority::new),
+    );
 
     Ok(Pane {
         signals: Default::default(),

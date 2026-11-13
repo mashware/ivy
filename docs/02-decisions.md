@@ -6484,6 +6484,8 @@ load.
 
 ## D43 — A connection holds a pane, the file is not read while it does, and the hold dies with the connection
 
+**Hook publication amendment (November 2026).** Hook publication is the constrained exception in D90: it repaints for the holding invocation without taking its connection or enabling the file transport.
+
 **Status: taken.** Delivered in the third PR of the milestone that gives the panel buttons, F3.
 
 **[D17](#d17--the-contract-is-the-document-not-the-file-the-source-of-truth-is-the-apps-state) said the panel's contract is
@@ -6839,6 +6841,8 @@ measured series nobody asked for.
 
 ## D47 — A line carries an address its producer chose, and a patch is all-or-nothing over it
 
+**Hook publication amendment (November 2026).** A holder patch applies over the current committed document, including an admitted hook overlay (D90); the hold and patch authority remain connection-local.
+
 **Status: taken.** Delivered in the second PR of the milestone that lets a producer read its panel
 back and change one line of it, on top of
 [D48](#d48--the-application-can-write-the-document-back-out-and-what-the-writer-promises-is-a-round-trip-not-the-producers-bytes)'s
@@ -7188,6 +7192,8 @@ threads. The range is across the five whole runs, not samples selected from insi
 | Treating batch `V` minus `S` as read latency | The expensive work is deliberately off-frame, so subtraction would attach a connection thread's work to a frame number that never measured it |
 
 ## D50 — An intentional session retirement clears what its own connection controls; a disconnect still preserves it
+
+**Hook publication amendment (November 2026).** Retirement also revokes the shared hook hold generation. Queued hook publications cannot resurrect a retired panel (D90).
 
 **Status: taken.** Delivered after the panel's bidirectional channel exposed the difference between
 an agent disappearing and the same agent deliberately ending its session.
@@ -8918,6 +8924,8 @@ The size guard measures the core at 647 production lines, unchanged. Moving watc
 
 ## D80 — Agent signals are declared independently of the panel publisher
 
+**Hook publication amendment (November 2026).** Hook publication changes the panel document only. It does not submit or reinterpret agent signals (D90).
+
 **Decided for [#16](https://github.com/mashware/ivy/issues/16).** Client identity, activity and
 human-input requirements belong to a transient pane-local signal, separate from the panel's
 producer-owned document. Enabling an integration is explicit per client in Connect agents.
@@ -9112,6 +9120,8 @@ revision's fresh complete validation.
 
 
 ## D84 — AI recovery uses declared IDs and fixed client launches
+
+**Hook publication amendment (November 2026).** Panel hook authorization reuses native client recognition independently of the Linux-only recovery setting. macOS adds native peer audit-token, process unique identity, PTY ancestry and kqueue lifetime evidence; it does not enable session recovery (D90).
 
 Startup sessions mode extends D81 only when explicitly enabled. Save an allowlisted client and
 validated exact ID beside the local directory; never save a program path, argument list, environment,
@@ -9409,3 +9419,34 @@ retarget old pixels. Only a whole painted row is reachable. Unlike a command but
 nothing, so it does not require a settled frame; otherwise each toggle would swallow the next click.
 Header painting and relayout remain inside the existing panel paint span (D13); no measured bench
 batch currently paints these headers. Fold choices are kept until the console closes.
+
+
+## D90 — An attested hook publishes over the hold it works for
+
+**Decided (November 2026).** `ivy-session publish` accepts a bounded panel object on stdin
+and submits `panel_publish` to the inherited pane endpoint. A hook is admitted only when kernel
+peer and bounded process ancestry evidence identify the same live native client invocation as
+the holder. Source names and PANEL_ID/PANEL_DIR select or label; they never authenticate.
+A script can still hold the panel with ordinary tools, but its hold cannot receive hook updates.
+
+The connection thread admits into the same bounded control queue as holder publications and
+patches, wakes the window and replies immediately. This promises admission, not painting.
+Application rechecks the live root and hold incarnation. Root death, foreground takeover,
+release, republishing and retirement invalidate queued authority. The helper itself may exit
+after admission. Late refusal is visible on the identity row.
+
+A hook replaces lines, phase, attention and freshness. Holder header, roadmap identity and other
+metadata remain. Incoming actions never introduce commands. Existing actions survive only when
+the hook still declares `wait`; otherwise they are cleared. The merged document must fit the
+normal ceiling before any state changes. The identity row displays `<source> · hook` without
+changing ownership. Holder set replaces all, patch uses the current document, disconnect retains
+it and retirement clears it.
+
+Native macOS evidence is isolated from Linux recovery. Unsupported or inconsistent proof is
+refused. Same-user code injection and modified hooks remain within D84’s same-user trust limit;
+this authenticates process lineage, not vendor code. Native Mac client scenarios remain a required
+manual verification; cross-compilation alone establishes no runtime claim.
+
+`overlaid` counts committed overlays; `overlays_refused` counts admitted overlays refused in the
+window. Admission refusals cost no frame and are excluded. Application belongs to the existing
+control span. No hook workload has measured its frame cost yet.

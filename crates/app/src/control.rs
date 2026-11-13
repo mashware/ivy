@@ -32,7 +32,7 @@ use crate::{Pane, Window};
 mod applying;
 mod channel;
 mod retiring;
-pub(crate) use channel::open_with_sessions;
+pub(crate) use channel::{open_with_authority, open_with_sessions};
 
 /// How many deliveries a pane's inbox may hold before a publication is refused.
 ///
@@ -42,7 +42,7 @@ pub(crate) use channel::open_with_sessions;
 /// reply timed out — each up to 256 KiB — with nothing reading. With the queue bounded the extra
 /// publication comes back refused, the producer is told instead of the window growing, and the queue
 /// drains as soon as a pass runs. Eight is one per connection the pane serves.
-const MAX_PENDING: usize = 8;
+pub(crate) const MAX_PENDING: usize = 8;
 
 /// Read counters shared with connection threads and retained after their pane closes.
 ///
@@ -255,6 +255,7 @@ fn measured_reader(reader: crate::panel::DocumentReader, reads: ReadActivity) ->
 
 /// What a pane keeps of its channel.
 pub struct PaneControl {
+    authority: Option<Arc<crate::panel::overlay::Authority>>,
     pub(crate) plan_identity: Option<Result<crate::project::Identity, String>>,
     /// Kept for its destructor: dropping it is what asks this pane's threads to end.
     _channel: Channel,
@@ -760,6 +761,8 @@ fn answer_windows_requests(
                 continue;
             }
             What::Publish { .. }
+            | What::PublishAttested { .. }
+            | What::Overlay { .. }
             | What::Get
             | What::Patch { .. }
             | What::AgentSignal(_)

@@ -8,17 +8,56 @@ pub(crate) fn open_with_sessions(
     sessions: Option<panel_control::session::SessionHandler>,
     wake: impl Fn() + Send + Sync + 'static,
 ) -> Option<PaneControl> {
+    open_services(dir, reader, reads, sessions, None, wake)
+}
+
+pub(crate) fn open_with_authority(
+    dir: &PanelDir,
+    state: &PanelState,
+    reads: ReadActivity,
+    sessions: Option<panel_control::session::SessionHandler>,
+    authority: Arc<crate::panel::overlay::Authority>,
+    wake: impl Fn() + Send + Sync + 'static,
+) -> Option<PaneControl> {
+    open_services(
+        dir,
+        state.reader(),
+        reads,
+        sessions,
+        Some((state, authority)),
+        wake,
+    )
+}
+
+fn open_services(
+    dir: &PanelDir,
+    reader: crate::panel::DocumentReader,
+    reads: ReadActivity,
+    sessions: Option<panel_control::session::SessionHandler>,
+    authorization: Option<(&PanelState, Arc<crate::panel::overlay::Authority>)>,
+    wake: impl Fn() + Send + Sync + 'static,
+) -> Option<PaneControl> {
     let (sender, inbox) = sync_channel(MAX_PENDING);
     #[cfg(test)]
     let test_sender = sender.clone();
     let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(wake);
     let read_document = measured_reader(reader, reads.clone());
-    match Channel::open_with_services(
+    let (publisher, authority) = authorization.map_or((None, None), |(state, authority)| {
+        let handler = crate::panel::overlay::service(
+            state,
+            Arc::clone(&authority),
+            sender.clone(),
+            Arc::clone(&wake),
+        );
+        (Some(handler), Some(authority))
+    });
+    match Channel::open_with_authorization_services(
         dir.path(),
         dir.id(),
         sender,
         Some(read_document),
         sessions,
+        publisher,
         Arc::clone(&wake),
     ) {
         Ok(channel) => {
@@ -26,6 +65,7 @@ pub(crate) fn open_with_sessions(
                 panel_control::Reply::Failed("this console's project is not known yet".into())
             }));
             Some(PaneControl {
+                authority,
                 plan_identity: None,
                 _channel: channel,
                 inbox,

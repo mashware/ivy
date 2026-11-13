@@ -28,7 +28,7 @@ impl PanelLayout {
             theme,
             warning.as_deref(),
             attention,
-            state.holder.as_ref().map(|held| held.source.as_str()),
+            state.displayed_source(),
         );
         if let Some(panel) = state.last_good.as_deref() {
             fold::append_blocks(&mut rows, panel, &state.folds, width, theme);

@@ -28,6 +28,7 @@ mod color;
 mod document;
 mod driving;
 mod fold;
+pub(crate) mod overlay;
 #[cfg(test)]
 use fold::lay_out;
 pub(crate) use fold::toggle_header_at;
@@ -256,6 +257,8 @@ pub struct PanelState {
     /// **It dies with the connection**, which is not a detail: without a release, an agent that
     /// crashed would freeze this pane's panel for ever and its file would never be read again.
     holder: Option<Holder>,
+    overlay: overlay::HoldCell,
+    hook_source: Option<String>,
     /// The last intentional retirement, until another document is successfully committed.
     ///
     /// **It is an idempotency record, not authority that survives a generation.** Only the same

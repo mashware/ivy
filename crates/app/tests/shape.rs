@@ -47,6 +47,26 @@ use std::path::Path;
 /// a directory walk turns a renamed or deleted file into a target that is silently skipped, and a
 /// guard with no file to look at reads exactly like a clean one.
 const MODULES: &[(&str, &str)] = &[
+    (
+        "src/client_attestation/mod.rs",
+        include_str!("../src/client_attestation/mod.rs"),
+    ),
+    (
+        "src/client_attestation/programs.rs",
+        include_str!("../src/client_attestation/programs.rs"),
+    ),
+    (
+        "src/client_attestation/verify.rs",
+        include_str!("../src/client_attestation/verify.rs"),
+    ),
+    (
+        "src/panel/overlay.rs",
+        include_str!("../src/panel/overlay.rs"),
+    ),
+    (
+        "src/panel/overlay/tests.rs",
+        include_str!("../src/panel/overlay/tests.rs"),
+    ),
     ("src/board/plans.rs", include_str!("../src/board/plans.rs")),
     (
         "src/board/plans/disk.rs",
@@ -69,12 +89,12 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/ai_sessions/tests/codex_probe.rs"),
     ),
     (
-        "src/ai_sessions/programs/child.rs",
-        include_str!("../src/ai_sessions/programs/child.rs"),
+        "src/client_attestation/programs/child.rs",
+        include_str!("../src/client_attestation/programs/child.rs"),
     ),
     (
-        "src/ai_sessions/programs/child/tests.rs",
-        include_str!("../src/ai_sessions/programs/child/tests.rs"),
+        "src/client_attestation/programs/child/tests.rs",
+        include_str!("../src/client_attestation/programs/child/tests.rs"),
     ),
     ("src/clipboard.rs", include_str!("../src/clipboard.rs")),
     (
@@ -568,7 +588,7 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
         363,
         "what a pane holds of its panel. On the day it was recorded it was split over `panel.rs` \
          and its child modules for the document, links, driving and the pane, to pay the block \
-         ceiling. Cache construction now belongs to the resolved-colour cache and leaves363.",
+         ceiling. Cache construction belongs to the resolved-colour cache. Pure warning and hook-refusal presentation now belong to their policy functions, keeping363 after hook state transitions and provenance revocation.",
     ),
     (
         "impl InjectedDrags",

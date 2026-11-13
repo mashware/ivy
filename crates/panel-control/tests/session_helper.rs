@@ -3,7 +3,7 @@
 #![cfg(target_os = "linux")]
 
 use panel_contract::PanelDir;
-use panel_control::{Channel, session};
+use panel_control::{Channel, Reply, session};
 use std::io::Write;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
@@ -92,4 +92,157 @@ fn absent_inherited_identity_is_a_distinct_bounded_error() {
         "outside_ivy"
     );
     assert!(output.stdout.len() <= session::MAX_REPLY + 1);
+}
+
+#[test]
+fn publish_cli_is_silent_without_identity_and_rejects_bad_input_before_connect() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ivy-session"))
+        .arg("publish")
+        .env_remove("PANEL_DIR")
+        .env_remove("PANEL_ID")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut child = output;
+    child.stdin.take().unwrap().write_all(b"not json").unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.is_empty());
+
+    let dir = PanelDir::create().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_ivy-session"))
+        .arg("publish")
+        .env("PANEL_DIR", dir.path())
+        .env("PANEL_ID", dir.id())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut child = output;
+    child.stdin.take().unwrap().write_all(b"[]").unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("must be a JSON object"));
+}
+
+#[test]
+fn publish_cli_maps_unheld_and_policy_refusal_to_the_declared_output() {
+    let dir = PanelDir::create().unwrap();
+    let (sender, inbox) = sync_channel(1);
+    let (document_sender, document_receiver) = sync_channel(1);
+    let callback = Arc::new(move |_peer, _connection, document| {
+        document_sender.send(document).unwrap();
+        Reply::PublishUnheld
+    });
+    let _channel = Channel::open_with_authorization_services(
+        dir.path(),
+        dir.id(),
+        sender,
+        None,
+        None,
+        Some(panel_control::listener::PublicationServices::new(callback)),
+        Arc::new(|| {}),
+    )
+    .unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ivy-session"))
+        .arg("publish")
+        .env("PANEL_DIR", dir.path())
+        .env("PANEL_ID", dir.id())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"{\n  \"lines\": [\"x\"]\n}\n")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "{\"ok\":false,\"code\":\"unheld\",\"message\":\"this panel has no holder\"}\n"
+    );
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        document_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap(),
+        "{\"lines\":[\"x\"]}"
+    );
+    assert!(inbox.try_recv().is_err());
+
+    let dir = PanelDir::create().unwrap();
+    let (sender, _inbox) = sync_channel(1);
+    let callback = Arc::new(|_peer, _connection, _document| Reply::PublishRefused {
+        code: "unauthorized".into(),
+        message: "publisher does not descend from this panel's holding client".into(),
+    });
+    let _channel = Channel::open_with_authorization_services(
+        dir.path(),
+        dir.id(),
+        sender,
+        None,
+        None,
+        Some(panel_control::listener::PublicationServices::new(callback)),
+        Arc::new(|| {}),
+    )
+    .unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ivy-session"))
+        .arg("publish")
+        .env("PANEL_DIR", dir.path())
+        .env("PANEL_ID", dir.id())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"{\"lines\":[]}")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stderr).unwrap(),
+        "ivy-session: publisher does not descend from this panel's holding client\n"
+    );
+}
+
+#[test]
+fn publish_cli_rejects_oversized_stdin_before_endpoint_connect() {
+    let dir = PanelDir::create().unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ivy-session"))
+        .arg("publish")
+        .env("PANEL_DIR", dir.path())
+        .env("PANEL_ID", dir.id())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    // No endpoint is bound: an attempted connection would exit 1 instead of the input error.
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(&vec![b' '; panel_contract::MAX_BYTES as usize + 1])
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stderr).unwrap(),
+        "ivy-session: session metadata goes over the ceiling\n"
+    );
 }

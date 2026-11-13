@@ -102,7 +102,7 @@ impl Drop for Running {
                 lifetime: self.lifetime.take(),
                 _slot: self.slot.take().unwrap(),
             });
-        super::super::worker::reap_later();
+        crate::ai_sessions::reap_later();
     }
 }
 

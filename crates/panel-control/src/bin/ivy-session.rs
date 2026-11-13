@@ -4,17 +4,18 @@ use panel_control::session::{self, Client, Request};
 use std::io::{Read, Write};
 
 fn main() {
+    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    if args.as_slice() == [std::ffi::OsString::from("publish")] {
+        publish(std::io::stdin().lock());
+        return;
+    }
     let result = if panel_contract::ENV_NAMES
         .iter()
         .any(|name| std::env::var_os(name).is_none_or(|v| v.is_empty()))
     {
         Ok(serde_json::json!({"ok":false,"error":"outside_ivy"}))
     } else {
-        request(
-            std::env::args_os().skip(1).collect(),
-            std::io::stdin().lock(),
-        )
-        .and_then(|request| {
+        request(args, std::io::stdin().lock()).and_then(|request| {
             session::exchange(&request)
                 .map_err(|_| "cannot reach this pane's session service".into())
         })
@@ -31,6 +32,50 @@ fn main() {
     if !succeeded || written.is_err() {
         std::process::exit(1);
     }
+}
+
+fn publish(mut input: impl Read) {
+    use panel_control::client::whole_identity;
+    let [id, dir] = panel_contract::ENV_NAMES.map(std::env::var_os);
+    if !panel_control::endpoint::BINDS || whole_identity(id.as_deref(), dir.as_deref()).is_none() {
+        return;
+    }
+    let bytes = match read_input(&mut input, panel_contract::MAX_BYTES as usize) {
+        Ok(bytes) => bytes,
+        Err(message) => {
+            eprintln!("ivy-session: {message}");
+            std::process::exit(2);
+        }
+    };
+    let document = match session::publish_document(&bytes) {
+        Ok(document) => document,
+        Err(message) => {
+            eprintln!("ivy-session: {message}");
+            std::process::exit(2);
+        }
+    };
+    let line = format!("{{\"tool\":\"panel_publish\",\"document\":{document}}}\n");
+    let reply = match session::exchange_line(line.as_bytes()) {
+        Ok(reply) => reply,
+        Err(_) => {
+            eprintln!("ivy-session: cannot reach this pane's publication service");
+            std::process::exit(1);
+        }
+    };
+    if reply["ok"] == true {
+        println!("{{\"ok\":true}}");
+        return;
+    }
+    if reply["code"] == "unheld" {
+        println!("{{\"ok\":false,\"code\":\"unheld\",\"message\":\"this panel has no holder\"}}");
+        return;
+    }
+    let message = reply["message"]
+        .as_str()
+        .or_else(|| reply["error"].as_str())
+        .unwrap_or("publication refused");
+    eprintln!("ivy-session: {message}");
+    std::process::exit(1);
 }
 
 fn request(args: Vec<std::ffi::OsString>, mut input: impl Read) -> Result<Request, String> {
@@ -54,7 +99,7 @@ fn request(args: Vec<std::ffi::OsString>, mut input: impl Read) -> Result<Reques
             session::update_request((*generation).into(), &bytes)?
         }
         _ => return Err(
-            "usage: ivy-session hook codex | attach CLIENT | probe GENERATION | update GENERATION"
+            "usage: ivy-session publish | hook codex | attach CLIENT | probe GENERATION | update GENERATION"
                 .into(),
         ),
     };

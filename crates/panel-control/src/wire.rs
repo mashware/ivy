@@ -139,6 +139,8 @@ pub enum Request {
     /// start disagreeing field by field. It is the producer's own bytes, kept as a [`RawValue`], so
     /// the parser's ceiling measures what arrived and not a compact re-serialisation of it.
     PanelSet { source: String, document: String },
+    /// Publish an attested hook overlay. It carries no producer supplied identity or source.
+    PanelPublish { document: String },
     /// Publish a project roadmap document. Project scope is supplied by the caller's pane; `repo`
     /// is deliberately not part of the request and cannot widen that scope.
     PlanSet { document: String },
@@ -362,6 +364,7 @@ fn interpret(line: &[u8]) -> Incoming {
             ))
         }
         "panel_set" => panel_set(&envelope),
+        "panel_publish" => panel_publish(&envelope),
         "plan_set" => plan_set(&envelope),
         "plan_get" => Incoming::Request(Request::PlanGet),
         "plan_retire" => Incoming::Request(Request::PlanRetire),
@@ -373,6 +376,20 @@ fn interpret(line: &[u8]) -> Incoming {
         "split_close" => split_close(&envelope),
         other => Incoming::Request(Request::NotServed(other.to_owned())),
     }
+}
+
+fn panel_publish(envelope: &Envelope<'_>) -> Incoming {
+    let Some(document) = envelope.document else {
+        return Incoming::Malformed("a publication carries no \"document\"".to_owned());
+    };
+    // Unlike panel_set's tolerant document parser, hook payloads must be objects. This rejects
+    // scalars and arrays at the wire boundary while retaining the original JSON for contract parse.
+    if !document.get().trim_start().starts_with('{') {
+        return Incoming::Malformed("publication document must be a JSON object".to_owned());
+    }
+    Incoming::Request(Request::PanelPublish {
+        document: document.get().to_owned(),
+    })
 }
 
 /// The plan document stays as the exact JSON text received, just like a panel publication.
@@ -579,6 +596,15 @@ fn split_close(envelope: &Envelope<'_>) -> Incoming {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Reply {
     Ok,
+    /// Admission into the bounded overlay queue, with no promise of a paint pass.
+    PublishAccepted,
+    /// A well formed publisher arrived while no connection held the panel.
+    PublishUnheld,
+    /// A policy refusal with the stable code and human reason consumed by ivy-session.
+    PublishRefused {
+        code: String,
+        message: String,
+    },
     /// Taken, **and some of what was sent fell away on the way in**: the sentence naming it, as the
     /// contract's reader wrote it. Still a success — nothing was refused and the panel paints — which
     /// is why it is an `ok` with one more field and not a failure (**D58**).
@@ -621,6 +647,16 @@ impl Reply {
     pub fn line(&self) -> String {
         match self {
             Self::Ok => "{\"ok\":true}\n".to_owned(),
+            Self::PublishAccepted => "{\"ok\":true}\n".to_owned(),
+            Self::PublishUnheld => {
+                "{\"ok\":false,\"code\":\"unheld\",\"message\":\"this panel has no holder\"}\n"
+                    .to_owned()
+            }
+            Self::PublishRefused { code, message } => {
+                let code = serde_json::Value::String(code.clone());
+                let message = serde_json::Value::String(message.clone());
+                format!("{{\"ok\":false,\"code\":{code},\"message\":{message}}}\n")
+            }
             Self::Lossy(dropped) => {
                 let escaped = serde_json::Value::String(dropped.clone());
                 format!("{{\"ok\":true,\"dropped\":{escaped}}}\n")
@@ -1033,6 +1069,20 @@ mod tests {
             Some(Incoming::Request(Request::SplitClose { .. }))
         ));
         assert_eq!(framing.take(), None);
+    }
+
+    #[test]
+    fn panel_publish_accepts_only_a_document_object_and_has_no_source_field() {
+        assert!(
+            matches!(one("{\"tool\":\"panel_publish\",\"document\":{\"lines\":[\"x\"]}}\n"), Incoming::Request(Request::PanelPublish { document }) if document == r#"{"lines":["x"]}"#)
+        );
+        assert!(
+            matches!(one("{\"tool\":\"panel_publish\",\"document\":[]}\n"), Incoming::Malformed(reason) if reason.contains("object"))
+        );
+        assert!(matches!(
+            one("{\"tool\":\"panel_publish\"}\n"),
+            Incoming::Malformed(_)
+        ));
     }
 
     /// Retirement is a connection-scoped instruction with no payload of its own.

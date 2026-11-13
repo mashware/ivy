@@ -66,8 +66,36 @@ pub fn update_request(generation: String, bytes: &[u8]) -> Result<Request, Strin
     Ok(request)
 }
 
+/// Validates and compacts a hook panel document before any endpoint connection is attempted.
+pub fn publish_document(bytes: &[u8]) -> Result<String, String> {
+    if bytes.len() as u64 > panel_contract::MAX_BYTES {
+        return Err(format!(
+            "publication input goes over {} bytes",
+            panel_contract::MAX_BYTES
+        ));
+    }
+    let value: serde_json::Value = serde_json::from_slice(bytes)
+        .map_err(|_| "publication input is not valid JSON".to_owned())?;
+    if !value.is_object() {
+        return Err("publication input must be a JSON object".to_owned());
+    }
+    let compact = serde_json::to_string(&value).map_err(|_| "cannot encode publication input")?;
+    if compact.len() as u64 > panel_contract::MAX_BYTES {
+        return Err(format!(
+            "publication document goes over {} bytes",
+            panel_contract::MAX_BYTES
+        ));
+    }
+    Ok(compact)
+}
+
 /// Opens only the endpoint inherited by this pane. No arbitrary endpoint or pane selector exists.
 pub fn exchange(request: &Request) -> io::Result<serde_json::Value> {
+    exchange_line(&request.line().map_err(io::Error::other)?)
+}
+
+/// Exchanges a prebuilt, bounded newline JSON request over this pane's inherited endpoint.
+pub fn exchange_line(line: &[u8]) -> io::Result<serde_json::Value> {
     let outside = || {
         io::Error::new(
             io::ErrorKind::NotFound,
@@ -80,7 +108,6 @@ pub fn exchange(request: &Request) -> io::Result<serde_json::Value> {
     let id = std::env::var_os(panel_contract::ENV_NAMES[0])
         .filter(|v| !v.is_empty())
         .ok_or_else(outside)?;
-    let line = request.line().map_err(io::Error::other)?;
     let deadline = Instant::now() + Duration::from_secs(2);
     let mut stream = interprocess::local_socket::ConnectOptions::new()
         .name(crate::endpoint::name_of(
@@ -89,7 +116,7 @@ pub fn exchange(request: &Request) -> io::Result<serde_json::Value> {
         )?)
         .wait_mode(interprocess::ConnectWaitMode::Timeout(remaining(deadline)?))
         .connect_sync()?;
-    let mut unwritten = line.as_slice();
+    let mut unwritten = line;
     while !unwritten.is_empty() {
         stream.set_send_timeout(Some(remaining(deadline)?))?;
         match stream.write(unwritten) {
@@ -142,4 +169,36 @@ fn remaining(deadline: Instant) -> io::Result<Duration> {
         .checked_duration_since(Instant::now())
         .filter(|duration| !duration.is_zero())
         .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "session exchange timed out"))
+}
+
+#[cfg(test)]
+mod publish_tests {
+    use super::*;
+
+    #[test]
+    fn publish_input_requires_object_and_compacts_with_byte_ceilings() {
+        assert_eq!(
+            publish_document(b"{\n \"lines\": [\"a\"]\n}").unwrap(),
+            r#"{"lines":["a"]}"#
+        );
+        assert_eq!(
+            publish_document(b"[]").unwrap_err(),
+            "publication input must be a JSON object"
+        );
+        assert_eq!(
+            publish_document(b"{broken").unwrap_err(),
+            "publication input is not valid JSON"
+        );
+        assert!(publish_document(&vec![b' '; panel_contract::MAX_BYTES as usize + 1]).is_err());
+    }
+
+    #[test]
+    fn publish_silence_gate_requires_a_whole_identity_and_supported_endpoint() {
+        use crate::client::whole_identity;
+        use std::ffi::OsStr;
+        assert!(whole_identity(None, None).is_none());
+        assert!(whole_identity(Some(OsStr::new("pane")), None).is_none());
+        assert!(whole_identity(Some(OsStr::new("pane")), Some(OsStr::new("relative"))).is_none());
+        assert!(whole_identity(Some(OsStr::new("pane")), Some(OsStr::new("/tmp/panel"))).is_some());
+    }
 }

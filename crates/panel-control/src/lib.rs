@@ -41,5 +41,7 @@ pub mod session;
 pub mod wire;
 
 pub use client::{Answered, Producer};
-pub use listener::{Answer, Channel, Connection, Delivery, ReadDocument, What};
+pub use listener::{
+    Answer, Channel, Connection, Delivery, OverlayAuthority, PublishHandler, ReadDocument, What,
+};
 pub use wire::{Activity, AgentSnapshot, MAX_REQUEST, Reply, Request, Side};
