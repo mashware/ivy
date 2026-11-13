@@ -3,11 +3,11 @@
 #![cfg(target_os = "linux")]
 
 use panel_contract::PanelDir;
-use panel_control::{session, Channel, Reply};
+use panel_control::{Channel, Reply, session};
 use std::io::Write;
 use std::process::{Command, Stdio};
-use std::sync::mpsc::sync_channel;
 use std::sync::Arc;
+use std::sync::mpsc::sync_channel;
 use std::time::Duration;
 
 #[test]

@@ -2,10 +2,10 @@ use super::*;
 use panel_contract::PanelDir;
 use panel_control::session::Client;
 use panel_control::{Answer, Channel};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
-use std::sync::mpsc::{sync_channel, Receiver};
+use std::sync::mpsc::{Receiver, sync_channel};
 use std::time::{Duration, Instant};
 use term_core::{Pty, Size};
 
@@ -198,10 +198,12 @@ fn nested_client_is_rejected_but_generic_descendant_hook_is_allowed() {
     fixture.hold("flow");
     let nested = fixture.publish("nested");
     assert_eq!(nested["ok"], false);
-    assert!(nested["message"]
-        .as_str()
-        .unwrap()
-        .contains("does not descend"));
+    assert!(
+        nested["message"]
+            .as_str()
+            .unwrap()
+            .contains("does not descend")
+    );
     assert!(fixture.inbox.try_recv().is_err());
 }
 
@@ -216,10 +218,12 @@ fn unheld_and_script_held_refusals_keep_their_contract() {
     script.hold_as("shell script", false);
     let reply = script.publish("");
     assert_eq!(reply["ok"], false);
-    assert!(reply["message"]
-        .as_str()
-        .unwrap()
-        .contains("not an attested agent client"));
+    assert!(
+        reply["message"]
+            .as_str()
+            .unwrap()
+            .contains("not an attested agent client")
+    );
 }
 
 #[test]
@@ -252,10 +256,12 @@ fn foreign_client_root_and_closed_holder_are_refused() {
     let endpoint = holder.directory.path().join(panel_contract::CONTROL_SOCKET);
     let reply = foreign.publish_to(&endpoint);
     assert_eq!(reply["ok"], false);
-    assert!(reply["message"]
-        .as_str()
-        .unwrap()
-        .contains("does not descend"));
+    assert!(
+        reply["message"]
+            .as_str()
+            .unwrap()
+            .contains("does not descend")
+    );
     assert!(holder.inbox.try_recv().is_err());
 
     assert_eq!(holder.publish("helper")["ok"], true);
