@@ -8514,15 +8514,23 @@ position. Run boundaries include rows, spaces, color/style changes, selection/se
 and the cursor cell. Moving a cursor or changing a highlight may therefore separate a ligature
 into its original characters. That is an explicit presentation rule, not a source-text change.
 
-**The grid remains D34's.** Its cell step is still floored to device pixels. For an eligible
-monospaced face, the whole shaped run mesh is transformed by the constant horizontal ratio
-`cell_width / natural_character_advance`; vertical metrics and all relative glyph-component offsets
-are preserved. The ratio is never inferred by stretching arbitrary text to a target width. Coverage,
-fixed isolated advances and the unwrapped row's expected total advance are checked before this
-path is used. Normal font-engine floating/raster rounding can be bounded, but a tolerance cannot
-grow with run length and disguise drift. Actual ligature-font images at fractional sizes/scales
-must prove that the chosen mapping delivers visible ligatures and retains column alignment;
-fallback is not evidence that a supported-font acceptance criterion passed.
+**The grid remains D34's.** Its cell step is still floored to device pixels. Each
+visible shaped glyph is translated from its natural pen position to its source cell's origin;
+its raster quad keeps its dimensions and atlas texels. Continuation glyphs in a substituted
+cluster contribute no duplicate ink. Logical row extents follow the cell grid while ink bounds
+include natural ligature overhang. Coverage, fixed isolated advances and the unwrapped row's
+expected total advance are checked before this path is used.
+
+The private ligature face disables subpixel raster bins, so splitting a plain-text run at a
+selection, search or cursor boundary does not select different raster texels. The normal,
+preview and fallback faces keep their existing configuration. Tests compare plain ASCII with
+per-cell drawing and split runs across fractional sizes/scales, and separately prove actual
+ligature substitutions.
+
+The original horizontal mesh squeeze resampled already rasterized glyphs and let selection
+boundaries change their spacing and raster phases. Translation replaces it without changing
+terminal cells or selection-color inversion. This geometry regression is independently
+reproducible; the original Ubuntu Sans Mono screenshot still needs a desktop comparison.
 
 Epaint's cached galleys are shared. The transformed mesh lives in an owned cloned galley with consistent horizontal bounds and row
 placement, submitted as an ordinary text shape. Texel UVs remain unnormalized until epaint's final
@@ -8535,8 +8543,8 @@ historical control batches retain their configuration veto and geometry.
 
 **Discarded, with the reason:**
 - Natural-width row drawing: its fractional advance accumulates against the terminal's floored step.
-- Reconstructing source clusters from public glyph counts: contextual and repeated-character
-  substitutions do not expose enough identity; the whole-run transform needs none of it.
+- Reconstructing substituted clusters from visible quad counts: continuation glyphs do not each
+  emit a quad; placement instead follows the source glyph entries and their vertex ranges.
 - Forking epaint to expose cluster metadata: solves that unnecessary intermediate reconstruction.
 - Another monochrome rasterizer and atlas: duplicates facilities the selected engine already has.
 - Unicode substitutions for `!=` or `=>`: change the characters and cannot represent font features.

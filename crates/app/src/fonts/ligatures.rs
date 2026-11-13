@@ -3,6 +3,7 @@ use super::*;
 use std::time::Duration;
 
 pub(super) const FAMILY: &str = "terminal-ligature-face";
+pub(super) const DATA: &str = "terminal-ligature-face-data";
 
 /// Cumulative subset of painting, never an additional framework-cost subtraction.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -30,6 +31,7 @@ pub(crate) fn ligature_family(
         let definitions = fonts.definitions();
         let active = definitions.font_data.get(&chosen.family)?;
         if !Arc::ptr_eq(active, &chosen.data)
+            || !definitions.font_data.contains_key(DATA)
             || !definitions
                 .families
                 .contains_key(&egui::FontFamily::Name(FAMILY.into()))

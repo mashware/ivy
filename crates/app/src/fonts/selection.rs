@@ -153,9 +153,14 @@ pub(super) fn queue_definitions(
         monospaced(preview, faces, &factory),
     );
     if let Some(face) = chosen {
+        let mut ligature_data = face.data.as_ref().clone();
+        ligature_data.tweak.subpixel_binning = Some(false);
+        definitions
+            .font_data
+            .insert(super::ligatures::DATA.into(), Arc::new(ligature_data));
         definitions.families.insert(
             egui::FontFamily::Name(super::ligatures::FAMILY.into()),
-            vec![face.family.clone()],
+            vec![super::ligatures::DATA.into()],
         );
     }
     for face in chosen.into_iter().chain(faces).chain(preview) {
@@ -300,6 +305,49 @@ mod tests {
                 .size()
         });
         (metrics, bounds)
+    }
+
+    #[test]
+    fn ligature_alias_disables_binning_without_changing_selected_face_readiness() {
+        let ctx = egui::Context::default();
+        let mut discoverer = Discoverer::default();
+        let mut data = egui::FontData::from_static(include_bytes!(
+            "../../tests/fixtures/ligatures/JetBrainsMono-Regular.ttf"
+        ));
+        data.tweak.subpixel_binning = None;
+        super::super::ligatures::use_measurement_face(&mut discoverer, data, &ctx);
+        let chosen = Arc::clone(&discoverer.chosen.as_ref().unwrap().data);
+        assert_eq!(chosen.tweak.subpixel_binning, None);
+        pass(&ctx);
+        assert!(super::super::ligatures::ligature_family(&discoverer, &ctx).is_some());
+        ctx.fonts(|fonts| {
+            let definitions = fonts.definitions();
+            assert!(Arc::ptr_eq(
+                definitions
+                    .font_data
+                    .get(&discoverer.chosen.as_ref().unwrap().family)
+                    .unwrap(),
+                &chosen
+            ));
+            assert_eq!(
+                definitions
+                    .font_data
+                    .get(super::super::ligatures::DATA)
+                    .unwrap()
+                    .tweak
+                    .subpixel_binning,
+                Some(false)
+            );
+            assert_eq!(
+                definitions
+                    .families
+                    .get(&egui::FontFamily::Name(
+                        super::super::ligatures::FAMILY.into()
+                    ))
+                    .unwrap(),
+                &[String::from(super::super::ligatures::DATA)]
+            );
+        });
     }
 
     #[test]
