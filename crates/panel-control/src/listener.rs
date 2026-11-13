@@ -301,6 +301,8 @@ impl Channel {
     }
 
     /// Installs a diagnostic-only peer classifier before the endpoint begins accepting connections.
+    // Keep the established service entry points compatible while adding one independent callback.
+    #[allow(clippy::too_many_arguments)]
     pub fn open_with_publication_inspector(
         dir: &Path,
         id: &str,
@@ -571,6 +573,8 @@ fn serve(
 /// next byte would ever wake. A timeout returns control to the loop to look at the stop flag,
 /// without the eager five-millisecond polling an earlier version used to catch a request split
 /// across reads: a blocking read already returns as soon as the rest of the request arrives.
+// Connection evidence stays separate from the shared services and their authorization callbacks.
+#[allow(clippy::too_many_arguments)]
 fn converse(
     stream: Stream,
     connection: Connection,

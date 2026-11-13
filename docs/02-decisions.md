@@ -9469,3 +9469,29 @@ manual verification; cross-compilation alone establishes no runtime claim.
 `overlaid` counts committed overlays; `overlays_refused` counts admitted overlays refused in the
 window. Admission refusals cost no frame and are excluded. Application belongs to the existing
 control span. No hook workload has measured its frame cost yet.
+
+## D91 — A borrowed publisher is labelled by ancestry, never refused
+
+A daemon or multiplexer can carry another console's panel identity. Environment values select an
+endpoint; they do not show whether its publisher belongs to that console. On Linux and macOS the
+listener therefore captures its kernel peer once and asks a revocable, pane-bound ancestry callback
+off the frame. A stable walk to the original PTY child is inside; a stable chain reaching the native
+root without that child is outside; failed or unstable evidence is unknown. The walk is bounded to
+64 hops, checks parent and birth identities, and rechecks peer/root liveness before returning.
+
+Only outside adds `published from a process outside this console`. Unknown allows publication
+without a label. Session authorization is unchanged. The label belongs to the accepted document,
+not its connection reservation: disconnect preserves it, patches keep it, a newer valid file or
+full publication replaces it, and retirement clears it. It is an application row even when the
+producer hides its header, and it is absent from serialized producer documents.
+
+**Accepted limits.** An editor still descended from console A can borrow A's identity without a
+label. A multiplexer detached from that ancestry can label an intended publisher outside. Native
+snapshots cannot make the whole process tree atomic, especially on macOS; detected instability is
+unknown. A same-user ptrace-capable process may counterfeit evidence and can already write the
+unlabelled panel file. These are diagnostic limits, not authority grants. Windows remains file-only.
+
+**Discarded:** refusing foreign ancestry (breaks intended detached publishers); using foreground
+session authorization (rejects ordinary background descendants and conflates failure with outside);
+producer-supplied PID or labels (untrusted); storing the label on the holder (loses it on disconnect);
+process scans or per-frame inspection (unbounded or frame-blocking work without a consumer need).

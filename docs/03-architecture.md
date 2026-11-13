@@ -153,3 +153,21 @@ Measurement boundaries are unchanged: native scanning, preference application an
 ### Codex console-local startup
 
 Ordinary Bash, Zsh and Fish consoles install a function after user startup that resolves Codex from the current PATH and calls the bundled `ivy-codex` sibling. The launcher checks client capability and isolates supported local interactive launches; MCP identity still requires the configured `env_vars` forwarding. Existing aliases and functions win. Explicit bypasses and unsupported shells remain unchanged. No global shell or Codex configuration is modified.
+
+### Publication ancestry diagnostics
+
+The panel listener captures kernel peer identity independently of session authorization. On its
+connection worker, before reading requests, a pane-bound callback classifies the peer's ancestry
+as inside, outside or unknown. The callback is installed after the PTY child is spawned and before
+the listener opens, including when session restoration is disabled. The PTY's revocable lifetime
+invalidates observations after closure; the callback cannot keep the pane alive.
+
+`term-core` walks at most 64 ancestors using native birth identities and stable parent snapshots:
+Linux uses `/proc` and pidfds; macOS uses `LOCAL_PEERPID` with `PROC_PIDTBSDINFO` start seconds and
+microseconds. Missing, exited, reused or unstable processes yield unknown. The Linux session peer
+and foreground checks retain their existing authorization rules.
+
+The app stores publication origin beside the current panel document. Only confirmed outside
+origin paints an application row. Disconnect leaves it; patches preserve it; a valid newer file
+clears it. Publication and file takeover invalidate the shared layout cache, including background
+panes and folded blocks. No producer field or wire request can choose the observation.

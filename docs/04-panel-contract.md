@@ -475,6 +475,15 @@ only reason it exists. Three things follow, and they are the whole of it:
 - **Reading changes nothing.** It takes no hold, so it does not stop the file being read, it does not
   refuse anybody else, and a panel driven by its `panel.json` goes on being driven by it.
 
+**Publication provenance is application-owned.** On Linux and macOS a connection whose kernel
+peer is confirmed outside the console's original program tree adds the row
+`published from a process outside this console`. It stays visible with `header: false` and
+folded producer blocks. An ordinary descendant has no label; uncertainty also has no label and
+never refuses a publication. The observation is made once per connection, off the frame, and is
+not session authorization. It stays with the displayed document after disconnect and through
+patches, and is replaced on a successful full publication, valid newer file takeover or retirement.
+Neither producer JSON nor `panel_get` contains this annotation.
+
 **A read does not wait for the window to paint or run an interface pass.** The channel answers from
 the last document the application committed for that pane, so `panel_get` remains available while
 the window is minimised or occluded. Serialising the answer and writing it to the connection happen
