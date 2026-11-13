@@ -17,8 +17,8 @@
   "related_repos": [],
   "roadmap": null,
   "started_at": "2026-11-13T15:43:54.477544+00:00",
-  "updated_at": "2026-11-13T16:23:40.304342+00:00",
-  "notes": "Study answer applied. Exact-version protocol identity positive; remote CLI overrides dropped; ordinary identity override uses in-process MCP. Design incomplete, target-host shared start/resume and real-phone evidence required; guidance-only not selected.",
+  "updated_at": "2026-11-13T16:31:37.858827+00:00",
+  "notes": "Study resumed without a new answer (ai answer exit 2). Compatibility design remains incomplete. Host verification protocol saved; no GUI/phone or restored 0.167 scratch runtime available. No implementation selected.",
   "pending": null,
   "ticket_deps": [],
   "defaults_used": [
@@ -53,6 +53,11 @@
       "key": "unattended:reclassified",
       "default": "S \u2192 M: retained runtime CLI, routing and recovery scope",
       "phase": "design"
+    },
+    {
+      "key": "unattended:rehomed",
+      "default": "Restored study branch 69-codex-mobile-panel-routing from main at afef5c75e0f94cc9156501df613bafbaa7986217; no local work branch existed",
+      "phase": "run"
     }
   ]
 }

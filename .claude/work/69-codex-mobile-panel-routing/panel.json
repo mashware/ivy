@@ -1,14 +1,14 @@
 {
-  "updated_at": "2026-11-13T16:23:41.300Z",
+  "updated_at": "2026-11-13T16:31:39.231Z",
   "phase": "design",
   "header": true,
   "attention": "block",
   "lines": [
     {"key":"title","text":"Allow Codex mobile remote control without losing per-console panel routing","style":"title"},
     "",
-    {"key":"now","ref":"Now","text":"Exact-version probes narrow CLI limitation; study remains incomplete","mark":"info"},
-    {"key":"next","ref":"Next","text":"Target-host shared start/resume and real-phone evidence","mark":"info"},
+    {"key":"now","ref":"Now","text":"Compatibility evidence reviewed; design remains incomplete","mark":"info"},
+    {"key":"next","ref":"Next","text":"Resolve ordinary shared launch contract on the target host","mark":"info"},
     "",
-    {"key":"block-1","text":"Target host, two real Ivy consoles and phone evidence unavailable","mark":"block"}
+    {"key":"block-1","text":"Need target-host two-console start/resume and real-phone history/input observations","mark":"block"}
   ]
 }

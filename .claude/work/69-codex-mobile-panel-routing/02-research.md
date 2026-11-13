@@ -56,3 +56,12 @@ Opened https://learn.chatgpt.com/docs/extend/mcp, https://learn.chatgpt.com/docs
 
 ### Remaining decisive work
 A compatible ordinary launch path must preserve shared-daemon ownership while conveying distinct invocation identity. Test saved-history exact resume/rebinding and two real Ivy panels, then real-phone history and input while the desktop thread stays live. A protocol adapter would be a new design option, with lifecycle, config override, existing server-name resolution and recovery costs; none has been selected or implemented. No documentation-only substitution or combined-success claim is authorized by the study answer.
+
+## Relaunch audit — 2026-11-13T16:31:37.858827+00:00
+`ai why` returned study; `ai answer` exited 2 (no new study reply). Main was clean at afef5c75e0f94cc9156501df613bafbaa7986217; the recorded work branch did not exist, so run re-created it from main. No production changes or commits were made. This is a continuation of the incomplete design, not a new revision or approval.
+
+Environment checks: `codex --version` returned codex-cli 0.163.0. `command -v ivy` and `command -v adb` returned no executable; DISPLAY and WAYLAND_DISPLAY are unset. Neither prior /tmp/ivy69-research nor /tmp/ivy-69-codex-0167 exists. Preserved probe JSON was inspected, not rerun or newly verified. No target-host access or paired phone is supplied by this run.
+
+Reopened official [MCP configuration](https://learn.chatgpt.com/docs/extend/mcp), [CLI reference](https://learn.chatgpt.com/docs/cli/reference), and [App Server](https://learn.chatgpt.com/docs/app-server). MCP docs describe env/env_vars local versus remote executor sources; CLI docs describe managed/foreground remote control; App Server documents thread/resume and stored-history pagination. None of these inspected passages establishes the missing target-version ordinary-launch per-console propagation contract. This is an evidence limit, not a claim that no supported implementation exists.
+
+The next host observations are specified in host-verification.md. No new approach panel or challenger was launched: the prior panels and answered challenge remain recorded, no approach has changed, and this run cannot complete the pending host experiment. No tests were run because only ignored study artifacts changed. Study remains incomplete and blocks rather than inventing an implementation or substituting the prior guidance-only proposal.

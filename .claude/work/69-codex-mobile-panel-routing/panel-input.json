@@ -1,11 +1,10 @@
 {
   "phase": "design",
-  "now": "Exact-version probes narrow CLI limitation; study remains incomplete",
-  "next": "Target-host shared start/resume and real-phone evidence",
-  "attention": "block",
+  "now": "Compatibility evidence reviewed; design remains incomplete",
+  "next": "Resolve ordinary shared launch contract on the target host",
   "blocks": [
     {
-      "text": "Target host, two real Ivy consoles and phone evidence unavailable"
+      "text": "Need target-host two-console start/resume and real-phone history/input observations"
     }
   ]
 }

@@ -1,11 +1,11 @@
 # 69 — Codex mobile access with console panel routing
-- Size M; phase design, reopened and incomplete.
-- Study answer applied: retain original compatibility investigation.
-- Exact 0.167 protocol supports distinct per-thread MCP env/tool identities.
-- Explicit --remote CLI sends config:{} for tested overrides.
-- Controlled plain CLI uses daemon; identity override uses in-process MCP.
-- Saved-thread resume/rebinding, two real panels and phone remain unverified.
-- No combined solution or all-path impossibility established.
-- Safeguard and existing user config preserved; no production code changed.
-- Next: target-host shared-daemon start/resume traces, then real-phone check.
-- Research and reproducible synthetic probes saved in this work folder.
+- Size M; design remains incomplete.
+- Study relaunched; no new answer available (exit 2).
+- Work branch restored from clean main; production tree unchanged.
+- Saved 0.167.0 probes show direct protocol identity support only.
+- Ordinary CLI shared ownership plus console identity remains unresolved.
+- Current runner has Codex 0.163.0; no Ivy GUI or phone tooling.
+- Required target-host observations: host-verification.md.
+- Need supported shared start/resume, two real panels, and live phone history/input.
+- Next action: supply host access or measured traces and relaunch as study.
+- No implementation selected, no successful joint-support claim, no study approval.
