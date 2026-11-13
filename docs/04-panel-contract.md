@@ -157,10 +157,27 @@ it is not painted blank: an empty line where there was garbage would be inventin
 | `text` | The content. **It is cut to 512 characters when painted**: it is the only thing that bounds what laying out a single line costs, and one of 260 000 costs a whole frame all by itself |
 | `mark` | `done` `current` `pending` `wait` `block` `info` — the app chooses the symbol, the color and the alignment |
 | `ref` | Short label aligned in a column. **It does not have to be a number**: `#1`, `Now`, `Context`. **Short for real**: whatever goes past the width of its column is clipped, and the column cannot push the text out of the panel |
-| `style` | `normal` `dim` `title` `accent` `ok` `warn` `error` — meant for lines without a `mark`, but **it can come alongside one**: then the mark sets the symbol and the style the color |
+| `style` | `normal` `dim` `title` `accent` `ok` `warn` `error` `section` — meant for lines without a `mark`, but **it can come alongside one**: then the mark sets the symbol and the style the color |
+| `summary` | Optional string, cut to its first 40 characters when read; painted only on a section header |
+| `collapsed` | Boolean, default `false`; only a section header uses it |
 | `link` | **A web address this line points at.** It is painted as a compact label and one click on the label opens it in the desktop's browser. See below |
 | `indent` | Manual indentation, in cells (inherited by the continuation lines). **It is bounded to 64** when read, and **when painted also against the panel's width**: an indentation of 40 is not honored whole in a panel of 36, because it would leave the text outside |
 | `key` | The name **you** give this line, so it can be addressed later. **It is never painted**, it has no bound of its own — the document's ceiling holds it, as it holds every other string — and it is kept exactly as you wrote it, repeated keys included |
+
+#### Block headers
+
+A line with `style: "section"` opens a block, ending before the next gap or section header.
+The header paints a fold indicator, title, rule and summary pinned to the right edge. When space
+runs out the title is cut before the summary; below the width of the indicator and summary,
+the summary is cut from the right. A header ignores `mark`, `ref`, `link` and `indent`, and
+its reference does not widen the block's reference column. On other lines, `summary` and
+`collapsed` have no effect on painting. Wrong JSON types are ignored per field.
+
+`collapsed: true` starts the block folded, showing only its header. A plain click on a fully
+painted header opens or folds it, including immediately after a republish or toggle. A clipped
+header is inert. The choice belongs to this console, in memory only, keyed by the header's `key`
+when present, otherwise its text. Duplicate identities share a choice. The reader's choice wins
+over the producer's default across republishes and disappears when the console closes (D89).
 
 #### `link`
 
@@ -188,8 +205,8 @@ it is not painted blank: an empty line where there was garbage would be inventin
 - The decision, with what was discarded, in [02-decisions.md](02-decisions.md) → D51.
 
 **A line with no `key` is a line.** Nothing about publishing changes if you never write one, and
-nothing about how a panel is painted changes if you do — the field exists for what a channel can say
-about a document, not for what the document looks like. And **it is deliberately not `ref`**: that one
+on ordinary lines it changes no painting. On section headers it also identifies the reader’s fold
+choice across republishes. And **it is deliberately not `ref`**: that one
 is painted, clipped to the width of its column, and legitimately repeated —`#1` twice in one panel is
 ordinary— so an address built on it would change whenever the text did.
 

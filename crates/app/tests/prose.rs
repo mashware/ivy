@@ -470,6 +470,7 @@ const SOURCES: &[(&str, &str, usize)] = &[
         include_str!("../src/tab_bar/chrome.rs"),
         3,
     ),
+    ("src/panel/fold.rs", include_str!("../src/panel/fold.rs"), 2),
     (
         "src/panel/cache.rs",
         include_str!("../src/panel/cache.rs"),

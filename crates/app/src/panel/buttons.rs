@@ -36,7 +36,7 @@ pub(super) fn buttons_drawn(
 
     for (nth, row) in rows.iter().enumerate() {
         let belongs = match row.role {
-            RowRole::Text => None,
+            RowRole::Text | RowRole::Fold(_) => None,
             RowRole::ButtonLabel(action) | RowRole::ButtonBody(action) => Some(action),
         };
         let closes = match (open, belongs) {

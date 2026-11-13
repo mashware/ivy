@@ -1,5 +1,5 @@
 //! Resolved panel rows carry the theme that gave their colours meaning.
-use super::{AttentionState, PanelState, Row, Theme, color, lay_out};
+use super::{AttentionState, PanelState, Row, Theme, color, fold, lay_out_head};
 
 /// A layout and its resolved-colour cache key: changing the theme must repaint quiet producers.
 pub(super) struct PanelLayout {
@@ -21,7 +21,7 @@ impl PanelLayout {
         warning: Option<String>,
         attention: Option<AttentionState>,
     ) -> Self {
-        let mut rows = lay_out(
+        let mut rows = lay_out_head(
             state.last_good.as_deref(),
             id,
             width,
@@ -30,6 +30,9 @@ impl PanelLayout {
             attention,
             state.holder.as_ref().map(|held| held.source.as_str()),
         );
+        if let Some(panel) = state.last_good.as_deref() {
+            fold::append_blocks(&mut rows, panel, &state.folds, width, theme);
+        }
         color::flag(&mut rows);
         Self {
             width,

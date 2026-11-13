@@ -136,6 +136,7 @@ dependencies = [
  "skrifa",
  "term-core",
  "unicode-properties",
+ "unicode-segmentation",
  "ureq",
  "url",
  "webbrowser",

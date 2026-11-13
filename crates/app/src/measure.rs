@@ -145,7 +145,8 @@ pub struct Spans {
     interpreted: Duration,
     enqueued: Duration,
     /// What it cost to check whether this console's `panel.json` changed, read and interpret it if it
-    /// did, split the width, **serve the panel's border** and **paint it**.
+    /// did, split the width, **serve the panel's border** and **paint it**, including section
+    /// headers and the relayout after a reader toggles a block.
     ///
     /// **All six things, and saying it in full matters.** The number is made up of **two disjoint
     /// spans** of `crate::painter::paint_pane`, summed: one before painting the console —checking the

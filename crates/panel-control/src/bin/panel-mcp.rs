@@ -1134,7 +1134,7 @@ mod tests {
         for clause in [
             "\"attention\" is wait, block or done;",
             "a line's \"mark\" is done, current, pending, wait, block or info;",
-            "its \"style\" is normal, dim, title, accent, ok, warn or error.",
+            "its \"style\" is normal, dim, title, accent, ok, warn, error or section.",
             "Any other non-null value is dropped",
         ] {
             assert!(

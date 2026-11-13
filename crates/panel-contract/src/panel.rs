@@ -265,6 +265,8 @@ pub struct Line {
     /// the symbol by the mark: two of the nine files in the repo do it, and on purpose — it is how you
     /// say "this line is information, and its color *is* the data".
     pub style: Option<Style>,
+    pub summary: Option<String>,
+    pub collapsed: bool,
     /// Manual indentation, in cells.
     pub indent: usize,
     /// The address the producer associates with this line. **It is read and not used yet**: painting
@@ -369,7 +371,7 @@ impl PartialOrd for Attention {
     }
 }
 
-/// How a line is painted. The seven of the contract.
+/// How a line is painted. The eight of the contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Style {
     Normal,
@@ -379,11 +381,12 @@ pub enum Style {
     Ok,
     Warn,
     Error,
+    Section,
 }
 
 impl Style {
-    /// The seven, read and described from this list for the reason [`Mark::ALL`] gives.
-    pub const ALL: [Self; 7] = [
+    /// The eight, read and described from this list for the reason [`Mark::ALL`] gives.
+    pub const ALL: [Self; 8] = [
         Self::Normal,
         Self::Dim,
         Self::Title,
@@ -391,6 +394,7 @@ impl Style {
         Self::Ok,
         Self::Warn,
         Self::Error,
+        Self::Section,
     ];
 }
 
@@ -719,6 +723,11 @@ pub(crate) fn read_line_noting(
             .min(MAX_INDENT) as usize,
         link: string(raw, "link"),
         key: string(raw, "key"),
+        summary: string(raw, "summary").map(|text| text.chars().take(40).collect()),
+        collapsed: raw
+            .get("collapsed")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
     })
 }
 
@@ -868,7 +877,9 @@ fn serialize_line(line: &Line) -> String {
         && line.style.is_none()
         && line.link.is_none()
         && line.key.is_none()
-        && line.indent == 0;
+        && line.indent == 0
+        && line.summary.is_none()
+        && !line.collapsed;
     if bare {
         return quoted(&line.text);
     }
@@ -889,6 +900,7 @@ fn serialize_line(line: &Line) -> String {
         ("ref", line.reference.as_deref()),
         ("link", line.link.as_deref()),
         ("key", line.key.as_deref()),
+        ("summary", line.summary.as_deref()),
     ] {
         if let Some(value) = value {
             comma.before(&mut out);
@@ -902,6 +914,10 @@ fn serialize_line(line: &Line) -> String {
     if line.indent > 0 {
         comma.before(&mut out);
         out.push_str(&format!("\"indent\":{}", line.indent));
+    }
+    if line.collapsed {
+        comma.before(&mut out);
+        out.push_str("\"collapsed\":true");
     }
     out.push('}');
     out
@@ -1018,6 +1034,7 @@ impl Style {
             Self::Ok => "ok",
             Self::Warn => "warn",
             Self::Error => "error",
+            Self::Section => "section",
         }
     }
 }
@@ -2502,5 +2519,49 @@ mod every_invisible {
     fn a_command_of_only_spaces_is_refused() {
         assert!(Action::new("x", "   ").is_none());
         assert!(Action::new("   ", "ls").is_none());
+    }
+}
+
+#[cfg(test)]
+mod section_headers {
+    use super::*;
+
+    #[test]
+    fn header_fields_survive_file_and_channel_reads_and_serialization() {
+        let text = r#"{"lines":[{"text":"MRs","style":"section","summary":"2/4 merged","collapsed":true,"key":"mrs"}]}"#;
+        let (panel, dropped) = parse_document_noting(text).unwrap();
+        assert_eq!(dropped.sentence(), None);
+        assert_eq!(panel.lines[0].style, Some(Style::Section));
+        assert_eq!(panel.lines[0].summary.as_deref(), Some("2/4 merged"));
+        assert!(panel.lines[0].collapsed);
+        let serialized = serialize(&panel).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(json["lines"][0]["style"], "section");
+        assert_eq!(json["lines"][0]["summary"], "2/4 merged");
+        assert_eq!(json["lines"][0]["collapsed"], true);
+        assert_eq!(parse_document(&serialized).unwrap(), panel);
+        let dir = crate::PanelDir::create().unwrap();
+        std::fs::write(dir.path().join(crate::PANEL_FILE), text).unwrap();
+        assert_eq!(read(dir.path()).unwrap().lines, panel.lines);
+    }
+
+    #[test]
+    fn summary_counts_characters_and_bad_types_leave_the_line_standing() {
+        let text = serde_json::json!({"lines":[
+            {"text":"MRs","style":"section","summary":"日".repeat(50)},
+            {"text":"still here","summary":42,"collapsed":"true"},
+            {"summary":"","collapsed":false}
+        ]})
+        .to_string();
+        let panel = parse_document(&text).unwrap();
+        assert_eq!(panel.lines.len(), 3);
+        assert_eq!(
+            panel.lines[0].summary.as_deref(),
+            Some("日".repeat(40).as_str())
+        );
+        assert_eq!(panel.lines[1].text, "still here");
+        assert_eq!(panel.lines[1].summary, None);
+        assert!(!panel.lines[1].collapsed);
+        assert_eq!(parse_document(&serialize(&panel).unwrap()).unwrap(), panel);
     }
 }

@@ -9395,3 +9395,17 @@ and panel.
   it would mechanise «workers keep off», but a person running their one agent inside tmux in an Ivy
   console would lose the instructions, and the hold already settles who owns the pane: the first
   producer keeps it and every other is refused by name (D43).
+
+## D89 — The block's fold belongs to the reader
+
+A section header's `collapsed` is its initial state. Clicking its row sets a per-console choice,
+in memory only, identified by `key` or, without one, its text. That choice wins across whole-document
+republishes. A file producer has no return channel, and flow republishes its folded default, so
+producer-owned state would prevent the reader from keeping the train open. Saving it with the
+window's geometry would change the layout format for a preference nobody asked to persist.
+
+The last painting owns the header identity and fold value a press toggles: a republish cannot
+retarget old pixels. Only a whole painted row is reachable. Unlike a command button, a fold runs
+nothing, so it does not require a settled frame; otherwise each toggle would swallow the next click.
+Header painting and relayout remain inside the existing panel paint span (D13); no measured bench
+batch currently paints these headers. Fold choices are kept until the console closes.
