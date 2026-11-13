@@ -1,0 +1,26 @@
+{
+  "version": "0.167.0",
+  "synthetic_home": "/tmp/ivy69-research/ordinary-home",
+  "managed_daemon_pid": 1681,
+  "plain": {
+    "argv": [
+      "codex",
+      "--no-alt-screen"
+    ],
+    "tui_pid": 1730,
+    "mcp_parent_pid": 1681,
+    "PANEL_ID": "daemon-baseline"
+  },
+  "override": {
+    "argv": [
+      "codex",
+      "--no-alt-screen",
+      "-c",
+      "mcp_servers.ivy.env.PANEL_ID=\"console-override\""
+    ],
+    "tui_pid": 1825,
+    "mcp_parent_pid": 1825,
+    "PANEL_ID": "console-override"
+  },
+  "inference": "In this controlled version/environment, identity override caused in-process MCP ownership; it does not establish a universal version limitation."
+}

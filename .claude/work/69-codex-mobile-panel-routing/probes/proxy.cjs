@@ -1,0 +1,10 @@
+const {WebSocketServer}=require('ws');
+const {spawn}=require('child_process');
+const fs=require('fs');
+const child=spawn('/tmp/ivy69-research/package/vendor/x86_64-unknown-linux-musl/bin/codex',['app-server'],{env:{...process.env,CODEX_HOME:'/tmp/ivy69-research/server-home'},stdio:['pipe','pipe','pipe']});
+let socket,buf='';
+child.stdout.on('data',d=>{buf+=d; let i;while((i=buf.indexOf('\n'))>=0){const line=buf.slice(0,i);buf=buf.slice(i+1);if(socket && socket.readyState===1)socket.send(line)}});
+child.stderr.on('data',d=>fs.appendFileSync('/tmp/ivy69-research/server.stderr',d));
+const wss=new WebSocketServer({port:18769,host:'127.0.0.1'});
+wss.on('connection',ws=>{socket=ws;ws.on('message',d=>{fs.appendFileSync('/tmp/ivy69-research/requests.jsonl',d+'\n');child.stdin.write(d+'\n')})});
+process.on('SIGTERM',()=>{child.kill();wss.close();setTimeout(()=>process.exit(),100)});

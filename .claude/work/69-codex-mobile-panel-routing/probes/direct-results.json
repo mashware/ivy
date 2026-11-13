@@ -1,0 +1,164 @@
+[
+  {
+    "id": 2,
+    "result": {
+      "thread": {
+        "id": "01a1d5b3-789f-7602-b2e8-91e5c33dbd7c",
+        "environments": [
+          {
+            "environmentId": "local",
+            "cwd": "/tmp/ivy69-research",
+            "runtimeWorkspaceRoots": [
+              "/tmp/ivy69-research"
+            ]
+          }
+        ],
+        "extra": null,
+        "sessionId": "01a1d5b3-789f-7602-b2e8-91e5c33dbd7c",
+        "forkedFromId": null,
+        "parentThreadId": null,
+        "preview": "",
+        "ephemeral": false,
+        "section": null,
+        "sectionEnteredAt": null,
+        "projectId": null,
+        "historyMode": "paginated",
+        "modelProvider": "openai",
+        "model": "gpt-6.1-sol",
+        "reasoningEffort": null,
+        "createdAt": 1794586671,
+        "updatedAt": 1794586671,
+        "recencyAt": 1794586671,
+        "status": {
+          "type": "idle"
+        },
+        "path": "/tmp/ivy69-research/direct-home/sessions/2026/11/13/rollout-2026-11-13T16-17-51-01a1d5b3-789f-7602-b2e8-91e5c33dbd7c.jsonl",
+        "cwd": "/tmp/ivy69-research",
+        "cliVersion": "0.167.0",
+        "originator": "ivy69-probe",
+        "source": "vscode",
+        "canAcceptDirectInput": true,
+        "threadSource": null,
+        "agentNickname": null,
+        "agentRole": null,
+        "gitInfo": null,
+        "name": null,
+        "daybreakEnabled": null,
+        "turns": []
+      },
+      "model": "gpt-6.1-sol",
+      "modelProvider": "openai",
+      "serviceTier": null,
+      "disabledPluginIds": [],
+      "cwd": "/tmp/ivy69-research",
+      "runtimeWorkspaceRoots": [
+        "/tmp/ivy69-research"
+      ],
+      "instructionSources": [],
+      "approvalPolicy": "on-request",
+      "approvalsReviewer": "user",
+      "sandbox": {
+        "type": "readOnly",
+        "networkAccess": false
+      },
+      "activePermissionProfile": {
+        "id": ":read-only",
+        "extends": null
+      },
+      "reasoningEffort": null,
+      "multiAgentMode": "explicitRequestOnly"
+    }
+  },
+  {
+    "id": 3,
+    "result": {
+      "thread": {
+        "id": "01a1d5b3-78c5-72c1-af25-73d9e83f0140",
+        "environments": [
+          {
+            "environmentId": "local",
+            "cwd": "/tmp/ivy69-research",
+            "runtimeWorkspaceRoots": [
+              "/tmp/ivy69-research"
+            ]
+          }
+        ],
+        "extra": null,
+        "sessionId": "01a1d5b3-78c5-72c1-af25-73d9e83f0140",
+        "forkedFromId": null,
+        "parentThreadId": null,
+        "preview": "",
+        "ephemeral": false,
+        "section": null,
+        "sectionEnteredAt": null,
+        "projectId": null,
+        "historyMode": "paginated",
+        "modelProvider": "openai",
+        "model": "gpt-6.1-sol",
+        "reasoningEffort": null,
+        "createdAt": 1794586671,
+        "updatedAt": 1794586671,
+        "recencyAt": 1794586671,
+        "status": {
+          "type": "idle"
+        },
+        "path": "/tmp/ivy69-research/direct-home/sessions/2026/11/13/rollout-2026-11-13T16-17-51-01a1d5b3-78c5-72c1-af25-73d9e83f0140.jsonl",
+        "cwd": "/tmp/ivy69-research",
+        "cliVersion": "0.167.0",
+        "originator": "ivy69-probe",
+        "source": "vscode",
+        "canAcceptDirectInput": true,
+        "threadSource": null,
+        "agentNickname": null,
+        "agentRole": null,
+        "gitInfo": null,
+        "name": null,
+        "daybreakEnabled": null,
+        "turns": []
+      },
+      "model": "gpt-6.1-sol",
+      "modelProvider": "openai",
+      "serviceTier": null,
+      "disabledPluginIds": [],
+      "cwd": "/tmp/ivy69-research",
+      "runtimeWorkspaceRoots": [
+        "/tmp/ivy69-research"
+      ],
+      "instructionSources": [],
+      "approvalPolicy": "on-request",
+      "approvalsReviewer": "user",
+      "sandbox": {
+        "type": "readOnly",
+        "networkAccess": false
+      },
+      "activePermissionProfile": {
+        "id": ":read-only",
+        "extends": null
+      },
+      "reasoningEffort": null,
+      "multiAgentMode": "explicitRequestOnly"
+    }
+  },
+  {
+    "id": 5,
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"PANEL_ID\": \"console-A\", \"PANEL_DIR\": \"/tmp/ivy69-research/panels\"}"
+        }
+      ]
+    }
+  },
+  {
+    "id": 7,
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"PANEL_ID\": \"console-B\", \"PANEL_DIR\": \"/tmp/ivy69-research/panels\"}"
+        }
+      ]
+    }
+  }
+]

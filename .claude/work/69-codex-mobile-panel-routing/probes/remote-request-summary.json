@@ -1,0 +1,27 @@
+[
+  {
+    "id": "initialize",
+    "method": "initialize",
+    "params": {
+      "clientInfo": {
+        "name": "codex-tui",
+        "title": null,
+        "version": "0.167.0"
+      },
+      "capabilities": {
+        "requiredHumanApproval": true,
+        "experimentalApi": true,
+        "requestAttestation": false,
+        "optOutNotificationMethods": null
+      }
+    }
+  },
+  {
+    "method": "thread/start",
+    "params": {
+      "config": {},
+      "cwd": null,
+      "ephemeral": false
+    }
+  }
+]

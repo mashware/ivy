@@ -7,7 +7,7 @@
   "base": "main",
   "stacked_on": null,
   "worktree": null,
-  "size": "S",
+  "size": "M",
   "phase": "design",
   "phases_done": [
     "context"
@@ -17,20 +17,9 @@
   "related_repos": [],
   "roadmap": null,
   "started_at": "2026-11-13T15:43:54.477544+00:00",
-  "updated_at": "2026-11-13T15:51:14.613382+00:00",
-  "notes": "Study proposal only; high challenge pending. Guidance-only scope is not approved. Original runtime acceptance criteria remain open. Size S is provisional for guidance; reopen size if runtime implementation is chosen.",
-  "pending": {
-    "id": "69-codex-mobile-panel-routing:design:design_challenge:afef5c7:b266979",
-    "gate": "design_challenge",
-    "phase": "design",
-    "resume": "feat:design",
-    "resume_at": "\u00a77 after writing each challenge Response; recommended response reopens \u00a71.5 and target-version investigation",
-    "head": "afef5c75e0f94cc9156501df613bafbaa7986217",
-    "question_file": "ask-question.md",
-    "options_file": "ask-options.md",
-    "why": "study",
-    "free_text": true
-  },
+  "updated_at": "2026-11-13T16:23:40.304342+00:00",
+  "notes": "Study answer applied. Exact-version protocol identity positive; remote CLI overrides dropped; ordinary identity override uses in-process MCP. Design incomplete, target-host shared start/resume and real-phone evidence required; guidance-only not selected.",
+  "pending": null,
   "ticket_deps": [],
   "defaults_used": [
     {
@@ -46,6 +35,23 @@
     {
       "key": "unattended:reclassified",
       "default": "M \u2192 S: contained guidance delivery; no topology change or split",
+      "phase": "design"
+    },
+    {
+      "key": "unattended:rehomed",
+      "default": "69-codex-mobile-panel-routing \u2192 69-codex-mobile-panel-routing from main",
+      "phase": "run"
+    },
+    {
+      "key": "unattended:answer:design_challenge",
+      "default": "Apply the recommended response to each",
+      "id": "69-codex-mobile-panel-routing:design:design_challenge:afef5c7:b266979",
+      "phase": "design",
+      "head": "afef5c75e0f94cc9156501df613bafbaa7986217"
+    },
+    {
+      "key": "unattended:reclassified",
+      "default": "S \u2192 M: retained runtime CLI, routing and recovery scope",
       "phase": "design"
     }
   ]

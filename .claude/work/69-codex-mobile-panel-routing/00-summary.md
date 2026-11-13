@@ -1,13 +1,11 @@
-# 69 — Codex mobile remote control and panel routing
-Study only; size S provisional for guidance proposal, phase design.
-Branch 69-codex-mobile-panel-routing from main afef5c7; no tracked changes.
-Original runtime compatibility criteria remain open; guidance fallback is not approved.
-Checked installed 0.163.0 and isolated exact 0.167.0 help/schema; no live daemon/MCP/phone test.
-Generic per-thread configuration remains a candidate, not proved supported or impossible.
-Independent review found high gaps: fallback condition unproved; version/runtime claims need restraint.
-Pending design_challenge question asks retain investigation or explicitly choose limited guidance scope.
-README, Connect visible/manual and copied prompt need consistent advice if guidance is chosen.
-Relevant existing tests are in crates/app/src/tests/integrated_chrome.rs, not connection/tests.rs.
-No schema/API changes, dependencies or external-repo work.
-Resume design from pending; open 03-design.md, 02-research.md and design-challenge.md.
-Never begin build while why=study.
+# 69 — Codex mobile access with console panel routing
+- Size M; phase design, reopened and incomplete.
+- Study answer applied: retain original compatibility investigation.
+- Exact 0.167 protocol supports distinct per-thread MCP env/tool identities.
+- Explicit --remote CLI sends config:{} for tested overrides.
+- Controlled plain CLI uses daemon; identity override uses in-process MCP.
+- Saved-thread resume/rebinding, two real panels and phone remain unverified.
+- No combined solution or all-path impossibility established.
+- Safeguard and existing user config preserved; no production code changed.
+- Next: target-host shared-daemon start/resume traces, then real-phone check.
+- Research and reproducible synthetic probes saved in this work folder.

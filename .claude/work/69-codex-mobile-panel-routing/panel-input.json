@@ -1,6 +1,11 @@
 {
   "phase": "design",
-  "now": "Exact-version capability study and independent design review complete",
-  "next": "design after scope decision",
-  "decision": "Retain compatibility investigation or explicitly choose guidance-only scope; runtime checks remain open"
+  "now": "Exact-version probes narrow CLI limitation; study remains incomplete",
+  "next": "Target-host shared start/resume and real-phone evidence",
+  "attention": "block",
+  "blocks": [
+    {
+      "text": "Target host, two real Ivy consoles and phone evidence unavailable"
+    }
+  ]
 }

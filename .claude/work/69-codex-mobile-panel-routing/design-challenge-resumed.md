@@ -1,0 +1,9 @@
+# Reopened design challenge
+
+| Angle | Finding | Type | Severity |
+|---|---|---|---|
+| Fit and need | The `-c` candidate is no longer merely schema speculation: exact 0.167.0 direct `thread/start` calls in one stdio appserver delivered A/B panel identities to MCP. Keep it as a viable mechanism. This does not prove the proposed Ivy TUI path: explicit `--remote` CLI sent `config: {}`, and ordinary TUI with daemon auto-start delivered the MCP parent `TUI`. | missing | high |
+| Fragile assumptions | Treating per-thread appserver config as proof that Ivy can attach console identity to ordinary daemon-backed start/resume is unsupported. Empty pre-turn resume rejection gives no resume/rebinding evidence; phone reattachment and active-writer behavior are also untested. Conversely, these results do not prove impossibility. | missing | high |
+| Simplification | No need to repeat generic CLI/schema discovery. The next discriminating experiment is a real 0.167 daemon-backed ordinary Ivy start and exact resume with isolated MCP markers in two consoles, then inspect requests and tool identities. If that succeeds, proceed to real phone validation; if not, investigate the documented appserver/session config path. | missing | medium |
+| Operation | No production or config changes, two-console panel isolation, active conversation load/input, or phone test occurred. `connected` and local stdio success do not meet acceptance. Keep launcher safeguard pending those checks; no operational mitigation is validated. | missing | high |
+| Decision idiom | Closing as “unsupported” would overstate evidence; closing the study as “done” or approving guidance-only also skips the ticket’s stated fallback condition and acceptance criteria. Record this as blocked/unresolved for unavailable target-host and device evidence, not as a product limitation. | idiom | high |
