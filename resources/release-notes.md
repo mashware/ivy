@@ -6,7 +6,7 @@
 - Open and fold individual panel block headers to keep the information you need in view.
 - Agents started in an Ivy console are prompted to publish their status panel.
 - Hooks from the active agent can refresh progress and clear an obsolete waiting claim while the agent keeps its panel connection.
-- Completed agents release their panel so file publishers can take over; publications from outside the console are identified, and stale endpoints or borrowed console identities cannot claim the panel.
+- Completed agents release their panel so file publishers can take over, and publications from processes outside the console are labelled.
 - Selecting text no longer shifts shaped terminal text at selection boundaries.
 
 ## Since 0.1.0-alpha.6
