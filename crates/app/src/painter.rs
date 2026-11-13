@@ -8,6 +8,8 @@
 //! **The cell's size is asked for, not invented.** The width comes from the font's reference glyph
 //! and the height from its line height. Guessing it by eye is what throws the rows out of line.
 
+#[cfg(test)]
+mod background_tests;
 mod blocks;
 mod ligatures;
 mod pane;
@@ -249,13 +251,18 @@ impl CellMetrics {
     /// The rectangle the cell of a given row and column occupies, from the given origin.
     ///
     /// **The origin is used as it arrives, fraction and all**, and that is worth a line because the
-    /// first version of this snapped it and a test demanded it. It buys nothing: the tessellator
-    /// rounds each glyph's origin and each rectangle to the pixel grid itself, and a fraction shared
-    /// by every cell of the pane survives that rounding as the same offset for all of them. What has
-    /// to be whole is the **step** — see [`on_whole_pixels`] — not where the run starts.
+    /// first version of this snapped it and a test demanded it. The tessellator rounds each origin
+    /// and rectangle to the pixel grid itself. Shared edges must use the same expression: adding
+    /// the width to a near corner can differ from the next cell's corner by enough `f32` error to
+    /// round to another pixel. The **step** stays whole — see [`on_whole_pixels`].
     fn cell(&self, origin: Pos2, row: u16, column: u16) -> Rect {
         let corner = origin + vec2(column as f32 * self.width, row as f32 * self.height);
-        Rect::from_min_size(corner, vec2(self.width, self.height))
+        let next_corner = origin
+            + vec2(
+                (column as f32 + 1.0) * self.width,
+                (row as f32 + 1.0) * self.height,
+            );
+        Rect::from_min_max(corner, next_corner)
     }
 }
 
