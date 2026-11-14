@@ -257,12 +257,17 @@ fn chips(
     selected: &mut Option<usize>,
 ) {
     for (entry, position) in section.entries.iter().zip(positions) {
-        if position == wanted
-            && ui
-                .small_button(format!("{} · {}", entry.tab_label, entry.console_label))
-                .clicked()
-        {
-            *selected = Some(entry.pane);
+        if position == wanted {
+            let id = egui::Id::new(("board-roadmap-console", ui.ctx().viewport_id(), entry.pane));
+            if ui
+                .scope_builder(egui::UiBuilder::new().id(id), |ui| {
+                    ui.small_button(format!("{} · {}", entry.tab_label, entry.console_label))
+                        .clicked()
+                })
+                .inner
+            {
+                *selected = Some(entry.pane);
+            }
         }
     }
 }
@@ -284,6 +289,24 @@ fn fallback(section: &Section) -> Vec<(&str, &panel_contract::Line)> {
 }
 
 pub(super) fn paint_project(
+    ui: &mut egui::Ui,
+    section: &Section,
+    reader: &mut Reader,
+    window: (usize, usize),
+    theme: &Theme,
+) -> Option<usize> {
+    let id = egui::Id::new((
+        "board-roadmap-project",
+        ui.ctx().viewport_id(),
+        project_key(section),
+    ));
+    ui.scope_builder(egui::UiBuilder::new().id(id), |ui| {
+        paint_project_contents(ui, section, reader, window, theme)
+    })
+    .inner
+}
+
+fn paint_project_contents(
     ui: &mut egui::Ui,
     section: &Section,
     reader: &mut Reader,
@@ -481,7 +504,13 @@ pub(super) fn paint_project(
             }
         });
     }
-    if (plan.milestones.len() > range.len() || prefix > 0 || all)
+    let hidden_details = prefix > 0
+        || plan
+            .milestones
+            .iter()
+            .enumerate()
+            .any(|(i, m)| !started(m, attached[i]));
+    if (hidden_details || all)
         && ui
             .small_button(if all {
                 "Show less milestones"
@@ -515,6 +544,128 @@ mod tests {
     fn plan() -> Plan {
         panel_contract::plan::parse_document_noting(r#"{"milestones":[{"id":"empty","title":"Empty"},{"id":"old","title":"Old","items":[{"text":"old","mark":"pending"}]},{"id":"H3","title":"Now","items":[{"id":"D","text":"work","mark":"current"},{"text":"unknown","mark":"future"}]}]}"#).unwrap().0
     }
+    fn test_section(plan: Plan, panes: &[usize]) -> Section {
+        Section {
+            key: None,
+            kind: super::super::model::Kind::Other,
+            entries: panes
+                .iter()
+                .map(|pane| super::super::model::Entry {
+                    pane: *pane,
+                    console_label: format!("Console {pane}"),
+                    tab_label: "Tab".into(),
+                    snapshot: crate::panel::summary::Snapshot {
+                        document: None,
+                        warning: None,
+                        attention: None,
+                        outside: false,
+                    },
+                })
+                .collect(),
+            roadmap: Some(Resolved {
+                plan: Some(Arc::new(plan)),
+                source: "fixture".into(),
+                error: None,
+            }),
+        }
+    }
+    fn press(pos: egui::Pos2, down: bool) -> Vec<egui::Event> {
+        vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: down,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]
+    }
+    fn ui_frame(
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+        paint: impl FnMut(&mut egui::Ui),
+    ) -> Vec<egui::epaint::ClippedShape> {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                events,
+                ..Default::default()
+            },
+            paint,
+        );
+        let shapes = output.shapes.clone();
+        output.drop_without_applying_deltas();
+        shapes
+    }
+    #[test]
+    fn a_small_pending_plan_exposes_all_deliverable_details() {
+        let plan=panel_contract::plan::parse_document_noting(r#"{"milestones":[{"id":"M","title":"Pending","done_when":"criterion witness","items":[{"text":"deliverable witness","mark":"pending"}]}]}"#).unwrap().0;
+        let section = test_section(plan, &[]);
+        let ctx = egui::Context::default();
+        let mut reader = Reader::default();
+        reader.projects.insert(project_key(&section), true);
+        let draw = |reader: &mut Reader, events| {
+            ui_frame(&ctx, events, |ui| {
+                let _ = paint_project(ui, &section, reader, (2, 3), &Theme::default());
+            })
+        };
+        let shapes = draw(&mut reader, vec![]);
+        let at = shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == "Show all milestones" => {
+                    Some(t.pos + t.galley.size() / 2.0)
+                }
+                _ => None,
+            })
+            .expect("pending milestone has no disclosure");
+        draw(&mut reader, press(at, true));
+        draw(&mut reader, press(at, false));
+        let shapes = draw(&mut reader, vec![]);
+        for expected in ["deliverable witness", "criterion witness"] {
+            assert!(
+                shapes.iter().any(
+                    |s| matches!(&s.shape,egui::Shape::Text(t)if t.galley.text().contains(expected))
+                ),
+                "unreachable {expected}"
+            );
+        }
+    }
+    #[test]
+    fn reordering_roadmap_console_chips_cannot_retarget_a_press() {
+        let mut section = test_section(Plan::default(), &[1, 2]);
+        let ctx = egui::Context::default();
+        let mut selected = None;
+        let mut draw = |section: &Section, events| {
+            ui_frame(&ctx, events, |ui| {
+                chips(
+                    ui,
+                    section,
+                    &[Placement::Off, Placement::Off],
+                    &Placement::Off,
+                    &mut selected,
+                );
+            })
+        };
+        let shapes = draw(&section, vec![]);
+        let at = shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text().contains("Console 1") => {
+                    Some(t.pos + t.galley.size() / 2.0)
+                }
+                _ => None,
+            })
+            .unwrap();
+        draw(&section, press(at, true));
+        section.entries.reverse();
+        draw(&section, press(at, false));
+        assert_eq!(
+            selected,
+            Some(1),
+            "release selected another console after reorder"
+        );
+    }
+
     #[test]
     fn declared_current_anchors_before_pending_and_unknown_is_not_done() {
         let plan = plan();

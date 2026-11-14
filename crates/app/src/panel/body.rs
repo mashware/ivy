@@ -112,7 +112,8 @@ impl Body {
                 hits.push((row_rect, Action::Fold(header.id.clone(), header.folded)));
             }
             if let Some(link) = &row.link {
-                let painted = links::paint_label(painter, link, y, metrics, theme, discoverer);
+                let painted =
+                    links::paint_label_in(painter, rect, link, y, metrics, theme, discoverer);
                 for link in links::reachable(vec![painted]) {
                     if painter.clip_rect().contains_rect(link.area) {
                         hits.push((link.area, Action::Link(link.target)));
@@ -143,6 +144,45 @@ pub(super) fn paint_row(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn clipped_board_links_keep_their_body_coordinates() {
+        fn ink(text: &str, clip: Rect) -> (Pos2, usize) {
+            let ctx = eframe::egui::Context::default();
+            let mut hits = 0;
+            let output=ctx.run_ui(eframe::egui::RawInput::default(),|ui| {
+                let metrics=CellMetrics::measure(ui.ctx(),eframe::egui::FontId::monospace(14.0)).for_panel(ui.ctx());
+                let rect=Rect::from_min_max(Pos2::new(100.0,20.0),Pos2::new(500.0,400.0));
+                let panel=panel_contract::parse_document(&serde_json::json!({"lines":[{"text":text,"link":"https://example.test/pull/42"}]}).to_string()).unwrap();
+                let body=Body::layout(&panel,&Reader::default(),(rect.width()/metrics.width())as usize,&Theme::default(),true);
+                hits=body.paint(&ui.painter().with_clip_rect(clip),rect,&metrics,&Theme::default(),&mut Discoverer::default()).len();
+            });
+            let shapes = output.shapes.clone();
+            output.drop_without_applying_deltas();
+            let at = shapes
+                .iter()
+                .find_map(|s| match &s.shape {
+                    eframe::egui::Shape::Text(t) if t.galley.text() == "#42 ↗" => Some(t.pos),
+                    _ => None,
+                })
+                .expect("link label painted");
+            (at, hits)
+        }
+        let full = Rect::from_min_max(Pos2::new(100.0, 20.0), Pos2::new(500.0, 400.0));
+        for text in ["Review".to_owned(), "review ".repeat(25)] {
+            let baseline = ink(&text, full).0;
+            for clip in [
+                Rect::from_min_max(Pos2::new(180.0, 20.0), full.max),
+                Rect::from_min_max(full.min, Pos2::new(420.0, 400.0)),
+            ] {
+                let (at, hits) = ink(&text, clip);
+                assert_eq!(at, baseline, "clipping relocated link label");
+                if !clip.contains(baseline) {
+                    assert_eq!(hits, 0, "clipped link became interactive");
+                }
+            }
+        }
+    }
+
     #[test]
     fn all_content_is_reachable_and_board_folds_are_independent() {
         let doc = panel_contract::parse_document(

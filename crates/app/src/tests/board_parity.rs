@@ -41,6 +41,10 @@ mod tests {
     }
 
     fn native(pane: &mut Pane, state: &str) {
+        native_at(pane, state, Instant::now());
+    }
+
+    fn native_at(pane: &mut Pane, state: &str, now: Instant) {
         pane.signals.configure(
             crate::agent_signals::Enabled {
                 claude: true,
@@ -51,7 +55,24 @@ mod tests {
         );
         pane.screen
             .advance(format!("\x1b]7501;state={state}:app=claude-code\x1b\\").as_bytes());
-        pane.signals.sync_native(&mut pane.screen, Instant::now());
+        pane.signals.sync_native(&mut pane.screen, now);
+    }
+
+    #[test]
+    fn an_expired_native_wait_is_visibly_unconfirmed_on_its_card() {
+        let mut window = window_with("sleep 30", "sleep 30");
+        prepare(&mut window);
+        let ctx = egui::Context::default();
+        let target = window.active().panes()[0].name;
+        native_at(
+            window.active_mut().panes_mut()[0],
+            "blocked:kind=question",
+            Instant::now() - crate::agent_signals::STALE_AFTER - Duration::from_secs(1),
+        );
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
+        let shapes = frame(&mut window, &ctx, vec![]);
+        let card = window.board.card_rect(target).unwrap();
+        assert!(shapes.iter().any(|shape|matches!(&shape.shape,egui::Shape::Text(t) if t.galley.text().contains("Waiting state is unconfirmed") && card.contains(t.pos) && shape.clip_rect.contains(t.pos))),"expired native wait looked confirmed");
     }
 
     #[test]

@@ -66,6 +66,7 @@ pub(super) fn paint(
     ui: &mut egui::Ui,
     entry: &Entry,
     column: Column,
+    backed: bool,
     since: Option<Instant>,
     branch: Option<&str>,
     selected: bool,
@@ -75,7 +76,7 @@ pub(super) fn paint(
     timing: &mut crate::measure::Board,
     child_hits: &mut Vec<(Rect, Command)>,
 ) -> Rect {
-    let ink = color(column, theme);
+    let ink = color(column, theme).gamma_multiply(if backed { 1.0 } else { 0.45 });
     let age = since.map(|at| Instant::now().saturating_duration_since(at));
     let warmth = age.map(heat).unwrap_or(Heat::Normal);
     let background = match warmth {
@@ -135,6 +136,9 @@ pub(super) fn paint(
                     crate::panel::attention_symbol(attention.class)
                 ),
             );
+        }
+        if column == Column::Wait && !backed {
+            ui.weak("Waiting state is unconfirmed");
         }
         let compact = matches!(column, Column::Done | Column::Idle) && !reader.opened;
         if entry.snapshot.outside {

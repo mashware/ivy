@@ -198,6 +198,19 @@ pub(super) fn paint(window: &mut Window, parent: &mut egui::Ui, area: Rect, sect
                                     ui.weak("—");
                                 }
                                 for (row, entry) in entries.into_iter().enumerate() {
+                                    let signal = window
+                                        .all_panes()
+                                        .find(|p| p.name == entry.pane)
+                                        .and_then(|p| p.signals.view(Instant::now()));
+                                    let panel_wait =
+                                        entry.snapshot.document.as_ref().and_then(|p| p.attention)
+                                            == Some(panel_contract::Attention::Wait)
+                                            && !signal.is_some_and(|s| s.busy);
+                                    let backed = if *c == Column::Wait && !panel_wait {
+                                        signal.is_some_and(|s| s.backed)
+                                    } else {
+                                        entry.snapshot.attention.is_none_or(|a| a.backed)
+                                    };
                                     let since = window.board.observations.since(entry.pane);
                                     let branch =
                                         window.board.branches.get(entry.pane).map(str::to_owned);
@@ -208,6 +221,7 @@ pub(super) fn paint(window: &mut Window, parent: &mut egui::Ui, area: Rect, sect
                                         ui,
                                         entry,
                                         *c,
+                                        backed,
                                         since,
                                         branch.as_deref(),
                                         selected,
