@@ -19,11 +19,14 @@
 //! `tiling` is the module that knows no console and no tab.
 
 mod chrome;
+mod feedback;
+mod indicator;
 mod interaction;
+mod layout;
 pub(crate) use chrome::{geometry, partition};
 
 use crate::painter::CellMetrics;
-use crate::{Window, WindowRequest, panel};
+use crate::{Window, WindowRequest};
 use eframe::egui;
 use std::time::{Instant, SystemTime};
 
@@ -52,7 +55,7 @@ pub(crate) struct TabBarOutcome {
 /// with the window builders in `lib.rs`'s test module. See that item's note.
 pub(crate) const TAB_BAR_MARGIN: f32 = 4.0;
 
-// Keep space for both an attention claim and a readable number beside the close target.
+// Retain the established close-target eligibility floor.
 const CLOSE_MIN_WIDTH: f32 = 65.0;
 
 /// Sets aside the bar's place at the top, and returns what is left to the consoles.
@@ -163,15 +166,8 @@ impl Window {
             return;
         }
         for which_tab in 0..self.tabs.len() {
-            let id = ui.id().with(("tab", which_tab));
-            if ui
-                .interact(
-                    tab_rect(tab_bar, which_tab, self.tabs.len()),
-                    id,
-                    egui::Sense::CLICK,
-                )
-                .clicked()
-            {
+            let id = feedback::id(ui, self.tabs[which_tab].name, "body");
+            if feedback::interact(ui, tab_rect(tab_bar, which_tab, self.tabs.len()), id).clicked() {
                 // **Through the same door as the keyboard, instead of writing `active` by hand.**
                 // They are the same transition, and having it in two places already cost a defect:
                 // the click did not ask for a frame, so with two quiet consoles —this milestone's
@@ -195,11 +191,7 @@ impl Window {
     /// The clip to the card is what holds up the equal-shares tiling with no scrolling: when the
     /// number stops fitting it is cut off inside its own card instead of invading the neighbor's.
     ///
-    /// **And each card says whether that tab claims you**, with the same symbol and the same color
-    /// as the panel of the pane that claims it. **The symbol goes flush left and the number stays
-    /// where it was**: centring the two together would move the number every time a producer
-    /// publishes or stops publishing, and a card whose number dances reads worse than one with a
-    /// gap on the left.
+    /// Status marks are drawn independently of the text font, with their own slot and gap.
     ///
     /// **A single clock for all the cards**, passed in from outside. It is not the same one as the
     /// panels' —each pane takes its own when it is painted, and the background ones share another—,
@@ -267,43 +259,61 @@ fn paint_cards(
                     },
                     window.theme.chrome_surface(),
                 );
-                let underline = egui::Rect::from_min_max(
-                    egui::pos2(
-                        tab_area.left(),
-                        (tab_area.bottom() - 2.0).max(tab_area.top()),
-                    ),
-                    tab_area.right_bottom(),
-                );
-                painter.rect_filled(underline, 0.0, window.theme.focus());
             } else {
                 painter.rect_filled(tab_area, 0.0, window.theme.focus());
             }
         }
 
-        let can_close = window.tabs.len() > 1 && tab_area.width() >= CLOSE_MIN_WIDTH;
-        let label_painter = if window.chrome.enabled() {
-            painter.with_clip_rect(egui::Rect::from_min_max(
-                tab_area.min,
-                egui::pos2(
-                    (tab_area.right() - if can_close { 25.0 } else { 0.0 }).max(tab_area.left()),
-                    tab_area.bottom(),
-                ),
-            ))
+        let size = if window.chrome.enabled() {
+            window.chrome.title_sizes.tab_size()
         } else {
+            metrics.font().size
+        };
+        let layout = layout::Layout::new(
+            tab_area,
+            size,
+            attention.is_some(),
+            window.chrome.enabled() && window.tabs.len() > 1,
+        );
+        feedback::paint(
+            ui,
+            &painter,
+            layout.body,
+            feedback::id(ui, window.tabs[which_tab].name, "body"),
+            window.theme.foreground(),
+            is_the_active_one,
+        );
+        if let Some(close) = layout.close {
+            feedback::paint(
+                ui,
+                &painter,
+                close,
+                feedback::id(ui, window.tabs[which_tab].name, "close"),
+                window.theme.foreground(),
+                false,
+            );
+        }
+        if is_the_active_one && window.chrome.enabled() {
+            let underline = egui::Rect::from_min_max(
+                egui::pos2(
+                    tab_area.left(),
+                    (tab_area.bottom() - 2.0).max(tab_area.top()),
+                ),
+                tab_area.right_bottom(),
+            );
+            painter.rect_filled(underline, 0.0, window.theme.focus());
+        }
+        let label_painter = if !window.chrome.enabled() && attention.is_none() {
             painter.clone()
+        } else {
+            painter.with_clip_rect(layout.label)
         };
         crate::header::title_text::paint(
             &label_painter,
             if window.chrome.enabled() {
-                tab_area.left_center()
-                    + egui::vec2(
-                        if tab_area.width() < 90.0 && attention.is_none() {
-                            4.0
-                        } else {
-                            25.0
-                        },
-                        0.0,
-                    )
+                layout.label.left_center()
+            } else if attention.is_some() {
+                layout.label.center()
             } else {
                 tab_area.center()
             },
@@ -335,9 +345,9 @@ fn paint_cards(
                 window.theme.foreground()
             },
         );
-        if window.chrome.enabled() && window.tabs.len() > 1 && tab_area.width() >= CLOSE_MIN_WIDTH {
+        if let Some(close) = layout.close {
             painter.text(
-                egui::pos2(tab_area.right() - 12.0, tab_area.center().y),
+                close.center(),
                 egui::Align2::CENTER_CENTER,
                 "×",
                 egui::FontId::proportional(16.0),
@@ -358,23 +368,18 @@ fn paint_cards(
             // else. What is changed is what lies behind.
             if is_the_active_one && !window.chrome.enabled() {
                 painter.rect_filled(
-                    egui::Rect::from_min_size(
-                        tab_area.left_top(),
-                        egui::vec2(2.0 * TAB_BAR_MARGIN + metrics.width(), tab_area.height()),
+                    egui::Rect::from_min_max(
+                        tab_area.min,
+                        egui::pos2(layout.indicator.right() + 4.0, tab_area.bottom()),
                     ),
                     0.0,
                     window.theme.background(),
                 );
             }
-            painter.text(
-                egui::pos2(tab_area.left() + TAB_BAR_MARGIN, tab_area.center().y),
-                egui::Align2::LEFT_CENTER,
-                panel::attention_symbol(attention.class),
-                if window.chrome.enabled() {
-                    egui::FontId::proportional(12.0)
-                } else {
-                    metrics.font()
-                },
+            indicator::paint(
+                &painter,
+                layout.indicator,
+                attention.class,
                 window
                     .theme
                     .attention_color(attention.class, attention.backed),
@@ -386,6 +391,14 @@ fn paint_cards(
     if window.chrome.enabled() && !window.tabs.is_empty() {
         let add = add_tab_rect(tab_bar, window.tabs.len());
         if add.width() >= 20.0 {
+            feedback::paint(
+                ui,
+                &ui.painter_at(tab_bar),
+                add,
+                ui.id().with("compact-tab-add"),
+                window.theme.foreground(),
+                false,
+            );
             ui.painter_at(tab_bar).text(
                 add.center(),
                 egui::Align2::CENTER_CENTER,
