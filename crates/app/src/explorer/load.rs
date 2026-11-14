@@ -2,7 +2,7 @@ use eframe::egui;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
+use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
@@ -120,6 +120,8 @@ struct Job {
     ctx: egui::Context,
 }
 
+type Reader = Arc<dyn Fn(&Path, &dyn Fn() -> bool) -> Result<Listing, String> + Send + Sync>;
+
 type Mailbox = Arc<(Mutex<Option<Job>>, Condvar)>;
 
 /// A single detached worker with one replaceable queued request and one result slot.
@@ -139,9 +141,7 @@ impl Default for Loader {
 }
 
 impl Loader {
-    fn new_with_reader(
-        reader: Arc<dyn Fn(&Path, &dyn Fn() -> bool) -> Result<Listing, String> + Send + Sync>,
-    ) -> Self {
+    fn new_with_reader(reader: Reader) -> Self {
         let mailbox: Mailbox = Arc::new((Mutex::new(None), Condvar::new()));
         let (result_tx, result_rx) = mpsc::sync_channel(1);
         let shutdown = Arc::new(AtomicBool::new(false));
@@ -195,10 +195,7 @@ impl Loader {
             self.current = None;
             return self.startup_reply.take();
         }
-        match self.result_rx.try_recv() {
-            Ok(reply) => Some(reply),
-            Err(TryRecvError::Empty | TryRecvError::Disconnected) => None,
-        }
+        self.result_rx.try_recv().ok()
     }
 
     pub(crate) fn cancel(&mut self) {
@@ -207,10 +204,10 @@ impl Loader {
         }
         self.startup_reply = None;
         let (lock, _) = &*self.mailbox;
-        if let Ok(mut slot) = lock.lock() {
-            if let Some(job) = slot.take() {
-                job.cancelled.store(true, Ordering::Release);
-            }
+        if let Ok(mut slot) = lock.lock()
+            && let Some(job) = slot.take()
+        {
+            job.cancelled.store(true, Ordering::Release);
         }
     }
 }
@@ -227,7 +224,7 @@ fn spawn_worker(
     mailbox: Mailbox,
     result_tx: SyncSender<Reply>,
     shutdown: Arc<AtomicBool>,
-    reader: Arc<dyn Fn(&Path, &dyn Fn() -> bool) -> Result<Listing, String> + Send + Sync>,
+    reader: Reader,
 ) -> Result<(), std::io::Error> {
     thread::Builder::new()
         .name("explorer-loader".into())
@@ -338,9 +335,14 @@ mod tests {
     #[test]
     fn rejects_the_4097th_entry_and_cancellation() {
         let temp = TempDir::new();
-        for index in 0..=ENTRY_LIMIT {
+        for index in 0..ENTRY_LIMIT {
             fs::write(temp.0.join(format!("{index:04}")), b"").unwrap();
         }
+        assert_eq!(
+            read_directory(&temp.0, || false).unwrap().entries.len(),
+            ENTRY_LIMIT
+        );
+        fs::write(temp.0.join("overflow"), b"").unwrap();
         assert_eq!(
             read_directory(&temp.0, || false).unwrap_err(),
             limit_error()
@@ -393,10 +395,10 @@ mod tests {
         let release_rx = Mutex::new(Some(release_rx));
         let reader = Arc::new(move |_path: &Path, _cancelled: &dyn Fn() -> bool| {
             started_tx.send(()).unwrap();
-            if let Ok(mut slot) = release_rx.lock() {
-                if let Some(receiver) = slot.take() {
-                    let _ = receiver.recv();
-                }
+            if let Ok(mut slot) = release_rx.lock()
+                && let Some(receiver) = slot.take()
+            {
+                let _ = receiver.recv();
             }
             Ok(Listing {
                 entries: Vec::new(),
@@ -406,10 +408,18 @@ mod tests {
         let mut loader = Loader::new_with_reader(reader);
         loader.submit(request(PathBuf::from("ignored")), &egui::Context::default());
         started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-        let start = Instant::now();
-        drop(loader);
-        assert!(start.elapsed() < Duration::from_millis(100));
+        let (dropped_tx, dropped_rx) = mpsc::sync_channel(1);
+        let dropper = thread::spawn(move || {
+            drop(loader);
+            let _ = dropped_tx.send(());
+        });
+        let dropped_before_release = dropped_rx.recv_timeout(Duration::from_secs(2)).is_ok();
         let _ = release_tx.send(());
+        dropper.join().unwrap();
+        assert!(
+            dropped_before_release,
+            "drop waited for the blocked filesystem read"
+        );
     }
 
     #[test]
@@ -422,10 +432,10 @@ mod tests {
             move |path: &Path, cancelled: &dyn Fn() -> bool| {
                 if path == Path::new("first") {
                     started_tx.send(()).unwrap();
-                    if let Ok(mut slot) = gate.lock() {
-                        if let Some(receiver) = slot.take() {
-                            let _ = receiver.recv();
-                        }
+                    if let Ok(mut slot) = gate.lock()
+                        && let Some(receiver) = slot.take()
+                    {
+                        let _ = receiver.recv();
                     }
                 }
                 if cancelled() {

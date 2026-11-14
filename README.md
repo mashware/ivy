@@ -37,6 +37,7 @@ still a regular terminal.
 | **A panel for each task** | Read the current step, notes, blockers and any other information its producer publishes. Resize or fold the panel away. |
 | **Attention across the workspace** | Producers declare when they need you, are blocked or have finished. Tab indicators and Overview bring those claims together. |
 | **Actions and MCP** | Producers can offer buttons with visible commands. Connected agents can publish and update panels, and open auxiliary consoles. |
+| **Shared file explorer** | Browse files in a collapsible overlay, retain separate navigation for each console, and pin one console while working in another. |
 | **Markdown previews** | Ctrl-click a local Markdown path to read formatted plans and notes in a floating viewer that updates on save. |
 | **Git review beside the work** | Open a console's repository, compare changes in unified or side-by-side mode, and send reviewed comments back to that console. |
 | **Everyday terminal controls** | Copy and paste, scrollback search, text selection, clickable web links and mouse support for terminal programs. |
@@ -330,3 +331,31 @@ See [COPYRIGHT](COPYRIGHT) for authorship and [LICENSE](LICENSE) for the complet
 
 Third-party dependencies and bundled assets retain their own licenses. See
 [third-party notices](THIRD-PARTY.md) for the vendored code, themes and test font included here.
+
+## Browse a console's files
+
+Choose **Files** from the window menu to show the shared file explorer. It follows the active
+console and remembers that console's root, expanded folders, selected entry and scroll position.
+Different worktrees and even two consoles in the same directory keep separate navigation.
+**Pin this console** keeps its files visible while you type in another console or switch tabs;
+**Follow active pane** returns to following focus. Closing the pinned console returns to following.
+
+Use the triangles to expand folders, select a file with one click, and double-click or press Enter
+to enter a directory or preview a regular Markdown file. Other file types and symlinks can be
+selected and copied with **Copy path**; they are never executed. Arrow keys navigate the tree.
+The Markdown viewer keeps its existing guard against changing documents with unsent review comments.
+
+**Up** changes the explorer root, **Refresh** reloads it, and **Use console directory** resets it
+to the console's latest known local directory. Browsing never changes the running program's working
+directory. Later console directory changes leave the saved tree intact. Unknown or remote console
+directories show an unavailable message. Missing directories and listing failures are shown explicitly.
+
+The overlay leaves console dimensions unchanged; drag its right edge to adjust its width. Below
+560 points it uses the full console content width. **Hide** or Escape preserves navigation and pin
+state. Clicking outside transfers keyboard input back to the console. Navigation is kept only while
+Ivy is running; restarting starts with Files hidden and fresh navigation from restored console directories.
+
+Listings load on one background worker. A directory above 4096 entries or 4 MiB of paths is refused
+with an explanation. The window caches up to 32 listings / 16 MiB and displays up to 8192 tree rows;
+open a directory as the root or collapse folders to reach more entries. A stalled local filesystem
+can delay further listings, but the explorer can still be hidden and consoles remain responsive.
