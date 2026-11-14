@@ -293,6 +293,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../../panel-control/src/session/tests.rs"),
     ),
     (
+        "panel-control/tests/inherited_directory.rs",
+        include_str!("../../panel-control/tests/inherited_directory.rs"),
+    ),
+    (
         "panel-control/tests/session_helper.rs",
         include_str!("../../panel-control/tests/session_helper.rs"),
     ),
