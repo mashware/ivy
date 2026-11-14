@@ -794,6 +794,58 @@ mod tests {
                 .all(|p| p[0].x < p[1].x && (p[0].y - p[1].y).abs() < 1.0),
             "active milestones must share one row: {titles:?}"
         );
+        let text_edge = |needle: &str, end: bool| {
+            expanded
+                .iter()
+                .find_map(|s| match &s.shape {
+                    egui::Shape::Text(t) => {
+                        if end && t.galley.text() != needle {
+                            return None;
+                        }
+                        let start = t.galley.text().find(needle)?;
+                        let cursor = t.galley.text()[..start].chars().count()
+                            + if end { needle.chars().count() } else { 0 };
+                        Some(
+                            t.pos.x
+                                + t.galley
+                                    .pos_from_cursor(egui::text::CCursor::new(cursor))
+                                    .left(),
+                        )
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("missing {needle}"))
+        };
+        for (id, title) in [
+            ("M1", "Bandeja multi-perfil"),
+            ("M2", "Facturación en Stripe v3"),
+            ("M3", "Informes"),
+        ] {
+            let gap = text_edge(title, false) - text_edge(id, true);
+            assert!(
+                (4.0..=12.0).contains(&gap),
+                "{id} title separated from its ID by {gap}"
+            );
+        }
+        for items in [
+            vec![
+                "Bandeja y búsqueda por perfil",
+                "Página de ajustes",
+                "Notificaciones sin duplicados",
+            ],
+            vec!["Pruebas en sandbox", "Corte en producción"],
+            vec![
+                "Exportar a CSV",
+                "Gráficas de actividad",
+                "Informes programados por email",
+            ],
+        ] {
+            let lefts: Vec<_> = items.iter().map(|text| text_edge(text, false)).collect();
+            assert!(
+                lefts.windows(2).all(|p| (p[0] - p[1]).abs() < 0.5),
+                "deliverable left edges differ: {items:?} {lefts:?}"
+            );
+        }
         let card_widths: Vec<_> = titles
             .iter()
             .map(|at| {

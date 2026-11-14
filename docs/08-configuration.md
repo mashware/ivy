@@ -599,7 +599,7 @@ visible without an open console. Without a plan, producer section headings and s
 a clearly labelled fallback. Plain-string plan items retain their text and count toward totals.
 
 The card's **Go to console** label names its navigation behavior. Click a card, or move with the
-arrows and press Enter, to open its console. The branch is aligned to the right of its footer.
+arrows and press Enter, to open its console. The branch and its icon are aligned to the left of its footer.
 Waiting is yellow, Stuck orange/red, Working blue and Finished green. Left/Right follow reading
 order, Up/Down the grid, and Home/End the first/last card; selection reveals the required position in
 both scroll axes. A card's fold, expansion or disclosed HTTP(S) link performs that reader action

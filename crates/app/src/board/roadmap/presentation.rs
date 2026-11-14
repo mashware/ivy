@@ -57,7 +57,11 @@ pub(super) fn paint_project_contents(
                 ui.add_space(offset);
                 if let Some((total, projects)) = surface.board_totals {
                     ui.heading("Board");
-                    ui.weak(format!("{total} consoles · {projects} projects"));
+                    ui.weak(format!(
+                        "{total} console{} · {projects} project{}",
+                        if total == 1 { "" } else { "s" },
+                        if projects == 1 { "" } else { "s" }
+                    ));
                 } else {
                     ui.label(
                         egui::RichText::new(crate::board::cards::clean(section.name()))
@@ -331,29 +335,62 @@ fn paint_milestone(
                 ui.set_width(ui.available_width());
                 let (d, n) = progress(m);
                 ui.horizontal(|ui| {
-                    if let Some(id) = &m.id {
-                        ui.strong(crate::board::cards::clean(id));
-                    }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.weak(format!("{d}/{n}"));
-                        crate::board::style::progress(ui, d, n, 60.0, theme);
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(crate::board::cards::clean(&m.title)).strong(),
-                            )
-                            .truncate()
-                            .halign(egui::Align::Min),
-                        )
-                        .on_hover_text(if m.depends_on.is_empty() {
-                            crate::board::cards::clean(&m.title)
-                        } else {
-                            format!(
-                                "{}\nDepends on: {}",
-                                crate::board::cards::clean(&m.title),
-                                crate::board::cards::clean(&m.depends_on.join(", "))
-                            )
-                        });
+                    let available = ui.available_width();
+                    let ratio = format!("{d}/{n}");
+                    let measure = |text: String| {
+                        ui.painter()
+                            .layout_no_wrap(text, egui::FontId::monospace(12.0), theme.foreground())
+                            .size()
+                            .x
+                    };
+                    let ratio_width = measure(ratio.clone()).min(available * 0.15);
+                    let track_width = 60.0_f32.min(available * 0.2);
+                    let id_width = m.id.as_ref().map_or(0.0, |id| {
+                        measure(crate::board::cards::clean(id)).min(available * 0.2)
                     });
+                    let gaps = ui.spacing().item_spacing.x * if m.id.is_some() { 3.0 } else { 2.0 };
+                    let title_width =
+                        (available - id_width - ratio_width - track_width - gaps).max(1.0);
+                    if let Some(id) = &m.id {
+                        ui.add_sized(
+                            egui::vec2(id_width, 18.0),
+                            egui::Label::new(
+                                egui::RichText::new(crate::board::cards::clean(id)).strong(),
+                            )
+                            .truncate(),
+                        )
+                        .on_hover_text(crate::board::cards::clean(id));
+                    }
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(title_width, 18.0),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.set_min_width(title_width);
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(crate::board::cards::clean(&m.title))
+                                        .strong(),
+                                )
+                                .truncate(),
+                            )
+                            .on_hover_text(
+                                if m.depends_on.is_empty() {
+                                    crate::board::cards::clean(&m.title)
+                                } else {
+                                    format!(
+                                        "{}\nDepends on: {}",
+                                        crate::board::cards::clean(&m.title),
+                                        crate::board::cards::clean(&m.depends_on.join(", "))
+                                    )
+                                },
+                            );
+                        },
+                    );
+                    crate::board::style::progress(ui, d, n, track_width, theme);
+                    ui.add_sized(
+                        egui::vec2(ratio_width, 18.0),
+                        egui::Label::new(egui::RichText::new(ratio).weak()).truncate(),
+                    );
                 });
                 if let Some(done_when) = &m.done_when {
                     ui.small(format!(
@@ -437,19 +474,23 @@ fn paint_milestone(
                             mark_color,
                             egui::FontId::monospace(12.0),
                         );
-                        ui.add_sized(
+                        ui.allocate_ui_with_layout(
                             egui::vec2(text_width, 0.0),
-                            egui::Label::new(
-                                egui::RichText::new(crate::board::cards::clean(&item.text)).color(
-                                    if item.mark == Some(Mark::Done) {
-                                        crate::board::style::dim(theme)
-                                    } else {
-                                        theme.foreground()
-                                    },
-                                ),
-                            )
-                            .wrap()
-                            .halign(egui::Align::Min),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                ui.set_min_width(text_width);
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(crate::board::cards::clean(&item.text))
+                                            .color(if item.mark == Some(Mark::Done) {
+                                                crate::board::style::dim(theme)
+                                            } else {
+                                                theme.foreground()
+                                            }),
+                                    )
+                                    .wrap(),
+                                );
+                            },
                         );
                         if let Some(reference) = &reference {
                             ui.add_sized(

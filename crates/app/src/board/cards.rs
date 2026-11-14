@@ -232,36 +232,42 @@ pub(super) fn paint(
         if branch.is_some() || doc.is_none() || has_toggle {
             ui.separator();
             ui.horizontal(|ui| {
-                if has_toggle {
-                    let r = ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(if compact { "Show panel" } else { "Hide panel" })
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if has_toggle {
+                        let r = ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(if compact {
+                                    "Show panel"
+                                } else {
+                                    "Hide panel"
+                                })
                                 .size(11.0)
                                 .color(theme.focus()),
-                        )
-                        .sense(egui::Sense::hover()),
-                    );
-                    if ui.clip_rect().contains_rect(r.rect) {
-                        child_hits.push((r.rect, Command::Compact(entry.pane)));
+                            )
+                            .sense(egui::Sense::hover()),
+                        );
+                        if ui.clip_rect().contains_rect(r.rect) {
+                            child_hits.push((r.rect, Command::Compact(entry.pane)));
+                        }
                     }
-                }
-                let (rect, _) = ui.allocate_exact_size(
-                    egui::vec2(ui.available_width(), 18.0),
-                    egui::Sense::hover(),
-                );
-                if let Some(branch) = branch {
-                    super::style::branch(ui, rect, &clean(branch), theme);
-                } else if doc.is_none() {
-                    ui.put(
-                        rect,
-                        egui::Label::new(
-                            egui::RichText::new("publishes nothing")
-                                .size(11.0)
-                                .color(super::style::dim(theme)),
-                        )
-                        .halign(egui::Align::Max),
+                    let (rect, _) = ui.allocate_exact_size(
+                        egui::vec2(ui.available_width(), 18.0),
+                        egui::Sense::hover(),
                     );
-                }
+                    if let Some(branch) = branch {
+                        super::style::branch(ui, rect, &clean(branch), theme);
+                    } else if doc.is_none() {
+                        ui.put(
+                            rect,
+                            egui::Label::new(
+                                egui::RichText::new("publishes nothing")
+                                    .size(11.0)
+                                    .color(super::style::dim(theme)),
+                            )
+                            .halign(egui::Align::Max),
+                        );
+                    }
+                });
             });
         }
     });

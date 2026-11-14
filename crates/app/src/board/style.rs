@@ -165,8 +165,7 @@ pub(super) fn branch(ui: &mut egui::Ui, rect: egui::Rect, name: &str, theme: &Th
     job.wrap.max_rows = 1;
     job.wrap.break_anywhere = true;
     let galley = ui.painter().layout_job(job);
-    let width = galley.size().x;
-    let x = (rect.right() - width - 14.0).max(rect.left() + 4.0);
+    let x = rect.left() + 4.0;
     let y = rect.center().y;
     let stroke = egui::Stroke::new(1.0, ink);
     ui.painter()
@@ -183,10 +182,7 @@ pub(super) fn branch(ui: &mut egui::Ui, rect: egui::Rect, name: &str, theme: &Th
         ui.painter().circle_stroke(point, 1.5, stroke);
     }
     ui.painter().galley(
-        egui::pos2(
-            rect.right() - width,
-            rect.center().y - galley.size().y / 2.0,
-        ),
+        egui::pos2(rect.left() + 18.0, rect.center().y - galley.size().y / 2.0),
         galley,
         ink,
     );
