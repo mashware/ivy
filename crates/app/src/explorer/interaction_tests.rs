@@ -263,7 +263,7 @@ fn files_menu_pins_and_follows_across_tabs_without_leaking_input_or_retiling() {
     frame(&mut window, &ctx, area, vec![]);
     type_text(&mut window, &ctx, area, "outside-marker\n");
     let deadline = Instant::now() + std::time::Duration::from_secs(5);
-    while !marker.exists() {
+    while fs::read_to_string(&marker).unwrap_or_default() != "outside-marker\n" {
         assert!(
             Instant::now() < deadline,
             "outside click did not route input to B's PTY"
