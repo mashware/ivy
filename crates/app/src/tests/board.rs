@@ -514,7 +514,7 @@ mod tests {
         let tab = window.tabs[1].name;
         let hidden = window.tabs[1].panes()[1].name;
         let first = window.tabs[1].panes()[0].name;
-        window.pane_view.toggle(tab, first);
+        window.pane_view.toggle(tab, first, 2);
         let layout = window.tabs[1].root.describe();
         frame(&mut window, &ctx, vec![]);
         frame(&mut window, &ctx, chord_with(egui::Key::O));

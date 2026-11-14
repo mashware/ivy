@@ -232,7 +232,7 @@ pub(crate) fn pointer(
                     }
                     super::integrated::Target::Zoom => {
                         window.active_mut().focus = name;
-                        window.pane_view.toggle(tab, name);
+                        window.pane_view.toggle(tab, name, rects.len());
                         true
                     }
                     super::integrated::Target::Close => {
