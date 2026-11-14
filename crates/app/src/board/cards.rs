@@ -118,18 +118,24 @@ pub(super) fn paint(
             let title_width =
                 (available - phase_width - navigation_width - 2.0 * ui.spacing().item_spacing.x)
                     .max(1.0);
-            ui.add_sized(
+            ui.allocate_ui_with_layout(
                 egui::vec2(title_width, 20.0),
-                egui::Label::new(egui::RichText::new(clean(title(entry))).size(13.0).strong())
-                    .truncate()
-                    .halign(egui::Align::Min),
-            )
-            .on_hover_text(format!(
-                "{}\n{} · {}",
-                clean(title(entry)),
-                clean(&entry.console_label),
-                clean(&entry.tab_label)
-            ));
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(clean(title(entry))).size(13.0).strong(),
+                        )
+                        .truncate(),
+                    )
+                    .on_hover_text(format!(
+                        "{}\n{} · {}",
+                        clean(title(entry)),
+                        clean(&entry.console_label),
+                        clean(&entry.tab_label)
+                    ));
+                },
+            );
             if let Some(phase) = phase {
                 ui.add_sized(
                     egui::vec2(phase_width, 20.0),
@@ -298,6 +304,59 @@ pub(super) fn age_refresh(since: Option<Instant>, now: Instant) -> Option<Durati
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn short_and_long_titles_start_at_the_same_left_padding() {
+        let mut offsets = Vec::new();
+        for title in [
+            "[DEMO] Export CSV",
+            "[DEMO] A much longer title that must be truncated within the card",
+        ] {
+            let ctx = egui::Context::default();
+            let entry = Entry {
+                pane: 1, console_label:"Console".into(), tab_label:"Tab".into(),
+                snapshot: crate::panel::summary::Snapshot {
+                    document:Some(std::sync::Arc::new(panel_contract::parse_document(&serde_json::json!({"phase":"design","lines":[{"text":title,"style":"title"}]}).to_string()).unwrap())),
+                    warning:None,attention:None,outside:false,
+                },
+            };
+            let mut card = Rect::NOTHING;
+            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                ui.set_width(400.0);
+                super::super::style::apply(ui, &Theme::default());
+                card = paint(
+                    ui,
+                    &entry,
+                    Column::Wait,
+                    true,
+                    None,
+                    Some("main"),
+                    false,
+                    &mut Reader::default(),
+                    &mut crate::fonts::Discoverer::default(),
+                    &Theme::default(),
+                    &mut crate::measure::Board::default(),
+                    &mut Vec::new(),
+                );
+            });
+            let start = output
+                .shapes
+                .iter()
+                .find_map(|s| match &s.shape {
+                    egui::Shape::Text(t) if t.galley.text() == title => {
+                        Some(t.pos.x + t.galley.pos_from_cursor(egui::text::CCursor::new(0)).left())
+                    }
+                    _ => None,
+                })
+                .expect("card title painted");
+            offsets.push(start - card.left());
+            output.drop_without_applying_deltas();
+        }
+        assert!(
+            (offsets[0] - offsets[1]).abs() < 0.5,
+            "short/long title left offsets differ: {offsets:?}"
+        );
+    }
+
     #[test]
     fn long_phases_and_navigation_fit_the_narrow_finished_and_idle_columns() {
         let widths = super::super::layout::column_widths(1344.0, 8.0);

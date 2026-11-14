@@ -135,6 +135,33 @@ mod tests {
     }
 
     #[test]
+    fn exact_reference_mr_link_click_reaches_the_desktop() {
+        let mut window = window_with("sleep 30", "sleep 30");
+        prepare(&mut window);
+        window.desktop = crate::links::Desktop::Recorded(Vec::new());
+        let ctx = egui::Context::default();
+        let pane = &mut *window.active_mut().panes_mut()[0];
+        let target = pane.name;
+        pane.panel = Some(PanelDir::create().unwrap());
+        let doc = include_str!("../../tests/fixtures/board-reference/t2g.panel.json").replace(
+            "https://github.com/example/app/pull/62",
+            "https://github.com",
+        );
+        publish_at(pane, &doc);
+        pane.to_reread.raise();
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
+        let shapes = frame(&mut window, &ctx, vec![]);
+        let at = card_text(&window, &shapes, target, "github.com")
+            .expect("reference link label visible");
+        frame(&mut window, &ctx, click_at(at));
+        assert!(window.board.is_open());
+        match &window.desktop {
+            crate::links::Desktop::Recorded(opened) => assert_eq!(opened, &["https://github.com/"]),
+            _ => panic!("test desktop changed"),
+        }
+    }
+
+    #[test]
     fn columns_are_painted_in_order_and_hold_the_explicit_states() {
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 3]);
         prepare(&mut window);
