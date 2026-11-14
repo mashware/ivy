@@ -200,14 +200,12 @@ fn publish_cli_rejects_invalid_identity_and_bad_input_before_connect() {
         .arg("publish")
         .env_remove("PANEL_DIR")
         .env_remove("PANEL_ID")
-        .stdin(Stdio::piped())
+        // Invalid identity exits before input; writing to that completed child races its exit.
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()
+        .output()
         .unwrap();
-    let mut child = output;
-    child.stdin.take().unwrap().write_all(b"not json").unwrap();
-    let output = child.wait_with_output().unwrap();
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(output.stdout, b"{\"ok\":false,\"error\":\"outside_ivy\"}\n");
     assert!(output.stderr.is_empty());

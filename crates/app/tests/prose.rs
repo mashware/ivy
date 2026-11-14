@@ -76,6 +76,16 @@ use std::path::Path;
 /// entry down.
 const SOURCES: &[(&str, &str, usize)] = &[
     (
+        "src/board/style.rs",
+        include_str!("../src/board/style.rs"),
+        1,
+    ),
+    (
+        "src/board/roadmap/presentation.rs",
+        include_str!("../src/board/roadmap/presentation.rs"),
+        1,
+    ),
+    (
         "src/client_attestation/mod.rs",
         include_str!("../src/client_attestation/mod.rs"),
         0,
@@ -386,6 +396,27 @@ const SOURCES: &[(&str, &str, usize)] = &[
         1,
     ),
     ("src/board.rs", include_str!("../src/board.rs"), 1),
+    (
+        "src/board/branches.rs",
+        include_str!("../src/board/branches.rs"),
+        3,
+    ),
+    (
+        "src/board/cards.rs",
+        include_str!("../src/board/cards.rs"),
+        1,
+    ),
+    (
+        "src/board/observation.rs",
+        include_str!("../src/board/observation.rs"),
+        1,
+    ),
+    ("src/panel/body.rs", include_str!("../src/panel/body.rs"), 1),
+    (
+        "src/tests/board_parity.rs",
+        include_str!("../src/tests/board_parity.rs"),
+        3,
+    ),
     (
         "src/board/input.rs",
         include_str!("../src/board/input.rs"),

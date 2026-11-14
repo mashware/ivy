@@ -41,6 +41,7 @@ pub(crate) struct View {
     pub client: Client,
     pub busy: bool,
     pub waiting: bool,
+    pub done: bool,
     pub backed: bool,
 }
 struct Declaration {
@@ -56,14 +57,21 @@ struct Reporter {
 pub(crate) struct Signals {
     enabled: Enabled,
     generation: u64,
+    incarnation: u64,
     capability_pending: bool,
     native: Option<Declaration>,
     reporter: Option<Reporter>,
 }
 impl Signals {
+    pub(crate) fn incarnation(&self) -> u64 {
+        self.incarnation
+    }
+
     pub(crate) fn reset_for_new_shell(&mut self, screen: &mut Screen) {
         let enabled = self.enabled;
+        let incarnation = self.incarnation.wrapping_add(1);
         *self = Self::default();
+        self.incarnation = incarnation;
         self.configure(enabled, screen);
     }
 
@@ -105,6 +113,7 @@ impl Signals {
                             busy: snapshot.state == ProgramState::Working,
                             waiting: snapshot.state == ProgramState::Blocked
                                 && snapshot.kind.is_some(),
+                            done: snapshot.state == ProgramState::Done,
                             backed: true,
                         },
                         at: now,
@@ -165,6 +174,7 @@ impl Signals {
                             client: Client::OpenCode,
                             busy: snapshot.activity == Activity::Busy,
                             waiting: snapshot.permission || snapshot.question,
+                            done: false,
                             backed: true,
                         },
                         at: now,
@@ -199,6 +209,7 @@ impl Signals {
                 connected && s.view.backed && now.saturating_duration_since(s.at) < STALE_AFTER;
             View {
                 busy: backed && s.view.busy,
+                done: backed && s.view.done,
                 backed,
                 ..s.view
             }
@@ -232,5 +243,28 @@ impl crate::Pane {
         self.panel_state
             .attention(now)
             .max(self.signals.attention(Instant::now()))
+    }
+}
+
+#[cfg(test)]
+mod done_tests {
+    use super::*;
+
+    #[test]
+    fn native_done_is_visible_only_while_backed_and_fresh() {
+        let now = Instant::now();
+        let mut screen = Screen::new(term_core::Size { rows: 4, cols: 40 });
+        let mut signals = Signals::default();
+        signals.configure(
+            Enabled {
+                codex: true,
+                ..Enabled::default()
+            },
+            &mut screen,
+        );
+        screen.advance(b"\x1b]7501;state=done:app=codex\x1b\\");
+        signals.sync_native(&mut screen, now);
+        assert!(signals.view(now).unwrap().done);
+        assert!(!signals.view(now + STALE_AFTER).unwrap().done);
     }
 }

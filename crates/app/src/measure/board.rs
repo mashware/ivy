@@ -5,6 +5,15 @@ use std::{io::Write, time::Duration};
 #[derive(Default)]
 pub(crate) struct Board {
     mode: Option<bool>,
+    observation: Series,
+    observation_total: Duration,
+    content_layout: Series,
+    content_paint: Series,
+    observed: usize,
+    transitions: usize,
+    content_rows: usize,
+    expansions: usize,
+    folds: usize,
     plan_projection: Series,
     plan_paint: Series,
     cost: Duration,
@@ -24,6 +33,28 @@ pub(crate) struct Board {
 }
 
 impl Board {
+    pub(crate) fn observation(&mut self, cost: Duration, panes: usize, transitions: usize) {
+        self.observation.record(cost);
+        self.observation_total += cost;
+        self.cost += cost;
+        self.observed += panes;
+        self.transitions += transitions;
+    }
+    pub(crate) fn content_layout(&mut self, cost: Duration) {
+        self.content_layout.record(cost);
+    }
+    pub(crate) fn content_paint(&mut self, cost: Duration) {
+        self.content_paint.record(cost);
+    }
+    pub(crate) fn content_rows(&mut self, rows: usize) {
+        self.content_rows += rows;
+    }
+    pub(crate) fn expanded(&mut self) {
+        self.expansions += 1;
+    }
+    pub(crate) fn folded(&mut self) {
+        self.folds += 1;
+    }
     pub(crate) fn plan_projection(&mut self, cost: Duration) {
         self.plan_projection.record(cost);
     }
@@ -93,6 +124,26 @@ impl Board {
         )?;
         writeln!(
             to,
+            "board observation: total={:?}, {} (subtracted once)",
+            self.observation_total, self.observation
+        )?;
+        writeln!(
+            to,
+            "board content layout: {} (included in board application, subtracted once)",
+            self.content_layout
+        )?;
+        writeln!(
+            to,
+            "board content paint enqueue: {} (included in board application, subtracted once)",
+            self.content_paint
+        )?;
+        writeln!(
+            to,
+            "board content witnesses: observed={}, transitions={}, rows={}, expansions={}, folds={}",
+            self.observed, self.transitions, self.content_rows, self.expansions, self.folds
+        )?;
+        writeln!(
+            to,
             "board application: frames={}, total={:?}, {} (input, projection and paint enqueue; excludes pane refresh and tessellation)",
             self.work.total, self.total, self.work
         )?;
@@ -147,6 +198,27 @@ mod tests {
             timing.work.total, 2,
             "sub-clock work is still one actual frame"
         );
+    }
+
+    #[test]
+    fn observation_is_drained_once_and_nested_content_is_not_subtracted() {
+        let mut timing = Board::default();
+        timing.observation(Duration::from_micros(3), 4, 2);
+        timing.record_work(Duration::from_micros(7));
+        timing.content_layout(Duration::from_micros(2));
+        timing.content_paint(Duration::from_micros(1));
+        assert_eq!(timing.take_cost(), Duration::from_micros(10));
+        assert_eq!(timing.take_cost(), Duration::ZERO);
+        timing.close_frame();
+        let mut report = Vec::new();
+        timing.publish(&mut report).unwrap();
+        let report = String::from_utf8(report).unwrap();
+        assert!(report.contains("board observation: total=3µs"), "{report}");
+        assert!(
+            report.contains("board application: frames=1, total=7µs"),
+            "{report}"
+        );
+        assert!(report.contains("observed=4, transitions=2"), "{report}");
     }
 
     #[test]
