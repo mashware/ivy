@@ -149,12 +149,12 @@ test('private directory check precedes every connection and disposal cancels ret
 import {join} from 'node:path'
 import {lstatSync as realStat} from 'node:fs'
 import {EventEmitter} from 'node:events'
-export const state = {mode:0o700, uid:process.geteuid(), directory:true, missing:false, real:false, reads:[], connections:0, callbacks:0}
+export const state = {mode:0o700, uid:process.geteuid(), directory:true, missing:false, real:false, reads:[], connections:0, callbacks:0, endpoints:[]}
 export const timers = new Map(); let serial=0
 function setTimeout(callback, delay){const id=++serial;timers.set(id,{callback,delay});return id}
 function clearTimeout(id){timers.delete(id)}
 function lstatSync(path){state.reads.push(path);if(state.real)return realStat(path);if(state.missing)throw Error('gone');return {isDirectory:()=>state.directory,uid:state.uid,mode:state.mode}}
-function createConnection(){state.connections++;const socket=new EventEmitter();socket.end=()=>{};socket.write=()=>{};return socket}
+function createConnection(path){state.connections++;state.endpoints.push(path);const socket=new EventEmitter();socket.end=()=>{};socket.write=()=>{};return socket}
 ${channel}
 export function open(path){return channel(path,()=>{state.callbacks++})}
 `)
@@ -200,6 +200,14 @@ export function open(path){return channel(path,()=>{state.callbacks++})}
       assert.equal(state.connections, before+1, 'genuine private directory passes')
       genuine.close()
     }
+    // The kernel follows link before ..; path.join would connect to a different parent.
+    await mkdir(join(dir, 'private', 'child'), {recursive:true, mode:0o700})
+    await chmod(join(dir, 'private'), 0o700)
+    await symlink(join(dir, 'private', 'child'), join(dir, 'link'))
+    const original = dir + '/link/..'
+    const traversed = open(original)
+    assert.equal(state.endpoints.at(-1), original + '/control.sock', 'connect uses exactly the directory spelling that lstat checked')
+    traversed.close()
     await chmod(dir, 0o755)
     const before = state.connections, rejected = open(dir)
     assert.equal(state.connections, before)

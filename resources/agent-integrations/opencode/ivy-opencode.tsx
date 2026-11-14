@@ -1,7 +1,6 @@
 // OpenCode 1.18.31 TUI plugin. Only state metadata leaves this process.
 import { createEffect, createRoot, createSignal } from "solid-js"
 import { createConnection, type Socket } from "node:net"
-import { join } from "node:path"
 import { lstatSync } from "node:fs"
 
 const envelope = (snapshot: Snapshot | null) => JSON.stringify({ tool: "agent_signal", v: 1, client: "opencode", snapshot }) + "\n"
@@ -40,7 +39,7 @@ function channel(dir: string, connected: () => void) {
       retry = setTimeout(connect, 1000)
       return
     }
-    const current = createConnection(join(dir, "control.sock"))
+    const current = createConnection(`${dir}/control.sock`)
     socket = current
     reporterReady = false
     current.on("connect", () => { if (socket === current) connected() })
