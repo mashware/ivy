@@ -8,6 +8,7 @@ pub(super) fn handle(
     ui: &egui::Ui,
     tab_bar: egui::Rect,
     metrics: &CellMetrics,
+    blocked: bool,
 ) {
     let started = Instant::now();
     let count = window.tabs.len();
@@ -27,6 +28,7 @@ pub(super) fn handle(
                 )
                 .on_hover_text("Close tab")
                 .clicked()
+            && !blocked
         {
             window.chrome.record_work(started.elapsed());
             window.timed_separately += window.chrome.take_cost();
@@ -57,14 +59,14 @@ pub(super) fn handle(
                 egui::Sense::CLICK,
             )
             .on_hover_text("Double-click or right-click to rename tab");
-        if response.double_clicked() || response.secondary_clicked() {
+        if !blocked && (response.double_clicked() || response.secondary_clicked()) {
             let tab = &window.tabs[which_tab];
             let initial = tab
                 .label
                 .clone()
                 .unwrap_or_else(|| format!("Terminal {}", tab.name + 1));
             window.pane_view.begin_tab_rename(tab.name, initial);
-        } else if response.clicked() {
+        } else if response.clicked() && !blocked {
             window.chrome.record_work(started.elapsed());
             window.timed_separately += window.chrome.take_cost();
             window.apply(
@@ -83,6 +85,7 @@ pub(super) fn handle(
             .interact(add, ui.id().with("compact-tab-add"), egui::Sense::CLICK)
             .on_hover_text("New tab")
             .clicked()
+        && !blocked
     {
         window.chrome.record_work(started.elapsed());
         window.timed_separately += window.chrome.take_cost();

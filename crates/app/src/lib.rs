@@ -71,6 +71,7 @@ pub mod session;
 pub mod settings;
 mod shell_integration;
 use shell_integration::the_users_shell;
+mod explorer;
 mod startup;
 mod tab_bar;
 pub mod theme;
@@ -901,6 +902,7 @@ struct Window {
     clipboard: clipboard::Service,
     board: board::State,
     viewer: viewer::State,
+    explorer: explorer::Explorer,
     projects: project_view::State,
     restoration: restoration::State,
     /// The previous frame's mirror. **The deadline is armed against it**, so the deadline is
@@ -1393,7 +1395,12 @@ impl eframe::App for Window {
         let chrome_owned = chrome::before_keys(self, ui, &metrics);
         self.timed_separately += self.chrome.take_cost();
         board_owned |= board::blocked(self, ui.ctx());
-        let (viewer_owned, requests) = viewer::keys(self, ui, &metrics, pane_owned || board_owned);
+        let (viewer_owned, requests) = explorer::keys(
+            self,
+            ui,
+            &metrics,
+            pane_owned || board_owned || chrome_owned,
+        );
         let area = ui.max_rect();
 
         // **The order is applied before tiling**, so that what gets painted in this same frame is
@@ -1413,9 +1420,6 @@ impl eframe::App for Window {
         let overlay_owns_pointer = viewer_owned || board_owned || pane_owned || chrome_owned;
         let header_owns_pointer =
             overlay_owns_pointer || header::menu::pointer_blocked(self, ui.ctx());
-        if header_owns_pointer {
-            header::menu::block_pointer(ui, overlay_owns_pointer);
-        }
         let (tab_bar, area) = tab_bar::partition(self, area, &metrics);
 
         // **Everything that changes tab goes before tiling**, and this is what a defect cost: the
@@ -1424,8 +1428,11 @@ impl eframe::App for Window {
         // out of those rectangles comes `measured`, so the two pseudoterminals of the just-opened
         // tab were given a wrong grid and corrected it on the following frame — a double
         // readjustment, visible in any full-screen program.
-        if let Some(tab_bar) = tab_bar.filter(|_| !header_owns_pointer) {
-            self.handle_tab_bar_clicks(ui, tab_bar, &metrics);
+        if let Some(tab_bar) = tab_bar {
+            tab_bar::handle_clicks(self, ui, tab_bar, &metrics, header_owns_pointer);
+        }
+        if header_owns_pointer {
+            header::menu::block_pointer(ui, overlay_owns_pointer);
         }
 
         // **Walking the tree is timed, and it is not zeal: it is the instrument's rule.** The
@@ -6939,6 +6946,7 @@ mod tests {
             clipboard: clipboard::Service::default(),
             board: crate::board::State::default(),
             viewer: viewer::State::default(),
+            explorer: explorer::Explorer::default(),
             projects: project_view::State::default(),
             restoration: restoration::State::default(),
             link_press_in_progress: None,

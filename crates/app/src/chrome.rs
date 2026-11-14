@@ -99,7 +99,7 @@ mod traffic_lights;
 pub(crate) mod typography;
 mod updates;
 pub(crate) use branding::native_options;
-pub(crate) use connection::{after_panels, begin_pass, prepare};
+pub(crate) use connection::{begin_pass, prepare};
 
 #[derive(Clone, Copy)]
 enum Action {
@@ -113,6 +113,7 @@ enum Action {
     Menu,
     Preferences,
     Viewer(bool),
+    Files,
     Shortcuts,
     TogglePanel,
     Minimize,
@@ -424,6 +425,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         Some(
             Action::Search
                 | Action::Viewer(_)
+                | Action::Files
                 | Action::TogglePanel
                 | Action::Minimize
                 | Action::Maximize
@@ -465,6 +467,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
             window.settings_editor.open_from_chrome();
         }
         Some(Action::Shortcuts) => window.settings_editor.open_shortcuts_from_chrome(),
+        Some(Action::Files) => crate::explorer::toggle(window, &ctx),
         Some(Action::Viewer(markdown)) => crate::viewer::open(window, markdown),
         Some(Action::TogglePanel) => {
             let focus = window.active().focus;
@@ -526,6 +529,11 @@ fn resize_direction(area: Rect, p: egui::Pos2) -> Option<egui::ResizeDirection> 
         (_, _, _, true) => Some(East),
         _ => None,
     }
+}
+
+pub(crate) fn after_panels(window: &mut Window, ui: &mut egui::Ui, area: Rect) {
+    crate::explorer::show(window, ui, area);
+    connection::after_panels(window, ui, area);
 }
 
 #[cfg(test)]

@@ -39,6 +39,7 @@ pub(super) fn show(
         ("Toggle information panel", Action::TogglePanel, None, false),
         ("Preferences", Action::Preferences, None, true),
         ("Keyboard shortcuts", Action::Shortcuts, None, false),
+        ("Files", Action::Files, None, true),
         ("Markdown viewer", Action::Viewer(true), None, true),
         ("Git diff viewer", Action::Viewer(false), None, false),
         (
@@ -58,7 +59,7 @@ pub(super) fn show(
         ("Maximize window", Action::Maximize, None, false),
         ("Close window", Action::Close, None, false),
     ];
-    let menu_entries = &menu_entries[..if compact { 16 } else { 12 }];
+    let menu_entries = &menu_entries[..if compact { 17 } else { 13 }];
     let menu_height = 12.0
         + menu_entries.len() as f32 * 30.0
         + menu_entries.iter().filter(|entry| entry.3).count() as f32 * 9.0;

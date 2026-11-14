@@ -145,6 +145,43 @@ fn add_tab_rect(bar: egui::Rect, count: usize) -> egui::Rect {
     )
 }
 
+pub(crate) fn handle_clicks(
+    window: &mut Window,
+    ui: &egui::Ui,
+    tab_bar: egui::Rect,
+    metrics: &CellMetrics,
+    blocked: bool,
+) {
+    if window.chrome.enabled() {
+        interaction::handle(window, ui, tab_bar, metrics, blocked);
+        return;
+    }
+    for which_tab in 0..window.tabs.len() {
+        let id = ui.id().with(("tab", which_tab));
+        if ui
+            .interact(
+                tab_rect(tab_bar, which_tab, window.tabs.len()),
+                id,
+                egui::Sense::CLICK,
+            )
+            .clicked()
+            && !blocked
+        {
+            // **Through the same door as the keyboard, instead of writing `active` by hand.**
+            // They are the same transition, and having it in two places already cost a defect:
+            // the click did not ask for a frame, so with two quiet consoles —this milestone's
+            // case— the tab just shown was stuck with the start-up grid until input from
+            // something else arrived.
+            window.apply(
+                WindowRequest::Go(which_tab as isize - window.active as isize),
+                ui.ctx(),
+                ui.max_rect(),
+                metrics,
+            );
+        }
+    }
+}
+
 impl Window {
     /// Changes tab when a tab card is clicked.
     ///
@@ -152,39 +189,14 @@ impl Window {
     /// uses `Sense::CLICK` for the same reason too: `Sense::click()` adds `FOCUSABLE`, that is, the
     /// card **would ask for egui's keyboard focus** and would compete with the application's
     /// routing, which is geographic.
+    #[cfg(test)]
     pub(crate) fn handle_tab_bar_clicks(
         &mut self,
         ui: &egui::Ui,
         tab_bar: egui::Rect,
         metrics: &CellMetrics,
     ) {
-        if self.chrome.enabled() {
-            interaction::handle(self, ui, tab_bar, metrics);
-            return;
-        }
-        for which_tab in 0..self.tabs.len() {
-            let id = ui.id().with(("tab", which_tab));
-            if ui
-                .interact(
-                    tab_rect(tab_bar, which_tab, self.tabs.len()),
-                    id,
-                    egui::Sense::CLICK,
-                )
-                .clicked()
-            {
-                // **Through the same door as the keyboard, instead of writing `active` by hand.**
-                // They are the same transition, and having it in two places already cost a defect:
-                // the click did not ask for a frame, so with two quiet consoles —this milestone's
-                // case— the tab just shown was stuck with the start-up grid until input from
-                // something else arrived.
-                self.apply(
-                    WindowRequest::Go(which_tab as isize - self.active as isize),
-                    ui.ctx(),
-                    ui.max_rect(),
-                    metrics,
-                );
-            }
-        }
+        handle_clicks(self, ui, tab_bar, metrics, false);
     }
 
     /// Paints the bar: one card per tab, with its number inside.
