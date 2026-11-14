@@ -195,36 +195,6 @@ pub(super) fn enrich(window: &crate::Window, sections: &mut Vec<Section>, now: S
     }
 }
 
-/// Reader choices are local to the Board and never change a published plan.
-pub(super) fn paint_controls(ui: &mut egui::Ui, sections: &[Section], reader: &mut Reader) {
-    let eligible: Vec<_> = sections
-        .iter()
-        .filter(|s| s.roadmap.is_some() || !fallback(s).is_empty())
-        .collect();
-    if eligible.is_empty() {
-        return;
-    }
-    let all_open = eligible.iter().all(|s| {
-        reader
-            .projects
-            .get(&project_key(s))
-            .copied()
-            .unwrap_or(false)
-    });
-    if ui
-        .button(if all_open {
-            "Close all roadmaps"
-        } else {
-            "Open all roadmaps"
-        })
-        .clicked()
-    {
-        for section in eligible {
-            reader.projects.insert(project_key(section), !all_open);
-        }
-    }
-}
-
 fn done(m: &Milestone) -> bool {
     !m.items.is_empty() && m.items.iter().all(|i| i.mark == Some(Mark::Done))
 }
@@ -277,6 +247,7 @@ struct Surface<'a> {
     theme: &'a Theme,
     signals: &'a HashMap<usize, crate::agent_signals::View>,
     now: SystemTime,
+    board_totals: Option<(usize, usize)>,
 }
 fn chip(
     ui: &mut egui::Ui,
@@ -351,8 +322,10 @@ pub(super) fn paint_project(
         theme,
         &HashMap::new(),
         SystemTime::now(),
+        None,
     )
 }
+#[allow(clippy::too_many_arguments)]
 pub(super) fn paint_project_with_signals(
     ui: &mut egui::Ui,
     section: &Section,
@@ -361,6 +334,7 @@ pub(super) fn paint_project_with_signals(
     theme: &Theme,
     signals: &HashMap<usize, crate::agent_signals::View>,
     now: SystemTime,
+    board_totals: Option<(usize, usize)>,
 ) -> Option<usize> {
     let id = egui::Id::new((
         "board-roadmap-project",
@@ -371,6 +345,7 @@ pub(super) fn paint_project_with_signals(
         theme,
         signals,
         now,
+        board_totals,
     };
     ui.scope_builder(egui::UiBuilder::new().id(id), |ui| {
         presentation::paint_project_contents(ui, section, reader, window, &surface)
@@ -523,6 +498,7 @@ mod tests {
                         theme: &Theme::default(),
                         signals: &HashMap::new(),
                         now: SystemTime::now(),
+                        board_totals: None,
                     },
                 );
             })
@@ -775,7 +751,6 @@ mod tests {
                 |ui| {
                     ui.set_width(1500.0);
                     super::super::style::apply(ui, &Theme::default());
-                    paint_controls(ui, std::slice::from_ref(&section), reader);
                     let _ = paint_project(ui, &section, reader, (2, 3), &Theme::default());
                 },
             );
@@ -787,7 +762,7 @@ mod tests {
         assert!(text_at(&folded, "4/14").is_some());
         assert!(text_at(&folded, "now M1, M2, M3").is_some());
         assert!(text_at(&folded, "0/4 milestones").is_none());
-        let open = text_at(&folded, "Open all roadmaps").unwrap();
+        let open = text_at(&folded, "Roadmap").unwrap();
         draw(&mut reader, press(open, true));
         draw(&mut reader, press(open, false));
         let expanded = draw(&mut reader, vec![]);
@@ -863,12 +838,12 @@ mod tests {
                 "producer command leaked into roadmap controls"
             );
         }
-        let close = text_at(&expanded, "Close all roadmaps").unwrap();
+        let close = text_at(&expanded, "Roadmap").unwrap();
         draw(&mut reader, press(close, true));
         draw(&mut reader, press(close, false));
         let folded = draw(&mut reader, vec![]);
         assert!(text_at(&folded, "0/4 milestones").is_none());
-        assert!(text_at(&folded, "Open all roadmaps").is_some());
+        assert!(text_at(&folded, "Roadmap").is_some());
         let individual = text_at(&folded, "Roadmap").unwrap();
         draw(&mut reader, press(individual, true));
         draw(&mut reader, press(individual, false));

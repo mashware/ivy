@@ -9567,10 +9567,11 @@ without consoles remain unchanged.
 **Visual reference clarified by the owner.** The supplied folded/expanded Bellwether screenshots
 are the presentation target, not merely an example of five-column behavior. Each project shows its
 summary, then its expanded roadmap, then its terminal-state headers and cards. Column badges are
-local; toolbar totals remain global. Plan-only projects omit an empty terminal grid. Use monospaced
+local; global Board totals share the first gray summary row, replacing its project name/count. Later project rows retain their names. The separate toolbar and global roadmap button are removed at the owner's request. Plan-only projects omit an empty terminal grid. Use monospaced
 reference spacing, state colors, progress tracks, right-aligned count pills and wrapping milestone
 cards; retain every pictured item, active ID, attachment, dependency, outside count and source.
 The comparison fixture uses the actual reference plan and panels, with executable actions excluded.
+The owner further chose yellow Waiting, orange/red Stuck, blue Working and green Finished; console navigation uses the explicit “Go to console” label, and the branch sits against the card's right edge.
 Native warnings remain; console identity and honest observed age are disclosed on hover. Vector
 marks avoid relying on missing glyphs, without changing D9's sidebar or terminal cell policy.
 

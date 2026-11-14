@@ -43,9 +43,10 @@ impl Reader {
 }
 pub(super) fn color(column: Column, theme: &Theme) -> Color32 {
     match column {
-        Column::Wait | Column::Block => theme.color(term_core::TermColor::Indexed(1)),
-        Column::Working => theme.color(term_core::TermColor::Indexed(3)),
-        Column::Done => theme.focus(),
+        Column::Wait => theme.color(term_core::TermColor::Indexed(3)),
+        Column::Block => theme.color(term_core::TermColor::Indexed(1)),
+        Column::Working => theme.focus(),
+        Column::Done => theme.color(term_core::TermColor::Indexed(2)),
         Column::Idle => theme.divider(),
     }
 }
@@ -109,7 +110,7 @@ pub(super) fn paint(
             let phase = doc.and_then(|d| d.phase.as_deref());
             let phase_width = phase.map_or(0.0, |s| (s.chars().count() as f32 * 7.3).min(72.0));
             let title_width =
-                (ui.available_width() - phase_width - 18.0 - 2.0 * ui.spacing().item_spacing.x)
+                (ui.available_width() - phase_width - 94.0 - 2.0 * ui.spacing().item_spacing.x)
                     .max(1.0);
             ui.add_sized(
                 egui::vec2(title_width, 20.0),
@@ -132,7 +133,16 @@ pub(super) fn paint(
                 )
                 .on_hover_text(clean(phase));
             }
-            super::style::go(ui, theme);
+            ui.add_sized(
+                egui::vec2(94.0, 20.0),
+                egui::Label::new(
+                    egui::RichText::new("Go to console")
+                        .size(11.0)
+                        .color(theme.focus()),
+                )
+                .truncate()
+                .halign(egui::Align::Max),
+            );
         });
         if column == Column::Wait && !backed {
             ui.weak("Waiting state is unconfirmed");
@@ -193,6 +203,7 @@ pub(super) fn paint(
                     ui.id().with((entry.pane, rect.min.y.to_bits())),
                     egui::Sense::hover(),
                 )
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
                 .on_hover_text(hint);
                 child_hits.push((rect, Command::Body(entry.pane, action)));
             }
@@ -217,42 +228,36 @@ pub(super) fn paint(
         if branch.is_some() || doc.is_none() || has_toggle {
             ui.separator();
             ui.horizontal(|ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if has_toggle {
-                        let r = ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(if compact {
-                                    "Show panel"
-                                } else {
-                                    "Hide panel"
-                                })
+                if has_toggle {
+                    let r = ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(if compact { "Show panel" } else { "Hide panel" })
                                 .size(11.0)
                                 .color(theme.focus()),
-                            )
-                            .sense(egui::Sense::hover()),
-                        );
-                        if ui.clip_rect().contains_rect(r.rect) {
-                            child_hits.push((r.rect, Command::Compact(entry.pane)));
-                        }
-                    }
-                    let (rect, _) = ui.allocate_exact_size(
-                        egui::vec2(ui.available_width(), 18.0),
-                        egui::Sense::hover(),
+                        )
+                        .sense(egui::Sense::hover()),
                     );
-                    if let Some(branch) = branch {
-                        super::style::branch(ui, rect, &clean(branch), theme);
-                    } else if doc.is_none() {
-                        ui.put(
-                            rect,
-                            egui::Label::new(
-                                egui::RichText::new("publishes nothing")
-                                    .size(11.0)
-                                    .color(super::style::dim(theme)),
-                            )
-                            .halign(egui::Align::Min),
-                        );
+                    if ui.clip_rect().contains_rect(r.rect) {
+                        child_hits.push((r.rect, Command::Compact(entry.pane)));
                     }
-                });
+                }
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), 18.0),
+                    egui::Sense::hover(),
+                );
+                if let Some(branch) = branch {
+                    super::style::branch(ui, rect, &clean(branch), theme);
+                } else if doc.is_none() {
+                    ui.put(
+                        rect,
+                        egui::Label::new(
+                            egui::RichText::new("publishes nothing")
+                                .size(11.0)
+                                .color(super::style::dim(theme)),
+                        )
+                        .halign(egui::Align::Max),
+                    );
+                }
             });
         }
     });

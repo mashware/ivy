@@ -58,12 +58,18 @@ mod tests {
         ctx.style_mut_of(egui::Theme::Dark, |style| {
             style.interaction.tooltip_delay = 0.0
         });
+        for _ in 0..3 {
+            frame(window, ctx, vec![]);
+        }
         let shapes = frame(window, ctx, vec![]);
         let at = shapes
             .iter()
             .filter_map(|shape| match &shape.shape {
                 egui::Shape::Text(t) => {
-                    let i = t.galley.text().rfind("Roadmap")?;
+                    if t.galley.text() != "Roadmap" {
+                        return None;
+                    }
+                    let i = 0;
                     let cursor = t.galley.text()[..i].chars().count() + 3;
                     let at = t
                         .galley
@@ -112,12 +118,20 @@ mod tests {
     fn open_roadmaps(window: &mut Window, ctx: &egui::Context) {
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         loop {
+            frame(window, ctx, vec![]);
             let shapes = frame(window, ctx, vec![]);
-            if let Some(at) = text_point(&shapes, "Open all roadmaps") {
+            let point = shapes.iter().find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == "Roadmap" => Some(
+                    t.pos
+                        + t.galley
+                            .pos_from_cursor(egui::text::CCursor::new(3))
+                            .center()
+                            .to_vec2(),
+                ),
+                _ => None,
+            });
+            if let Some(at) = point {
                 frame(window, ctx, click_at(at));
-                return;
-            }
-            if text_point(&shapes, "Close all roadmaps").is_some() {
                 return;
             }
             assert!(
@@ -401,7 +415,7 @@ mod tests {
         };
         let asking = window.tabs[0].panes()[0].name;
         let card = window.board.card_rect(asking).unwrap();
-        assert!(shapes.iter().any(|s|matches!(&s.shape, egui::Shape::Rect(r) if (r.rect.width()-card.width()).abs()<2.0 && card.contains(r.rect.center()) && r.stroke.color == window.theme.color(term_core::TermColor::Indexed(1)))), "waiting state border is absent");
+        assert!(shapes.iter().any(|s|matches!(&s.shape, egui::Shape::Rect(r) if (r.rect.width()-card.width()).abs()<2.0 && card.contains(r.rect.center()) && r.stroke.color == window.theme.color(term_core::TermColor::Indexed(3)))), "waiting state border is absent");
         assert!(
             !on_card(asking, "it is waiting for you"),
             "removed duplicate attention prose returned"
@@ -1309,9 +1323,7 @@ mod tests {
         let deadline = Instant::now() + std::time::Duration::from_secs(5);
         loop {
             let shapes = frame(&mut window, &ctx, vec![]);
-            if the_text_queued_up(&shapes, "Open all roadmaps") {
-                open_roadmaps(&mut window, &ctx);
-            }
+
             if the_text_queued_up(&shapes, "visible configured task") {
                 assert!(!the_text_queued_up(&shapes, "unconfigured stored task"));
                 break;

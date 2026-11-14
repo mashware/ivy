@@ -311,7 +311,9 @@ mod tests {
         needle: &str,
     ) -> Option<egui::Pos2> {
         let card = window.board.card_rect(pane)?;
-        shapes.iter().find_map(|shape| match &shape.shape {
+        // Ignore console/sidebar layers covered by the Board's opaque canvas.
+        let start = shapes.iter().rposition(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill.a() == 255 && r.rect.contains_rect(card) && r.rect.width() > card.width() + 10.0)).map_or(0, |i| i + 1);
+        shapes[start..].iter().find_map(|shape| match &shape.shape {
             egui::Shape::Text(t)
                 if t.galley.text().contains(needle)
                     && card.contains(t.pos)
@@ -572,14 +574,14 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             let shapes = pass(&mut window, vec![]);
-            if the_text_queued_up(&shapes, "demo") && the_text_queued_up(&shapes, "empty") {
+            if the_text_queued_up(&shapes, "Board") && the_text_queued_up(&shapes, "empty") {
                 for label in ["WAITING FOR YOU", "STUCK", "WORKING", "FINISHED", "IDLE"] {
                     let header = text_position(&shapes, label).unwrap_or_else(|| {
                         panic!(
                             "first open hid the {label} column header without any scrolling input"
                         )
                     });
-                    let first_project = text_position(&shapes, "demo").unwrap();
+                    let first_project = text_position(&shapes, "Board").unwrap();
                     assert!(
                         header.y > first_project.y,
                         "{label} header ink at {header:?} must follow the project row at {first_project:?}"

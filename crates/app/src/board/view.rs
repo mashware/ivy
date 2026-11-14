@@ -129,19 +129,17 @@ fn paint_contents(
     super::style::apply(&mut ui, &theme);
     ui.painter().rect_filled(area, 0.0, theme.background());
     let total = sections.iter().map(|s| s.entries.len()).sum::<usize>();
-    egui::Frame::new()
-        .inner_margin(egui::Margin::symmetric(16, 8))
-        .show(&mut ui, |ui| {
-            ui.set_min_height(30.0);
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.heading("Board");
-                ui.weak(format!("{total} consoles · {} projects", sections.len()));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    roadmap::paint_controls(ui, sections, &mut window.board.surface.roadmaps);
+    if sections.is_empty() {
+        egui::Frame::new()
+            .fill(theme.divider())
+            .inner_margin(egui::Margin::symmetric(12, 8))
+            .show(&mut ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.heading("Board");
+                    ui.weak("0 consoles · 0 projects");
                 });
             });
-        });
+    }
     if sections
         .iter()
         .flat_map(|s| &s.entries)
@@ -149,7 +147,6 @@ fn paint_contents(
     {
         ui.weak("No task state has been published yet");
     }
-    ui.separator();
     window.board.surface.painted.clear();
     window.board.surface.child_hits.clear();
     window.board.order.clear();
@@ -177,7 +174,7 @@ fn paint_contents(
         .show(&mut ui, |ui| {
             ui.set_min_width(canvas_width);
             let mut row_base = 0;
-            for section in sections {
+            for (section_index, section) in sections.iter().enumerate() {
                 let section_top = ui.next_widget_position().y;
                 let started = Instant::now();
                 if let Some(pane) = roadmap::paint_project_with_signals(
@@ -188,6 +185,7 @@ fn paint_contents(
                     &theme,
                     signals,
                     now,
+                    (section_index == 0).then_some((total, sections.len())),
                 ) {
                     window.board.activate = Some(pane);
                 }

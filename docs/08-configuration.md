@@ -582,8 +582,9 @@ restart is unknown. Leaving
 wait, replacing the shell or closing the console clears it. Silence alone does not move Wait or Done
 to Idle; freshness/backing warnings remain visible.
 
-Project roadmaps start folded and can be opened individually or with the toolbar's **Open all
-roadmaps** / **Close all roadmaps** toggle. The summary shows the plan title, deliverable progress
+The first gray summary row carries **Board**, the global console count and project count.
+Each project's **Roadmap** button opens or folds its own plan; there is no separate global toggle.
+Project roadmaps start folded. The summary shows the plan title, deliverable progress
 and active milestone IDs. Expanded plans show separate milestone/deliverable totals and wrapping,
 equal-width milestone cards with their own bars, done-when criteria, completed summaries and
 state-colored attached-console badges. A done summary counts all explicitly done items, including
@@ -597,7 +598,9 @@ override configured files as a whole; retirement reveals the file again. A confi
 visible without an open console. Without a plan, producer section headings and summaries appear as
 a clearly labelled fallback. Plain-string plan items retain their text and count toward totals.
 
-Click a card, or move with the arrows and press Enter, to open its console. Left/Right follow reading
+The card's **Go to console** label names its navigation behavior. Click a card, or move with the
+arrows and press Enter, to open its console. The branch is aligned to the right of its footer.
+Waiting is yellow, Stuck orange/red, Working blue and Finished green. Left/Right follow reading
 order, Up/Down the grid, and Home/End the first/last card; selection reveals the required position in
 both scroll axes. A card's fold, expansion or disclosed HTTP(S) link performs that reader action
 without activating the console. The Board never executes producer action commands. Escape or the

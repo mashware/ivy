@@ -158,9 +158,16 @@ pub(super) fn chevron(painter: &egui::Painter, rect: egui::Rect, open: bool, ink
 }
 
 pub(super) fn branch(ui: &mut egui::Ui, rect: egui::Rect, name: &str, theme: &Theme) {
-    let x = rect.left() + 4.0;
-    let y = rect.center().y;
     let ink = dim(theme);
+    let font = egui::FontId::monospace(11.0);
+    let mut job =
+        egui::text::LayoutJob::simple(name.to_owned(), font, ink, (rect.width() - 20.0).max(0.0));
+    job.wrap.max_rows = 1;
+    job.wrap.break_anywhere = true;
+    let galley = ui.painter().layout_job(job);
+    let width = galley.size().x;
+    let x = (rect.right() - width - 14.0).max(rect.left() + 4.0);
+    let y = rect.center().y;
     let stroke = egui::Stroke::new(1.0, ink);
     ui.painter()
         .line_segment([egui::pos2(x, y - 4.0), egui::pos2(x, y + 4.0)], stroke);
@@ -175,30 +182,16 @@ pub(super) fn branch(ui: &mut egui::Ui, rect: egui::Rect, name: &str, theme: &Th
     ] {
         ui.painter().circle_stroke(point, 1.5, stroke);
     }
-    let mut text = rect;
-    text.min.x += 18.0;
-    ui.put(
-        text,
-        egui::Label::new(egui::RichText::new(name).size(11.0).color(ink))
-            .truncate()
-            .halign(egui::Align::Min),
+    ui.painter().galley(
+        egui::pos2(
+            rect.right() - width,
+            rect.center().y - galley.size().y / 2.0,
+        ),
+        galley,
+        ink,
     );
-}
-
-pub(super) fn go(ui: &mut egui::Ui, theme: &Theme) {
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(12.0, 16.0), egui::Sense::hover());
-    let c = rect.center();
-    let stroke = egui::Stroke::new(1.0, dim(theme));
-    for (a, b) in [
-        (egui::vec2(-3.0, 3.0), egui::vec2(3.0, -3.0)),
-        (egui::vec2(-3.0, 0.0), egui::vec2(-3.0, 3.0)),
-        (egui::vec2(0.0, 3.0), egui::vec2(-3.0, 3.0)),
-        (egui::vec2(0.0, -3.0), egui::vec2(3.0, -3.0)),
-        (egui::vec2(3.0, 0.0), egui::vec2(3.0, -3.0)),
-    ] {
-        ui.painter().line_segment([c + a, c + b], stroke);
-    }
-    response.on_hover_text("Go to this console");
+    ui.interact(rect, ui.id().with("branch"), egui::Sense::hover())
+        .on_hover_text(name);
 }
 
 pub(super) fn done_summary(ui: &mut egui::Ui, text: &str, theme: &Theme) {
