@@ -88,7 +88,7 @@ pub(crate) enum Target {
 fn targets(strip: egui::Rect, _m: &CellMetrics, can_close: bool) -> Vec<(Target, egui::Rect)> {
     let width = 25.0;
     let right = (strip.right() - super::CORNER_LEFT_TO_THE_GRAB).max(strip.left());
-    let count = if can_close { 4 } else { 3 };
+    let count = if can_close { 4 } else { 2 };
     let left = right - count as f32 * width;
     if left - strip.left() < 30.0 {
         return vec![(Target::Label, strip)];
@@ -99,7 +99,7 @@ fn targets(strip: egui::Rect, _m: &CellMetrics, can_close: bool) -> Vec<(Target,
     )];
     for (i, target) in [Target::Review, Target::Panel, Target::Zoom, Target::Close]
         .into_iter()
-        .filter(|target| *target != Target::Close || can_close)
+        .filter(|target| !matches!(target, Target::Zoom | Target::Close) || can_close)
         .enumerate()
     {
         let x = left + i as f32 * width;
@@ -784,6 +784,25 @@ mod tests {
                 "fresh, busy and stale logo opacity must survive the project fill"
             );
             output.drop_without_applying_deltas();
+        }
+    }
+
+    #[test]
+    fn singleton_header_omits_zoom_and_reclaims_its_target_width() {
+        let m = CellMetrics::of(8.0, 16.0);
+        for width in [35.0, 100.0, 150.0, 500.0] {
+            let strip = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 33.0));
+            let items = targets(strip, &m, false);
+            assert!(items.iter().all(|(target, _)| !matches!(target, Target::Zoom | Target::Close)));
+            for (_, rect) in targets(strip, &m, true).into_iter().filter(|(t, _)| *t == Target::Zoom) {
+                assert!(!matches!(hit(strip, &m, false, rect.center()), Some(Target::Zoom)));
+            }
+            if width >= 100.0 {
+                assert_eq!(items.len(), 3);
+            }
+            if width == 500.0 {
+                assert_eq!(items[0].1.width() - targets(strip, &m, true)[0].1.width(), 50.0);
+            }
         }
     }
 
