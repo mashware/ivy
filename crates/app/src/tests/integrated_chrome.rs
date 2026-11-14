@@ -840,6 +840,58 @@ mod tests {
     }
 
     #[test]
+    fn singleton_and_multi_pane_tab_switches_update_zoom_control_immediately() {
+        let ctx = egui::Context::default();
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        let area = area_of(1400.0);
+        let singleton = window.active().name;
+        let sibling = window.active().panes()[1].name;
+        window.close_a_pane_called(sibling, &ctx).unwrap();
+        let multi = window.tabs[1].name;
+
+        frame(&mut window, &ctx, area, vec![]);
+        frame(&mut window, &ctx, area, chord_with(egui::Key::ArrowRight));
+        assert_eq!(window.active().name, multi);
+        let pane = window.active().focus;
+        let zoom = control(&window, &ctx, area, 0, 37.5);
+        frame(&mut window, &ctx, area, click_at(zoom));
+        assert_eq!(window.pane_view.zoomed(multi), Some(pane));
+
+        frame(&mut window, &ctx, area, chord_with(egui::Key::ArrowLeft));
+        assert_eq!(window.active().name, singleton);
+        assert_eq!(window.pane_view.zoomed(multi), Some(pane));
+        let former_zoom = control(&window, &ctx, area, 0, 37.5);
+        frame(&mut window, &ctx, area, click_at(former_zoom));
+        assert_eq!(window.pane_view.zoomed(singleton), None);
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            key_with(egui::Key::Escape, egui::Modifiers::NONE),
+        );
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: false,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        frame(&mut window, &ctx, area, chord_with(egui::Key::ArrowRight));
+        assert_eq!(window.active().name, multi);
+        assert_eq!(window.pane_view.zoomed(multi), Some(pane));
+        let restore = control(&window, &ctx, area, 0, 37.5);
+        frame(&mut window, &ctx, area, click_at(restore));
+        assert_eq!(window.pane_view.zoomed(multi), None);
+    }
+
+    #[test]
     fn inactive_removals_clear_zoom_before_a_later_split() {
         for detach in [false, true] {
             let ctx = egui::Context::default();
