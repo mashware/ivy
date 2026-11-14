@@ -435,73 +435,76 @@ fn paint_project_contents(
             ui.label(format!("○ {}", milestone_title(milestone)));
             continue;
         }
-        egui::Frame::group(ui.style()).show(ui, |ui| {
-            ui.strong(milestone_title(milestone));
-            if let Some(criterion) = &milestone.done_when {
-                ui.label(format!("Done when: {criterion}"));
-            }
-            if !milestone.depends_on.is_empty() {
-                ui.label(format!("Depends on: {}", milestone.depends_on.join(", ")));
-            }
-            ui.horizontal_wrapped(|ui| {
-                chips(
-                    ui,
-                    section,
-                    &positions,
-                    &Placement::Milestone(mi),
-                    &mut selected,
-                )
-            });
-            let item_attached: Vec<_> = (0..milestone.items.len())
-                .map(|i| positions.contains(&Placement::Item(mi, i)))
-                .collect();
-            let mk = (
-                key.clone(),
-                milestone
-                    .id
-                    .clone()
-                    .unwrap_or_else(|| format!("#{mi}:{}", milestone.title)),
-            );
-            let expanded = reader.milestones.contains(&mk);
-            let visible = visible_items(milestone, &item_attached, expanded);
-            let hidden_done = milestone
-                .items
-                .iter()
-                .enumerate()
-                .filter(|(i, item)| item.mark == Some(Mark::Done) && !visible.contains(i))
-                .count();
-            if hidden_done > 0 {
-                ui.small(format!("✓ {hidden_done} completed"));
-            }
-            for &i in &visible {
-                let item = &milestone.items[i];
+        let mk = (
+            key.clone(),
+            milestone
+                .id
+                .clone()
+                .unwrap_or_else(|| format!("#{mi}:{}", milestone.title)),
+        );
+        let id = egui::Id::new(("board-roadmap-milestone", ui.ctx().viewport_id(), &mk));
+        ui.scope_builder(egui::UiBuilder::new().id(id), |ui| {
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.strong(milestone_title(milestone));
+                if let Some(criterion) = &milestone.done_when {
+                    ui.label(format!("Done when: {criterion}"));
+                }
+                if !milestone.depends_on.is_empty() {
+                    ui.label(format!("Depends on: {}", milestone.depends_on.join(", ")));
+                }
                 ui.horizontal_wrapped(|ui| {
-                    ui.label(format!(
-                        "{} {} {}",
-                        symbol(item.mark),
-                        item.text,
-                        item.reference.as_deref().unwrap_or("")
-                    ));
                     chips(
                         ui,
                         section,
                         &positions,
-                        &Placement::Item(mi, i),
+                        &Placement::Milestone(mi),
                         &mut selected,
-                    );
+                    )
                 });
-            }
-            if (visible.len() < milestone.items.len() || expanded)
-                && ui
-                    .small_button(if expanded { "Show less" } else { "Show all" })
-                    .clicked()
-            {
-                if expanded {
-                    reader.milestones.remove(&mk);
-                } else {
-                    reader.milestones.insert(mk);
+                let item_attached: Vec<_> = (0..milestone.items.len())
+                    .map(|i| positions.contains(&Placement::Item(mi, i)))
+                    .collect();
+                let expanded = reader.milestones.contains(&mk);
+                let visible = visible_items(milestone, &item_attached, expanded);
+                let hidden_done = milestone
+                    .items
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, item)| item.mark == Some(Mark::Done) && !visible.contains(i))
+                    .count();
+                if hidden_done > 0 {
+                    ui.small(format!("✓ {hidden_done} completed"));
                 }
-            }
+                for &i in &visible {
+                    let item = &milestone.items[i];
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(format!(
+                            "{} {} {}",
+                            symbol(item.mark),
+                            item.text,
+                            item.reference.as_deref().unwrap_or("")
+                        ));
+                        chips(
+                            ui,
+                            section,
+                            &positions,
+                            &Placement::Item(mi, i),
+                            &mut selected,
+                        );
+                    });
+                }
+                if (visible.len() < milestone.items.len() || expanded)
+                    && ui
+                        .small_button(if expanded { "Show less" } else { "Show all" })
+                        .clicked()
+                {
+                    if expanded {
+                        reader.milestones.remove(&mk);
+                    } else {
+                        reader.milestones.insert(mk);
+                    }
+                }
+            });
         });
     }
     let hidden_details = prefix > 0
@@ -663,6 +666,59 @@ mod tests {
             selected,
             Some(1),
             "release selected another console after reorder"
+        );
+    }
+
+    #[test]
+    fn reordering_milestones_cannot_retarget_a_disclosure_press() {
+        let mut plan = Plan::default();
+        for id in ["a", "b"] {
+            plan.milestones.push(Milestone {
+                id: Some(id.into()),
+                title: "Same shape".into(),
+                items: (0..7)
+                    .map(|i| panel_contract::plan::Item {
+                        text: format!("Item {i}"),
+                        mark: Some(Mark::Current),
+                        ..Default::default()
+                    })
+                    .collect(),
+                ..Default::default()
+            });
+        }
+        let mut section = test_section(plan, &[]);
+        let ctx = egui::Context::default();
+        let mut reader = Reader::default();
+        reader.projects.insert(project_key(&section), true);
+        let mut draw = |section: &Section, events| {
+            ui_frame(&ctx, events, |ui| {
+                let _ = paint_project(ui, section, &mut reader, (2, 3), &Theme::default());
+            })
+        };
+        let shapes = draw(&section, vec![]);
+        let at = shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == "Show all" => {
+                    Some(t.pos + t.galley.size() / 2.0)
+                }
+                _ => None,
+            })
+            .expect("milestone disclosure");
+        draw(&section, press(at, true));
+        Arc::make_mut(section.roadmap.as_mut().unwrap().plan.as_mut().unwrap())
+            .milestones
+            .reverse();
+        draw(&section, press(at, false));
+        assert!(
+            reader
+                .milestones
+                .contains(&(project_key(&section), "a".into()))
+        );
+        assert!(
+            !reader
+                .milestones
+                .contains(&(project_key(&section), "b".into()))
         );
     }
 
