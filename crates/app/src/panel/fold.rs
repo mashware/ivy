@@ -46,6 +46,7 @@ pub(super) fn is_gap(line: &Line) -> bool {
     line.style != Some(Style::Section)
         && line.text.is_empty()
         && line.reference.is_none()
+        && line.link.is_none()
         && line.mark.is_none()
 }
 
@@ -264,6 +265,25 @@ mod tests {
     fn click(state: &mut PanelState) {
         let area = state.drawn.as_ref().unwrap().headers[0].area;
         assert!(toggle_header_at(state, area.center()));
+    }
+
+    #[test]
+    fn link_only_rows_remain_inside_a_collapsed_section() {
+        let mut state = state(serde_json::json!([
+            header(),
+            {"text":"", "link":"https://example.com/pull/42"},
+            "hidden after link",
+            "",
+            "visible after gap"
+        ]));
+        let text = paint(&mut state, 420.0, 600.0).join("\n");
+        assert!(!text.contains("hidden after link"));
+        assert!(!text.contains("#42"));
+        assert!(text.contains("visible after gap"));
+        click(&mut state);
+        let text = paint(&mut state, 420.0, 600.0).join("\n");
+        assert!(text.contains("hidden after link"));
+        assert!(text.contains("#42"), "{text}");
     }
 
     #[test]

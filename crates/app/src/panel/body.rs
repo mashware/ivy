@@ -452,7 +452,7 @@ mod tests {
             (at, hits)
         }
         let full = Rect::from_min_max(Pos2::new(100.0, 20.0), Pos2::new(500.0, 400.0));
-        for text in ["Review".to_owned(), "review ".repeat(25)] {
+        for text in [String::new(), "Review".to_owned(), "review ".repeat(25)] {
             let baseline = ink(&text, full).0;
             for clip in [
                 Rect::from_min_max(Pos2::new(180.0, 20.0), full.max),

@@ -295,8 +295,8 @@ fn chip(
         .scope_builder(egui::UiBuilder::new().id(id), |ui| {
             super::style::console_chip(ui, column, &title, surface.theme)
                 .on_hover_text(format!(
-                    "Go to {} · {}",
-                    entry.console_label, entry.tab_label
+                    "{}\nGo to {} · {}",
+                    title, entry.console_label, entry.tab_label
                 ))
                 .clicked()
         })
@@ -435,6 +435,39 @@ mod tests {
         output.drop_without_applying_deltas();
         shapes
     }
+    #[test]
+    fn multiple_long_attachments_stay_inside_their_milestone_column() {
+        let plan = panel_contract::plan::parse_document_noting(r#"{"milestones":[{"id":"M","title":"Now","items":[{"id":"D","text":"Deliverable","mark":"current"}]}]}"#).unwrap().0;
+        let mut section = test_section(plan, &[1, 2, 3]);
+        for entry in &mut section.entries {
+            entry.snapshot.document = Some(Arc::new(
+                panel_contract::parse_document(
+                    &serde_json::json!({
+                        "title": "Long attached title ".repeat(80),
+                        "milestone":"M", "deliverable":"D", "lines":[]
+                    })
+                    .to_string(),
+                )
+                .unwrap(),
+            ));
+        }
+        let ctx = egui::Context::default();
+        let mut reader = Reader::default();
+        reader.projects.insert(project_key(&section), true);
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.set_width(440.0);
+            super::super::style::apply(ui, &Theme::default());
+            let left = ui.min_rect().left();
+            let _ = paint_project(ui, &section, &mut reader, (2, 3), &Theme::default());
+            assert!(
+                ui.min_rect().right() <= left + 440.1,
+                "roadmap expanded to {}",
+                ui.min_rect().width()
+            );
+        })
+        .drop_without_applying_deltas();
+    }
+
     #[test]
     fn a_small_pending_plan_exposes_all_deliverable_details() {
         let plan=panel_contract::plan::parse_document_noting(r#"{"milestones":[{"id":"M","title":"Pending","done_when":"criterion witness","items":[{"text":"deliverable witness","mark":"pending"}]}]}"#).unwrap().0;

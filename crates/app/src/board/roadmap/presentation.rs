@@ -287,11 +287,8 @@ pub(super) fn paint_project_contents(
             ui.weak(format!("Outside the code · {pending} pending:"));
             for item in &plan.outside {
                 let text=crate::board::cards::clean(&item.text);
-                if item.mark==Some(Mark::Done) {
-                    crate::board::style::completed_tag(ui,&text,crate::board::style::dim(theme),theme);
-                } else {
-                    crate::board::style::tag(ui,text,theme.foreground(),theme);
-                }
+                let completed = item.mark == Some(Mark::Done);
+                crate::board::style::outside_tag(ui, &text, completed, if completed { crate::board::style::dim(theme) } else { theme.foreground() }, theme);
 
             }
         });
@@ -376,7 +373,7 @@ fn paint_milestone(
                         .filter(|(_, p)| **p == Placement::Item(mi, i))
                         .map(|(e, _)| e)
                         .collect();
-                    let badge_width: f32 = on
+                    let natural_badge_width: f32 = on
                         .iter()
                         .map(|entry| {
                             let title = crate::board::cards::clean(
@@ -397,6 +394,8 @@ fn paint_milestone(
                         })
                         .sum();
                     let reference = item.reference.as_deref().map(crate::board::cards::clean);
+                    let available = ui.available_width();
+                    let badge_width = natural_badge_width.min((available * 0.65).max(1.0));
                     let ref_width = reference.as_ref().map_or(0.0, |reference| {
                         ui.painter()
                             .layout_no_wrap(
@@ -407,7 +406,10 @@ fn paint_milestone(
                             .size()
                             .x
                     });
-                    let gaps = 6.0 * (1 + on.len() + usize::from(reference.is_some())) as f32;
+                    let ref_width = ref_width.min(available * 0.15);
+                    let gaps = 6.0
+                        * (1 + usize::from(!on.is_empty()) + usize::from(reference.is_some()))
+                            as f32;
                     let text_width =
                         (ui.available_width() - 12.0 - ref_width - badge_width - gaps).max(16.0);
                     ui.horizontal_top(|ui| {
@@ -445,10 +447,23 @@ fn paint_milestone(
                             .halign(egui::Align::Min),
                         );
                         if let Some(reference) = &reference {
-                            ui.weak(reference);
+                            ui.add_sized(
+                                egui::vec2(ref_width, 16.0),
+                                egui::Label::new(egui::RichText::new(reference).weak()).truncate(),
+                            )
+                            .on_hover_text(reference);
                         }
-                        for entry in on {
-                            chip(ui, entry, selected, surface);
+                        if !on.is_empty() {
+                            ui.allocate_ui_with_layout(
+                                egui::vec2(badge_width, 0.0),
+                                egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true),
+                                |ui| {
+                                    ui.set_width(badge_width);
+                                    for entry in on {
+                                        chip(ui, entry, selected, surface);
+                                    }
+                                },
+                            );
                         }
                     });
                 }

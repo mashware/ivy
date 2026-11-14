@@ -119,7 +119,9 @@ pub(super) fn console_chip(
                 let (rect, _) =
                     ui.allocate_exact_size(egui::vec2(10.0, 14.0), egui::Sense::hover());
                 column_mark(ui.painter(), rect, column, ink);
-                ui.label(egui::RichText::new(title).size(11.0).color(ink));
+                ui.add(
+                    egui::Label::new(egui::RichText::new(title).size(11.0).color(ink)).truncate(),
+                );
             });
         });
     ui.interact(
@@ -215,13 +217,14 @@ pub(super) fn done_summary(ui: &mut egui::Ui, text: &str, theme: &Theme) {
     });
 }
 
-pub(super) fn completed_tag(
+pub(super) fn outside_tag(
     ui: &mut egui::Ui,
     text: &str,
+    completed: bool,
     ink: Color32,
     theme: &Theme,
-) -> egui::Response {
-    let frame = egui::Frame::new()
+) {
+    egui::Frame::new()
         .fill(theme.panel_background())
         .stroke(egui::Stroke::new(1.0, theme.divider()))
         .corner_radius(6)
@@ -230,21 +233,44 @@ pub(super) fn completed_tag(
             ui.spacing_mut().interact_size.y = 14.0;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
-                let (rect, _) =
-                    ui.allocate_exact_size(egui::vec2(10.0, 14.0), egui::Sense::hover());
-                crate::panel::body::paint_mark(
-                    ui.painter(),
-                    rect,
-                    panel_contract::Mark::Done,
-                    ink,
-                    egui::FontId::monospace(11.0),
-                );
-                ui.label(egui::RichText::new(text).size(11.0).color(ink));
+                if completed {
+                    let (rect, _) =
+                        ui.allocate_exact_size(egui::vec2(10.0, 14.0), egui::Sense::hover());
+                    crate::panel::body::paint_mark(
+                        ui.painter(),
+                        rect,
+                        panel_contract::Mark::Done,
+                        ink,
+                        egui::FontId::monospace(11.0),
+                    );
+                }
+                ui.add(egui::Label::new(egui::RichText::new(text).size(11.0).color(ink)).wrap());
             });
         });
-    ui.interact(
-        frame.response.rect,
-        ui.id().with("completed-tag"),
-        egui::Sense::click(),
-    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn an_attached_console_title_stays_inside_its_available_width() {
+        let ctx = egui::Context::default();
+        let title = "Legal long attached console title ".repeat(80);
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.set_width(440.0);
+            apply(ui, &Theme::default());
+            let chip = console_chip(
+                ui,
+                super::super::observation::Column::Wait,
+                &title,
+                &Theme::default(),
+            );
+            assert!(
+                chip.rect.width() <= 440.0,
+                "attachment grew to {} points inside 440",
+                chip.rect.width()
+            );
+        })
+        .drop_without_applying_deltas();
+    }
 }
