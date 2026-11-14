@@ -110,6 +110,7 @@ fn inherited_endpoint() -> io::Result<interprocess::local_socket::Name<'static>>
     let [id, dir] = panel_contract::ENV_NAMES.map(std::env::var_os);
     let (id, dir) =
         crate::client::whole_identity(id.as_deref(), dir.as_deref()).ok_or_else(outside)?;
+    crate::endpoint::private_to_this_user(dir)?;
     crate::endpoint::name_of(dir, id)
 }
 

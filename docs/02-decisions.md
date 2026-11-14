@@ -715,6 +715,23 @@ PANEL_ID=3f2a9c14   PANEL_DIR=/run/user/1000/ivy-3f2a9c14
 | Who deletes | The value itself, when it dies | It covers three paths that a sweep at shutdown does not cover: the half-built error of whoever launches the console, the **panic** — where the interface framework does not run its shutdown hook, checked in its source, but destructors do run — and closing a pane without closing the window, which arrives in Phase 2 |
 | How it deletes | The contract's file and then the directory; **never recursively** | The directory belongs to the application, but **its content belongs to the producer**. A recursive delete would carry off whatever had been left there and would turn any badly built path into data loss instead of into an error. If something that is not the contract's remains, the directory survives and it is said where |
 
+**An inherited name does not prove that the directory still belongs to this console.** A closed
+console removes its directory, while a surviving tmux or agent session keeps the identity. Under
+a shared temporary directory another user could recreate that name and listen for panel documents.
+Before connecting, the MCP bridge and session helper therefore inspect the directory without
+following a final symlink: it must be a directory owned by the effective uid, with no group or
+other permission bits (`mode & 0o077 == 0`). Terminal slash and dot components are removed only
+for this metadata lookup, so `alias/` and `alias/.` cannot disguise a final symlink. The direct
+OpenCode plugin repeats the same check on every reconnect attempt. Missing paths and metadata
+errors fail closed, with the Rust clients naming the directory in their refusal. An inherited
+identity under `sudo -E` receives no privileged exception.
+
+This check authenticates the inherited directory before connecting; it does not eliminate the
+check/connect pathname race or validate every ancestor. Arbitrary scripts publishing through the
+file transport remain responsible for the paths they write. The bridge's initialize handshake
+still describes a whole supported identity; validation happens when the first tool opens a channel
+(**D88**). Explicit callers managing their own directories retain the low-level connector.
+
 **What the app sets wins over what the child inherits, and without a directory they are removed.**
 This is not an implementation detail: the pseudoterminal copies the parent process's environment, so
 **launching the application from inside one of its own consoles** — which is going to happen as soon
@@ -9544,3 +9561,69 @@ Route data is atomically replaced while a separate persistent lock inode seriali
 On launcher exit, an immutable private cancellation marker closes its exact attachment epoch before any route lock or relay join is attempted. A tool operation already in flight can finish, but subsequent operations see that epoch as inactive even if a slow operation delayed ordinary record cleanup. Cancellation takes no route or registry lock, so it remains effective under contention and cannot revoke a newer epoch. The stable public proof remains readable while inactive, permitting a later verified resume. Process reapers are detached and explicitly declared; relay and reader joins have a grace deadline. Cleanup failure is diagnosed rather than presented as successful revocation.
 
 The host manager can install an app-server newer than the CLI. The actual official CLI 0.167.2 starting managed server 0.169.0 was separately exercised for start, exact saved resume with a new epoch, fork and matching MCP proof. Unknown server versions remain refused rather than silently trusted. Real phone history/input and panel publication after resume were observed with CLI/server 0.167.2; the mixed-server protocol check is separate evidence.
+
+
+## D93 — The Board follows Bellwether, with independent native reader state
+
+**New signal, 14 November 2026 — #71.** The owner requested the same Board presentation,
+information and behavior as Bellwether's Herdr plugin, with executable action buttons deferred.
+The reference is Bellwether commit `995b18da65f3bb6775cf18b157aa05410efb07eb`, specifically
+`mods/bellwether-board/main.js`; its executable classification takes precedence over older README
+prose. This supersedes B1's fixed cards, three-line excerpts and attention/tree ordering in D85.
+
+**Decision.** Keep D85's native global Board and project-plan sources, but present project rows
+across Waiting for you, Stuck, Working, Finished and Idle columns. Repository rows sort by their
+strongest effective column, then name; Other consoles remains last. A card exposes its producer's
+supported content, with Bellwether's initial eighteen-line expansion and compact finished/idle
+cards. Reader-owned section and roadmap folds do not alter the published document. Roadmaps show
+completed summaries, started milestones and later milestones, with controls to inspect all items.
+The configured roadmap window remains the initial detail window and never makes attached work or
+remaining content unreachable. Existing published-over-file precedence and configured projects
+without consoles remain unchanged.
+
+**Visual reference clarified by the owner.** The supplied folded/expanded Bellwether screenshots
+are the presentation target, not merely an example of five-column behavior. Each project shows its
+summary, then its expanded roadmap, then its terminal-state headers and cards. Column badges are
+local; global Board totals share the first gray summary row, replacing its project name/count. Later project rows retain their names. The separate toolbar and global roadmap button are removed at the owner's request. Plan-only projects omit an empty terminal grid. Use monospaced
+reference spacing, state colors, progress tracks, right-aligned count pills and wrapping milestone
+cards; retain every pictured item, active ID, attachment, dependency, outside count and source.
+The comparison fixture uses the actual reference plan and panels, with executable actions excluded.
+The owner further chose yellow Waiting, orange/red Stuck, blue Working and green Finished; console navigation uses one outward diagonal arrow with a “Go to console” tooltip, and the branch and its icon sit at the card's left edge, following the owner's subsequent correction.
+Native warnings remain; console identity and honest observed age are disclosed on hover. Vector
+marks avoid relying on missing glyphs, without changing D9's sidebar or terminal cell policy.
+
+**Retain string plan items.** Bellwether's reference has four deliverables and one outside item as
+plain JSON strings. Dropping them silently changed 4/14 to 4/10 and hid one pending outside task.
+Accept a string as literal item text with no invented mark or identity. This is a compatible syntax
+addition, not a new field or version. A valid milestone retains a console whose deliverable ID is
+not in its item list at milestone level; absent/unknown milestones are off-plan.
+
+**State is explicit.** In first-match order: published wait unless the client explicitly says busy;
+published block; published done or explicit native Done; explicit client waiting; stale panel;
+explicit busy; otherwise idle. Reuse supported native client declarations, including preserving
+ProgramState::Done through the internal view. No phase/body/output parsing or public activity field
+is added. Silence alone never moves a waiting or finished card to Idle; warnings and unconfirmed
+backing remain visible. This is a Board projection, not a rewrite of sidebar/tab attention.
+
+**Time is observed, not guessed.** Ivy currently receives no authoritative wait-onset timestamp.
+Track the effective transition into waiting with a monotonic clock for all live panes, including
+while Board is closed. Republishing the same wait retains its start; departure, a fresh shell or
+pane closure clears it. Warm begins at five observed minutes and hot at fifteen. After restart the
+prior duration is unknown; label the duration as observed instead of treating file age as history.
+
+**Two views share primitives, not interaction authority.** Reuse bounded native wrapping,
+color-emoji and link primitives while the Board owns its reference mark/ref/section presentation,
+but give Board its own caches, fold choices and painted child hit geometry. The sidebar's mutable
+layout and drawn records describe its own pixels. Child links, folds and expansion consume their
+click before card navigation; no producer action command is routed from this Board. Available Git
+branch text is resolved per worktree directory off the frame, not from the repository grouping key.
+
+**Discarded:** keeping excerpts behind a sidebar drill-down (fails the requested information);
+duplicating the wrapping, emoji and link-trust engine (would diverge across surfaces); calling
+the sidebar painter a second time (overwrites its input geometry); guessing wait age from publication
+mtime or producer dates (republishing is not a new wait); classifying activity from terminal output
+(violates D6); replacing existing plan transport/storage (presentation needs no new source).
+
+**Verification boundary.** Observation while Board is closed and all added layout/input/paint work
+must be named and subtracted once. Native visual and interaction parity needs a real desktop run;
+headless tests alone cannot establish it. No new performance figure is claimed by this decision.

@@ -16,9 +16,8 @@ fn main() {
         publish(std::io::stdin().lock());
         return;
     }
-    let result = request(args, std::io::stdin().lock()).and_then(|request| {
-        session::exchange(&request).map_err(|_| "cannot reach this pane's session service".into())
-    });
+    let result = request(args, std::io::stdin().lock())
+        .and_then(|request| session::exchange(&request).map_err(|failure| failure.to_string()));
     let reply = match result {
         Ok(reply) => reply,
         Err(message) => {
@@ -54,8 +53,8 @@ fn publish(mut input: impl Read) {
     let line = format!("{{\"tool\":\"panel_publish\",\"document\":{document}}}\n");
     let reply = match session::exchange_line(line.as_bytes()) {
         Ok(reply) => reply,
-        Err(_) => {
-            eprintln!("ivy-session: cannot reach this pane's publication service");
+        Err(failure) => {
+            eprintln!("ivy-session: {failure}");
             std::process::exit(1);
         }
     };

@@ -15,8 +15,8 @@ use crate::theme::Theme;
 /// A panel link as it was drawn: the address a click opens, and only the ink that represented it.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct PaintedLink {
-    target: String,
-    area: Rect,
+    pub(super) target: String,
+    pub(super) area: Rect,
 }
 
 /// The link adornment attached beside a line or hanging below it.
@@ -25,7 +25,7 @@ pub(super) struct LaidOutLink {
     pub(super) column: usize,
     right_aligned: bool,
     label: String,
-    target: String,
+    pub(super) target: String,
 }
 
 impl PanelState {
@@ -141,7 +141,26 @@ pub(super) fn paint_label(
     theme: &Theme,
     discoverer: &mut crate::fonts::Discoverer,
 ) -> (PaintedLink, bool) {
-    let rect = painter.clip_rect();
+    paint_label_in(
+        painter,
+        painter.clip_rect(),
+        link,
+        y,
+        metrics,
+        theme,
+        discoverer,
+    )
+}
+
+pub(super) fn paint_label_in(
+    painter: &Painter,
+    rect: Rect,
+    link: &LaidOutLink,
+    y: f32,
+    metrics: &CellMetrics,
+    theme: &Theme,
+    discoverer: &mut crate::fonts::Discoverer,
+) -> (PaintedLink, bool) {
     discoverer.note_text(&link.label);
     let color = theme.panel_color(Some(Mark::Pending), None);
     let x = if link.right_aligned {

@@ -1,0 +1,34 @@
+{
+ "v": 1,
+ "phase": "ship",
+ "attention": "done",
+ "attention_since": 1794679316,
+ "lines": [
+  {
+   "text": "[DEMO] Fix: notificaciones duplicadas",
+   "style": "title"
+  },
+  "",
+  {
+   "text": "Resultado",
+   "style": "section",
+   "summary": "merged"
+  },
+  {
+   "text": "causa: el worker reintentaba sin idempotency key",
+   "mark": "done"
+  },
+  {
+   "text": "test de regresión añadido",
+   "mark": "done"
+  },
+  {
+   "text": "PR mergeada",
+   "mark": "done",
+   "ref": "#88",
+   "link": "https://github.com/example/app/pull/88"
+  }
+ ],
+ "milestone": "M1",
+ "deliverable": "notif"
+}

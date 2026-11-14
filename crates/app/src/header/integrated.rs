@@ -649,6 +649,7 @@ mod tests {
                                 agent: Some(crate::agent_signals::View {
                                     client: crate::agent_signals::Client::Codex,
                                     busy: false,
+                                    done: false,
                                     waiting: true,
                                     backed,
                                 }),
@@ -733,6 +734,7 @@ mod tests {
                             agent: Some(crate::agent_signals::View {
                                 client: crate::agent_signals::Client::Claude,
                                 busy,
+                                done: false,
                                 waiting: false,
                                 backed,
                             }),

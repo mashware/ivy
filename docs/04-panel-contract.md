@@ -240,9 +240,16 @@ and reported to the producer.
 }
 ```
 
+An element of `items` or `outside` may also be a JSON string: `"Review the design"` is shorthand
+for `{"text":"Review the design"}`. It retains the literal text without inventing an ID, mark,
+reference or link. It counts toward the total; only an explicit `done` contributes to completion.
+This accepts Bellwether's existing plan syntax without adding a field or changing the version.
+
 `milestone` and `deliverable` on a panel are optional strings and are not patchable: republish the
 whole panel document to change them. A matching pair places its card under that deliverable; a
-matching milestone alone places it under the milestone. Everything else appears in **Off the plan**.
+matching milestone alone places it under the milestone. A known milestone with an unknown deliverable
+keeps its console attached at milestone level. Only an absent or unknown milestone appears in
+**Off the plan**, and a console without a published panel is not assigned an invented plan position.
 
 ## Project plan channel
 

@@ -1195,6 +1195,49 @@ fn board_guards_require_real_navigation_and_reject_closed_activity() {
 }
 
 #[test]
+fn rich_board_guard_requires_observation_and_real_interactions() {
+    use std::{fs, process::Command};
+    let report = std::env::temp_dir().join(format!("board-rich-{}", std::process::id()));
+    let function = MEASURE
+        .split("# Board report validation (also exercised with synthetic reports).\n")
+        .nth(1)
+        .unwrap()
+        .split("# End Board report validation.")
+        .next()
+        .unwrap();
+    let shell = format!("set -eu\n{function}\ninvalidate() {{ exit 7; }}\ncheck_board_report\n");
+    let accepts = |contents: &str| {
+        fs::write(&report, contents).unwrap();
+        Command::new("sh")
+            .arg("-c")
+            .arg(&shell)
+            .env("REPORT", &report)
+            .env("BOARD", "open")
+            .env("BOARD_RICH", "1")
+            .env("DIRECTORIES", "4")
+            .status()
+            .unwrap()
+            .success()
+    };
+    let report_text = "board mode: open\nboard application: frames=9, total=1ms\nboard witnesses: open=8, projected=32, painted=24, repositories=2, ungrouped=3, navigation=2, focus=1, deadlines=0\nboard content witnesses: observed=4, transitions=1, rows=20, expansions=1, folds=1\n";
+    assert!(accepts(report_text));
+    for field in ["observed", "transitions", "rows", "expansions", "folds"] {
+        let value = if field == "observed" {
+            4
+        } else if field == "rows" {
+            20
+        } else {
+            1
+        };
+        assert!(
+            !accepts(&report_text.replace(&format!("{field}={value}"), &format!("{field}=0"))),
+            "{field}"
+        );
+    }
+    fs::remove_file(report).unwrap();
+}
+
+#[test]
 fn board_variants_are_only_averaged_with_their_own_mode() {
     use std::{fs, process::Command};
     let directory = std::env::temp_dir().join(format!("board-compare-{}", std::process::id()));

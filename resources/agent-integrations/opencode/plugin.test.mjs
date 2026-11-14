@@ -138,3 +138,84 @@ test('route bootstrap, displayed request, cancellation, navigation and disposal'
     await dispose(); dispose=undefined
   } finally { if (dispose) await dispose(); if (server) await new Promise(resolve => server.close(resolve)); delete process.env.PANEL_DIR; delete process.env.PANEL_ID; await rm(dir,{recursive:true,force:true}) }
 })
+
+test('private directory check precedes every connection and disposal cancels retries', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ivy-private-'))
+  const originalDir = process.env.PANEL_DIR, originalId = process.env.PANEL_ID
+  try {
+    const source = await readFile(new URL('./ivy-opencode.tsx', import.meta.url), 'utf8')
+    const channel = source.slice(source.indexOf('const envelope'), source.indexOf('export default'))
+    await writeFile(join(dir, 'channel.ts'), `
+import {join} from 'node:path'
+import {lstatSync as realStat} from 'node:fs'
+import {EventEmitter} from 'node:events'
+export const state = {mode:0o700, uid:process.geteuid(), directory:true, missing:false, real:false, reads:[], connections:0, callbacks:0, endpoints:[]}
+export const timers = new Map(); let serial=0
+function setTimeout(callback, delay){const id=++serial;timers.set(id,{callback,delay});return id}
+function clearTimeout(id){timers.delete(id)}
+function lstatSync(path){state.reads.push(path);if(state.real)return realStat(path);if(state.missing)throw Error('gone');return {isDirectory:()=>state.directory,uid:state.uid,mode:state.mode}}
+function createConnection(path){state.connections++;state.endpoints.push(path);const socket=new EventEmitter();socket.end=()=>{};socket.write=()=>{};return socket}
+${channel}
+export function open(path){return channel(path,()=>{state.callbacks++})}
+`)
+    const {state, timers, open} = await import(pathToFileURL(join(dir, 'channel.ts')))
+    const next = () => {
+      assert.equal(timers.size, 1)
+      const [id, {callback, delay}] = [...timers][0]
+      assert.equal(delay, 1000); timers.delete(id); callback()
+    }
+    for (const invalid of [
+      {mode:0o755}, ...[0o040,0o020,0o010,0o004,0o002,0o001].map(bit=>({mode:0o700|bit})),
+      {uid:process.geteuid() ^ 1}, {directory:false}, {missing:true},
+    ]) {
+      Object.assign(state, {mode:0o700, uid:process.geteuid(), directory:true, missing:false}, invalid)
+      const before = state.connections, reads = state.reads.length
+      const transport = open(dir)
+      assert.equal(state.connections, before)
+      assert.equal(transport.send({session:'cached',activity:'idle',permission:false,question:false}), false)
+      next()
+      assert.equal(state.reads.length, reads+2, 'each retry checks again')
+      assert.equal(state.connections, before)
+      assert.equal(state.callbacks, 0)
+      Object.assign(state, {mode:0o700, uid:process.geteuid(), directory:true, missing:false})
+      next()
+      assert.equal(state.connections, before+1, 'repair enables a connection')
+      transport.close(); assert.equal(timers.size, 0)
+      Object.assign(state, invalid)
+      const stopped = open(dir)
+      assert.equal(timers.size, 1)
+      stopped.close(); assert.equal(timers.size, 0, 'disposal cancels metadata retry')
+    }
+    const {symlink, chmod} = await import('node:fs/promises')
+    const alias = join(dir, 'alias')
+    await symlink(dir, alias)
+    state.real = true
+    for (const suffix of ['', '/', '/.', '/././']) {
+      const before = state.connections
+      const rejected = open(alias+suffix)
+      assert.equal(state.connections, before, 'final symlink is rejected with terminal slash/dot')
+      assert.equal(state.reads.at(-1), alias)
+      rejected.close()
+      const genuine = open(dir+suffix)
+      assert.equal(state.connections, before+1, 'genuine private directory passes')
+      genuine.close()
+    }
+    // The kernel follows link before ..; path.join would connect to a different parent.
+    await mkdir(join(dir, 'private', 'child'), {recursive:true, mode:0o700})
+    await chmod(join(dir, 'private'), 0o700)
+    await symlink(join(dir, 'private', 'child'), join(dir, 'link'))
+    const original = dir + '/link/..'
+    const traversed = open(original)
+    assert.equal(state.endpoints.at(-1), original + '/control.sock', 'connect uses exactly the directory spelling that lstat checked')
+    traversed.close()
+    await chmod(dir, 0o755)
+    const before = state.connections, rejected = open(dir)
+    assert.equal(state.connections, before)
+    rejected.close()
+    await chmod(dir, 0o700)
+  } finally {
+    if (originalDir === undefined) delete process.env.PANEL_DIR; else process.env.PANEL_DIR = originalDir
+    if (originalId === undefined) delete process.env.PANEL_ID; else process.env.PANEL_ID = originalId
+    await rm(dir, {recursive:true, force:true})
+  }
+})

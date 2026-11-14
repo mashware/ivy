@@ -7,6 +7,7 @@ pub(crate) struct Snapshot {
     pub(crate) document: Option<Arc<Panel>>,
     pub(crate) warning: Option<String>,
     pub(crate) attention: Option<AttentionState>,
+    pub(crate) outside: bool,
 }
 
 pub(crate) fn snapshot(state: &PanelState, now: SystemTime) -> Snapshot {
@@ -15,6 +16,7 @@ pub(crate) fn snapshot(state: &PanelState, now: SystemTime) -> Snapshot {
             document: None,
             warning: None,
             attention: None,
+            outside: false,
         };
     }
     let warning = state.warning(now);
@@ -23,15 +25,12 @@ pub(crate) fn snapshot(state: &PanelState, now: SystemTime) -> Snapshot {
         document: state.last_good.clone(),
         warning,
         attention,
+        outside: state.published_by == panel_control::PublicationOrigin::Outside,
     }
 }
 
 pub(crate) fn has_document(state: &PanelState) -> bool {
     !state.is_retired() && state.last_good.is_some()
-}
-
-pub(crate) fn body_symbol(mark: panel_contract::Mark) -> char {
-    super::symbol(mark)
 }
 
 #[cfg(test)]
