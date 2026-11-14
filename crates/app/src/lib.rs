@@ -1396,9 +1396,17 @@ impl eframe::App for Window {
         self.timed_separately += self.chrome.take_cost();
         board_owned |= board::blocked(self, ui.ctx());
         let (explorer_keys, explorer_pointer) = explorer::before_keys(
-            self, ui, &metrics, pane_owned || board_owned || chrome_owned || viewer::is_open(self),
+            self,
+            ui,
+            &metrics,
+            pane_owned || board_owned || chrome_owned || viewer::is_open(self),
         );
-        let (viewer_owned, requests) = viewer::keys(self, ui, &metrics, pane_owned || board_owned || explorer_keys);
+        let (viewer_owned, requests) = viewer::keys(
+            self,
+            ui,
+            &metrics,
+            pane_owned || board_owned || explorer_keys,
+        );
         let area = ui.max_rect();
 
         // **The order is applied before tiling**, so that what gets painted in this same frame is

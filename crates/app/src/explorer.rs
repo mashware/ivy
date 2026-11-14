@@ -39,6 +39,8 @@ pub(crate) struct Explorer {
     pointer_frame: Option<u64>,
     queued_open: bool,
     activate: bool,
+    viewport_rows: usize,
+    row_stride: f32,
 }
 
 impl Default for Explorer {
@@ -60,6 +62,8 @@ impl Default for Explorer {
             pointer_frame: None,
             queued_open: false,
             activate: false,
+            viewport_rows: 24,
+            row_stride: 27.0,
         }
     }
 }
@@ -149,6 +153,19 @@ impl Explorer {
     }
 
     fn evict(&mut self) {
+        // Traversal touches the root before its children. Keep that anchor while evicting
+        // derived listings, otherwise pressure makes the next frame reload the entire tree.
+        let recent_pane = self
+            .cache
+            .iter()
+            .max_by_key(|(_, value)| value.used)
+            .map(|(key, _)| key.pane);
+        let root = recent_pane.and_then(|pane| {
+            self.navigation
+                .get(&pane)
+                .and_then(|nav| nav.root.clone())
+                .map(|path| (pane, path))
+        });
         while self.cache.len() > CACHE_COUNT
             || self
                 .cache
@@ -160,6 +177,10 @@ impl Explorer {
             let Some(oldest) = self
                 .cache
                 .iter()
+                .filter(|(key, _)| {
+                    root.as_ref()
+                        .is_none_or(|(pane, path)| key.pane != *pane || &key.path != path)
+                })
                 .min_by_key(|(_, cached)| cached.used)
                 .map(|(key, _)| key.clone())
             else {

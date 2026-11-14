@@ -4,6 +4,7 @@ use std::{collections::HashSet, path::PathBuf};
 pub(super) struct Navigation {
     pub(super) root: Option<PathBuf>,
     pub(super) source: Option<PathBuf>,
+    pub(super) seeded_source: Option<PathBuf>,
     pub(super) expanded: HashSet<PathBuf>,
     pub(super) selected: Option<PathBuf>,
     pub(super) scroll: f32,
@@ -18,12 +19,17 @@ impl Navigation {
         }
         self.source = source;
         self.epoch = self.epoch.wrapping_add(1);
-        if self.root.is_none()
-            && let Some(path) = self.source.clone()
-        {
-            self.enter(path);
+        if self.root.is_none() {
+            self.use_source();
         }
         true
+    }
+
+    pub(super) fn use_source(&mut self) {
+        if let Some(path) = self.source.clone() {
+            self.seeded_source = Some(path.clone());
+            self.enter(path);
+        }
     }
 
     pub(super) fn enter(&mut self, path: PathBuf) {
@@ -57,10 +63,22 @@ mod tests {
         assert_eq!(nav.root, Some("/work/a".into()));
         assert_eq!(nav.scroll, 120.0);
         assert!(nav.expanded.contains(&PathBuf::from("/work/a/src")));
-        nav.enter(nav.source.clone().unwrap());
+        nav.use_source();
         assert_eq!(nav.root, Some("/work/b".into()));
         assert!(nav.expanded.is_empty());
         assert!(nav.selected.is_none());
         assert_eq!(nav.scroll, 0.0);
+    }
+    #[test]
+    fn deliberate_browsing_does_not_report_a_console_directory_change() {
+        let mut nav = Navigation::default();
+        nav.observe(Some("/work/a".into()));
+        nav.enter("/work".into());
+        assert_eq!(nav.source, nav.seeded_source);
+        nav.observe(Some("/work/b".into()));
+        assert_ne!(nav.source, nav.seeded_source);
+        nav.use_source();
+        assert_eq!(nav.source, nav.seeded_source);
+        assert_eq!(nav.root, nav.source);
     }
 }

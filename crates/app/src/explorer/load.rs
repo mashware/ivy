@@ -468,4 +468,78 @@ mod tests {
             thread::yield_now();
         }
     }
+    #[test]
+    fn blocked_filesystem_reader_leaves_frames_and_console_input_progressing() {
+        use crate::tests::{one_frame_in, window_of_tabs};
+        let temp = TempDir::new();
+        let marker = temp.0.join("console-input");
+        let command = format!(
+            "cd '{}' && exec cat > '{}'",
+            temp.0.display(),
+            marker.display()
+        );
+        let mut window = window_of_tabs([[command.as_str(), "sleep 30"]]);
+        crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
+        let ctx = egui::Context::default();
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let pane = window.active().panes()[0].name;
+        while window.projects.directory(pane) != Some(temp.0.as_path()) {
+            one_frame_in(&mut window, &ctx, area, vec![]);
+            assert!(Instant::now() < deadline, "native directory unavailable");
+            thread::sleep(Duration::from_millis(10));
+        }
+        let (started_tx, started_rx) = mpsc::sync_channel(1);
+        let (release_tx, release_rx) = mpsc::sync_channel(1);
+        let gate = Mutex::new(Some(release_rx));
+        window.explorer.loader = Loader::new_with_reader(Arc::new(move |_, _| {
+            let _ = started_tx.send(());
+            if let Some(receiver) = gate.lock().unwrap().take() {
+                let _ = receiver.recv();
+            }
+            Ok(Listing {
+                entries: Vec::new(),
+                bytes: 0,
+            })
+        }));
+        crate::explorer::toggle(&mut window, &ctx);
+        one_frame_in(&mut window, &ctx, area, vec![]);
+        started_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        let before = ctx.cumulative_frame_nr();
+        let pos = egui::pos2(400.0, 450.0);
+        for pressed in [true, false] {
+            one_frame_in(
+                &mut window,
+                &ctx,
+                area,
+                vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+        }
+        one_frame_in(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::Text("WHILE_BLOCKED\n".into())],
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while fs::read(&marker).unwrap_or_default() != b"WHILE_BLOCKED\n" {
+            one_frame_in(&mut window, &ctx, area, vec![]);
+            assert!(
+                Instant::now() < deadline,
+                "console input stalled behind filesystem read"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(ctx.cumulative_frame_nr() > before);
+        assert!(window.explorer.loading.is_some());
+        release_tx.send(()).unwrap();
+    }
 }

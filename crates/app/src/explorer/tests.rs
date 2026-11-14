@@ -124,3 +124,39 @@ fn explorer_escape_and_keyboard_never_resize_or_close_consoles() {
         before
     );
 }
+
+#[test]
+fn cache_pressure_keeps_the_current_tree_root_instead_of_reloading_it() {
+    let mut state = Explorer::default();
+    state.reconcile(&sources());
+    let root = state.request(1, "/repo/main".into());
+    state.cache.insert(
+        root.clone(),
+        Cached {
+            result: Ok(Listing {
+                entries: vec![],
+                bytes: 0,
+            }),
+            used: 0,
+        },
+    );
+    for index in 1..=32 {
+        let child = state.request(1, PathBuf::from(format!("/repo/main/{index}")));
+        state.cache.insert(
+            child,
+            Cached {
+                result: Ok(Listing {
+                    entries: vec![],
+                    bytes: 0,
+                }),
+                used: index,
+            },
+        );
+    }
+    state.evict();
+    assert_eq!(state.cache.len(), CACHE_COUNT);
+    assert!(
+        state.cache.contains_key(&root),
+        "evicting root makes the next frame reload the whole tree"
+    );
+}

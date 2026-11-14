@@ -21,8 +21,8 @@ fn rows(state: &mut Explorer, pane: usize) -> (Vec<Row>, Option<Request>, Vec<St
     let mut rows = Vec::new();
     let mut pending = None;
     let mut messages = Vec::new();
-    let visible_start = (state.navigation[&pane].scroll / 24.0) as usize;
-    let visible_end = visible_start.saturating_add(40);
+    let visible_start = (state.navigation[&pane].scroll / state.row_stride) as usize;
+    let visible_end = visible_start.saturating_add(state.viewport_rows);
     while let Some(visit) = stack.pop() {
         if rows.len() >= ROW_LIMIT {
             messages.push("More entries hidden; collapse folders or open a directory.".into());
@@ -133,7 +133,7 @@ pub(super) fn keys(state: &mut Explorer, pane: usize, ctx: &egui::Context) {
             current.unwrap_or(0).saturating_sub(1)
         };
         nav.selected = Some(rows[index].entry.path.clone());
-        nav.scroll = (index as f32 * 24.0 - 48.0).max(0.0);
+        nav.scroll = (index as f32 * state.row_stride - 48.0).max(0.0);
     }
     if let Some(index) = current {
         let entry = &rows[index].entry;
@@ -167,6 +167,14 @@ pub(super) fn show(
             ui.set_min_size(rect.size());
             ui.set_max_size(rect.size());
             ui.set_clip_rect(rect);
+            if area.width() >= 560.0 {
+                let grip = egui::Rect::from_center_size(
+                    rect.right_center(),
+                    egui::vec2(12.0, rect.height()),
+                );
+                ui.interact(grip, egui::Id::new("explorer-divider"), egui::Sense::drag())
+                    .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+            }
             ui.painter()
                 .rect_filled(rect, 0.0, theme.panel_background());
             ui.painter().line_segment(
@@ -193,7 +201,7 @@ pub(super) fn show(
             };
             body.add(
                 egui::Label::new(format!(
-                    "{}: {} (#{pane})",
+                    "{}: #{pane} {}",
                     if state.pinned.is_some() {
                         "Pinned"
                     } else {
@@ -243,7 +251,7 @@ pub(super) fn show(
                     .add_enabled(available, egui::Button::new("Use console directory"))
                     .clicked()
                 {
-                    nav.enter(nav.source.clone().unwrap());
+                    nav.use_source();
                 }
                 if ui
                     .add_enabled(available, egui::Button::new("Refresh"))
@@ -256,13 +264,17 @@ pub(super) fn show(
                 body.label("Local directory unavailable or unsupported.");
                 return;
             }
-            if nav.source != nav.root {
+            if nav.source != nav.seeded_source {
                 body.label("Console directory changed");
             }
             if !state.message.is_empty() {
                 body.label(&state.message);
             }
             let scroll = nav.scroll;
+            state.row_stride = 24.0 + body.spacing().item_spacing.y;
+            state.viewport_rows = ((body.available_height() - 110.0).max(24.0) / state.row_stride)
+                .ceil() as usize
+                + 1;
             let (rows, pending, messages) = rows(state, pane);
             let activate_key = std::mem::take(&mut state.activate);
             let mut action = if activate_key {
@@ -324,7 +336,12 @@ pub(super) fn show(
                         });
                     }
                 });
-            if root_loaded {
+            let incomplete = rows
+                .iter()
+                .any(|row| row.message.as_deref() == Some("Loading…"));
+            let scroll_gesture =
+                parent.input(|i| i.pointer.any_down() || i.smooth_scroll_delta != egui::Vec2::ZERO);
+            if root_loaded && (!incomplete || scroll_gesture) {
                 state.navigation.get_mut(&pane).unwrap().scroll = result.state.offset.y;
             }
             if let Some(path) = toggle {
