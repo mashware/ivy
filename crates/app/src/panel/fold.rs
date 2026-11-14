@@ -7,15 +7,15 @@ use eframe::egui::{Painter, Pos2, Rect};
 use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(super) enum HeaderId {
+pub(crate) enum HeaderId {
     Key(String),
     Text(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct Header {
-    id: HeaderId,
-    folded: bool,
+    pub(super) id: HeaderId,
+    pub(super) folded: bool,
     summary: String,
 }
 pub(super) type Folds = HashMap<HeaderId, bool>;
@@ -23,8 +23,8 @@ pub(super) type Folds = HashMap<HeaderId, bool>;
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct PaintedHeader {
     area: Rect,
-    id: HeaderId,
-    folded: bool,
+    pub(super) id: HeaderId,
+    pub(super) folded: bool,
 }
 
 pub(crate) fn toggle_header_at(state: &mut PanelState, point: Pos2) -> bool {

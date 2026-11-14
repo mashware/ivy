@@ -21,6 +21,7 @@
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+pub(crate) mod body;
 mod buttons;
 mod cache;
 use cache::PanelLayout;
@@ -1118,7 +1119,7 @@ pub fn paint(
             // forever because nothing triggered the search.
             discoverer.note_text(&row.text);
             let at = Pos2::new(x, y);
-            let inked = fold::paint_header(
+            let inked = body::paint_row(
                 painter,
                 at,
                 row,
@@ -1126,10 +1127,7 @@ pub fn paint(
                 width,
                 discoverer,
                 &mut color_glyphs,
-            )
-            .unwrap_or_else(|| {
-                color::paint_text(painter, at, row, metrics, discoverer, &mut color_glyphs)
-            });
+            );
             // **What a row really measures is asked of whoever drew it**, and that closes the last
             // way a press could send a command nobody could read. This module lays text out counting
             // characters, and a character is not a column: twenty-nine kanji are fifty-eight columns,
