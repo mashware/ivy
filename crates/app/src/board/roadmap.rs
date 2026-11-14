@@ -469,9 +469,12 @@ fn paint_project_contents(
                 let hidden_done = milestone
                     .items
                     .iter()
-                    .enumerate()
-                    .filter(|(i, item)| item.mark == Some(Mark::Done) && !visible.contains(i))
-                    .count();
+                    .filter(|item| item.mark == Some(Mark::Done))
+                    .count()
+                    - visible
+                        .iter()
+                        .filter(|&&i| milestone.items[i].mark == Some(Mark::Done))
+                        .count();
                 if hidden_done > 0 {
                     ui.small(format!("✓ {hidden_done} completed"));
                 }

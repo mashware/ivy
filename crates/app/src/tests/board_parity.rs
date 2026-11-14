@@ -175,6 +175,12 @@ mod tests {
             .iter()
             .map(|name| window.board.card_rect(*name).expect("card painted"))
             .collect();
+        for (header, card) in xs.iter().zip(&cards) {
+            assert!(
+                (header - card.left()).abs() < 4.0,
+                "column header {header} is not aligned with card {card:?}"
+            );
+        }
         assert!(
             cards
                 .windows(2)

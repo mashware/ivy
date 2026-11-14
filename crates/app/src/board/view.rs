@@ -6,8 +6,9 @@ use super::{
     observation::{self, COLUMNS, Column},
     roadmap,
 };
-use crate::Window;
+use crate::{Window, agent_signals::View};
 use eframe::egui::{self, Rect, Vec2};
+use std::collections::HashMap;
 use std::time::{Instant, SystemTime};
 
 #[derive(Default)]
@@ -76,15 +77,22 @@ fn reveal_offset(geometry: &Geometry, pane: usize, offset: Vec2) -> Vec2 {
     result.max(Vec2::ZERO)
 }
 
-fn column(window: &Window, entry: &Entry, now: SystemTime) -> Column {
-    let signal = window
-        .all_panes()
-        .find(|p| p.name == entry.pane)
-        .and_then(|p| p.signals.view(Instant::now()));
-    observation::classify(entry.snapshot.document.as_deref(), signal, now)
+fn column(entry: &Entry, signals: &HashMap<usize, View>, now: SystemTime) -> Column {
+    observation::classify(
+        entry.snapshot.document.as_deref(),
+        signals.get(&entry.pane).copied(),
+        now,
+    )
 }
 
-pub(super) fn paint(window: &mut Window, parent: &mut egui::Ui, area: Rect, sections: &[Section]) {
+pub(super) fn paint(
+    window: &mut Window,
+    parent: &mut egui::Ui,
+    area: Rect,
+    sections: &[Section],
+    signals: &HashMap<usize, View>,
+    now: SystemTime,
+) {
     // ScrollArea resolves wheel ownership through registered Areas, not painted layer IDs.
     // Keep the Board's foreground layer in that registry as well as in the paint list.
     egui::Area::new(egui::Id::new("board-layer"))
@@ -94,13 +102,19 @@ pub(super) fn paint(window: &mut Window, parent: &mut egui::Ui, area: Rect, sect
         .constrain(false)
         .show(parent.ctx(), |registered| {
             registered.allocate_rect(area, egui::Sense::hover());
-            paint_contents(window, registered, area, sections);
+            paint_contents(window, registered, area, sections, signals, now);
         });
 }
 
-fn paint_contents(window: &mut Window, parent: &mut egui::Ui, area: Rect, sections: &[Section]) {
+fn paint_contents(
+    window: &mut Window,
+    parent: &mut egui::Ui,
+    area: Rect,
+    sections: &[Section],
+    signals: &HashMap<usize, View>,
+    now: SystemTime,
+) {
     let theme = window.theme;
-    let now = SystemTime::now();
     let mut ui = egui::Ui::new(
         parent.ctx().clone(),
         egui::Id::new("board-screen"),
@@ -158,25 +172,24 @@ fn paint_contents(window: &mut Window, parent: &mut egui::Ui, area: Rect, sectio
         .auto_shrink([false, false])
         .show(&mut ui, |ui| {
             ui.set_min_width(canvas_width);
-            ui.horizontal_top(|ui| {
-                for (index, c) in COLUMNS.iter().enumerate() {
-                    let count = sections
-                        .iter()
-                        .flat_map(|s| &s.entries)
-                        .filter(|e| column(window, e, now) == *c)
-                        .count();
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(widths[index], 28.0),
-                        egui::Layout::left_to_right(egui::Align::Center),
-                        |ui| {
-                            ui.colored_label(
-                                cards::color(*c, &theme),
-                                format!("{} {}  {count}", c.symbol(), c.name()),
-                            );
-                        },
-                    );
-                }
-            });
+            let (header, _) =
+                ui.allocate_exact_size(egui::vec2(canvas_width, 28.0), egui::Sense::hover());
+            let mut left = header.left();
+            for (index, c) in COLUMNS.iter().enumerate() {
+                let count = sections
+                    .iter()
+                    .flat_map(|s| &s.entries)
+                    .filter(|e| column(e, signals, now) == *c)
+                    .count();
+                ui.painter().text(
+                    egui::pos2(left, header.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    format!("{} {}  {count}", c.symbol(), c.name()),
+                    egui::TextStyle::Body.resolve(ui.style()),
+                    cards::color(*c, &theme),
+                );
+                left += widths[index] + ui.spacing().item_spacing.x;
+            }
             let mut row_base = 0;
             for section in sections {
                 let section_top = ui.next_widget_position().y;
@@ -197,7 +210,7 @@ fn paint_contents(window: &mut Window, parent: &mut egui::Ui, area: Rect, sectio
                         let mut entries: Vec<_> = section
                             .entries
                             .iter()
-                            .filter(|e| column(window, e, now) == *c)
+                            .filter(|e| column(e, signals, now) == *c)
                             .collect();
                         if *c == Column::Wait {
                             entries.sort_by_key(|e| window.board.observations.since(e.pane));
@@ -212,10 +225,7 @@ fn paint_contents(window: &mut Window, parent: &mut egui::Ui, area: Rect, sectio
                                     ui.weak("—");
                                 }
                                 for (row, entry) in entries.into_iter().enumerate() {
-                                    let signal = window
-                                        .all_panes()
-                                        .find(|p| p.name == entry.pane)
-                                        .and_then(|p| p.signals.view(Instant::now()));
+                                    let signal = signals.get(&entry.pane).copied();
                                     let panel_wait =
                                         entry.snapshot.document.as_ref().and_then(|p| p.attention)
                                             == Some(panel_contract::Attention::Wait)

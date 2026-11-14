@@ -136,15 +136,16 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, area: egui::R
     window.board.timing.plan_projection(plan_started.elapsed());
     let wall = std::time::SystemTime::now();
     let clock = Instant::now();
+    let signals: std::collections::HashMap<_, _> = window
+        .all_panes()
+        .filter_map(|pane| pane.signals.view(clock).map(|signal| (pane.name, signal)))
+        .collect();
     sections.sort_by_key(|section| {
         let rank = section
             .entries
             .iter()
             .map(|entry| {
-                let signal = window
-                    .all_panes()
-                    .find(|p| p.name == entry.pane)
-                    .and_then(|p| p.signals.view(clock));
+                let signal = signals.get(&entry.pane).copied();
                 observation::classify(entry.snapshot.document.as_deref(), signal, wall).rank()
             })
             .min()
@@ -174,7 +175,7 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, area: egui::R
         .iter()
         .position(|pane| Some(*pane) == window.board.selected)
         .unwrap_or(0);
-    view::paint(window, ui, area, &sections);
+    view::paint(window, ui, area, &sections, &signals, wall);
     if let Some(target) = window.board.activate.take() {
         activate(window, ui.ctx(), target);
     }
