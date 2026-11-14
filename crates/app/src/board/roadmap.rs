@@ -846,6 +846,9 @@ mod tests {
                 "deliverable left edges differ: {items:?} {lefts:?}"
             );
         }
+        let blocked = text_at(&expanded, "Pruebas en sandbox").unwrap();
+        let block_left = text_edge("Pruebas en sandbox", false);
+        assert!(expanded.iter().any(|s|matches!(&s.shape,egui::Shape::Circle(c) if c.stroke.color==Theme::default().color(term_core::TermColor::Indexed(1)) && c.center.x<block_left && c.center.x>block_left-18.0 && (c.center.y-blocked.y).abs()<9.0)),"blocked deliverable must use the same red/orange mark as its blocked console");
         let card_widths: Vec<_> = titles
             .iter()
             .map(|at| {

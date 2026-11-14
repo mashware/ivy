@@ -459,8 +459,12 @@ fn paint_milestone(
                         ui.spacing_mut().interact_size.y = 16.0;
                         let mark_color = match item.mark {
                             Some(Mark::Done | Mark::Current) => theme.focus(),
-                            Some(Mark::Wait | Mark::Block) => crate::board::cards::color(
+                            Some(Mark::Wait) => crate::board::cards::color(
                                 crate::board::observation::Column::Wait,
+                                theme,
+                            ),
+                            Some(Mark::Block) => crate::board::cards::color(
+                                crate::board::observation::Column::Block,
                                 theme,
                             ),
                             _ => crate::board::style::dim(theme),
