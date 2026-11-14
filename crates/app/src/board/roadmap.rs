@@ -443,8 +443,7 @@ mod tests {
             entry.snapshot.document = Some(Arc::new(
                 panel_contract::parse_document(
                     &serde_json::json!({
-                        "title": "Long attached title ".repeat(80),
-                        "milestone":"M", "deliverable":"D", "lines":[]
+                        "milestone":"M", "deliverable":"D", "lines":[{"text": "Long attached title ".repeat(80), "style":"title"}]
                     })
                     .to_string(),
                 )

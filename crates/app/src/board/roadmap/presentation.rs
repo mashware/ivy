@@ -460,7 +460,31 @@ fn paint_milestone(
                                 |ui| {
                                     ui.set_width(badge_width);
                                     for entry in on {
-                                        chip(ui, entry, selected, surface);
+                                        let title = crate::board::cards::clean(
+                                            crate::board::cards::title(entry)
+                                                .split(" · ")
+                                                .next()
+                                                .unwrap_or(""),
+                                        );
+                                        let width = (ui
+                                            .painter()
+                                            .layout_no_wrap(
+                                                title,
+                                                egui::FontId::monospace(11.0),
+                                                theme.foreground(),
+                                            )
+                                            .size()
+                                            .x
+                                            + 26.0)
+                                            .min(badge_width);
+                                        ui.allocate_ui_with_layout(
+                                            egui::vec2(width, 18.0),
+                                            egui::Layout::top_down(egui::Align::Min),
+                                            |ui| {
+                                                ui.set_width(width);
+                                                chip(ui, entry, selected, surface);
+                                            },
+                                        );
                                     }
                                 },
                             );
