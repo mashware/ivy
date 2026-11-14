@@ -598,7 +598,7 @@ override configured files as a whole; retirement reveals the file again. A confi
 visible without an open console. Without a plan, producer section headings and summaries appear as
 a clearly labelled fallback. Plain-string plan items retain their text and count toward totals.
 
-The card's single right-facing arrow opens its console; its tooltip reads **Go to console**. Click a card, or move with the
+The card's single outward diagonal arrow opens its console; its tooltip reads **Go to console**. Click a card, or move with the
 arrows and press Enter, to open its console. The branch and its icon are aligned to the left of its footer.
 Waiting is yellow, Stuck orange/red, Working blue and Finished green. Left/Right follow reading
 order, Up/Down the grid, and Home/End the first/last card; selection reveals the required position in

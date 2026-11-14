@@ -196,9 +196,9 @@ pub(super) fn console_navigation(ui: &mut egui::Ui, width: f32, theme: &Theme) {
     let r = (width * 0.3).min(4.0);
     let stroke = egui::Stroke::new(1.0, theme.focus());
     for (a, b) in [
-        (c + egui::vec2(-r, 0.0), c + egui::vec2(r, 0.0)),
-        (c + egui::vec2(0.0, -r), c + egui::vec2(r, 0.0)),
-        (c + egui::vec2(0.0, r), c + egui::vec2(r, 0.0)),
+        (c + egui::vec2(-r, r), c + egui::vec2(r, -r)),
+        (c + egui::vec2(0.0, -r), c + egui::vec2(r, -r)),
+        (c + egui::vec2(r, 0.0), c + egui::vec2(r, -r)),
     ] {
         ui.painter().line_segment([a, b], stroke);
     }
