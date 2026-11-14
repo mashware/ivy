@@ -200,6 +200,7 @@ impl Window {
             ctx.request_repaint_after(flip);
         }
 
+        crate::board::observe(self, ctx);
         let board = self.board.is_open();
         let started = board.then(Instant::now);
         let missing = panel_warning_due(self, now);

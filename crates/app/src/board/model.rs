@@ -18,16 +18,11 @@ pub(super) enum Kind {
     Other,
 }
 
-pub(super) struct Band {
-    pub(super) title: Option<String>,
-    pub(super) count: usize,
-}
-
 pub(super) struct Section {
     pub(super) key: Option<Key>,
-    pub(super) bands: Vec<Band>,
     pub(super) kind: Kind,
     pub(super) entries: Vec<Entry>,
+    pub(super) roadmap: Option<super::roadmap::Resolved>,
 }
 
 impl Section {
@@ -94,7 +89,6 @@ pub(super) fn group(consoles: Vec<(Option<Membership>, Entry)>) -> Vec<Section> 
                     key,
                     Section {
                         key: membership.as_ref().map(|m| m.key.clone()),
-                        bands: Vec::new(),
                         kind: membership
                             .as_ref()
                             .map_or(Kind::Other, |m| Kind::Repository {
@@ -102,6 +96,7 @@ pub(super) fn group(consoles: Vec<(Option<Membership>, Entry)>) -> Vec<Section> 
                                 ink: m.ink,
                             }),
                         entries: Vec::new(),
+                        roadmap: None,
                     },
                 ));
                 sections.len() - 1
@@ -111,10 +106,6 @@ pub(super) fn group(consoles: Vec<(Option<Membership>, Entry)>) -> Vec<Section> 
     }
     for (_, section) in &mut sections {
         order(&mut section.entries);
-        section.bands.push(Band {
-            title: None,
-            count: section.entries.len(),
-        });
     }
     // Stable: equal sections keep the order of their first console. After `order`, a section's
     // first entry carries its strongest claim.
@@ -146,33 +137,6 @@ pub(super) fn reconcile(selected: Option<usize>, ordinal: usize, order: &[usize]
     })
 }
 
-/// The claim, or the absence of any document; nothing when a document claims nothing.
-pub(super) fn status(snapshot: &Snapshot) -> Option<String> {
-    match snapshot.attention {
-        Some(a) => Some(format!(
-            "{} {}",
-            crate::panel::attention_symbol(a.class),
-            match a.class {
-                panel_contract::Attention::Wait => "it is waiting for you",
-                panel_contract::Attention::Block => "stuck on something else, not you",
-                panel_contract::Attention::Done => "it finished and nobody looked",
-            }
-        )),
-        None if snapshot.document.is_none() => Some("No published state".to_owned()),
-        None => None,
-    }
-}
-
-pub(super) fn excerpt(
-    document: &panel_contract::Panel,
-) -> impl Iterator<Item = &panel_contract::Line> {
-    document
-        .lines
-        .iter()
-        .filter(|line| !line.text.trim().is_empty())
-        .take(3)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,6 +150,7 @@ mod tests {
                 document: None,
                 warning: None,
                 attention: None,
+                outside: false,
             },
         }
     }
@@ -224,28 +189,14 @@ mod tests {
         assert_eq!(reconcile(Some(7), 0, &[]), None);
     }
     #[test]
-    fn phase_and_body_do_not_declare_attention_and_excerpt_is_literal() {
-        let panel=panel_contract::parse_document(r#"{"phase":"done","lines":[{"text":"  "},{"text":"old blocker","mark":"block","indent":2},{"text":"second"},{"text":"third"},{"text":"fourth"}]}"#).unwrap();
-        let snapshot = Snapshot {
-            document: Some(std::sync::Arc::new(panel)),
-            warning: None,
-            attention: None,
-        };
-        assert_eq!(status(&snapshot), None);
-        let lines: Vec<_> = excerpt(snapshot.document.as_ref().unwrap()).collect();
+    fn phase_and_body_do_not_declare_attention() {
+        let panel = panel_contract::parse_document(
+            r#"{"phase":"done","lines":[{"text":"old blocker","mark":"block","indent":2}]}"#,
+        )
+        .unwrap();
         assert_eq!(
-            lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(),
-            vec!["old blocker", "second", "third"]
-        );
-        assert_eq!(lines[0].indent, 2);
-        assert_eq!(
-            status(&entry(0).snapshot).as_deref(),
-            Some("No published state")
-        );
-        assert!(
-            status(&claiming(0, Wait).snapshot)
-                .unwrap()
-                .ends_with("it is waiting for you")
+            super::super::observation::classify(Some(&panel), None, std::time::SystemTime::now()),
+            super::super::observation::Column::Idle
         );
     }
     #[test]

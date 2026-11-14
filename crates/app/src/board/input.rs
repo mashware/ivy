@@ -24,6 +24,7 @@ pub(crate) fn toggle(window: &mut Window, ctx: &egui::Context) {
         close(window, ctx);
     } else {
         let selected = window.active().focus;
+        window.board.branches = Default::default();
         window.board.open = true;
         window.board.original = Some(selected);
         window.board.selected = Some(selected);
@@ -53,6 +54,9 @@ pub(super) fn close(window: &mut Window, ctx: &egui::Context) {
     }
     window.board.open = false;
     window.board.pressed = None;
+    window.board.child_hits.clear();
+    window.board.child_pressed = None;
+    window.board.link_to_open = None;
     window.board.activate = None;
     window.board.painted.clear();
     window.board.order.clear();
@@ -208,6 +212,15 @@ fn navigate(state: &mut State, key: egui::Key) {
 
 fn pointer(state: &mut State, pos: egui::Pos2, pressed: bool) {
     if pressed {
+        state.child_pressed = state
+            .child_hits
+            .iter()
+            .find(|(r, _)| r.contains(pos))
+            .cloned();
+        if state.child_pressed.is_some() {
+            state.pressed = None;
+            return;
+        }
         state.pressed = state.painted.iter().copied().find(|(_, r)| r.contains(pos));
         if let Some((id, _)) = state.pressed {
             state.selected = Some(id);
@@ -216,6 +229,10 @@ fn pointer(state: &mut State, pos: egui::Pos2, pressed: bool) {
                 .iter()
                 .position(|slot| slot.pane == id)
                 .unwrap_or(state.ordinal);
+        }
+    } else if let Some((rect, command)) = state.child_pressed.take() {
+        if rect.contains(pos) {
+            state.apply_card_command(&command);
         }
     } else if let Some((id, rect)) = state.pressed.take()
         && rect.contains(pos)

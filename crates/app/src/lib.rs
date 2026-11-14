@@ -1922,6 +1922,7 @@ mod tests {
     mod agent_signals;
     #[path = "board.rs"]
     mod board;
+    mod board_parity;
     mod context_clipboard;
     mod header_controls;
     mod integrated_chrome;
@@ -11962,6 +11963,8 @@ mod tests {
         // inventing a threshold—, only that it is not zero.
         let requested = egui::vec2(800.0, 600.0);
         let mut window = a_window_that_asks(requested);
+        // Isolate warning attribution from independently measured Board observation.
+        window.board.enabled = false;
         let ctx = egui::Context::default();
         let stubborn = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1126.0, 661.0));
 
