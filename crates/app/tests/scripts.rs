@@ -472,6 +472,18 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/settings/editor/view/tests/layout.rs"),
     ),
     (
+        "app/src/tab_bar/layout.rs",
+        include_str!("../src/tab_bar/layout.rs"),
+    ),
+    (
+        "app/src/tab_bar/indicator.rs",
+        include_str!("../src/tab_bar/indicator.rs"),
+    ),
+    (
+        "app/src/tab_bar/feedback.rs",
+        include_str!("../src/tab_bar/feedback.rs"),
+    ),
+    (
         "app/src/tab_bar/interaction.rs",
         include_str!("../src/tab_bar/interaction.rs"),
     ),

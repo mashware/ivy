@@ -1067,6 +1067,218 @@ mod tests {
         assert!(!has_text(&shapes, "Preferences"));
     }
     #[test]
+    fn tab_controls_own_the_press_until_release_and_keep_selection_visible() {
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for target in ["body", "close", "add"] {
+            let ctx = egui::Context::default();
+            let mut window = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+            window.chrome.enable();
+            window.headers = window.headers.integrated(true);
+            let area = area_of(800.0);
+            frame(&mut window, &ctx, area, vec![]);
+            let at = egui::pos2(
+                match target {
+                    "body" => 230.0,
+                    "close" => 375.0,
+                    _ => 420.0,
+                },
+                65.0,
+            );
+            let pressed = frame(
+                &mut window,
+                &ctx,
+                area,
+                vec![egui::Event::PointerMoved(at), button(at, true)],
+            );
+            assert_eq!(window.active, 0, "{target} selected on press");
+            assert_eq!(window.tabs.len(), 2, "{target} acted on press");
+            assert!(pressed.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == window.theme.focus() && r.rect.height() == 2.0)), "selected underline disappeared");
+            let away = egui::pos2(50.0, 200.0);
+            frame(
+                &mut window,
+                &ctx,
+                area,
+                vec![egui::Event::PointerMoved(away)],
+            );
+            frame(&mut window, &ctx, area, vec![button(away, false)]);
+            assert_eq!(window.active, 0);
+            assert_eq!(window.tabs.len(), 2, "cancelled {target} acted");
+            frame(
+                &mut window,
+                &ctx,
+                area,
+                vec![egui::Event::PointerMoved(at), button(at, true)],
+            );
+            frame(&mut window, &ctx, area, vec![button(at, false)]);
+            match target {
+                "body" => {
+                    assert_eq!(window.active, 1);
+                    assert_eq!(window.tabs.len(), 2);
+                }
+                "close" => {
+                    assert_eq!(window.tabs.len(), 1);
+                    assert_eq!(window.tabs[0].name, 0);
+                }
+                _ => {
+                    assert_eq!(window.tabs.len(), 3);
+                    assert_eq!(window.active, 2);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_held_tab_press_cannot_activate_another_target() {
+        let ctx = egui::Context::default();
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        let area = area_of(800.0);
+        frame(&mut window, &ctx, area, vec![]);
+        let body = egui::pos2(230.0, 65.0);
+        let close = egui::pos2(375.0, 65.0);
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![
+                egui::Event::PointerMoved(body),
+                egui::Event::PointerButton {
+                    pos: body,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::PointerMoved(close)],
+        );
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::PointerButton {
+                pos: close,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert_eq!(window.active, 0);
+        assert_eq!(window.tabs.len(), 2);
+    }
+
+    #[test]
+    fn held_press_cannot_transfer_after_a_preceding_tab_is_removed() {
+        let ctx = egui::Context::default();
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 3]);
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        let area = area_of(900.0);
+        frame(&mut window, &ctx, area, vec![]);
+        let at = egui::pos2(230.0, 65.0);
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::PointerMoved(at), button(true)],
+        );
+        // A keyboard close can remove the active predecessor while the pointer remains held.
+        let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
+        window.apply(WindowRequest::CloseTab, &ctx, area, &metrics);
+        let held = frame(&mut window, &ctx, area, vec![]);
+        assert!(!held.iter().any(|s| matches!(&s.shape,
+            egui::Shape::Rect(r) if r.rect.contains(at) && r.fill == window.theme.foreground().gamma_multiply(0.20)
+        )), "held feedback transferred to the next tab at the same index");
+        frame(&mut window, &ctx, area, vec![button(false)]);
+        assert_eq!(window.tabs.len(), 2);
+        assert_eq!(
+            window.tabs[window.active].name, 1,
+            "release selected the successor at the old index"
+        );
+    }
+
+    #[test]
+    fn selected_tab_keeps_underline_and_distinct_hover_and_held_feedback() {
+        let ctx = egui::Context::default();
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        let area = area_of(800.0);
+        let at = egui::pos2(70.0, 65.0);
+        let mut pass = |time, events| {
+            ui_pass(
+                &mut window,
+                &ctx,
+                area,
+                egui::RawInput {
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+            )
+        };
+        let baseline = pass(0.0, vec![]);
+        pass(0.01, vec![egui::Event::PointerMoved(at)]);
+        let hover = pass(0.14, vec![]);
+        let held = pass(
+            0.15,
+            vec![egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        let fills = |shapes: &[egui::epaint::ClippedShape]| {
+            shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Rect(r) if r.rect.contains(at) => Some(r.fill),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_ne!(
+            fills(&baseline),
+            fills(&hover),
+            "selected tab has no hover feedback"
+        );
+        assert_ne!(
+            fills(&hover),
+            fills(&held),
+            "selected tab has no distinct held feedback"
+        );
+        assert_eq!(window.active, 0);
+        assert!(held.iter().any(|s| matches!(&s.shape,
+            egui::Shape::Rect(r) if r.rect.contains(at) && r.fill == window.theme.foreground().gamma_multiply(0.20)
+        )), "selected tab has no immediate held fill");
+        for shapes in [&baseline, &hover, &held] {
+            assert!(
+                shapes.iter().any(|s| matches!(&s.shape,
+                    egui::Shape::Rect(r) if r.fill == window.theme.focus() && r.rect.height() == 2.0
+                )),
+                "selected underline disappeared"
+            );
+        }
+    }
+
+    #[test]
     fn narrow_tab_labels_select_without_invisible_close_targets() {
         for width in [130.0, 95.0] {
             let ctx = egui::Context::default();
@@ -1167,13 +1379,27 @@ mod tests {
             .iter()
             .find(|t| t.galley.text() == "1")
             .expect("narrow tab number painted");
-        let claim = texts
+        let claim = shapes
             .iter()
-            .find(|t| t.galley.text() == "?")
-            .expect("attention painted");
+            .find_map(|s| match &s.shape {
+                egui::Shape::Vec(parts)
+                    if s.clip_rect.top() > 49.0
+                        && matches!(
+                            parts.as_slice(),
+                            [egui::Shape::Path(_), egui::Shape::Circle(_)]
+                        ) =>
+                {
+                    parts
+                        .iter()
+                        .map(egui::Shape::visual_bounding_rect)
+                        .reduce(|a, b| a.union(b))
+                }
+                _ => None,
+            })
+            .expect("drawn attention painted");
         assert!(
-            label.pos.x >= claim.pos.x + claim.galley.size().x,
-            "attention overlaps the tab number"
+            label.pos.x >= claim.right() + 10.0,
+            "attention overlaps the tab number or loses its gap"
         );
     }
 

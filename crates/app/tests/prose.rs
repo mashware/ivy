@@ -474,6 +474,21 @@ const SOURCES: &[(&str, &str, usize)] = &[
         1,
     ),
     (
+        "src/tab_bar/layout.rs",
+        include_str!("../src/tab_bar/layout.rs"),
+        2,
+    ),
+    (
+        "src/tab_bar/indicator.rs",
+        include_str!("../src/tab_bar/indicator.rs"),
+        2,
+    ),
+    (
+        "src/tab_bar/feedback.rs",
+        include_str!("../src/tab_bar/feedback.rs"),
+        1,
+    ),
+    (
         "src/tab_bar/interaction.rs",
         include_str!("../src/tab_bar/interaction.rs"),
         1,
@@ -766,7 +781,7 @@ const SOURCES: &[(&str, &str, usize)] = &[
     ("src/report.rs", include_str!("../src/report.rs"), 238),
     ("src/search.rs", include_str!("../src/search.rs"), 48),
     // Three comment lines moved with the tab interaction to its own module.
-    ("src/tab_bar.rs", include_str!("../src/tab_bar.rs"), 168),
+    ("src/tab_bar.rs", include_str!("../src/tab_bar.rs"), 166),
     (
         "src/tests/markdown.rs",
         include_str!("../src/tests/markdown.rs"),
@@ -824,9 +839,8 @@ const SOURCES: &[(&str, &str, usize)] = &[
 /// deleted declared file a compile error. [`rust_sources`] walks only to find the opposite mistake:
 /// a real file nobody declared. It never supplies the text being judged, so a path cannot disappear
 /// from the guard merely because the directory walk did not return it.
-// Re-measured at 19,488 by the existing walker after replacing obsolete wall-clock ratio
-// explanations with the scoped-clock rationale; the feature's original 19,500 included those.
-const COMMENT_LINES_AT_LEAST: usize = 19_488;
+// Re-measured with the existing comment walker after registering the tab modules.
+const COMMENT_LINES_AT_LEAST: usize = 19_905;
 
 /// How many **different** listed words a line needs before it is called Spanish.
 ///

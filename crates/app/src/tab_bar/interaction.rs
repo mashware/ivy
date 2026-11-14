@@ -1,7 +1,7 @@
 //! Pointer interactions for the integrated tab strip.
-use super::{CLOSE_MIN_WIDTH, CellMetrics, Window, WindowRequest, add_tab_rect, compact_tab_rect};
+use super::{CellMetrics, Window, WindowRequest, add_tab_rect, compact_tab_rect, feedback, layout};
 use eframe::egui;
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 
 pub(super) fn handle(
     window: &mut Window,
@@ -11,52 +11,34 @@ pub(super) fn handle(
 ) {
     let started = Instant::now();
     let count = window.tabs.len();
+    let mut action = None;
     for which_tab in 0..count {
         let card = compact_tab_rect(tab_bar, which_tab, count);
-        let close = egui::Rect::from_min_max(
-            egui::pos2((card.right() - 25.0).max(card.left()), card.top()),
-            card.right_bottom(),
+        let layout = layout::Layout::new(
+            card,
+            window.chrome.title_sizes.tab_size(),
+            window.tabs[which_tab]
+                .attention(SystemTime::now())
+                .is_some(),
+            count > 1,
         );
-        let can_close = count > 1 && card.width() >= CLOSE_MIN_WIDTH;
-        if can_close
-            && ui
-                .interact(
-                    close,
-                    ui.id().with(("compact-tab-close", which_tab)),
-                    egui::Sense::CLICK,
-                )
-                .on_hover_text("Close tab")
-                .clicked()
-        {
-            window.chrome.record_work(started.elapsed());
-            window.timed_separately += window.chrome.take_cost();
-            window.apply(
-                WindowRequest::Go(which_tab as isize - window.active as isize),
-                ui.ctx(),
-                ui.max_rect(),
-                metrics,
-            );
-            window.apply(WindowRequest::CloseTab, ui.ctx(), ui.max_rect(), metrics);
-            return;
-        }
-        let body = egui::Rect::from_min_max(
-            card.min,
-            egui::pos2(
-                if can_close {
-                    close.left()
-                } else {
-                    card.right()
-                },
-                card.bottom(),
-            ),
-        );
-        let response = ui
-            .interact(
-                body,
-                ui.id().with(("compact-tab", which_tab)),
-                egui::Sense::CLICK,
+        if let Some(close) = layout.close
+            && feedback::interact(
+                ui,
+                close,
+                feedback::id(ui, window.tabs[which_tab].name, "close"),
             )
-            .on_hover_text("Double-click or right-click to rename tab");
+            .on_hover_text("Close tab")
+            .clicked()
+        {
+            action = Some((which_tab, true));
+        }
+        let response = feedback::interact(
+            ui,
+            layout.body,
+            feedback::id(ui, window.tabs[which_tab].name, "body"),
+        )
+        .on_hover_text("Double-click or right-click to rename tab");
         if response.double_clicked() || response.secondary_clicked() {
             let tab = &window.tabs[which_tab];
             let initial = tab
@@ -65,30 +47,28 @@ pub(super) fn handle(
                 .unwrap_or_else(|| format!("Terminal {}", tab.name + 1));
             window.pane_view.begin_tab_rename(tab.name, initial);
         } else if response.clicked() {
-            window.chrome.record_work(started.elapsed());
-            window.timed_separately += window.chrome.take_cost();
-            window.apply(
-                WindowRequest::Go(which_tab as isize - window.active as isize),
-                ui.ctx(),
-                ui.max_rect(),
-                metrics,
-            );
-            return;
+            action = Some((which_tab, false));
         }
     }
 
     let add = add_tab_rect(tab_bar, count);
-    if add.width() >= 20.0
-        && ui
-            .interact(add, ui.id().with("compact-tab-add"), egui::Sense::CLICK)
+    let new_tab = add.width() >= 20.0
+        && feedback::interact(ui, add, ui.id().with("compact-tab-add"))
             .on_hover_text("New tab")
-            .clicked()
-    {
-        window.chrome.record_work(started.elapsed());
-        window.timed_separately += window.chrome.take_cost();
-        window.apply(WindowRequest::NewTab, ui.ctx(), ui.max_rect(), metrics);
-        return;
-    }
+            .clicked();
     window.chrome.record_work(started.elapsed());
     window.timed_separately += window.chrome.take_cost();
+    if let Some((which, close)) = action {
+        window.apply(
+            WindowRequest::Go(which as isize - window.active as isize),
+            ui.ctx(),
+            ui.max_rect(),
+            metrics,
+        );
+        if close {
+            window.apply(WindowRequest::CloseTab, ui.ctx(), ui.max_rect(), metrics);
+        }
+    } else if new_tab {
+        window.apply(WindowRequest::NewTab, ui.ctx(), ui.max_rect(), metrics);
+    }
 }
