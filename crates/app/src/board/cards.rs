@@ -108,9 +108,15 @@ pub(super) fn paint(
         let doc = entry.snapshot.document.as_deref();
         ui.horizontal(|ui| {
             let phase = doc.and_then(|d| d.phase.as_deref());
-            let phase_width = phase.map_or(0.0, |s| (s.chars().count() as f32 * 7.3).min(72.0));
+            let available = ui.available_width();
+            let phase_width = phase.map_or(0.0, |s| {
+                (s.chars().count() as f32 * 7.3)
+                    .min(72.0)
+                    .min(available * 0.25)
+            });
+            let navigation_width = 94.0_f32.min(available * 0.45);
             let title_width =
-                (ui.available_width() - phase_width - 94.0 - 2.0 * ui.spacing().item_spacing.x)
+                (available - phase_width - navigation_width - 2.0 * ui.spacing().item_spacing.x)
                     .max(1.0);
             ui.add_sized(
                 egui::vec2(title_width, 20.0),
@@ -133,16 +139,7 @@ pub(super) fn paint(
                 )
                 .on_hover_text(clean(phase));
             }
-            ui.add_sized(
-                egui::vec2(94.0, 20.0),
-                egui::Label::new(
-                    egui::RichText::new("Go to console")
-                        .size(11.0)
-                        .color(theme.focus()),
-                )
-                .truncate()
-                .halign(egui::Align::Max),
-            );
+            super::style::console_navigation(ui, navigation_width, theme);
         });
         if column == Column::Wait && !backed {
             ui.weak("Waiting state is unconfirmed");
@@ -296,4 +293,51 @@ pub(super) fn age_refresh(since: Option<Instant>, now: Instant) -> Option<Durati
         Duration::from_secs(60)
             - Duration::from_secs(now.saturating_duration_since(at).as_secs() % 60)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn long_phases_and_navigation_fit_the_narrow_finished_and_idle_columns() {
+        let widths = super::super::layout::column_widths(1344.0, 8.0);
+        for (column, width) in [(Column::Done, widths[3]), (Column::Idle, widths[4])] {
+            let ctx = egui::Context::default();
+            let entry = Entry {
+                pane: 1,
+                console_label: "Console".into(),
+                tab_label: "Tab".into(),
+                snapshot: crate::panel::summary::Snapshot {
+                    document: Some(std::sync::Arc::new(panel_contract::parse_document(r#"{"phase":"implementation","lines":[{"text":"A long producer title for a narrow column","style":"title"}]}"#).unwrap())),
+                    warning: None,
+                    attention: None,
+                    outside: false,
+                },
+            };
+            ctx.run_ui(egui::RawInput::default(), |ui| {
+                ui.set_width(width);
+                super::super::style::apply(ui, &Theme::default());
+                let rect = paint(
+                    ui,
+                    &entry,
+                    column,
+                    true,
+                    None,
+                    Some("main"),
+                    false,
+                    &mut Reader::default(),
+                    &mut crate::fonts::Discoverer::default(),
+                    &Theme::default(),
+                    &mut crate::measure::Board::default(),
+                    &mut Vec::new(),
+                );
+                assert!(
+                    rect.width() <= width + 0.1,
+                    "{column:?} expanded from {width} to {}",
+                    rect.width()
+                );
+            })
+            .drop_without_applying_deltas();
+        }
+    }
 }

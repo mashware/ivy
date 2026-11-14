@@ -194,6 +194,21 @@ pub(super) fn branch(ui: &mut egui::Ui, rect: egui::Rect, name: &str, theme: &Th
         .on_hover_text(name);
 }
 
+pub(super) fn console_navigation(ui: &mut egui::Ui, width: f32, theme: &Theme) {
+    ui.add_sized(
+        egui::vec2(width, 20.0),
+        egui::Label::new(
+            egui::RichText::new("Go to console")
+                .size(11.0)
+                .color(theme.focus()),
+        )
+        .truncate()
+        .halign(egui::Align::Max),
+    )
+    .on_hover_cursor(egui::CursorIcon::PointingHand)
+    .on_hover_text("Go to console");
+}
+
 pub(super) fn done_summary(ui: &mut egui::Ui, text: &str, theme: &Theme) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
