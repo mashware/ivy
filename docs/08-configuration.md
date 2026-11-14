@@ -599,7 +599,8 @@ visible without an open console. Without a plan, producer section headings and s
 a clearly labelled fallback. Plain-string plan items retain their text and count toward totals.
 
 The card's single outward diagonal arrow opens its console; its tooltip reads **Go to console**.
-Clickable cards and controls use a pointing-hand cursor. Passive roadmap labels retain text selection. Click a card, or move with the
+Reader controls use a pointing-hand cursor. Card backgrounds keep the normal pointer and still open
+their console on click. Passive roadmap labels retain text selection. Click a card, or move with the
 arrows and press Enter, to open its console. The branch and its icon are aligned to the left of its footer.
 Waiting is yellow, Stuck orange/red, Working blue and Finished green. Left/Right follow reading
 order, Up/Down the grid, and Home/End the first/last card; selection reveals the required position in

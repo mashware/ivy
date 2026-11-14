@@ -289,9 +289,6 @@ pub(super) fn paint(
         ));
     }
     let hovered = ui.rect_contains_pointer(rect);
-    if hovered {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-    }
     if selected || warmth == Heat::Hot || hovered {
         ui.painter().rect_stroke(
             rect,
