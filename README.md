@@ -179,13 +179,13 @@ from the launching environment; never save a console's actual `PANEL_ID` or `PAN
 See the [official Codex MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
 
 In a newly opened ordinary Bash, Zsh or Fish console, type `codex`, `codex resume <session-id>`
-or `codex fork <session-id>`. With Codex CLI and its running daemon at version 0.167.2, supported
+or `codex fork <session-id>`. On Linux, with Codex CLI and its running daemon at version 0.167.2, supported
 ordinary launches use the shared daemon and keep each conversation's panel connected to its console.
 The same live conversation can therefore be used for remote control. Ivy leaves your Codex and shell
 configuration unchanged, and preserves the daemon's remote-control preference. If you want remote
 control, start it explicitly with `codex remote-control start`.
 
-Other versions and advanced options, including custom configuration, profiles and security flags,
+Other platforms, versions and advanced options, including custom configuration, profiles and security flags,
 use an independent session with a diagnostic when supported. An independent session does not provide
 live mobile access to that same desktop conversation. Explicit `--no-daemon`, remote launches and
 administrative commands retain their own behavior. Existing aliases and functions take precedence;
@@ -193,7 +193,9 @@ administrative commands retain their own behavior. Existing aliases and function
 If automatic integration is unavailable, check the client's help before using `--no-daemon` in the
 intended console. Never persist console identity values.
 
-If a conversation is still active from before this integration and cannot be safely attached, leave
+Before panel setup, Codex still opens normally and reports that its panel bridge is not configured.
+Use the bundled, matching `panel-mcp` binary; the shared connection verifies the actual bridge before
+associating it with a console. If a conversation is still active from before this integration and cannot be safely attached, leave
 its old desktop session before resuming it here. Ivy does not restart a shared daemon to recover it.
 A remote host reporting “connected” does not prove that its live conversation can load history or
 accept input. Confirm both on your phone while the desktop session remains open; phone access has not

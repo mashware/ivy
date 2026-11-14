@@ -334,10 +334,36 @@ fn answer_routed(
     Some(match method {
         "initialize" => succeeded(&id, initialized(&message, instructions)),
         "tools/list" => succeeded(&id, tools()),
-        "tools/call" => called_routed(&id, &message, pane, route, epoch),
+        "tools/call" => {
+            let proof = route
+                .and_then(|path| {
+                    panel_control::codex_route::lock_route(std::path::Path::new(path)).ok()
+                })
+                .map(|guard| guard.identity.proof.clone());
+            let answer = called_routed(&id, &message, pane, route, epoch);
+            attach_route_proof(answer, proof.as_deref())
+        }
         "ping" => succeeded(&id, serde_json::json!({})),
         other => failed(&id, -32601, &format!("no method \"{other}\"")),
     })
+}
+
+fn attach_route_proof(answer: String, proof: Option<&str>) -> String {
+    let Some(proof) = proof else {
+        return answer;
+    };
+    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&answer) else {
+        return answer;
+    };
+    if let Some(result) = value
+        .get_mut("result")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        result.insert("_meta".into(), serde_json::json!({"ivy/routeProof": proof}));
+        value.to_string()
+    } else {
+        answer
+    }
 }
 
 /// The instructions this bridge sends with its handshake, or none.
@@ -960,6 +986,47 @@ fn failed(id: &serde_json::Value, code: i32, message: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_capability_attests_without_disclosing_its_path_and_invalid_cannot_attest() {
+        let home = panel_contract::PanelDir::create().unwrap();
+        let registry = panel_control::codex_route::Registry::for_home(home.path()).unwrap();
+        let route = registry.pending().unwrap();
+        let proof = panel_control::codex_route::lock_route(&route)
+            .unwrap()
+            .identity
+            .proof;
+        let message =
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"panel_get"}}"#;
+        let mut pane = None;
+        let mut epoch = None;
+        let result = answer_routed(
+            message,
+            &mut pane,
+            None,
+            Some(route.as_os_str()),
+            &mut epoch,
+        )
+        .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(value["result"]["_meta"]["ivy/routeProof"], proof);
+        assert!(result.contains("inactive"));
+        assert!(!result.contains(route.to_str().unwrap()));
+        std::fs::remove_file(&route).unwrap();
+        let missing = answer_routed(
+            message,
+            &mut pane,
+            None,
+            Some(route.as_os_str()),
+            &mut epoch,
+        )
+        .unwrap();
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&missing).unwrap()["result"]
+                .get("_meta")
+                .is_none()
+        );
+    }
 
     #[test]
     fn idle_revocation_disconnects_the_producer_without_another_tool_call() {

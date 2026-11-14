@@ -2,7 +2,8 @@
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::hash::{Hash, Hasher};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -80,12 +81,34 @@ fn lock(file: &File) -> io::Result<()> {
         }
     }
 }
-fn rewrite(file: &mut File, value: &impl Serialize) -> io::Result<()> {
-    let data = serde_json::to_vec(value)?;
-    file.seek(SeekFrom::Start(0))?;
-    file.set_len(0)?;
-    file.write_all(&data)?;
-    file.sync_data()
+// The lock inode is stable; data is replaced atomically and never truncated in place.
+fn atomic_write(path: &Path, data: &[u8]) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        let _ = (path, data);
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Codex routes require atomic replacement support",
+        ));
+    }
+    #[cfg(not(windows))]
+    {
+        let parent = path.parent().ok_or_else(|| invalid("missing parent"))?;
+        let temp = parent.join(format!("write-{}", random()?));
+        let mut f = open_file(&temp, true)?;
+        let result = (|| {
+            f.write_all(data)?;
+            f.sync_data()?;
+            fs::rename(&temp, path)
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temp);
+        }
+        result
+    }
+}
+fn route_lock_path(path: &Path) -> PathBuf {
+    path.with_extension("lock")
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -95,10 +118,13 @@ pub struct Identity {
     pub pane_dir: PathBuf,
     pub epoch: String,
     pub active: bool,
+    pub proof: String,
 }
 impl Identity {
     fn validate(&self) -> io::Result<()> {
         if self.v != 1
+            || self.proof.len() != 32
+            || !self.proof.bytes().all(|b| b.is_ascii_hexdigit())
             || (self.active
                 && (self.pane_id.is_empty()
                     || !self.pane_dir.is_absolute()
@@ -110,12 +136,13 @@ impl Identity {
     }
 }
 pub struct RouteGuard {
-    file: File,
+    _file: File,
+    path: PathBuf,
     pub identity: Identity,
 }
 impl RouteGuard {
     fn write(&mut self) -> io::Result<()> {
-        rewrite(&mut self.file, &self.identity)
+        atomic_write(&self.path, &serde_json::to_vec(&self.identity)?)
     }
 }
 pub fn lock_route(path: &Path) -> io::Result<RouteGuard> {
@@ -126,8 +153,9 @@ pub fn lock_route(path: &Path) -> io::Result<RouteGuard> {
         .parent()
         .ok_or_else(|| invalid("route has no parent"))?;
     validate_dir(parent)?;
+    let lockfile = open_file(&route_lock_path(path), false)?;
+    lock(&lockfile)?;
     let mut file = open_file(path, false)?;
-    lock(&file)?;
     let mut bytes = Vec::new();
     (&mut file).take(16385).read_to_end(&mut bytes)?;
     if bytes.len() > 16384 {
@@ -135,7 +163,11 @@ pub fn lock_route(path: &Path) -> io::Result<RouteGuard> {
     }
     let identity: Identity = serde_json::from_slice(&bytes)?;
     identity.validate()?;
-    Ok(RouteGuard { file, identity })
+    Ok(RouteGuard {
+        _file: lockfile,
+        path: path.to_owned(),
+        identity,
+    })
 }
 pub struct Registry {
     root: PathBuf,
@@ -183,18 +215,25 @@ impl Registry {
         let _lock = self.registry_lock()?;
         loop {
             let p = self.root.join(format!("route-{}", random()?));
-            match open_file(&p, true) {
-                Ok(mut f) => {
-                    rewrite(
-                        &mut f,
-                        &Identity {
-                            v: 1,
-                            pane_id: String::new(),
-                            pane_dir: PathBuf::new(),
-                            epoch: String::new(),
-                            active: false,
-                        },
-                    )?;
+            match open_file(&route_lock_path(&p), true) {
+                Ok(_lockfile) => {
+                    let mut f = match open_file(&p, true) {
+                        Ok(f) => f,
+                        Err(e) => {
+                            let _ = fs::remove_file(route_lock_path(&p));
+                            return Err(e);
+                        }
+                    };
+                    let record = Identity {
+                        v: 1,
+                        pane_id: String::new(),
+                        pane_dir: PathBuf::new(),
+                        epoch: String::new(),
+                        active: false,
+                        proof: random()?,
+                    };
+                    f.write_all(&serde_json::to_vec(&record)?)?;
+                    f.sync_data()?;
                     return Ok(p);
                 }
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
@@ -202,6 +241,7 @@ impl Registry {
             }
         }
     }
+
     fn validate_route(&self, p: &Path) -> io::Result<()> {
         let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
         if p.parent() != Some(self.root.as_path())
@@ -253,33 +293,56 @@ impl Registry {
             pane_dir: pane_dir.into(),
             epoch: epoch.into(),
             active: true,
+            proof: guard.identity.proof.clone(),
         };
         identity.validate()?;
-        // The registry lock serializes route creation and binding. Inspect the actual records
-        // instead of trusting a stale pane index: a killed launcher leaves its route behind.
-        // Hold every matching record locked until the entire cutover has committed or rolled back.
-        let mut displaced = Vec::new();
-        for entry in fs::read_dir(&self.root)? {
-            let entry = entry?;
-            let candidate = entry.path();
-            if candidate == route
-                || !entry.file_name().to_str().is_some_and(|name| {
-                    name.strip_prefix("route-").is_some_and(|suffix| {
-                        suffix.len() == 32 && suffix.bytes().all(|b| b.is_ascii_hexdigit())
-                    })
-                })
-            {
-                continue;
+        // The index is scoped to one exact pane and is checked against its full identity.
+        // Corrupt records belonging to unrelated panes cannot prevent this binding.
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        pane_id.hash(&mut hasher);
+        pane_dir.hash(&mut hasher);
+        let index = self.root.join(format!("pane-{:016x}", hasher.finish()));
+        let previous_index = match open_file(&index, false) {
+            Ok(mut file) => {
+                let mut bytes = Vec::new();
+                (&mut file).take(16385).read_to_end(&mut bytes)?;
+                if bytes.len() > 16384 {
+                    return Err(invalid("pane index too large"));
+                }
+                Some(bytes)
             }
-            let other = lock_route(&candidate)?;
-            if other.identity.active
-                && other.identity.pane_id == pane_id
-                && other.identity.pane_dir == pane_dir
-            {
-                let previous = other.identity.clone();
-                displaced.push((other, previous));
+            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error),
+        };
+        let mut displaced = Vec::new();
+        if let Some(bytes) = &previous_index {
+            let (indexed_id, indexed_dir, filename): (String, PathBuf, String) =
+                serde_json::from_slice(bytes)?;
+            if indexed_id != pane_id || indexed_dir != pane_dir {
+                return Err(invalid("pane index collision"));
+            }
+            let candidate = self.root.join(filename);
+            self.validate_route(&candidate)?;
+            if candidate != route {
+                let other = lock_route(&candidate)?;
+                if other.identity.active
+                    && other.identity.pane_id == pane_id
+                    && other.identity.pane_dir == pane_dir
+                {
+                    let previous = other.identity.clone();
+                    displaced.push((other, previous));
+                }
             }
         }
+        let index_bytes = serde_json::to_vec(&(
+            pane_id,
+            pane_dir,
+            route
+                .file_name()
+                .ok_or_else(|| invalid("missing route name"))?
+                .to_string_lossy()
+                .as_ref(),
+        ))?;
         let mapping = self
             .root
             .join(format!("thread-{}", thread.to_ascii_lowercase()));
@@ -287,6 +350,7 @@ impl Registry {
         let mut f = open_file(&temp, true)?;
         let previous = guard.identity.clone();
         let mut route_changed = false;
+        let mut index_changed = false;
         let result = (|| {
             f.write_all(
                 route
@@ -302,17 +366,31 @@ impl Registry {
                 other.identity.active = false;
                 other.write()?;
             }
+            atomic_write(&index, &index_bytes)?;
+            index_changed = true;
             fs::rename(&temp, &mapping)?;
             Ok(())
         })();
         if let Err(error) = result {
             let _ = fs::remove_file(&temp);
             guard.identity = previous;
-            let mut restore_error = if route_changed {
+            let index_restore = if index_changed {
+                match &previous_index {
+                    Some(bytes) => atomic_write(&index, bytes),
+                    None => fs::remove_file(&index),
+                }
+            } else {
+                Ok(())
+            };
+            let mut restore_error = index_restore.err();
+            let route_restore = if route_changed {
                 guard.write().err()
             } else {
                 None
             };
+            if let Some(error) = route_restore {
+                restore_error = Some(error);
+            }
             for (other, previous) in &mut displaced {
                 other.identity = previous.clone();
                 if let Err(failure) = other.write() {
@@ -398,6 +476,39 @@ mod tests {
         fs::remove_dir_all(home).unwrap();
     }
     #[test]
+    fn interrupted_unrelated_record_does_not_poison_a_new_binding() {
+        let (home, r) = registry();
+        let broken = r.pending().unwrap();
+        fs::write(&broken, b"{partial").unwrap();
+        assert!(lock_route(&broken).is_err());
+        let route = r.pending().unwrap();
+        r.bind(
+            "01234567-89ab-cdef-0123-456789abcdef",
+            &route,
+            "different",
+            Path::new("/tmp/different"),
+            "new",
+        )
+        .unwrap();
+        assert!(lock_route(&route).unwrap().identity.active);
+        fs::remove_dir_all(home).unwrap();
+    }
+    #[test]
+    fn public_proof_is_immutable_across_bind_and_revoke() {
+        let (home, r) = registry();
+        let route = r.pending().unwrap();
+        let proof = lock_route(&route).unwrap().identity.proof;
+        let thread = "01234567-89ab-cdef-0123-456789abcdef";
+        r.bind(thread, &route, "one", Path::new("/tmp/one"), "first")
+            .unwrap();
+        assert_eq!(lock_route(&route).unwrap().identity.proof, proof);
+        r.revoke(&route, "first").unwrap();
+        r.bind(thread, &route, "two", Path::new("/tmp/two"), "second")
+            .unwrap();
+        assert_eq!(lock_route(&route).unwrap().identity.proof, proof);
+        fs::remove_dir_all(home).unwrap();
+    }
+    #[test]
     fn binding_another_conversation_revokes_only_the_same_pane() {
         let (home, r) = registry();
         let old = r.pending().unwrap();
@@ -444,7 +555,7 @@ mod tests {
         let (home, r) = registry();
         let route = r.pending().unwrap();
         let guard = lock_route(&route).unwrap();
-        let other_file = open_file(&route, false).unwrap();
+        let other_file = open_file(&route_lock_path(&route), false).unwrap();
         assert_eq!(
             other_file.try_lock_exclusive().unwrap_err().kind(),
             io::ErrorKind::WouldBlock

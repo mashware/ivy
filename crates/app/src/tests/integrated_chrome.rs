@@ -616,7 +616,7 @@ mod tests {
             "Tool discovery alone does not prove a connection",
             "type codex normally",
             "Existing codex aliases or functions take precedence",
-            "Unsupported versions and advanced options",
+            "unsupported versions and advanced options",
             "A connected host does not prove",
             "A successful tool call proves a usable connection.",
         ];

@@ -2,7 +2,7 @@
 //! Conversation ownership remains upstream; only this integration's runtime MCP route changes.
 
 use crate::codex_route::Registry;
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::io::{self, Read, Write};
@@ -21,7 +21,6 @@ use tungstenite::{Message, WebSocket, accept_hdr_with_config};
 
 const MAX_FRAME: usize = 64 << 20;
 const TOKEN_ENV: &str = "IVY_CODEX_RELAY_AUTH";
-const CONFIG_ID: &str = "ivy-private-config";
 
 #[cfg(unix)]
 static TERMINATING: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
@@ -106,7 +105,7 @@ fn nonce() -> io::Result<String> {
 
 /// Unknown versions retain the existing independent-launch path until exercised.
 pub fn supported(exe: &OsStr, args: &[OsString]) -> bool {
-    if !supported_args(args) {
+    if !cfg!(target_os = "linux") || !supported_args(args) {
         return false;
     }
     output(exe, &["--version"], Duration::from_secs(2))
@@ -208,6 +207,10 @@ fn home() -> io::Result<PathBuf> {
     Ok(path)
 }
 
+fn verified_server(start: &Value) -> bool {
+    start.get("appServerVersion").and_then(Value::as_str) == Some("0.167.2")
+}
+
 /// Does not enable remote control, restart an existing server, or edit user settings.
 pub fn run(exe: &OsStr, args: &[OsString]) -> io::Result<ExitStatus> {
     #[cfg(unix)]
@@ -228,11 +231,7 @@ pub fn run(exe: &OsStr, args: &[OsString]) -> io::Result<ExitStatus> {
         .ok_or_else(|| error("Codex did not report its daemon socket"))?
         .to_owned();
     // A separately installed daemon can differ from the CLI. Do not replace it.
-    if start
-        .get("appServerVersion")
-        .and_then(Value::as_str)
-        .is_some_and(|version| version != "0.167.2")
-    {
+    if !verified_server(&start) {
         return Err(error(
             "the running Codex server is not the verified version 0.167.2; update it explicitly or use --no-daemon",
         ));
@@ -260,9 +259,13 @@ pub fn run(exe: &OsStr, args: &[OsString]) -> io::Result<ExitStatus> {
             &epoch,
             &thread_stop,
         );
-        if let Err(failure) = result {
-            // Protocol payloads and capabilities are deliberately absent from diagnostics.
-            eprintln!("ivy-codex: shared connection stopped ({failure})");
+        match result {
+            Ok(thread) => thread,
+            Err(failure) => {
+                // Protocol payloads and capabilities are deliberately absent from diagnostics.
+                eprintln!("ivy-codex: shared connection stopped ({failure})");
+                None
+            }
         }
     });
     let child = Command::new(exe)
@@ -285,7 +288,14 @@ pub fn run(exe: &OsStr, args: &[OsString]) -> io::Result<ExitStatus> {
         Err(failure) => Err(failure),
     };
     stop.store(true, Ordering::Release);
-    let _ = relay.join();
+    if let Ok(Some(thread)) = relay.join()
+        && thread.len() == 36
+        && thread.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
+    {
+        // The native remote endpoint was private to this invocation. Its printed
+        // reconnect command cannot outlive it; offer the stable shell entry point.
+        eprintln!("ivy-codex: return to this conversation with: codex resume {thread}");
+    }
     result
 }
 
@@ -410,23 +420,42 @@ impl Drop for ProxyStream {
         }
     }
 }
-type Upstream = WebSocket<ProxyStream>;
+trait Protocol {
+    fn send_value(&mut self, value: &Value) -> io::Result<()>;
+}
+impl<S: Read + Write> Protocol for WebSocket<S> {
+    fn send_value(&mut self, value: &Value) -> io::Result<()> {
+        self.send(Message::text(value.to_string()))
+            .map_err(|_| error("protocol peer disconnected"))
+    }
+}
 
 struct Attachment {
-    route: PathBuf,
+    route: Option<PathBuf>,
     fresh: bool,
+    servers: Vec<String>,
+}
+
+enum Internal {
+    ReadThread(Value),
+    ReadConfig(Value),
+    Proof {
+        attachment: Attachment,
+        response: Value,
+        remaining: Vec<String>,
+    },
 }
 
 struct Routing {
     registry: Registry,
-    servers: Option<Map<String, Value>>,
-    waiting: Vec<Value>,
     pending: HashMap<String, Attachment>,
-    unknown_resumes: HashMap<String, Value>,
+    internal: HashMap<String, Internal>,
     active: Option<PathBuf>,
+    last_thread: Option<String>,
     epoch: String,
     pane_id: String,
     pane_dir: PathBuf,
+    launch_dir: PathBuf,
     serial: u64,
 }
 
@@ -435,85 +464,128 @@ impl Drop for Routing {
         if let Some(route) = &self.active {
             let _ = self.registry.revoke(route, &self.epoch);
         }
-        for attachment in self.pending.values().filter(|a| a.fresh) {
-            let _ = std::fs::remove_file(&attachment.route);
+        for a in self.pending.values() {
+            if a.fresh
+                && let Some(route) = &a.route
+            {
+                let _ = std::fs::remove_file(route);
+            }
+        }
+        for stage in self.internal.values() {
+            if let Internal::Proof { attachment: a, .. } = stage
+                && a.fresh
+                && let Some(route) = &a.route
+            {
+                let _ = std::fs::remove_file(route);
+            }
         }
     }
 }
 
-fn write_upstream(output: &mut Upstream, value: &Value) -> io::Result<()> {
-    output
-        .send(Message::text(value.to_string()))
-        .map_err(|_| error("official proxy disconnected"))
+fn write_upstream(output: &mut impl Protocol, value: &Value) -> io::Result<()> {
+    output.send_value(value)
 }
-
-fn send(ws: &mut WebSocket<TcpStream>, value: &Value) -> io::Result<()> {
-    ws.send(Message::text(value.to_string()))
-        .map_err(|_| error("local client disconnected"))
+fn send(ws: &mut impl Protocol, value: &Value) -> io::Result<()> {
+    ws.send_value(value)
 }
-
-fn reject(ws: &mut WebSocket<TcpStream>, id: &Value, message: &str) -> io::Result<()> {
+fn reject(ws: &mut impl Protocol, id: &Value, message: &str) -> io::Result<()> {
     send(
         ws,
         &json!({"id":id,"error":{"code":-32001,"message":message}}),
     )
 }
 
+// Start must use the invoking console's directory; saved sessions retain their own
+// cwd when it is not explicitly supplied. The latter needs an upstream thread/read.
+fn discovery_cwd(message: &mut Value, launch: &Path) -> io::Result<Option<PathBuf>> {
+    let method = message
+        .get("method")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    let params = message
+        .get_mut("params")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| error("conversation request has no parameters"))?;
+    match params.get("cwd") {
+        Some(Value::String(cwd)) => Ok(Some(PathBuf::from(cwd))),
+        None | Some(Value::Null) if method == "thread/start" => {
+            params.insert("cwd".into(), json!(launch));
+            Ok(Some(launch.to_path_buf()))
+        }
+        None | Some(Value::Null) => Ok(None),
+        _ => Err(error("invalid conversation directory")),
+    }
+}
+
 impl Routing {
+    fn reset_connection(&mut self) {
+        if let Some(route) = self.active.take() {
+            let _ = self.registry.revoke(&route, &self.epoch);
+        }
+        for (_, a) in self.pending.drain() {
+            if a.fresh
+                && let Some(route) = a.route
+            {
+                let _ = std::fs::remove_file(route);
+            }
+        }
+        for (_, stage) in self.internal.drain() {
+            if let Internal::Proof { attachment: a, .. } = stage
+                && a.fresh
+                && let Some(route) = a.route
+            {
+                let _ = std::fs::remove_file(route);
+            }
+        }
+    }
+    fn private(&mut self, stage: Internal) -> String {
+        self.serial += 1;
+        let id = format!("ivy-private-{}", self.serial);
+        self.internal.insert(id.clone(), stage);
+        id
+    }
+    fn config_request(
+        &mut self,
+        request: Value,
+        cwd: &Path,
+        upstream: &mut impl Protocol,
+    ) -> io::Result<()> {
+        let id = self.private(Internal::ReadConfig(request));
+        write_upstream(
+            upstream,
+            &json!({"id":id,"method":"config/read","params":{"includeLayers":false,"cwd":cwd}}),
+        )
+    }
     fn request(
         &mut self,
         mut message: Value,
-        upstream: &mut Upstream,
-        _ws: &mut WebSocket<TcpStream>,
+        upstream: &mut impl Protocol,
+        _ws: &mut impl Protocol,
     ) -> io::Result<()> {
         let Some(method) = message.get("method").and_then(Value::as_str) else {
             return write_upstream(upstream, &message);
         };
-        if !matches!(method, "thread/start" | "thread/resume" | "thread/fork") {
+        if !matches!(method, "thread/start" | "thread/resume" | "thread/fork")
+            || message.get("id").is_none()
+        {
             return write_upstream(upstream, &message);
         }
-        let Some(id) = message.get("id").cloned() else {
-            return write_upstream(upstream, &message);
-        };
-        if self.servers.is_none() {
-            if self.waiting.len() >= 8 {
-                return Err(error("too many pending conversation starts"));
-            }
-            self.waiting.push(message);
-            return Ok(());
+        if let Some(cwd) = discovery_cwd(&mut message, &self.launch_dir)? {
+            return self.config_request(message, &cwd, upstream);
         }
-        let thread = message.pointer("/params/threadId").and_then(Value::as_str);
-        let existing = if method == "thread/resume" {
-            thread
-                .map(|thread| self.registry.route_for(thread))
-                .transpose()?
-                .flatten()
-        } else {
-            None
-        };
-        if method == "thread/resume" && existing.is_none() {
-            // A pre-integration loaded conversation can ignore our new configuration.
-            // Establish that it is cold before assigning any new capability.
-            self.serial += 1;
-            let internal = format!("ivy-private-loaded-{}", self.serial);
-            self.unknown_resumes.insert(internal.clone(), message);
-            return write_upstream(
-                upstream,
-                &json!({"id":internal,"method":"thread/loaded/list","params":{"limit":10000}}),
-            );
-        }
-        let fresh = existing.is_none();
-        let route = match existing {
-            Some(route) => route,
-            None => self.registry.pending()?,
-        };
-        self.inject(&mut message, &route)?;
-        self.pending
-            .insert(id.to_string(), Attachment { route, fresh });
-        write_upstream(upstream, &message)
+        let thread = message
+            .pointer("/params/threadId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| error("saved conversation has no thread ID"))?
+            .to_owned();
+        let id = self.private(Internal::ReadThread(message));
+        write_upstream(
+            upstream,
+            &json!({"id":id,"method":"thread/read","params":{"threadId":thread,"includeTurns":false}}),
+        )
     }
-
-    fn inject(&self, message: &mut Value, route: &Path) -> io::Result<()> {
+    fn inject(message: &mut Value, route: &Path, servers: &[String]) -> io::Result<()> {
         let params = message
             .get_mut("params")
             .and_then(Value::as_object_mut)
@@ -525,129 +597,257 @@ impl Routing {
         let config = config
             .as_object_mut()
             .ok_or_else(|| error("invalid conversation config"))?;
-        // config/read is a normalized read schema, not a valid input config
-        // (for example optional timeout fields serialize as null). Merge only our
-        // own leaf; Codex retains each existing command, environment and policy.
-        let servers = config.entry("mcp_servers").or_insert_with(|| json!({}));
-        let servers = servers
+        let entries = config
+            .entry("mcp_servers")
+            .or_insert_with(|| json!({}))
             .as_object_mut()
             .ok_or_else(|| error("invalid MCP overrides"))?;
-        let mut found = false;
-        for (name, server) in self.servers.as_ref().into_iter().flatten() {
-            if !ivy_server(server) {
-                continue;
-            }
-            let entry = servers.entry(name.clone()).or_insert_with(|| json!({}));
-            let entry = entry
+        for name in servers {
+            let entry = entries
+                .entry(name.clone())
+                .or_insert_with(|| json!({}))
                 .as_object_mut()
                 .ok_or_else(|| error("invalid MCP server override"))?;
-            let env = entry.entry("env").or_insert_with(|| json!({}));
-            let env = env
+            let env = entry
+                .entry("env")
+                .or_insert_with(|| json!({}))
                 .as_object_mut()
                 .ok_or_else(|| error("invalid MCP environment override"))?;
             env.insert(crate::codex_route::ENV.to_owned(), json!(route));
-            found = true;
-        }
-        if !found {
-            return Err(error(
-                "configure the bundled panel-mcp stdio server before using shared Codex panel routing",
-            ));
         }
         Ok(())
     }
-
-    fn finish_attachment(&mut self, id: &Value, message: &Value) -> io::Result<()> {
-        let Some(attachment) = self.pending.remove(&id.to_string()) else {
-            return Ok(());
+    fn start_attachment(
+        &mut self,
+        mut request: Value,
+        config: &Value,
+        upstream: &mut impl Protocol,
+    ) -> io::Result<()> {
+        let id = request
+            .get("id")
+            .cloned()
+            .ok_or_else(|| error("missing request ID"))?;
+        let servers = configured_servers(config);
+        if servers.is_empty() {
+            eprintln!(
+                "ivy-codex: configure the bundled panel-mcp server to use the Ivy panel in this conversation"
+            );
+            self.pending.insert(
+                id.to_string(),
+                Attachment {
+                    route: None,
+                    fresh: false,
+                    servers,
+                },
+            );
+            return write_upstream(upstream, &request);
+        }
+        let existing = if request.get("method").and_then(Value::as_str) == Some("thread/resume") {
+            request
+                .pointer("/params/threadId")
+                .and_then(Value::as_str)
+                .map(|thread| self.registry.route_for(thread))
+                .transpose()?
+                .flatten()
+        } else {
+            None
         };
-        let Some(thread) = message.pointer("/result/thread/id").and_then(Value::as_str) else {
-            if attachment.fresh {
-                let _ = std::fs::remove_file(attachment.route);
+        let fresh = existing.is_none();
+        let route = match existing {
+            Some(route) => route,
+            None => self.registry.pending()?,
+        };
+        if let Err(e) = Self::inject(&mut request, &route, &servers) {
+            if fresh {
+                let _ = std::fs::remove_file(&route);
             }
-            return Ok(());
-        };
-        self.registry.bind(
-            thread,
-            &attachment.route,
-            &self.pane_id,
-            &self.pane_dir,
-            &self.epoch,
-        )?;
-        let old = self.active.replace(attachment.route);
+            return Err(e);
+        }
+        self.pending.insert(
+            id.to_string(),
+            Attachment {
+                route: Some(route),
+                fresh,
+                servers,
+            },
+        );
+        write_upstream(upstream, &request)
+    }
+    fn proof_request(
+        &mut self,
+        attachment: Attachment,
+        response: Value,
+        mut remaining: Vec<String>,
+        upstream: &mut impl Protocol,
+    ) -> io::Result<()> {
+        let server = remaining
+            .pop()
+            .ok_or_else(|| error("no MCP proof target"))?;
+        let thread = response
+            .pointer("/result/thread/id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| error("missing thread ID"))?
+            .to_owned();
+        let id = self.private(Internal::Proof {
+            attachment,
+            response,
+            remaining,
+        });
+        write_upstream(
+            upstream,
+            &json!({"id":id,"method":"mcpServer/tool/call","params":{"threadId":thread,"server":server,"tool":"panel_get","arguments":{}}}),
+        )
+    }
+    fn finish(
+        &mut self,
+        attachment: Attachment,
+        response: Value,
+        ws: &mut impl Protocol,
+    ) -> io::Result<()> {
+        let id = response.get("id").cloned().unwrap_or(Value::Null);
+        if let Some(route) = &attachment.route {
+            let thread = response
+                .pointer("/result/thread/id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| error("missing thread ID"))?;
+            if self
+                .registry
+                .bind(thread, route, &self.pane_id, &self.pane_dir, &self.epoch)
+                .is_err()
+            {
+                if attachment.fresh {
+                    let _ = std::fs::remove_file(route);
+                }
+                return reject(
+                    ws,
+                    &id,
+                    "The conversation opened, but Ivy could not bind its panel safely.",
+                );
+            }
+        }
+        self.last_thread = response
+            .pointer("/result/thread/id")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let old = std::mem::replace(&mut self.active, attachment.route);
         if let Some(old) = old
             && self.active.as_ref() != Some(&old)
         {
             self.registry.revoke(&old, &self.epoch)?;
         }
-        Ok(())
+        send(ws, &response)
     }
-
     fn response(
         &mut self,
-        mut message: Value,
-        upstream: &mut Upstream,
-        ws: &mut WebSocket<TcpStream>,
+        message: Value,
+        upstream: &mut impl Protocol,
+        ws: &mut impl Protocol,
     ) -> io::Result<()> {
+        // Server requests and notifications are never responses even if IDs coincide.
+        if message.get("method").is_some() {
+            return send(ws, &message);
+        }
         let id = message.get("id").cloned().unwrap_or(Value::Null);
-        if id == CONFIG_ID {
-            self.servers = Some(
-                message
-                    .pointer("/result/config/mcp_servers")
-                    .and_then(Value::as_object)
-                    .cloned()
-                    .ok_or_else(|| error("Codex did not return the configured MCP servers"))?,
-            );
-            for request in std::mem::take(&mut self.waiting) {
-                self.request(request, upstream, ws)?;
+        if let Some(stage) = id.as_str().and_then(|id| self.internal.remove(id)) {
+            match stage {
+                Internal::ReadThread(request) => {
+                    let original_id = request.get("id").cloned().unwrap_or(Value::Null);
+                    let Some(cwd) = message
+                        .pointer("/result/thread/cwd")
+                        .and_then(Value::as_str)
+                    else {
+                        return reject(
+                            ws,
+                            &original_id,
+                            "Ivy could not determine the saved conversation directory.",
+                        );
+                    };
+                    self.config_request(request, Path::new(cwd), upstream)
+                }
+                Internal::ReadConfig(request) => {
+                    let original_id = request.get("id").cloned().unwrap_or(Value::Null);
+                    if message.get("result").is_none() {
+                        return reject(
+                            ws,
+                            &original_id,
+                            "Ivy could not read the conversation configuration.",
+                        );
+                    }
+                    self.start_attachment(request, &message, upstream)
+                }
+                Internal::Proof {
+                    attachment,
+                    response,
+                    remaining,
+                } => {
+                    let original_id = response.get("id").cloned().unwrap_or(Value::Null);
+                    if !proof_matches(attachment.route.as_deref(), &message) {
+                        if attachment.fresh
+                            && let Some(route) = &attachment.route
+                        {
+                            let _ = std::fs::remove_file(route);
+                        }
+                        return reject(
+                            ws,
+                            &original_id,
+                            "The conversation opened, but its panel connection could not be verified. No panel was rebound.",
+                        );
+                    }
+                    if remaining.is_empty() {
+                        self.finish(attachment, response, ws)
+                    } else {
+                        self.proof_request(attachment, response, remaining, upstream)
+                    }
+                }
             }
-            return Ok(());
-        }
-        if let Some(original) = id.as_str().and_then(|id| self.unknown_resumes.remove(id)) {
-            let original_id = original.get("id").cloned().unwrap_or(Value::Null);
-            let thread = original
-                .pointer("/params/threadId")
+        } else if let Some(attachment) = self.pending.remove(&id.to_string()) {
+            if message
+                .pointer("/result/thread/id")
                 .and_then(Value::as_str)
-                .unwrap_or("");
-            let data = message.pointer("/result/data").and_then(Value::as_array);
-            let complete = message
-                .pointer("/result/nextCursor")
-                .is_none_or(Value::is_null);
-            if data.is_none()
-                || !complete
-                || data.is_some_and(|data| data.iter().any(|id| id.as_str() == Some(thread)))
+                .is_none()
             {
-                return reject(
-                    ws,
-                    &original_id,
-                    "This conversation was opened before Ivy's shared-panel integration. Leave its active desktop session before resuming it here; no panel binding was changed.",
-                );
+                if attachment.fresh
+                    && let Some(route) = &attachment.route
+                {
+                    let _ = std::fs::remove_file(route);
+                }
+                return send(ws, &message);
             }
-            let route = self.registry.pending()?;
-            let mut original = original;
-            self.inject(&mut original, &route)?;
-            self.pending
-                .insert(original_id.to_string(), Attachment { route, fresh: true });
-            return write_upstream(upstream, &original);
-        }
-        if self.finish_attachment(&id, &message).is_err() {
-            return reject(
-                ws,
-                &id,
-                "The conversation opened, but Ivy could not bind its panel safely. No fallback panel was selected.",
-            );
-        }
-        // Only a successful initialize response opens our private configuration read.
-        if message.get("result").is_some() && message.get("ivyInitialize").is_some() {
-            if let Some(object) = message.as_object_mut() {
-                object.remove("ivyInitialize");
+            if attachment.route.is_none() {
+                return self.finish(attachment, message, ws);
             }
-            write_upstream(
-                upstream,
-                &json!({"id":CONFIG_ID,"method":"config/read","params":{"includeLayers":false,"cwd":std::env::current_dir()?}}),
-            )?;
+            let servers = attachment.servers.clone();
+            self.proof_request(attachment, message, servers, upstream)
+        } else {
+            send(ws, &message)
         }
-        send(ws, &message)
     }
+}
+
+fn configured_servers(config: &Value) -> Vec<String> {
+    config
+        .pointer("/result/config/mcp_servers")
+        .and_then(Value::as_object)
+        .map(|servers| {
+            servers
+                .iter()
+                .filter(|(_, v)| ivy_server(v))
+                .map(|(k, _)| k.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn proof_matches(route: Option<&Path>, message: &Value) -> bool {
+    let expected = route
+        .and_then(|p| crate::codex_route::lock_route(p).ok())
+        .map(|g| g.identity.proof.clone());
+    let actual = message
+        .pointer("/result/_meta/ivy~1routeProof")
+        .and_then(Value::as_str);
+    expected
+        .as_deref()
+        .is_some_and(|expected| actual == Some(expected))
 }
 
 fn ivy_server(server: &Value) -> bool {
@@ -661,6 +861,42 @@ fn ivy_server(server: &Value) -> bool {
             .is_some_and(|name| matches!(name, "panel-mcp" | "panel-mcp.exe"))
 }
 
+#[derive(Debug, PartialEq)]
+enum HealthAction {
+    None,
+    Probe,
+    Expired,
+}
+struct ConnectionHealth {
+    heard_at: Instant,
+    probe_at: Option<Instant>,
+}
+impl ConnectionHealth {
+    fn new(now: Instant) -> Self {
+        Self {
+            heard_at: now,
+            probe_at: None,
+        }
+    }
+    fn heard(&mut self, now: Instant) {
+        self.heard_at = now;
+        self.probe_at = None;
+    }
+    fn poll(&mut self, now: Instant) -> HealthAction {
+        if self
+            .probe_at
+            .is_some_and(|at| now.duration_since(at) >= Duration::from_secs(5))
+        {
+            return HealthAction::Expired;
+        }
+        if self.probe_at.is_none() && now.duration_since(self.heard_at) >= Duration::from_secs(5) {
+            self.probe_at = Some(now);
+            return HealthAction::Probe;
+        }
+        HealthAction::None
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn serve(
     listener: TcpListener,
@@ -672,17 +908,17 @@ fn serve(
     pane_dir: &Path,
     epoch: &str,
     stop: &AtomicBool,
-) -> io::Result<()> {
+) -> io::Result<Option<String>> {
     let mut routing = Routing {
         registry,
-        servers: None,
-        waiting: Vec::new(),
         pending: HashMap::new(),
-        unknown_resumes: HashMap::new(),
+        internal: HashMap::new(),
         active: None,
+        last_thread: None,
         epoch: epoch.to_owned(),
         pane_id: pane_id.to_owned(),
         pane_dir: pane_dir.to_owned(),
+        launch_dir: std::env::current_dir()?,
         serial: 0,
     };
     while !stop.load(Ordering::Acquire) {
@@ -697,25 +933,34 @@ fn serve(
         let Ok(mut ws) = authenticated(stream, token) else {
             continue;
         };
-        let stream = ProxyStream::open(exe, socket)?;
-        let (mut upstream, _) = tungstenite::client("ws://localhost/", stream)
-            .map_err(|_| error("official proxy WebSocket handshake failed"))?;
+        let stream = match ProxyStream::open(exe, socket) {
+            Ok(stream) => stream,
+            Err(_) => {
+                let _ = ws.close(None);
+                continue;
+            }
+        };
+        let (mut upstream, _) = match tungstenite::client("ws://localhost/", stream) {
+            Ok(value) => value,
+            Err(_) => {
+                let _ = ws.close(None);
+                continue;
+            }
+        };
         upstream.get_mut().timeout = Duration::from_millis(10);
-        let mut initialize_id = None;
+        let mut health = ConnectionHealth::new(Instant::now());
         let result = (|| {
             while !stop.load(Ordering::Acquire) {
-                loop {
-                    match upstream.read() {
+                // A continuous stream must still leave the user's input a turn.
+                for _ in 0..64 {
+                    let incoming = upstream.read();
+                    if incoming.is_ok() {
+                        health.heard(Instant::now());
+                    }
+                    match incoming {
                         Ok(Message::Text(text)) => {
-                            let mut message: Value = serde_json::from_str(&text)
+                            let message: Value = serde_json::from_str(&text)
                                 .map_err(|_| error("invalid official protocol message"))?;
-                            if initialize_id
-                                .as_ref()
-                                .is_some_and(|id| message.get("id") == Some(id))
-                            {
-                                initialize_id = None;
-                                message["ivyInitialize"] = Value::Bool(true);
-                            }
                             routing.response(message, &mut upstream, &mut ws)?;
                         }
                         Ok(Message::Ping(_) | Message::Pong(_)) => {
@@ -738,19 +983,26 @@ fn serve(
                         Err(_) => return Err(error("official proxy disconnected")),
                     }
                 }
+                match health.poll(Instant::now()) {
+                    HealthAction::Probe => upstream
+                        .send(Message::Ping(Vec::new().into()))
+                        .map_err(|_| error("official proxy disconnected"))?,
+                    HealthAction::Expired => {
+                        return Err(error("official server stopped responding"));
+                    }
+                    HealthAction::None => {}
+                }
                 match ws.read() {
                     Ok(Message::Text(text)) => {
                         let value: Value = serde_json::from_str(&text)
                             .map_err(|_| error("invalid local protocol message"))?;
-                        if value
-                            .get("id")
-                            .and_then(Value::as_str)
-                            .is_some_and(|id| id.starts_with("ivy-private-"))
+                        if value.get("method").is_some()
+                            && value
+                                .get("id")
+                                .and_then(Value::as_str)
+                                .is_some_and(|id| id.starts_with("ivy-private-"))
                         {
                             return Err(error("local request uses a reserved correlation ID"));
-                        }
-                        if value.get("method").and_then(Value::as_str) == Some("initialize") {
-                            initialize_id = value.get("id").cloned();
                         }
                         routing.request(value, &mut upstream, &mut ws)?;
                     }
@@ -773,115 +1025,272 @@ fn serve(
             Ok(())
         })();
         drop(upstream);
-        result?;
-        // The official TUI can reconnect to its local endpoint; the daemon stays alive.
-        routing.servers = None;
+        if result.is_err() {
+            let _ = ws.close(None);
+        }
+        routing.reset_connection();
     }
-    Ok(())
+    Ok(routing.last_thread.clone())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn routing() -> (PathBuf, Routing) {
-        let home = std::env::temp_dir().join(format!("ivy-relay-test-{}", nonce().unwrap()));
-        std::fs::create_dir(&home).unwrap();
-        let state = Routing {
-            registry: Registry::for_home(&home).unwrap(),
-            servers: Some(json!({
-                "custom-ivy-name": {"command":"/opt/ivy/panel-mcp","tool_timeout_sec":null,"env":{"KEEP":"value"}},
-                "other": {"command":"/opt/other/server","tool_timeout_sec":null}
-            }).as_object().unwrap().clone()),
-            waiting: Vec::new(), pending:HashMap::new(), unknown_resumes:HashMap::new(),
-            active:None, epoch:"test-epoch".to_owned(), pane_id:"new-console".to_owned(),
-            pane_dir:home.join("new-pane"), serial:0,
-        };
-        (home, state)
+    #[test]
+    fn a_silent_proxy_requires_a_live_server_response() {
+        let now = Instant::now();
+        let mut health = ConnectionHealth::new(now);
+        assert_eq!(
+            health.poll(now + Duration::from_secs(4)),
+            HealthAction::None
+        );
+        assert_eq!(
+            health.poll(now + Duration::from_secs(5)),
+            HealthAction::Probe
+        );
+        assert_eq!(
+            health.poll(now + Duration::from_secs(10)),
+            HealthAction::Expired
+        );
+        health.heard(now + Duration::from_secs(10));
+        assert_eq!(
+            health.poll(now + Duration::from_secs(11)),
+            HealthAction::None
+        );
     }
 
+    #[test]
+    fn cwd_discovery_keeps_saved_thread_semantics() {
+        let mut start = json!({"method":"thread/start","params":{"cwd":null}});
+        assert_eq!(
+            discovery_cwd(&mut start, Path::new("/shell")).unwrap(),
+            Some(PathBuf::from("/shell"))
+        );
+        assert_eq!(start["params"]["cwd"], "/shell");
+        let mut explicit = json!({"method":"thread/start","params":{"cwd":"/project"}});
+        assert_eq!(
+            discovery_cwd(&mut explicit, Path::new("/shell")).unwrap(),
+            Some(PathBuf::from("/project"))
+        );
+        let mut resume = json!({"method":"thread/resume","params":{"cwd":null}});
+        assert_eq!(
+            discovery_cwd(&mut resume, Path::new("/shell")).unwrap(),
+            None
+        );
+        assert!(resume["params"]["cwd"].is_null());
+    }
     #[test]
     fn normalized_readback_is_not_reinserted_as_input_configuration() {
-        let (home, state) = routing();
-        let route = state.registry.pending().unwrap();
         let mut message = json!({"params":{"config":{"features":{"existing":true}}}});
-        state.inject(&mut message, &route).unwrap();
+        Routing::inject(
+            &mut message,
+            Path::new("/route"),
+            &["custom-ivy-name".into()],
+        )
+        .unwrap();
         assert_eq!(
             message["params"]["config"],
-            json!({
-                "features":{"existing":true},
-                "mcp_servers":{"custom-ivy-name":{"env":{"IVY_CODEX_ROUTE":route}}}
-            })
+            json!({"features":{"existing":true},"mcp_servers":{"custom-ivy-name":{"env":{"IVY_CODEX_ROUTE":"/route"}}}})
         );
-        drop(state);
+    }
+    #[test]
+    fn proof_must_match_current_route() {
+        let home = std::env::temp_dir().join(format!("ivy-proof-{}", nonce().unwrap()));
+        std::fs::create_dir(&home).unwrap();
+        let registry = Registry::for_home(&home).unwrap();
+        let route = registry.pending().unwrap();
+        let proof = crate::codex_route::lock_route(&route)
+            .unwrap()
+            .identity
+            .proof
+            .clone();
+        assert!(!proof_matches(Some(&route), &json!({"result":{}})));
+        assert!(!proof_matches(
+            Some(&route),
+            &json!({"result":{"_meta":{"ivy/routeProof":"wrong"}}})
+        ));
+        assert!(!proof_matches(
+            None,
+            &json!({"result":{"_meta":{"ivy/routeProof":proof}}})
+        ));
+        assert!(proof_matches(
+            Some(&route),
+            &json!({"result":{"_meta":{"ivy/routeProof":proof}}})
+        ));
         std::fs::remove_dir_all(home).unwrap();
+    }
+    #[test]
+    fn first_run_without_panel_configuration_requires_no_injection() {
+        assert!(configured_servers(&json!({"result":{"config":{"mcp_servers":{}}}})).is_empty());
+        assert_eq!(
+            configured_servers(
+                &json!({"result":{"config":{"mcp_servers":{"one":{"command":"/bin/panel-mcp","tool_timeout_sec":null},"other":{"command":"/bin/other"}}}}})
+            ),
+            vec!["one"]
+        );
+    }
+    #[derive(Default)]
+    struct Peer(Vec<Value>);
+    impl Protocol for Peer {
+        fn send_value(&mut self, value: &Value) -> io::Result<()> {
+            self.0.push(value.clone());
+            Ok(())
+        }
+    }
+
+    fn routing(home: &Path) -> Routing {
+        Routing {
+            registry: Registry::for_home(home).unwrap(),
+            pending: HashMap::new(),
+            internal: HashMap::new(),
+            active: None,
+            last_thread: None,
+            epoch: "new-epoch".into(),
+            pane_id: "new-pane".into(),
+            pane_dir: home.join("new"),
+            launch_dir: home.to_path_buf(),
+            serial: 0,
+        }
     }
 
     #[test]
-    fn a_failed_resume_preserves_the_existing_console_binding() {
-        let (home, mut state) = routing();
+    fn loaded_resume_success_is_held_until_the_running_mcp_proves_its_route() {
+        let home = std::env::temp_dir().join(format!("ivy-proof-state-{}", nonce().unwrap()));
+        std::fs::create_dir(&home).unwrap();
+        let mut state = routing(&home);
         let route = state.registry.pending().unwrap();
         let thread = "01234567-89ab-cdef-0123-456789abcdef";
         state
             .registry
-            .bind(thread, &route, "original", &home.join("old"), "old-epoch")
+            .bind(thread, &route, "old", &home.join("old"), "old-epoch")
             .unwrap();
-        state.pending.insert(
-            "17".to_owned(),
-            Attachment {
-                route: route.clone(),
-                fresh: false,
-            },
-        );
+        let original = json!({"id":17,"result":{"thread":{"id":thread}}});
+        let mut upstream = Peer::default();
+        let mut client = Peer::default();
+        let prepare = || Attachment {
+            route: Some(route.clone()),
+            fresh: false,
+            servers: vec!["ivy".into()],
+        };
+        state.pending.insert("17".into(), prepare());
+        // A colliding server request must stay a server request, not commit a binding.
+        let server_request = json!({"id":17,"method":"permission/request","params":{}});
         state
-            .finish_attachment(
-                &json!(17),
-                &json!({"id":17,"error":{"code":-1,"message":"resume failed"}}),
-            )
+            .response(server_request.clone(), &mut upstream, &mut client)
             .unwrap();
-        let guard = crate::codex_route::lock_route(&route).unwrap();
-        assert!(guard.identity.active);
-        assert_eq!(guard.identity.pane_id, "original");
-        drop(guard);
-        drop(state);
-        std::fs::remove_dir_all(home).unwrap();
-    }
-
-    #[test]
-    fn only_a_correlated_success_authorizes_the_pending_capability() {
-        let (home, mut state) = routing();
-        let route = state.registry.pending().unwrap();
-        let thread = "01234567-89ab-cdef-0123-456789abcdef";
-        state.pending.insert(
-            "17".to_owned(),
-            Attachment {
-                route: route.clone(),
-                fresh: true,
-            },
-        );
-        let response = json!({"result":{"thread":{"id":thread}}});
-        state.finish_attachment(&json!(18), &response).unwrap();
-        assert!(
-            !crate::codex_route::lock_route(&route)
-                .unwrap()
-                .identity
-                .active
-        );
-        assert!(state.registry.route_for(thread).unwrap().is_none());
-        state.finish_attachment(&json!(17), &response).unwrap();
-        assert_eq!(
-            state.registry.route_for(thread).unwrap(),
-            Some(route.clone())
-        );
+        assert_eq!(client.0.pop(), Some(server_request));
+        state
+            .response(original.clone(), &mut upstream, &mut client)
+            .unwrap();
+        assert!(client.0.is_empty(), "no successful attach before proof");
+        let probe = upstream.0.pop().unwrap();
+        assert_eq!(probe["method"], "mcpServer/tool/call");
+        assert_eq!(probe["params"]["threadId"], thread);
+        // This is the race: upstream resume succeeded, but an old runtime ignored
+        // our fresh configuration and reports a different (or absent) proof.
+        state.response(json!({"id":probe["id"],"result":{"content":[],"_meta":{"ivy/routeProof":"stale"}}}),&mut upstream,&mut client).unwrap();
+        assert!(client.0.pop().unwrap().get("error").is_some());
         assert_eq!(
             crate::codex_route::lock_route(&route)
                 .unwrap()
                 .identity
                 .pane_id,
-            "new-console"
+            "old"
+        );
+        assert!(state.active.is_none());
+        state.pending.insert("17".into(), prepare());
+        state
+            .response(original.clone(), &mut upstream, &mut client)
+            .unwrap();
+        let probe = upstream.0.pop().unwrap();
+        let proof = crate::codex_route::lock_route(&route)
+            .unwrap()
+            .identity
+            .proof
+            .clone();
+        state
+            .response(
+                json!({"id":probe["id"],"result":{"content":[],"_meta":{"ivy/routeProof":proof}}}),
+                &mut upstream,
+                &mut client,
+            )
+            .unwrap();
+        assert_eq!(client.0.pop(), Some(original));
+        assert_eq!(
+            crate::codex_route::lock_route(&route)
+                .unwrap()
+                .identity
+                .pane_id,
+            "new-pane"
         );
         drop(state);
         std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn ordinary_and_saved_requests_discover_configuration_in_the_right_directory() {
+        let home = std::env::temp_dir().join(format!("ivy-config-state-{}", nonce().unwrap()));
+        std::fs::create_dir(&home).unwrap();
+        let mut state = routing(&home);
+        let mut server = Peer::default();
+        let mut client = Peer::default();
+        state
+            .request(
+                json!({"id":4,"method":"thread/start","params":{"cwd":null}}),
+                &mut server,
+                &mut client,
+            )
+            .unwrap();
+        let read = server.0.pop().unwrap();
+        assert_eq!(read["method"], "config/read");
+        assert_eq!(read["params"]["cwd"], json!(home));
+        state
+            .response(
+                json!({"id":read["id"],"result":{"config":{"mcp_servers":{}}}}),
+                &mut server,
+                &mut client,
+            )
+            .unwrap();
+        let start = server.0.pop().unwrap();
+        assert_eq!(start["method"], "thread/start");
+        assert_eq!(start["params"]["cwd"], json!(home));
+        state
+            .response(
+                json!({"id":4,"result":{"thread":{"id":"01234567-89ab-cdef-0123-456789abcdef"}}}),
+                &mut server,
+                &mut client,
+            )
+            .unwrap();
+        assert!(client.0.pop().unwrap().get("result").is_some());
+        let saved = home.join("saved-project");
+        state.request(json!({"id":5,"method":"thread/resume","params":{"threadId":"01234567-89ab-cdef-0123-456789abcdef","cwd":null}}),&mut server,&mut client).unwrap();
+        let read = server.0.pop().unwrap();
+        assert_eq!(read["method"], "thread/read");
+        state
+            .response(
+                json!({"id":read["id"],"result":{"thread":{"cwd":saved}}}),
+                &mut server,
+                &mut client,
+            )
+            .unwrap();
+        let read = server.0.pop().unwrap();
+        assert_eq!(read["method"], "config/read");
+        assert_eq!(read["params"]["cwd"], json!(saved));
+        drop(state);
+        std::fs::remove_dir_all(home).unwrap();
+    }
+    #[test]
+    fn server_version_must_be_exact() {
+        assert!(verified_server(&json!({"appServerVersion":"0.167.2"})));
+        for value in [
+            json!({}),
+            json!({"appServerVersion":null}),
+            json!({"appServerVersion":17}),
+            json!({"appServerVersion":"0.167.1"}),
+        ] {
+            assert!(!verified_server(&value));
+        }
     }
 
     #[test]
