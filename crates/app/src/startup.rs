@@ -104,7 +104,8 @@ pub fn run() -> eframe::Result {
                 if std::env::var("MEASURE_CHROME").ok().as_deref() == Some("zoom") {
                     let tab = window.active().name;
                     let focus = window.active().focus;
-                    window.pane_view.toggle(tab, focus);
+                    let pane_count = window.active().panes().len();
+                    window.pane_view.toggle(tab, focus, pane_count);
                     window.chrome.set_zoom_probe(true);
                 }
             }

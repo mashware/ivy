@@ -254,6 +254,11 @@ impl Window {
         if self.tabs[tab_index].focus == name {
             self.tabs[tab_index].focus = inherited;
         }
+        if matches!(self.tabs[tab_index].root, Node::Leaf(_))
+            || self.pane_view.zoomed(self.tabs[tab_index].name) == Some(name)
+        {
+            self.pane_view.clear(self.tabs[tab_index].name);
+        }
         self.some_closed_by_hand = true;
         self.watcher.stop_before_retirement();
         drop(leaving);
@@ -299,6 +304,11 @@ impl Window {
             }
             if self.tabs[tab].focus == name {
                 self.tabs[tab].focus = inherited;
+            }
+            if matches!(self.tabs[tab].root, Node::Leaf(_))
+                || self.pane_view.zoomed(self.tabs[tab].name) == Some(name)
+            {
+                self.pane_view.clear(self.tabs[tab].name);
             }
             detached.push(leaving);
         }
