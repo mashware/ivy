@@ -472,6 +472,7 @@ fn actual_headers_paint_only_declared_logos_preserve_manual_names_and_gate_anima
     let busy = View {
         client: Client::Codex,
         busy: true,
+        done: false,
         waiting: false,
         backed: true,
     };
@@ -485,6 +486,7 @@ fn actual_headers_paint_only_declared_logos_preserve_manual_names_and_gate_anima
         (
             View {
                 busy: false,
+                done: false,
                 ..busy
             },
             true,
@@ -502,6 +504,7 @@ fn actual_headers_paint_only_declared_logos_preserve_manual_names_and_gate_anima
             View {
                 waiting: true,
                 busy: false,
+                done: false,
                 ..busy
             },
             true,
