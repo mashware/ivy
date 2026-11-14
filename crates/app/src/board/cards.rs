@@ -114,7 +114,7 @@ pub(super) fn paint(
                     .min(72.0)
                     .min(available * 0.25)
             });
-            let navigation_width = 94.0_f32.min(available * 0.45);
+            let navigation_width = 16.0_f32.min(available * 0.1);
             let title_width =
                 (available - phase_width - navigation_width - 2.0 * ui.spacing().item_spacing.x)
                     .max(1.0);
@@ -369,7 +369,21 @@ mod tests {
                     })
                     .expect("header field painted")
             };
-            neighbors.push((position("design"), position("Go to console")));
+            let navigation = output
+                .shapes
+                .iter()
+                .find_map(|s| match &s.shape {
+                    egui::Shape::LineSegment { points, stroke }
+                        if stroke.color == Theme::default().focus()
+                            && points[0].y == points[1].y
+                            && points[0].y < card.top() + 30.0 =>
+                    {
+                        Some((points[0].x + points[1].x) / 2.0)
+                    }
+                    _ => None,
+                })
+                .expect("console navigation arrow painted");
+            neighbors.push((position("design"), navigation));
             output.drop_without_applying_deltas();
         }
         assert!(

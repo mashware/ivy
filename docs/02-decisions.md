@@ -9571,7 +9571,7 @@ local; global Board totals share the first gray summary row, replacing its proje
 reference spacing, state colors, progress tracks, right-aligned count pills and wrapping milestone
 cards; retain every pictured item, active ID, attachment, dependency, outside count and source.
 The comparison fixture uses the actual reference plan and panels, with executable actions excluded.
-The owner further chose yellow Waiting, orange/red Stuck, blue Working and green Finished; console navigation uses the explicit “Go to console” label, and the branch and its icon sit at the card's left edge, following the owner's subsequent correction.
+The owner further chose yellow Waiting, orange/red Stuck, blue Working and green Finished; console navigation uses one right-facing arrow with a “Go to console” tooltip, and the branch and its icon sit at the card's left edge, following the owner's subsequent correction.
 Native warnings remain; console identity and honest observed age are disclosed on hover. Vector
 marks avoid relying on missing glyphs, without changing D9's sidebar or terminal cell policy.
 
