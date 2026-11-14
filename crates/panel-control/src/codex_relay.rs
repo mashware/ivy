@@ -245,7 +245,10 @@ fn home() -> io::Result<PathBuf> {
 }
 
 fn verified_server(start: &Value) -> bool {
-    start.get("appServerVersion").and_then(Value::as_str) == Some("0.167.2")
+    matches!(
+        start.get("appServerVersion").and_then(Value::as_str),
+        Some("0.167.2" | "0.169.0")
+    )
 }
 
 /// Does not enable remote control, restart an existing server, or edit user settings.
@@ -272,7 +275,7 @@ pub fn run(exe: &OsStr, args: &[OsString]) -> io::Result<ExitStatus> {
     // A separately installed daemon can differ from the CLI. Do not replace it.
     if !verified_server(&start) {
         return Err(error(
-            "the running Codex server is not the verified version 0.167.2; update it explicitly or use --no-daemon",
+            "the running Codex server is not a verified version (0.167.2 or 0.169.0); use --no-daemon for independent mode",
         ));
     }
     let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))?;
@@ -1656,11 +1659,13 @@ mod tests {
     #[test]
     fn server_version_must_be_exact() {
         assert!(verified_server(&json!({"appServerVersion":"0.167.2"})));
+        assert!(verified_server(&json!({"appServerVersion":"0.169.0"})));
         for value in [
             json!({}),
             json!({"appServerVersion":null}),
             json!({"appServerVersion":17}),
             json!({"appServerVersion":"0.167.1"}),
+            json!({"appServerVersion":"0.169.1"}),
         ] {
             assert!(!verified_server(&value));
         }

@@ -179,7 +179,7 @@ from the launching environment; never save a console's actual `PANEL_ID` or `PAN
 See the [official Codex MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
 
 In a newly opened ordinary Bash, Zsh or Fish console, type `codex`, `codex resume <session-id>`
-or `codex fork <session-id>`. On Linux, with Codex CLI and its running daemon at version 0.167.2, supported
+or `codex fork <session-id>`. On Linux, with Codex CLI 0.167.2 and its running daemon at 0.167.2 or 0.169.0, supported
 ordinary launches use the shared daemon and keep each conversation's panel connected to its console.
 The same live conversation can therefore be used for remote control. Ivy leaves your Codex and shell
 configuration unchanged, and preserves the daemon's remote-control preference. If you want remote
@@ -198,8 +198,9 @@ Use the bundled, matching `panel-mcp` binary; the shared connection verifies the
 associating it with a console. If a conversation is still active from before this integration and cannot be safely attached, leave
 its old desktop session before resuming it here. Ivy does not restart a shared daemon to recover it.
 A remote host reporting “connected” does not prove that its live conversation can load history or
-accept input. Confirm both on your phone while the desktop session remains open; phone access has not
-yet been verified for this integration.
+accept input. Phone history, input and MCP panel publication were verified on Linux with CLI/server
+0.167.2, including after saved-thread resume. Confirm those behaviors on your own device while the
+desktop session remains open.
 
 Tool discovery alone proves no connection to a console. Successful pane-tool calls prove a usable
 connection; observe a test status beside the intended console to confirm the target. To verify
