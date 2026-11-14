@@ -38,6 +38,110 @@ mod tests {
         window.headers = window.headers.integrated(true);
     }
 
+    fn text_point(shapes: &[egui::epaint::ClippedShape], needle: &str) -> Option<egui::Pos2> {
+        shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(t) => {
+                let start = t.galley.text().find(needle)?;
+                let index = t.galley.text()[..start].chars().count() + needle.chars().count() / 2;
+                let at = t
+                    .galley
+                    .pos_from_cursor(egui::text::CCursor::new(index))
+                    .center()
+                    + t.pos.to_vec2();
+                shape.clip_rect.contains(at).then_some(at)
+            }
+            _ => None,
+        })
+    }
+
+    fn hover_roadmap(window: &mut Window, ctx: &egui::Context, expected: &str) {
+        ctx.style_mut_of(egui::Theme::Dark, |style| {
+            style.interaction.tooltip_delay = 0.0
+        });
+        for _ in 0..3 {
+            frame(window, ctx, vec![]);
+        }
+        let shapes = frame(window, ctx, vec![]);
+        let at = shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(t) => {
+                    if t.galley.text() != "Roadmap" {
+                        return None;
+                    }
+                    let i = 0;
+                    let cursor = t.galley.text()[..i].chars().count() + 3;
+                    let at = t
+                        .galley
+                        .pos_from_cursor(egui::text::CCursor::new(cursor))
+                        .center()
+                        + t.pos.to_vec2();
+                    shape.clip_rect.contains(at).then_some(at)
+                }
+                _ => None,
+            })
+            .max_by(|a, b| a.x.total_cmp(&b.x))
+            .expect("project Roadmap disclosure");
+        frame(window, ctx, vec![egui::Event::PointerMoved(at)]);
+        for _ in 0..80 {
+            let shapes = frame(window, ctx, vec![]);
+            if the_text_queued_up(&shapes, expected) {
+                return;
+            }
+        }
+        panic!("Roadmap hover omitted source {expected:?}");
+    }
+
+    fn show_panel(window: &mut Window, ctx: &egui::Context, pane: usize) {
+        let shapes = frame(window, ctx, vec![]);
+        let card = window.board.card_rect(pane).expect("card painted");
+        let control = shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == "Show panel" && card.contains(t.pos) => {
+                    let start = t.galley.text().find("Show panel").unwrap();
+                    let cursor = t.galley.text()[..start].chars().count() + 5;
+                    Some(
+                        t.galley
+                            .pos_from_cursor(egui::text::CCursor::new(cursor))
+                            .center()
+                            + t.pos.to_vec2(),
+                    )
+                }
+                _ => None,
+            })
+            .expect("Show panel control on card");
+        frame(window, ctx, click_at(control));
+        frame(window, ctx, vec![]);
+    }
+
+    fn open_roadmaps(window: &mut Window, ctx: &egui::Context) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            frame(window, ctx, vec![]);
+            let shapes = frame(window, ctx, vec![]);
+            let point = shapes.iter().find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == "Roadmap" => Some(
+                    t.pos
+                        + t.galley
+                            .pos_from_cursor(egui::text::CCursor::new(3))
+                            .center()
+                            .to_vec2(),
+                ),
+                _ => None,
+            });
+            if let Some(at) = point {
+                frame(window, ctx, click_at(at));
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "no roadmap control after configured files resolved"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     #[test]
     fn board_open_and_escape_preserve_consoles_and_swallow_the_closing_frames_input() {
         let received = term_core::received::Received::new("board-escape");
@@ -167,6 +271,7 @@ mod tests {
                 painted: Default::default(),
             })
         };
+        frame(&mut window, &ctx, vec![]);
         let names: Vec<usize> = window.all_panes().map(|pane| pane.name).collect();
         let projects = [
             badge("/work/ivy/.git", "Ivy"),
@@ -178,18 +283,19 @@ mod tests {
             pane.project = project;
         }
         frame(&mut window, &ctx, chord_with(egui::Key::O));
+        frame(&mut window, &ctx, vec![]);
         frame(&mut window, &ctx, vec![key(egui::Key::Home)]);
-        assert_eq!(window.board.selected(), Some(names[0]));
+        assert_eq!(window.board.selected(), Some(names[3]));
         frame(&mut window, &ctx, vec![key(egui::Key::ArrowDown)]);
         assert_eq!(
             window.board.selected(),
-            Some(names[3]),
-            "↓ from the first Ivy card goes to FacQ's row, where reading order gives the next Ivy card"
+            Some(names[0]),
+            "↓ moves to the next card in the same state column"
         );
         frame(&mut window, &ctx, vec![key(egui::Key::ArrowUp)]);
-        assert_eq!(window.board.selected(), Some(names[0]));
+        assert_eq!(window.board.selected(), Some(names[3]));
         frame(&mut window, &ctx, vec![key(egui::Key::ArrowRight)]);
-        assert_eq!(window.board.selected(), Some(names[1]));
+        assert_eq!(window.board.selected(), Some(names[0]));
     }
 
     #[test]
@@ -249,10 +355,7 @@ mod tests {
         let shapes = pass(&mut window, vec![]);
         let header_seen = shapes.iter().any(|s| {
             matches!(&s.shape, egui::Shape::Text(t)
-            if t.galley.text() == "Ivy" && small.contains(t.pos)
-                && t.galley.job.sections.first().is_some_and(|section| {
-                    section.format.font_id.family == egui::FontFamily::Monospace
-                }))
+            if t.galley.text() == "Ivy" && small.contains(t.pos) && s.clip_rect.contains(t.pos))
         });
         assert!(
             header_seen,
@@ -268,13 +371,13 @@ mod tests {
         assert!(
             window
                 .board
-                .card_rect(names[2])
+                .card_rect(names[1])
                 .is_some_and(|card| card.height() == before.height()),
             "the fixture needs the second row fully in sight"
         );
         pass(&mut window, vec![key(egui::Key::ArrowDown)]);
         pass(&mut window, vec![]);
-        assert_eq!(window.board.selected(), Some(names[2]));
+        assert_eq!(window.board.selected(), Some(names[1]));
         assert_eq!(
             window.board.card_rect(names[0]),
             Some(before),
@@ -283,7 +386,7 @@ mod tests {
     }
 
     #[test]
-    fn a_card_paints_its_claim_and_its_warning() {
+    fn a_card_paints_its_state_border_and_its_warning() {
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
         integrated(&mut window);
         let ctx = egui::Context::default();
@@ -298,6 +401,7 @@ mod tests {
             1,
             SystemTime::UNIX_EPOCH + Duration::from_secs(60),
         );
+        window.active_mut().focus = window.active().panes()[1].name;
         frame(&mut window, &ctx, chord_with(egui::Key::O));
         let shapes = frame(&mut window, &ctx, vec![]);
         // The console panels under the board paint the same claim and warning, so only text that
@@ -310,9 +414,11 @@ mod tests {
             })
         };
         let asking = window.tabs[0].panes()[0].name;
+        let card = window.board.card_rect(asking).unwrap();
+        assert!(shapes.iter().any(|s|matches!(&s.shape, egui::Shape::Rect(r) if (r.rect.width()-card.width()).abs()<2.0 && card.contains(r.rect.center()) && r.stroke.color == window.theme.color(term_core::TermColor::Indexed(3)))), "waiting state border is absent");
         assert!(
-            on_card(asking, "it is waiting for you"),
-            "the claim is not on its card"
+            !on_card(asking, "it is waiting for you"),
+            "removed duplicate attention prose returned"
         );
         let stale = window.tabs[1].panes()[1].name;
         let warning = crate::panel::summary::snapshot(
@@ -341,6 +447,7 @@ mod tests {
             ink: egui::Color32::RED,
             painted: Default::default(),
         };
+        frame(&mut window, &ctx, vec![]);
         let ivy = || Key::Repository("/work/ivy/.git".into());
         let projects = [
             Some(badge(ivy(), "Ivy")),
@@ -354,16 +461,12 @@ mod tests {
         }
         frame(&mut window, &ctx, chord_with(egui::Key::O));
         let shapes = frame(&mut window, &ctx, vec![]);
-        // The console headers under the board paint the same project names, in a proportional face.
-        let on_the_board =
-            |t: &egui::epaint::TextShape| {
-                t.galley.job.sections.first().is_some_and(|section| {
-                    section.format.font_id.family == egui::FontFamily::Monospace
-                })
-            };
+        // The board overlays the console headers; its section labels are painted later.
+        let on_the_board = |t: &egui::epaint::TextShape| area().contains(t.pos);
         let header = |name: &str| {
             shapes
                 .iter()
+                .rev()
                 .find_map(|s| match &s.shape {
                     egui::Shape::Text(t) if t.galley.text() == name && on_the_board(t) => {
                         Some(t.pos.y)
@@ -374,7 +477,7 @@ mod tests {
         };
         let (ivy_at, facq_at, other_at) = (header("Ivy"), header("FacQ"), header("Other consoles"));
         assert!(
-            ivy_at < facq_at && facq_at < other_at,
+            facq_at < ivy_at && ivy_at < other_at,
             "sections out of order"
         );
         assert!(
@@ -388,7 +491,7 @@ mod tests {
             "the folder console left «Other consoles»"
         );
         assert!(
-            card(3).top() < facq_at,
+            card(3).top() < other_at && card(3).top() > ivy_at,
             "the second Ivy console left its section"
         );
         let mut report = Vec::new();
@@ -485,24 +588,26 @@ mod tests {
         let background = &mut window.tabs[1].panes_mut()[1];
         background.panel = Some(PanelDir::create().unwrap());
         background.folded = true;
-        publish_at(background, r#"{"lines":["Before quiet publication"]}"#);
+        publish_at(background, r#"{"lines":["Before"]}"#);
         background.to_reread.raise();
         frame(&mut window, &ctx, chord_with(egui::Key::O));
+        let target = window.tabs[1].panes()[1].name;
+        show_panel(&mut window, &ctx, target);
         let shapes = frame(&mut window, &ctx, vec![]);
-        assert!(the_text_queued_up(&shapes, "Before quiet publication"));
+        assert!(the_text_queued_up(&shapes, "Before"));
         let background = window.tabs[1].panes()[1];
         publish_at(
             background,
-            r#"{"attention":"wait","phase":"quiet phase","lines":["Changed without terminal output"]}"#,
+            r#"{"attention":"wait","phase":"quiet phase","lines":["Changed"]}"#,
         );
         background.to_reread.raise();
         let shapes = frame(&mut window, &ctx, vec![]);
         assert!(
-            the_text_queued_up(&shapes, "Changed without terminal output"),
+            the_text_queued_up(&shapes, "Changed"),
             "Board refreshed only the active or unfolded panes"
         );
         assert!(the_text_queued_up(&shapes, "quiet phase"));
-        assert!(!the_text_queued_up(&shapes, "Before quiet publication"));
+        assert!(!the_text_queued_up(&shapes, "Before"));
         assert_eq!(window.active, 0);
         assert!(window.tabs[1].panes()[1].folded);
     }
@@ -749,7 +854,10 @@ mod tests {
             .filter_map(|pane| window.board.card_rect(pane.name))
             .filter(|r| r.is_positive())
             .collect();
-        assert!(cards.len() >= 2, "small Board did not expose two cards");
+        assert!(
+            cards.len() >= 2,
+            "small Board did not expose two cards: {cards:?}"
+        );
         // Cards sit side by side as well as one under another, so no pair may share a point.
         for (n, card) in cards.iter().enumerate() {
             for other in &cards[n + 1..] {
@@ -765,9 +873,7 @@ mod tests {
                 && (text.galley.text().contains("Long console")
                     || text.galley.text().contains("long phase")
                     || text.galley.text().contains("long body"))
-                && cards
-                    .iter()
-                    .any(|card| card.contains(text.pos) && card.contains_rect(shape.clip_rect))
+                && cards.iter().any(|card| card.contains(text.pos))
             {
                 checked_slots += 1;
                 assert_eq!(
@@ -785,10 +891,23 @@ mod tests {
             checked_slots >= 2,
             "long metadata was not painted inside the Board card slots"
         );
+        pass(&mut window, vec![key(egui::Key::Escape)]);
         assert!(
-            the_text_queued_up(&shapes, "Close"),
-            "close control was displaced by metadata"
+            !window.board.is_open(),
+            "Escape could not close the small Board"
         );
+        pass(
+            &mut window,
+            vec![egui::Event::Key {
+                key: egui::Key::O,
+                physical_key: None,
+                pressed: false,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        pass(&mut window, chord_with(egui::Key::O));
+        assert!(window.board.is_open());
         pass(&mut window, vec![key(egui::Key::End)]);
         let target = window.tabs[1].panes()[1].name;
         let rect = window
@@ -805,7 +924,7 @@ mod tests {
     }
 
     #[test]
-    fn board_paints_only_three_literal_body_lines_with_their_style_and_indentation() {
+    fn board_paints_supported_body_lines_with_their_style_and_indentation() {
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
         integrated(&mut window);
         let ctx = egui::Context::default();
@@ -813,24 +932,20 @@ mod tests {
         pane.panel = Some(PanelDir::create().unwrap());
         publish_at(
             pane,
-            r##"{"phase":"literal phase","lines":["   ",{"text":"first literal","mark":"block","style":"warn","indent":2,"ref":"#42","link":"https://example.test/inert"},"second literal","third literal","fourth must stay hidden"],"actions":[{"label":"Do not render this action","send":"unsafe command"}]}"##,
+            r##"{"phase":"literal phase","lines":["   ",{"text":"first","mark":"block","style":"warn","indent":2,"ref":"#42","link":"https://example.test/inert"},"second","third","fourth"],"actions":[{"label":"Do not render this action","send":"unsafe command"}]}"##,
         );
         pane.to_reread.raise();
+        let target = pane.name;
         frame(&mut window, &ctx, chord_with(egui::Key::O));
+        show_panel(&mut window, &ctx, target);
         let shapes = frame(&mut window, &ctx, vec![]);
-        for text in [
-            "literal phase",
-            "#42 first literal",
-            "second literal",
-            "third literal",
-        ] {
+        for text in ["literal phase", "first", "second", "third", "fourth"] {
             assert!(
                 the_text_queued_up(&shapes, text),
                 "literal projection omitted {text:?}"
             );
         }
         for text in [
-            "fourth must stay hidden",
             "No attention requested",
             "Do not render this action",
             "unsafe command",
@@ -850,24 +965,34 @@ mod tests {
                 })
                 .unwrap()
         };
-        let first = text_shape("first literal");
-        let second = text_shape("second literal");
-        let third = text_shape("third literal");
-        assert!(first.pos.x > second.pos.x, "producer indentation was lost");
+        let first = text_shape("first");
+        let second = text_shape("second");
+        let third = text_shape("third");
+        assert!(
+            the_text_queued_up(&shapes, "#42"),
+            "producer reference was lost"
+        );
+        assert!(
+            text_point(&shapes, "first").unwrap().x > text_point(&shapes, "second").unwrap().x,
+            "producer indentation was lost"
+        );
         assert!(
             first.pos.y < second.pos.y && second.pos.y < third.pos.y,
             "body order changed"
         );
-        let expected = window.theme.panel_color(
-            Some(panel_contract::Mark::Block),
-            Some(panel_contract::Style::Warn),
-        );
+        let expected = window
+            .theme
+            .panel_color(None, Some(panel_contract::Style::Warn));
         assert!(
             first
                 .galley
                 .job
                 .sections
                 .iter()
+                .filter(|s| {
+                    let i = first.galley.text().find("first").unwrap();
+                    s.byte_range.start.0 <= i && i < s.byte_range.end.0
+                })
                 .all(|s| s.format.color == expected),
             "producer style/mark did not reach painted text"
         );
@@ -1003,17 +1128,30 @@ mod tests {
             .panel_state
             .deliver(1, "flow", panel, SystemTime::now())
             .unwrap();
+        window
+            .all_panes_mut()
+            .find(|p| p.name == origins[1])
+            .unwrap()
+            .panel_state
+            .deliver(
+                2,
+                "flow",
+                panel_contract::parse_document(r#"{"lines":["Off-plan witness"]}"#).unwrap(),
+                SystemTime::now(),
+            )
+            .unwrap();
         frame(&mut window, &ctx, chord_with(egui::Key::O));
+        open_roadmaps(&mut window, &ctx);
         let shapes = frame(&mut window, &ctx, vec![]);
-        for expected in [
-            "published ",
-            "roadmap.md",
-            "Build - 0/1",
-            "Feature",
-            "Off the plan",
-        ] {
+        for expected in ["From roadmap.md", "Build", "0/1", "Feature", "Off the plan"] {
             assert!(the_text_queued_up(&shapes, expected), "missing {expected}");
         }
+        assert!(
+            text_point(&shapes, "Feature").unwrap().y
+                < text_point(&shapes, "WAITING FOR YOU").unwrap().y,
+            "expanded roadmap must precede this project's state headers"
+        );
+        hover_roadmap(&mut window, &ctx, "published ");
         let first = window.board.card_rect(origins[0]).unwrap();
         let second = window.board.card_rect(origins[1]).unwrap();
         assert!(
@@ -1084,6 +1222,7 @@ mod tests {
             panel_control::Answer::Text(_)
         ));
         frame(&mut window, &ctx, chord_with(egui::Key::O));
+        open_roadmaps(&mut window, &ctx);
         let deadline = Instant::now() + std::time::Duration::from_secs(5);
         let published_shapes = loop {
             let shapes = frame(&mut window, &ctx, vec![]);
@@ -1110,10 +1249,7 @@ mod tests {
         loop {
             let shapes = frame(&mut window, &ctx, vec![]);
             if the_text_queued_up(&shapes, "file only task") {
-                assert!(the_text_queued_up(
-                    &shapes,
-                    &format!("from {}", roadmap.display())
-                ));
+                hover_roadmap(&mut window, &ctx, &format!("from {}", roadmap.display()));
                 assert!(!the_text_queued_up(&shapes, "published task"));
                 break;
             }
@@ -1183,9 +1319,11 @@ mod tests {
             .unwrap()
             .0
             .apply_to(&mut window);
+        open_roadmaps(&mut window, &ctx);
         let deadline = Instant::now() + std::time::Duration::from_secs(5);
         loop {
             let shapes = frame(&mut window, &ctx, vec![]);
+
             if the_text_queued_up(&shapes, "visible configured task") {
                 assert!(!the_text_queued_up(&shapes, "unconfigured stored task"));
                 break;

@@ -105,6 +105,12 @@ fn milestone(raw: &serde_json::Value, dropped: &mut Dropped) -> Option<Milestone
 }
 
 fn item(raw: &serde_json::Value, dropped: &mut Dropped) -> Option<Item> {
+    if let Some(text) = raw.as_str() {
+        return Some(Item {
+            text: text.to_owned(),
+            ..Default::default()
+        });
+    }
     let object = raw.as_object()?;
     let mark_value = object.get("mark");
     let mark = mark_value.and_then(|v| v.as_str()).and_then(mark);
@@ -141,6 +147,23 @@ fn mark(value: &str) -> Option<Mark> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn string_deliverables_and_outside_items_keep_their_text_without_inventing_state() {
+        let (plan, dropped) = parse_document_noting(r#"{"milestones":[{"id":"M","title":"Milestone","items":["Plain delivery",{"text":"Done","mark":"done"}]}],"outside":["Review",{"text":"Contract","mark":"done"},false,null]}"#).unwrap();
+        assert_eq!(plan.milestones[0].items.len(), 2);
+        assert_eq!(
+            plan.milestones[0].items[0],
+            Item {
+                text: "Plain delivery".into(),
+                ..Default::default()
+            }
+        );
+        assert_eq!(plan.outside.len(), 2);
+        assert_eq!(plan.outside[0].text, "Review");
+        assert_eq!(plan.outside[0].mark, None);
+        assert!(dropped.sentence().is_none());
+    }
 
     #[test]
     fn parses_all_fields_and_excludes_info_mark() {

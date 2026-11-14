@@ -7,24 +7,24 @@ use eframe::egui::{Painter, Pos2, Rect};
 use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(super) enum HeaderId {
+pub(crate) enum HeaderId {
     Key(String),
     Text(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct Header {
-    id: HeaderId,
-    folded: bool,
-    summary: String,
+    pub(super) id: HeaderId,
+    pub(super) folded: bool,
+    pub(super) summary: String,
 }
 pub(super) type Folds = HashMap<HeaderId, bool>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct PaintedHeader {
     area: Rect,
-    id: HeaderId,
-    folded: bool,
+    pub(super) id: HeaderId,
+    pub(super) folded: bool,
 }
 
 pub(crate) fn toggle_header_at(state: &mut PanelState, point: Pos2) -> bool {
@@ -46,6 +46,7 @@ pub(super) fn is_gap(line: &Line) -> bool {
     line.style != Some(Style::Section)
         && line.text.is_empty()
         && line.reference.is_none()
+        && line.link.is_none()
         && line.mark.is_none()
 }
 
@@ -147,7 +148,7 @@ pub(super) fn paint_header(
     Some(inked)
 }
 
-fn fit<'a>(text: &'a str, width: f32, measure: &impl Fn(&str) -> f32) -> &'a str {
+pub(super) fn fit<'a>(text: &'a str, width: f32, measure: &impl Fn(&str) -> f32) -> &'a str {
     let boundaries: Vec<usize> = text
         .grapheme_indices(true)
         .map(|(at, _)| at)
@@ -264,6 +265,25 @@ mod tests {
     fn click(state: &mut PanelState) {
         let area = state.drawn.as_ref().unwrap().headers[0].area;
         assert!(toggle_header_at(state, area.center()));
+    }
+
+    #[test]
+    fn link_only_rows_remain_inside_a_collapsed_section() {
+        let mut state = state(serde_json::json!([
+            header(),
+            {"text":"", "link":"https://example.com/pull/42"},
+            "hidden after link",
+            "",
+            "visible after gap"
+        ]));
+        let text = paint(&mut state, 420.0, 600.0).join("\n");
+        assert!(!text.contains("hidden after link"));
+        assert!(!text.contains("#42"));
+        assert!(text.contains("visible after gap"));
+        click(&mut state);
+        let text = paint(&mut state, 420.0, 600.0).join("\n");
+        assert!(text.contains("hidden after link"));
+        assert!(text.contains("#42"), "{text}");
     }
 
     #[test]

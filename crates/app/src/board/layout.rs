@@ -1,15 +1,21 @@
 //! Where the section headers and the cards go: a pure function of how many cards each section holds
 //! and of the width, so painting, scrolling to the selection and arrow keys read one geometry.
+#[cfg(test)]
 use eframe::egui::{Rect, pos2, vec2};
 
+#[cfg(test)]
 pub(super) const GAP: f32 = 10.0;
 /// Below this a card stops being readable, so the grid drops a column instead.
+#[cfg(test)]
 const MIN_CARD_WIDTH: f32 = 260.0;
 /// Name, claim or «No published state», phase, warning and three body lines. Fixed, so no document can grow its card over
 /// a neighbour (D68's bounded rows, carried over to cards).
+#[cfg(test)]
 pub(super) const CARD_SLOTS: usize = 7;
+#[cfg(test)]
 pub(super) const CARD_PADDING: f32 = 8.0;
 
+#[cfg(test)]
 pub(super) struct Card {
     pub(super) rect: Rect,
     /// What has to be on screen for the card to be seen in context: the card, and its section's
@@ -28,6 +34,7 @@ pub(super) struct Slot {
     pub(super) column: usize,
 }
 
+#[cfg(test)]
 pub(super) struct Layout {
     pub(super) headers: Vec<Rect>,
     /// One per card, in the order the sections and their entries are given.
@@ -35,6 +42,7 @@ pub(super) struct Layout {
     pub(super) height: f32,
 }
 
+#[cfg(test)]
 pub(super) fn layout(counts: &[usize], width: f32, line: f32) -> Layout {
     let width = width.max(1.0);
     let columns = (((width + GAP) / (MIN_CARD_WIDTH + GAP)).floor() as usize).max(1);
@@ -99,6 +107,13 @@ pub(super) fn vertical(cards: &[Slot], from: usize, down: bool) -> usize {
         .rfind(|(_, slot)| slot.column <= column)
         .or_else(|| in_row().next())
         .map_or(from, |(index, _)| index)
+}
+
+/// Fixed state columns stay legible through horizontal scrolling.
+pub(super) fn column_widths(width: f32, gap: f32) -> [f32; 5] {
+    let weights = [1.3, 1.15, 1.15, 0.75, 0.7];
+    let total: f32 = weights.iter().sum();
+    weights.map(|weight| (width - 4.0 * gap).max(1.0) * weight / total)
 }
 
 #[cfg(test)]

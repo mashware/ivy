@@ -1,0 +1,55 @@
+{
+ "v": 1,
+ "phase": "review",
+ "attention": "wait",
+ "attention_since": 1794680816,
+ "actions": [
+  {
+   "label": "Aprobar",
+   "send": "sí, adelante"
+  }
+ ],
+ "lines": [
+  {
+   "text": "[DEMO] Selector de perfil en la bandeja",
+   "style": "title"
+  },
+  "",
+  {
+   "text": "MRs",
+   "style": "section",
+   "summary": "2/4 merged",
+   "key": "mrs"
+  },
+  {
+   "text": "profile selector",
+   "mark": "done",
+   "ref": "#1",
+   "link": "https://github.com/example/app/pull/62"
+  },
+  {
+   "text": "inbox and search",
+   "mark": "current",
+   "ref": "#3",
+   "link": "https://github.com/example/app/pull/64"
+  },
+  {
+   "text": "pipeline ✓ · 0/1 approvals · 2 threads",
+   "style": "dim",
+   "indent": 5
+  },
+  {
+   "text": "settings page",
+   "mark": "pending",
+   "ref": "#4"
+  },
+  "",
+  {
+   "text": "¿Mergeo #3 aunque falte la aprobación de diseño?",
+   "mark": "wait",
+   "ref": "Pregunta"
+  }
+ ],
+ "milestone": "M1",
+ "deliverable": "inbox"
+}
