@@ -122,6 +122,7 @@ pub(super) fn paint(
                 egui::vec2(title_width, 20.0),
                 egui::Layout::left_to_right(egui::Align::Center),
                 |ui| {
+                    ui.set_min_width(title_width);
                     ui.add(
                         egui::Label::new(
                             egui::RichText::new(clean(title(entry))).size(13.0).strong(),
@@ -307,6 +308,7 @@ mod tests {
     #[test]
     fn short_and_long_titles_start_at_the_same_left_padding() {
         let mut offsets = Vec::new();
+        let mut neighbors = Vec::new();
         for title in [
             "[DEMO] Export CSV",
             "[DEMO] A much longer title that must be truncated within the card",
@@ -349,11 +351,29 @@ mod tests {
                 })
                 .expect("card title painted");
             offsets.push(start - card.left());
+            let position = |needle: &str| {
+                output
+                    .shapes
+                    .iter()
+                    .find_map(|s| match &s.shape {
+                        egui::Shape::Text(t) if t.galley.text() == needle => Some(
+                            t.pos.x + t.galley.pos_from_cursor(egui::text::CCursor::new(0)).left(),
+                        ),
+                        _ => None,
+                    })
+                    .expect("header field painted")
+            };
+            neighbors.push((position("design"), position("Go to console")));
             output.drop_without_applying_deltas();
         }
         assert!(
             (offsets[0] - offsets[1]).abs() < 0.5,
             "short/long title left offsets differ: {offsets:?}"
+        );
+        assert!(
+            (neighbors[0].0 - neighbors[1].0).abs() < 0.5
+                && (neighbors[0].1 - neighbors[1].1).abs() < 0.5,
+            "phase/navigation shifted with title length: {neighbors:?}"
         );
     }
 
