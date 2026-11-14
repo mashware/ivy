@@ -2383,10 +2383,12 @@ mod tests {
         /// artifact to satisfy a test, which is the tail wagging the dog.
         const DRAWN_RULE: char = '\u{2500}';
 
-        const SOURCES: [(&str, &str); 53] = [
+        const SOURCES: [(&str, &str); 55] = [
             ("board/plans.rs", include_str!("board/plans.rs")),
             ("board/plans/disk.rs", include_str!("board/plans/disk.rs")),
             ("board/roadmap.rs", include_str!("board/roadmap.rs")),
+            ("board/cards.rs", include_str!("board/cards.rs")),
+            ("board/view.rs", include_str!("board/view.rs")),
             ("roadmap_file.rs", include_str!("roadmap_file.rs")),
             ("git_process.rs", include_str!("git_process.rs")),
             ("project.rs", include_str!("project.rs")),
@@ -2586,7 +2588,8 @@ mod tests {
             .chain(sentences)
         {
             let (where_from, message) = message;
-            // **One character is allowed not to be ASCII, and it is a horizontal rule.** Adding
+            // Board punctuation and state glyphs are English UI symbols; accents and prose
+            // punctuation remain rejected. The report's horizontal rule is retained. Adding
             // `lib.rs` to this walk brought in three English sentences that are not ASCII, and the
             // first attempt exempted that file from `is_ascii()` altogether. **That was a hole, and
             // it was demonstrated**: `is_ascii()` was carrying a third thing nobody had named —
@@ -2600,7 +2603,9 @@ mod tests {
             // `×` to anyway. What is left is the report's rule, `── tab n, pane n ──`, whose
             // character is drawn and never Spanish.
             assert!(
-                message.chars().all(|c| c.is_ascii() || c == DRAWN_RULE),
+                message.chars().all(|c| c.is_ascii()
+                    || c == DRAWN_RULE
+                    || matches!(c, '·' | '✓' | '▸' | '▾' | '○' | '⎇')),
                 "«{message}» ({where_from}) carries a character that is neither ASCII nor the \
                  report's rule: the angle quotes, the dashes and the accents are how this \
                  repository writes Spanish"

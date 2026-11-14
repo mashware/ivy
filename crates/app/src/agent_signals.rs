@@ -63,7 +63,9 @@ pub(crate) struct Signals {
     reporter: Option<Reporter>,
 }
 impl Signals {
-    pub(crate) fn incarnation(&self)->u64 {self.incarnation}
+    pub(crate) fn incarnation(&self) -> u64 {
+        self.incarnation
+    }
 
     pub(crate) fn reset_for_new_shell(&mut self, screen: &mut Screen) {
         let enabled = self.enabled;

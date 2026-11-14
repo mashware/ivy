@@ -554,25 +554,44 @@ Like other bindings, it can be changed or disabled with `key.board = none`, whic
 chord to the program when the board is closed. The Shortcuts section in Settings edits the same key.
 `key.overview`, the name before the board, is no longer understood and is reported as an unknown key.
 
-The board has one section per Git repository, named as the console header names that project, and
-a last section, **Other consoles**, for consoles outside any repository — a plain folder included,
-even though its header shows a project name. Sections that hold waiting work come before sections
-with blocked work, then finished work, then sections with no declared claim.
+The board has one row per Git repository and five state columns: **Waiting for you**, **Stuck**,
+**Working**, **Finished** and **Idle**. Repository rows sort by their strongest state, then name;
+**Other consoles** stays last for consoles outside a repository. Column counts and project/console
+totals show the whole window. Narrow windows scroll horizontally instead of shrinking the columns.
 
-Each console is a card of fixed size. Inside a section, waiting work comes before blocked work, then
-finished work, then consoles with no declared claim. A card shows the console and tab names, the
-claim when there is one, the literal phase, any warning about old or unreadable state and up to
-three nonempty lines of the panel. A console with no document says **No published state**. When no
-console has a document, the screen says **No task state has been published yet** and still shows
-every console.
+A card uses the first producer title, the current phase and the available worktree branch. Its body
+uses the same native panel content, marks, references, styles, links and section summaries. Long
+panels initially show eighteen source lines; **Show all** exposes the remainder. Finished and Idle
+cards start compact; **Show panel** opens them. Section-fold choices belong to the Board reader and
+survive producer republishes independently of the sidebar. Freshness and publication-origin notices
+remain visible. A console without a panel says **publishes nothing**; when none has published, the
+screen says **No task state has been published yet** and still includes every console.
 
-Click a card, or move with the arrows and press Enter, to open its console: Left/Right go one card in
-reading order, Up/Down one row of the grid, Home/End to the first and last card. A hidden target
-restores its tab's arrangement before taking focus. Escape, Close or the Board control returns to
-the console. Opening and closing the screen preserves console dimensions, programs, history and
-panel ownership. All programs continue running. Producer actions and links are inert here; return
-to the console to use them. Settings and the board open separately so a settings draft is not
-discarded.
+State comes only from published attention and supported explicit client declarations. An explicit
+working signal suppresses a lingering panel wait; block and done retain priority, followed by an
+explicit client wait, stale state, working, and finally idle. Native explicit Done can place a console
+in Finished without a panel. Phase, body text and console output never determine state.
+
+Waiting cards are ordered oldest observed first. The Board tracks an effective wait even while
+closed, keeps its start across republishes and highlights it after five and fifteen observed minutes.
+The duration is labelled **observed wait**: time before observation or a restart is unknown. Leaving
+wait, replacing the shell or closing the console clears it. Silence alone does not move Wait or Done
+to Idle; freshness/backing warnings remain visible.
+
+Project roadmaps start folded and can be opened individually or together. Expanded plans show
+completed summaries, started milestones, later milestones, progress and attached/off-plan consoles.
+**Show all** inside a milestone exposes remaining deliverables; **Show all milestones** reaches the
+whole plan. The configured roadmap window remains the initial detail window and cannot hide attached
+work. Published plans still override configured files as a whole; retirement reveals the file again.
+A configured project remains visible without an open console. Without a plan, producer section
+headings and summaries can be inspected as a clearly labelled fallback.
+
+Click a card, or move with the arrows and press Enter, to open its console. Left/Right follow reading
+order, Up/Down the grid, and Home/End the first/last card; selection reveals the required position in
+both scroll axes. A card's fold, expansion or disclosed HTTP(S) link performs that reader action
+without activating the console. The Board never executes producer action commands. Escape, Close
+or the Board control returns to the console. Console dimensions, programs, history, panel ownership
+and hidden-console pump budgets are preserved. Settings and Board remain separate.
 
 ## Markdown and Git diff viewers
 

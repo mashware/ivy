@@ -322,6 +322,18 @@ check_board_report() {
     BOARD_COUNTS=$(sed -n 's/^board witnesses: open=\([0-9]*\), projected=\([0-9]*\), painted=\([0-9]*\), repositories=\([0-9]*\), ungrouped=\([0-9]*\), navigation=\([0-9]*\), focus=\([0-9]*\), deadlines=\([0-9]*\)$/\1 \2 \3 \4 \5 \6 \7 \8/p' "$REPORT" | head -1)
     [ -n "$BOARD_WORK" ] && [ -n "$BOARD_COUNTS" ] || invalidate "Board report omitted its work or witnesses"
     set -- $BOARD_COUNTS
+    if [ "${BOARD_RICH:-}" = 1 ]; then
+        BOARD_CONTENT=$(sed -n 's/^board content witnesses: observed=\([0-9]*\), transitions=\([0-9]*\), rows=\([0-9]*\), expansions=\([0-9]*\), folds=\([0-9]*\)$/\1 \2 \3 \4 \5/p' "$REPORT" | head -1)
+        [ -n "$BOARD_CONTENT" ] || invalidate "rich Board report omitted content witnesses"
+        set -- $BOARD_CONTENT
+        [ "$1" -gt 0 ] && [ "$2" -gt 0 ] || invalidate "rich Board did not observe panes and transitions"
+        if [ "$EXPECTED_BOARD" = open ]; then
+            [ "$3" -gt 0 ] && [ "$4" -gt 0 ] && [ "$5" -gt 0 ] || invalidate "rich Board did not paint content and exercise expansion and folds"
+        else
+            [ "$3" = 0 ] && [ "$4" = 0 ] && [ "$5" = 0 ] || invalidate "rich closed Board painted or changed content"
+        fi
+        set -- $BOARD_COUNTS
+    fi
     if [ "$EXPECTED_BOARD" = open ]; then
         [ "$BOARD_WORK" -gt 0 ] && [ "$1" -gt 0 ] && [ "$2" -ge "$DIRECTORIES" ] && [ "$3" -gt 0 ] && [ "$6" -gt 0 ] && [ "$7" -gt 0 ] || invalidate "open Board variant omitted actual open, card, navigation or focus effects"
         # The project probe gives every open run two repositories; fewer means the grouping path was
@@ -607,9 +619,10 @@ RESTORES=0
 # batch, and the guards read the same variable, so they judge the leaked load as the batch's own. A
 # `PATCHES=1` in the environment runs X as Y and publishes it under X's name; a `LARGE=1` pads S and
 # the file batches to the ceiling, and hides U and V from the leak guard that only fires without it.
-LIGATURES= ACTIONS= CONTROL= HEADER= READS= PATCHES= LINKS= SEARCH= LARGE= CJK= EMOJI= PANEL_EMOJI= SETTINGS= INTEGRATED_CHROME= BOARD=
+LIGATURES= ACTIONS= CONTROL= HEADER= READS= PATCHES= LINKS= SEARCH= LARGE= CJK= EMOJI= PANEL_EMOJI= SETTINGS= INTEGRATED_CHROME= BOARD= BOARD_RICH=
 case "$BATCH" in
     ligatures-on|ligatures-off) TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; LIGATURES=${BATCH#ligatures-} ;;
+    board-rich-closed|board-rich-open) TABS=2; PANES=2x1; DUMPING=4; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=1; BOARD_RICH=1; BOARD=${BATCH##*-} ;;
     board-4-closed|board-4-open) TABS=2; PANES=2x1; DUMPING=4; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=1; BOARD=${BATCH##*-} ;;
     board-16-closed|board-16-open) TABS=8; PANES=2x1; DUMPING=16; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=1; BOARD=${BATCH##*-} ;;
     projects) TABS=1; PANES=2x2; DUMPING=4; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=1; CHROME_EXPECTED_VISIBLE=4 ;;
@@ -832,6 +845,16 @@ document_body() {  # document_body <which of the consoles> <turn> [the key on th
     # console so that different classes live together in one tab, which is what forces the tab to
     # compare: the one on an odd turn waits, the even one is taken as finished.
     if [ $(( $1 % 2 )) = 0 ]; then attention=done; else attention=wait; fi
+    if [ "${BOARD_RICH:-}" = 1 ]; then
+        printf '{"v":1,"stale_after_minutes":600,"attention":"%s","lines":[{"text":"Rich Board %s","style":"title"},{"text":"Details","style":"section","key":"details"}' "$attention" "$1"
+        rich_n=1
+        while [ "$rich_n" -le 24 ]; do
+            printf ',{"ref":"step-%s","text":"Measured detail %s","mark":"current"}' "$rich_n" "$rich_n"
+            rich_n=$((rich_n + 1))
+        done
+        printf ']}\n'
+        return
+    fi
     # **Only batch R declares buttons**, for the same reason only P dumps Japanese and only Q dumps
     # emoji: they are the one path that lays out a button's rows, walks them to work out what a press
     # may reach, and composes what one sends. Any other batch painting one would be mixing foreign
@@ -1110,7 +1133,7 @@ seed() {
 case "$BATCH" in
     A) : ;;                       # no panel: nobody publishes anything
     B) seed quiet & ;;
-    projects|ligatures-on|ligatures-off|board-4-closed|board-4-open|board-16-closed|board-16-open|chrome|chrome-zoom|settings-apply|settings-closed|settings-open|settings-fonts|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
+    projects|ligatures-on|ligatures-off|board-rich-closed|board-rich-open|board-4-closed|board-4-open|board-16-closed|board-16-open|chrome|chrome-zoom|settings-apply|settings-closed|settings-open|settings-fonts|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
 esac
 
 echo "batch $BATCH · $TABS tab(s) of $PANES · $DUMPING of $DIRECTORIES consoles dumping $MIB MiB · window $WINDOW_SIZE · do not touch the machine until it closes" >&2
@@ -1153,6 +1176,11 @@ assert hashlib.sha256(Path(sys.argv[1]).read_bytes()).hexdigest() == "a0bf60ef0f
 PYFONT
 else
     unset MEASURE_LIGATURES MEASURE_LIGATURE_FONT
+fi
+if [ -n "$BOARD_RICH" ]; then
+    export MEASURE_BOARD_RICH=1
+else
+    unset MEASURE_BOARD_RICH
 fi
 if [ -n "$BOARD" ]; then
     export MEASURE_BOARD="$BOARD"

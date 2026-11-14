@@ -200,26 +200,30 @@ impl Window {
             ctx.request_repaint_after(flip);
         }
 
-        crate::board::observe(self, ctx);
-        let board = self.board.is_open();
-        let started = board.then(Instant::now);
-        let missing = panel_warning_due(self, now);
-        if board {
-            let moment = Instant::now();
-            if self.board.warning_due.is_some_and(|due| due <= moment) {
-                self.board.timing.deadline_expired();
-            }
-            self.board.warning_due = missing.and_then(|delay| moment.checked_add(delay));
-        } else {
-            self.board.warning_due = None;
+        arm_panel_state(self, ctx, now);
+    }
+}
+
+fn arm_panel_state(window: &mut Window, ctx: &egui::Context, now: SystemTime) {
+    crate::board::observe(window, ctx);
+    let board = window.board.is_open();
+    let started = board.then(Instant::now);
+    let missing = panel_warning_due(window, now);
+    if board {
+        let moment = Instant::now();
+        if window.board.warning_due.is_some_and(|due| due <= moment) {
+            window.board.timing.deadline_expired();
         }
-        if let Some(missing) = missing {
-            ctx.request_repaint_after(missing);
-        }
-        if let Some(started) = started {
-            self.board.timing.record_work(started.elapsed());
-            self.timed_separately += self.board.timing.take_cost();
-        }
+        window.board.warning_due = missing.and_then(|delay| moment.checked_add(delay));
+    } else {
+        window.board.warning_due = None;
+    }
+    if let Some(missing) = missing {
+        ctx.request_repaint_after(missing);
+    }
+    if let Some(started) = started {
+        window.board.timing.record_work(started.elapsed());
+        window.timed_separately += window.board.timing.take_cost();
     }
 }
 

@@ -50,6 +50,7 @@ impl Worker {
                     let request = {
                         let mut q = thread.queue.lock().unwrap();
                         while q.pending.is_empty() && !q.stopping {
+                            // Bounded: requests wake this worker; dropping it sets stopping and notifies the same condition variable.
                             q = thread.wake.wait(q).unwrap();
                         }
                         if q.stopping {

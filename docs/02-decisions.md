@@ -9544,3 +9544,51 @@ Route data is atomically replaced while a separate persistent lock inode seriali
 On launcher exit, an immutable private cancellation marker closes its exact attachment epoch before any route lock or relay join is attempted. A tool operation already in flight can finish, but subsequent operations see that epoch as inactive even if a slow operation delayed ordinary record cleanup. Cancellation takes no route or registry lock, so it remains effective under contention and cannot revoke a newer epoch. The stable public proof remains readable while inactive, permitting a later verified resume. Process reapers are detached and explicitly declared; relay and reader joins have a grace deadline. Cleanup failure is diagnosed rather than presented as successful revocation.
 
 The host manager can install an app-server newer than the CLI. The actual official CLI 0.167.2 starting managed server 0.169.0 was separately exercised for start, exact saved resume with a new epoch, fork and matching MCP proof. Unknown server versions remain refused rather than silently trusted. Real phone history/input and panel publication after resume were observed with CLI/server 0.167.2; the mixed-server protocol check is separate evidence.
+
+
+## D93 — The Board follows Bellwether, with independent native reader state
+
+**New signal, 14 November 2026 — #71.** The owner requested the same Board presentation,
+information and behavior as Bellwether's Herdr plugin, with executable action buttons deferred.
+The reference is Bellwether commit `995b18da65f3bb6775cf18b157aa05410efb07eb`, specifically
+`mods/bellwether-board/main.js`; its executable classification takes precedence over older README
+prose. This supersedes B1's fixed cards, three-line excerpts and attention/tree ordering in D85.
+
+**Decision.** Keep D85's native global Board and project-plan sources, but present project rows
+across Waiting for you, Stuck, Working, Finished and Idle columns. Repository rows sort by their
+strongest effective column, then name; Other consoles remains last. A card exposes its producer's
+supported content, with Bellwether's initial eighteen-line expansion and compact finished/idle
+cards. Reader-owned section and roadmap folds do not alter the published document. Roadmaps show
+completed summaries, started milestones and later milestones, with controls to inspect all items.
+The configured roadmap window remains the initial detail window and never makes attached work or
+remaining content unreachable. Existing published-over-file precedence and configured projects
+without consoles remain unchanged.
+
+**State is explicit.** In first-match order: published wait unless the client explicitly says busy;
+published block; published done or explicit native Done; explicit client waiting; stale panel;
+explicit busy; otherwise idle. Reuse supported native client declarations, including preserving
+ProgramState::Done through the internal view. No phase/body/output parsing or public activity field
+is added. Silence alone never moves a waiting or finished card to Idle; warnings and unconfirmed
+backing remain visible. This is a Board projection, not a rewrite of sidebar/tab attention.
+
+**Time is observed, not guessed.** Ivy currently receives no authoritative wait-onset timestamp.
+Track the effective transition into waiting with a monotonic clock for all live panes, including
+while Board is closed. Republishing the same wait retains its start; departure, a fresh shell or
+pane closure clears it. Warm begins at five observed minutes and hot at fifteen. After restart the
+prior duration is unknown; label the duration as observed instead of treating file age as history.
+
+**Two views share rendering, not interaction authority.** Reuse pure native panel body primitives,
+but give Board its own caches, fold choices and painted child hit geometry. The sidebar's mutable
+layout and drawn records describe its own pixels. Child links, folds and expansion consume their
+click before card navigation; no producer action command is routed from this Board. Available Git
+branch text is resolved per worktree directory off the frame, not from the repository grouping key.
+
+**Discarded:** keeping excerpts behind a sidebar drill-down (fails the requested information);
+duplicating the full renderer (diverges on wrapping, marks, references, folds and emoji); calling
+the sidebar painter a second time (overwrites its input geometry); guessing wait age from publication
+mtime or producer dates (republishing is not a new wait); classifying activity from terminal output
+(violates D6); replacing existing plan transport/storage (presentation needs no new source).
+
+**Verification boundary.** Observation while Board is closed and all added layout/input/paint work
+must be named and subtracted once. Native visual and interaction parity needs a real desktop run;
+headless tests alone cannot establish it. No new performance figure is claimed by this decision.

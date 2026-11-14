@@ -30,10 +30,9 @@ pub(crate) fn toggle(window: &mut Window, ctx: &egui::Context) {
         window.board.selected = Some(selected);
         window.board.ordinal = 0;
         window.board.scroll_selected = true;
-        window.board.pressed = None;
+        window.board.surface.pressed = None;
         window.board.activate = None;
         window.board.order.clear();
-        window.board.viewport = None;
         cancel_gestures(window, ctx);
         window.board.blocked_frame = Some(ctx.cumulative_frame_nr());
     }
@@ -53,12 +52,12 @@ pub(super) fn close(window: &mut Window, ctx: &egui::Context) {
         window.tabs[owner].focus = original;
     }
     window.board.open = false;
-    window.board.pressed = None;
-    window.board.child_hits.clear();
-    window.board.child_pressed = None;
-    window.board.link_to_open = None;
+    window.board.surface.pressed = None;
+    window.board.surface.child_hits.clear();
+    window.board.surface.child_pressed = None;
+    window.board.surface.link_to_open = None;
     window.board.activate = None;
-    window.board.painted.clear();
+    window.board.surface.painted.clear();
     window.board.order.clear();
     window.board.blocked_frame = Some(ctx.cumulative_frame_nr());
     window.board.awaiting_release = ctx.input(|i| i.pointer.any_down());
@@ -212,17 +211,23 @@ fn navigate(state: &mut State, key: egui::Key) {
 
 fn pointer(state: &mut State, pos: egui::Pos2, pressed: bool) {
     if pressed {
-        state.child_pressed = state
+        state.surface.child_pressed = state
+            .surface
             .child_hits
             .iter()
             .find(|(r, _)| r.contains(pos))
             .cloned();
-        if state.child_pressed.is_some() {
-            state.pressed = None;
+        if state.surface.child_pressed.is_some() {
+            state.surface.pressed = None;
             return;
         }
-        state.pressed = state.painted.iter().copied().find(|(_, r)| r.contains(pos));
-        if let Some((id, _)) = state.pressed {
+        state.surface.pressed = state
+            .surface
+            .painted
+            .iter()
+            .copied()
+            .find(|(_, r)| r.contains(pos));
+        if let Some((id, _)) = state.surface.pressed {
             state.selected = Some(id);
             state.ordinal = state
                 .order
@@ -230,11 +235,13 @@ fn pointer(state: &mut State, pos: egui::Pos2, pressed: bool) {
                 .position(|slot| slot.pane == id)
                 .unwrap_or(state.ordinal);
         }
-    } else if let Some((rect, command)) = state.child_pressed.take() {
+    } else if let Some((rect, command)) = state.surface.child_pressed.take() {
         if rect.contains(pos) {
-            state.apply_card_command(&command);
+            state
+                .surface
+                .apply_card_command(&command, &mut state.timing);
         }
-    } else if let Some((id, rect)) = state.pressed.take()
+    } else if let Some((id, rect)) = state.surface.pressed.take()
         && rect.contains(pos)
     {
         state.activate = Some(id);
@@ -256,11 +263,14 @@ mod tests {
     fn release_keeps_the_pressed_identity_even_when_cards_reorder() {
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(100.0, 100.0));
         let mut state = State {
-            painted: vec![(7, rect)],
+            surface: super::super::view::ViewState {
+                painted: vec![(7, rect)],
+                ..Default::default()
+            },
             ..State::default()
         };
         pointer(&mut state, rect.center(), true);
-        state.painted = vec![(8, rect)];
+        state.surface.painted = vec![(8, rect)];
         pointer(&mut state, rect.center(), false);
         assert_eq!(state.activate, Some(7));
     }

@@ -10,6 +10,48 @@ use crate::Window;
 use eframe::egui::{self, Rect, Vec2};
 use std::time::{Instant, SystemTime};
 
+#[derive(Default)]
+pub(super) struct ViewState {
+    pub(super) cards: std::collections::HashMap<usize, cards::Reader>,
+    pub(super) roadmaps: roadmap::Reader,
+    pub(super) child_hits: Vec<(Rect, cards::Command)>,
+    pub(super) child_pressed: Option<(Rect, cards::Command)>,
+    pub(super) link_to_open: Option<String>,
+    pub(super) painted: Vec<(usize, Rect)>,
+    pub(super) pressed: Option<(usize, Rect)>,
+}
+
+impl ViewState {
+    pub(super) fn apply_card_command(
+        &mut self,
+        command: &cards::Command,
+        timing: &mut crate::measure::Board,
+    ) {
+        let pane = match command {
+            cards::Command::Body(pane, _)
+            | cards::Command::Expand(pane)
+            | cards::Command::Compact(pane) => *pane,
+        };
+        if !self.cards.contains_key(&pane) {
+            return;
+        }
+        match command {
+            cards::Command::Body(_, crate::panel::body::Action::Link(target)) => {
+                self.link_to_open = Some(target.clone())
+            }
+            cards::Command::Body(_, crate::panel::body::Action::Fold(..)) => {
+                self.cards.get_mut(&pane).unwrap().apply(command);
+                timing.folded();
+            }
+            cards::Command::Expand(_) => {
+                self.cards.get_mut(&pane).unwrap().apply(command);
+                timing.expanded();
+            }
+            cards::Command::Compact(_) => self.cards.get_mut(&pane).unwrap().apply(command),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct Geometry {
     viewport: Rect,
@@ -63,7 +105,7 @@ pub(super) fn paint(window: &mut Window, parent: &mut egui::Ui, area: Rect, sect
     ui.horizontal(|ui| {
         ui.heading("Board");
         ui.weak(format!("{total} consoles · {} projects", sections.len()));
-        roadmap::paint_controls(ui, sections, &mut window.board.roadmaps);
+        roadmap::paint_controls(ui, sections, &mut window.board.surface.roadmaps);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             close = ui.button("Close").clicked();
         });
@@ -76,8 +118,8 @@ pub(super) fn paint(window: &mut Window, parent: &mut egui::Ui, area: Rect, sect
         ui.weak("No task state has been published yet");
     }
     ui.separator();
-    window.board.painted.clear();
-    window.board.child_hits.clear();
+    window.board.surface.painted.clear();
+    window.board.surface.child_hits.clear();
     window.board.order.clear();
     let reveal = std::mem::take(&mut window.board.scroll_selected);
     let canvas_width = ui.available_width().max(1360.0);
@@ -128,7 +170,7 @@ pub(super) fn paint(window: &mut Window, parent: &mut egui::Ui, area: Rect, sect
                 if let Some(pane) = roadmap::paint_project(
                     ui,
                     section,
-                    &mut window.board.roadmaps,
+                    &mut window.board.surface.roadmaps,
                     window.board.roadmap_window,
                     &theme,
                 ) {
@@ -161,7 +203,7 @@ pub(super) fn paint(window: &mut Window, parent: &mut egui::Ui, area: Rect, sect
                                         window.board.branches.get(entry.pane).map(str::to_owned);
                                     let selected = window.board.selected == Some(entry.pane);
                                     let board = &mut window.board;
-                                    let reader = board.cards.entry(entry.pane).or_default();
+                                    let reader = board.surface.cards.entry(entry.pane).or_default();
                                     let rect = cards::paint(
                                         ui,
                                         entry,
@@ -173,7 +215,7 @@ pub(super) fn paint(window: &mut Window, parent: &mut egui::Ui, area: Rect, sect
                                         &mut window.discoverer,
                                         &theme,
                                         &mut board.timing,
-                                        &mut board.child_hits,
+                                        &mut board.surface.child_hits,
                                     );
                                     board.order.push(Slot {
                                         pane: entry.pane,
@@ -182,6 +224,7 @@ pub(super) fn paint(window: &mut Window, parent: &mut egui::Ui, area: Rect, sect
                                     });
                                     if rect.intersects(ui.clip_rect()) {
                                         board
+                                            .surface
                                             .painted
                                             .push((entry.pane, rect.intersect(ui.clip_rect())));
                                         board.timing.painted(1);

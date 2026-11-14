@@ -83,13 +83,15 @@ pub(super) fn heat(age: Duration) -> Heat {
 #[derive(Default)]
 pub(super) struct Observations {
     panes: HashMap<usize, (Column, Option<Instant>)>,
-    epochs: HashMap<usize,u64>,
+    epochs: HashMap<usize, u64>,
 }
 impl Observations {
-    pub(super) fn observe_epoch(&mut self,pane:usize,column:Column,epoch:u64,now:Instant) {
-        if self.epochs.get(&pane).is_some_and(|old|*old!=epoch){self.reset(pane);}
-        self.epochs.insert(pane,epoch);
-        self.observe(pane,column,now);
+    pub(super) fn observe_epoch(&mut self, pane: usize, column: Column, epoch: u64, now: Instant) {
+        if self.epochs.get(&pane).is_some_and(|old| *old != epoch) {
+            self.reset(pane);
+        }
+        self.epochs.insert(pane, epoch);
+        self.observe(pane, column, now);
     }
 
     pub(super) fn observe(&mut self, pane: usize, column: Column, now: Instant) {
@@ -105,7 +107,7 @@ impl Observations {
     }
     pub(super) fn retain(&mut self, live: &[usize]) {
         self.panes.retain(|pane, _| live.contains(pane));
-        self.epochs.retain(|pane,_|live.contains(pane));
+        self.epochs.retain(|pane, _| live.contains(pane));
     }
     pub(super) fn since(&self, pane: usize) -> Option<Instant> {
         self.panes.get(&pane).and_then(|entry| entry.1)
@@ -155,12 +157,13 @@ mod tests {
     }
     #[test]
     fn new_shell_epoch_resets_even_an_unchanged_wait() {
-        let mut state=Observations::default();let now=Instant::now();
-        state.observe_epoch(1,Column::Wait,0,now);
-        state.observe_epoch(1,Column::Wait,0,now+Duration::from_secs(10));
-        assert_eq!(state.since(1),Some(now));
-        state.observe_epoch(1,Column::Wait,1,now+Duration::from_secs(20));
-        assert_eq!(state.since(1),Some(now+Duration::from_secs(20)));
+        let mut state = Observations::default();
+        let now = Instant::now();
+        state.observe_epoch(1, Column::Wait, 0, now);
+        state.observe_epoch(1, Column::Wait, 0, now + Duration::from_secs(10));
+        assert_eq!(state.since(1), Some(now));
+        state.observe_epoch(1, Column::Wait, 1, now + Duration::from_secs(20));
+        assert_eq!(state.since(1), Some(now + Duration::from_secs(20)));
     }
     #[test]
     fn explicit_precedence_and_missing_panel() {
