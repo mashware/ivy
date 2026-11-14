@@ -143,7 +143,7 @@ pub(super) fn disclosure(ui: &mut egui::Ui, open: bool, theme: &Theme) -> egui::
                 ui.spacing_mut().item_spacing.x = 5.0;
                 let (rect, _) = ui.allocate_exact_size(egui::vec2(8.0, 14.0), egui::Sense::hover());
                 chevron(ui.painter(), rect, open, theme.foreground());
-                ui.label("Roadmap");
+                ui.add(egui::Label::new("Roadmap").selectable(false));
             });
         });
     ui.interact(
@@ -151,6 +151,7 @@ pub(super) fn disclosure(ui: &mut egui::Ui, open: bool, theme: &Theme) -> egui::
         ui.id().with("roadmap-disclosure"),
         egui::Sense::click(),
     )
+    .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 pub(super) fn chevron(painter: &egui::Painter, rect: egui::Rect, open: bool, ink: Color32) {
