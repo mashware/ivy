@@ -756,6 +756,120 @@ mod tests {
     }
 
     #[test]
+    fn singleton_controls_follow_split_zoom_close_and_tab_switches() {
+        let ctx = egui::Context::default();
+        chrome::prepare(&ctx);
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        let tab = window.active().name;
+        let sibling = window.active().panes()[1].name;
+        window.close_a_pane_called(sibling, &ctx).unwrap();
+        for width in [1400.0, 400.0] {
+            let area = area_of(width);
+            frame(&mut window, &ctx, area, vec![]);
+            let old_zoom = control(&window, &ctx, area, 0, 37.5);
+            frame(&mut window, &ctx, area, click_at(old_zoom));
+            assert_eq!(window.pane_view.zoomed(tab), None);
+            frame(
+                &mut window,
+                &ctx,
+                area,
+                key_with(egui::Key::Escape, egui::Modifiers::NONE),
+            );
+            frame(
+                &mut window,
+                &ctx,
+                area,
+                vec![egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: false,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+        }
+        let area = area_of(1400.0);
+        let pane = window.active().focus;
+        window
+            .pane_view
+            .open_menu(tab, pane, false, egui::pos2(200.0, 150.0));
+        frame(&mut window, &ctx, area, vec![]);
+        let shapes = frame(&mut window, &ctx, area, vec![]);
+        assert!(has_text(&shapes, "Rename"));
+        assert!(!has_text(&shapes, "Maximize / restore"));
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            key_with(egui::Key::Escape, egui::Modifiers::NONE),
+        );
+        frame(&mut window, &ctx, area, vec![]);
+        assert!(
+            !window.pane_view.is_modal(),
+            "menu remained modal after Escape"
+        );
+        frame(&mut window, &ctx, area, chord_with(egui::Key::D));
+        assert_eq!(window.active().panes().len(), 2);
+        let original = window.active().root.describe();
+        let zoom = control(&window, &ctx, area, 0, 37.5);
+        frame(&mut window, &ctx, area, click_at(zoom));
+        assert_eq!(window.pane_view.zoomed(tab), Some(pane));
+        frame(&mut window, &ctx, area, chord_with(egui::Key::ArrowRight));
+        assert_ne!(window.active().name, tab);
+        frame(&mut window, &ctx, area, chord_with(egui::Key::ArrowLeft));
+        assert_eq!(window.active().name, tab);
+        assert_eq!(window.pane_view.zoomed(tab), Some(pane));
+        let restore = control(&window, &ctx, area, 0, 37.5);
+        frame(&mut window, &ctx, area, click_at(restore));
+        assert_eq!(window.pane_view.zoomed(tab), None);
+        assert_eq!(window.active().root.describe(), original);
+        let zoom = control(&window, &ctx, area, 0, 37.5);
+        frame(&mut window, &ctx, area, click_at(zoom));
+        let hidden = window.active().panes()[1].name;
+        window.close_a_pane_called(hidden, &ctx).unwrap();
+        assert_eq!(window.pane_view.zoomed(tab), None);
+        frame(&mut window, &ctx, area, the_chord_again(egui::Key::D));
+        assert_eq!(window.active().panes().len(), 2);
+        assert_eq!(window.pane_view.zoomed(tab), None);
+        let shapes = frame(&mut window, &ctx, area, vec![]);
+        for pane in window.active().panes() {
+            assert!(has_text(&shapes, &format!("Console {}", pane.name + 1)));
+        }
+    }
+
+    #[test]
+    fn inactive_removals_clear_zoom_before_a_later_split() {
+        for detach in [false, true] {
+            let ctx = egui::Context::default();
+            let mut window = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+            window.chrome.enable();
+            window.headers = window.headers.integrated(true);
+            let tab = window.tabs[1].name;
+            let survivor = window.tabs[1].focus;
+            let hidden = window.tabs[1]
+                .panes()
+                .iter()
+                .find(|p| p.name != survivor)
+                .unwrap()
+                .name;
+            window.pane_view.toggle(tab, survivor, 2);
+            if detach {
+                drop(window.detach_panes_called(&[hidden], &ctx).unwrap());
+            } else {
+                window.close_a_pane_called(hidden, &ctx).unwrap();
+            }
+            assert_eq!(window.pane_view.zoomed(tab), None);
+            window.active = 1;
+            let area = area_of(1400.0);
+            frame(&mut window, &ctx, area, chord_with(egui::Key::D));
+            assert_eq!(window.active().panes().len(), 2);
+            assert_eq!(window.pane_view.zoomed(tab), None);
+        }
+    }
+
+    #[test]
     fn hidden_sibling_keeps_original_grid_and_its_unpainted_round_is_closed() {
         let ctx = egui::Context::default();
         let mut window = window_with("sleep 30", "sleep 30");
@@ -766,7 +880,7 @@ mod tests {
         let hidden_grid = window.active().panes()[1].measured;
         let name = window.active().focus;
         let tab = window.active().name;
-        window.pane_view.toggle(tab, name);
+        window.pane_view.toggle(tab, name, 2);
         let (tx, rx) = std::sync::mpsc::channel();
         let ready = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let signal = ready.clone();

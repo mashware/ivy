@@ -793,15 +793,28 @@ mod tests {
         for width in [35.0, 100.0, 150.0, 500.0] {
             let strip = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 33.0));
             let items = targets(strip, &m, false);
-            assert!(items.iter().all(|(target, _)| !matches!(target, Target::Zoom | Target::Close)));
-            for (_, rect) in targets(strip, &m, true).into_iter().filter(|(t, _)| *t == Target::Zoom) {
-                assert!(!matches!(hit(strip, &m, false, rect.center()), Some(Target::Zoom)));
+            assert!(
+                items
+                    .iter()
+                    .all(|(target, _)| !matches!(target, Target::Zoom | Target::Close))
+            );
+            for (_, rect) in targets(strip, &m, true)
+                .into_iter()
+                .filter(|(t, _)| *t == Target::Zoom)
+            {
+                assert!(!matches!(
+                    hit(strip, &m, false, rect.center()),
+                    Some(Target::Zoom)
+                ));
             }
             if width >= 100.0 {
                 assert_eq!(items.len(), 3);
             }
             if width == 500.0 {
-                assert_eq!(items[0].1.width() - targets(strip, &m, true)[0].1.width(), 50.0);
+                assert_eq!(
+                    items[0].1.width() - targets(strip, &m, true)[0].1.width(),
+                    50.0
+                );
             }
         }
     }
