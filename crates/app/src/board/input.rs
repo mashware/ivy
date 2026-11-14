@@ -76,7 +76,7 @@ pub(crate) fn cancel_gestures(window: &mut Window, ctx: &egui::Context) {
     window.presses_for_the_program.clear();
     window.where_the_last_press_fell = None;
     egui::DragAndDrop::clear_payload(ctx);
-    ctx.set_dragged_id(egui::Id::NULL);
+    ctx.stop_dragging();
     for tab in &mut window.tabs {
         for pane in tab.panes_mut() {
             pane.painted_console = None;

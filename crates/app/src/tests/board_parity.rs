@@ -297,4 +297,297 @@ mod tests {
             .expect("expanded section card painted");
         assert!(shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text().contains("Section hidden witness") && card.contains(text.pos) && shape.clip_rect.contains(text.pos))), "section click did not reveal its body");
     }
+
+    fn card_text(
+        window: &Window,
+        shapes: &[egui::epaint::ClippedShape],
+        pane: usize,
+        needle: &str,
+    ) -> Option<egui::Pos2> {
+        let card = window.board.card_rect(pane)?;
+        shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(t)
+                if t.galley.text().contains(needle)
+                    && card.contains(t.pos)
+                    && shape.clip_rect.contains(t.pos) =>
+            {
+                let start = t.galley.text().find(needle).unwrap();
+                let cursor = t.galley.text()[..start].chars().count() + needle.chars().count() / 2;
+                Some(
+                    t.galley
+                        .pos_from_cursor(egui::text::CCursor::new(cursor))
+                        .center()
+                        + t.pos.to_vec2(),
+                )
+            }
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn compact_cards_hide_show_and_hide_their_body_without_selecting_a_console() {
+        for attention in ["done", "idle"] {
+            let mut window = window_with("sleep 30", "sleep 30");
+            prepare(&mut window);
+            let ctx = egui::Context::default();
+            let pane = &mut *window.active_mut().panes_mut()[1];
+            let target = pane.name;
+            pane.panel = Some(PanelDir::create().unwrap());
+            let mut doc = serde_json::json!({"lines":[
+                {"text":"Producer heading", "style":"title"},
+                "ZBODY"
+            ]});
+            if attention == "done" {
+                doc["attention"] = "done".into();
+            }
+            publish_at(pane, &doc.to_string());
+            pane.to_reread.raise();
+            let focus = window.active().focus;
+            frame(&mut window, &ctx, chord_with(egui::Key::O));
+            let shapes = frame(&mut window, &ctx, vec![]);
+            assert!(card_text(&window, &shapes, target, "Producer heading").is_some());
+            assert!(card_text(&window, &shapes, target, "ZBODY").is_none());
+            let show = card_text(&window, &shapes, target, "Show panel").unwrap();
+            frame(&mut window, &ctx, click_at(show));
+            let shapes = frame(&mut window, &ctx, vec![]);
+            assert!(
+                card_text(&window, &shapes, target, "ZBODY").is_some(),
+                "{attention} body stayed hidden after Show panel"
+            );
+            let hide = card_text(&window, &shapes, target, "Hide panel").unwrap();
+            frame(&mut window, &ctx, click_at(hide));
+            let shapes = frame(&mut window, &ctx, vec![]);
+            assert!(card_text(&window, &shapes, target, "ZBODY").is_none());
+            assert!(card_text(&window, &shapes, target, "Show panel").is_some());
+            assert!(window.board.is_open());
+            assert_eq!(window.active().focus, focus);
+        }
+    }
+
+    #[test]
+    fn board_section_choice_survives_replacement_without_opening_the_sidebar_section() {
+        let mut window = window_with("sleep 30", "sleep 30");
+        prepare(&mut window);
+        let ctx = egui::Context::default();
+        let target = window.active().panes()[1].name;
+        let publish = |window: &mut Window, heading: &str, body: &str| {
+            let pane = &mut *window.active_mut().panes_mut()[1];
+            if pane.panel.is_none() {
+                pane.panel = Some(PanelDir::create().unwrap());
+            }
+            publish_at(
+                pane,
+                &serde_json::json!({"attention":"wait","lines":[
+                    {"text":heading,"style":"section","collapsed":true,"key":"stable-section"},
+                    body
+                ]})
+                .to_string(),
+            );
+            pane.to_reread.raise();
+        };
+        publish(&mut window, "Before replacement", "Old hidden body");
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
+        let shapes = frame(&mut window, &ctx, vec![]);
+        let section = card_text(&window, &shapes, target, "Before replacement").unwrap();
+        frame(&mut window, &ctx, click_at(section));
+        publish(&mut window, "After replacement", "New republished body");
+        let shapes = frame(&mut window, &ctx, vec![]);
+        assert!(card_text(&window, &shapes, target, "New republished body").is_some());
+        frame(
+            &mut window,
+            &ctx,
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert!(!window.board.is_open());
+        let shapes = frame(&mut window, &ctx, vec![]);
+        assert!(
+            !the_text_queued_up(&shapes, "New republished body"),
+            "Board fold choice leaked into the sidebar"
+        );
+        frame(
+            &mut window,
+            &ctx,
+            vec![egui::Event::Key {
+                key: egui::Key::O,
+                physical_key: None,
+                pressed: false,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
+        let shapes = frame(&mut window, &ctx, vec![]);
+        assert!(
+            card_text(&window, &shapes, target, "New republished body").is_some(),
+            "closing Board discarded its reader choice; open={}",
+            window.board.is_open()
+        );
+    }
+
+    #[test]
+    fn waiting_cards_use_observed_age_then_stable_tree_order() {
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
+        prepare(&mut window);
+        let ctx = egui::Context::default();
+        let names: Vec<_> = window.all_panes().map(|p| p.name).collect();
+        for group in [1, 0] {
+            for pane in window.tabs[group].panes_mut() {
+                pane.panel = Some(PanelDir::create().unwrap());
+                publish_at(pane, r#"{"attention":"wait","lines":["Waiting witness"]}"#);
+                pane.to_reread.raise();
+            }
+            frame(&mut window, &ctx, vec![]);
+        }
+        assert_eq!(
+            window.board.observed_since(names[2]),
+            window.board.observed_since(names[3])
+        );
+        assert!(window.board.observed_since(names[2]) < window.board.observed_since(names[0]));
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
+        frame(&mut window, &ctx, vec![]);
+        let cards: Vec<_> = [2, 3, 0, 1]
+            .map(|i| window.board.card_rect(names[i]).unwrap())
+            .into();
+        assert!(
+            cards.windows(2).all(|r| r[0].bottom() < r[1].top()),
+            "wait age or stable ties did not control the painted order: {cards:?}"
+        );
+    }
+
+    #[test]
+    fn native_wheel_reveals_lower_waiting_cards_without_keyboard_navigation() {
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 4]);
+        prepare(&mut window);
+        let ctx = egui::Context::default();
+        let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(2048.0, 1224.0));
+        let names: Vec<_> = window.all_panes().map(|p| p.name).collect();
+        for pane in window.all_panes_mut() {
+            pane.panel = Some(PanelDir::create().unwrap());
+            publish_at(pane, &serde_json::json!({"attention":"wait","lines":(0..33).map(|n|format!("Waiting line {n}: {}", "long content ".repeat(6))).collect::<Vec<_>>()} ).to_string());
+            pane.to_reread.raise();
+        }
+        let pass = |window: &mut Window, events| {
+            ui_pass(
+                window,
+                &ctx,
+                viewport,
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+            )
+        };
+        pass(&mut window, chord_with(egui::Key::O));
+        pass(&mut window, vec![]);
+        let first_before = window
+            .board
+            .card_rect(names[0])
+            .expect("first waiting card initially visible");
+        assert!(
+            window.board.card_rect(names[7]).is_none(),
+            "fixture needs lower cards outside the viewport"
+        );
+        for _ in 0..20 {
+            pass(
+                &mut window,
+                vec![
+                    egui::Event::PointerMoved(egui::pos2(200.0, 600.0)),
+                    egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Point,
+                        phase: egui::TouchPhase::Move,
+                        delta: egui::vec2(0.0, -600.0),
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+            pass(&mut window, vec![]);
+            if window.board.card_rect(names[7]).is_some() {
+                break;
+            }
+        }
+        assert!(window.board.is_open());
+        assert_ne!(
+            window.board.card_rect(names[0]),
+            Some(first_before),
+            "wheel left first card fixed in place"
+        );
+        assert!(
+            window
+                .board
+                .card_rect(names[7])
+                .is_some_and(|r| r.is_positive() && viewport.contains(r.center())),
+            "wheel never revealed the last waiting card"
+        );
+    }
+
+    #[test]
+    fn first_open_keeps_column_headers_visible_with_a_tall_selected_wait_card() {
+        let mut window = window_with("sleep 30", "sleep 30");
+        let removed = window.active().panes()[1].name;
+        drop(window.active_mut().root.close(removed).unwrap());
+        prepare(&mut window);
+        let ctx = egui::Context::default();
+        let pane = &mut *window.active_mut().panes_mut()[0];
+        pane.panel = Some(PanelDir::create().unwrap());
+        publish_at(pane, &serde_json::json!({"attention":"wait","lines":(0..33).map(|n|format!("Waiting line {n}: {}", "long content ".repeat(6))).collect::<Vec<_>>()} ).to_string());
+        pane.to_reread.raise();
+        let root = std::env::temp_dir().join(format!("ivy-71-first-open-{}", std::process::id()));
+        let mut configured = String::new();
+        for name in ["demo", "empty"] {
+            let directory = root.join(name);
+            std::fs::create_dir_all(&directory).unwrap();
+            let path = directory.join("roadmap.md");
+            std::fs::write(&path, "# Roadmap\n- [ ] Pending item\n").unwrap();
+            configured.push_str(&format!("roadmap.{name}={}\n", path.display()));
+        }
+        settings::interpret(&configured)
+            .unwrap()
+            .0
+            .apply_to(&mut window);
+        let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(2048.0, 1224.0));
+        let pass = |window: &mut Window, events| {
+            ui_pass(
+                window,
+                &ctx,
+                viewport,
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+            )
+        };
+        pass(&mut window, chord_with(egui::Key::O));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let shapes = pass(&mut window, vec![]);
+            if the_text_queued_up(&shapes, "demo") && the_text_queued_up(&shapes, "empty") {
+                for label in ["Waiting for you", "Stuck", "Working", "Finished", "Idle"] {
+                    let header = text_position(&shapes, label).unwrap_or_else(|| {
+                        panic!(
+                            "first open hid the {label} column header without any scrolling input"
+                        )
+                    });
+                    let first_project = text_position(&shapes, "demo").unwrap();
+                    assert!(
+                        header.y < first_project.y,
+                        "{label} header ink at {header:?} is underneath the first project row at {first_project:?}"
+                    );
+                }
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "configured project rows did not arrive"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        drop(window);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

@@ -85,6 +85,20 @@ fn column(window: &Window, entry: &Entry, now: SystemTime) -> Column {
 }
 
 pub(super) fn paint(window: &mut Window, parent: &mut egui::Ui, area: Rect, sections: &[Section]) {
+    // ScrollArea resolves wheel ownership through registered Areas, not painted layer IDs.
+    // Keep the Board's foreground layer in that registry as well as in the paint list.
+    egui::Area::new(egui::Id::new("board-layer"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(area.min)
+        .movable(false)
+        .constrain(false)
+        .show(parent.ctx(), |registered| {
+            registered.allocate_rect(area, egui::Sense::hover());
+            paint_contents(window, registered, area, sections);
+        });
+}
+
+fn paint_contents(window: &mut Window, parent: &mut egui::Ui, area: Rect, sections: &[Section]) {
     let theme = window.theme;
     let now = SystemTime::now();
     let mut ui = egui::Ui::new(

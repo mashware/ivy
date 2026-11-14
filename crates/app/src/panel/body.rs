@@ -215,4 +215,39 @@ mod tests {
                 .any(|r| r.text.contains("secret"))
         );
     }
+
+    #[test]
+    fn initial_cap_counts_source_lines_after_title_and_closed_content_not_wrapped_rows() {
+        let mut lines = vec![
+            serde_json::json!({"text":"Only heading", "style":"title"}),
+            serde_json::json!({"text":"Closed section", "style":"section", "collapsed":true}),
+            serde_json::json!("Hidden source line"),
+            serde_json::json!({"text":"Open section", "style":"section"}),
+        ];
+        lines.extend(
+            (0..18).map(|n| serde_json::json!(format!("visible-{n:02} {}", "wrapped ".repeat(6)))),
+        );
+        let doc = panel_contract::parse_document(&serde_json::json!({"lines":lines}).to_string())
+            .unwrap();
+        let body = Body::layout(&doc, &Reader::default(), 20, &Theme::default(), false);
+        let text: String = body.rows.iter().map(|r| r.text.as_str()).collect();
+        assert!(!text.contains("Only heading"));
+        assert!(!text.contains("Hidden source line"));
+        assert!(
+            text.contains("visible-15"),
+            "wrapping consumed the source-line allowance"
+        );
+        assert!(
+            !text.contains("visible-16"),
+            "more than eighteen displayed source lines escaped the cap"
+        );
+        assert_eq!(body.hidden, 2);
+        assert!(
+            body.rows() > 18,
+            "fixture must wrap into more than eighteen screen rows"
+        );
+        let full = Body::layout(&doc, &Reader::default(), 20, &Theme::default(), true);
+        assert!(full.rows.iter().any(|r| r.text.contains("visible-17")));
+        assert_eq!(full.hidden, 0);
+    }
 }
