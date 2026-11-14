@@ -2,7 +2,6 @@
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
-use std::hash::{Hash, Hasher};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -128,7 +127,8 @@ impl Identity {
             || (self.active
                 && (self.pane_id.is_empty()
                     || !self.pane_dir.is_absolute()
-                    || self.epoch.is_empty()))
+                    || self.epoch.is_empty()
+                    || self.epoch.len() > 100))
         {
             return Err(invalid("invalid route record"));
         }
@@ -145,7 +145,63 @@ impl RouteGuard {
         atomic_write(&self.path, &serde_json::to_vec(&self.identity)?)
     }
 }
+// Atomic data replacement makes a lock-free read a complete old or new snapshot.
+// The caller must lock and recheck any snapshot before acting on it.
+fn read_identity(path: &Path) -> io::Result<Identity> {
+    let mut file = open_file(path, false)?;
+    let mut bytes = Vec::new();
+    (&mut file).take(16385).read_to_end(&mut bytes)?;
+    if bytes.len() > 16384 {
+        return Err(invalid("route record too large"));
+    }
+    let identity: Identity = serde_json::from_slice(&bytes)?;
+    identity.validate()?;
+    Ok(identity)
+}
+fn cancel_path(root: &Path, epoch: &str) -> io::Result<PathBuf> {
+    if epoch.is_empty() || epoch.len() > 100 {
+        return Err(invalid("invalid route epoch"));
+    }
+    let name: String = epoch
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    Ok(root.join(format!("cancel-{name}")))
+}
+fn epoch_cancelled(root: &Path, epoch: &str) -> io::Result<bool> {
+    if epoch.is_empty() {
+        return Ok(false);
+    }
+    match open_file(&cancel_path(root, epoch)?, false) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+fn reject_cancelled(root: &Path, epoch: &str) -> io::Result<()> {
+    if epoch_cancelled(root, epoch)? {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "route epoch is cancelled",
+        ));
+    }
+    Ok(())
+}
 pub fn lock_route(path: &Path) -> io::Result<RouteGuard> {
+    let mut guard = lock_route_unchecked(path)?;
+    if epoch_cancelled(
+        path.parent()
+            .ok_or_else(|| invalid("route has no parent"))?,
+        &guard.identity.epoch,
+    )? {
+        // Keep the immutable public proof available for a later verified reattach, while
+        // every producer operation observes the cancelled capability as inactive.
+        guard.identity.active = false;
+    }
+    Ok(guard)
+}
+fn lock_route_unchecked(path: &Path) -> io::Result<RouteGuard> {
     if !path.is_absolute() {
         return Err(invalid("route path must be absolute"));
     }
@@ -155,14 +211,7 @@ pub fn lock_route(path: &Path) -> io::Result<RouteGuard> {
     validate_dir(parent)?;
     let lockfile = open_file(&route_lock_path(path), false)?;
     lock(&lockfile)?;
-    let mut file = open_file(path, false)?;
-    let mut bytes = Vec::new();
-    (&mut file).take(16385).read_to_end(&mut bytes)?;
-    if bytes.len() > 16384 {
-        return Err(invalid("route record too large"));
-    }
-    let identity: Identity = serde_json::from_slice(&bytes)?;
-    identity.validate()?;
+    let identity = read_identity(path)?;
     Ok(RouteGuard {
         _file: lockfile,
         path: path.to_owned(),
@@ -199,6 +248,20 @@ impl Registry {
         }
         validate_dir(&root)?;
         Ok(Self { root })
+    }
+    /// Persist cancellation independently of any route or registry lock.
+    pub fn cancel_epoch(&self, epoch: &str) -> io::Result<()> {
+        validate_dir(&self.root)?;
+        let path = cancel_path(&self.root, epoch)?;
+        let file = match open_file(&path, true) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => open_file(&path, false)?,
+            Err(error) => return Err(error),
+        };
+        file.sync_all()?;
+        #[cfg(unix)]
+        File::open(&self.root)?.sync_all()?;
+        Ok(())
     }
     fn registry_lock(&self) -> io::Result<File> {
         validate_dir(&self.root)?;
@@ -270,7 +333,7 @@ impl Registry {
         (&mut f).take(256).read_to_string(&mut s)?;
         let route = self.root.join(s);
         self.validate_route(&route)?;
-        let _guard = lock_route(&route)?;
+        let _guard = lock_route_unchecked(&route)?;
         Ok(Some(route))
     }
     pub fn bind(
@@ -285,8 +348,10 @@ impl Registry {
             return Err(invalid("invalid thread UUID"));
         }
         self.validate_route(route)?;
+        reject_cancelled(&self.root, epoch)?;
         let _lock = self.registry_lock()?;
-        let mut guard = lock_route(route)?;
+        reject_cancelled(&self.root, epoch)?;
+        let mut guard = lock_route_unchecked(route)?;
         let identity = Identity {
             v: 1,
             pane_id: pane_id.into(),
@@ -296,53 +361,37 @@ impl Registry {
             proof: guard.identity.proof.clone(),
         };
         identity.validate()?;
-        // The index is scoped to one exact pane and is checked against its full identity.
-        // Corrupt records belonging to unrelated panes cannot prevent this binding.
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        pane_id.hash(&mut hasher);
-        pane_dir.hash(&mut hasher);
-        let index = self.root.join(format!("pane-{:016x}", hasher.finish()));
-        let previous_index = match open_file(&index, false) {
-            Ok(mut file) => {
-                let mut bytes = Vec::new();
-                (&mut file).take(16385).read_to_end(&mut bytes)?;
-                if bytes.len() > 16384 {
-                    return Err(invalid("pane index too large"));
-                }
-                Some(bytes)
-            }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-            Err(error) => return Err(error),
-        };
+        // Bind holds the registry lock, so no other bind can activate or move a route.
+        // A revoke can only deactivate one. Atomic record replacement lets us inspect
+        // unrelated records without waiting on their in-flight tool calls.
         let mut displaced = Vec::new();
-        if let Some(bytes) = &previous_index {
-            let (indexed_id, indexed_dir, filename): (String, PathBuf, String) =
-                serde_json::from_slice(bytes)?;
-            if indexed_id != pane_id || indexed_dir != pane_dir {
-                return Err(invalid("pane index collision"));
+        for entry in fs::read_dir(&self.root)? {
+            let candidate = entry?.path();
+            if candidate == route || self.validate_route(&candidate).is_err() {
+                continue;
             }
-            let candidate = self.root.join(filename);
-            self.validate_route(&candidate)?;
-            if candidate != route {
-                let other = lock_route(&candidate)?;
-                if other.identity.active
-                    && other.identity.pane_id == pane_id
-                    && other.identity.pane_dir == pane_dir
-                {
-                    let previous = other.identity.clone();
-                    displaced.push((other, previous));
-                }
+            let Ok(snapshot) = read_identity(&candidate) else {
+                continue;
+            };
+            if !snapshot.active || snapshot.pane_id != pane_id || snapshot.pane_dir != pane_dir {
+                continue;
+            }
+            if epoch_cancelled(&self.root, &snapshot.epoch)? {
+                continue;
+            }
+            let other = match lock_route(&candidate) {
+                Ok(other) => other,
+                Err(_error) if epoch_cancelled(&self.root, &snapshot.epoch)? => continue,
+                Err(error) => return Err(error),
+            };
+            if other.identity.active
+                && other.identity.pane_id == pane_id
+                && other.identity.pane_dir == pane_dir
+            {
+                let previous = other.identity.clone();
+                displaced.push((other, previous));
             }
         }
-        let index_bytes = serde_json::to_vec(&(
-            pane_id,
-            pane_dir,
-            route
-                .file_name()
-                .ok_or_else(|| invalid("missing route name"))?
-                .to_string_lossy()
-                .as_ref(),
-        ))?;
         let mapping = self
             .root
             .join(format!("thread-{}", thread.to_ascii_lowercase()));
@@ -350,7 +399,6 @@ impl Registry {
         let mut f = open_file(&temp, true)?;
         let previous = guard.identity.clone();
         let mut route_changed = false;
-        let mut index_changed = false;
         let result = (|| {
             f.write_all(
                 route
@@ -359,30 +407,21 @@ impl Registry {
                     .as_encoded_bytes(),
             )?;
             f.sync_data()?;
-            guard.identity = identity;
-            route_changed = true;
-            guard.write()?;
             for (other, _) in &mut displaced {
                 other.identity.active = false;
                 other.write()?;
             }
-            atomic_write(&index, &index_bytes)?;
-            index_changed = true;
+            reject_cancelled(&self.root, epoch)?;
+            guard.identity = identity;
+            route_changed = true;
+            guard.write()?;
             fs::rename(&temp, &mapping)?;
             Ok(())
         })();
         if let Err(error) = result {
             let _ = fs::remove_file(&temp);
             guard.identity = previous;
-            let index_restore = if index_changed {
-                match &previous_index {
-                    Some(bytes) => atomic_write(&index, bytes),
-                    None => fs::remove_file(&index),
-                }
-            } else {
-                Ok(())
-            };
-            let mut restore_error = index_restore.err();
+            let mut restore_error = None;
             let route_restore = if route_changed {
                 guard.write().err()
             } else {
@@ -494,6 +533,43 @@ mod tests {
         fs::remove_dir_all(home).unwrap();
     }
     #[test]
+    fn cancellation_does_not_wait_for_inflight_guard_and_fresh_epoch_reuses_route() {
+        let (home, registry) = registry();
+        let route = registry.pending().unwrap();
+        let thread = "01234567-89ab-cdef-0123-456789abcdef";
+        registry
+            .bind(thread, &route, "one", Path::new("/tmp/one"), "old")
+            .unwrap();
+        let inflight = lock_route(&route).unwrap();
+        let proof = inflight.identity.proof.clone();
+        // Synchronous success while the guard is held proves cancellation takes no route lock.
+        registry.cancel_epoch("old").unwrap();
+        registry.cancel_epoch("old").unwrap();
+        assert!(inflight.identity.active);
+        drop(inflight);
+        let cancelled = lock_route(&route).unwrap();
+        assert!(!cancelled.identity.active);
+        assert_eq!(cancelled.identity.proof, proof);
+        drop(cancelled);
+        assert_eq!(registry.route_for(thread).unwrap(), Some(route.clone()));
+        assert!(
+            registry
+                .bind(thread, &route, "one", Path::new("/tmp/one"), "old")
+                .is_err()
+        );
+        registry
+            .bind(thread, &route, "one", Path::new("/tmp/one"), "new")
+            .unwrap();
+        assert!(lock_route(&route).unwrap().identity.active);
+        registry.cancel_epoch("old").unwrap();
+        let current = lock_route(&route).unwrap();
+        assert!(current.identity.active);
+        assert_eq!(current.identity.proof, proof);
+        drop(current);
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
     fn public_proof_is_immutable_across_bind_and_revoke() {
         let (home, r) = registry();
         let route = r.pending().unwrap();
@@ -508,6 +584,50 @@ mod tests {
         assert_eq!(lock_route(&route).unwrap().identity.proof, proof);
         fs::remove_dir_all(home).unwrap();
     }
+    #[test]
+    fn orphan_active_after_interruption_is_found_without_a_thread_mapping() {
+        let (home, r) = registry();
+        let orphan = r.pending().unwrap();
+        let unrelated = r.pending().unwrap();
+        let broken = r.pending().unwrap();
+        let new = r.pending().unwrap();
+        // This is the on-disk state if the process dies after committing the route and
+        // before publishing its thread mapping. There is deliberately no mapping for it.
+        {
+            let mut guard = lock_route(&orphan).unwrap();
+            guard.identity.pane_id = "pane-a".into();
+            guard.identity.pane_dir = PathBuf::from("/tmp/pane-a");
+            guard.identity.epoch = "orphan".into();
+            guard.identity.active = true;
+            guard.write().unwrap();
+        }
+        r.bind(
+            "21234567-89ab-cdef-0123-456789abcdef",
+            &unrelated,
+            "pane-b",
+            Path::new("/tmp/pane-b"),
+            "other",
+        )
+        .unwrap();
+        fs::write(&broken, b"{partial").unwrap();
+        // Holding an unrelated operation open does not make the attach wait for it.
+        let other_guard = lock_route(&unrelated).unwrap();
+        r.bind(
+            "11234567-89ab-cdef-0123-456789abcdef",
+            &new,
+            "pane-a",
+            Path::new("/tmp/pane-a"),
+            "new",
+        )
+        .unwrap();
+        assert!(!lock_route(&orphan).unwrap().identity.active);
+        assert!(lock_route(&new).unwrap().identity.active);
+        assert!(other_guard.identity.active);
+        drop(other_guard);
+        assert!(lock_route(&unrelated).unwrap().identity.active);
+        fs::remove_dir_all(home).unwrap();
+    }
+
     #[test]
     fn binding_another_conversation_revokes_only_the_same_pane() {
         let (home, r) = registry();

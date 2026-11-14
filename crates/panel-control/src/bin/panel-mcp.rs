@@ -233,6 +233,7 @@ fn routed_loop(
                 Err(RecvTimeoutError::Disconnected) => break,
             }
         } else {
+            // Abandoned on purpose: the idle MCP dispatcher can wait indefinitely for its client; it holds no pane connection and ends when the client closes stdin or the process exits.
             match receiver.recv() {
                 Ok(frame) => frame,
                 Err(_) => break,
@@ -915,7 +916,7 @@ fn called_routed(
 
 /// What the pane answered, as the tool result an agent reads.
 ///
-/// **Out of [`called`] so a test reaches it without a pane**, for the reason [`what_it_did`] gives:
+/// **Out of [`called_routed`] so a test reaches it without a pane**, for the reason [`what_it_did`] gives:
 /// every arm here is only walked once a channel exists, which is how a verb once shipped answering
 /// the wrong word.
 fn result_of(did: &str, answered: Answered) -> serde_json::Value {

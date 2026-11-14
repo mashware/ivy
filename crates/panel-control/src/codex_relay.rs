@@ -10,7 +10,7 @@ use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicBool, Ordering},
     mpsc,
 };
@@ -85,8 +85,11 @@ fn wait_for_client(child: &mut Child) -> io::Result<ExitStatus> {
                 }
                 forwarded = Some(Instant::now());
             }
+            if forwarded.is_some_and(|at| at.elapsed() > Duration::from_millis(2200)) {
+                return Err(error("Codex did not exit after termination"));
+            }
             if forwarded.is_some_and(|at| at.elapsed() > Duration::from_secs(2)) {
-                child.kill()?;
+                let _ = child.kill();
             }
         }
         std::thread::sleep(Duration::from_millis(10));
@@ -95,6 +98,34 @@ fn wait_for_client(child: &mut Child) -> io::Result<ExitStatus> {
 
 fn error(message: impl Into<String>) -> io::Error {
     io::Error::other(message.into())
+}
+
+// A killed process can be stuck in an uninterruptible kernel wait. Reap it on
+// a detached thread instead of making the console wait without a deadline.
+fn kill_and_reap(mut child: Child) {
+    let _ = child.kill();
+    std::thread::spawn(move || {
+        // Abandoned on purpose: the detached reaper may wait for a stuck killed child, never the console.
+        let _ = child.wait();
+    });
+}
+
+fn join_if_finished<T>(handle: std::thread::JoinHandle<T>, grace: Duration) -> Option<T> {
+    let deadline = Instant::now() + grace;
+    while !handle.is_finished() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    if !handle.is_finished() {
+        return None;
+    }
+    // Bounded: is_finished confirms this thread has already completed.
+    handle.join().ok()
+}
+
+#[derive(Default)]
+struct RouteExit {
+    closing: bool,
+    active: Option<PathBuf>,
 }
 
 fn nonce() -> io::Result<String> {
@@ -150,12 +181,19 @@ fn supported_args(args: &[OsString]) -> bool {
 
 /// Bounded capability/lifecycle commands never inherit terminal input.
 fn output(exe: &OsStr, args: &[&str], timeout: Duration) -> io::Result<String> {
-    let mut child = Command::new(exe)
+    let mut command = Command::new(exe);
+    command
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()?;
+        .stderr(Stdio::null());
+    // A shared daemon must not inherit the first pane's identity.
+    if args == ["app-server", "daemon", "start"] {
+        for name in panel_contract::ENV_NAMES {
+            command.env_remove(name);
+        }
+    }
+    let mut child = command.spawn()?;
     let stdout = child
         .stdout
         .take()
@@ -172,8 +210,7 @@ fn output(exe: &OsStr, args: &[&str], timeout: Duration) -> io::Result<String> {
             break status;
         }
         if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
+            kill_and_reap(child);
             return Err(error("Codex command timed out"));
         }
         std::thread::sleep(Duration::from_millis(10));
@@ -218,7 +255,9 @@ pub fn run(exe: &OsStr, args: &[OsString]) -> io::Result<ExitStatus> {
     let [id, dir] = panel_contract::ENV_NAMES.map(std::env::var_os);
     let (id, dir) = crate::client::whole_identity(id.as_deref(), dir.as_deref())
         .ok_or_else(|| error("shared Codex launch requires this console's identity"))?;
-    let registry = Registry::for_home(&home()?)?;
+    let codex_home = home()?;
+    let registry = Registry::for_home(&codex_home)?;
+    let exit_registry = Registry::for_home(&codex_home)?;
     let start: Value = serde_json::from_str(&output(
         exe,
         &["app-server", "daemon", "start"],
@@ -241,6 +280,9 @@ pub fn run(exe: &OsStr, args: &[OsString]) -> io::Result<ExitStatus> {
     let address = listener.local_addr()?;
     let token = nonce()?;
     let epoch = nonce()?;
+    let relay_epoch = epoch.clone();
+    let exit_route = Arc::new(Mutex::new(RouteExit::default()));
+    let relay_route = Arc::clone(&exit_route);
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = Arc::clone(&stop);
     let exe_owned = exe.to_owned();
@@ -256,7 +298,8 @@ pub fn run(exe: &OsStr, args: &[OsString]) -> io::Result<ExitStatus> {
             registry,
             &pane_id,
             &pane_dir,
-            &epoch,
+            &relay_epoch,
+            relay_route,
             &thread_stop,
         );
         match result {
@@ -280,15 +323,43 @@ pub fn run(exe: &OsStr, args: &[OsString]) -> io::Result<ExitStatus> {
         Ok(mut child) => match wait_for_client(&mut child) {
             Ok(status) => Ok(status),
             Err(failure) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                kill_and_reap(child);
                 Err(failure)
             }
         },
         Err(failure) => Err(failure),
     };
     stop.store(true, Ordering::Release);
-    if let Ok(Some(thread)) = relay.join()
+    // Persist cancellation without acquiring the route or registry locks. An MCP
+    // operation already holding one of them must not keep this epoch usable.
+    let cancellation = exit_registry.cancel_epoch(&epoch);
+    if cancellation.is_err() {
+        eprintln!("ivy-codex: panel route cancellation could not be persisted on exit");
+    }
+    // Close the route independently of the relay: its proxy pipe can be stuck.
+    // The same mutex guards binding, so no late response can reactivate a route.
+    let deadline = Instant::now() + Duration::from_secs(6);
+    loop {
+        match exit_route.try_lock() {
+            Ok(mut guard) => {
+                guard.closing = true;
+                if let Some(route) = guard.active.take()
+                    && exit_registry.revoke(&route, &epoch).is_err()
+                {
+                    eprintln!("ivy-codex: panel route could not be revoked on exit");
+                }
+                break;
+            }
+            Err(std::sync::TryLockError::WouldBlock) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            _ => {
+                eprintln!("ivy-codex: panel route cleanup could not finish on exit");
+                break;
+            }
+        }
+    }
+    if let Some(Some(thread)) = join_if_finished(relay, Duration::from_millis(200))
         && thread.len() == 36
         && thread.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
     {
@@ -296,6 +367,7 @@ pub fn run(exe: &OsStr, args: &[OsString]) -> io::Result<ExitStatus> {
         // reconnect command cannot outlive it; offer the stable shell entry point.
         eprintln!("ivy-codex: return to this conversation with: codex resume {thread}");
     }
+    cancellation?;
     result
 }
 
@@ -331,7 +403,7 @@ fn authenticated(stream: TcpStream, expected: &str) -> io::Result<WebSocket<TcpS
 // The official proxy carries raw WebSocket bytes, including its HTTP upgrade.
 // A bounded pipe reader supplies timeouts without platform-specific pipe polling.
 struct ProxyStream {
-    child: Child,
+    child: Option<Child>,
     input: ChildStdin,
     receiver: Option<mpsc::Receiver<Vec<u8>>>,
     buffer: std::io::Cursor<Vec<u8>>,
@@ -370,7 +442,7 @@ impl ProxyStream {
             }
         });
         Ok(Self {
-            child,
+            child: Some(child),
             input,
             receiver: Some(rx),
             buffer: std::io::Cursor::new(Vec::new()),
@@ -413,10 +485,12 @@ impl Write for ProxyStream {
 impl Drop for ProxyStream {
     fn drop(&mut self) {
         drop(self.receiver.take());
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        if let Some(child) = self.child.take() {
+            kill_and_reap(child);
+        }
         if let Some(reader) = self.reader.take() {
-            let _ = reader.join();
+            // The reader may remain in OS read if another process owns the pipe.
+            let _ = join_if_finished(reader, Duration::from_millis(200));
         }
     }
 }
@@ -434,11 +508,16 @@ struct Attachment {
     route: Option<PathBuf>,
     fresh: bool,
     servers: Vec<String>,
+    needs_inventory: bool,
 }
 
 enum Internal {
     ReadThread(Value),
     ReadConfig(Value),
+    Inventory {
+        attachment: Attachment,
+        response: Value,
+    },
     Proof {
         attachment: Attachment,
         response: Value,
@@ -451,6 +530,7 @@ struct Routing {
     pending: HashMap<String, Attachment>,
     internal: HashMap<String, Internal>,
     active: Option<PathBuf>,
+    exit_route: Arc<Mutex<RouteExit>>,
     last_thread: Option<String>,
     epoch: String,
     pane_id: String,
@@ -520,8 +600,11 @@ fn discovery_cwd(message: &mut Value, launch: &Path) -> io::Result<Option<PathBu
 
 impl Routing {
     fn reset_connection(&mut self) {
-        if let Some(route) = self.active.take() {
-            let _ = self.registry.revoke(&route, &self.epoch);
+        if let Ok(mut exit) = self.exit_route.lock()
+            && let Some(route) = self.active.take()
+            && self.registry.revoke(&route, &self.epoch).is_ok()
+        {
+            exit.active = None;
         }
         for (_, a) in self.pending.drain() {
             if a.fresh
@@ -597,23 +680,20 @@ impl Routing {
         let config = config
             .as_object_mut()
             .ok_or_else(|| error("invalid conversation config"))?;
-        let entries = config
-            .entry("mcp_servers")
-            .or_insert_with(|| json!({}))
-            .as_object_mut()
-            .ok_or_else(|| error("invalid MCP overrides"))?;
+        // A parent-table override replaces preceding app-server CLI overrides.
+        // Dotted leaves retain a daemon's explicit command/env/policy choices.
+        // This target version splits paths literally and cannot address a server
+        // whose name itself contains a dot without replacing the whole table.
         for name in servers {
-            let entry = entries
-                .entry(name.clone())
-                .or_insert_with(|| json!({}))
-                .as_object_mut()
-                .ok_or_else(|| error("invalid MCP server override"))?;
-            let env = entry
-                .entry("env")
-                .or_insert_with(|| json!({}))
-                .as_object_mut()
-                .ok_or_else(|| error("invalid MCP environment override"))?;
-            env.insert(crate::codex_route::ENV.to_owned(), json!(route));
+            if name.is_empty() || name.contains('.') {
+                return Err(error(
+                    "this Codex version cannot safely override an Ivy MCP server name containing a dot",
+                ));
+            }
+            config.insert(
+                format!("mcp_servers.{name}.env.{}", crate::codex_route::ENV),
+                json!(route),
+            );
         }
         Ok(())
     }
@@ -638,6 +718,8 @@ impl Routing {
                     route: None,
                     fresh: false,
                     servers,
+                    needs_inventory: request.get("method").and_then(Value::as_str)
+                        != Some("thread/start"),
                 },
             );
             return write_upstream(upstream, &request);
@@ -669,6 +751,7 @@ impl Routing {
                 route: Some(route),
                 fresh,
                 servers,
+                needs_inventory: false,
             },
         );
         write_upstream(upstream, &request)
@@ -705,6 +788,14 @@ impl Routing {
         ws: &mut impl Protocol,
     ) -> io::Result<()> {
         let id = response.get("id").cloned().unwrap_or(Value::Null);
+        let mut exit = self
+            .exit_route
+            .lock()
+            .map_err(|_| error("route exit state unavailable"))?;
+        if exit.closing {
+            drop(exit);
+            return reject(ws, &id, "The console is closing; no panel was rebound.");
+        }
         if let Some(route) = &attachment.route {
             let thread = response
                 .pointer("/result/thread/id")
@@ -718,6 +809,7 @@ impl Routing {
                 if attachment.fresh {
                     let _ = std::fs::remove_file(route);
                 }
+                drop(exit);
                 return reject(
                     ws,
                     &id,
@@ -729,12 +821,14 @@ impl Routing {
             .pointer("/result/thread/id")
             .and_then(Value::as_str)
             .map(str::to_owned);
+        exit.active = attachment.route.clone();
         let old = std::mem::replace(&mut self.active, attachment.route);
         if let Some(old) = old
             && self.active.as_ref() != Some(&old)
         {
             self.registry.revoke(&old, &self.epoch)?;
         }
+        drop(exit);
         send(ws, &response)
     }
     fn response(
@@ -775,6 +869,20 @@ impl Routing {
                     }
                     self.start_attachment(request, &message, upstream)
                 }
+                Internal::Inventory {
+                    attachment,
+                    response,
+                } => {
+                    let original_id = response.get("id").cloned().unwrap_or(Value::Null);
+                    if !inventory_excludes_ivy(&message) {
+                        return reject(
+                            ws,
+                            &original_id,
+                            "The conversation may still use an earlier Ivy panel connection. Restore its panel configuration or leave the old session before resuming; no panel was rebound.",
+                        );
+                    }
+                    self.finish(attachment, response, ws)
+                }
                 Internal::Proof {
                     attachment,
                     response,
@@ -813,8 +921,23 @@ impl Routing {
                 }
                 return send(ws, &message);
             }
-            if attachment.route.is_none() {
+            if attachment.route.is_none() && !attachment.needs_inventory {
                 return self.finish(attachment, message, ws);
+            }
+            if attachment.route.is_none() {
+                let thread = message
+                    .pointer("/result/thread/id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| error("missing thread ID"))?
+                    .to_owned();
+                let internal = self.private(Internal::Inventory {
+                    attachment,
+                    response: message,
+                });
+                return write_upstream(
+                    upstream,
+                    &json!({"id":internal,"method":"mcpServerStatus/list","params":{"threadId":thread,"detail":"toolsAndAuthOnly","limit":10000}}),
+                );
             }
             let servers = attachment.servers.clone();
             self.proof_request(attachment, message, servers, upstream)
@@ -822,6 +945,52 @@ impl Routing {
             send(ws, &message)
         }
     }
+}
+
+// A missing page, failed discovery, or server still initializing cannot establish
+// that a previously loaded panel bridge is absent. Do not query third-party tools.
+fn inventory_excludes_ivy(message: &Value) -> bool {
+    let Some(result) = message.get("result").and_then(Value::as_object) else {
+        return false;
+    };
+    if result.get("nextCursor") != Some(&Value::Null) {
+        return false;
+    }
+    let Some(entries) = result.get("data").and_then(Value::as_array) else {
+        return false;
+    };
+    entries.iter().all(|entry| {
+        let Some(obj) = entry.as_object() else {
+            return false;
+        };
+        let Some(name) = obj
+            .get("serverInfo")
+            .and_then(|v| v.get("name"))
+            .and_then(Value::as_str)
+        else {
+            return false;
+        };
+        if matches!(name, "ivy panel" | "agent-terminal panel") {
+            return false;
+        }
+        if obj.get("runtimeStatus").and_then(Value::as_str) != Some("connected")
+            || obj.get("toolsError") != Some(&Value::Null)
+        {
+            return false;
+        }
+        let Some(tools) = obj.get("tools").and_then(Value::as_object) else {
+            return false;
+        };
+        ![
+            "panel_get",
+            "panel_set",
+            "split_open",
+            "split_read",
+            "split_close",
+        ]
+        .iter()
+        .all(|name| tools.contains_key(*name))
+    })
 }
 
 fn configured_servers(config: &Value) -> Vec<String> {
@@ -907,6 +1076,7 @@ fn serve(
     pane_id: &str,
     pane_dir: &Path,
     epoch: &str,
+    exit_route: Arc<Mutex<RouteExit>>,
     stop: &AtomicBool,
 ) -> io::Result<Option<String>> {
     let mut routing = Routing {
@@ -914,6 +1084,7 @@ fn serve(
         pending: HashMap::new(),
         internal: HashMap::new(),
         active: None,
+        exit_route,
         last_thread: None,
         epoch: epoch.to_owned(),
         pane_id: pane_id.to_owned(),
@@ -1091,8 +1262,20 @@ mod tests {
         .unwrap();
         assert_eq!(
             message["params"]["config"],
-            json!({"features":{"existing":true},"mcp_servers":{"custom-ivy-name":{"env":{"IVY_CODEX_ROUTE":"/route"}}}})
+            json!({"features":{"existing":true},"mcp_servers.custom-ivy-name.env.IVY_CODEX_ROUTE":"/route"})
         );
+    }
+    #[test]
+    fn route_override_addresses_only_the_leaf_and_rejects_ambiguous_names() {
+        let mut message = json!({"params":{"config":{}}});
+        Routing::inject(&mut message, Path::new("/route"), &["ivy".into()]).unwrap();
+        let config = message["params"]["config"].as_object().unwrap();
+        assert_eq!(config.len(), 1);
+        assert_eq!(config["mcp_servers.ivy.env.IVY_CODEX_ROUTE"], "/route");
+        assert!(!config.contains_key("mcp_servers"));
+        for name in ["", "ivy.other"] {
+            assert!(Routing::inject(&mut message, Path::new("/route"), &[name.into()]).is_err());
+        }
     }
     #[test]
     fn proof_must_match_current_route() {
@@ -1145,6 +1328,7 @@ mod tests {
             pending: HashMap::new(),
             internal: HashMap::new(),
             active: None,
+            exit_route: Arc::new(Mutex::new(RouteExit::default())),
             last_thread: None,
             epoch: "new-epoch".into(),
             pane_id: "new-pane".into(),
@@ -1172,6 +1356,7 @@ mod tests {
             route: Some(route.clone()),
             fresh: false,
             servers: vec!["ivy".into()],
+            needs_inventory: false,
         };
         state.pending.insert("17".into(), prepare());
         // A colliding server request must stay a server request, not commit a binding.
@@ -1247,7 +1432,7 @@ mod tests {
         assert_eq!(read["params"]["cwd"], json!(home));
         state
             .response(
-                json!({"id":read["id"],"result":{"config":{"mcp_servers":{}}}}),
+                json!({"id":read["id"],"result":{"config":{"mcp_servers":{"slow":{"command":"/unrelated/mcp"}}}}}),
                 &mut server,
                 &mut client,
             )
@@ -1262,6 +1447,10 @@ mod tests {
                 &mut client,
             )
             .unwrap();
+        assert!(
+            server.0.is_empty(),
+            "a new conversation cannot inherit a loaded MCP"
+        );
         assert!(client.0.pop().unwrap().get("result").is_some());
         let saved = home.join("saved-project");
         state.request(json!({"id":5,"method":"thread/resume","params":{"threadId":"01234567-89ab-cdef-0123-456789abcdef","cwd":null}}),&mut server,&mut client).unwrap();
@@ -1280,6 +1469,190 @@ mod tests {
         drop(state);
         std::fs::remove_dir_all(home).unwrap();
     }
+    #[test]
+    fn empty_config_requires_complete_inventory_before_accepting_resume() {
+        let home = std::env::temp_dir().join(format!("ivy-inventory-{}", nonce().unwrap()));
+        std::fs::create_dir(&home).unwrap();
+        let mut state = routing(&home);
+        let route = state.registry.pending().unwrap();
+        let thread = "01234567-89ab-cdef-0123-456789abcdef";
+        state
+            .registry
+            .bind(thread, &route, "old-pane", &home.join("old"), "old-epoch")
+            .unwrap();
+        let mut upstream = Peer::default();
+        let mut client = Peer::default();
+        let request =
+            json!({"id":17,"method":"thread/resume","params":{"threadId":thread,"cwd":"/saved"}});
+        let config = json!({"result":{"config":{"mcp_servers":{}}}});
+        let original = json!({"id":17,"result":{"thread":{"id":thread}}});
+        state
+            .start_attachment(request.clone(), &config, &mut upstream)
+            .unwrap();
+        assert_eq!(upstream.0.pop().unwrap(), request);
+        state
+            .response(original.clone(), &mut upstream, &mut client)
+            .unwrap();
+        assert!(client.0.is_empty());
+        let inventory = upstream.0.pop().unwrap();
+        assert_eq!(inventory["method"], "mcpServerStatus/list");
+        let collision = json!({"id":inventory["id"],"method":"permission/request","params":{}});
+        state
+            .response(collision.clone(), &mut upstream, &mut client)
+            .unwrap();
+        assert_eq!(client.0.pop(), Some(collision));
+        state.response(json!({"id":inventory["id"],"result":{"data":[{"serverInfo":{"name":"ivy panel"},"runtimeStatus":"connected","tools":{},"toolsError":null}],"nextCursor":null}}), &mut upstream, &mut client).unwrap();
+        assert!(client.0.pop().unwrap().get("error").is_some());
+        let identity = crate::codex_route::lock_route(&route)
+            .unwrap()
+            .identity
+            .clone();
+        assert!(identity.active);
+        assert_eq!(identity.pane_id, "old-pane");
+        for bad in [
+            json!({}),
+            json!({"result":{"data":[]}}),
+            json!({"result":{"data":[],"nextCursor":"more"}}),
+            json!({"result":{"data":[{"serverInfo":null,"runtimeStatus":"starting","tools":{},"toolsError":null}],"nextCursor":null}}),
+        ] {
+            state
+                .start_attachment(request.clone(), &config, &mut upstream)
+                .unwrap();
+            upstream.0.pop();
+            state
+                .response(original.clone(), &mut upstream, &mut client)
+                .unwrap();
+            let inv = upstream.0.pop().unwrap();
+            let mut bad = bad;
+            bad["id"] = inv["id"].clone();
+            state.response(bad, &mut upstream, &mut client).unwrap();
+            assert!(client.0.pop().unwrap().get("error").is_some());
+            assert_eq!(
+                crate::codex_route::lock_route(&route)
+                    .unwrap()
+                    .identity
+                    .pane_id,
+                "old-pane"
+            );
+        }
+        state
+            .start_attachment(request.clone(), &config, &mut upstream)
+            .unwrap();
+        upstream.0.pop();
+        state
+            .response(original.clone(), &mut upstream, &mut client)
+            .unwrap();
+        let inv = upstream.0.pop().unwrap();
+        state
+            .response(
+                json!({"id":inv["id"],"result":{"data":[],"nextCursor":null}}),
+                &mut upstream,
+                &mut client,
+            )
+            .unwrap();
+        assert_eq!(client.0.pop(), Some(original));
+        assert!(
+            crate::codex_route::lock_route(&route)
+                .unwrap()
+                .identity
+                .active
+        );
+        drop(state);
+        std::fs::remove_dir_all(home).unwrap();
+    }
+    #[test]
+    fn inventory_detects_legacy_name_and_complete_ivy_tool_set() {
+        let inventory = |name: &str, tools: Value| json!({"result":{"data":[{"serverInfo":{"name":name},"runtimeStatus":"connected","tools":tools,"toolsError":null}],"nextCursor":null}});
+        assert!(!inventory_excludes_ivy(&inventory(
+            "agent-terminal panel",
+            json!({})
+        )));
+        assert!(!inventory_excludes_ivy(&inventory(
+            "renamed",
+            json!({"panel_set":{},"panel_get":{},"split_open":{},"split_read":{},"split_close":{}})
+        )));
+        assert!(inventory_excludes_ivy(&inventory(
+            "other",
+            json!({"panel_get":{}})
+        )));
+    }
+
+    #[test]
+    fn exit_cancels_epoch_without_waiting_for_a_held_route() {
+        let home = std::env::temp_dir().join(format!("ivy-cancel-exit-{}", nonce().unwrap()));
+        std::fs::create_dir(&home).unwrap();
+        let registry = Registry::for_home(&home).unwrap();
+        let route = registry.pending().unwrap();
+        let epoch = nonce().unwrap();
+        let thread = "01234567-89ab-cdef-0123-456789abcdef";
+        registry
+            .bind(thread, &route, "old", &home.join("pane"), &epoch)
+            .unwrap();
+        let held = crate::codex_route::lock_route(&route).unwrap();
+        let start = Instant::now();
+        registry.cancel_epoch(&epoch).unwrap();
+        assert!(
+            start.elapsed() < Duration::from_secs(1),
+            "cancellation waited for the route"
+        );
+        drop(held);
+        assert!(
+            !crate::codex_route::lock_route(&route)
+                .unwrap()
+                .identity
+                .active
+        );
+        assert!(
+            registry
+                .bind(thread, &route, "late", &home.join("pane"), &epoch)
+                .is_err()
+        );
+        std::fs::remove_dir_all(home).unwrap();
+    }
+    #[test]
+    fn closing_console_cannot_reactivate_route_after_relay_is_abandoned() {
+        let home = std::env::temp_dir().join(format!("ivy-exit-state-{}", nonce().unwrap()));
+        std::fs::create_dir(&home).unwrap();
+        let mut state = routing(&home);
+        let route = state.registry.pending().unwrap();
+        state.exit_route.lock().unwrap().closing = true;
+        let mut peer = Peer::default();
+        let original =
+            json!({"id":9,"result":{"thread":{"id":"01234567-89ab-cdef-0123-456789abcdef"}}});
+        state
+            .finish(
+                Attachment {
+                    route: Some(route.clone()),
+                    fresh: true,
+                    servers: vec!["ivy".into()],
+                    needs_inventory: false,
+                },
+                original,
+                &mut peer,
+            )
+            .unwrap();
+        assert!(peer.0[0].get("error").is_some());
+        assert!(
+            !crate::codex_route::lock_route(&route)
+                .unwrap()
+                .identity
+                .active
+        );
+        drop(state);
+        std::fs::remove_dir_all(home).unwrap();
+    }
+    #[test]
+    fn unfinished_cleanup_thread_does_not_block_console() {
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        let handle = std::thread::spawn(move || {
+            let _ = rx.recv_timeout(Duration::from_secs(2));
+        });
+        let start = Instant::now();
+        assert!(join_if_finished(handle, Duration::from_millis(20)).is_none());
+        assert!(start.elapsed() < Duration::from_secs(1));
+        drop(tx);
+    }
+
     #[test]
     fn server_version_must_be_exact() {
         assert!(verified_server(&json!({"appServerVersion":"0.167.2"})));
