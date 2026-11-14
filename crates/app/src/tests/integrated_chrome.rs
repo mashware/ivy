@@ -537,12 +537,10 @@ mod tests {
             && text.contains("Tool discovery alone does not prove a connection")
             && text.contains("shared background server lacks that console identity")
             && text.contains("do not assume the client is outside Ivy")
-            && text.contains("codex --help")
-            && text.contains("codex resume --help")
-            && text.contains("typing codex starts supported local interactive sessions independently")
-            && text.contains("Codex 0.167.0 advertises --no-daemon")
-            && text.contains("use --no-daemon only if supported")
-            && text.contains("Ivy does not edit global shell or Codex configuration")
+            && text.contains("0.167.2 or 0.169.0 use the shared daemon")
+            && text.contains("A connected host does not prove")
+            && text.contains("phone history, input and panel publication were verified")
+            && text.contains("does not edit global shell or Codex configuration")
             && text.contains("Existing aliases or functions win with a diagnostic")
             && text.contains("not correct-console routing")
             && text.contains("distinct statuses from two separate Codex consoles")
@@ -618,8 +616,8 @@ mod tests {
             "Tool discovery alone does not prove a connection",
             "type codex normally",
             "Existing codex aliases or functions take precedence",
-            "check codex --help or codex resume --help",
-            "Only if supported, use --no-daemon",
+            "unsupported versions and advanced options",
+            "A connected host does not prove",
             "A successful tool call proves a usable connection.",
         ];
         let visible = |shapes: &[egui::epaint::ClippedShape], needle: &str| {

@@ -188,6 +188,14 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../../panel-control/src/client.rs"),
     ),
     (
+        "panel-control/src/codex_relay.rs",
+        include_str!("../../panel-control/src/codex_relay.rs"),
+    ),
+    (
+        "panel-control/src/codex_route.rs",
+        include_str!("../../panel-control/src/codex_route.rs"),
+    ),
+    (
         "panel-control/src/endpoint.rs",
         include_str!("../../panel-control/src/endpoint.rs"),
     ),

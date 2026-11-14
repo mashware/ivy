@@ -222,9 +222,37 @@ fn main() {
         std::process::exit(2);
     }
     let original: Vec<_> = args.collect();
+    if matches!(classify(&original), Kind::Interactive { already: false })
+        && panel_control::codex_relay::supported(&exe, &original)
+    {
+        match panel_control::codex_relay::run(&exe, &original) {
+            Ok(status) => {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::process::ExitStatusExt;
+                    if let Some(signal) = status.signal() {
+                        unsafe {
+                            libc::signal(signal, libc::SIG_DFL);
+                            libc::raise(signal);
+                        }
+                    }
+                }
+                std::process::exit(status.code().unwrap_or(1));
+            }
+            Err(failure) => {
+                eprintln!(
+                    "ivy-codex: shared panel connection could not start ({failure}); use --no-daemon explicitly for independent mode"
+                );
+                std::process::exit(1);
+            }
+        }
+    }
     let mut inject = false;
     match classify(&original) {
         Kind::Interactive { already: false } => {
+            eprintln!(
+                "ivy-codex: this version or invocation has no verified shared-panel bridge; using independent mode without live mobile access"
+            );
             inject = supports(&exe);
             if !inject {
                 eprintln!(

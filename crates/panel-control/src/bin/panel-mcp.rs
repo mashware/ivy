@@ -40,7 +40,9 @@ fn main() {
     // inherit the identity of whatever console runs the suite. That the first tool call judges the
     // variables by the same rule is D88's decision, and the binary's integration test holds both.
     let [id, dir] = panel_contract::ENV_NAMES.map(std::env::var_os);
-    let instructions = instructions_for(
+    let route = std::env::var_os(panel_control::codex_route::ENV);
+    let instructions = handshake_instructions(
+        route.as_deref(),
         id.as_deref(),
         dir.as_deref(),
         panel_control::endpoint::BINDS,
@@ -48,12 +50,18 @@ fn main() {
             .is_some_and(|dir| panel_control::endpoint::socket_present(std::path::Path::new(dir))),
     );
 
-    bridge(
-        std::io::stdin().lock(),
-        std::io::stdout(),
-        &mut pane,
-        instructions,
-    );
+    if let Some(route) = route {
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        std::thread::spawn(move || read_frames(std::io::stdin().lock(), sender));
+        routed_loop(receiver, std::io::stdout(), &mut pane, instructions, &route);
+    } else {
+        bridge(
+            std::io::stdin().lock(),
+            std::io::stdout(),
+            &mut pane,
+            instructions,
+        );
+    }
 }
 
 /// Answers messages until the input ends.
@@ -72,6 +80,8 @@ fn bridge(
     // error the loop cannot answer, so a client that garbled a single message would be left waiting
     // for ever on every message after it too. As bytes, the bad line is the only casualty and it
     // leaves with the parse error the protocol has for exactly this.
+    let route = std::env::var_os(panel_control::codex_route::ENV);
+    let mut epoch: Option<String> = None;
     let mut line = Vec::new();
     loop {
         line.clear();
@@ -134,7 +144,7 @@ fn bridge(
         }
         let answered = match std::str::from_utf8(&line) {
             Ok(line) if line.trim().is_empty() => continue,
-            Ok(line) => answer(line, pane, instructions),
+            Ok(line) => answer_routed(line, pane, instructions, route.as_deref(), &mut epoch),
             Err(failure) => Some(failed(
                 &serde_json::Value::Null,
                 -32700,
@@ -145,6 +155,119 @@ fn bridge(
             continue;
         };
         if writeln!(output, "{answered}").is_err() || output.flush().is_err() {
+            break;
+        }
+    }
+}
+
+// The input thread owns framing, including the overlong-line tail. Its bounded queue cannot
+// grow with an unresponsive client, while the dispatcher remains free to revoke idle producers.
+enum Frame {
+    Line(Vec<u8>),
+    TooLong,
+    ReadError(std::io::Error),
+}
+
+fn read_frames(mut input: impl BufRead, sender: std::sync::mpsc::SyncSender<Frame>) {
+    loop {
+        let mut line = Vec::new();
+        match input
+            .by_ref()
+            .take(MAX_REQUEST as u64 + 1)
+            .read_until(b'\n', &mut line)
+        {
+            Ok(0) => return,
+            Ok(_) => (),
+            Err(error) => {
+                let _ = sender.send(Frame::ReadError(error));
+                return;
+            }
+        }
+        let ended = line.last() == Some(&b'\n');
+        if line.len() - usize::from(ended) > MAX_REQUEST {
+            if sender.send(Frame::TooLong).is_err() {
+                return;
+            }
+            if !ended && let Err(error) = swallow_to_newline(&mut input) {
+                let _ = sender.send(Frame::ReadError(error));
+                return;
+            }
+        } else if sender.send(Frame::Line(line)).is_err() {
+            return;
+        }
+    }
+}
+
+fn invalidate_stale_route(
+    route: &std::ffi::OsStr,
+    pane: &mut Option<Producer>,
+    epoch: &mut Option<String>,
+) {
+    if pane.is_none() {
+        return;
+    }
+    let current = panel_control::codex_route::lock_route(std::path::Path::new(route));
+    if !current.as_ref().is_ok_and(|guard| {
+        guard.identity.active && Some(guard.identity.epoch.as_str()) == epoch.as_deref()
+    }) {
+        *pane = None;
+        *epoch = None;
+    }
+}
+
+fn routed_loop(
+    receiver: std::sync::mpsc::Receiver<Frame>,
+    mut output: impl Write,
+    pane: &mut Option<Producer>,
+    instructions: Option<&str>,
+    route: &std::ffi::OsStr,
+) {
+    use std::sync::mpsc::RecvTimeoutError;
+    let mut epoch = None;
+    loop {
+        invalidate_stale_route(route, pane, &mut epoch);
+        let frame = if pane.is_some() {
+            match receiver.recv_timeout(std::time::Duration::from_millis(150)) {
+                Ok(frame) => frame,
+                Err(RecvTimeoutError::Timeout) => continue,
+                Err(RecvTimeoutError::Disconnected) => break,
+            }
+        } else {
+            // Abandoned on purpose: the idle MCP dispatcher can wait indefinitely for its client; it holds no pane connection and ends when the client closes stdin or the process exits.
+            match receiver.recv() {
+                Ok(frame) => frame,
+                Err(_) => break,
+            }
+        };
+        let answered = match frame {
+            Frame::TooLong => Some(failed(
+                &serde_json::Value::Null,
+                -32600,
+                "the message goes over the ceiling",
+            )),
+            Frame::ReadError(error) => {
+                eprintln!(
+                    "panel-mcp: reading a message failed ({}{})",
+                    error.kind(),
+                    error
+                        .raw_os_error()
+                        .map_or(String::new(), |number| format!(", errno {number}"))
+                );
+                break;
+            }
+            Frame::Line(line) => match std::str::from_utf8(&line) {
+                Ok(line) if line.trim().is_empty() => None,
+                Ok(line) => answer_routed(line, pane, instructions, Some(route), &mut epoch),
+                Err(error) => Some(failed(
+                    &serde_json::Value::Null,
+                    -32700,
+                    &format!("the message is not UTF-8 ({error})"),
+                )),
+            },
+        };
+        if let Some(answered) = answered
+            && (writeln!(output, "{answered}").is_err() || output.flush().is_err())
+        {
             break;
         }
     }
@@ -172,7 +295,18 @@ fn swallow_to_newline(input: &mut impl BufRead) -> std::io::Result<()> {
 }
 
 /// Answers one message, or nothing when the message is a notification.
+#[cfg(test)]
 fn answer(line: &str, pane: &mut Option<Producer>, instructions: Option<&str>) -> Option<String> {
+    answer_routed(line, pane, instructions, None, &mut None)
+}
+
+fn answer_routed(
+    line: &str,
+    pane: &mut Option<Producer>,
+    instructions: Option<&str>,
+    route: Option<&std::ffi::OsStr>,
+    epoch: &mut Option<String>,
+) -> Option<String> {
     let message: serde_json::Value = match serde_json::from_str(line) {
         Ok(message) => message,
         // **Parse errors are answered without an id**, which is what the protocol asks for and what
@@ -201,10 +335,36 @@ fn answer(line: &str, pane: &mut Option<Producer>, instructions: Option<&str>) -
     Some(match method {
         "initialize" => succeeded(&id, initialized(&message, instructions)),
         "tools/list" => succeeded(&id, tools()),
-        "tools/call" => called(&id, &message, pane),
+        "tools/call" => {
+            let proof = route
+                .and_then(|path| {
+                    panel_control::codex_route::lock_route(std::path::Path::new(path)).ok()
+                })
+                .map(|guard| guard.identity.proof.clone());
+            let answer = called_routed(&id, &message, pane, route, epoch);
+            attach_route_proof(answer, proof.as_deref())
+        }
         "ping" => succeeded(&id, serde_json::json!({})),
         other => failed(&id, -32601, &format!("no method \"{other}\"")),
     })
+}
+
+fn attach_route_proof(answer: String, proof: Option<&str>) -> String {
+    let Some(proof) = proof else {
+        return answer;
+    };
+    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&answer) else {
+        return answer;
+    };
+    if let Some(result) = value
+        .get_mut("result")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        result.insert("_meta".into(), serde_json::json!({"ivy/routeProof": proof}));
+        value.to_string()
+    } else {
+        answer
+    }
 }
 
 /// The instructions this bridge sends with its handshake, or none.
@@ -220,6 +380,25 @@ fn answer(line: &str, pane: &mut Option<Producer>, instructions: Option<&str>) -
 /// It takes the values — and whether the channel binds — instead of reading them, so both gates
 /// can be tested on any platform without `set_var`; `main` reads them, and the binary's integration
 /// test covers that line.
+fn handshake_instructions(
+    route: Option<&std::ffi::OsStr>,
+    id: Option<&std::ffi::OsStr>,
+    dir: Option<&std::ffi::OsStr>,
+    binds: bool,
+    socket_present: bool,
+) -> Option<&'static str> {
+    if route.is_some() {
+        return binds.then_some(ROUTED_INSTRUCTIONS);
+    }
+    instructions_for(id, dir, binds, socket_present)
+}
+
+const ROUTED_INSTRUCTIONS: &str = "This server may reach the Ivy console attached to this conversation. \
+The route can be pending or unavailable, and a tool call reports whether it works. \
+When it is available, publish task status with this server's panel_set, update it with panel_patch, \
+and use attention wait, block, or done when the person needs to know. \
+A subagent sharing the same console should leave its parent's panel alone.";
+
 fn instructions_for(
     id: Option<&std::ffi::OsStr>,
     dir: Option<&std::ffi::OsStr>,
@@ -521,10 +700,12 @@ fn what_it_did(ask: &Ask) -> &'static str {
 }
 
 /// Runs a tool call.
-fn called(
+fn called_routed(
     id: &serde_json::Value,
     message: &serde_json::Value,
     pane: &mut Option<Producer>,
+    route: Option<&std::ffi::OsStr>,
+    epoch: &mut Option<String>,
 ) -> String {
     let params = message.get("params").unwrap_or(&serde_json::Value::Null);
     let name = params
@@ -672,6 +853,37 @@ fn called(
     // **A failure to reach the pane is a tool error and not a protocol one**, which is the
     // distinction the protocol draws and it matters here: the agent is meant to read it, decide the
     // panel is not available and carry on working, not to treat its whole connection as broken.
+    // Keep the route lock until the producer operation has returned. A stale or missing
+    // capability never falls back to the process environment.
+    let guard = if let Some(route) = route {
+        match panel_control::codex_route::lock_route(std::path::Path::new(route)) {
+            Ok(guard) if guard.identity.active => Some(guard),
+            Ok(_) => {
+                *pane = None;
+                *epoch = None;
+                return succeeded(id, refusal("panel route is inactive"));
+            }
+            Err(error) => {
+                *pane = None;
+                *epoch = None;
+                return succeeded(id, refusal(&format!("panel route unavailable: {error}")));
+            }
+        }
+    } else {
+        None
+    };
+    if let Some(guard) = &guard {
+        if epoch.as_deref() != Some(guard.identity.epoch.as_str()) {
+            *pane = None;
+            *epoch = Some(guard.identity.epoch.clone());
+        }
+        if pane.is_none() {
+            match Producer::of(&guard.identity.pane_dir, &guard.identity.pane_id) {
+                Ok(producer) => *pane = Some(producer),
+                Err(error) => return succeeded(id, refusal(&error.to_string())),
+            }
+        }
+    }
     let producer = match open(pane) {
         Ok(producer) => producer,
         Err(failure) => return succeeded(id, refusal(&failure)),
@@ -704,7 +916,7 @@ fn called(
 
 /// What the pane answered, as the tool result an agent reads.
 ///
-/// **Out of [`called`] so a test reaches it without a pane**, for the reason [`what_it_did`] gives:
+/// **Out of [`called_routed`] so a test reaches it without a pane**, for the reason [`what_it_did`] gives:
 /// every arm here is only walked once a channel exists, which is how a verb once shipped answering
 /// the wrong word.
 fn result_of(did: &str, answered: Answered) -> serde_json::Value {
@@ -775,6 +987,275 @@ fn failed(id: &serde_json::Value, code: i32, message: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_capability_attests_without_disclosing_its_path_and_invalid_cannot_attest() {
+        let home = panel_contract::PanelDir::create().unwrap();
+        let registry = panel_control::codex_route::Registry::for_home(home.path()).unwrap();
+        let route = registry.pending().unwrap();
+        let proof = panel_control::codex_route::lock_route(&route)
+            .unwrap()
+            .identity
+            .proof;
+        let message =
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"panel_get"}}"#;
+        let mut pane = None;
+        let mut epoch = None;
+        let result = answer_routed(
+            message,
+            &mut pane,
+            None,
+            Some(route.as_os_str()),
+            &mut epoch,
+        )
+        .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(value["result"]["_meta"]["ivy/routeProof"], proof);
+        assert!(result.contains("inactive"));
+        assert!(!result.contains(route.to_str().unwrap()));
+        std::fs::remove_file(&route).unwrap();
+        let missing = answer_routed(
+            message,
+            &mut pane,
+            None,
+            Some(route.as_os_str()),
+            &mut epoch,
+        )
+        .unwrap();
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&missing).unwrap()["result"]
+                .get("_meta")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn idle_revocation_disconnects_the_producer_without_another_tool_call() {
+        use panel_contract::PanelDir;
+        use panel_control::{Answer, Channel, Producer, What, codex_route::Registry};
+        use std::sync::{Arc, mpsc::sync_channel};
+        use std::time::Duration;
+        struct SignalOutput(std::sync::mpsc::SyncSender<()>);
+        impl Write for SignalOutput {
+            fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+                Ok(data.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                self.0.send(()).unwrap();
+                Ok(())
+            }
+        }
+        let home = PanelDir::create().unwrap();
+        let dir = PanelDir::create().unwrap();
+        let (tx, inbox) = sync_channel(8);
+        let _channel = Channel::open_with_reader(
+            dir.path(),
+            dir.id(),
+            tx,
+            Arc::new(|| Ok(r#"{"lines":[]}"#.into())),
+            Arc::new(|| {}),
+        )
+        .unwrap();
+        let registry = Registry::for_home(home.path()).unwrap();
+        let route = registry.pending().unwrap();
+        registry
+            .bind(
+                "01234567-89ab-cdef-0123-456789abcdef",
+                &route,
+                dir.id(),
+                dir.path(),
+                "one",
+            )
+            .unwrap();
+        let (frames, receiver) = sync_channel(1);
+        let (flush, flushed) = sync_channel(0);
+        let route_for_thread = route.clone();
+        let worker = std::thread::spawn(move || {
+            let mut pane = None;
+            routed_loop(
+                receiver,
+                SignalOutput(flush),
+                &mut pane,
+                None,
+                route_for_thread.as_os_str(),
+            );
+        });
+        frames
+            .send(Frame::Line(
+                br#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"panel_set","arguments":{"source":"old","document":{"lines":["old"]}}}}"#
+                    .to_vec(),
+            ))
+            .unwrap();
+        let initial = inbox.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(matches!(initial.what, What::Publish { .. }));
+        initial.answer.send(Answer::Taken).unwrap();
+        flushed.recv_timeout(Duration::from_secs(5)).unwrap();
+        registry.revoke(&route, "one").unwrap();
+        let closed = inbox.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(matches!(closed.what, What::Closed));
+        let mut replacement = Producer::of(dir.path(), dir.id()).unwrap();
+        let publish =
+            std::thread::spawn(move || replacement.publish("next", r#"{"lines":["new"]}"#));
+        let message = inbox.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(matches!(message.what, What::Publish { .. }));
+        message.answer.send(Answer::Taken).unwrap();
+        assert!(matches!(
+            publish.join().unwrap().unwrap(),
+            panel_control::Answered::Ok
+        ));
+        drop(frames);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn routed_reader_keeps_boundaries_after_an_overlong_frame() {
+        let mut input = vec![b'x'; MAX_REQUEST + 50];
+        input.extend_from_slice(b"\nnext\n");
+        let (sender, receiver) = std::sync::mpsc::sync_channel(4);
+        read_frames(std::io::Cursor::new(input), sender);
+        assert!(matches!(receiver.recv().unwrap(), Frame::TooLong));
+        match receiver.recv().unwrap() {
+            Frame::Line(bytes) => assert_eq!(bytes, b"next\n"),
+            _ => panic!("expected next frame"),
+        }
+    }
+
+    #[test]
+    fn routed_handshake_does_not_claim_a_connection_or_inherit_stale_pane_identity() {
+        let routed = handshake_instructions(
+            Some(std::ffi::OsStr::new("/route")),
+            None,
+            None,
+            true,
+            false,
+        )
+        .unwrap();
+        assert!(routed.contains("pending or unavailable"));
+        assert!(!routed.contains("This session runs in an Ivy console"));
+        assert_eq!(handshake_instructions(None, None, None, true, false), None);
+        assert_eq!(
+            handshake_instructions(
+                Some(std::ffi::OsStr::new("/route")),
+                None,
+                None,
+                false,
+                false
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn route_reassociation_moves_an_existing_bridge_between_real_panes() {
+        use panel_contract::PanelDir;
+        use panel_control::{Channel, codex_route::Registry};
+        use std::sync::{Arc, mpsc::sync_channel};
+        let home = PanelDir::create().unwrap();
+        let first = PanelDir::create().unwrap();
+        let second = PanelDir::create().unwrap();
+        let (tx1, rx1) = sync_channel(8);
+        let (tx2, rx2) = sync_channel(8);
+        let _first_channel = Channel::open_with_reader(
+            first.path(),
+            first.id(),
+            tx1,
+            Arc::new(|| Ok(r#"{"lines":["first"]}"#.into())),
+            Arc::new(|| {}),
+        )
+        .unwrap();
+        let _second_channel = Channel::open_with_reader(
+            second.path(),
+            second.id(),
+            tx2,
+            Arc::new(|| Ok(r#"{"lines":["second"]}"#.into())),
+            Arc::new(|| {}),
+        )
+        .unwrap();
+        let registry = Registry::for_home(home.path()).unwrap();
+        let route = registry.pending().unwrap();
+        let thread = "01234567-89ab-cdef-0123-456789abcdef";
+        let mut pane = None;
+        let mut epoch = None;
+        let message =
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"panel_get"}}"#;
+        registry
+            .bind(thread, &route, first.id(), first.path(), "one")
+            .unwrap();
+        let first_result = answer_routed(
+            message,
+            &mut pane,
+            None,
+            Some(route.as_os_str()),
+            &mut epoch,
+        )
+        .unwrap();
+        assert!(first_result.contains("first"));
+        let window_first = std::thread::spawn(move || {
+            let open = rx1.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+            assert!(matches!(open.what, panel_control::What::Open { .. }));
+            open.answer
+                .send(panel_control::Answer::Opened(Some("old-handle".into())))
+                .unwrap();
+            let closed = rx1.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+            assert!(matches!(closed.what, panel_control::What::Closed));
+        });
+        let open = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"split_open","arguments":{"side":"right"}}}"#;
+        assert!(
+            answer_routed(open, &mut pane, None, Some(route.as_os_str()), &mut epoch)
+                .unwrap()
+                .contains("old-handle")
+        );
+        registry
+            .bind(thread, &route, second.id(), second.path(), "two")
+            .unwrap();
+        registry.revoke(&route, "one").unwrap();
+        let second_result = answer_routed(
+            message,
+            &mut pane,
+            None,
+            Some(route.as_os_str()),
+            &mut epoch,
+        )
+        .unwrap();
+        assert!(second_result.contains("second"));
+        assert!(!second_result.contains("first"));
+        window_first.join().unwrap();
+        let window_second = std::thread::spawn(move || {
+            let read = rx2.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+            assert!(matches!(read.what, panel_control::What::Read { .. }));
+            read.answer
+                .send(panel_control::Answer::Refused("unknown handle".into()))
+                .unwrap();
+        });
+        let read = r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"split_read","arguments":{"pane":"old-handle"}}}"#;
+        assert!(
+            answer_routed(read, &mut pane, None, Some(route.as_os_str()), &mut epoch)
+                .unwrap()
+                .contains("unknown handle")
+        );
+        window_second.join().unwrap();
+        registry.revoke(&route, "two").unwrap();
+        let revoked = answer_routed(
+            message,
+            &mut pane,
+            None,
+            Some(route.as_os_str()),
+            &mut epoch,
+        )
+        .unwrap();
+        assert!(revoked.contains("inactive"));
+        assert!(pane.is_none());
+        std::fs::remove_file(&route).unwrap();
+        let missing = answer_routed(
+            message,
+            &mut pane,
+            None,
+            Some(route.as_os_str()),
+            &mut epoch,
+        )
+        .unwrap();
+        assert!(missing.contains("unavailable"));
+    }
 
     fn ask(message: &str) -> serde_json::Value {
         let mut nowhere = None;
