@@ -251,14 +251,7 @@ impl Window {
         {
             self.bank_control(did);
         }
-        if self.tabs[tab_index].focus == name {
-            self.tabs[tab_index].focus = inherited;
-        }
-        if matches!(self.tabs[tab_index].root, Node::Leaf(_))
-            || self.pane_view.zoomed(self.tabs[tab_index].name) == Some(name)
-        {
-            self.pane_view.clear(self.tabs[tab_index].name);
-        }
+        after_removal(self, tab_index, name, inherited);
         self.some_closed_by_hand = true;
         self.watcher.stop_before_retirement();
         drop(leaving);
@@ -302,14 +295,7 @@ impl Window {
             {
                 self.bank_control(did);
             }
-            if self.tabs[tab].focus == name {
-                self.tabs[tab].focus = inherited;
-            }
-            if matches!(self.tabs[tab].root, Node::Leaf(_))
-                || self.pane_view.zoomed(self.tabs[tab].name) == Some(name)
-            {
-                self.pane_view.clear(self.tabs[tab].name);
-            }
+            after_removal(self, tab, name, inherited);
             detached.push(leaving);
         }
 
@@ -340,6 +326,16 @@ impl Window {
             }
         }
         Ok(())
+    }
+}
+
+fn after_removal(window: &mut Window, tab_index: usize, removed: usize, inherited: usize) {
+    let tab = &mut window.tabs[tab_index];
+    if tab.focus == removed {
+        tab.focus = inherited;
+    }
+    if matches!(tab.root, Node::Leaf(_)) || window.pane_view.zoomed(tab.name) == Some(removed) {
+        window.pane_view.clear(tab.name);
     }
 }
 
