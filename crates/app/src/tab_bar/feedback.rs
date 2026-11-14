@@ -89,7 +89,7 @@ mod tests {
                     egui::Shape::Rect(r) if r.rect == rect => Some(r.fill),
                     _ => None,
                 })
-                .last()
+                .next_back()
         };
         frame(0.0, vec![], false).drop_without_applying_deltas();
         let hovered = frame(0.01, vec![egui::Event::PointerMoved(rect.center())], false);
