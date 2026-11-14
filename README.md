@@ -179,17 +179,25 @@ from the launching environment; never save a console's actual `PANEL_ID` or `PAN
 See the [official Codex MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
 
 In a newly opened ordinary Bash, Zsh or Fish console, type `codex`, `codex resume <session-id>`
-or `codex fork <session-id>`. Ivy installs a console-local function after your shell startup and
-uses the external client on your current PATH. For local interactive sessions it checks client help
-and adds `--no-daemon` when supported. Codex 0.167.0 advertises this option; earlier clients without
-it run unchanged with a diagnostic. Ivy changes neither shell startup files nor Codex configuration.
+or `codex fork <session-id>`. With Codex CLI and its running daemon at version 0.167.2, supported
+ordinary launches use the shared daemon and keep each conversation's panel connected to its console.
+The same live conversation can therefore be used for remote control. Ivy leaves your Codex and shell
+configuration unchanged, and preserves the daemon's remote-control preference. If you want remote
+control, start it explicitly with `codex remote-control start`.
 
-Existing `codex` aliases or functions take precedence and produce a diagnostic. Explicit
-`command codex`, absolute paths, unsupported shells and shells started with custom arguments bypass
-this integration. Remote mode and administrative commands run unchanged. If automatic integration
-is unavailable, check `codex --help` or `codex resume --help` and use the corresponding
-`--no-daemon` form inside the intended console only when that command advertises it. Never persist
-console identity values or pass an unsupported option.
+Other versions and advanced options, including custom configuration, profiles and security flags,
+use an independent session with a diagnostic when supported. An independent session does not provide
+live mobile access to that same desktop conversation. Explicit `--no-daemon`, remote launches and
+administrative commands retain their own behavior. Existing aliases and functions take precedence;
+`command codex`, absolute paths, custom shell arguments and unsupported shells bypass integration.
+If automatic integration is unavailable, check the client's help before using `--no-daemon` in the
+intended console. Never persist console identity values.
+
+If a conversation is still active from before this integration and cannot be safely attached, leave
+its old desktop session before resuming it here. Ivy does not restart a shared daemon to recover it.
+A remote host reporting “connected” does not prove that its live conversation can load history or
+accept input. Confirm both on your phone while the desktop session remains open; phone access has not
+yet been verified for this integration.
 
 Tool discovery alone proves no connection to a console. Successful pane-tool calls prove a usable
 connection; observe a test status beside the intended console to confirm the target. To verify

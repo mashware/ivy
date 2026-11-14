@@ -9525,3 +9525,14 @@ unlabelled panel file. These are diagnostic limits, not authority grants. Window
 session authorization (rejects ordinary background descendants and conflates failure with outside);
 producer-supplied PID or labels (untrusted); storing the label on the holder (loses it on disconnect);
 process scans or per-frame inspection (unbounded or frame-blocking work without a consumer need).
+
+
+## D92 — Codex mobile and panel tools share one conversation owner
+
+**14 November 2026 — #69.** Ordinary compatible Codex starts use its official shared app-server through a private authenticated local relay. Each conversation's existing Ivy MCP configuration receives a private runtime route capability; user configuration is not edited. Successful starts, resumes and forks bind that capability to the originating console. A loaded MCP client resolves the stable capability again on each tool call, so rejoining from a new console does not depend on Codex replacing loaded-thread configuration.
+
+**Why:** Codex 0.167.2 explicitly excludes command-line MCP overrides from shared-daemon mode. Its loaded-thread resume can acknowledge a request while ignoring its new MCP settings. An isolated real daemon/TUI probe confirmed the first behavior and a saved-history protocol probe confirmed the second. A transparent relay prototype preserved start/resume/fork IDs, directory and model. One shared owner is necessary for live mobile history/input without a second writer.
+
+**Boundary:** route capability is private runtime state, never a pane selector in an MCP tool. Route changes and complete pane calls share a lock; old attachment cleanup cannot revoke a new attachment. Failed, unknown or revoked routes never fall back to daemon-inherited identity. Direct env-based MCP integrations and explicit launcher bypasses retain their meaning. The relay uses the official client and subscription, never a model API or provider key. Version-specific compatibility and actual phone checks must be reported separately.
+
+**Discarded:** simply removing --no-daemon loses independent panel identity; MCP -c overrides select embedded ownership; per-thread direct overrides alone do not update a loaded MCP; a metadata thread ID alone is not authorization; separate remote servers introduce enrollment and lifetime semantics that the shared official owner already handles; guidance-only delivery was explicitly rejected by the owner.

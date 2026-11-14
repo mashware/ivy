@@ -35,6 +35,8 @@
 //! handle (**D44**). All six are advertised, because all six are answered.
 
 pub mod client;
+pub mod codex_relay;
+pub mod codex_route;
 pub mod diagnostic_peer;
 pub mod endpoint;
 pub mod listener;

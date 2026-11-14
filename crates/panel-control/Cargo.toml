@@ -37,6 +37,13 @@ serde = { version = "1", features = ["derive"] }
 # build of this branch fetches it. Worth knowing before running the delivery offline.
 interprocess = "2.4"
 
+# The Codex relay accepts only authenticated loopback WebSockets; protocol framing
+# belongs to the RFC implementation, not a second handwritten parser.
+tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+# Route cutover and a complete MCP operation share an operating-system file lock.
+fs2 = "0.4"
+getrandom = "0.3"
+
 # Closing a channel wakes its blocking accept without opening another client connection. The Unix
 # endpoint polls its listener beside a private stream pair; `libc` supplies that descriptor wait.
 [target.'cfg(unix)'.dependencies]
