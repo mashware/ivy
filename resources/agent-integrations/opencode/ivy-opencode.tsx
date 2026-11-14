@@ -2,6 +2,7 @@
 import { createEffect, createRoot, createSignal } from "solid-js"
 import { createConnection, type Socket } from "node:net"
 import { join } from "node:path"
+import { lstatSync } from "node:fs"
 
 const envelope = (snapshot: Snapshot | null) => JSON.stringify({ tool: "agent_signal", v: 1, client: "opencode", snapshot }) + "\n"
 type Snapshot = { session: string; activity: "busy" | "idle" | "unknown"; permission: boolean; question: boolean; stale?: boolean }
@@ -9,7 +10,7 @@ type Entry = { id: string; sessionID: string }
 
 // One request in flight and one latest replacement. Read each response before
 // writing the next one; neither a slow endpoint nor an outage accumulates frames.
-function channel(path: string, connected: () => void) {
+function channel(dir: string, connected: () => void) {
   let socket: Socket | undefined, retry: ReturnType<typeof setTimeout> | undefined
   let retryReply: ReturnType<typeof setTimeout> | undefined, waitingForRefresh = false
   let pending: Snapshot | null | undefined, inflightSnapshot: Snapshot | null | undefined, inflight = false, buffer = "", stopped = false
@@ -26,7 +27,20 @@ function channel(path: string, connected: () => void) {
   }
   function connect() {
     if (stopped) return
-    const current = createConnection(path)
+    // A trailing slash or /. would make lstat follow a final symlink. Keep .. intact.
+    let lookup = dir
+    while (lookup.length > 1 && (lookup.endsWith("/") || lookup.endsWith("/."))) lookup = lookup.slice(0, -1)
+    try {
+      const stat = lstatSync(lookup)
+      if (!stat.isDirectory() || stat.uid !== process.geteuid!() || (stat.mode & 0o077) !== 0) {
+        retry = setTimeout(connect, 1000)
+        return
+      }
+    } catch {
+      retry = setTimeout(connect, 1000)
+      return
+    }
+    const current = createConnection(join(dir, "control.sock"))
     socket = current
     reporterReady = false
     current.on("connect", () => { if (socket === current) connected() })
@@ -105,7 +119,7 @@ export default {
     let latestIds: string[] = []
     const [children, setChildren] = createSignal<string[]>([])
     let requestRefresh = () => {}
-    const transport = channel(join(dir, "control.sock"), () => requestRefresh())
+    const transport = channel(dir, () => requestRefresh())
     let lastSnapshot: Snapshot | undefined, markedStale = false
     const markStale = () => {
       if (lastSnapshot && !markedStale) {

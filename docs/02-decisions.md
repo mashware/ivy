@@ -715,6 +715,23 @@ PANEL_ID=3f2a9c14   PANEL_DIR=/run/user/1000/ivy-3f2a9c14
 | Who deletes | The value itself, when it dies | It covers three paths that a sweep at shutdown does not cover: the half-built error of whoever launches the console, the **panic** — where the interface framework does not run its shutdown hook, checked in its source, but destructors do run — and closing a pane without closing the window, which arrives in Phase 2 |
 | How it deletes | The contract's file and then the directory; **never recursively** | The directory belongs to the application, but **its content belongs to the producer**. A recursive delete would carry off whatever had been left there and would turn any badly built path into data loss instead of into an error. If something that is not the contract's remains, the directory survives and it is said where |
 
+**An inherited name does not prove that the directory still belongs to this console.** A closed
+console removes its directory, while a surviving tmux or agent session keeps the identity. Under
+a shared temporary directory another user could recreate that name and listen for panel documents.
+Before connecting, the MCP bridge and session helper therefore inspect the directory without
+following a final symlink: it must be a directory owned by the effective uid, with no group or
+other permission bits (`mode & 0o077 == 0`). Terminal slash and dot components are removed only
+for this metadata lookup, so `alias/` and `alias/.` cannot disguise a final symlink. The direct
+OpenCode plugin repeats the same check on every reconnect attempt. Missing paths and metadata
+errors fail closed, with the Rust clients naming the directory in their refusal. An inherited
+identity under `sudo -E` receives no privileged exception.
+
+This check authenticates the inherited directory before connecting; it does not eliminate the
+check/connect pathname race or validate every ancestor. Arbitrary scripts publishing through the
+file transport remain responsible for the paths they write. The bridge's initialize handshake
+still describes a whole supported identity; validation happens when the first tool opens a channel
+(**D88**). Explicit callers managing their own directories retain the low-level connector.
+
 **What the app sets wins over what the child inherits, and without a directory they are removed.**
 This is not an implementation detail: the pseudoterminal copies the parent process's environment, so
 **launching the application from inside one of its own consoles** — which is going to happen as soon

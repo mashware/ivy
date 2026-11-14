@@ -1,10 +1,8 @@
 //! Where a pane's channel lives, and who is allowed to reach it.
 //!
-//! **The access control is the directory's permission and nothing else.** `PanelDir` creates its
-//! directory `0o700` and the socket is born inside it, so a process of another user cannot reach
-//! the endpoint without the directory's mode having already failed — at which point a check of our
-//! own would be bypassed by the same failure. That is the whole of the POSIX story, and it is
-//! deliberately not supplemented.
+//! `PanelDir` creates a `0o700` directory. Inherited clients also verify its owner and
+//! permissions before connecting: a stale identity may name a replacement planted after the
+//! console closed. This pathname check does not authenticate the peer across a replacement race.
 
 use std::io;
 use std::path::Path;
@@ -197,6 +195,57 @@ pub fn bind(dir: &Path, id: &str) -> io::Result<Listener> {
     }
 }
 
+/// Refuses an inherited directory that another user could control.
+pub fn private_to_this_user(dir: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        // SAFETY: geteuid has no arguments or memory preconditions.
+        private_to_uid(dir, unsafe { libc::geteuid() })
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = dir;
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+fn private_to_uid(dir: &Path, uid: u32) -> io::Result<()> {
+    use std::os::unix::{ffi::OsStrExt, fs::MetadataExt};
+    // lstat("alias/.") follows alias. Strip only terminal slash/dot components;
+    // normalising interior components (especially ..) would change symlink traversal.
+    let mut bytes = dir.as_os_str().as_bytes();
+    loop {
+        if (bytes.len() > 1 && bytes.ends_with(b"/")) || bytes.ends_with(b"/.") {
+            bytes = &bytes[..bytes.len() - 1];
+        } else {
+            break;
+        }
+    }
+    let lookup = Path::new(std::ffi::OsStr::from_bytes(bytes));
+    let metadata = std::fs::symlink_metadata(lookup).map_err(|failure| {
+        let detail = if failure.kind() == io::ErrorKind::NotFound {
+            "directory is gone".to_owned()
+        } else {
+            failure.to_string()
+        };
+        io::Error::new(
+            failure.kind(),
+            format!(
+                "this console's panel could not be reached at {} ({detail})",
+                dir.display()
+            ),
+        )
+    })?;
+    if !metadata.is_dir() || metadata.uid() != uid || metadata.mode() & 0o077 != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("{} is not a private directory of this user", dir.display()),
+        ));
+    }
+    Ok(())
+}
+
 /// Opens a connection to a pane's endpoint, from the producer's side.
 pub fn connect(dir: &Path, id: &str) -> io::Result<Stream> {
     Stream::connect(name_of(dir, id)?)
@@ -206,6 +255,52 @@ pub fn connect(dir: &Path, id: &str) -> io::Result<Stream> {
 mod tests {
     use super::*;
     use panel_contract::PanelDir;
+
+    #[cfg(unix)]
+    #[test]
+    fn inherited_directory_requires_private_mode_type_and_effective_owner() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
+        let panel = PanelDir::create().unwrap();
+        let dir = panel.path();
+        private_to_this_user(dir).unwrap();
+        let uid = std::fs::symlink_metadata(dir).unwrap().uid();
+        assert!(private_to_uid(dir, uid ^ 1).is_err());
+        for bit in [0o040, 0o020, 0o010, 0o004, 0o002, 0o001] {
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700 | bit)).unwrap();
+            let error = private_to_this_user(dir).unwrap_err().to_string();
+            assert!(error.contains(&dir.display().to_string()), "{error}");
+            assert!(
+                error.contains("not a private directory of this user"),
+                "{error}"
+            );
+        }
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let alias = dir.join("alias");
+        symlink(dir, &alias).unwrap();
+        for suffix in ["", "/", "/.", "/././"] {
+            let path = std::path::PathBuf::from(format!("{}{suffix}", alias.display()));
+            let error = private_to_this_user(&path).unwrap_err().to_string();
+            assert!(error.contains(&path.display().to_string()), "{error}");
+            assert!(
+                error.contains("not a private directory of this user"),
+                "{error}"
+            );
+            private_to_this_user(Path::new(&format!("{}{suffix}", dir.display()))).unwrap();
+        }
+        let file = dir.join("file");
+        std::fs::write(&file, "").unwrap();
+        assert!(private_to_this_user(&file).is_err());
+        let missing = dir.join("gone");
+        let error = private_to_this_user(&missing).unwrap_err().to_string();
+        assert!(error.contains("directory is gone"), "{error}");
+        assert!(error.contains(&missing.display().to_string()), "{error}");
+        assert!(!error.contains("not a private directory"), "{error}");
+        let error = private_to_this_user(&file.join("child"))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("file/child"), "{error}");
+        assert!(!error.contains("not a private directory"), "{error}");
+    }
 
     /// **The endpoint is inside the pane's directory, which is where its permission comes from.**
     /// Asserting the name alone would pass with a socket in the shared temporary — the one place it
