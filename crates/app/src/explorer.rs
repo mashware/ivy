@@ -221,22 +221,6 @@ fn reconcile(window: &mut Window) {
     window.explorer.poll();
 }
 
-pub(crate) fn keys(
-    window: &mut Window,
-    ui: &mut egui::Ui,
-    metrics: &CellMetrics,
-    blocked: bool,
-) -> (bool, Vec<crate::WindowRequest>) {
-    let (owned, pointer) = before_keys(
-        window,
-        ui,
-        metrics,
-        blocked || crate::viewer::is_open(window),
-    );
-    let (viewer, requests) = crate::viewer::keys(window, ui, metrics, blocked || owned);
-    (pointer || viewer, requests)
-}
-
 /// Capture the gesture before console dispatch; resolve the displayed pane after focus changes.
 pub(crate) fn before_keys(
     window: &mut Window,

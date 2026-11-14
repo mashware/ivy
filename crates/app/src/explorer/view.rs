@@ -202,6 +202,14 @@ pub(super) fn show(
                     label.unwrap_or("Console")
                 ))
                 .truncate(),
+            )
+            .on_hover_text(
+                state
+                    .navigation
+                    .get(&pane)
+                    .and_then(|nav| nav.source.as_deref())
+                    .map(display)
+                    .unwrap_or_else(|| "Local directory unavailable or unsupported.".into()),
             );
             body.horizontal_wrapped(|ui| {
                 if state.pinned.is_some() {

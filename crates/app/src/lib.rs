@@ -1395,12 +1395,10 @@ impl eframe::App for Window {
         let chrome_owned = chrome::before_keys(self, ui, &metrics);
         self.timed_separately += self.chrome.take_cost();
         board_owned |= board::blocked(self, ui.ctx());
-        let (viewer_owned, requests) = explorer::keys(
-            self,
-            ui,
-            &metrics,
-            pane_owned || board_owned || chrome_owned,
+        let (explorer_keys, explorer_pointer) = explorer::before_keys(
+            self, ui, &metrics, pane_owned || board_owned || chrome_owned || viewer::is_open(self),
         );
+        let (viewer_owned, requests) = viewer::keys(self, ui, &metrics, pane_owned || board_owned || explorer_keys);
         let area = ui.max_rect();
 
         // **The order is applied before tiling**, so that what gets painted in this same frame is
@@ -1417,7 +1415,8 @@ impl eframe::App for Window {
         self.answer_the_windows_requests(ui.ctx(), area, &metrics);
 
         pane_view::reconcile(self);
-        let overlay_owns_pointer = viewer_owned || board_owned || pane_owned || chrome_owned;
+        let overlay_owns_pointer =
+            viewer_owned || explorer_pointer || board_owned || pane_owned || chrome_owned;
         let header_owns_pointer =
             overlay_owns_pointer || header::menu::pointer_blocked(self, ui.ctx());
         let (tab_bar, area) = tab_bar::partition(self, area, &metrics);
