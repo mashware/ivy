@@ -42,6 +42,7 @@ pub(super) fn apply(ui: &mut egui::Ui, theme: &Theme) {
     style.spacing.button_padding = egui::vec2(8.0, 3.0);
     style.spacing.interact_size.y = 22.0;
     style.visuals.weak_text_color = Some(dim(theme));
+    style.visuals.interact_cursor = Some(egui::CursorIcon::PointingHand);
     style.visuals.widgets.noninteractive.bg_stroke.color = theme.divider();
     style.visuals.widgets.inactive.bg_stroke.color = theme.divider();
 }
@@ -120,7 +121,9 @@ pub(super) fn console_chip(
                     ui.allocate_exact_size(egui::vec2(10.0, 14.0), egui::Sense::hover());
                 column_mark(ui.painter(), rect, column, ink);
                 ui.add(
-                    egui::Label::new(egui::RichText::new(title).size(11.0).color(ink)).truncate(),
+                    egui::Label::new(egui::RichText::new(title).size(11.0).color(ink))
+                        .truncate()
+                        .selectable(false),
                 );
             });
         });
@@ -129,6 +132,7 @@ pub(super) fn console_chip(
         ui.id().with("console-chip"),
         egui::Sense::click(),
     )
+    .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 pub(super) fn disclosure(ui: &mut egui::Ui, open: bool, theme: &Theme) -> egui::Response {

@@ -104,6 +104,7 @@ pub(super) fn paint(
         .corner_radius(8)
         .inner_margin(10);
     let response = frame.show(ui, |ui| {
+        ui.style_mut().interaction.selectable_labels = false;
         ui.set_width(ui.available_width());
         let doc = entry.snapshot.document.as_deref();
         ui.horizontal(|ui| {
@@ -219,10 +220,12 @@ pub(super) fn paint(
                 } else {
                     format!("Show all {} lines", doc.lines.len())
                 };
-                let r = ui.add(
-                    egui::Label::new(egui::RichText::new(label).color(theme.focus()))
-                        .sense(egui::Sense::hover()),
-                );
+                let r = ui
+                    .add(
+                        egui::Label::new(egui::RichText::new(label).color(theme.focus()))
+                            .sense(egui::Sense::hover()),
+                    )
+                    .on_hover_cursor(egui::CursorIcon::PointingHand);
                 if ui.clip_rect().contains_rect(r.rect) {
                     child_hits.push((r.rect, Command::Expand(entry.pane)));
                 }
@@ -234,18 +237,20 @@ pub(super) fn paint(
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if has_toggle {
-                        let r = ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(if compact {
-                                    "Show panel"
-                                } else {
-                                    "Hide panel"
-                                })
-                                .size(11.0)
-                                .color(theme.focus()),
+                        let r = ui
+                            .add(
+                                egui::Label::new(
+                                    egui::RichText::new(if compact {
+                                        "Show panel"
+                                    } else {
+                                        "Hide panel"
+                                    })
+                                    .size(11.0)
+                                    .color(theme.focus()),
+                                )
+                                .sense(egui::Sense::hover()),
                             )
-                            .sense(egui::Sense::hover()),
-                        );
+                            .on_hover_cursor(egui::CursorIcon::PointingHand);
                         if ui.clip_rect().contains_rect(r.rect) {
                             child_hits.push((r.rect, Command::Compact(entry.pane)));
                         }
@@ -283,7 +288,11 @@ pub(super) fn paint(
             age.as_secs() / 60
         ));
     }
-    if selected || warmth == Heat::Hot || ui.rect_contains_pointer(rect) {
+    let hovered = ui.rect_contains_pointer(rect);
+    if hovered {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    if selected || warmth == Heat::Hot || hovered {
         ui.painter().rect_stroke(
             rect,
             8.0,

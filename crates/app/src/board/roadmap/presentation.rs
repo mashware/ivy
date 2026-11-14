@@ -554,8 +554,10 @@ fn paint_milestone(
                                 .size(11.0)
                                 .color(theme.focus()),
                             )
-                            .sense(egui::Sense::click()),
+                            .sense(egui::Sense::click())
+                            .selectable(false),
                         )
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
                         .clicked()
                 {
                     if expanded {
