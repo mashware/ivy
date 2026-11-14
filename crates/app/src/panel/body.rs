@@ -6,7 +6,8 @@ use crate::{
     theme::Theme,
 };
 use eframe::egui::{Painter, Pos2, Rect};
-use panel_contract::{Panel, Style};
+use panel_contract::{Mark, Panel, Style};
+use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Action {
@@ -29,8 +30,13 @@ impl Reader {
         self.revision
     }
 }
+struct Prefix {
+    mark: Option<(Mark, eframe::egui::Color32)>,
+    reference: Option<Row>,
+}
 pub(crate) struct Body {
     rows: Vec<Row>,
+    prefixes: HashMap<usize, Prefix>,
     pub(crate) hidden: usize,
 }
 impl Body {
@@ -57,6 +63,9 @@ impl Body {
             if closed {
                 return false;
             }
+            if shown == 0 && fold::is_gap(line) {
+                return false;
+            }
             if !full && shown >= 18 {
                 hidden += 1;
                 return false;
@@ -71,13 +80,90 @@ impl Body {
             }
             true
         });
+        let column = panel
+            .lines
+            .iter()
+            .filter(|l| l.style != Some(Style::Section))
+            .filter_map(|l| l.reference.as_deref())
+            .map(|s| super::sanitize(s).chars().count())
+            .max()
+            .unwrap_or(0)
+            .min(12)
+            .min(width.saturating_sub(super::MINIMUM_SLOT + 3));
         let mut rows = Vec::new();
-        fold::append_blocks(&mut rows, &document, &reader.folds, width, theme);
+        let mut prefixes = HashMap::new();
+        for line in &document.lines {
+            if line.style == Some(Style::Section) {
+                let key = line.key.as_ref().map_or_else(
+                    || fold::HeaderId::Text(line.text.clone()),
+                    |key| fold::HeaderId::Key(key.clone()),
+                );
+                let mut row = Row::text(0, super::sanitize(&line.text), theme.foreground());
+                row.header = Some(fold::Header {
+                    id: key.clone(),
+                    folded: reader.folds.get(&key).copied().unwrap_or(line.collapsed),
+                    summary: super::sanitize(line.summary.as_deref().unwrap_or("")),
+                });
+                rows.push(row);
+                continue;
+            }
+            let mut laid = super::lay_out_line(line, column, width, theme);
+            let text_color = match line.style {
+                Some(Style::Dim) => theme.foreground().gamma_multiply(0.5),
+                Some(style) => theme.panel_color(None, Some(style)),
+                None if line.mark == Some(Mark::Done) => theme.foreground().gamma_multiply(0.5),
+                None => theme.foreground(),
+            };
+            for row in &mut laid {
+                row.color = text_color;
+            }
+            if !fold::is_gap(line)
+                && let Some(first) = laid.first_mut()
+            {
+                let count =
+                    (2 + if column > 0 { column + 1 } else { 0 }).min(first.text.chars().count());
+                first.text = format!(
+                    "{}{}",
+                    " ".repeat(count),
+                    first.text.chars().skip(count).collect::<String>()
+                );
+                let mark = line.mark.map(|mark| {
+                    let color = match mark {
+                        Mark::Done | Mark::Pending => theme.foreground().gamma_multiply(0.5),
+                        Mark::Current | Mark::Info => theme.focus(),
+                        Mark::Wait | Mark::Block => theme.color(term_core::TermColor::Indexed(1)),
+                    };
+                    (mark, color)
+                });
+                let reference = line.reference.as_ref().map(|reference| {
+                    Row::text(
+                        2,
+                        super::sanitize(reference).chars().take(column).collect(),
+                        theme.foreground().gamma_multiply(0.5),
+                    )
+                });
+                prefixes.insert(rows.len(), Prefix { mark, reference });
+            }
+            rows.extend(laid);
+        }
         color::flag(&mut rows);
-        Self { rows, hidden }
+        for prefix in prefixes.values_mut() {
+            if let Some(reference) = &mut prefix.reference {
+                color::flag(std::slice::from_mut(reference));
+            }
+        }
+        Self {
+            rows,
+            prefixes,
+            hidden,
+        }
     }
     pub(crate) fn height(&self, metrics: &CellMetrics) -> f32 {
-        self.rows.len() as f32 * metrics.height()
+        self.rows
+            .iter()
+            .enumerate()
+            .map(|(n, row)| row_height(row, n, metrics))
+            .sum()
     }
     pub(crate) fn rows(&self) -> usize {
         self.rows.len()
@@ -90,11 +176,18 @@ impl Body {
         theme: &Theme,
         discoverer: &mut Discoverer,
     ) -> Vec<(Rect, Action)> {
-        let width = (rect.width() / metrics.width()) as usize;
         let mut hits = Vec::new();
         let mut glyphs = Vec::new();
+        let mut top = rect.top();
         for (n, row) in self.rows.iter().enumerate() {
-            let y = rect.top() + n as f32 * metrics.height();
+            let step = row_height(row, n, metrics);
+            let y = top
+                + if row.header.is_some() && n > 0 {
+                    4.0
+                } else {
+                    0.0
+                };
+            top += step;
             let row_rect = Rect::from_min_size(
                 Pos2::new(rect.left(), y),
                 eframe::egui::vec2(rect.width(), metrics.height()),
@@ -104,7 +197,39 @@ impl Body {
             }
             let at = Pos2::new(rect.left() + row.column as f32 * metrics.width(), y);
             discoverer.note_text(&row.text);
-            let ink = paint_row(painter, at, row, metrics, width, discoverer, &mut glyphs);
+            let ink = if row.header.is_some() {
+                paint_board_header(
+                    painter,
+                    Rect::from_min_size(at, eframe::egui::vec2(rect.width(), metrics.height())),
+                    row,
+                    metrics,
+                    theme,
+                    discoverer,
+                    &mut glyphs,
+                )
+            } else {
+                color::paint_text(painter, at, row, metrics, discoverer, &mut glyphs)
+            };
+            if let Some(prefix) = self.prefixes.get(&n) {
+                if let Some((mark, ink)) = prefix.mark {
+                    paint_mark(
+                        painter,
+                        Rect::from_min_size(
+                            Pos2::new(rect.left(), y),
+                            eframe::egui::vec2(12.0, metrics.height()),
+                        ),
+                        mark,
+                        ink,
+                        metrics.font(),
+                    );
+                }
+                if let Some(reference) = &prefix.reference {
+                    let origin =
+                        Pos2::new(rect.left() + reference.column as f32 * metrics.width(), y);
+                    discoverer.note_text(&reference.text);
+                    color::paint_text(painter, origin, reference, metrics, discoverer, &mut glyphs);
+                }
+            }
             if let Some(header) = &row.header
                 && painter.clip_rect().contains_rect(row_rect)
                 && ink.right() <= rect.right()
@@ -125,6 +250,165 @@ impl Body {
             glyph.paint(painter);
         }
         hits
+    }
+}
+
+fn row_height(row: &Row, index: usize, metrics: &CellMetrics) -> f32 {
+    if row.text.is_empty() && row.header.is_none() && row.link.is_none() {
+        return 6.0;
+    }
+    metrics.height()
+        + 2.0
+        + if row.header.is_some() && index > 0 {
+            4.0
+        } else {
+            0.0
+        }
+}
+
+fn paint_board_header(
+    painter: &Painter,
+    rect: Rect,
+    row: &Row,
+    metrics: &CellMetrics,
+    theme: &Theme,
+    discoverer: &mut Discoverer,
+    glyphs: &mut Vec<ColorGlyph>,
+) -> Rect {
+    let at = rect.min;
+    let header = row.header.as_ref().unwrap();
+    let dim = theme.foreground().gamma_multiply(0.5);
+    let measure = |text: &str| {
+        painter
+            .layout_no_wrap(text.to_owned(), metrics.font(), theme.foreground())
+            .size()
+            .x
+    };
+    let summary: String = header.summary.chars().take(40).collect();
+    let summary = fold::fit(&summary, (rect.width() - 24.0).max(0.0), &measure);
+    let summary_left = rect.right() - measure(summary);
+    let title = fold::fit(&row.text, (summary_left - at.x - 36.0).max(0.0), &measure);
+    paint_chevron(
+        painter,
+        Rect::from_min_size(at, eframe::egui::vec2(8.0, metrics.height())),
+        !header.folded,
+        dim,
+    );
+    let mut pieces = [
+        Row::text(0, title.into(), theme.foreground()),
+        Row::text(0, summary.into(), dim),
+    ];
+    color::flag(&mut pieces);
+    let mut title_ink = Rect::NOTHING;
+    for (index, (piece, x)) in pieces.iter().zip([at.x + 14.0, summary_left]).enumerate() {
+        discoverer.note_text(&piece.text);
+        let ink = color::paint_text(
+            painter,
+            Pos2::new(x, at.y),
+            piece,
+            metrics,
+            discoverer,
+            glyphs,
+        );
+        if index == 0 {
+            title_ink = ink;
+        }
+    }
+    if title_ink.right() + 12.0 < summary_left {
+        painter.line_segment(
+            [
+                Pos2::new(title_ink.right() + 6.0, rect.center().y),
+                Pos2::new(summary_left - 6.0, rect.center().y),
+            ],
+            eframe::egui::Stroke::new(1.0, theme.divider()),
+        );
+    }
+    rect
+}
+
+pub(crate) fn paint_chevron(painter: &Painter, rect: Rect, open: bool, ink: eframe::egui::Color32) {
+    let c = rect.center();
+    let points = if open {
+        vec![
+            c + eframe::egui::vec2(-3.0, -2.0),
+            c + eframe::egui::vec2(3.0, -2.0),
+            c + eframe::egui::vec2(0.0, 3.0),
+        ]
+    } else {
+        vec![
+            c + eframe::egui::vec2(-2.0, -3.0),
+            c + eframe::egui::vec2(-2.0, 3.0),
+            c + eframe::egui::vec2(3.0, 0.0),
+        ]
+    };
+    painter.add(eframe::egui::Shape::convex_polygon(
+        points,
+        ink,
+        eframe::egui::Stroke::NONE,
+    ));
+}
+
+/// Contract marks are small vector symbols; their width never depends on a fallback font.
+pub(crate) fn paint_mark(
+    painter: &Painter,
+    rect: Rect,
+    mark: Mark,
+    ink: eframe::egui::Color32,
+    font: eframe::egui::FontId,
+) {
+    use eframe::egui::{Align2, Shape, Stroke};
+    let c = rect.center();
+    let stroke = Stroke::new(1.2, ink);
+    match mark {
+        Mark::Done => {
+            painter.line_segment(
+                [
+                    c + eframe::egui::vec2(-4.0, 0.0),
+                    c + eframe::egui::vec2(-1.0, 3.0),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    c + eframe::egui::vec2(-1.0, 3.0),
+                    c + eframe::egui::vec2(4.0, -4.0),
+                ],
+                stroke,
+            );
+        }
+        Mark::Current => {
+            painter.add(Shape::convex_polygon(
+                vec![
+                    c + eframe::egui::vec2(-3.0, -4.0),
+                    c + eframe::egui::vec2(4.0, 0.0),
+                    c + eframe::egui::vec2(-3.0, 4.0),
+                ],
+                ink,
+                Stroke::NONE,
+            ));
+        }
+        Mark::Pending => {
+            painter.circle_filled(c, 1.0, ink);
+        }
+        Mark::Block => {
+            painter.circle_stroke(c, 4.0, stroke);
+            painter.line_segment(
+                [
+                    c + eframe::egui::vec2(-3.0, 3.0),
+                    c + eframe::egui::vec2(3.0, -3.0),
+                ],
+                stroke,
+            );
+        }
+        Mark::Wait | Mark::Info => {
+            painter.text(
+                c,
+                Align2::CENTER_CENTER,
+                if mark == Mark::Wait { "?" } else { "i" },
+                font,
+                ink,
+            );
+        }
     }
 }
 
@@ -249,5 +533,59 @@ mod tests {
         let full = Body::layout(&doc, &Reader::default(), 20, &Theme::default(), true);
         assert!(full.rows.iter().any(|r| r.text.contains("visible-17")));
         assert_eq!(full.hidden, 0);
+    }
+
+    #[test]
+    fn reference_body_keeps_separate_marks_refs_styles_indentation_and_summary_without_actions() {
+        let panel = panel_contract::parse_document(include_str!(
+            "../../tests/fixtures/board-reference/t2g.panel.json"
+        ))
+        .unwrap();
+        let theme = Theme::default();
+        let body = Body::layout(&panel, &Reader::default(), 100, &theme, true);
+        assert_eq!(
+            body.rows[0].text, "MRs",
+            "first title and initial gap must be omitted"
+        );
+        assert_eq!(body.rows[0].header.as_ref().unwrap().summary, "2/4 merged");
+        let profile = body
+            .rows
+            .iter()
+            .position(|r| r.text.contains("profile selector"))
+            .unwrap();
+        let inbox = body
+            .rows
+            .iter()
+            .position(|r| r.text.contains("inbox and search"))
+            .unwrap();
+        let pipeline = body
+            .rows
+            .iter()
+            .find(|r| r.text.contains("pipeline"))
+            .unwrap();
+        assert_eq!(
+            body.prefixes[&profile].reference.as_ref().unwrap().text,
+            "#1"
+        );
+        assert_eq!(body.prefixes[&inbox].reference.as_ref().unwrap().text, "#3");
+        assert_eq!(body.prefixes[&profile].mark.unwrap().0, Mark::Done);
+        assert_eq!(body.prefixes[&inbox].mark.unwrap().0, Mark::Current);
+        assert_eq!(
+            body.rows[profile].color,
+            theme.foreground().gamma_multiply(0.5)
+        );
+        assert_eq!(body.rows[inbox].color, theme.foreground());
+        assert_eq!(pipeline.color, theme.foreground().gamma_multiply(0.5));
+        let leading = |r: &Row| r.text.chars().take_while(|c| *c == ' ').count();
+        assert!(
+            leading(pipeline) >= leading(&body.rows[inbox]) + 5,
+            "dim child indentation was flattened"
+        );
+        assert!(
+            body.rows
+                .iter()
+                .all(|r| !r.text.contains("Aprobar") && !r.text.contains("sí, adelante")),
+            "producer actions must not become reader controls"
+        );
     }
 }

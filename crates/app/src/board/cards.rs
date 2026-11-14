@@ -43,14 +43,26 @@ impl Reader {
 }
 pub(super) fn color(column: Column, theme: &Theme) -> Color32 {
     match column {
-        Column::Wait => theme.attention_color(panel_contract::Attention::Wait, true),
-        Column::Block => theme.attention_color(panel_contract::Attention::Block, true),
-        Column::Working => theme.focus(),
-        Column::Done => theme.attention_color(panel_contract::Attention::Done, true),
+        Column::Wait | Column::Block => theme.color(term_core::TermColor::Indexed(1)),
+        Column::Working => theme.color(term_core::TermColor::Indexed(3)),
+        Column::Done => theme.focus(),
         Column::Idle => theme.divider(),
     }
 }
-fn clean(text: &str) -> String {
+pub(super) fn title(entry: &Entry) -> &str {
+    entry
+        .snapshot
+        .document
+        .as_deref()
+        .and_then(|d| {
+            d.lines
+                .iter()
+                .find(|l| l.style == Some(panel_contract::Style::Title))
+        })
+        .map_or(entry.console_label.as_str(), |l| l.text.as_str())
+}
+
+pub(super) fn clean(text: &str) -> String {
     text.chars()
         .map(|c| {
             if panel_contract::is_shown_as_itself(c) {
@@ -81,8 +93,8 @@ pub(super) fn paint(
     let warmth = age.map(heat).unwrap_or(Heat::Normal);
     let background = match warmth {
         Heat::Normal => theme.panel_background(),
-        Heat::Warm => theme.panel_background().lerp_to_gamma(ink, 0.08),
-        Heat::Hot => theme.panel_background().lerp_to_gamma(ink, 0.16),
+        Heat::Warm => theme.background().lerp_to_gamma(ink, 20.0 / 255.0),
+        Heat::Hot => theme.background().lerp_to_gamma(ink, 41.0 / 255.0),
     };
     let stroke = egui::Stroke::new(1.0, if selected { theme.focus() } else { ink });
     let frame = egui::Frame::new()
@@ -93,50 +105,35 @@ pub(super) fn paint(
     let response = frame.show(ui, |ui| {
         ui.set_width(ui.available_width());
         let doc = entry.snapshot.document.as_deref();
-        let title = doc
-            .and_then(|d| {
-                d.lines
-                    .iter()
-                    .find(|l| l.style == Some(panel_contract::Style::Title))
-            })
-            .map_or(entry.console_label.as_str(), |l| l.text.as_str());
         ui.horizontal(|ui| {
             let phase = doc.and_then(|d| d.phase.as_deref());
-            let phase_width = if phase.is_some() {
-                ui.available_width().min(110.0) * 0.4
-            } else {
-                0.0
-            };
+            let phase_width = phase.map_or(0.0, |s| (s.chars().count() as f32 * 7.3).min(72.0));
             let title_width =
-                (ui.available_width() - phase_width - ui.spacing().item_spacing.x).max(1.0);
+                (ui.available_width() - phase_width - 18.0 - 2.0 * ui.spacing().item_spacing.x)
+                    .max(1.0);
             ui.add_sized(
                 egui::vec2(title_width, 20.0),
-                egui::Label::new(egui::RichText::new(clean(title)).strong()).truncate(),
+                egui::Label::new(egui::RichText::new(clean(title(entry))).size(13.0).strong())
+                    .truncate()
+                    .halign(egui::Align::Min),
             )
-            .on_hover_text(clean(title));
+            .on_hover_text(format!(
+                "{}\n{} · {}",
+                clean(title(entry)),
+                clean(&entry.console_label),
+                clean(&entry.tab_label)
+            ));
             if let Some(phase) = phase {
                 ui.add_sized(
                     egui::vec2(phase_width, 20.0),
                     egui::Label::new(egui::RichText::new(clean(phase)).color(theme.focus()))
-                        .truncate(),
+                        .truncate()
+                        .halign(egui::Align::Min),
                 )
                 .on_hover_text(clean(phase));
             }
+            super::style::go(ui, theme);
         });
-        if let Some(attention) = entry.snapshot.attention {
-            let message = match attention.class {
-                panel_contract::Attention::Wait => "it is waiting for you",
-                panel_contract::Attention::Block => "stuck on something else, not you",
-                panel_contract::Attention::Done => "it finished and nobody looked",
-            };
-            ui.colored_label(
-                theme.attention_color(attention.class, attention.backed),
-                format!(
-                    "{} {message}",
-                    crate::panel::attention_symbol(attention.class)
-                ),
-            );
-        }
         if column == Column::Wait && !backed {
             ui.weak("Waiting state is unconfirmed");
         }
@@ -153,105 +150,124 @@ pub(super) fn paint(
                 clean(warning),
             );
         }
-        if let Some(doc) = doc {
-            if !compact {
-                let metrics =
-                    CellMetrics::measure(ui.ctx(), egui::TextStyle::Monospace.resolve(ui.style()))
-                        .for_panel(ui.ctx());
-                let width = (ui.available_width() / metrics.width()).max(1.0) as usize;
-                let key = entry.snapshot.document.as_ref().unwrap();
-                let started = Instant::now();
-                if reader.cache.as_ref().is_none_or(|(id, w, t, r, full, _)| {
-                    !std::sync::Arc::ptr_eq(id, key)
-                        || *w != width
-                        || t != theme
-                        || *r != reader.body.revision()
-                        || *full != reader.full
-                }) {
-                    reader.cache = Some((
-                        key.clone(),
-                        width,
-                        *theme,
-                        reader.body.revision(),
-                        reader.full,
-                        Body::layout(doc, &reader.body, width, theme, reader.full),
-                    ));
-                }
-                timing.content_layout(started.elapsed());
-                let body = &reader.cache.as_ref().unwrap().5;
-                let (rect, _) = ui.allocate_exact_size(
-                    egui::vec2(ui.available_width(), body.height(&metrics)),
-                    egui::Sense::hover(),
-                );
-                let started = Instant::now();
-                let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
-                for (rect, action) in body.paint(&painter, rect, &metrics, theme, discoverer) {
-                    let hint = match &action {
-                        body::Action::Link(target) => target.as_str(),
-                        body::Action::Fold(..) => "Toggle section",
-                    };
-                    ui.interact(
-                        rect,
-                        ui.id().with((entry.pane, rect.min.y.to_bits())),
-                        egui::Sense::hover(),
-                    )
-                    .on_hover_text(hint);
-                    child_hits.push((rect, Command::Body(entry.pane, action)));
-                }
-                timing.content_rows(body.rows());
-                timing.content_paint(started.elapsed());
-                if body.hidden > 0 || reader.full {
-                    let label = if reader.full {
-                        "Show less".to_owned()
-                    } else {
-                        format!("Show all {} lines", doc.lines.len())
-                    };
-                    let r = ui.add(
-                        egui::Label::new(egui::RichText::new(label).color(theme.focus()))
-                            .sense(egui::Sense::hover()),
-                    );
-                    if ui.clip_rect().contains_rect(r.rect) {
-                        child_hits.push((r.rect, Command::Expand(entry.pane)));
-                    }
-                }
+        if let Some(doc) = doc
+            && !compact
+        {
+            let metrics =
+                CellMetrics::measure(ui.ctx(), egui::TextStyle::Monospace.resolve(ui.style()))
+                    .for_panel(ui.ctx());
+            let width = (ui.available_width() / metrics.width()).max(1.0) as usize;
+            let key = entry.snapshot.document.as_ref().unwrap();
+            let started = Instant::now();
+            if reader.cache.as_ref().is_none_or(|(id, w, t, r, full, _)| {
+                !std::sync::Arc::ptr_eq(id, key)
+                    || *w != width
+                    || t != theme
+                    || *r != reader.body.revision()
+                    || *full != reader.full
+            }) {
+                reader.cache = Some((
+                    key.clone(),
+                    width,
+                    *theme,
+                    reader.body.revision(),
+                    reader.full,
+                    Body::layout(doc, &reader.body, width, theme, reader.full),
+                ));
             }
-        } else {
-            ui.weak("publishes nothing");
-        }
-        ui.separator();
-        ui.horizontal_wrapped(|ui| {
-            if let Some(branch) = branch {
-                ui.weak(format!("⎇ {}", clean(branch)));
-            }
-            if let Some(age) = age {
-                ui.weak(format!("observed wait {} min", age.as_secs() / 60));
-            }
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(format!(
-                        "{} · {}",
-                        clean(&entry.console_label),
-                        clean(&entry.tab_label)
-                    ))
-                    .weak(),
-                )
-                .truncate(),
+            timing.content_layout(started.elapsed());
+            let body = &reader.cache.as_ref().unwrap().5;
+            let (rect, _) = ui.allocate_exact_size(
+                egui::vec2(ui.available_width(), body.height(&metrics)),
+                egui::Sense::hover(),
             );
-            if doc.is_some() && matches!(column, Column::Done | Column::Idle) {
+            let started = Instant::now();
+            let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+            for (rect, action) in body.paint(&painter, rect, &metrics, theme, discoverer) {
+                let hint = match &action {
+                    body::Action::Link(target) => target.as_str(),
+                    body::Action::Fold(..) => "Toggle section",
+                };
+                ui.interact(
+                    rect,
+                    ui.id().with((entry.pane, rect.min.y.to_bits())),
+                    egui::Sense::hover(),
+                )
+                .on_hover_text(hint);
+                child_hits.push((rect, Command::Body(entry.pane, action)));
+            }
+            timing.content_rows(body.rows());
+            timing.content_paint(started.elapsed());
+            if body.hidden > 0 || reader.full {
+                let label = if reader.full {
+                    "Show less".to_owned()
+                } else {
+                    format!("Show all {} lines", doc.lines.len())
+                };
                 let r = ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(if compact { "Show panel" } else { "Hide panel" })
-                            .color(theme.focus()),
-                    )
-                    .sense(egui::Sense::hover()),
+                    egui::Label::new(egui::RichText::new(label).color(theme.focus()))
+                        .sense(egui::Sense::hover()),
                 );
                 if ui.clip_rect().contains_rect(r.rect) {
-                    child_hits.push((r.rect, Command::Compact(entry.pane)));
+                    child_hits.push((r.rect, Command::Expand(entry.pane)));
                 }
             }
-        });
+        }
+        let has_toggle = doc.is_some() && matches!(column, Column::Done | Column::Idle);
+        if branch.is_some() || doc.is_none() || has_toggle {
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if has_toggle {
+                        let r = ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(if compact {
+                                    "Show panel"
+                                } else {
+                                    "Hide panel"
+                                })
+                                .size(11.0)
+                                .color(theme.focus()),
+                            )
+                            .sense(egui::Sense::hover()),
+                        );
+                        if ui.clip_rect().contains_rect(r.rect) {
+                            child_hits.push((r.rect, Command::Compact(entry.pane)));
+                        }
+                    }
+                    let (rect, _) = ui.allocate_exact_size(
+                        egui::vec2(ui.available_width(), 18.0),
+                        egui::Sense::hover(),
+                    );
+                    if let Some(branch) = branch {
+                        super::style::branch(ui, rect, &clean(branch), theme);
+                    } else if doc.is_none() {
+                        ui.put(
+                            rect,
+                            egui::Label::new(
+                                egui::RichText::new("publishes nothing")
+                                    .size(11.0)
+                                    .color(super::style::dim(theme)),
+                            )
+                            .halign(egui::Align::Min),
+                        );
+                    }
+                });
+            });
+        }
     });
     let rect = response.response.rect;
+    if let Some(age) = age {
+        ui.interact(
+            rect,
+            ui.id().with((entry.pane, "observed-age")),
+            egui::Sense::hover(),
+        )
+        .on_hover_text(format!(
+            "observed wait {} min; time before observation is unknown",
+            age.as_secs() / 60
+        ));
+    }
     if selected || warmth == Heat::Hot || ui.rect_contains_pointer(rect) {
         ui.painter().rect_stroke(
             rect,

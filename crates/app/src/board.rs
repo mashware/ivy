@@ -11,6 +11,7 @@ mod observation;
 pub(crate) mod plans;
 pub(crate) mod probe;
 mod roadmap;
+mod style;
 mod view;
 
 use eframe::egui;

@@ -1,6 +1,5 @@
 //! Live identities and literal producer content, grouped by project, independent of screen geometry.
 use crate::{Window, panel::summary::Snapshot, project::Key};
-use eframe::egui::Color32;
 use std::{cmp::Reverse, time::SystemTime};
 
 /// The section of every console outside a Git repository, folders included (D85, B1).
@@ -14,7 +13,7 @@ pub(super) struct Entry {
 }
 
 pub(super) enum Kind {
-    Repository { name: String, ink: Color32 },
+    Repository { name: String },
     Other,
 }
 
@@ -32,20 +31,12 @@ impl Section {
             Kind::Other => OTHER,
         }
     }
-
-    pub(super) fn ink(&self) -> Option<Color32> {
-        match self.kind {
-            Kind::Repository { ink, .. } => Some(ink),
-            Kind::Other => None,
-        }
-    }
 }
 
 /// The repository a console belongs to, as its header already resolved it.
 pub(super) struct Membership {
     pub(super) key: Key,
     pub(super) name: String,
-    pub(super) ink: Color32,
 }
 
 pub(super) fn sections(window: &Window, now: SystemTime) -> Vec<Section> {
@@ -61,7 +52,6 @@ pub(super) fn sections(window: &Window, now: SystemTime) -> Vec<Section> {
                 .map(|badge| Membership {
                     key: badge.key.clone(),
                     name: badge.name.clone(),
-                    ink: badge.ink,
                 });
             consoles.push((
                 membership,
@@ -93,7 +83,6 @@ pub(super) fn group(consoles: Vec<(Option<Membership>, Entry)>) -> Vec<Section> 
                             .as_ref()
                             .map_or(Kind::Other, |m| Kind::Repository {
                                 name: m.name.clone(),
-                                ink: m.ink,
                             }),
                         entries: Vec::new(),
                         roadmap: None,
@@ -166,7 +155,6 @@ mod tests {
         Some(Membership {
             key: Key::Repository(format!("/work/{name}/.git").into()),
             name: name.to_owned(),
-            ink: Color32::RED,
         })
     }
     fn shape(sections: &[Section]) -> Vec<(String, Vec<usize>)> {
@@ -242,8 +230,6 @@ mod tests {
                 (OTHER.to_owned(), vec![0]),
             ]
         );
-        assert_eq!(sections[2].ink(), None);
-        assert_eq!(sections[0].ink(), Some(Color32::RED));
     }
     #[test]
     fn sections_follow_their_strongest_claim_and_ties_keep_the_first_console() {

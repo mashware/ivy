@@ -2383,11 +2383,16 @@ mod tests {
         /// artifact to satisfy a test, which is the tail wagging the dog.
         const DRAWN_RULE: char = '\u{2500}';
 
-        const SOURCES: [(&str, &str); 55] = [
+        const SOURCES: [(&str, &str); 57] = [
             ("board/plans.rs", include_str!("board/plans.rs")),
             ("board/plans/disk.rs", include_str!("board/plans/disk.rs")),
             ("board/roadmap.rs", include_str!("board/roadmap.rs")),
             ("board/cards.rs", include_str!("board/cards.rs")),
+            ("board/style.rs", include_str!("board/style.rs")),
+            (
+                "board/roadmap/presentation.rs",
+                include_str!("board/roadmap/presentation.rs"),
+            ),
             ("board/view.rs", include_str!("board/view.rs")),
             ("roadmap_file.rs", include_str!("roadmap_file.rs")),
             ("git_process.rs", include_str!("git_process.rs")),

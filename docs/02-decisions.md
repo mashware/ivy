@@ -9564,6 +9564,22 @@ The configured roadmap window remains the initial detail window and never makes 
 remaining content unreachable. Existing published-over-file precedence and configured projects
 without consoles remain unchanged.
 
+**Visual reference clarified by the owner.** The supplied folded/expanded Bellwether screenshots
+are the presentation target, not merely an example of five-column behavior. Each project shows its
+summary, then its expanded roadmap, then its terminal-state headers and cards. Column badges are
+local; toolbar totals remain global. Plan-only projects omit an empty terminal grid. Use monospaced
+reference spacing, state colors, progress tracks, right-aligned count pills and wrapping milestone
+cards; retain every pictured item, active ID, attachment, dependency, outside count and source.
+The comparison fixture uses the actual reference plan and panels, with executable actions excluded.
+Native warnings remain; console identity and honest observed age are disclosed on hover. Vector
+marks avoid relying on missing glyphs, without changing D9's sidebar or terminal cell policy.
+
+**Retain string plan items.** Bellwether's reference has four deliverables and one outside item as
+plain JSON strings. Dropping them silently changed 4/14 to 4/10 and hid one pending outside task.
+Accept a string as literal item text with no invented mark or identity. This is a compatible syntax
+addition, not a new field or version. A valid milestone retains a console whose deliverable ID is
+not in its item list at milestone level; absent/unknown milestones are off-plan.
+
 **State is explicit.** In first-match order: published wait unless the client explicitly says busy;
 published block; published done or explicit native Done; explicit client waiting; stale panel;
 explicit busy; otherwise idle. Reuse supported native client declarations, including preserving
@@ -9577,14 +9593,15 @@ while Board is closed. Republishing the same wait retains its start; departure, 
 pane closure clears it. Warm begins at five observed minutes and hot at fifteen. After restart the
 prior duration is unknown; label the duration as observed instead of treating file age as history.
 
-**Two views share rendering, not interaction authority.** Reuse pure native panel body primitives,
+**Two views share primitives, not interaction authority.** Reuse bounded native wrapping,
+color-emoji and link primitives while the Board owns its reference mark/ref/section presentation,
 but give Board its own caches, fold choices and painted child hit geometry. The sidebar's mutable
 layout and drawn records describe its own pixels. Child links, folds and expansion consume their
 click before card navigation; no producer action command is routed from this Board. Available Git
 branch text is resolved per worktree directory off the frame, not from the repository grouping key.
 
 **Discarded:** keeping excerpts behind a sidebar drill-down (fails the requested information);
-duplicating the full renderer (diverges on wrapping, marks, references, folds and emoji); calling
+duplicating the wrapping, emoji and link-trust engine (would diverge across surfaces); calling
 the sidebar painter a second time (overwrites its input geometry); guessing wait age from publication
 mtime or producer dates (republishing is not a new wait); classifying activity from terminal output
 (violates D6); replacing existing plan transport/storage (presentation needs no new source).

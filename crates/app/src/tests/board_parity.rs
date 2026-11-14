@@ -158,7 +158,7 @@ mod tests {
         native(window.tabs[1].panes_mut()[1], "done");
         frame(&mut window, &ctx, chord_with(egui::Key::O));
         let shapes = frame(&mut window, &ctx, vec![]);
-        let labels = ["Waiting for you", "Stuck", "Working", "Finished", "Idle"];
+        let labels = ["WAITING FOR YOU", "STUCK", "WORKING", "FINISHED", "IDLE"];
         let xs: Vec<_> = labels
             .iter()
             .map(|label| {
@@ -177,7 +177,7 @@ mod tests {
             .collect();
         for (header, card) in xs.iter().zip(&cards) {
             assert!(
-                (header - card.left()).abs() < 4.0,
+                (header - card.left() - 18.0).abs() < 1.0,
                 "column header {header} is not aligned with card {card:?}"
             );
         }
@@ -573,7 +573,7 @@ mod tests {
         loop {
             let shapes = pass(&mut window, vec![]);
             if the_text_queued_up(&shapes, "demo") && the_text_queued_up(&shapes, "empty") {
-                for label in ["Waiting for you", "Stuck", "Working", "Finished", "Idle"] {
+                for label in ["WAITING FOR YOU", "STUCK", "WORKING", "FINISHED", "IDLE"] {
                     let header = text_position(&shapes, label).unwrap_or_else(|| {
                         panic!(
                             "first open hid the {label} column header without any scrolling input"
@@ -581,8 +581,8 @@ mod tests {
                     });
                     let first_project = text_position(&shapes, "demo").unwrap();
                     assert!(
-                        header.y < first_project.y,
-                        "{label} header ink at {header:?} is underneath the first project row at {first_project:?}"
+                        header.y > first_project.y,
+                        "{label} header ink at {header:?} must follow the project row at {first_project:?}"
                     );
                 }
                 break;
@@ -595,5 +595,34 @@ mod tests {
         }
         drop(window);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn initial_open_reveals_the_selected_idle_console_at_a_narrow_viewport() {
+        let mut window = window_with("sleep 30", "sleep 30");
+        prepare(&mut window);
+        let ctx = egui::Context::default();
+        let target = window.active().focus;
+        let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 480.0));
+        let pass = |window: &mut Window, events| {
+            ui_pass(
+                window,
+                &ctx,
+                viewport,
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+            )
+        };
+        pass(&mut window, chord_with(egui::Key::O));
+        pass(&mut window, vec![]);
+        assert!(
+            window
+                .board
+                .card_rect(target)
+                .is_some_and(|r| r.is_positive() && viewport.contains(r.center())),
+            "initially selected Idle console remains outside the narrow viewport"
+        );
     }
 }

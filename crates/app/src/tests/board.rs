@@ -38,6 +38,54 @@ mod tests {
         window.headers = window.headers.integrated(true);
     }
 
+    fn text_point(shapes: &[egui::epaint::ClippedShape], needle: &str) -> Option<egui::Pos2> {
+        shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(t) => {
+                let start = t.galley.text().find(needle)?;
+                let index = t.galley.text()[..start].chars().count() + needle.chars().count() / 2;
+                let at = t
+                    .galley
+                    .pos_from_cursor(egui::text::CCursor::new(index))
+                    .center()
+                    + t.pos.to_vec2();
+                shape.clip_rect.contains(at).then_some(at)
+            }
+            _ => None,
+        })
+    }
+
+    fn hover_roadmap(window: &mut Window, ctx: &egui::Context, expected: &str) {
+        ctx.style_mut_of(egui::Theme::Dark, |style| {
+            style.interaction.tooltip_delay = 0.0
+        });
+        let shapes = frame(window, ctx, vec![]);
+        let at = shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(t) => {
+                    let i = t.galley.text().rfind("Roadmap")?;
+                    let cursor = t.galley.text()[..i].chars().count() + 3;
+                    let at = t
+                        .galley
+                        .pos_from_cursor(egui::text::CCursor::new(cursor))
+                        .center()
+                        + t.pos.to_vec2();
+                    shape.clip_rect.contains(at).then_some(at)
+                }
+                _ => None,
+            })
+            .max_by(|a, b| a.x.total_cmp(&b.x))
+            .expect("project Roadmap disclosure");
+        frame(window, ctx, vec![egui::Event::PointerMoved(at)]);
+        for _ in 0..80 {
+            let shapes = frame(window, ctx, vec![]);
+            if the_text_queued_up(&shapes, expected) {
+                return;
+            }
+        }
+        panic!("Roadmap hover omitted source {expected:?}");
+    }
+
     fn show_panel(window: &mut Window, ctx: &egui::Context, pane: usize) {
         let shapes = frame(window, ctx, vec![]);
         let card = window.board.card_rect(pane).expect("card painted");
@@ -45,7 +93,14 @@ mod tests {
             .iter()
             .find_map(|s| match &s.shape {
                 egui::Shape::Text(t) if t.galley.text() == "Show panel" && card.contains(t.pos) => {
-                    Some(t.pos + t.galley.size() / 2.0)
+                    let start = t.galley.text().find("Show panel").unwrap();
+                    let cursor = t.galley.text()[..start].chars().count() + 5;
+                    Some(
+                        t.galley
+                            .pos_from_cursor(egui::text::CCursor::new(cursor))
+                            .center()
+                            + t.pos.to_vec2(),
+                    )
                 }
                 _ => None,
             })
@@ -55,17 +110,22 @@ mod tests {
     }
 
     fn open_roadmaps(window: &mut Window, ctx: &egui::Context) {
-        let shapes = frame(window, ctx, vec![]);
-        let at = shapes
-            .iter()
-            .find_map(|s| match &s.shape {
-                egui::Shape::Text(t) if t.galley.text() == "Open all roadmaps" => {
-                    Some(t.pos + t.galley.size() / 2.0)
-                }
-                _ => None,
-            })
-            .expect("Open all roadmaps control");
-        frame(window, ctx, click_at(at));
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let shapes = frame(window, ctx, vec![]);
+            if let Some(at) = text_point(&shapes, "Open all roadmaps") {
+                frame(window, ctx, click_at(at));
+                return;
+            }
+            if text_point(&shapes, "Close all roadmaps").is_some() {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "no roadmap control after configured files resolved"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     #[test]
@@ -312,7 +372,7 @@ mod tests {
     }
 
     #[test]
-    fn a_card_paints_its_claim_and_its_warning() {
+    fn a_card_paints_its_state_border_and_its_warning() {
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
         integrated(&mut window);
         let ctx = egui::Context::default();
@@ -327,6 +387,7 @@ mod tests {
             1,
             SystemTime::UNIX_EPOCH + Duration::from_secs(60),
         );
+        window.active_mut().focus = window.active().panes()[1].name;
         frame(&mut window, &ctx, chord_with(egui::Key::O));
         let shapes = frame(&mut window, &ctx, vec![]);
         // The console panels under the board paint the same claim and warning, so only text that
@@ -339,9 +400,11 @@ mod tests {
             })
         };
         let asking = window.tabs[0].panes()[0].name;
+        let card = window.board.card_rect(asking).unwrap();
+        assert!(shapes.iter().any(|s|matches!(&s.shape, egui::Shape::Rect(r) if (r.rect.width()-card.width()).abs()<2.0 && card.contains(r.rect.center()) && r.stroke.color == window.theme.color(term_core::TermColor::Indexed(1)))), "waiting state border is absent");
         assert!(
-            on_card(asking, "it is waiting for you"),
-            "the claim is not on its card"
+            !on_card(asking, "it is waiting for you"),
+            "removed duplicate attention prose returned"
         );
         let stale = window.tabs[1].panes()[1].name;
         let warning = crate::panel::summary::snapshot(
@@ -777,7 +840,10 @@ mod tests {
             .filter_map(|pane| window.board.card_rect(pane.name))
             .filter(|r| r.is_positive())
             .collect();
-        assert!(cards.len() >= 2, "small Board did not expose two cards");
+        assert!(
+            cards.len() >= 2,
+            "small Board did not expose two cards: {cards:?}"
+        );
         // Cards sit side by side as well as one under another, so no pair may share a point.
         for (n, card) in cards.iter().enumerate() {
             for other in &cards[n + 1..] {
@@ -811,10 +877,23 @@ mod tests {
             checked_slots >= 2,
             "long metadata was not painted inside the Board card slots"
         );
+        pass(&mut window, vec![key(egui::Key::Escape)]);
         assert!(
-            the_text_queued_up(&shapes, "Close"),
-            "close control was displaced by metadata"
+            !window.board.is_open(),
+            "Escape could not close the small Board"
         );
+        pass(
+            &mut window,
+            vec![egui::Event::Key {
+                key: egui::Key::O,
+                physical_key: None,
+                pressed: false,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        pass(&mut window, chord_with(egui::Key::O));
+        assert!(window.board.is_open());
         pass(&mut window, vec![key(egui::Key::End)]);
         let target = window.tabs[1].panes()[1].name;
         let rect = window
@@ -876,23 +955,30 @@ mod tests {
         let second = text_shape("second");
         let third = text_shape("third");
         assert!(
-            first.galley.text().contains("#42   first"),
-            "producer reference or indentation was lost"
+            the_text_queued_up(&shapes, "#42"),
+            "producer reference was lost"
+        );
+        assert!(
+            text_point(&shapes, "first").unwrap().x > text_point(&shapes, "second").unwrap().x,
+            "producer indentation was lost"
         );
         assert!(
             first.pos.y < second.pos.y && second.pos.y < third.pos.y,
             "body order changed"
         );
-        let expected = window.theme.panel_color(
-            Some(panel_contract::Mark::Block),
-            Some(panel_contract::Style::Warn),
-        );
+        let expected = window
+            .theme
+            .panel_color(None, Some(panel_contract::Style::Warn));
         assert!(
             first
                 .galley
                 .job
                 .sections
                 .iter()
+                .filter(|s| {
+                    let i = first.galley.text().find("first").unwrap();
+                    s.byte_range.start.0 <= i && i < s.byte_range.end.0
+                })
                 .all(|s| s.format.color == expected),
             "producer style/mark did not reach painted text"
         );
@@ -1028,18 +1114,30 @@ mod tests {
             .panel_state
             .deliver(1, "flow", panel, SystemTime::now())
             .unwrap();
+        window
+            .all_panes_mut()
+            .find(|p| p.name == origins[1])
+            .unwrap()
+            .panel_state
+            .deliver(
+                2,
+                "flow",
+                panel_contract::parse_document(r#"{"lines":["Off-plan witness"]}"#).unwrap(),
+                SystemTime::now(),
+            )
+            .unwrap();
         frame(&mut window, &ctx, chord_with(egui::Key::O));
         open_roadmaps(&mut window, &ctx);
         let shapes = frame(&mut window, &ctx, vec![]);
-        for expected in [
-            "published ",
-            "roadmap.md",
-            "Build - 0/1",
-            "Feature",
-            "Off the plan",
-        ] {
+        for expected in ["From roadmap.md", "Build", "0/1", "Feature", "Off the plan"] {
             assert!(the_text_queued_up(&shapes, expected), "missing {expected}");
         }
+        assert!(
+            text_point(&shapes, "Feature").unwrap().y
+                < text_point(&shapes, "WAITING FOR YOU").unwrap().y,
+            "expanded roadmap must precede this project's state headers"
+        );
+        hover_roadmap(&mut window, &ctx, "published ");
         let first = window.board.card_rect(origins[0]).unwrap();
         let second = window.board.card_rect(origins[1]).unwrap();
         assert!(
@@ -1137,10 +1235,7 @@ mod tests {
         loop {
             let shapes = frame(&mut window, &ctx, vec![]);
             if the_text_queued_up(&shapes, "file only task") {
-                assert!(the_text_queued_up(
-                    &shapes,
-                    &format!("from {}", roadmap.display())
-                ));
+                hover_roadmap(&mut window, &ctx, &format!("from {}", roadmap.display()));
                 assert!(!the_text_queued_up(&shapes, "published task"));
                 break;
             }

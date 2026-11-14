@@ -556,11 +556,14 @@ chord to the program when the board is closed. The Shortcuts section in Settings
 
 The board has one row per Git repository and five state columns: **Waiting for you**, **Stuck**,
 **Working**, **Finished** and **Idle**. Repository rows sort by their strongest state, then name;
-**Other consoles** stays last for consoles outside a repository. Column counts and project/console
-totals show the whole window. Narrow windows scroll horizontally instead of shrinking the columns.
+**Other consoles** stays last for consoles outside a repository. Each project's summary and roadmap
+appear above its terminal columns. Right-edge column badges count that project's consoles; toolbar
+totals count the whole window. Projects without consoles keep their roadmap without an empty terminal
+grid. Narrow windows scroll horizontally instead of shrinking the columns.
 
 A card uses the first producer title, the current phase and the available worktree branch. Its body
-uses the same native panel content, marks, references, styles, links and section summaries. Long
+retains native panel content, marks, references, styles, links and section summaries in Bellwether's
+monospaced presentation, with aligned references and independent reader controls. Long
 panels initially show eighteen source lines; **Show all** exposes the remainder. Finished and Idle
 cards start compact; **Show panel** opens them. Section-fold choices belong to the Board reader and
 survive producer republishes independently of the sidebar. Freshness and publication-origin notices
@@ -574,23 +577,31 @@ in Finished without a panel. Phase, body text and console output never determine
 
 Waiting cards are ordered oldest observed first. The Board tracks an effective wait even while
 closed, keeps its start across republishes and highlights it after five and fifteen observed minutes.
-The duration is labelled **observed wait**: time before observation or a restart is unknown. Leaving
+The card's hover disclosure labels the duration **observed wait**: time before observation or a
+restart is unknown. Leaving
 wait, replacing the shell or closing the console clears it. Silence alone does not move Wait or Done
 to Idle; freshness/backing warnings remain visible.
 
-Project roadmaps start folded and can be opened individually or together. Expanded plans show
-completed summaries, started milestones, later milestones, progress and attached/off-plan consoles.
-**Show all** inside a milestone exposes remaining deliverables; **Show all milestones** reaches the
-whole plan. The configured roadmap window remains the initial detail window and cannot hide attached
-work. Published plans still override configured files as a whole; retirement reveals the file again.
-A configured project remains visible without an open console. Without a plan, producer section
-headings and summaries can be inspected as a clearly labelled fallback.
+Project roadmaps start folded and can be opened individually or with the toolbar's **Open all
+roadmaps** / **Close all roadmaps** toggle. The summary shows the plan title, deliverable progress
+and active milestone IDs. Expanded plans show separate milestone/deliverable totals and wrapping,
+equal-width milestone cards with their own bars, done-when criteria, completed summaries and
+state-colored attached-console badges. A done summary counts all explicitly done items, including
+an attached done item still shown individually.
+
+**Show all N** inside a milestone reveals its remaining deliverables. Later milestone chips show
+progress and dependencies; clicking one reveals its detail. **Show all milestones** reaches entries
+outside the configured initial roadmap window. Attached work remains visible. Off-plan consoles,
+all outside-code entries with their pending count, and the source remain available. Published plans
+override configured files as a whole; retirement reveals the file again. A configured project remains
+visible without an open console. Without a plan, producer section headings and summaries appear as
+a clearly labelled fallback. Plain-string plan items retain their text and count toward totals.
 
 Click a card, or move with the arrows and press Enter, to open its console. Left/Right follow reading
 order, Up/Down the grid, and Home/End the first/last card; selection reveals the required position in
 both scroll axes. A card's fold, expansion or disclosed HTTP(S) link performs that reader action
-without activating the console. The Board never executes producer action commands. Escape, Close
-or the Board control returns to the console. Console dimensions, programs, history, panel ownership
+without activating the console. The Board never executes producer action commands. Escape or the
+Board control returns to the console. Console dimensions, programs, history, panel ownership
 and hidden-console pump budgets are preserved. Settings and Board remain separate.
 
 ## Markdown and Git diff viewers

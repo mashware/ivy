@@ -29,15 +29,6 @@ impl Column {
             Self::Idle => "Idle",
         }
     }
-    pub(super) fn symbol(self) -> &'static str {
-        match self {
-            Self::Wait => "?",
-            Self::Block => "⊘",
-            Self::Working => "▸",
-            Self::Done => "∎",
-            Self::Idle => "·",
-        }
-    }
     pub(super) fn rank(self) -> usize {
         self as usize
     }

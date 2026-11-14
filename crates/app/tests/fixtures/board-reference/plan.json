@@ -1,0 +1,110 @@
+{
+ "v": 1,
+ "title": "[DEMO] App de correo — Q4",
+ "source": "docs/roadmap.md",
+ "milestones": [
+  {
+   "id": "M1",
+   "title": "Bandeja multi-perfil",
+   "done_when": "Un usuario cambia de perfil sin recargar",
+   "items": [
+    {
+     "id": "selector",
+     "text": "Selector de perfil",
+     "mark": "done",
+     "ref": "#1"
+    },
+    {
+     "id": "inbox",
+     "text": "Bandeja y búsqueda por perfil",
+     "mark": "current",
+     "ref": "#3"
+    },
+    {
+     "id": "settings",
+     "text": "Página de ajustes",
+     "mark": "pending",
+     "ref": "#4"
+    },
+    {
+     "id": "notif",
+     "text": "Notificaciones sin duplicados",
+     "mark": "done",
+     "ref": "#88"
+    }
+   ]
+  },
+  {
+   "id": "M2",
+   "title": "Facturación en Stripe v3",
+   "done_when": "Los cobros de diciembre salen por v3",
+   "depends_on": [
+    "M1"
+   ],
+   "items": [
+    {
+     "id": "subs",
+     "text": "Modelo de suscripciones",
+     "mark": "done"
+    },
+    {
+     "id": "webhooks",
+     "text": "Webhooks firmados",
+     "mark": "done"
+    },
+    {
+     "id": "sandbox",
+     "text": "Pruebas en sandbox",
+     "mark": "block"
+    },
+    {
+     "id": "cutover",
+     "text": "Corte en producción",
+     "mark": "pending"
+    }
+   ]
+  },
+  {
+   "id": "M3",
+   "title": "Informes",
+   "done_when": "Un admin exporta un mes de actividad",
+   "items": [
+    {
+     "id": "csv",
+     "text": "Exportar a CSV",
+     "mark": "current"
+    },
+    {
+     "id": "charts",
+     "text": "Gráficas de actividad",
+     "mark": "pending"
+    },
+    "Informes programados por email"
+   ]
+  },
+  {
+   "id": "M4",
+   "title": "App móvil",
+   "depends_on": [
+    "M1",
+    "M3"
+   ],
+   "items": [
+    "Login",
+    "Bandeja",
+    "Push"
+   ]
+  }
+ ],
+ "outside": [
+  "Revisión legal del RGPD",
+  {
+   "text": "Contrato con Stripe",
+   "mark": "done"
+  },
+  {
+   "text": "Auditoría de seguridad",
+   "mark": "pending"
+  }
+ ]
+}

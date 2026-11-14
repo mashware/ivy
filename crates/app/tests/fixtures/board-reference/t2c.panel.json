@@ -1,0 +1,11 @@
+{
+  "phase": "design",
+  "attention": "done",
+  "lines": [
+    {
+      "text": "Selected terminal text intermittently shows gaps and fragmented highlighting",
+      "key": "title",
+      "style": "title"
+    }
+  ]
+}

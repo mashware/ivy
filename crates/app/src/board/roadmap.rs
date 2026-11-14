@@ -1,4 +1,5 @@
 //! A roadmap is inert text and groups of console cards; no links or actions are activated here.
+mod presentation;
 use super::model::Section;
 use crate::{project::Key, theme::Theme};
 use eframe::egui;
@@ -24,6 +25,14 @@ pub(super) struct Reader {
     projects: HashMap<String, bool>,
     milestones: HashSet<(String, String)>,
     all_milestones: HashSet<String>,
+}
+
+pub(super) fn project_open(reader: &Reader, section: &Section) -> bool {
+    reader
+        .projects
+        .get(&project_key(section))
+        .copied()
+        .unwrap_or(false)
 }
 
 fn project_key(section: &Section) -> String {
@@ -79,10 +88,11 @@ pub(super) fn placement(panel: Option<&Panel>, plan: &Plan) -> Placement {
             .items
             .iter()
             .position(|i| i.id.as_ref() == Some(id))
-            .map_or(Placement::Off, |i| Placement::Item(m, i)),
+            .map_or(Placement::Milestone(m), |i| Placement::Item(m, i)),
     }
 }
 
+#[cfg(test)]
 fn milestone_title(milestone: &Milestone) -> String {
     let done = milestone
         .items
@@ -95,16 +105,6 @@ fn milestone_title(milestone: &Milestone) -> String {
         milestone.title,
         milestone.items.len()
     )
-}
-fn symbol(mark: Option<Mark>) -> &'static str {
-    match mark {
-        Some(Mark::Done) => "✓",
-        Some(Mark::Current) => "▶",
-        Some(Mark::Pending) => "○",
-        Some(Mark::Wait) => "…",
-        Some(Mark::Block) => "!",
-        _ => " ",
-    }
 }
 pub(super) fn published_source(published: &super::plans::Published, now: SystemTime) -> String {
     let seconds = now
@@ -157,7 +157,6 @@ pub(super) fn enrich(window: &crate::Window, sections: &mut Vec<Section>, now: S
             key,
             kind: super::model::Kind::Repository {
                 name: file.name.clone(),
-                ink: window.theme.focus(),
             },
             entries: Vec::new(),
             roadmap: None,
@@ -196,82 +195,130 @@ pub(super) fn enrich(window: &crate::Window, sections: &mut Vec<Section>, now: S
     }
 }
 
-/// Reader choices are local to the board and never change the published plan.
+/// Reader choices are local to the Board and never change a published plan.
 pub(super) fn paint_controls(ui: &mut egui::Ui, sections: &[Section], reader: &mut Reader) {
-    ui.horizontal(|ui| {
-        if ui.button("Open all roadmaps").clicked() {
-            for section in sections
-                .iter()
-                .filter(|s| s.roadmap.is_some() || !fallback(s).is_empty())
-            {
-                reader.projects.insert(project_key(section), true);
-            }
-        }
-        if ui.button("Close all roadmaps").clicked() {
-            for section in sections
-                .iter()
-                .filter(|s| s.roadmap.is_some() || !fallback(s).is_empty())
-            {
-                reader.projects.insert(project_key(section), false);
-            }
-        }
+    let eligible: Vec<_> = sections
+        .iter()
+        .filter(|s| s.roadmap.is_some() || !fallback(s).is_empty())
+        .collect();
+    if eligible.is_empty() {
+        return;
+    }
+    let all_open = eligible.iter().all(|s| {
+        reader
+            .projects
+            .get(&project_key(s))
+            .copied()
+            .unwrap_or(false)
     });
+    if ui
+        .button(if all_open {
+            "Close all roadmaps"
+        } else {
+            "Open all roadmaps"
+        })
+        .clicked()
+    {
+        for section in eligible {
+            reader.projects.insert(project_key(section), !all_open);
+        }
+    }
 }
 
 fn done(m: &Milestone) -> bool {
     !m.items.is_empty() && m.items.iter().all(|i| i.mark == Some(Mark::Done))
 }
-
 fn started(m: &Milestone, attached: bool) -> bool {
+    if done(m) {
+        return attached;
+    }
     attached
-        || (!done(m)
-            && m.items.iter().any(|i| {
-                matches!(
-                    i.mark,
-                    Some(Mark::Done | Mark::Current | Mark::Wait | Mark::Block)
-                )
-            }))
+        || m.items.iter().any(|i| {
+            matches!(
+                i.mark,
+                Some(Mark::Done | Mark::Current | Mark::Wait | Mark::Block)
+            )
+        })
 }
-
 fn visible_items(m: &Milestone, attached: &[bool], all: bool) -> Vec<usize> {
     let mut open = 0;
     m.items
         .iter()
         .enumerate()
         .filter_map(|(i, item)| {
-            let is_open = item.mark != Some(Mark::Done);
-            if is_open {
-                open += 1;
+            if all || attached.get(i).copied().unwrap_or(false) {
+                return Some(i);
             }
-            (all || attached.get(i).copied().unwrap_or(false) || (is_open && open <= 5))
-                .then_some(i)
+            if item.mark == Some(Mark::Done) {
+                return None;
+            }
+            open += 1;
+            (open <= 5).then_some(i)
         })
         .collect()
 }
-
+fn progress(m: &Milestone) -> (usize, usize) {
+    (
+        m.items
+            .iter()
+            .filter(|i| i.mark == Some(Mark::Done))
+            .count(),
+        m.items.len(),
+    )
+}
+fn milestone_key(project: &str, m: &Milestone, index: usize) -> (String, String) {
+    (
+        project.to_owned(),
+        m.id.clone()
+            .unwrap_or_else(|| format!("#{index}:{}", m.title)),
+    )
+}
+struct Surface<'a> {
+    theme: &'a Theme,
+    signals: &'a HashMap<usize, crate::agent_signals::View>,
+    now: SystemTime,
+}
+fn chip(
+    ui: &mut egui::Ui,
+    entry: &super::model::Entry,
+    selected: &mut Option<usize>,
+    surface: &Surface<'_>,
+) {
+    let column = super::observation::classify(
+        entry.snapshot.document.as_deref(),
+        surface.signals.get(&entry.pane).copied(),
+        surface.now,
+    );
+    let title = super::cards::clean(super::cards::title(entry).split(" · ").next().unwrap_or(""));
+    let id = egui::Id::new(("board-roadmap-console", ui.ctx().viewport_id(), entry.pane));
+    if ui
+        .scope_builder(egui::UiBuilder::new().id(id), |ui| {
+            super::style::console_chip(ui, column, &title, surface.theme)
+                .on_hover_text(format!(
+                    "Go to {} · {}",
+                    entry.console_label, entry.tab_label
+                ))
+                .clicked()
+        })
+        .inner
+    {
+        *selected = Some(entry.pane);
+    }
+}
 fn chips(
     ui: &mut egui::Ui,
     section: &Section,
     positions: &[Placement],
     wanted: &Placement,
     selected: &mut Option<usize>,
+    surface: &Surface<'_>,
 ) {
     for (entry, position) in section.entries.iter().zip(positions) {
-        if position == wanted {
-            let id = egui::Id::new(("board-roadmap-console", ui.ctx().viewport_id(), entry.pane));
-            if ui
-                .scope_builder(egui::UiBuilder::new().id(id), |ui| {
-                    ui.small_button(format!("{} · {}", entry.tab_label, entry.console_label))
-                        .clicked()
-                })
-                .inner
-            {
-                *selected = Some(entry.pane);
-            }
+        if position == wanted && (*wanted != Placement::Off || entry.snapshot.document.is_some()) {
+            chip(ui, entry, selected, surface);
         }
     }
 }
-
 fn fallback(section: &Section) -> Vec<(&str, &panel_contract::Line)> {
     section
         .entries
@@ -282,12 +329,13 @@ fn fallback(section: &Section) -> Vec<(&str, &panel_contract::Line)> {
                     .lines
                     .iter()
                     .filter(|line| line.style == Some(panel_contract::Style::Section))
-                    .map(move |line| (entry.console_label.as_str(), line))
+                    .map(move |line| (super::cards::title(entry), line))
             })
         })
         .collect()
 }
 
+#[cfg(test)]
 pub(super) fn paint_project(
     ui: &mut egui::Ui,
     section: &Section,
@@ -295,255 +343,40 @@ pub(super) fn paint_project(
     window: (usize, usize),
     theme: &Theme,
 ) -> Option<usize> {
-    let id = egui::Id::new((
-        "board-roadmap-project",
-        ui.ctx().viewport_id(),
-        project_key(section),
-    ));
-    ui.scope_builder(egui::UiBuilder::new().id(id), |ui| {
-        paint_project_contents(ui, section, reader, window, theme)
-    })
-    .inner
+    paint_project_with_signals(
+        ui,
+        section,
+        reader,
+        window,
+        theme,
+        &HashMap::new(),
+        SystemTime::now(),
+    )
 }
-
-fn paint_project_contents(
+pub(super) fn paint_project_with_signals(
     ui: &mut egui::Ui,
     section: &Section,
     reader: &mut Reader,
     window: (usize, usize),
     theme: &Theme,
+    signals: &HashMap<usize, crate::agent_signals::View>,
+    now: SystemTime,
 ) -> Option<usize> {
-    let key = project_key(section);
-    let mut selected = None;
-    let resolved = section.roadmap.as_ref();
-    let fallback = fallback(section);
-    let mut is_open = reader.projects.get(&key).copied().unwrap_or(false);
-    let horizontal_offset = (ui.clip_rect().left() - ui.max_rect().left()).max(0.0);
-    ui.horizontal_wrapped(|ui| {
-        ui.add_space(horizontal_offset);
-        ui.colored_label(
-            section.ink().unwrap_or(theme.focus()),
-            egui::RichText::new(section.name()).strong(),
-        );
-        ui.label(format!("{} consoles", section.entries.len()));
-        if let Some(roadmap) = resolved {
-            if let Some(plan) = &roadmap.plan {
-                let total: usize = plan.milestones.iter().map(|m| m.items.len()).sum();
-                let completed: usize = plan
-                    .milestones
-                    .iter()
-                    .flat_map(|m| &m.items)
-                    .filter(|i| i.mark == Some(Mark::Done))
-                    .count();
-                ui.label(format!(
-                    "{} · {completed}/{total} done",
-                    plan.title.as_deref().unwrap_or("Roadmap")
-                ));
-            } else {
-                ui.label(format!("No plan · {} sections", fallback.len()));
-            }
-            let notice = match &roadmap.error {
-                Some(error) => format!("{}\n{}", roadmap.source, error),
-                None => roadmap.source.clone(),
-            };
-            if ui
-                .small_button(if is_open {
-                    "▾ Roadmap"
-                } else {
-                    "▸ Roadmap"
-                })
-                .on_hover_text(notice)
-                .clicked()
-            {
-                is_open = !is_open;
-                reader.projects.insert(key.clone(), is_open);
-            }
-        } else if !fallback.is_empty() {
-            ui.label(format!("No plan · {} sections", fallback.len()));
-            if ui
-                .small_button(if is_open {
-                    "▾ Sections"
-                } else {
-                    "▸ Sections"
-                })
-                .clicked()
-            {
-                is_open = !is_open;
-                reader.projects.insert(key.clone(), is_open);
-            }
-        } else {
-            ui.label("No plan");
-        }
-    });
-    if is_open && resolved.is_none_or(|r| r.plan.is_none()) && !fallback.is_empty() {
-        ui.label("No plan published · console sections");
-        for (console, line) in fallback {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(console);
-                ui.strong(&line.text);
-                if let Some(summary) = &line.summary {
-                    ui.label(summary);
-                }
-            });
-        }
-    }
-    let Some(roadmap) = resolved.filter(|_| is_open) else {
-        return selected;
+    let id = egui::Id::new((
+        "board-roadmap-project",
+        ui.ctx().viewport_id(),
+        project_key(section),
+    ));
+    let surface = Surface {
+        theme,
+        signals,
+        now,
     };
-    ui.small(&roadmap.source);
-    if let Some(error) = &roadmap.error {
-        ui.label(error);
-    }
-    let Some(plan) = &roadmap.plan else {
-        return selected;
-    };
-    if let Some(title) = &plan.title {
-        ui.strong(title);
-    }
-    let positions: Vec<_> = section
-        .entries
-        .iter()
-        .map(|e| placement(e.snapshot.document.as_deref(), plan))
-        .collect();
-    let attached: Vec<bool> = (0..plan.milestones.len())
-        .map(|m| {
-            positions
-                .iter()
-                .any(|p| matches!(p, Placement::Item(n, _) | Placement::Milestone(n) if *n == m))
-        })
-        .collect();
-    let prefix = plan
-        .milestones
-        .iter()
-        .enumerate()
-        .take_while(|(i, m)| done(m) && !attached[*i])
-        .count();
-    if prefix > 0 {
-        ui.label(format!("✓ {prefix} completed milestones"));
-    }
-    let range = super::roadmap::window(plan, window.0, window.1);
-    let all = reader.all_milestones.contains(&key);
-    for (mi, milestone) in plan.milestones.iter().enumerate() {
-        if mi < prefix && !all {
-            continue;
-        }
-        let active = started(milestone, attached[mi]);
-        if !all && !range.contains(&mi) && !active {
-            continue;
-        }
-        if !active && !all {
-            ui.label(format!("○ {}", milestone_title(milestone)));
-            continue;
-        }
-        let mk = (
-            key.clone(),
-            milestone
-                .id
-                .clone()
-                .unwrap_or_else(|| format!("#{mi}:{}", milestone.title)),
-        );
-        let id = egui::Id::new(("board-roadmap-milestone", ui.ctx().viewport_id(), &mk));
-        ui.scope_builder(egui::UiBuilder::new().id(id), |ui| {
-            egui::Frame::group(ui.style()).show(ui, |ui| {
-                ui.strong(milestone_title(milestone));
-                if let Some(criterion) = &milestone.done_when {
-                    ui.label(format!("Done when: {criterion}"));
-                }
-                if !milestone.depends_on.is_empty() {
-                    ui.label(format!("Depends on: {}", milestone.depends_on.join(", ")));
-                }
-                ui.horizontal_wrapped(|ui| {
-                    chips(
-                        ui,
-                        section,
-                        &positions,
-                        &Placement::Milestone(mi),
-                        &mut selected,
-                    )
-                });
-                let item_attached: Vec<_> = (0..milestone.items.len())
-                    .map(|i| positions.contains(&Placement::Item(mi, i)))
-                    .collect();
-                let expanded = reader.milestones.contains(&mk);
-                let visible = visible_items(milestone, &item_attached, expanded);
-                let hidden_done = milestone
-                    .items
-                    .iter()
-                    .filter(|item| item.mark == Some(Mark::Done))
-                    .count()
-                    - visible
-                        .iter()
-                        .filter(|&&i| milestone.items[i].mark == Some(Mark::Done))
-                        .count();
-                if hidden_done > 0 {
-                    ui.small(format!("✓ {hidden_done} completed"));
-                }
-                for &i in &visible {
-                    let item = &milestone.items[i];
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label(format!(
-                            "{} {} {}",
-                            symbol(item.mark),
-                            item.text,
-                            item.reference.as_deref().unwrap_or("")
-                        ));
-                        chips(
-                            ui,
-                            section,
-                            &positions,
-                            &Placement::Item(mi, i),
-                            &mut selected,
-                        );
-                    });
-                }
-                if (visible.len() < milestone.items.len() || expanded)
-                    && ui
-                        .small_button(if expanded { "Show less" } else { "Show all" })
-                        .clicked()
-                {
-                    if expanded {
-                        reader.milestones.remove(&mk);
-                    } else {
-                        reader.milestones.insert(mk);
-                    }
-                }
-            });
-        });
-    }
-    let hidden_details = prefix > 0
-        || plan
-            .milestones
-            .iter()
-            .enumerate()
-            .any(|(i, m)| !started(m, attached[i]));
-    if (hidden_details || all)
-        && ui
-            .small_button(if all {
-                "Show less milestones"
-            } else {
-                "Show all milestones"
-            })
-            .clicked()
-    {
-        if all {
-            reader.all_milestones.remove(&key);
-        } else {
-            reader.all_milestones.insert(key.clone());
-        }
-    }
-    if !plan.outside.is_empty() {
-        ui.strong("Outside the plan");
-        for item in &plan.outside {
-            ui.label(format!("{} {}", symbol(item.mark), item.text));
-        }
-    }
-    if positions.contains(&Placement::Off) {
-        ui.label("Off the plan");
-        ui.horizontal_wrapped(|ui| chips(ui, section, &positions, &Placement::Off, &mut selected));
-    }
-    selected
+    ui.scope_builder(egui::UiBuilder::new().id(id), |ui| {
+        presentation::paint_project_contents(ui, section, reader, window, &surface)
+    })
+    .inner
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -618,7 +451,7 @@ mod tests {
         let at = shapes
             .iter()
             .find_map(|s| match &s.shape {
-                egui::Shape::Text(t) if t.galley.text() == "Show all milestones" => {
+                egui::Shape::Text(t) if t.galley.text().contains("M Pending 0/1") => {
                     Some(t.pos + t.galley.size() / 2.0)
                 }
                 _ => None,
@@ -639,6 +472,11 @@ mod tests {
     #[test]
     fn reordering_roadmap_console_chips_cannot_retarget_a_press() {
         let mut section = test_section(Plan::default(), &[1, 2]);
+        for entry in &mut section.entries {
+            entry.snapshot.document = Some(Arc::new(
+                panel_contract::parse_document(r#"{"lines":[]}"#).unwrap(),
+            ));
+        }
         let ctx = egui::Context::default();
         let mut selected = None;
         let mut draw = |section: &Section, events| {
@@ -649,6 +487,11 @@ mod tests {
                     &[Placement::Off, Placement::Off],
                     &Placement::Off,
                     &mut selected,
+                    &Surface {
+                        theme: &Theme::default(),
+                        signals: &HashMap::new(),
+                        now: SystemTime::now(),
+                    },
                 );
             })
         };
@@ -702,7 +545,7 @@ mod tests {
         let at = shapes
             .iter()
             .find_map(|s| match &s.shape {
-                egui::Shape::Text(t) if t.galley.text() == "Show all" => {
+                egui::Shape::Text(t) if t.galley.text().contains("Show all 7") => {
                     Some(t.pos + t.galley.size() / 2.0)
                 }
                 _ => None,
@@ -751,6 +594,12 @@ mod tests {
         assert_eq!(
             visible_items(&milestone, &attached, false),
             vec![0, 2, 3, 4, 5, 6, 8]
+        );
+        attached[2] = true;
+        assert_eq!(
+            visible_items(&milestone, &attached, false),
+            vec![0, 2, 3, 4, 5, 6, 7, 8],
+            "attached unfinished items must not consume the five other open-item slots"
         );
         assert_eq!(
             visible_items(&milestone, &attached, true),
@@ -812,12 +661,192 @@ mod tests {
             placement(Some(&p(r#"{"milestone":"H3","lines":[]}"#)), &plan),
             Placement::Milestone(2)
         );
+        assert_eq!(
+            placement(
+                Some(&p(
+                    r#"{"milestone":"H3","deliverable":"missing","lines":[]}"#
+                )),
+                &plan
+            ),
+            Placement::Milestone(2)
+        );
         for text in [
             r#"{"deliverable":"D","lines":[]}"#,
-            r#"{"milestone":"H3","deliverable":"missing","lines":[]}"#,
             r#"{"milestone":"missing","lines":[]}"#,
         ] {
             assert_eq!(placement(Some(&p(text)), &plan), Placement::Off);
         }
+    }
+
+    fn text_at(shapes: &[egui::epaint::ClippedShape], needle: &str) -> Option<egui::Pos2> {
+        shapes.iter().find_map(|s| match &s.shape {
+            egui::Shape::Text(t) => {
+                let start = t.galley.text().find(needle)?;
+                let at = t
+                    .galley
+                    .pos_from_cursor(egui::text::CCursor::new(
+                        t.galley.text()[..start].chars().count() + needle.chars().count() / 2,
+                    ))
+                    .center()
+                    + t.pos.to_vec2();
+                s.clip_rect.contains(at).then_some(at)
+            }
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn exact_reference_plan_preserves_all_items_and_paints_three_active_cards_and_every_outside_item()
+     {
+        let (plan, _) = panel_contract::plan::parse_document_noting(include_str!(
+            "../../tests/fixtures/board-reference/plan.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            plan.milestones
+                .iter()
+                .map(|m| m.items.len())
+                .collect::<Vec<_>>(),
+            [4, 4, 3, 3]
+        );
+        assert_eq!(
+            plan.milestones
+                .iter()
+                .map(progress)
+                .fold((0, 0), |(d, n), (x, y)| (d + x, n + y)),
+            (4, 14)
+        );
+        assert_eq!(plan.outside.len(), 3);
+        let mut section = test_section(plan, &[1, 2, 3, 4, 5]);
+        let docs = [
+            include_str!("../../tests/fixtures/board-reference/t2g.panel.json"),
+            include_str!("../../tests/fixtures/board-reference/t2h.panel.json"),
+            include_str!("../../tests/fixtures/board-reference/t2j.panel.json"),
+            include_str!("../../tests/fixtures/board-reference/t2k.panel.json"),
+            include_str!("../../tests/fixtures/board-reference/t2c.panel.json"),
+        ];
+        for (entry, doc) in section.entries.iter_mut().zip(docs) {
+            entry.snapshot.document = Some(Arc::new(panel_contract::parse_document(doc).unwrap()));
+        }
+        let ctx = egui::Context::default();
+        let mut reader = Reader::default();
+        let draw = |reader: &mut Reader, events| {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1600.0, 1500.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.set_width(1500.0);
+                    super::super::style::apply(ui, &Theme::default());
+                    paint_controls(ui, std::slice::from_ref(&section), reader);
+                    let _ = paint_project(ui, &section, reader, (2, 3), &Theme::default());
+                },
+            );
+            let shapes = output.shapes.clone();
+            output.drop_without_applying_deltas();
+            shapes
+        };
+        let folded = draw(&mut reader, vec![]);
+        assert!(text_at(&folded, "4/14").is_some());
+        assert!(text_at(&folded, "now M1, M2, M3").is_some());
+        assert!(text_at(&folded, "0/4 milestones").is_none());
+        let open = text_at(&folded, "Open all roadmaps").unwrap();
+        draw(&mut reader, press(open, true));
+        draw(&mut reader, press(open, false));
+        let expanded = draw(&mut reader, vec![]);
+        for text in [
+            "0/4 milestones · 4/14 deliverables",
+            "Outside the code · 2 pending:",
+            "Revisión legal del RGPD",
+            "Contrato con Stripe",
+            "Auditoría de seguridad",
+            "From docs/roadmap.md",
+            "after M1, M3",
+            "Notificaciones sin duplicados",
+            "Informes programados por email",
+        ] {
+            assert!(
+                text_at(&expanded, text).is_some(),
+                "reference information omitted {text:?}"
+            );
+        }
+        let titles = [
+            "Bandeja multi-perfil",
+            "Facturación en Stripe v3",
+            "Informes",
+        ]
+        .map(|t| text_at(&expanded, t).unwrap());
+        assert!(
+            titles
+                .windows(2)
+                .all(|p| p[0].x < p[1].x && (p[0].y - p[1].y).abs() < 1.0),
+            "active milestones must share one row: {titles:?}"
+        );
+        let card_widths: Vec<_> = titles
+            .iter()
+            .map(|at| {
+                expanded
+                    .iter()
+                    .filter_map(|s| match &s.shape {
+                        egui::Shape::Rect(r)
+                            if r.rect.contains(*at)
+                                && r.stroke.color == Theme::default().focus()
+                                && r.rect.height() > 50.0 =>
+                        {
+                            Some(r.rect.width())
+                        }
+                        _ => None,
+                    })
+                    .next()
+                    .expect("milestone frame")
+            })
+            .collect();
+
+        assert!(expanded.iter().filter(|s|matches!(&s.shape,egui::Shape::Rect(r) if r.rect.height()==4.0 && r.rect.width()==60.0)).count()>=3,"missing per-milestone progress tracks");
+        assert_eq!(expanded.iter().filter(|s|matches!(&s.shape,egui::Shape::Text(t) if t.galley.text().contains("2 done"))).count(),2,"summary must count attached done items as well as hidden done items");
+        for shape in &expanded {
+            if let egui::Shape::Text(text) = &shape.shape
+                && text.galley.text().contains("2 done")
+            {
+                let near = egui::Rect::from_min_max(
+                    text.pos - egui::vec2(18.0, 1.0),
+                    text.pos + egui::vec2(0.0, 18.0),
+                );
+                let strokes=expanded.iter().filter(|s|matches!(&s.shape,egui::Shape::LineSegment{points,stroke} if stroke.color==Theme::default().focus() && points[0].x!=points[1].x && points[0].y!=points[1].y && near.contains(points[0]) && near.contains(points[1]))).count();
+                assert_eq!(
+                    strokes, 2,
+                    "done summary needs a visible checkmark without relying on font coverage"
+                );
+            }
+        }
+
+        for forbidden in ["Aprobar", "sí, adelante"] {
+            assert!(
+                text_at(&expanded, forbidden).is_none(),
+                "producer command leaked into roadmap controls"
+            );
+        }
+        let close = text_at(&expanded, "Close all roadmaps").unwrap();
+        draw(&mut reader, press(close, true));
+        draw(&mut reader, press(close, false));
+        let folded = draw(&mut reader, vec![]);
+        assert!(text_at(&folded, "0/4 milestones").is_none());
+        assert!(text_at(&folded, "Open all roadmaps").is_some());
+        let individual = text_at(&folded, "Roadmap").unwrap();
+        draw(&mut reader, press(individual, true));
+        draw(&mut reader, press(individual, false));
+        assert!(
+            text_at(&draw(&mut reader, vec![]), "0/4 milestones").is_some(),
+            "individual project disclosure failed"
+        );
+        assert!(
+            card_widths.windows(2).all(|p| (p[0] - p[1]).abs() < 1.0),
+            "milestone cards differ in width: {card_widths:?}"
+        );
     }
 }

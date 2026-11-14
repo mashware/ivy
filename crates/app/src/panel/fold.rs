@@ -16,7 +16,7 @@ pub(crate) enum HeaderId {
 pub(super) struct Header {
     pub(super) id: HeaderId,
     pub(super) folded: bool,
-    summary: String,
+    pub(super) summary: String,
 }
 pub(super) type Folds = HashMap<HeaderId, bool>;
 
@@ -147,7 +147,7 @@ pub(super) fn paint_header(
     Some(inked)
 }
 
-fn fit<'a>(text: &'a str, width: f32, measure: &impl Fn(&str) -> f32) -> &'a str {
+pub(super) fn fit<'a>(text: &'a str, width: f32, measure: &impl Fn(&str) -> f32) -> &'a str {
     let boundaries: Vec<usize> = text
         .grapheme_indices(true)
         .map(|(at, _)| at)

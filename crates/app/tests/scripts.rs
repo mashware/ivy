@@ -75,6 +75,14 @@ use std::path::Path;
 /// to.
 const MODULES: &[(&str, &str)] = &[
     (
+        "app/src/board/style.rs",
+        include_str!("../src/board/style.rs"),
+    ),
+    (
+        "app/src/board/roadmap/presentation.rs",
+        include_str!("../src/board/roadmap/presentation.rs"),
+    ),
+    (
         "app/src/board/branches.rs",
         include_str!("../src/board/branches.rs"),
     ),

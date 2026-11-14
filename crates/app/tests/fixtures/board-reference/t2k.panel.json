@@ -1,0 +1,36 @@
+{
+ "v": 1,
+ "phase": "design",
+ "attention": "wait",
+ "attention_since": 1794681896,
+ "lines": [
+  {
+   "text": "[DEMO] Exportar informes a CSV",
+   "style": "title"
+  },
+  "",
+  {
+   "text": "Diseño",
+   "style": "section",
+   "summary": "2 opciones"
+  },
+  {
+   "text": "A: exportación síncrona (simple, límite 10k filas)",
+   "mark": "info",
+   "ref": "A"
+  },
+  {
+   "text": "B: job en cola + email con enlace",
+   "mark": "info",
+   "ref": "B"
+  },
+  "",
+  {
+   "text": "¿A o B?",
+   "mark": "wait",
+   "ref": "Decisión"
+  }
+ ],
+ "milestone": "M3",
+ "deliverable": "csv"
+}

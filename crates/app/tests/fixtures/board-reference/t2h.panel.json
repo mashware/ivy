@@ -1,0 +1,42 @@
+{
+ "v": 1,
+ "phase": "build",
+ "attention": "block",
+ "attention_since": 1794681596,
+ "lines": [
+  {
+   "text": "[DEMO] Migración de facturación a Stripe v3",
+   "style": "title"
+  },
+  "",
+  {
+   "text": "Plan",
+   "style": "section",
+   "summary": "3/6"
+  },
+  {
+   "text": "modelo de suscripciones",
+   "mark": "done"
+  },
+  {
+   "text": "webhooks firmados",
+   "mark": "done"
+  },
+  {
+   "text": "tests de integración",
+   "mark": "done"
+  },
+  {
+   "text": "sandbox de Stripe",
+   "mark": "block",
+   "ref": "Bloqueo"
+  },
+  {
+   "text": "la clave de test caducó; la API responde 401",
+   "style": "error",
+   "indent": 2
+  }
+ ],
+ "milestone": "M2",
+ "deliverable": "sandbox"
+}
