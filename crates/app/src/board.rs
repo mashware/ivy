@@ -41,6 +41,8 @@ pub(crate) struct State {
     scroll_selected: bool,
     blocked_frame: Option<u64>,
     awaiting_release: bool,
+    pointer_owned: bool,
+    keyboard_focus: bool,
     pub(crate) timing: crate::measure::Board,
 }
 
@@ -69,6 +71,8 @@ impl Default for State {
             scroll_selected: false,
             blocked_frame: None,
             awaiting_release: false,
+            pointer_owned: false,
+            keyboard_focus: false,
             timing: crate::measure::Board::default(),
         }
     }
@@ -99,6 +103,42 @@ impl State {
 pub(crate) use input::{
     before_keys, blocked, cancel_gestures, dismiss_for_chrome, reanchor, toggle,
 };
+
+/// Called by the shared sidebar host when Board becomes the selected tool.
+/// Keep the user's Board navigation and cached geometry across hide/reopen.
+pub(crate) fn reveal(window: &mut crate::Window, ctx: &egui::Context) {
+    if !window.board.enabled {
+        return;
+    }
+    if !window.board.open {
+        window.board.open = true;
+        window.board.original = Some(window.active().focus);
+        if window.board.selected.is_none() {
+            window.board.selected = Some(window.active().focus);
+            window.board.ordinal = 0;
+            window.board.scroll_selected = true;
+        }
+        window.board.surface.pressed = None;
+        window.board.pointer_owned = false;
+        window.board.activate = None;
+        window.board.keyboard_focus = true;
+        window.board.blocked_frame = Some(ctx.cumulative_frame_nr());
+    }
+    ctx.request_repaint();
+}
+
+/// Release Board input ownership while leaving its global view state intact.
+pub(crate) fn suspend(window: &mut crate::Window) {
+    window.board.open = false;
+    window.board.keyboard_focus = false;
+    if window.board.pointer_owned {
+        window.board.awaiting_release = true;
+        window.board.pointer_owned = false;
+    }
+    window.board.surface.pressed = None;
+    window.board.surface.child_pressed = None;
+    window.board.activate = None;
+}
 
 /// Runs only after active and background panel refresh, preserving normal PTY geometry.
 pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, area: egui::Rect) {
@@ -207,8 +247,7 @@ pub(crate) fn activate(window: &mut crate::Window, ctx: &egui::Context, target: 
         window.pane_view.clear(tab.name);
     }
     window.board.timing.navigation(changed);
-    window.board.original = None;
-    input::close(window, ctx);
+    crate::sidebar::close(window, ctx);
 }
 
 pub(crate) fn configure(window: &mut crate::Window, settings: &crate::settings::Settings) {
@@ -267,4 +306,48 @@ pub(crate) fn observe(window: &mut crate::Window, ctx: &egui::Context) {
         .timing
         .observation(started.elapsed(), live.len(), transitions);
     window.timed_separately += window.board.timing.take_cost();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn board_selection_and_scroll_survive_shared_sidebar_switches() {
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]; 4]);
+        let ctx = egui::Context::default();
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 650.0));
+        let frame = |window: &mut crate::Window, events| {
+            crate::tests::one_frame_in(window, &ctx, area, events);
+        };
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Board);
+        frame(&mut window, vec![]);
+        let initial_selection = window.board.selected();
+        frame(
+            &mut window,
+            vec![egui::Event::Key {
+                key: egui::Key::End,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        frame(&mut window, vec![]);
+        let selected = window.board.selected().expect("Board has a selection");
+        assert_ne!(
+            Some(selected),
+            initial_selection,
+            "End did not change Board selection"
+        );
+        let selected_rect = window
+            .board
+            .card_rect(selected)
+            .expect("selected card visible");
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Board);
+        frame(&mut window, vec![]);
+        assert_eq!(window.board.selected(), Some(selected));
+        assert_eq!(window.board.card_rect(selected), Some(selected_rect));
+    }
 }

@@ -74,6 +74,15 @@ use std::path::Path;
 /// [`the_list_still_names_every_module`] checks it against the tree and the reviewers no longer have
 /// to.
 const MODULES: &[(&str, &str)] = &[
+    ("app/src/sidebar.rs", include_str!("../src/sidebar.rs")),
+    (
+        "app/src/sidebar/probe.rs",
+        include_str!("../src/sidebar/probe.rs"),
+    ),
+    (
+        "app/src/sidebar/tests.rs",
+        include_str!("../src/sidebar/tests.rs"),
+    ),
     ("app/src/explorer.rs", include_str!("../src/explorer.rs")),
     (
         "app/src/explorer/model.rs",
@@ -401,6 +410,10 @@ const MODULES: &[(&str, &str)] = &[
     (
         "app/src/viewer/review.rs",
         include_str!("../src/viewer/review.rs"),
+    ),
+    (
+        "app/src/viewer/review/paint.rs",
+        include_str!("../src/viewer/review/paint.rs"),
     ),
     (
         "app/src/viewer/review/message.rs",

@@ -2013,6 +2013,12 @@ mod tests {
         Board::default()
             .publish(&mut window_spans)
             .expect("memory report");
+        // The sidebar's host span and geometry witnesses are part of every application report.
+        // These synthetic values exercise the script's extraction patterns; they are not runtime
+        // measurements or evidence for a performance claim.
+        window_spans.extend_from_slice(
+            b"sidebar application: frames=1, total=1ms\nsidebar witnesses: selected=Board, preferred_width=520, effective_width=520, console_grid=0=49x39;1=49x21, pane_identities=2, switches=2, resize_delta=40\n",
+        );
         // Use the real producer so the script's chrome witnesses are tied to its output.
         let mut chrome = crate::chrome::Chrome::default();
         chrome.enable();
@@ -2721,6 +2727,66 @@ mod tests {
                 expected,
                 "mode={mode} batch={batch} report={text:?}"
             );
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn sidebar_report_guard_rejects_zero_frames_for_open_and_closed_docks() {
+        let script = include_str!("../../../scripts/measure-frame.sh");
+        let (_, rest) = script.split_once("check_sidebar_report() {").unwrap();
+        let (body, _) = rest.split_once("\n}\n").unwrap();
+        let function = format!(
+            "invalidate() {{ exit 1; }}\ncheck_sidebar_report() {{{body}\n}}\ncheck_sidebar_report"
+        );
+        let root = std::env::temp_dir().join(format!("ivy-sidebar-guard-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let report = root.join("report.txt");
+        let witnesses = "sidebar witnesses: selected=none, preferred_width=480, effective_width=0, console_grid=0=49x39, pane_identities=1, switches=0, resize_delta=0\n";
+        for (dock, frames, witness, expected) in [
+            ("closed", 1, witnesses, true),
+            ("closed", 0, witnesses, false),
+            (
+                "closed",
+                1,
+                "sidebar witnesses: selected=none, preferred_width=480, effective_width=0, console_grid=0=49x39, pane_identities=10, switches=0, resize_delta=0\n",
+                false,
+            ),
+        ] {
+            std::fs::write(
+                &report,
+                format!("sidebar application: frames={frames}, total=1ms\n{witness}"),
+            )
+            .unwrap();
+            let status = std::process::Command::new("sh")
+                .args(["-c", &function])
+                .env("REPORT", &report)
+                .env("DOCK", dock)
+                .env("DUMPING", "1")
+                .status()
+                .unwrap();
+            assert_eq!(
+                status.success(),
+                expected,
+                "dock={dock}, frames={frames}, witness={witness}"
+            );
+        }
+        let open_witnesses = "sidebar witnesses: selected=Board, preferred_width=480, effective_width=480, console_grid=0=49x39, pane_identities=1, switches=2, resize_delta=40\n";
+        for (frames, expected) in [(1, true), (0, false)] {
+            std::fs::write(
+                &report,
+                format!("sidebar application: frames={frames}, total=1ms\n{open_witnesses}"),
+            )
+            .unwrap();
+            let status = std::process::Command::new("sh")
+                .args(["-c", &function])
+                .env("REPORT", &report)
+                .env("DOCK", "open")
+                .env("DUMPING", "1")
+                .status()
+                .unwrap();
+            assert_eq!(status.success(), expected, "dock=open, frames={frames}");
         }
         std::fs::remove_dir_all(root).unwrap();
     }

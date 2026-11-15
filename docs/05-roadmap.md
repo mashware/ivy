@@ -138,12 +138,15 @@ without changing anything else.
 
 ## Document views — «Read beside the consoles»
 
-**What you see:** an optional view to the right of the consoles, opened from the application menu.
+**What you see:** a shared, transient right sidebar beside the consoles, with Files, Markdown, Git
+and the global Board selected from one navigation rail. Its width is reserved from console space.
 
-**What you can do:** read a Markdown file with formatting while an agent works beside it and see
-its saved changes without reopening. Or choose a Git repository and inspect its staged or unstaged
-differences, with added and removed lines distinguished. Resize the view or close it without
-restarting any console. The sources are chosen explicitly and both views are read-only.
+**What you can do:** browse files, read a Markdown file with formatting while an agent works beside
+it and see its saved changes without reopening, inspect Git changes, or open the global Board.
+Markdown and Git sources are chosen explicitly and both views are read-only. Switching tools retains
+their state. Resize or close the dock without restarting any console; at narrow widths its body is
+suppressed until the window grows enough to fit both the dock and console floor. The rail remains
+available and the sidebar returns closed with its default width after restart.
 
 This is a standalone addition requested after the terminal's core workflow; it does not change
 what completing any of the five phases means. Installable plugins are outside this addition.
@@ -553,11 +556,13 @@ console.
 
 ## Document views — Standalone addition
 
-- [ ] **V1 — Markdown and Git review viewers** ([#337](https://github.com/mashware/ivy-history-private/issues/337)).
-  A transient floating overlay opens explicit paths, including local Markdown paths clicked in a
-  console. Markdown refreshes on save. Git presents files and hunks in unified or split form, with
-  local and base comparisons. Review comments are previewed before insertion into the pinned origin
-  console. D72 records input isolation, bounded loading and the remaining contract. Native desktop
+- [ ] **V1 — Shared Files, Markdown, Git and Board sidebar** ([#73](https://github.com/mashware/ivy-history-private/issues/73),
+  with Markdown and Git review viewers from [#337](https://github.com/mashware/ivy-history-private/issues/337)).
+  A transient right dock opens explicit paths, including local Markdown paths clicked in a console.
+  Markdown refreshes on save. Git presents files and hunks in unified or split form, with local and
+  base comparisons. Review comments are previewed before insertion into the pinned origin console.
+  Files uses #72's pane-keyed explorer; Board remains global. D72 records input isolation, bounded
+  loading, responsive suppression, reserved rail and measurement contracts. Native desktop
   validation remains distinct from headless proofs.
 
 ## Updates and release notes — Standalone addition

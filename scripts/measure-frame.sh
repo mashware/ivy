@@ -193,8 +193,12 @@
 # Integrated chrome variants: chrome and chrome-zoom use two tabs of two consoles.
 # Both paint pane headers. The zoom variant starts with a transient zoom;
 # neither changes historical batches.
-# Board variants: board-4-closed/open and board-16-closed/open use
-# matched integrated chrome, geometry, ASCII loads and ordinary panel publications.
+# Frozen Board overlay-era records: board-rich-*, board-4-* and board-16-* remain historical
+# labels only. Their old reports are preserved; the current dock has different console geometry.
+# Dock variants (dock-v1-4-closed/open) are a new, versioned regime. They keep the same workload
+# and geometry but exercise the shared sidebar. Open reports must witness the selected tool, its
+# effective body width, every console grid and pane identity count; these runs are not comparable
+# as painting-only deltas because docking changes the console grid.
 # Open variants must navigate to a different live focus; deadlines are reported but
 # not required because the dumping load does not isolate an idle deadline wake. Every
 # board batch, closed ones included, runs the project probe over two real repositories,
@@ -219,6 +223,18 @@ case "$CARGO_TARGET_DIR" in
     *) CARGO_TARGET_DIR="$PWD/$CARGO_TARGET_DIR" ;;
 esac
 export CARGO_TARGET_DIR
+PANEL_BASE_DIR=${XDG_RUNTIME_DIR:-}
+case "$PANEL_BASE_DIR" in
+    /*) ;;
+    *)
+        # Give the measurement its own private runtime directory instead of cleaning every ivy-*
+        # directory in a shared /tmp fallback.
+        PANEL_BASE_DIR="$CARGO_TARGET_DIR/measurements/runtime-$(id -u)"
+        mkdir -p "$PANEL_BASE_DIR"
+        chmod 700 "$PANEL_BASE_DIR"
+        export XDG_RUNTIME_DIR="$PANEL_BASE_DIR"
+        ;;
+esac
 APP="$CARGO_TARGET_DIR/release/app"
 LOAD="$CARGO_TARGET_DIR/release/host-load"
 PUBLISHER="$CARGO_TARGET_DIR/release/examples/publish"
@@ -350,6 +366,50 @@ check_board_report() {
 }
 # End Board report validation.
 
+# Shared sidebar probe validation. Only versioned dock batches require these witnesses; historical
+# Board runs keep their original regime and are not reinterpreted as dock measurements.
+check_sidebar_report() {
+    [ -n "${DOCK:-}" ] || return 0
+    SIDEBAR_LINE=$(sed -n 's/^sidebar witnesses: //p' "$REPORT" | head -1)
+    SIDEBAR_WORK=$(sed -n 's/^sidebar application: frames=\([0-9]*\),.*/\1/p' "$REPORT" | head -1)
+    [ -n "$SIDEBAR_LINE" ] && [ -n "$SIDEBAR_WORK" ] || invalidate "dock report omitted host work or witnesses"
+    [ "$SIDEBAR_WORK" -gt 0 ] || invalidate "dock recorded no host frames"
+    case "$SIDEBAR_LINE" in
+        *"pane_identities=$DUMPING,"*) : ;;
+        *) invalidate "dock witness pane identity count does not match the seeded panes" ;;
+    esac
+    case "$SIDEBAR_LINE" in
+        *"console_grid="*"x"*) : ;;
+        *) invalidate "dock witness omitted per-console grid geometry" ;;
+    esac
+    if [ "$DOCK" = open ]; then
+        case "$SIDEBAR_LINE" in
+            selected=Board,*effective_width=*) : ;;
+            *) invalidate "open dock did not witness Board selection and effective width" ;;
+        esac
+        DOCK_WIDTH=$(printf '%s\n' "$SIDEBAR_LINE" | sed -n 's/.*effective_width=\([0-9.]*\).*/\1/p')
+        LC_ALL=C awk -v width="${DOCK_WIDTH:-0}" 'BEGIN { exit !(width >= 320) }' || invalidate "open dock body was suppressed or narrower than its floor"
+        SWITCHES=$(printf '%s\n' "$SIDEBAR_LINE" | sed -n 's/.*switches=\([0-9]*\), resize_delta=.*/\1/p')
+        RESIZE=$(printf '%s\n' "$SIDEBAR_LINE" | sed -n 's/.*resize_delta=\([0-9.]*\)$/\1/p')
+        [ "${SWITCHES:-0}" -ge 2 ] || invalidate "open dock probe did not witness both tool switches"
+        LC_ALL=C awk -v width="${RESIZE:-0}" 'BEGIN { exit !(width >= 10) }' || invalidate "open dock probe did not witness divider resize"
+    else
+        case "$SIDEBAR_LINE" in
+            selected=none,*) : ;;
+            *) invalidate "closed dock unexpectedly selected a tool" ;;
+        esac
+        case "$SIDEBAR_LINE" in
+            *"effective_width=0,"*) : ;;
+            *) invalidate "closed dock retained an effective body width" ;;
+        esac
+        case "$SIDEBAR_LINE" in
+            *"switches=0, resize_delta=0"*) : ;;
+            *) invalidate "closed dock probe unexpectedly switched tools or resized" ;;
+        esac
+    fi
+}
+# End sidebar report validation.
+
 # Integrated chrome report validation (also exercised with synthetic reports).
 check_chrome_report() {
 # A missing witness cannot be interpreted as zero work. Historical runs must also prove
@@ -401,7 +461,7 @@ validate_project_records() {
                 if (accents != 1 || timings != 1) exit 1
                 if (batch == "projects") {
                     if (a[1] != "true" || a[2] != "true" || a[3]+0 < 4 || a[4]+0 < 4 || a[5]+0 < 4 || frames < 1) exit 1
-                } else if (batch ~ /^board-/) {
+                } else if (batch ~ /^board-/ || batch ~ /^dock-v1-/) {
                     # The board covers the headers while open, so no painted floor: resolved identities
                     # are what the grouping needs, one per console.
                     if (consoles+0 < 1 || a[1] != "true" || a[2] != "true" || a[4]+0 < consoles || frames < 1) exit 1
@@ -587,7 +647,13 @@ if [ "${MEASURE_AS_CONSOLE:-}" = "1" ]; then
 fi
 
 # ── Batch mode ──────────────────────────────────────────────────────────────────
-BATCH=${1:?the batch is missing: A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y or Z}
+BATCH=${1:?the batch is missing: A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z or dock-v1-4-closed/open}
+case "$BATCH" in
+    board-rich-*|board-4-*|board-16-*)
+        echo "$BATCH is a frozen overlay-era Board regime; use dock-v1-4-closed/open for current dock measurements" >&2
+        exit 2
+        ;;
+esac
 MIB=${2:-44}
 OUTPUT="$ROOT/target/measurements"
 mkdir -p "$OUTPUT"
@@ -619,12 +685,10 @@ RESTORES=0
 # batch, and the guards read the same variable, so they judge the leaked load as the batch's own. A
 # `PATCHES=1` in the environment runs X as Y and publishes it under X's name; a `LARGE=1` pads S and
 # the file batches to the ceiling, and hides U and V from the leak guard that only fires without it.
-LIGATURES= ACTIONS= CONTROL= HEADER= READS= PATCHES= LINKS= SEARCH= LARGE= CJK= EMOJI= PANEL_EMOJI= SETTINGS= INTEGRATED_CHROME= BOARD= BOARD_RICH=
+LIGATURES= ACTIONS= CONTROL= HEADER= READS= PATCHES= LINKS= SEARCH= LARGE= CJK= EMOJI= PANEL_EMOJI= SETTINGS= INTEGRATED_CHROME= BOARD= BOARD_RICH= DOCK=
 case "$BATCH" in
     ligatures-on|ligatures-off) TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; LIGATURES=${BATCH#ligatures-} ;;
-    board-rich-closed|board-rich-open) TABS=8; PANES=2x1; DUMPING=16; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=1; BOARD_RICH=1; BOARD=${BATCH##*-} ;;
-    board-4-closed|board-4-open) TABS=2; PANES=2x1; DUMPING=4; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=1; BOARD=${BATCH##*-} ;;
-    board-16-closed|board-16-open) TABS=8; PANES=2x1; DUMPING=16; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=1; BOARD=${BATCH##*-} ;;
+    dock-v1-4-closed|dock-v1-4-open) TABS=2; PANES=2x1; DUMPING=4; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=1; BOARD=${BATCH##*-}; DOCK=${BATCH##*-} ;;
     projects) TABS=1; PANES=2x2; DUMPING=4; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=1; CHROME_EXPECTED_VISIBLE=4 ;;
     chrome|chrome-zoom) TABS=2; PANES=2x1; DUMPING=4; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=${BATCH#chrome}; INTEGRATED_CHROME=${INTEGRATED_CHROME#-}; INTEGRATED_CHROME=${INTEGRATED_CHROME:-1} ;;
     settings-apply) TABS=2; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; SETTINGS=apply ;;
@@ -707,7 +771,7 @@ fi
 # Now yes: whatever is left is from a previous run. An old panel would falsify the whole of batch A
 # — which is the reference — and in the others would give a panel that is not the one this run wants
 # to measure.
-rm -rf /run/user/"$(id -u)"/ivy-* 2>/dev/null || true
+rm -rf "$PANEL_BASE_DIR"/ivy-* 2>/dev/null || true
 
 # **And the run has its own configuration directory, for two different reasons.** It goes down here
 # and not next to the turns one **on purpose**: this deletes, and the script deletes nothing until
@@ -742,7 +806,7 @@ CONFIG="$OUTPUT/.config"
 rm -rf "$CONFIG"
 mkdir -p "$CONFIG"
 
-case "$BATCH" in projects|board-*) MEASURES_PROJECTS=1 ;; *) MEASURES_PROJECTS= ;; esac
+case "$BATCH" in projects|dock-v1-*|board-*) MEASURES_PROJECTS=1 ;; *) MEASURES_PROJECTS= ;; esac
 if [ -n "$MEASURES_PROJECTS" ]; then
     # Real repositories, with synthetic directory sources supplied to the measurement probe. The
     # board batches take it too, so the board they measure has two sections, as it has in use.
@@ -947,7 +1011,7 @@ publish() {  # publish <directory> <n> <which of the consoles>
     # `<dir>/panel.json`, so any other file in the directory is invisible. D confirms it by
     # measuring, and it is kept so the hypothesis is not raised again.
     if [ "$BATCH" = D ]; then
-        tmp="/run/user/$(id -u)/.measure-$(basename "$1").json"
+        tmp="$PANEL_BASE_DIR/.measure-$(basename "$1").json"
     else
         tmp="$1/.measure.json"
     fi
@@ -1077,12 +1141,12 @@ seed() {
     # four depending on how the race fell — a batch with some consoles having a panel and others
     # not, that is, with the regime mixed, and published as good because the witness was written all
     # the same.
-    while [ "$(ls -d /run/user/"$(id -u)"/ivy-* 2>/dev/null | wc -l)" -lt "$DIRECTORIES" ]; do
+    while [ "$(ls -d "$PANEL_BASE_DIR"/ivy-* 2>/dev/null | wc -l)" -lt "$DIRECTORIES" ]; do
         waited=$((waited + 1))
         [ "$waited" -gt 100 ] && { echo "the $DIRECTORIES panel directories did not show up" >&2; return 1; }
         sleep 0.1
     done
-    dirs=$(ls -d /run/user/"$(id -u)"/ivy-*)
+    dirs=$(ls -d "$PANEL_BASE_DIR"/ivy-*)
     count=$(echo "$dirs" | wc -l)
     if [ "$count" -ne "$DIRECTORIES" ]; then
         echo "$count panel directories showed up and $DIRECTORIES were expected: nothing is seeded" >&2
@@ -1133,7 +1197,7 @@ seed() {
 case "$BATCH" in
     A) : ;;                       # no panel: nobody publishes anything
     B) seed quiet & ;;
-    projects|ligatures-on|ligatures-off|board-rich-closed|board-rich-open|board-4-closed|board-4-open|board-16-closed|board-16-open|chrome|chrome-zoom|settings-apply|settings-closed|settings-open|settings-fonts|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
+    projects|ligatures-on|ligatures-off|dock-v1-4-closed|dock-v1-4-open|board-rich-closed|board-rich-open|board-4-closed|board-4-open|board-16-closed|board-16-open|chrome|chrome-zoom|settings-apply|settings-closed|settings-open|settings-fonts|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
 esac
 
 echo "batch $BATCH · $TABS tab(s) of $PANES · $DUMPING of $DIRECTORIES consoles dumping $MIB MiB · window $WINDOW_SIZE · do not touch the machine until it closes" >&2
@@ -1176,6 +1240,11 @@ assert hashlib.sha256(Path(sys.argv[1]).read_bytes()).hexdigest() == "a0bf60ef0f
 PYFONT
 else
     unset MEASURE_LIGATURES MEASURE_LIGATURE_FONT
+fi
+if [ -n "$DOCK" ]; then
+    export MEASURE_SIDEBAR="$DOCK"
+else
+    unset MEASURE_SIDEBAR
 fi
 if [ -n "$BOARD_RICH" ]; then
     export MEASURE_BOARD_RICH=1
@@ -1571,6 +1640,7 @@ check_settings_report
 check_chrome_report
 check_projects_report
 check_board_report
+check_sidebar_report
 
 # **The settings guard, and this one invalidates on two counts.** Ever since the terminal reads a
 # settings file, a run that read the measurer's own would have **another grid** — the font size

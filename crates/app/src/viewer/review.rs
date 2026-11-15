@@ -1,5 +1,6 @@
 //! Read-only Git review, with an explicit preview before sending comments.
 mod message;
+mod paint;
 use self::message::{preview_text, quote, safe};
 use super::diff::{Change, DiffLine, Document};
 use eframe::egui::{self, Color32, RichText};
@@ -100,6 +101,7 @@ impl Review {
         doc: &Document,
         source_label: &str,
         repository: &Path,
+        can_send: bool,
     ) -> Option<String> {
         if doc.files.is_empty() {
             ui.label("No changes.");
@@ -151,14 +153,14 @@ impl Review {
                     });
                 });
             ui.separator();
-            self.right_column(
+            send = self.right_column(
                 ui,
                 doc,
                 source_label,
                 repository,
                 (height - 60.0).max(80.0),
-                &mut send,
-            );
+                can_send,
+            )
         } else {
             ui.horizontal_top(|ui| {
                 ui.allocate_ui_with_layout(
@@ -180,7 +182,8 @@ impl Review {
                     egui::vec2(ui.available_width().max(20.0), height),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
-                        self.right_column(ui, doc, source_label, repository, height, &mut send);
+                        send =
+                            self.right_column(ui, doc, source_label, repository, height, can_send);
                     },
                 );
             });
@@ -195,18 +198,19 @@ impl Review {
         source_label: &str,
         repository: &Path,
         height: f32,
-        send: &mut Option<String>,
-    ) {
+        can_send: bool,
+    ) -> Option<String> {
         if height < 360.0 {
             egui::ScrollArea::vertical()
                 .id_salt("review-short-column")
                 .max_height(height)
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    right_column_content(self, ui, doc, source_label, repository, height, send);
-                });
+                    right_column_content(self, ui, doc, source_label, repository, height, can_send)
+                })
+                .inner
         } else {
-            right_column_content(self, ui, doc, source_label, repository, height, send);
+            right_column_content(self, ui, doc, source_label, repository, height, can_send)
         }
     }
 }
@@ -218,8 +222,8 @@ fn right_column_content(
     source_label: &str,
     repository: &Path,
     height: f32,
-    send: &mut Option<String>,
-) {
+    can_send: bool,
+) -> Option<String> {
     let footer = if review.preview {
         245.0
     } else if review.draft.is_some() {
@@ -230,7 +234,7 @@ fn right_column_content(
         8.0
     };
     changes(review, ui, doc, (height - footer).max(60.0));
-    comments(review, ui);
+    paint::comments(review, ui);
     if !review.comments.is_empty() {
         ui.horizontal(|ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -248,6 +252,7 @@ fn right_column_content(
             });
         });
     }
+    let mut send = None;
     if review.preview {
         let text = preview_text(review, source_label, repository);
         ui.separator();
@@ -277,7 +282,8 @@ fn right_column_content(
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
-                        .add(
+                        .add_enabled(
+                            can_send,
                             egui::Button::new(
                                 RichText::new("Insert into console")
                                     .color(review.theme.background()),
@@ -286,12 +292,16 @@ fn right_column_content(
                         )
                         .clicked()
                     {
-                        *send = Some(text);
+                        send = Some(text);
+                    }
+                    if !can_send {
+                        ui.label("Origin console unavailable; comments cannot be inserted.");
                     }
                 });
             });
         }
     }
+    send
 }
 
 fn file_list(review: &mut Review, ui: &mut egui::Ui, doc: &Document, height: f32) {
@@ -411,7 +421,7 @@ fn changes(review: &mut Review, ui: &mut egui::Ui, doc: &Document, height: f32) 
                         review.theme.foreground(),
                     );
                 }
-                Row::Unified(h, line) => paint_line(
+                Row::Unified(h, line) => paint::paint_line(
                     review,
                     ui,
                     &file.path,
@@ -426,7 +436,7 @@ fn changes(review: &mut Review, ui: &mut egui::Ui, doc: &Document, height: f32) 
                     ui.horizontal(|ui| {
                         let width = (ui.available_width() / 2.0 - 2.0).max(1.0);
                         if let Some(i) = pair.old {
-                            paint_line(
+                            paint::paint_line(
                                 review,
                                 ui,
                                 &file.path,
@@ -439,7 +449,7 @@ fn changes(review: &mut Review, ui: &mut egui::Ui, doc: &Document, height: f32) 
                             ui.allocate_space(egui::vec2(width, row_height));
                         }
                         if let Some(i) = pair.new {
-                            paint_line(
+                            paint::paint_line(
                                 review,
                                 ui,
                                 &file.path,
@@ -458,148 +468,6 @@ fn changes(review: &mut Review, ui: &mut egui::Ui, doc: &Document, height: f32) 
     });
 }
 
-fn paint_line(
-    review: &mut Review,
-    ui: &mut egui::Ui,
-    path: &Path,
-    line: &DiffLine,
-    side: Option<&'static str>,
-    width: f32,
-    height: f32,
-) {
-    let side = side.unwrap_or(if line.kind == Change::Removed {
-        "old"
-    } else {
-        "new"
-    });
-    let number = if side == "old" { line.old } else { line.new };
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
-    let ink = match line.kind {
-        Change::Added => Some(review.theme.color(term_core::TermColor::Indexed(2))),
-        Change::Removed => Some(review.theme.color(term_core::TermColor::Indexed(1))),
-        Change::Context => None,
-    };
-    if let Some(ink) = ink {
-        let bg = review.theme.background();
-        let mix = |a: u8, b: u8| ((a as u16 * 4 + b as u16) / 5) as u8;
-        ui.painter().rect_filled(
-            rect,
-            0.0,
-            Color32::from_rgb(
-                mix(bg.r(), ink.r()),
-                mix(bg.g(), ink.g()),
-                mix(bg.b(), ink.b()),
-            ),
-        );
-    }
-    let number_text = |n: Option<u32>| n.map_or_else(String::new, |n| n.to_string());
-    let gutter = if side == "old" || side == "new" {
-        format!("{:>4}", number_text(number))
-    } else {
-        String::new()
-    };
-    let gutter = if review.mode == Mode::Unified {
-        format!("{:>4} {:>4}", number_text(line.old), number_text(line.new))
-    } else {
-        gutter
-    };
-    let font = egui::TextStyle::Monospace.resolve(ui.style());
-    ui.painter().with_clip_rect(rect).text(
-        rect.left_center() + egui::vec2(6.0, 0.0),
-        egui::Align2::LEFT_CENTER,
-        format!("{gutter}  {}", line.text),
-        font,
-        review.theme.foreground(),
-    );
-    let plus = egui::Rect::from_min_size(
-        egui::pos2(rect.right() - 24.0, rect.top()),
-        egui::vec2(24.0, height),
-    );
-    if number.is_some() && (response.hovered() || response.has_focus()) {
-        ui.painter().text(
-            plus.center(),
-            egui::Align2::CENTER_CENTER,
-            "+",
-            egui::FontId::proportional(16.0),
-            review.theme.foreground(),
-        );
-    }
-    if let Some(number) = number
-        && response.clicked()
-        && review.draft.is_none()
-    {
-        review.draft = Some(Draft {
-            location: Location {
-                path: path.to_path_buf(),
-                side,
-                line: number,
-            },
-            text: String::new(),
-        });
-    }
-}
-
-fn comments(review: &mut Review, ui: &mut egui::Ui) {
-    if let Some(draft) = &mut review.draft {
-        ui.separator();
-        ui.label(format!(
-            "Comment on {} {}:{}",
-            quote(&draft.location.path.to_string_lossy()),
-            draft.location.side,
-            draft.location.line
-        ));
-        ui.add(egui::TextEdit::multiline(&mut draft.text).desired_width(f32::INFINITY));
-        let mut add = false;
-        let mut cancel = false;
-        ui.horizontal(|ui| {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                cancel = ui.button("Cancel comment").clicked();
-                add = ui
-                    .add_enabled(
-                        !draft.text.trim().is_empty() && safe(&draft.text),
-                        egui::Button::new("Add comment"),
-                    )
-                    .clicked();
-            });
-        });
-        if !safe(&draft.text) {
-            ui.colored_label(
-                Color32::RED,
-                "Comment contains a forbidden control character.",
-            );
-        }
-        if add {
-            let draft = review.draft.take().unwrap();
-            review.comments.push(Comment {
-                location: draft.location,
-                text: draft.text,
-            });
-            review.preview = false;
-        } else if cancel {
-            review.draft = None;
-        }
-    }
-    let mut remove = None;
-    for (index, comment) in review.comments.iter().enumerate() {
-        ui.horizontal(|ui| {
-            ui.label(format!(
-                "{} {}:{} - {}",
-                quote(&comment.location.path.to_string_lossy()),
-                comment.location.side,
-                comment.location.line,
-                comment.text
-            ));
-            if ui.small_button("Remove").clicked() {
-                remove = Some(index);
-            }
-        });
-    }
-    if let Some(index) = remove {
-        review.comments.remove(index);
-        review.preview = false;
-    }
-}
-
 enum Row {
     Header(usize),
     Unified(usize, usize),
@@ -610,6 +478,217 @@ enum Row {
 mod tests {
     use super::*;
     use eframe::egui::epaint::Shape;
+
+    fn window_frame(
+        window: &mut crate::Window,
+        ctx: &egui::Context,
+        area: egui::Rect,
+        events: Vec<egui::Event>,
+    ) -> Vec<(String, egui::Pos2)> {
+        fn collect(shape: &Shape, labels: &mut Vec<(String, egui::Pos2)>) {
+            match shape {
+                Shape::Text(text) => labels.push((
+                    text.galley.job.text.clone(),
+                    text.pos + text.galley.rect.center().to_vec2(),
+                )),
+                Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        collect(shape, labels);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut frame = eframe::Frame::_new_kittest();
+        eframe::App::logic(window, ctx, &mut frame);
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(area),
+                events,
+                ..Default::default()
+            },
+            |ui| eframe::App::ui(window, ui, &mut frame),
+        );
+        let mut labels = Vec::new();
+        for shape in &output.shapes {
+            collect(&shape.shape, &mut labels);
+        }
+        output.drop_without_applying_deltas();
+        labels
+    }
+
+    fn review_comment() -> Comment {
+        Comment {
+            location: Location {
+                path: PathBuf::from("first.rs"),
+                side: "new",
+                line: 1,
+            },
+            text: "unsent review note".into(),
+        }
+    }
+
+    fn loaded_diff() -> Document {
+        Document::parse(
+            "diff --git a/first.rs b/first.rs\n--- a/first.rs\n+++ b/first.rs\n@@ -1 +1 @@\n-old\n+new\n",
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn docked_window_insert_is_live_only_and_other_git_requests_reveal_retained_review() {
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        let ctx = egui::Context::default();
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));
+        crate::tests::one_frame_in(&mut window, &ctx, area, vec![]);
+        crate::viewer::select_state(&mut window, false);
+        let ids: Vec<_> = window.all_panes().map(|pane| pane.name).collect();
+        window.viewer.kind = super::super::load::Kind::Local;
+        window.viewer.path = "/repo".into();
+        window.viewer.origin = Some(super::super::Source {
+            pane: ids[0],
+            label: "console A".into(),
+            cwd: Some(Path::new("/repo").into()),
+        });
+        window.viewer.loaded = Some(super::super::load::Loaded {
+            text: "diff".into(),
+            markdown: None,
+            diff: Some(loaded_diff()),
+        });
+        window.viewer.review.comments.push(review_comment());
+        window.viewer.review.preview = true;
+        window.viewer.open = true;
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Git);
+
+        // An explicit request for another console while Files is selected must reveal the retained
+        // source and the replacement warning instead of leaving Files selected or discarding it.
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+        crate::viewer::origin::open_diff_for_pane(&mut window, ids[1]);
+        assert_eq!(
+            crate::sidebar::active(&window),
+            Some(crate::sidebar::Tool::Git)
+        );
+        assert_eq!(window.viewer.origin.as_ref().unwrap().pane, ids[0]);
+        assert!(window.viewer.message.contains("Send or clear"));
+
+        // The actual Window -> dock -> viewer -> Review path enables Insert for the live origin.
+        window.viewer.message.clear();
+        window_frame(&mut window, &ctx, area, vec![]);
+        let insert = window_frame(&mut window, &ctx, area, vec![])
+            .into_iter()
+            .find(|(text, _)| text == "Insert into console")
+            .expect("live Git dock paints its Insert control")
+            .1;
+        let button = |pressed| egui::Event::PointerButton {
+            pos: insert,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        window_frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::PointerMoved(insert), button(true)],
+        );
+        window_frame(&mut window, &ctx, area, vec![button(false)]);
+        assert!(
+            window.viewer.pending_send.is_some(),
+            "live Insert did not queue review text"
+        );
+
+        // Removing the origin identity makes the same dock render it as unavailable and blocks
+        // delivery; no replacement pane can inherit the review.
+        window.viewer.pending_send = None;
+        window.viewer.origin.as_mut().unwrap().pane = usize::MAX;
+        let labels = window_frame(&mut window, &ctx, area, vec![]);
+        assert!(labels.iter().any(|(text, _)| text.contains("unavailable")));
+        let insert = labels
+            .iter()
+            .find(|(text, _)| text == "Insert into console")
+            .unwrap()
+            .1;
+        window_frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![
+                egui::Event::PointerMoved(insert),
+                button(true),
+                button(false),
+            ],
+        );
+        assert!(window.viewer.pending_send.is_none());
+    }
+
+    #[test]
+    fn git_review_context_survives_switches_through_every_sidebar_tool() {
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        let ctx = egui::Context::default();
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
+        crate::tests::one_frame_in(&mut window, &ctx, area, vec![]);
+        let pane = window.active().panes()[0].name;
+        crate::viewer::select_state(&mut window, false);
+        window.viewer.kind = super::super::load::Kind::AgainstBase;
+        window.viewer.path = "/repo".into();
+        window.viewer.base = "release/73".into();
+        window.viewer.origin = Some(super::super::Source {
+            pane,
+            label: "console A".into(),
+            cwd: Some(Path::new("/repo").into()),
+        });
+        window.viewer.loaded = Some(super::super::load::Loaded {
+            text: "diff".into(),
+            markdown: None,
+            diff: Some(Document::parse(
+                "diff --git a/first.rs b/first.rs\n--- a/first.rs\n+++ b/first.rs\n@@ -1 +1 @@\n-old\n+new\n",
+            ).unwrap()),
+        });
+        window.viewer.review.file = 0;
+        window.viewer.review.hunk = 1;
+        window.viewer.review.comments.push(Comment {
+            location: Location {
+                path: PathBuf::from("first.rs"),
+                side: "new",
+                line: 1,
+            },
+            text: "unsent review note".into(),
+        });
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Git);
+
+        for tool in [
+            crate::sidebar::Tool::Markdown,
+            crate::sidebar::Tool::Files,
+            crate::sidebar::Tool::Board,
+            crate::sidebar::Tool::Git,
+        ] {
+            crate::sidebar::select(&mut window, tool);
+        }
+
+        assert_eq!(
+            crate::sidebar::active(&window),
+            Some(crate::sidebar::Tool::Git)
+        );
+        assert_eq!(window.viewer.path, "/repo");
+        assert_eq!(window.viewer.base, "release/73");
+        assert_eq!(window.viewer.origin.as_ref().unwrap().pane, pane);
+        assert_eq!(
+            window
+                .viewer
+                .loaded
+                .as_ref()
+                .unwrap()
+                .diff
+                .as_ref()
+                .unwrap()
+                .files[0]
+                .path,
+            Path::new("first.rs")
+        );
+        assert_eq!(window.viewer.review.file, 0);
+        assert_eq!(window.viewer.review.hunk, 1);
+        assert_eq!(window.viewer.review.comments[0].text, "unsent review note");
+    }
 
     #[test]
     fn explorer_transition_keeps_comments_and_rejects_a_different_document() {
@@ -645,6 +724,17 @@ mod tests {
         doc: &Document,
         events: Vec<egui::Event>,
     ) -> (Vec<(String, egui::Pos2)>, Option<String>) {
+        frame_for_source(review, ctx, doc, events, "console", true)
+    }
+
+    fn frame_for_source(
+        review: &mut Review,
+        ctx: &egui::Context,
+        doc: &Document,
+        events: Vec<egui::Event>,
+        source_label: &str,
+        can_send: bool,
+    ) -> (Vec<(String, egui::Pos2)>, Option<String>) {
         fn collect(shape: &Shape, labels: &mut Vec<(String, egui::Pos2)>) {
             match shape {
                 Shape::Text(text) => labels.push((
@@ -671,7 +761,7 @@ mod tests {
             },
             |ui| {
                 ui.horizontal_wrapped(|ui| review.toolbar(ui, doc));
-                sent = review.show(ui, doc, "console", Path::new("/repo"));
+                sent = review.show(ui, doc, source_label, Path::new("/repo"), can_send);
             },
         );
         let mut labels = Vec::new();
@@ -779,6 +869,104 @@ mod tests {
             !labels
                 .iter()
                 .any(|(label, _)| label == "Insert into console")
+        );
+    }
+
+    #[test]
+    fn live_source_enables_insert_and_removed_source_disables_it() {
+        let doc = Document::parse(
+            "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n",
+        )
+        .unwrap();
+        let comment = Comment {
+            location: Location {
+                path: PathBuf::from("a.txt"),
+                side: "new",
+                line: 1,
+            },
+            text: "Please revise".into(),
+        };
+        let ctx = egui::Context::default();
+        let mut review = Review {
+            preview: true,
+            comments: vec![comment],
+            ..Review::default()
+        };
+        let (labels, sent) = frame_for_source(&mut review, &ctx, &doc, vec![], "pane-1", true);
+        assert!(sent.is_none());
+        let insert = labels
+            .iter()
+            .find(|(label, _)| label == "Insert into console")
+            .unwrap()
+            .1;
+        let button = |pressed| egui::Event::PointerButton {
+            pos: insert,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame_for_source(
+            &mut review,
+            &ctx,
+            &doc,
+            vec![egui::Event::PointerMoved(insert), button(true)],
+            "pane-1",
+            true,
+        );
+        assert!(
+            frame_for_source(&mut review, &ctx, &doc, vec![button(false)], "pane-1", true,)
+                .1
+                .is_some()
+        );
+
+        let (labels, sent) = frame_for_source(
+            &mut review,
+            &ctx,
+            &doc,
+            vec![],
+            "pane-1 - unavailable",
+            false,
+        );
+        assert!(sent.is_none());
+        assert!(
+            labels
+                .iter()
+                .any(|(label, _)| label.contains("unavailable"))
+        );
+        let insert = labels
+            .iter()
+            .find(|(label, _)| label == "Insert into console")
+            .unwrap()
+            .1;
+        let unavailable_button = |pressed| egui::Event::PointerButton {
+            pos: insert,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame_for_source(
+            &mut review,
+            &ctx,
+            &doc,
+            vec![
+                egui::Event::PointerMoved(insert),
+                unavailable_button(true),
+                unavailable_button(false),
+            ],
+            "pane-1 - unavailable",
+            false,
+        );
+        assert!(
+            frame_for_source(
+                &mut review,
+                &ctx,
+                &doc,
+                vec![],
+                "pane-1 - unavailable",
+                false,
+            )
+            .1
+            .is_none()
         );
     }
     #[test]

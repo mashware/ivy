@@ -168,23 +168,18 @@ fn control_label(text: &str) -> &str {
         "Hide" => "×",
         "Pin this console" => "Pin",
         "Follow active pane" => "Follow",
-        "Up" => "Up",
         "Use console directory" => "Reset",
-        "Refresh" => "Refresh",
         "Copy path" => "Copy",
-        "Open" => "Open",
         _ => text,
     }
 }
 
 fn click_text(window: &mut crate::Window, ctx: &egui::Context, area: egui::Rect, text: &str) {
     let painted = frame(window, ctx, area, vec![]);
+    let dock = window.sidebar.last_dock.expect("Files dock is visible");
     let pos = painted
         .iter()
-        .find(|(label, pos)| {
-            label == control_label(text)
-                && (control_label(text) == text || window.explorer.rect(area).contains(*pos))
-        })
+        .find(|(label, pos)| label == control_label(text) && dock.contains(*pos))
         .unwrap_or_else(|| panic!("{text:?} not painted; visible text: {painted:?}"))
         .1;
     click_at(window, ctx, area, pos);
@@ -284,7 +279,7 @@ fn publish_directory(window: &mut crate::Window, pane: usize, uri: &str) {
 }
 
 #[test]
-fn files_menu_pins_and_follows_across_tabs_without_leaking_input_or_retiling() {
+fn files_rail_pins_and_follows_across_tabs_without_leaking_input() {
     let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
     let ctx = egui::Context::default();
     let worktrees = Worktrees::new();
@@ -314,15 +309,15 @@ fn files_menu_pins_and_follows_across_tabs_without_leaking_input_or_retiling() {
         .collect();
     frame(&mut window, &ctx, area, vec![]);
 
-    // The integrated titlebar menu exposes Files as a user-reachable entry.
-    click_at(&mut window, &ctx, area, egui::pos2(1075.0, 25.0));
-    assert!(
-        frame(&mut window, &ctx, area, vec![])
-            .iter()
-            .any(|(text, _)| text == "Files"),
-        "the titlebar menu should show a Files entry"
+    let metrics =
+        crate::painter::CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
+    let rail = crate::tab_bar::geometry(&window, area, &metrics).rail;
+    click_at(
+        &mut window,
+        &ctx,
+        area,
+        egui::pos2(rail.center().x, rail.top() + 20.0),
     );
-    click_text(&mut window, &ctx, area, "Files");
     frame(&mut window, &ctx, area, vec![]);
     assert!(window.explorer.visible);
     // Native metadata may seed navigation before the shell has completed its initial cd.
@@ -436,7 +431,7 @@ fn files_menu_pins_and_follows_across_tabs_without_leaking_input_or_retiling() {
         &ctx,
         area,
         vec![
-            egui::Event::PointerMoved(egui::pos2(area.right() - 120.0, 350.0)),
+            egui::Event::PointerMoved(egui::pos2(1000.0, 350.0)),
             egui::Event::MouseWheel {
                 unit: egui::MouseWheelUnit::Line,
                 delta: egui::vec2(0.0, -2.0),
@@ -444,7 +439,7 @@ fn files_menu_pins_and_follows_across_tabs_without_leaking_input_or_retiling() {
                 phase: egui::TouchPhase::Move,
             },
             egui::Event::PointerButton {
-                pos: egui::pos2(area.right() - 120.0, 350.0),
+                pos: egui::pos2(1000.0, 350.0),
                 button: egui::PointerButton::Primary,
                 pressed: false,
                 modifiers: egui::Modifiers::NONE,
@@ -491,7 +486,7 @@ fn files_menu_pins_and_follows_across_tabs_without_leaking_input_or_retiling() {
         Some(second.clone())
     );
 
-    // Hide and reopen retain each pane's tree and pin state. The panel remains an overlay.
+    // Hide and reopen retain each pane's tree and pin state. Closing restores the console area.
     click_text(&mut window, &ctx, area, "Pin this console");
     assert_eq!(window.explorer.pinned, Some(ids[2]));
     window
@@ -503,7 +498,7 @@ fn files_menu_pins_and_follows_across_tabs_without_leaking_input_or_retiling() {
     window.explorer.navigation.get_mut(&ids[0]).unwrap().scroll = 120.0;
     click_text(&mut window, &ctx, area, "Hide");
     assert!(!window.explorer.visible);
-    toggle(&mut window, &ctx);
+    crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
     frame(&mut window, &ctx, area, vec![]);
     assert!(window.explorer.visible);
     assert_eq!(window.explorer.navigation[&ids[0]].selected, Some(a_child));
@@ -534,7 +529,7 @@ fn files_menu_pins_and_follows_across_tabs_without_leaking_input_or_retiling() {
             .map(|pane| (pane.name, pane.measured))
             .collect::<Vec<_>>(),
         before,
-        "the overlay must not change console geometry"
+        "closing the dock must restore console geometry"
     );
 }
 
@@ -558,7 +553,7 @@ fn markdown_selection_opens_from_the_pinned_pane_only_after_enter() {
     let ids: Vec<_> = window.all_panes().map(|pane| pane.name).collect();
     wait_for_source(&mut window, &ctx, area, ids[0], &first.0);
     wait_for_source(&mut window, &ctx, area, ids[2], &second.0);
-    toggle(&mut window, &ctx);
+    crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
     frame(&mut window, &ctx, area, vec![]);
     click_text(&mut window, &ctx, area, "Use console directory");
     assert_eq!(window.explorer.target(Some(ids[0])), Some(ids[0]));
@@ -627,7 +622,7 @@ fn remote_source_suspends_saved_navigation_and_console_directory_resets_it_expli
     frame(&mut window, &ctx, area, vec![]);
     let pane = window.active().panes()[0].name;
     wait_for_source(&mut window, &ctx, area, pane, &original.0);
-    toggle(&mut window, &ctx);
+    crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
     frame(&mut window, &ctx, area, vec![]);
     click_text(&mut window, &ctx, area, "Use console directory");
 
@@ -697,7 +692,7 @@ fn refresh_clears_a_deleted_selection_and_reports_a_deleted_explorer_root() {
     frame(&mut window, &ctx, area, vec![]);
     let pane = window.active().panes()[0].name;
     wait_for_source(&mut window, &ctx, area, pane, &directory.0);
-    toggle(&mut window, &ctx);
+    crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
     frame(&mut window, &ctx, area, vec![]);
     click_text(&mut window, &ctx, area, "Use console directory");
     wait_for_text(&mut window, &ctx, area, "selected.md");
@@ -734,16 +729,8 @@ fn refresh_clears_a_deleted_selection_and_reports_a_deleted_explorer_root() {
             .iter()
             .any(|(text, _)| text.contains("Directory unavailable."))
         {
-            assert!(
-                painted
-                    .iter()
-                    .any(|(text, _)| text == control_label("Refresh"))
-            );
-            assert!(
-                painted
-                    .iter()
-                    .any(|(text, _)| text == control_label("Use console directory"))
-            );
+            assert!(painted.iter().any(|(text, _)| text == "Refresh"));
+            assert!(painted.iter().any(|(text, _)| text == "Reset"));
             break;
         }
         assert!(
@@ -754,32 +741,4 @@ fn refresh_clears_a_deleted_selection_and_reports_a_deleted_explorer_root() {
     }
     assert_eq!(window.explorer.navigation[&pane].root, Some(child));
     assert_eq!(window.projects.directory(pane), Some(directory.0.as_path()));
-}
-
-#[test]
-fn very_narrow_explorer_keeps_pin_and_hide_controls_reachable() {
-    let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
-    let ctx = egui::Context::default();
-    let area = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(120.0, 600.0));
-    frame(&mut window, &ctx, area, vec![]);
-    toggle(&mut window, &ctx);
-    frame(&mut window, &ctx, area, vec![]);
-    let painted = frame(&mut window, &ctx, area, vec![]);
-    for name in ["Files", "Pin", "×", "Up", "Reset", "Refresh"] {
-        let pos = painted
-            .iter()
-            .find(|(text, _)| text == name)
-            .unwrap_or_else(|| panic!("missing {name}: {painted:?}"))
-            .1;
-        assert!(
-            area.contains(pos),
-            "{name} outside narrow overlay at {pos:?}"
-        );
-    }
-    click_text(&mut window, &ctx, area, "Pin this console");
-    assert!(window.explorer.pinned.is_some());
-    click_text(&mut window, &ctx, area, "Follow active pane");
-    assert!(window.explorer.pinned.is_none());
-    click_text(&mut window, &ctx, area, "Hide");
-    assert!(!window.explorer.visible);
 }

@@ -44,7 +44,22 @@ fn pin(state: &mut State, source: Source) -> bool {
     true
 }
 
+pub(super) fn initialize(window: &mut Window, markdown: bool) {
+    let Some(index) = window.active().where_the_focus_is() else {
+        return;
+    };
+    let name = window.active().panes()[index].name;
+    if markdown {
+        if let Some(source) = source(window, name) {
+            window.viewer.origin = Some(source);
+        }
+    } else {
+        open_diff_for_pane(window, name);
+    }
+}
+
 pub(crate) fn open_diff_for_pane(window: &mut Window, name: usize) {
+    super::select_state(window, false);
     if window
         .viewer
         .origin
@@ -52,6 +67,7 @@ pub(crate) fn open_diff_for_pane(window: &mut Window, name: usize) {
         .is_some_and(|source| source.pane == name)
         && window.viewer.review.has_comments()
     {
+        crate::sidebar::select(window, crate::sidebar::Tool::Git);
         window.viewer.open = true;
         window.viewer.keyboard = true;
     } else {
@@ -59,7 +75,9 @@ pub(crate) fn open_diff_for_pane(window: &mut Window, name: usize) {
             return;
         };
         let cwd = source.cwd.clone();
+        crate::sidebar::select(window, crate::sidebar::Tool::Git);
         if !pin(&mut window.viewer, source) {
+            window.viewer.keyboard = true;
             return;
         }
         window.viewer.open_diff();
@@ -88,12 +106,14 @@ pub(crate) fn open_markdown_target(
     path: PathBuf,
     _line: Option<u32>,
 ) -> bool {
+    super::select_state(window, true);
     let Some(source) = source(window, pane) else {
         return false;
     };
     if !pin(&mut window.viewer, source) {
         return false;
     }
+    crate::sidebar::select(window, crate::sidebar::Tool::Markdown);
     window.viewer.open_markdown();
     window.viewer.path = path.to_string_lossy().into_owned();
     window.viewer.editing_path = false;
@@ -116,6 +136,37 @@ mod tests {
     use super::*;
     use crate::tests::{one_frame_in, window_of_tabs};
     use eframe::egui;
+
+    #[test]
+    fn markdown_and_git_banks_keep_independent_paths_and_loaded_content() {
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+        window.viewer.path = "/docs/guide.md".into();
+        window.viewer.loaded = Some(super::super::Loaded {
+            text: "markdown body".into(),
+            markdown: Some(
+                crate::viewer::markdown::MarkdownDocument::parse("markdown body").unwrap(),
+            ),
+            diff: None,
+        });
+
+        super::super::select_state(&mut window, false);
+        window.viewer.kind = super::super::Kind::AgainstBase;
+        window.viewer.path = "/repo".into();
+        window.viewer.base = "release".into();
+        window.viewer.loaded = Some(super::super::Loaded {
+            text: "git diff".into(),
+            markdown: None,
+            diff: None,
+        });
+
+        super::super::select_state(&mut window, true);
+        assert_eq!(window.viewer.path, "/docs/guide.md");
+        assert_eq!(window.viewer.loaded.as_ref().unwrap().text, "markdown body");
+        super::super::select_state(&mut window, false);
+        assert_eq!(window.viewer.path, "/repo");
+        assert_eq!(window.viewer.base, "release");
+        assert_eq!(window.viewer.loaded.as_ref().unwrap().text, "git diff");
+    }
     #[cfg(target_os = "linux")]
     struct Repository(PathBuf);
     #[cfg(target_os = "linux")]
@@ -272,33 +323,21 @@ mod tests {
     }
 
     #[test]
-    fn opening_a_path_pins_its_console_and_preserves_the_grid() {
+    fn opening_a_path_pins_its_console_without_changing_pane_identity() {
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
         let ctx = egui::Context::default();
         let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
         one_frame_in(&mut window, &ctx, area, vec![]);
-        let before: Vec<_> = window.all_panes().map(|p| (p.name, p.measured)).collect();
-        let name = before[1].0;
+        let names: Vec<_> = window.all_panes().map(|p| p.name).collect();
+        let name = names[1];
         open_markdown_target(&mut window, name, PathBuf::from("relative.md"), None);
         assert_eq!(window.viewer.origin.as_ref().unwrap().pane, name);
         assert!(window.viewer.message.contains("working directory"));
         assert!(window.viewer.requested.is_none());
         one_frame_in(&mut window, &ctx, area, vec![]);
         assert_eq!(
-            window
-                .all_panes()
-                .map(|p| (p.name, p.measured))
-                .collect::<Vec<_>>(),
-            before
-        );
-        window.viewer.width = 900.0;
-        one_frame_in(&mut window, &ctx, area, vec![]);
-        assert_eq!(
-            window
-                .all_panes()
-                .map(|p| (p.name, p.measured))
-                .collect::<Vec<_>>(),
-            before
+            window.all_panes().map(|p| p.name).collect::<Vec<_>>(),
+            names
         );
     }
     #[test]

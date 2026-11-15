@@ -125,6 +125,11 @@ pub fn run() -> eframe::Result {
                 measuring,
                 std::env::var("MEASURE_BOARD").ok().as_deref(),
             );
+            crate::sidebar::probe::configure(
+                &mut window,
+                measuring,
+                std::env::var("MEASURE_SIDEBAR").ok().as_deref(),
+            );
             // **The font goes apart from the rest of the settings, and it is not tidiness.** The
             // others put a value on the window; this one talks to the text engine and **costs
             // between 17.3 and 23.2 ms** (**D24**) because resolving a name forces enumerating the

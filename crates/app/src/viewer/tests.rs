@@ -8,19 +8,6 @@ impl Drop for Directory {
 }
 
 #[test]
-fn floating_viewer_stays_inside_the_available_area() {
-    let area = egui::Rect::from_min_size(egui::pos2(13.0, 17.0), egui::vec2(1000.0, 600.0));
-    let mut state = State::default();
-    state.open_markdown();
-    assert!(area.contains_rect(state.rect(area)));
-    assert_eq!(state.rect(area).width(), 800.0);
-    state.width = 10000.0;
-    assert!(area.contains_rect(state.rect(area)));
-    state.close();
-    assert!(state.refresh_at.is_none());
-}
-
-#[test]
 fn viewers_name_the_frame_work_they_remove() {
     let mut state = State::default();
     let cost = Duration::from_micros(37);
@@ -34,6 +21,23 @@ fn viewers_name_the_frame_work_they_remove() {
     assert_eq!(
         String::from_utf8(report).unwrap(),
         "document viewers: frames=1, total=37µs\n"
+    );
+}
+
+#[test]
+fn work_in_both_viewer_banks_counts_as_one_application_frame() {
+    let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+    window.viewer.record(Duration::from_micros(12));
+    window.viewer_other.record(Duration::from_micros(23));
+    window.close_the_frame(Duration::from_millis(1));
+    let mut report = Vec::new();
+    window
+        .viewer
+        .publish_combined(&window.viewer_other, &mut report)
+        .unwrap();
+    assert_eq!(
+        String::from_utf8(report).unwrap(),
+        "document viewers: frames=1, total=35µs\n"
     );
 }
 
@@ -65,7 +69,7 @@ fn background_refresh_does_not_move_or_hide_the_markdown() {
                 ..Default::default()
             },
             |ui| {
-                view::show(state, ui, rect, crate::theme::Theme::default());
+                view::show(state, ui, rect, crate::theme::Theme::default(), false);
             },
         );
         let mut found = Vec::new();
@@ -114,11 +118,7 @@ fn viewer_typing_and_dismissal_never_reach_the_program() {
         let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
         received.wait_until_ready(Duration::from_secs(5));
         let names: Vec<_> = window.all_panes().map(|p| p.name).collect();
-        if markdown {
-            window.viewer.open_markdown();
-        } else {
-            window.viewer.open_diff();
-        }
+        crate::viewer::activate(&mut window, markdown);
         one_frame_in(&mut window, &ctx, area, vec![]);
         one_frame_in(
             &mut window,
@@ -223,57 +223,6 @@ fn markdown_refresh_survives_atomic_save_and_obsolete_request() {
     await_text(&mut state, "# Changed after reopen");
     state.close();
     fs::remove_dir_all(dir).unwrap();
-}
-
-#[cfg(unix)]
-#[test]
-fn dragging_viewer_divider_keeps_the_gesture_out_of_the_consoles() {
-    use crate::tests::{one_frame_in, window_of_tabs};
-
-    let received = term_core::received::Received::new("viewer-divider");
-    let script = received.script("stty raw -echo && printf '\\033[?1000h\\033[?1006h'");
-    let mut window = window_of_tabs([[script.as_str(), "sleep 30"]]);
-    let ctx = egui::Context::default();
-    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
-    received.wait_until_ready(Duration::from_secs(5));
-    let names: Vec<_> = window.all_panes().map(|p| p.name).collect();
-    window.viewer.open_markdown();
-    one_frame_in(&mut window, &ctx, area, vec![]);
-
-    let metrics =
-        crate::painter::CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
-    let before = crate::tab_bar::geometry(&window, area, &metrics).consoles;
-    let from = window.viewer.rect(before).left_center();
-    let to = egui::pos2(from.x - 200.0, from.y);
-    let button = |pos, pressed| egui::Event::PointerButton {
-        pos,
-        button: egui::PointerButton::Primary,
-        pressed,
-        modifiers: egui::Modifiers::NONE,
-    };
-    one_frame_in(
-        &mut window,
-        &ctx,
-        area,
-        vec![egui::Event::PointerMoved(from), button(from, true)],
-    );
-    one_frame_in(&mut window, &ctx, area, vec![egui::Event::PointerMoved(to)]);
-    one_frame_in(&mut window, &ctx, area, vec![button(to, false)]);
-
-    let after = crate::tab_bar::geometry(&window, area, &metrics).consoles;
-    assert!(
-        (window.viewer.rect(after).left() - to.x).abs() < 10.0,
-        "divider did not follow the drag: {after:?}"
-    );
-    assert_eq!(after, before, "floating resize changed console geometry");
-    assert_eq!(
-        window.all_panes().map(|p| p.name).collect::<Vec<_>>(),
-        names
-    );
-    assert!(
-        received.so_far().is_empty(),
-        "divider gesture reached the program"
-    );
 }
 
 #[test]

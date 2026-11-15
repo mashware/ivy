@@ -1,5 +1,5 @@
-//! Floating review surface: fixed chrome around independently scrolling content.
-use super::{GRIP, Kind, State};
+//! Docked document and review content.
+use super::{Kind, State};
 use eframe::egui::{self, Color32, FontId, RichText};
 use std::path::Path;
 
@@ -8,57 +8,65 @@ pub(super) fn show(
     parent: &mut egui::Ui,
     full: egui::Rect,
     theme: crate::theme::Theme,
+    unavailable: bool,
 ) {
-    let rect = state.rect(full);
-    egui::Area::new(egui::Id::new("document-viewer"))
-        .order(egui::Order::Foreground)
-        .fixed_pos(rect.min)
+    let namespace = if state.kind == Kind::Markdown {
+        "markdown-viewer"
+    } else {
+        "git-viewer"
+    };
+    egui::Area::new(egui::Id::new(("document-viewer", namespace)))
+        .fade_in(false)
+        .constrain(false)
+        .fixed_pos(full.min)
         .movable(false)
-        .show(parent.ctx(), |ui| {
-            ui.set_min_size(rect.size());
-            ui.set_max_size(rect.size());
-            let surface = mix(theme.background(), theme.foreground(), 0.045);
-            let line = mix(surface, theme.foreground(), 0.16);
-            let frame = egui::Frame::new()
-                .fill(surface)
-                .corner_radius(9)
-                .stroke(egui::Stroke::new(1.0, line))
-                .shadow(egui::epaint::Shadow {
-                    offset: [-10, 6],
-                    blur: 32,
-                    spread: 0,
-                    color: Color32::from_black_alpha(90),
-                });
-            ui.painter().add(frame.paint(rect));
-            let grip = egui::Rect::from_center_size(
-                rect.left_center(),
-                egui::vec2(GRIP * 2.0, rect.height()),
-            );
-            ui.interact(grip, egui::Id::new("viewer-divider"), egui::Sense::drag())
-                .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
-            let inner = rect.shrink(1.0);
-            let mut content = ui.new_child(
-                egui::UiBuilder::new()
-                    .max_rect(inner)
-                    .layout(egui::Layout::top_down(egui::Align::Min)),
-            );
-            content.set_clip_rect(inner);
-            style(&mut content, theme, surface, line);
-            let (head, rest) =
-                inner.split_top_bottom_at_y((inner.top() + 62.0).min(inner.bottom()));
-            header(state, &mut content, head, theme, line);
-            if !state.open {
-                return;
-            }
-            let (body, foot) = rest.split_top_bottom_at_y((rest.bottom() - 38.0).max(rest.top()));
-            footer(state, &mut content, foot, theme, line);
-            let mut body_ui = content.new_child(
-                egui::UiBuilder::new()
-                    .max_rect(body)
-                    .layout(egui::Layout::top_down(egui::Align::Min)),
-            );
-            body_ui.set_clip_rect(body);
-            body_content(state, &mut body_ui, theme);
+        .order(egui::Order::Foreground)
+        .show(parent.ctx(), |parent| {
+            parent.set_min_size(full.size());
+            parent.set_max_size(full.size());
+            parent.set_clip_rect(full);
+            parent.push_id(namespace, |parent| {
+                let rect = full;
+                let mut ui = parent.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(rect)
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                );
+                ui.set_clip_rect(rect);
+                ui.set_min_size(rect.size());
+                ui.set_max_size(rect.size());
+                let surface = mix(theme.background(), theme.foreground(), 0.045);
+                let line = mix(surface, theme.foreground(), 0.16);
+                let frame = egui::Frame::new()
+                    .fill(surface)
+                    .corner_radius(0)
+                    .stroke(egui::Stroke::new(1.0, line));
+                ui.painter().add(frame.paint(rect));
+                let inner = rect.shrink(1.0);
+                let mut content = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(inner)
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                );
+                content.set_clip_rect(inner);
+                style(&mut content, theme, surface, line);
+                let (head, rest) =
+                    inner.split_top_bottom_at_y((inner.top() + 62.0).min(inner.bottom()));
+                header(state, &mut content, head, theme, line);
+                if !state.open {
+                    return;
+                }
+                let (body, foot) =
+                    rest.split_top_bottom_at_y((rest.bottom() - 38.0).max(rest.top()));
+                footer(state, &mut content, foot, theme, line, unavailable);
+                let mut body_ui = content.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(body)
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                );
+                body_ui.set_clip_rect(body);
+                body_content(state, &mut body_ui, theme, unavailable);
+            });
         });
 }
 
@@ -176,73 +184,6 @@ fn header(
             .truncate(),
         )
         .on_hover_text(path);
-    if icon_button(
-        ui,
-        egui::pos2(rect.right() - 40.0, rect.top() + 16.0),
-        "Close",
-    ) {
-        state.close();
-    }
-    if icon_button(
-        ui,
-        egui::pos2(rect.right() - 76.0, rect.top() + 16.0),
-        if state.expanded { "Restore" } else { "Expand" },
-    ) {
-        state.expanded = !state.expanded;
-    }
-}
-
-fn icon_button(ui: &mut egui::Ui, pos: egui::Pos2, label: &str) -> bool {
-    let rect = egui::Rect::from_min_size(pos, egui::vec2(28.0, 28.0));
-    let response = ui
-        .interact(
-            rect,
-            egui::Id::new(("viewer-icon", label)),
-            egui::Sense::click(),
-        )
-        .on_hover_text(label);
-    let scale = 17.0 / 24.0;
-    let stroke = egui::Stroke::new(1.6 * scale, ui.visuals().text_color());
-    if response.hovered() {
-        ui.painter()
-            .rect_filled(rect, 5, ui.visuals().widgets.hovered.bg_fill);
-    }
-    let at = |x: f32, y: f32| rect.center() + egui::vec2(x, y) * scale;
-    let line = |a: (f32, f32), b: (f32, f32)| {
-        ui.painter()
-            .line_segment([at(a.0, a.1), at(b.0, b.1)], stroke);
-    };
-    match label {
-        "Close" => {
-            line((-6.0, -6.0), (6.0, 6.0));
-            line((6.0, -6.0), (-6.0, 6.0));
-        }
-        "Restore" => {
-            for (a, b) in [
-                ((-3.0, -7.0), (-3.0, -9.0)),
-                ((-3.0, -9.0), (9.0, -9.0)),
-                ((9.0, -9.0), (9.0, 3.0)),
-                ((9.0, 3.0), (7.0, 3.0)),
-            ] {
-                line(a, b);
-            }
-            ui.painter().rect_stroke(
-                egui::Rect::from_min_max(at(-9.0, -3.0), at(3.0, 9.0)),
-                scale,
-                stroke,
-                egui::StrokeKind::Middle,
-            );
-        }
-        _ => {
-            ui.painter().rect_stroke(
-                egui::Rect::from_min_max(at(-7.0, -7.0), at(7.0, 7.0)),
-                scale,
-                stroke,
-                egui::StrokeKind::Middle,
-            );
-        }
-    }
-    response.clicked()
 }
 
 fn footer(
@@ -251,6 +192,7 @@ fn footer(
     rect: egui::Rect,
     theme: crate::theme::Theme,
     line: Color32,
+    unavailable: bool,
 ) {
     ui.painter().line_segment(
         [rect.left_top(), rect.right_top()],
@@ -265,8 +207,13 @@ fn footer(
         .origin
         .as_ref()
         .map_or("No source console", |s| s.label.as_str());
+    let source = if unavailable {
+        format!("{source} - unavailable")
+    } else {
+        source.to_owned()
+    };
     child.add(
-        egui::Label::new(RichText::new(source).size(11.0).color(mix(
+        egui::Label::new(RichText::new(&source).size(11.0).color(mix(
             theme.background(),
             theme.foreground(),
             0.6,
@@ -284,7 +231,12 @@ fn footer(
     }
 }
 
-fn body_content(state: &mut State, ui: &mut egui::Ui, theme: crate::theme::Theme) {
+fn body_content(
+    state: &mut State,
+    ui: &mut egui::Ui,
+    theme: crate::theme::Theme,
+    unavailable: bool,
+) {
     let markdown = state.kind == Kind::Markdown;
     if markdown && (state.editing_path || (state.requested.is_none() && state.job.is_none())) {
         egui::Frame::new()
@@ -326,6 +278,7 @@ fn body_content(state: &mut State, ui: &mut egui::Ui, theme: crate::theme::Theme
                     .requested
                     .as_ref()
                     .map_or(Path::new(&state.path), |(path, _)| path.as_path()),
+                !unavailable,
             );
         }
     }
@@ -428,140 +381,65 @@ fn controls(state: &mut State, ui: &mut egui::Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn maximizing_shows_restore_glyph_and_restoring_shows_maximize_glyph() {
-        let ctx = egui::Context::default();
-        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 700.0));
-        let mut state = State::default();
-        state.open_markdown();
-        let icon = egui::Rect::from_min_size(
-            state.rect(area).min + egui::vec2(state.rect(area).width() - 76.0, 16.0),
-            egui::vec2(28.0, 28.0),
-        );
-        let pos = icon.center();
-        let run = |state: &mut State, events| {
-            ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(area),
-                    events,
-                    ..Default::default()
-                },
-                |ui| show(state, ui, area, crate::theme::Theme::default()),
-            )
-        };
-        fn count(shape: &egui::Shape, icon: egui::Rect) -> usize {
-            match shape {
-                egui::Shape::LineSegment { points, .. } => {
-                    usize::from(points.iter().all(|point| icon.contains(*point)))
-                }
-                egui::Shape::Vec(shapes) => shapes.iter().map(|shape| count(shape, icon)).sum(),
-                _ => 0,
-            }
-        }
-        let lines = |state: &mut State| {
-            let output = run(state, vec![egui::Event::PointerMoved(pos)]);
-            let result: usize = output
-                .shapes
-                .iter()
-                .map(|shape| count(&shape.shape, icon))
-                .sum();
-            output.drop_without_applying_deltas();
-            result
-        };
-        run(&mut state, vec![]).drop_without_applying_deltas();
-        assert_eq!(lines(&mut state), 0);
-        for expanded in [true, false] {
-            for pressed in [true, false] {
-                run(
-                    &mut state,
-                    vec![
-                        egui::Event::PointerMoved(pos),
-                        egui::Event::PointerButton {
-                            pos,
-                            button: egui::PointerButton::Primary,
-                            pressed,
-                            modifiers: egui::Modifiers::NONE,
-                        },
-                    ],
-                )
-                .drop_without_applying_deltas();
-            }
-            assert_eq!(state.expanded, expanded);
-            assert_eq!(
-                lines(&mut state),
-                if expanded { 4 } else { 0 },
-                "the painted icon did not follow the maximized state"
-            );
-        }
-    }
 
     #[test]
-    fn narrow_overlay_keeps_header_and_comparison_controls_visible() {
+    fn dock_content_stays_within_the_supplied_rectangle() {
         let ctx = egui::Context::default();
-        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 480.0));
+        let area = egui::Rect::from_min_size(egui::Pos2::new(620.0, 0.0), egui::vec2(360.0, 480.0));
         let mut state = State::default();
         state.open_diff();
-        let run = |state: &mut State, events| {
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 600.0));
+        let frame = |state: &mut State| {
             ctx.run_ui(
                 egui::RawInput {
-                    screen_rect: Some(area),
-                    events,
+                    screen_rect: Some(screen),
                     ..Default::default()
                 },
-                |ui| show(state, ui, area, crate::theme::Theme::default()),
+                |ui| show(state, ui, area, crate::theme::Theme::default(), true),
             )
         };
-        run(&mut state, vec![]).drop_without_applying_deltas();
-        let output = run(&mut state, vec![]);
-        let mut labels = Vec::new();
-        fn collect(
+        frame(&mut state).drop_without_applying_deltas();
+        let output = frame(&mut state);
+        fn inspect(
             shape: &egui::Shape,
-            clip: egui::Rect,
+            area: egui::Rect,
             labels: &mut Vec<(String, egui::Pos2, egui::Rect)>,
         ) {
             match shape {
-                egui::Shape::Text(t) => {
-                    labels.push((t.galley.text().into(), t.pos + t.galley.size() * 0.5, clip))
+                egui::Shape::Text(text) => {
+                    labels.push((
+                        text.galley.text().to_owned(),
+                        text.pos + text.galley.size() * 0.5,
+                        area,
+                    ));
                 }
                 egui::Shape::Vec(shapes) => {
                     for shape in shapes {
-                        collect(shape, clip, labels);
+                        inspect(shape, area, labels);
                     }
                 }
                 _ => {}
             }
         }
+        let mut labels = Vec::new();
         for shape in &output.shapes {
-            collect(&shape.shape, shape.clip_rect, &mut labels);
+            inspect(&shape.shape, shape.clip_rect, &mut labels);
         }
         output.drop_without_applying_deltas();
-        for label in ["Review changes", "Local changes", "No source console"] {
-            let (_, point, clip) = labels
+        for expected in [
+            "Review changes",
+            "Local changes",
+            "No source console - unavailable",
+        ] {
+            let (_, position, clip) = labels
                 .iter()
-                .find(|(text, _, _)| text == label)
-                .unwrap_or_else(|| panic!("missing {label}: {labels:?}"));
-            assert!(clip.contains(*point), "clipped {label} at {point:?}");
+                .find(|(label, _, _)| label == expected)
+                .unwrap_or_else(|| panic!("missing dock label {expected:?}: {labels:?}"));
+            assert!(area.contains(*position), "{expected:?} escaped {area:?}");
+            assert!(
+                clip.contains(*position),
+                "{expected:?} escaped clip {clip:?}"
+            );
         }
-        let rect = state.rect(area);
-        let point = egui::pos2(rect.right() - 25.0, rect.top() + 30.0);
-        for pressed in [true, false] {
-            run(
-                &mut state,
-                vec![
-                    egui::Event::PointerMoved(point),
-                    egui::Event::PointerButton {
-                        pos: point,
-                        button: egui::PointerButton::Primary,
-                        pressed,
-                        modifiers: egui::Modifiers::NONE,
-                    },
-                ],
-            )
-            .drop_without_applying_deltas();
-        }
-        assert!(
-            !state.open,
-            "the compact close control did not dismiss the viewer"
-        );
     }
 }

@@ -255,7 +255,7 @@ mod tests {
             let mut window = window_with("sleep 30", "sleep 30");
             window.chrome.enable();
             window.headers = window.headers.integrated(true);
-            window.viewer.open_markdown();
+            crate::viewer::activate(&mut window, true);
             let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 420.0));
             let shapes = frame(&mut window, &ctx, area, vec![]);
             assert!(connection_highlight(&shapes, area));
@@ -285,10 +285,17 @@ mod tests {
             frame(&mut window, &ctx, area, click_at(close));
             let shapes = frame(&mut window, &ctx, area, vec![]);
             assert!(!has_text(&shapes, "No panels published yet"));
-            assert!(
-                has_text(&shapes, "Markdown viewer"),
-                "viewer did not resume after closure"
-            );
+            if width >= 700.0 {
+                assert!(
+                    has_text(&shapes, "Markdown viewer"),
+                    "viewer did not resume after closure"
+                );
+            } else {
+                assert!(
+                    !has_text(&shapes, "Markdown viewer"),
+                    "the dock body was not suppressed below its minimum width"
+                );
+            }
         }
     }
 
@@ -1939,7 +1946,7 @@ mod tests {
                 let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
                 window.chrome.enable();
                 window.headers = window.headers.integrated(true);
-                let area = area_of(800.0);
+                let area = area_of(1400.0);
                 frame(&mut window, &ctx, area, vec![]);
                 if board_open {
                     crate::board::toggle(&mut window, &ctx);
@@ -1986,6 +1993,22 @@ mod tests {
                         .all(|pane| pane.keystrokes.is_empty())
                 );
                 let focus = window.active().focus;
+                if board_open {
+                    let metrics = crate::painter::CellMetrics::measure(
+                        &ctx,
+                        egui::FontId::monospace(window.font_size),
+                    );
+                    let dock = crate::tab_bar::geometry(&window, area, &metrics)
+                        .dock
+                        .expect("Board is visible beside the consoles");
+                    // Escape dismisses the dock only after it receives keyboard focus.
+                    separate_click(
+                        &mut window,
+                        &ctx,
+                        area,
+                        dock.right_top() + egui::vec2(-8.0, 8.0),
+                    );
+                }
                 frame(&mut window, &ctx, area, vec![menu_key(egui::Key::Escape)]);
                 assert!(!window.board.is_open());
                 assert_eq!(window.active().focus, focus, "Board close undid tab action");
@@ -2063,7 +2086,6 @@ mod tests {
                     ("What's new", "New in this alpha"),
                     ("Connect agents", "Copy setup prompt"),
                     ("Search console", ""),
-                    ("Files", "Files"),
                 ] {
                     let ctx = egui::Context::default();
                     chrome::prepare(&ctx);

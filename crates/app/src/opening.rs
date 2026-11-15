@@ -324,6 +324,8 @@ fn initial_window(
         pane_view: crate::pane_view::State::default(),
         clipboard: crate::clipboard::Service::default(),
         board: crate::board::State::default(),
+        sidebar: crate::sidebar::Sidebar::default(),
+        viewer_other: crate::viewer::State::default(),
         viewer: crate::viewer::State::default(),
         explorer: crate::explorer::Explorer::default(),
         projects: crate::project_view::State::default(),

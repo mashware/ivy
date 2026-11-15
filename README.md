@@ -211,19 +211,20 @@ native two-console verification as incomplete rather than claiming isolation is 
 
 ## Read plans and review changes
 
-Read the plan or inspect changes while your consoles keep running. Both viewers float above the
-panes, attached to the right edge. Drag the left edge to resize, expand the viewer, or close it;
-the console layout stays in place.
+Read the plan or inspect changes while your consoles keep running. **Files**, **Markdown**, **Git**
+and **Board** share the right sidebar. Choose a tool from the vertical bar, drag the left divider
+to resize, or click the active tool again to close it. Consoles resize beside the sidebar; switching
+tools preserves their sources and navigation.
 
 ### Markdown previews
 
 Hold **Ctrl** and click a local `.md` path printed by an agent or shell. Ivy opens the document
 inside the terminal, with headings, lists, tables and code. Saving the file updates the preview
-without reopening it. You can also choose **Markdown viewer** from the application menu.
+without reopening it. You can also choose **Markdown** from the right tool bar.
 
 ![Ivy showing a formatted Markdown plan in a floating viewer above running consoles](docs/images/ivy-markdown.png)
 
-*Ivy's Markdown viewer rendered with example session data and the Tokyo Night theme.*
+*Markdown rendered with example session data and the Tokyo Night theme in the earlier floating layout.*
 
 ### Git review from each console
 
@@ -248,7 +249,7 @@ for directory discovery, supported files and platform behavior.
 
 ## Browse a console's files
 
-Choose **Files** from the window menu to show the shared file explorer on the right.
+Choose **Files** from the right tool bar to show the shared file explorer.
 A compact toolbar sits above the project tree; hover its controls for action details. It follows the active
 console and remembers that console's root, expanded folders, selected entry and scroll position.
 Different worktrees and even two consoles in the same directory keep separate navigation.
@@ -265,8 +266,8 @@ to the console's latest known local directory. Browsing never changes the runnin
 directory. Later console directory changes leave the saved tree intact. Unknown or remote console
 directories show an unavailable message. Missing directories and listing failures are shown explicitly.
 
-The overlay leaves console dimensions unchanged; drag its left edge to adjust its width. Below
-560 points it uses the full console content width. **Hide** or Escape preserves navigation and pin
+The explorer shares the dock width with the other tools; drag its left edge to resize it.
+Narrow windows hide the dock body until it fits again. **Hide** or Escape preserves navigation and pin
 state. Clicking outside transfers keyboard input back to the console. Navigation is kept only while
 Ivy is running; restarting starts with Files hidden and fresh navigation from restored console directories.
 

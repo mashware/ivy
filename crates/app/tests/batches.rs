@@ -551,7 +551,14 @@ fn the_large_pair_differs_in_the_patch_and_in_nothing_else() {
 #[test]
 fn no_knob_comes_from_the_callers_environment() {
     let table = MEASURE
-        .find("case \"$BATCH\" in")
+        .match_indices("case \"$BATCH\" in")
+        .find(|(at, _)| {
+            MEASURE[*at..]
+                .split("esac")
+                .next()
+                .is_some_and(|body| body.contains("TABS="))
+        })
+        .map(|(at, _)| at)
         .expect("the batch table is not in the script");
     let cleared: Vec<&str> = MEASURE[..table]
         .lines()

@@ -373,12 +373,7 @@ impl Window {
         // **The two saving spans go after the rest, and each with a row of its own.** They are
         // discounted from that rest —they go into the window's accumulator—, so without these rows
         // the number would exist and **nobody could audit it**.
-        self.settings_editor.publish(to)?;
-        self.chrome.publish(to)?;
-        self.viewer.publish(to)?;
-        self.projects.publish(to)?;
-        self.restoration.publish(to)?;
-        self.board.timing.publish(to)?;
+        publish_views(self, to)?;
         self.saving.publish(to)?;
         // **And discovery the same: its row goes after the rest because it too is discounted from
         // it.** It is the most expensive span this project adds outside a console, so without
@@ -443,9 +438,22 @@ impl Window {
     }
 }
 
+fn publish_views(window: &Window, to: &mut dyn std::io::Write) -> std::io::Result<()> {
+    window.settings_editor.publish(to)?;
+    window.chrome.publish(to)?;
+    window.viewer.publish_combined(&window.viewer_other, to)?;
+    window.projects.publish(to)?;
+    window.restoration.publish(to)?;
+    window.board.timing.publish(to)?;
+    window.sidebar.publish(to)?;
+    crate::sidebar::probe::publish(window, to)?;
+    Ok(())
+}
+
 fn close_views(window: &mut Window) {
     window.settings_editor.close_frame();
     window.chrome.close_frame();
-    window.viewer.close_frame();
+    window.viewer.close_combined_frame(&mut window.viewer_other);
     window.board.timing.close_frame();
+    window.sidebar.close_frame();
 }

@@ -8669,10 +8669,12 @@ viewport icon alone proves.
   without adding an SVG renderer or disk access to the painting path.
 - Replacing any controls with branding: window and console actions keep their existing geometry.
 
-## D72 — Document viewers overlay the consoles and never become consoles
+## D72 — Document viewers share a transient sidebar and never become consoles
 
-**8 November 2026 — #337.** Markdown and Git changes open in a transient, resizable floating
-view above the consoles. The console tree and its running programs retain their geometry and identity.
+**8 November 2026 — #337; amended for #73 on 15 November 2026.** Markdown and Git changes open in a
+transient shared right sidebar beside the consoles, together with Files and the global Board. The
+console tree and its running programs retain their identity; the dock reserves their width while
+open. The sidebar is closed on restart and its width and tool state are not persisted.
 The user chooses the source explicitly: a local Markdown path, or the review control of a console.
 Git opens that console's working directory without a path form. On Linux, the live foreground
 process directory takes precedence over a previous local OSC 7 report, which may predate a `cd`.
@@ -8680,8 +8682,16 @@ Local OSC 7 metadata remains the fallback when native discovery is unavailable. 
 explicit unusable/remote directory is never replaced with another console's or the app's directory.
 The terminal does not infer task state. The viewer has no PTY, producer identity, attention claim or MCP endpoint.
 It is not persisted. The view owns its gestures and keyboard input until focus returns to a console;
-its dismissal consumes the input that closed it. Viewer frame work is named and discounted from the
-framework remainder.
+its dismissal consumes the input that closed it. Tool state remains retained while another tool is
+shown. Viewer, Board and sidebar host frame work are separately named and discounted once from the
+framework remainder; the host span excludes viewer and Board spans.
+
+The sidebar reserves a 36 point navigation rail, a 6 point divider and a preferred 480 point body.
+The body needs at least 320 points, while the console tree keeps its metric-derived floor (at least
+320 points). Below the combined floors the body and divider are temporarily suppressed, the selected
+tool remains available from the rail, and its tooltip explains that the window must be widened.
+Closing returns the body and divider width to consoles; the navigation rail remains reserved.
+Neither suppression nor resizing changes pane identities, PTYs or tree weights.
 
 Markdown renders headings, lists, tables and code as native widgets and refreshes when its selected
 file changes. HTML and embedded assets are inert. Loading is bounded and runs off the window thread;
@@ -8706,7 +8716,11 @@ repository guessing from task text, other consoles or the app's working director
 the source console explicitly).
 
 Native desktop behaviour remains a separate verification from headless input and rendering tests;
-no performance figure is claimed from source inspection.
+no performance figure is claimed from source inspection. Historical `board-4-*` and `board-16-*`
+runs remain overlay-era evidence and the current script refuses to relabel them. The
+`dock-v1-4-closed/open` regimes use matched layouts and must
+publish the selected tool, effective width, per-pane grid and pane identity count before comparison.
+The dock-open grid intentionally differs from its closed control, so no painting speedup is inferred.
 
 ## D73 — Connection help is global and reports observed publication
 

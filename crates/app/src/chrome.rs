@@ -113,7 +113,6 @@ enum Action {
     Updates(bool),
     Menu,
     Preferences,
-    Files,
     Shortcuts,
     Minimize,
     Maximize,
@@ -437,7 +436,6 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
                     | Action::Connect
                     | Action::Updates(_)
                     | Action::Search
-                    | Action::Files
             )
         );
     if board_handoff {
@@ -448,7 +446,6 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         action,
         Some(
             Action::Search
-                | Action::Files
                 | Action::Minimize
                 | Action::Maximize
                 | Action::Close
@@ -492,7 +489,6 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
             window.settings_editor.open_from_chrome();
         }
         Some(Action::Shortcuts) => window.settings_editor.open_shortcuts_from_chrome(),
-        Some(Action::Files) => crate::explorer::toggle(window, &ctx),
         Some(Action::Minimize) => ctx.send_viewport_cmd(ViewportCommand::Minimized(true)),
         Some(Action::Maximize) => {
             let maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
@@ -545,7 +541,10 @@ fn resize_direction(area: Rect, p: egui::Pos2) -> Option<egui::ResizeDirection> 
 }
 
 pub(crate) fn after_panels(window: &mut Window, ui: &mut egui::Ui, area: Rect) {
-    crate::explorer::show(window, ui, area);
+    if let Some(dock) = window.sidebar.last_dock {
+        crate::viewer::paint(window, ui, dock);
+        crate::explorer::show(window, ui, dock);
+    }
     connection::after_panels(window, ui, area);
 }
 

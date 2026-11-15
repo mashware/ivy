@@ -4,7 +4,7 @@ mod tests {
     use super::super::*;
 
     fn area() -> egui::Rect {
-        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0))
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1800.0))
     }
 
     fn key(key: egui::Key) -> egui::Event {
@@ -208,6 +208,101 @@ mod tests {
             "Board sent bytes to its program or never released input"
         );
     }
+
+    #[test]
+    fn clicking_a_console_transfers_keyboard_input_while_board_stays_open() {
+        let received = term_core::received::Received::new("board-console-focus");
+        let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
+        integrated(&mut window);
+        let ctx = egui::Context::default();
+        received.wait_until_ready(Duration::from_secs(5));
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
+        let metrics = painter::CellMetrics::measure(&ctx, egui::FontId::monospace(14.0));
+        let consoles = tab_bar::geometry(&window, area(), &metrics).consoles;
+        frame(&mut window, &ctx, click_at(consoles.center()));
+        assert!(window.board.is_open(), "a console click hid the Board");
+        frame(&mut window, &ctx, vec![egui::Event::Text("console".into())]);
+        assert!(
+            window.board.is_open(),
+            "typing in the console hid the Board"
+        );
+        assert_eq!(received.wait_for(7, Duration::from_secs(5)), b"console");
+    }
+
+    #[test]
+    fn clicking_a_board_card_closes_the_dock_and_never_sends_its_gesture() {
+        let received = term_core::received::Received::new("board-card-activation");
+        let script = received.script("stty raw -echo");
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", script.as_str()]]);
+        integrated(&mut window);
+        let ctx = egui::Context::default();
+        received.wait_until_ready(Duration::from_secs(5));
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
+        let target = window.tabs[1].panes()[1].name;
+        let card = window.board.card_rect(target).expect("target card");
+        // Stay in the card's empty corner, away from body links and inline controls.
+        let at = card.left_top() + egui::vec2(4.0, 4.0);
+        frame(
+            &mut window,
+            &ctx,
+            vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        frame(
+            &mut window,
+            &ctx,
+            vec![
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::Text("closing".into()),
+            ],
+        );
+        assert!(
+            !window.board.is_open(),
+            "card activation left the dock open"
+        );
+        assert_eq!(sidebar::active(&window), None);
+        assert_eq!(window.active().focus, target);
+        frame(&mut window, &ctx, vec![egui::Event::Text("after".into())]);
+        assert_eq!(received.wait_for(5, Duration::from_secs(5)), b"after");
+    }
+
+    #[test]
+    fn stacked_dock_cards_fit_the_full_board_viewport_width() {
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+        integrated(&mut window);
+        let ctx = egui::Context::default();
+        let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 900.0));
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Board);
+        ui_pass(&mut window, &ctx, viewport, egui::RawInput::default());
+        let metrics = painter::CellMetrics::measure(&ctx, egui::FontId::monospace(14.0));
+        let dock = tab_bar::geometry(&window, viewport, &metrics)
+            .dock
+            .expect("dock has enough room for Board");
+        let cards: Vec<_> = window
+            .all_panes()
+            .filter_map(|pane| window.board.card_rect(pane.name))
+            .collect();
+        assert!(!cards.is_empty(), "the stacked Board painted no cards");
+        for card in cards {
+            assert!(
+                (card.left() - dock.left() - 8.0).abs() < 0.1
+                    && (card.right() - dock.right() + 8.0).abs() < 0.1,
+                "card {card:?} must retain both 8pt margins inside Board viewport {dock:?}"
+            );
+        }
+    }
     #[test]
     fn configurable_board_binding_returns_the_disabled_chord_to_the_program() {
         for (config, opening) in [
@@ -304,7 +399,7 @@ mod tests {
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 4]);
         integrated(&mut window);
         let ctx = egui::Context::default();
-        let small = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 560.0));
+        let small = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 560.0));
         for pane in window.all_panes_mut() {
             pane.project = Some(crate::project_view::Badge {
                 key: Key::Repository("/work/ivy/.git".into()),
@@ -415,7 +510,9 @@ mod tests {
         };
         let asking = window.tabs[0].panes()[0].name;
         let card = window.board.card_rect(asking).unwrap();
-        assert!(shapes.iter().any(|s|matches!(&s.shape, egui::Shape::Rect(r) if (r.rect.width()-card.width()).abs()<2.0 && card.contains(r.rect.center()) && r.stroke.color == window.theme.color(term_core::TermColor::Indexed(3)))), "waiting state border is absent");
+        let wait_ink = window.theme.color(term_core::TermColor::Indexed(3));
+        let dim_wait_ink = wait_ink.gamma_multiply(0.45);
+        assert!(shapes.iter().any(|s|matches!(&s.shape, egui::Shape::Rect(r) if (r.rect.intersect(s.clip_rect).width()-card.width()).abs()<2.0 && card.contains(r.rect.center()) && (r.stroke.color == wait_ink || r.stroke.color == dim_wait_ink))), "waiting state border is absent");
         assert!(
             !on_card(asking, "it is waiting for you"),
             "removed duplicate attention prose returned"
@@ -461,7 +558,7 @@ mod tests {
         }
         frame(&mut window, &ctx, chord_with(egui::Key::O));
         let shapes = frame(&mut window, &ctx, vec![]);
-        // The board overlays the console headers; its section labels are painted later.
+        // The dock paints after consoles, so its section labels are the visible copies.
         let on_the_board = |t: &egui::epaint::TextShape| area().contains(t.pos);
         let header = |name: &str| {
             shapes
@@ -816,11 +913,11 @@ mod tests {
     }
 
     #[test]
-    fn long_metadata_at_640_by_480_keeps_cards_separate_and_last_console_reachable() {
+    fn long_metadata_at_900_by_480_keeps_cards_separate_and_last_console_reachable() {
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
         integrated(&mut window);
-        let narrow = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 480.0));
+        let narrow = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 480.0));
         window.font_size = 14.0;
         for tab in &mut window.tabs {
             tab.label = Some("Long tab ".repeat(600));
@@ -855,8 +952,8 @@ mod tests {
             .filter(|r| r.is_positive())
             .collect();
         assert!(
-            cards.len() >= 2,
-            "small Board did not expose two cards: {cards:?}"
+            !cards.is_empty(),
+            "the narrow Board did not expose a card: {cards:?}"
         );
         // Cards sit side by side as well as one under another, so no pair may share a point.
         for (n, card) in cards.iter().enumerate() {
