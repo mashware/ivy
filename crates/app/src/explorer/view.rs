@@ -83,12 +83,12 @@ fn refresh_button(ui: &mut egui::Ui, available: bool) -> bool {
     available && response.clicked()
 }
 
-fn rows(state: &mut Explorer, pane: usize) -> (Vec<Row>, Option<Request>, Vec<String>) {
+fn rows(state: &mut Explorer, pane: usize) -> (Vec<Row>, Option<Request>, bool) {
     let Some(nav) = state.navigation.get(&pane) else {
-        return (Vec::new(), None, Vec::new());
+        return (Vec::new(), None, false);
     };
     let Some(root) = nav.root.clone().filter(|_| nav.source.is_some()) else {
-        return (Vec::new(), None, Vec::new());
+        return (Vec::new(), None, false);
     };
     enum Visit {
         Directory(PathBuf, usize),
@@ -97,12 +97,13 @@ fn rows(state: &mut Explorer, pane: usize) -> (Vec<Row>, Option<Request>, Vec<St
     let mut stack = vec![Visit::Directory(root, 0)];
     let mut rows = Vec::new();
     let mut pending = None;
-    let mut messages = Vec::new();
+    let mut truncated = false;
+    let row_limit = nav.row_limit;
     let visible_start = (state.navigation[&pane].scroll / state.row_stride) as usize;
     let visible_end = visible_start.saturating_add(state.viewport_rows);
     while let Some(visit) = stack.pop() {
-        if rows.len() >= ROW_LIMIT {
-            messages.push("More entries hidden; collapse folders to reveal other entries.".into());
+        if rows.len() >= row_limit {
+            truncated = true;
             break;
         }
         match visit {
@@ -159,7 +160,7 @@ fn rows(state: &mut Explorer, pane: usize) -> (Vec<Row>, Option<Request>, Vec<St
             }
         }
     }
-    (rows, pending, messages)
+    (rows, pending, truncated)
 }
 
 fn activate(state: &mut Explorer, pane: usize, entry: &Entry) -> Option<(usize, PathBuf)> {
@@ -316,7 +317,7 @@ pub(super) fn show(
             state.row_stride = 22.0 + body.spacing().item_spacing.y;
             state.viewport_rows =
                 ((body.available_height() - 32.0).max(22.0) / state.row_stride).ceil() as usize + 1;
-            let (rows, pending, messages) = rows(state, pane);
+            let (rows, pending, truncated) = rows(state, pane);
             let activate_key = std::mem::take(&mut state.activate);
             let mut action = if activate_key {
                 rows.iter()
@@ -334,9 +335,15 @@ pub(super) fn show(
                 .root
                 .as_ref()
                 .is_some_and(|path| state.cache.contains_key(&state.request(pane, path.clone())));
+            let footer_height = if truncated { 28.0 } else { 0.0 }
+                + if state.navigation[&pane].selected.is_some() {
+                    28.0
+                } else {
+                    0.0
+                };
             let result = egui::ScrollArea::both()
                 .id_salt(("explorer-tree", pane))
-                .max_height((body.available_height() - 32.0).max(22.0))
+                .max_height((body.available_height() - footer_height).max(22.0))
                 .vertical_scroll_offset(scroll)
                 .auto_shrink([false, false])
                 .show_rows(&mut body, 22.0, rows.len(), |ui, range| {
@@ -465,8 +472,15 @@ pub(super) fn show(
             if let Some(path) = selected {
                 state.navigation.get_mut(&pane).unwrap().selected = Some(path);
             }
-            for message in messages.iter().take(3) {
-                body.label(message);
+            if truncated {
+                body.horizontal(|ui| {
+                    ui.label("More entries hidden.");
+                    if ui.small_button("Show more").clicked() {
+                        let nav = state.navigation.get_mut(&pane).unwrap();
+                        nav.row_limit = nav.row_limit.saturating_add(ROW_LIMIT);
+                        ui.ctx().request_repaint();
+                    }
+                });
             }
             if let Some(path) = state.navigation[&pane].selected.clone() {
                 body.horizontal_wrapped(|ui| {
@@ -563,13 +577,9 @@ mod tests {
                 .map(|i| entry(&format!("/root/{i}"), EntryKind::File))
                 .collect(),
         );
-        let (visible, _, messages) = rows(&mut state, 1);
+        let (visible, _, truncated) = rows(&mut state, 1);
         assert_eq!(visible.len(), ROW_LIMIT);
-        assert!(
-            messages
-                .iter()
-                .any(|message| message.contains("More entries hidden"))
-        );
+        assert!(truncated);
     }
 
     #[test]

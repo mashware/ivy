@@ -8745,6 +8745,15 @@ filled triangles unlike the supplied IDE reference; child-root navigation with n
 automatic directory resets on every cwd observation, which would discard navigation while reading;
 filesystem watching or a new text renderer, neither needed for this refinement.
 
+Review exposed one loss of access: two expanded levels of 4096 directories can exhaust the
+8192-row flattening budget before reaching a descendant, even with preceding siblings collapsed.
+The owner chose **Show more**, displayed only when that budget truncates the tree. Each click
+admits another 8192 rows for that console while retaining root, selection and scroll. A new root
+resets the initial budget; same-source refresh keeps it. The existing listing/cache limits,
+virtualized painting and asynchronous filesystem worker remain. Removing the cap entirely and
+adding a permanent navigation toolbar were discarded: extra tree work is explicitly requested,
+and the compact everyday view remains the requested one.
+
 
 ## D73 — Connection help is global and reports observed publication
 

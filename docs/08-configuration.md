@@ -625,7 +625,9 @@ The top-right **Refresh** icon reloads directory listings. It keeps expansion an
 when the console directory is unchanged. When the console publishes a different local directory,
 a notice explains that Refresh adopts it. An unavailable or remote source suspends local browsing
 instead of choosing another console's directory. Files has no pin, up, reset or local close button.
-General text viewing is not included.
+When expanded folders fill the initial 8192-row tree budget, **Show more** reveals the next
+portion without changing the root or selection. The control appears only while entries remain
+hidden; a new console directory resets the initial budget. General text viewing is not included.
 
 ## Markdown and Git diff viewers
 

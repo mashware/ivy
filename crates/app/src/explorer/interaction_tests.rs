@@ -640,3 +640,69 @@ fn refresh_clears_a_deleted_selection_and_reports_a_deleted_explorer_root() {
     assert_eq!(window.explorer.navigation[&pane].root, Some(child));
     assert_eq!(window.projects.directory(pane), Some(directory.0.as_path()));
 }
+
+#[test]
+fn show_more_reaches_deep_content_without_changing_the_root() {
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
+    let ctx = egui::Context::default();
+    let directory = Directory::new("large-tree");
+    let command = format!("cd '{}' && exec sleep 30", directory.0.display());
+    let mut window = window_of_tabs([[command.as_str(), "sleep 30"]]);
+    crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
+    frame(&mut window, &ctx, area, vec![]);
+    let pane = window.active().panes()[0].name;
+    wait_for_source(&mut window, &ctx, area, pane, &directory.0);
+    crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+    frame(&mut window, &ctx, area, vec![]);
+    click_refresh(&mut window, &ctx, area);
+    wait_for_text(
+        &mut window,
+        &ctx,
+        area,
+        directory.0.file_name().unwrap().to_str().unwrap(),
+    );
+    let first = directory.0.join("4095");
+    let second = first.join("4095");
+    let target = second.join("deep.txt");
+    for path in [&directory.0, &first, &second] {
+        let entries = if path == &second {
+            vec![Entry {
+                path: target.clone(),
+                kind: EntryKind::File,
+            }]
+        } else {
+            (0..4096)
+                .map(|index| Entry {
+                    path: path.join(format!("{index:04}")),
+                    kind: EntryKind::Directory,
+                })
+                .collect()
+        };
+        let request = window.explorer.request(pane, path.clone());
+        window.explorer.cache.insert(
+            request,
+            Cached {
+                result: Ok(Listing { entries, bytes: 0 }),
+                used: 0,
+            },
+        );
+    }
+    let nav = window.explorer.navigation.get_mut(&pane).unwrap();
+    nav.expanded.extend([first, second]);
+    nav.selected = Some(target.clone());
+    frame(&mut window, &ctx, area, vec![]);
+    click_text(&mut window, &ctx, area, "Show more");
+    assert_eq!(
+        window.explorer.navigation[&pane].root,
+        Some(directory.0.clone())
+    );
+    assert_eq!(window.explorer.navigation[&pane].selected, Some(target));
+    assert_eq!(window.explorer.navigation[&pane].scroll, 0.0);
+    window.explorer.navigation.get_mut(&pane).unwrap().scroll = 8192.0 * window.explorer.row_stride;
+    wait_for_text(&mut window, &ctx, area, "deep.txt");
+    assert!(
+        !frame(&mut window, &ctx, area, vec![])
+            .iter()
+            .any(|(text, _)| text == "Show more")
+    );
+}

@@ -8,6 +8,7 @@ pub(super) struct Navigation {
     pub(super) expanded: HashSet<PathBuf>,
     pub(super) selected: Option<PathBuf>,
     pub(super) scroll: f32,
+    pub(super) row_limit: usize,
     pub(super) generation: u64,
     pub(super) epoch: u64,
 }
@@ -34,6 +35,7 @@ impl Navigation {
 
     pub(super) fn enter(&mut self, path: PathBuf) {
         self.root = Some(path);
+        self.row_limit = super::ROW_LIMIT;
         self.expanded.clear();
         self.selected = None;
         self.scroll = 0.0;
