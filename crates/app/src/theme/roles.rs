@@ -12,7 +12,7 @@
 use super::{Theme, mix, project_ink_contrast};
 use eframe::egui::{Color32, epaint::Shadow};
 
-/// The minimum contrast every text role keeps over every surface text is set on.
+/// The minimum contrast every text role keeps over every role surface text is set on.
 const TEXT_CONTRAST: f32 = 4.5;
 
 /// The interface's colors, derived from a theme.

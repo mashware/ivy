@@ -2,9 +2,9 @@
 //!
 //! Wait and block are solid because they ask for action; done is soft because it does not urge; a
 //! claim nobody is holding up is a dashed outline, so a stale claim never reads as a live one. The
-//! glyph is the application's own drawing, not a font character (D9). The tab strip adds a muted
-//! dot for a tab with no claim, which keeps its column occupied so eight tabs still scan as one
-//! vertical line; another surface paints nothing there.
+//! glyph is the application's own drawing, not a font character (D9). A tab with no claim asks for
+//! a muted dot instead ([`paint_unclaimed`]), which keeps its column occupied so eight tabs still
+//! scan as one vertical line.
 
 pub(crate) mod glyph;
 

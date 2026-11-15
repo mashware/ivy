@@ -9799,56 +9799,82 @@ use).
 after it lay out a different grid in the same window and are not a comparable pair (D13). The first
 series after D95 is a new baseline, not a delta.
 
-## D96 — The tabs live inside the title bar, and a project is a stripe and its name in its own ink
+## D96 — The tabs live inside the title bar, and a project tints its console header
 
 **New signal, 15 November 2026 — #93.** The redesign D94 started draws the window with one 40-point
-title bar that holds the tabs, and console headers that carry the project as a 3-point stripe and its
-name in the project's color. This amends D66 (tabs sat in a row of their own under the titlebar) and
-replaces D79's header tint. The owner chose to keep D66's panel toggle in the console header against
-the design, and not to add a Board button to the title bar.
+title bar that holds the tabs, and console headers that carry the project as a low tint of its color,
+a 3-point stripe and its name in that color. This amends D66 (tabs sat in a row of their own under the
+titlebar) and replaces D79's 28 → 6 % gradient with a flat tint. The owner chose to keep D66's panel
+toggle in the console header against the design, and not to add a Board button to the title bar.
 
 **Decision — tabs.** In the integrated regime the title bar is one row: split right, split down, the
 logo, the tabs on the row's bottom edge (34 points, equal widths of at most 190), the add button, a
-gap of at least 48 points that still drags and maximizes the window, and the right-hand buttons. The
-consoles start under that row instead of under two, so every console gets the old tab row back. One
-partition (`chrome::strip`) feeds the title bar's painting, its claim on the pointer — which leaves
-the tabs and the add button to the tab strip — and the tab geometry. A larger configured tab label
-grows the tabs and the bar with them. The active tab is the console background with a separator
-border open at the bottom; the others are transparent until hovered. Each tab shows its claim as an
-18-point pill in one column: wait and block solid, done soft, a claim nobody holds up dashed, no claim
-a muted dot. Small dots after the name carry the project ink of each of its consoles. The close cross
-is painted on the active and the hovered tab, but its target exists on every tab wide enough for it:
-egui resolves a press against the previous pass's targets, so a target born with the hover lost the
-first press to the tab's body. The left-hand «new tab» button left the row, because the add button
-after the tabs is the same action a few points away and the design has only that one; the word «Ivy»
-left with it — the native title still carries the name.
+gap of at least 48 points (16 when the bar is compact) that still drags and maximizes the window, and
+the right-hand buttons; the six points above the tabs drag too. The consoles start under that row
+instead of under two, so every console gets the old tab row back. One partition (`chrome::strip`)
+feeds the title bar's painting, its claim on the pointer — which leaves the tabs and the add button to
+the tab strip — and the tab geometry. A larger configured tab label grows the tabs and the bar with
+them. The bar turns compact — no split buttons and no logo, the window buttons in the menu — when the
+full bar would leave its tabs no room for one tab with its pill whole and a character of its label,
+plus the add button: about 456 points wide on Linux and Windows and 426 on macOS. The active tab is
+the console background with a separator border open at the bottom; the others are transparent until
+hovered, and their hover covers the whole card short of the bar's bottom line. Each tab shows its
+claim as an 18-point pill in one column (smaller only where its card is): wait and block solid, done
+soft, a claim nobody holds up dashed, no claim a muted dot. Small dots after the name carry the
+project ink of each of its consoles. A label that does not fit is not clipped: an unnamed tab shows
+its number instead of «Terminal N», and a named one is cut with «…» while two of its characters still
+show, its number below that. With two tabs or more, the close cross is painted on the active tab and on
+the one under the pointer, and its target exists exactly there; on any other tab that slot is the
+tab's body, so a press there selects the tab instead of closing its consoles unseen. egui resolves a
+press against the previous pass's targets, so the cross must have been under the pointer for one pass
+before it can be pressed, which a pointer moving onto it provides. The left-hand «new tab» button left
+the row, because the add button after the tabs is the same action a few points away and the design has
+only that one; the word «Ivy» left with it — the native title still carries the name. The add button
+stays after the last card, so the tab it creates lands under the pointer: the second click of a double
+click on it is taken as a plain click on that tab, not as a rename.
 
-**Decision — headers.** A console header is 28 points. The focused console's sits on the panel color
-with an accent outline around the pane; the others' on the chrome color with a separator outline. A
-project paints a 3-point stripe in its ink down the left edge and its name in that ink, brought toward
-the text until it reads at 3:1 on the header's surface (inks are chosen against the panel, and an
-unfocused header sits on the chrome), then « / » and the task. The number «01» is gone. Agent logos
-and the waiting marker stay, without the neutral backings a colored header needed. The branch is not
-shown: the only off-thread resolver is refreshed by the Board while it is open, and refreshing it with
-the Board closed would add a worker, periodic `git` runs and wake-ups outside any named span.
+**Decision — headers.** A console header is 28 points. The focused console's is the panel color mixed
+with 18 % of its project's ink, with an accent outline around the pane; the others' are the chrome
+color mixed with 14 %, with a separator outline. A console without a project keeps the plain panel or
+chrome and the roles' text. A project also paints a 3-point stripe in its ink down the left edge and its name, semibold,
+in that ink brought toward the text until it reads at 3:1 on the tinted surface (inks are chosen
+against the plain panel), then « / » and the task. The task and the separator are the theme's text
+roles brought back until they read at 4.5:1 on that surface, and black or white where the text role
+cannot. The number «01» is gone. Agent logos and the waiting marker stay, without the neutral backings
+D79's 28 % gradient needed: a 14–18 % tint stays close to the panel and the chrome they were drawn for.
+The branch is not shown: the only off-thread resolver is refreshed by the Board while it is open, and
+refreshing it with the Board closed would add a worker, periodic `git` runs and wake-ups outside any
+named span.
 
-**Why this reverses part of D79.** D79 replaced a narrow stripe the owner found almost invisible. The
-stripe returns with the project's name painted in the same ink beside it and with the same ink on the
-tab, so the stripe is no longer the whole cue — but it is a reversal of an owner signal, and the first
-look on a real desktop decides whether it holds.
+**Project colors.** A project takes cyan, magenta and their bright twins (slots 6, 5, 13 and 14), never
+the accent or a claim's color: green, red and yellow (1, 2, 3 and their twins 9, 10, 11) read as focus
+and claims, and blue (4) is the done claim, with 12 too close to it to tell apart at a glance. So
+there are at most four distinct project colors instead of six, fewer where a theme's slots collapse
+into each other, and past them projects repeat a color (D79's «while available»): the name in the
+header and the details on hover stay what tells two projects apart.
+
+**Why this reverses part of D79.** D79 replaced a narrow stripe the owner found almost invisible with
+a strong gradient. The tint stays, flatter, and remains the cue that answers that report; the stripe
+comes back on top of it, with the project's name painted in the same ink beside it and the same ink on
+the tab's dots. It is still a change to an owner signal, and the first look on a real desktop decides
+whether the flatter tint is enough.
 
 **Discarded:** a second tab row under the title bar (costs every console a row for one strip);
-keeping D79's 28 → 6 % gradient with white or black text (the design names the project by its ink on
-a neutral surface, and keeps the surface change for focus); a close target that exists
-only while visible (the first press is lost, measured by the existing close tests); showing the branch
-from the Board's resolver while the Board is closed (stale values with nobody refreshing them); a
-compact threshold raised above 300 points so narrow windows give the tabs more room (the menu, the
-connection indicator and their tests key off it — between about 300 and 500 points wide the tabs are
-narrow, and the keyboard still reaches them).
+keeping D79's 28 → 6 % gradient with white or black text (the design keeps the theme's text roles on
+a low flat tint, and its focused header differs from the others by the surface it is mixed from); a
+close target live on every tab (a press on an inactive tab's right edge closed it and its consoles
+with no cross painted there); an add button anchored at the band's right edge (it stays put, but the
+design draws it after the tabs, and at full width it would sit far from them); showing the branch from
+the Board's resolver while the Board is closed (stale values with nobody refreshing them); keeping the
+compact threshold at 300 points (between it and about 480 points the full bar left the tabs a band of
+zero, and every card, pill and the add button vanished).
 
 **Roles.** Hand-painted surfaces read `Roles` through `ui::style::roles`, which memoizes the last
 theme it was asked about and its roles in egui's memory. It answers any theme correctly, so it is not
 the single live-theme cache D94 discarded; it only saves re-deriving the contrast search every frame.
+Secondary and muted text are checked on the title bar's chrome as well as on the console background,
+the panel, raised surfaces and hover; a tinted header is not a role surface, and brings its own text
+back on it.
 
 **Measurement.** Only the integrated regime changes. The historical regime — no integrated chrome,
 the numbered tab cards and their single-tab rule — keeps its geometry and painting, so the measured
