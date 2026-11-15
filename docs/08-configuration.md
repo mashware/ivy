@@ -642,8 +642,8 @@ existing Ctrl-click behavior; ordinary mouse gestures still select terminal text
 
 ## Markdown and Git diff viewers
 
-Open a Markdown file from Files with one click, or use the Markdown view's file input. The viewer
-retains its source console and updates saved content. Console path gestures reveal files in Files
+Open a Markdown file from Files with one click. The viewer retains its source console and updates
+saved content. Console path gestures reveal files in Files
 as described above. Only empty authorities, localhost and the verified local hostname are accepted
 as local file links.
 
@@ -658,7 +658,8 @@ shows that fact instead of choosing another console's repository.
 
 Choose **Markdown** or **Git** from the right tool bar to open its retained view in the shared
 sidebar. On first use, Git uses the focused console; changing focus alone never retargets an open
-view. Choose a Markdown document in **Files**, or Ctrl-click an explicit local `.md` path in a console. Drag the sidebar's left divider to resize,
+view. Choose a Markdown document in **Files**. Ctrl-click a local console path to reveal its
+location in Files before opening the document. Drag the sidebar's left divider to resize,
 or dismiss it with the active tool button, **Close**, or Escape while it owns keyboard focus.
 Consoles resize alongside it and keep their identities. Clicking a console returns typing there.
 A narrow window temporarily hides the sidebar body until both it and the consoles fit. Tool
