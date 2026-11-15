@@ -27,7 +27,14 @@ feature_id: feat_term-core_nx0g1r
 
 ## What it does
 
-D59 makes a named theme the base for all twenty-two colors. Each explicitly configured color overrides only its own slot, regardless of whether that line appears before or after `theme`; this preserves a person's hand-tuned colors when they move or change the theme line. With no theme selected, the base is Ivy Night since D94 (#93, November 2026) — no longer the old gray factory palette; Settings names that choice «Ivy Night (default)». An unknown theme name warns without erasing the last valid selection. Since D94 every theme's focus is a green (converted palettes: normal green, else bright, else moved until 3:1), so the interface accent never equals the `done` claim's ANSI blue; an explicit `focus` is used verbatim.
+D59 makes a named theme the base for all twenty-two colors. Each explicitly configured color
+overrides only its own slot, regardless of whether that line appears before or after `theme`; this
+preserves a person's hand-tuned colors when they move or change the theme line. With no theme
+selected, the base is Ivy Night since D94 (#93, November 2026) — no longer the old gray factory
+palette; Settings names that choice «Ivy Night (default)». An unknown theme name warns without
+erasing the last valid selection. Since D94 every theme's focus is a green (converted palettes:
+normal green, else bright, else moved until 3:1), so the interface accent never equals the `done`
+claim's ANSI blue; an explicit `focus` is used verbatim.
 
 ## Where it lives
 
