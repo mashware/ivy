@@ -197,10 +197,10 @@ fn gray_overrides_keep_hovered_theme_selector_ink_contrasted_on_its_rendered_fil
     let mut label = None;
     for clipped in &shapes {
         fills(&clipped.shape, &mut rects);
-        if let Some(found) = rendered_text_color(&clipped.shape) {
-            if found.0 == "Tokyo Night" {
-                label = Some(found);
-            }
+        if let Some(found) = rendered_text_color(&clipped.shape)
+            && found.0 == "Tokyo Night"
+        {
+            label = Some(found);
         }
     }
     let (_, text_rect, ink) = label.expect("rendered theme selector label");
