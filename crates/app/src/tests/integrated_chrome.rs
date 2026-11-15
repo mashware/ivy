@@ -1918,4 +1918,133 @@ mod tests {
             assert_eq!(received.wait_for(5, Duration::from_secs(5)), b"AFTER");
         }
     }
+    fn pointer_button(pos: egui::Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    fn separate_click(window: &mut Window, ctx: &egui::Context, area: egui::Rect, at: egui::Pos2) {
+        frame(
+            window,
+            ctx,
+            area,
+            vec![egui::Event::PointerMoved(at), pointer_button(at, true)],
+        );
+        frame(window, ctx, area, vec![pointer_button(at, false)]);
+    }
+
+    #[test]
+    fn board_allows_tab_controls_and_preserves_the_result_after_escape() {
+        for board_open in [false, true] {
+            for target in ["body", "close", "add"] {
+                let ctx = egui::Context::default();
+                let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
+                window.chrome.enable();
+                window.headers = window.headers.integrated(true);
+                let area = area_of(800.0);
+                frame(&mut window, &ctx, area, vec![]);
+                if board_open {
+                    crate::board::toggle(&mut window, &ctx);
+                }
+                frame(&mut window, &ctx, area, vec![]);
+                frame(&mut window, &ctx, area, vec![]);
+                let selected = window.board.selected();
+                let at = egui::pos2(
+                    match target {
+                        "body" => 230.0,
+                        "close" => 375.0,
+                        _ => 420.0,
+                    },
+                    65.0,
+                );
+                separate_click(&mut window, &ctx, area, at);
+                assert_eq!(
+                    window.board.is_open(),
+                    board_open,
+                    "{target} dismissed Board"
+                );
+                match target {
+                    "body" => {
+                        assert_eq!(window.active, 1);
+                        assert_eq!(window.tabs.len(), 2);
+                    }
+                    "close" => {
+                        assert_eq!(window.tabs.len(), 1);
+                        assert_eq!(window.tabs[0].name, 0);
+                    }
+                    _ => {
+                        assert_eq!(window.tabs.len(), 3);
+                        assert_eq!(window.active, 2);
+                    }
+                }
+                assert_eq!(
+                    window.board.selected(),
+                    selected,
+                    "tab gesture selected a card"
+                );
+                assert!(
+                    window
+                        .all_panes_mut()
+                        .all(|pane| pane.keystrokes.is_empty())
+                );
+                let focus = window.active().focus;
+                frame(&mut window, &ctx, area, vec![menu_key(egui::Key::Escape)]);
+                assert!(!window.board.is_open());
+                assert_eq!(window.active().focus, focus, "Board close undid tab action");
+            }
+        }
+    }
+
+    fn menu_key(key: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn board_menu_preferences_and_shortcuts_receive_separate_clicks() {
+        for board_open in [false, true] {
+            for label in ["Preferences", "Keyboard shortcuts"] {
+                let ctx = egui::Context::default();
+                chrome::prepare(&ctx);
+                let mut window = window_with("sleep 30", "sleep 30");
+                window.chrome.enable();
+                window.headers = window.headers.integrated(true);
+                window.settings_editor =
+                    settings::editor::Editor::resolved(settings::Entry::Normal, None);
+                let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+                frame(&mut window, &ctx, area, vec![]);
+                if board_open {
+                    crate::board::toggle(&mut window, &ctx);
+                }
+                frame(&mut window, &ctx, area, vec![]);
+                let shapes = open_updates_menu(&mut window, &ctx, area);
+                let at = text_center(&shapes, label);
+                separate_click(&mut window, &ctx, area, at);
+                assert!(
+                    window.settings_editor.is_open(),
+                    "Board={board_open}: {label} did not open"
+                );
+                assert!(!window.board.is_open());
+                frame(&mut window, &ctx, area, vec![]);
+                let shapes = frame(&mut window, &ctx, area, vec![]);
+                if label == "Keyboard shortcuts" {
+                    assert!(has_text(&shapes, "Blank uses the factory chord"));
+                }
+                assert!(
+                    window
+                        .all_panes_mut()
+                        .all(|pane| pane.keystrokes.is_empty())
+                );
+            }
+        }
+    }
 }
