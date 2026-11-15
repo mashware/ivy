@@ -20,7 +20,7 @@
 
 mod chrome;
 mod feedback;
-mod indicator;
+pub(crate) mod indicator;
 mod interaction;
 mod layout;
 pub(crate) use chrome::{geometry, partition};

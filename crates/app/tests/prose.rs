@@ -652,6 +652,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
     ("src/ui.rs", include_str!("../src/ui.rs"), 2),
     ("src/ui/style.rs", include_str!("../src/ui/style.rs"), 12),
     (
+        "src/ui/claim_pill.rs",
+        include_str!("../src/ui/claim_pill.rs"),
+        0,
+    ),
+    (
         "src/settings/editor.rs",
         include_str!("../src/settings/editor.rs"),
         3,

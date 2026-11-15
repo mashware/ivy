@@ -2,7 +2,7 @@
 use eframe::egui;
 use panel_contract::Attention;
 
-pub(super) fn paint(
+pub(crate) fn paint(
     painter: &egui::Painter,
     rect: egui::Rect,
     class: Attention,

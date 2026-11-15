@@ -66,11 +66,18 @@ pub(crate) struct Roles {
     _derived: (),
 }
 
-/// The kit's radii, in points, by what they round. The design's other measures (chip, card and
-/// dialog radii, control, row, tab and bar heights) arrive with the surfaces that use them.
+/// The kit's measures, in points. The ones not listed here (the dialog radius, control and row
+/// heights) arrive with the surfaces that use them.
 pub(crate) mod metrics {
+    pub const RADIUS_CHIP: u8 = 4;
     pub const RADIUS_CONTROL: u8 = 6;
+    pub const RADIUS_CARD: u8 = 8;
     pub const RADIUS_FLOATING: u8 = 10;
+    /// The title bar, which holds the tabs: the design's single 40-point strip.
+    pub const TITLE_BAR_HEIGHT: f32 = 40.0;
+    /// A tab inside the title bar, sitting on its bottom edge.
+    pub const TAB_HEIGHT: f32 = 34.0;
+    pub const CONSOLE_HEADER_HEIGHT: f32 = 28.0;
 }
 
 impl Roles {
