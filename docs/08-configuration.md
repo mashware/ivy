@@ -623,7 +623,7 @@ normal limits. Other files select quietly and their paths can be copied; nothing
 
 Type into **Search files and folders** to match names below the displayed folder, including
 collapsed directories. Results show relative paths and match case-insensitively; contents are not
-searched. Double-click a matching directory to open it as the search location. Escape clears the
+searched. Double-click a matching directory to expand its contents within the results; the search root stays the same. Escape clears the
 query before closing Files. Queries are at most 256 characters. A bounded scan or unreadable folder
 is reported rather than presenting partial results as complete.
 

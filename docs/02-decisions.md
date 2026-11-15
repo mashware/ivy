@@ -8752,8 +8752,7 @@ Search matches file and directory names beneath the displayed root, not contents
 existing single cancellable worker, with generation/epoch-tagged replies. Queries are limited to
 256 characters, scans to 100000 entries and 4096 pending directories, and results to the existing
 4096-entry / 4 MiB payload bounds. Partial/unreadable results say so. Changing/clearing a query
-rejects old replies; Escape clears search before closing Files. Matching directories can be
-opened as a new search location. Clearing an ordinary query restores that console's tree.
+rejects old replies; Escape clears search before closing Files. Matching directories expand within the results, without replacing the search root. Clearing an ordinary query restores that console's tree.
 
 Ctrl+click on a local console path reveals it in Files: directories open directly and files open
 their parent with the file selected and scrolled into view. It uses the clicked console's explicit

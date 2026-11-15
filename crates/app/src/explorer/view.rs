@@ -52,51 +52,17 @@ fn rows(state: &mut Explorer, pane: usize) -> (Vec<Row>, Option<Request>, bool) 
     let Some(root) = nav.root.clone().filter(|_| nav.source.is_some()) else {
         return (Vec::new(), None, false);
     };
-    if !nav.query.trim().is_empty() {
+    let searching = !nav.query.trim().is_empty();
+    let row_limit = nav.row_limit;
+    enum Visit {
+        Directory(PathBuf, usize),
+        Entry(Entry, usize),
+    }
+    let mut stack = if searching {
         let request = state.request(pane, root.clone());
         state.clock = state.clock.wrapping_add(1);
-        return match state.cache.get_mut(&request) {
-            Some(cached) => {
-                cached.used = state.clock;
-                match &cached.result {
-                    Ok(listing) => {
-                        let mut found: Vec<_> = listing
-                            .entries
-                            .iter()
-                            .cloned()
-                            .map(|entry| Row {
-                                entry,
-                                depth: 0,
-                                message: None,
-                            })
-                            .collect();
-                        if found.is_empty() {
-                            found.push(Row {
-                                entry: Entry {
-                                    path: root.clone(),
-                                    kind: EntryKind::Other,
-                                },
-                                depth: 0,
-                                message: Some("No matching files or folders.".into()),
-                            });
-                        }
-                        (found, None, false)
-                    }
-                    Err(error) => (
-                        vec![Row {
-                            entry: Entry {
-                                path: root,
-                                kind: EntryKind::Other,
-                            },
-                            depth: 0,
-                            message: Some(error.clone()),
-                        }],
-                        None,
-                        false,
-                    ),
-                }
-            }
-            None => (
+        let Some(cached) = state.cache.get_mut(&request) else {
+            return (
                 vec![Row {
                     entry: Entry {
                         path: root,
@@ -107,21 +73,53 @@ fn rows(state: &mut Explorer, pane: usize) -> (Vec<Row>, Option<Request>, bool) 
                 }],
                 Some(request),
                 false,
-            ),
+            );
         };
-    }
-    enum Visit {
-        Directory(PathBuf, usize),
-        Entry(Entry, usize),
-    }
-    let mut stack = vec![Visit::Directory(root, 0)];
+        cached.used = state.clock;
+        match &cached.result {
+            Ok(listing) if !listing.entries.is_empty() => listing
+                .entries
+                .iter()
+                .rev()
+                .cloned()
+                .map(|entry| Visit::Entry(entry, 0))
+                .collect(),
+            result => {
+                let message = match result {
+                    Ok(_) => "No matching files or folders.".into(),
+                    Err(error) => error.clone(),
+                };
+                return (
+                    vec![Row {
+                        entry: Entry {
+                            path: root,
+                            kind: EntryKind::Other,
+                        },
+                        depth: 0,
+                        message: Some(message),
+                    }],
+                    None,
+                    false,
+                );
+            }
+        }
+    } else {
+        vec![Visit::Directory(root, 0)]
+    };
     let mut rows = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     let mut pending = None;
     let mut truncated = false;
-    let row_limit = nav.row_limit;
     let visible_start = (state.navigation[&pane].scroll / state.row_stride) as usize;
     let visible_end = visible_start.saturating_add(state.viewport_rows);
     while let Some(visit) = stack.pop() {
+        // An expanded matching folder can contain another top-level search match.
+        if searching
+            && let Visit::Entry(entry, _) = &visit
+            && !seen.insert(entry.path.clone())
+        {
+            continue;
+        }
         if rows.len() >= row_limit {
             truncated = true;
             break;
@@ -140,7 +138,8 @@ fn rows(state: &mut Explorer, pane: usize) -> (Vec<Row>, Option<Request>, bool) 
                 });
             }
             Visit::Directory(path, depth) => {
-                let key = state.request(pane, path.clone());
+                let mut key = state.request(pane, path.clone());
+                key.query.clear();
                 state.clock = state.clock.wrapping_add(1);
                 let root = state.navigation[&pane].root.as_ref() == Some(&path);
                 let near_view =
@@ -185,14 +184,6 @@ fn rows(state: &mut Explorer, pane: usize) -> (Vec<Row>, Option<Request>, bool) 
 
 fn activate(state: &mut Explorer, pane: usize, entry: &Entry) -> Option<(usize, PathBuf)> {
     match entry.kind {
-        EntryKind::Directory if !state.navigation[&pane].query.trim().is_empty() => {
-            state
-                .navigation
-                .get_mut(&pane)
-                .unwrap()
-                .enter(entry.path.clone());
-            None
-        }
         EntryKind::Directory => {
             let expanded = &mut state.navigation.get_mut(&pane).unwrap().expanded;
             if !expanded.remove(&entry.path) {
@@ -432,9 +423,7 @@ pub(super) fn show(
                         }
                         let indent = row.depth as f32 * 12.0;
                         let center_y = row_rect.center().y;
-                        if row.entry.kind == EntryKind::Directory
-                            && state.navigation[&pane].query.trim().is_empty()
-                        {
+                        if row.entry.kind == EntryKind::Directory {
                             let expanded =
                                 state.navigation[&pane].expanded.contains(&row.entry.path);
                             let center = egui::pos2(row_rect.left() + indent + 8.0, center_y);
@@ -485,7 +474,9 @@ pub(super) fn show(
                             row.entry.kind == EntryKind::Directory,
                             egui::Stroke::new(1.0, icon_color),
                         );
-                        let name = if state.navigation[&pane].query.trim().is_empty() {
+                        let name = if state.navigation[&pane].query.trim().is_empty()
+                            || row.depth > 0
+                        {
                             display(Path::new(row.entry.path.file_name().unwrap_or_default()))
                         } else {
                             display(

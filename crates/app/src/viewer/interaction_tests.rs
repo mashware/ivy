@@ -31,14 +31,16 @@ fn frame(
     }
     let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
     let mut native = eframe::Frame::_new_kittest();
-    eframe::App::logic(window, ctx, &mut native);
     let output = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(area),
             events,
             ..Default::default()
         },
-        |ui| eframe::App::ui(window, ui, &mut native),
+        |ui| {
+            eframe::App::logic(window, ui.ctx(), &mut native);
+            eframe::App::ui(window, ui, &mut native);
+        },
     );
     let mut found = Vec::new();
     for shape in &output.shapes {
@@ -228,9 +230,20 @@ fn git_viewer_opens_and_switches_modes_through_its_controls() {
 }
 
 #[test]
-fn control_click_on_a_painted_markdown_path_opens_the_floating_viewer() {
+fn control_click_reveals_markdown_in_files_before_opening_its_viewer() {
+    let mut nonce = [0; 8];
+    getrandom::fill(&mut nonce).unwrap();
+    let path = std::env::temp_dir().join(format!("viewer-path-{:x}", u64::from_ne_bytes(nonce)));
+    fs::create_dir(&path).unwrap();
+    let _directory = Directory(path.clone());
+    fs::write(
+        path.join("viewer-click.md"),
+        "CLICK_THROUGH_MARKDOWN_CONTENT",
+    )
+    .unwrap();
     let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
     let ctx = egui::Context::default();
+    crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
     frame(&mut window, &ctx, vec![]);
     frame(&mut window, &ctx, vec![]);
     let name = window.active().panes()[0].name;
@@ -239,7 +252,14 @@ fn control_click_on_a_painted_markdown_path_opens_the_floating_viewer() {
         .pane_called(name)
         .unwrap()
         .screen
-        .advance(b"\x1b[2J\x1b[H/tmp/viewer-click.md");
+        .advance(
+            format!(
+                "\x1b]7;{}\x07\x1b[2J\x1b[H{}",
+                url::Url::from_directory_path(&path).unwrap(),
+                path.join("viewer-click.md").display()
+            )
+            .as_bytes(),
+        );
     frame(&mut window, &ctx, vec![]);
     let metrics =
         crate::painter::CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
@@ -273,9 +293,10 @@ fn control_click_on_a_painted_markdown_path_opens_the_floating_viewer() {
             },
         ],
     );
-    assert!(window.viewer.open);
-    assert_eq!(window.viewer.origin.as_ref().unwrap().pane, name);
-    assert_eq!(window.viewer.path, "/tmp/viewer-click.md");
+    assert_eq!(
+        crate::sidebar::active(&window),
+        Some(crate::sidebar::Tool::Files)
+    );
     frame(
         &mut window,
         &ctx,
@@ -286,7 +307,37 @@ fn control_click_on_a_painted_markdown_path_opens_the_floating_viewer() {
             modifiers: chord,
         }],
     );
+    let deadline = Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        if frame(&mut window, &ctx, vec![])
+            .iter()
+            .any(|(text, _)| text == "viewer-click.md")
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Markdown location was not revealed"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    click(&mut window, &ctx, "viewer-click.md");
     assert!(window.viewer.open);
+    assert_eq!(window.viewer.origin.as_ref().unwrap().pane, name);
+    assert_eq!(
+        window.viewer.path,
+        path.join("viewer-click.md").to_string_lossy()
+    );
+    loop {
+        if frame(&mut window, &ctx, vec![])
+            .iter()
+            .any(|(text, _)| text.contains("CLICK_THROUGH_MARKDOWN_CONTENT"))
+        {
+            break;
+        }
+        assert!(Instant::now() < deadline, "Markdown was not rendered");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
 }
 
 #[cfg(target_os = "linux")]

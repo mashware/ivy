@@ -794,6 +794,16 @@ fn typed_name_search_finds_files_and_folders_below_collapsed_directories() {
     let directory = Directory::new("name-search");
     fs::create_dir_all(directory.0.join("src/nested/NeedleFolder")).unwrap();
     fs::write(directory.0.join("src/nested/NeedleFile.rs"), "not searched").unwrap();
+    fs::write(
+        directory.0.join("src/nested/NeedleFolder/inside.txt"),
+        "inside",
+    )
+    .unwrap();
+    fs::write(
+        directory.0.join("src/nested/NeedleFolder/NeedleChild.txt"),
+        "matching child",
+    )
+    .unwrap();
     fs::write(directory.0.join("unrelated.rs"), "needle in contents only").unwrap();
     let command = format!("cd '{}' && exec sleep 30", directory.0.display());
     let mut window = window_of_tabs([[command.as_str(), "sleep 30"]]);
@@ -815,6 +825,24 @@ fn typed_name_search_finds_files_and_folders_below_collapsed_directories() {
     );
     assert!(!found.iter().any(|(text, _)| text == "unrelated.rs"));
     assert_eq!(window.pane_called(pane).unwrap().keystrokes, before);
+    for _ in 0..70 {
+        frame(&mut window, &ctx, area, vec![]);
+    }
+    click_text(&mut window, &ctx, area, "src/nested/NeedleFolder");
+    click_text(&mut window, &ctx, area, "src/nested/NeedleFolder");
+    wait_for_text(&mut window, &ctx, area, "inside.txt");
+    assert_eq!(
+        window.explorer.navigation[&pane].root,
+        Some(directory.0.clone())
+    );
+    assert_eq!(window.explorer.navigation[&pane].query, "needle");
+    assert_eq!(
+        frame(&mut window, &ctx, area, vec![])
+            .iter()
+            .filter(|(text, _)| text.ends_with("NeedleChild.txt"))
+            .count(),
+        1
+    );
     frame(
         &mut window,
         &ctx,
@@ -828,6 +856,10 @@ fn typed_name_search_finds_files_and_folders_below_collapsed_directories() {
         }],
     );
     wait_for_text(&mut window, &ctx, area, "unrelated.rs");
+    assert_eq!(
+        window.explorer.navigation[&pane].root,
+        Some(directory.0.clone())
+    );
     assert!(window.explorer.visible);
 }
 
@@ -897,6 +929,50 @@ fn ctrl_clicking_a_local_path_reveals_its_own_consoles_file_and_scrolls_to_it() 
         crate::sidebar::active(&window),
         Some(crate::sidebar::Tool::Files)
     );
+    for (text, expected) in [
+        ("./folder", "entry-00.rs"),
+        ("./missing.rs", "Path unavailable"),
+    ] {
+        window
+            .pane_called(pane)
+            .unwrap()
+            .screen
+            .advance(format!("\x1b[2J\x1b[H{text}").as_bytes());
+        frame(&mut window, &ctx, area, vec![]);
+        let console = window
+            .pane_called(pane)
+            .unwrap()
+            .painted_console
+            .as_ref()
+            .unwrap()
+            .area;
+        let pos = console.min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5);
+        for pressed in [true, false] {
+            frame(
+                &mut window,
+                &ctx,
+                area,
+                vec![
+                    egui::Event::ModifiersChanged(egui::Modifiers::CTRL),
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::CTRL,
+                    },
+                ],
+            );
+        }
+        wait_for_text(&mut window, &ctx, area, expected);
+        assert_eq!(
+            window.explorer.navigation[&pane].root,
+            Some(directory.0.join("folder"))
+        );
+        assert!(window.explorer.navigation[&pane].selected.is_none());
+        assert_eq!(window.explorer.navigation[&pane].scroll, 0.0);
+    }
+    wait_for_text(&mut window, &ctx, area, "entry-00.rs");
 }
 
 #[test]
