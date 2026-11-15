@@ -192,12 +192,7 @@ pub(super) fn show(
                 );
                 ui.add_sized(
                     [52.0, 40.0],
-                    egui::Button::new(
-                        egui::RichText::new("Reset")
-                            .size(14.0)
-                            .color(ui.visuals().weak_text_color()),
-                    )
-                    .frame(false),
+                    egui::Button::new(egui::RichText::new("Reset").size(14.0)).frame(false),
                 )
                 .clicked()
             })

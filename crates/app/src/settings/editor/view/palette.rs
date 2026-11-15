@@ -112,6 +112,22 @@ pub(super) fn popup_frame(ui: &egui::Ui) -> egui::Frame {
         .inner_margin(10)
 }
 
+pub(super) fn primary_style(ui: &mut egui::Ui) {
+    let accent = ui.visuals().selection.bg_fill;
+    let ink = ui.visuals().selection.stroke.color;
+    let v = &mut ui.style_mut().visuals;
+    for (widget, amount) in [
+        (&mut v.widgets.inactive, 0.0),
+        (&mut v.widgets.hovered, 0.10),
+        (&mut v.widgets.active, 0.20),
+    ] {
+        let fill = blend(accent, ink, amount);
+        widget.bg_fill = fill;
+        widget.weak_bg_fill = fill;
+        widget.fg_stroke.color = readable(ink, fill, 4.5);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,21 +173,5 @@ mod tests {
                     .drop_without_applying_deltas();
             }
         }
-    }
-}
-
-pub(super) fn primary_style(ui: &mut egui::Ui) {
-    let accent = ui.visuals().selection.bg_fill;
-    let ink = ui.visuals().selection.stroke.color;
-    let v = &mut ui.style_mut().visuals;
-    for (widget, amount) in [
-        (&mut v.widgets.inactive, 0.0),
-        (&mut v.widgets.hovered, 0.10),
-        (&mut v.widgets.active, 0.20),
-    ] {
-        let fill = blend(accent, ink, amount);
-        widget.bg_fill = fill;
-        widget.weak_bg_fill = fill;
-        widget.fg_stroke.color = readable(ink, fill, 4.5);
     }
 }

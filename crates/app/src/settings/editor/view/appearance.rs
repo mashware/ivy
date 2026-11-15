@@ -250,16 +250,16 @@ pub(super) fn selector(ui: &mut egui::Ui, title: &str, width: f32) -> egui::Resp
         egui::Align2::LEFT_CENTER,
         title,
         egui::FontId::proportional(14.0),
-        ui.visuals().text_color(),
+        ui.style().interact(&response).fg_stroke.color,
     );
     let arrow = response.rect.right_center() - egui::vec2(15.0, 0.0);
     ui.painter().line_segment(
         [arrow + egui::vec2(-4.0, -2.0), arrow + egui::vec2(0.0, 2.0)],
-        egui::Stroke::new(1.3, ui.visuals().weak_text_color()),
+        egui::Stroke::new(1.3, ui.style().interact(&response).fg_stroke.color),
     );
     ui.painter().line_segment(
         [arrow + egui::vec2(0.0, 2.0), arrow + egui::vec2(4.0, -2.0)],
-        egui::Stroke::new(1.3, ui.visuals().weak_text_color()),
+        egui::Stroke::new(1.3, ui.style().interact(&response).fg_stroke.color),
     );
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), title)
