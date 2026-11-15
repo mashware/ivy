@@ -15,39 +15,12 @@ pub(super) fn show(
     let fg = window.theme.foreground();
     let hover = window.theme.divider();
     let mut action = None;
-    let menu_entries = [
+    let menu_entries: Vec<_> = [
         ("Check for updates", Action::Updates(true), None, false),
         ("What's new", Action::Updates(false), None, false),
-        (
-            "New tab",
-            Action::NewTab,
-            Some(crate::keyboard::Action::NewTab),
-            false,
-        ),
-        (
-            "Split right",
-            Action::SplitRight,
-            Some(crate::keyboard::Action::SplitRight),
-            true,
-        ),
-        (
-            "Split down",
-            Action::SplitDown,
-            Some(crate::keyboard::Action::SplitDown),
-            false,
-        ),
-        ("Toggle information panel", Action::TogglePanel, None, false),
         ("Preferences", Action::Preferences, None, true),
         ("Keyboard shortcuts", Action::Shortcuts, None, false),
         ("Files", Action::Files, None, true),
-        ("Markdown viewer", Action::Viewer(true), None, true),
-        ("Git diff viewer", Action::Viewer(false), None, false),
-        (
-            "Board",
-            Action::Board,
-            Some(crate::keyboard::Action::Board),
-            true,
-        ),
         ("Connect agents", Action::Connect, None, true),
         (
             "Search console",
@@ -58,8 +31,12 @@ pub(super) fn show(
         ("Minimize window", Action::Minimize, None, true),
         ("Maximize window", Action::Maximize, None, false),
         ("Close window", Action::Close, None, false),
-    ];
-    let menu_entries = &menu_entries[..if compact { 17 } else { 13 }];
+    ]
+    .into_iter()
+    .filter(|entry| {
+        compact || !matches!(entry.1, Action::Minimize | Action::Maximize | Action::Close)
+    })
+    .collect();
     let menu_height = 12.0
         + menu_entries.len() as f32 * 30.0
         + menu_entries.iter().filter(|entry| entry.3).count() as f32 * 9.0;
@@ -98,14 +75,82 @@ pub(super) fn show(
             }
         });
         window.chrome.menu_scroll = (window.chrome.menu_scroll - wheel).clamp(0.0, scroll_max);
-        // An Area's first pass is invisible while egui measures it. The menu's geometry is
-        // already known, so draw on a foreground layer directly and interact before the pane UI.
-        let painter = ctx
-            .layer_painter(egui::LayerId::new(
-                egui::Order::Foreground,
-                egui::Id::new("integrated-menu"),
-            ))
-            .with_clip_rect(menu_rect);
+        window.chrome.menu_selected = window
+            .chrome
+            .menu_selected
+            .filter(|index| *index < menu_entries.len());
+        let mut moved = false;
+        let mut activate = false;
+        ctx.input(|input| {
+            for event in &input.events {
+                if let egui::Event::Key {
+                    key, pressed: true, ..
+                } = event
+                {
+                    match key {
+                        egui::Key::ArrowDown | egui::Key::ArrowUp => {
+                            let count = menu_entries.len();
+                            window.chrome.menu_selected =
+                                Some(match (window.chrome.menu_selected, key) {
+                                    (Some(index), egui::Key::ArrowDown) => (index + 1) % count,
+                                    (Some(index), _) => (index + count - 1) % count,
+                                    (None, egui::Key::ArrowDown) => 0,
+                                    (None, _) => count - 1,
+                                });
+                            moved = true;
+                        }
+                        egui::Key::Enter => activate = true,
+                        _ => {}
+                    }
+                }
+            }
+        });
+        if let Some(index) = window.chrome.menu_selected {
+            if moved {
+                let top = 6.0
+                    + index as f32 * 30.0
+                    + menu_entries[..=index]
+                        .iter()
+                        .filter(|entry| entry.3)
+                        .count() as f32
+                        * 9.0;
+                if top < window.chrome.menu_scroll {
+                    window.chrome.menu_scroll = top;
+                } else if top + 30.0 > window.chrome.menu_scroll + menu_rect.height() {
+                    window.chrome.menu_scroll = top + 30.0 - menu_rect.height();
+                }
+                window.chrome.menu_scroll = window.chrome.menu_scroll.clamp(0.0, scroll_max);
+            }
+            if activate {
+                action = Some(menu_entries[index].1);
+            }
+        }
+
+        let id = egui::Id::new("integrated-menu");
+        let layer = egui::LayerId::new(egui::Order::Foreground, id);
+        egui::Area::new(id)
+            .order(egui::Order::Foreground)
+            .fixed_pos(menu_rect.min)
+            .movable(false)
+            .constrain(false)
+            .show(&ctx, |registered| {
+                registered.allocate_rect(menu_rect, Sense::hover());
+            });
+        if window.board.is_open() {
+            ctx.set_sublayer(
+                egui::LayerId::new(egui::Order::Foreground, egui::Id::new("board-layer")),
+                layer,
+            );
+        }
+        // Geometry is known; paint even on the Area's invisible measurement pass.
+        let mut menu_ui = egui::Ui::new(
+            ctx.clone(),
+            id.with("rows"),
+            egui::UiBuilder::new().layer_id(layer).max_rect(menu_rect),
+        );
+        menu_ui.set_clip_rect(menu_rect);
+        let ui = &menu_ui;
+        let painter = ui.painter();
         painter.rect_filled(menu_rect, 8.0, bg);
         painter.rect_stroke(
             menu_rect,
@@ -156,7 +201,10 @@ pub(super) fn show(
                 ui.id().with(("menu-item", index)),
                 Sense::CLICK,
             );
-            if response.hovered() {
+            if response.hovered() && ctx.input(|i| i.pointer.delta() != Vec2::ZERO) {
+                window.chrome.menu_selected = Some(index);
+            }
+            if response.hovered() || window.chrome.menu_selected == Some(index) {
                 painter.rect_filled(item, 3.0, hover);
             }
             painter.text(

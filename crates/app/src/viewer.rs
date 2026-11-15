@@ -339,7 +339,7 @@ pub(crate) fn before_keys(
     owned || (was_open && !state.open)
 }
 
-pub(crate) use origin::{open, open_diff_for_pane, open_markdown_target};
+pub(crate) use origin::{open_diff_for_pane, open_markdown_target};
 
 #[cfg(test)]
 mod interaction_tests;

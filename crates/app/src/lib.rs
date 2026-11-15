@@ -1384,7 +1384,9 @@ impl eframe::App for Window {
 
         // The board claims its input before the console dispatcher. Its named work is discounted
         // from frame accounting; outbound latency still includes this earlier application work.
-        let mut board_owned = board::before_keys(self, ui, &metrics);
+        let chrome_owned = chrome::before_keys(self, ui, &metrics);
+        self.timed_separately += self.chrome.take_cost();
+        let mut board_owned = board::before_keys(self, ui, &metrics, chrome_owned);
         let pane_owned = !board_owned && pane_view::before_keys(self, ui, &metrics);
         if pane_owned {
             if !self.pane_view.is_renaming() {
@@ -1392,8 +1394,6 @@ impl eframe::App for Window {
             }
             ui.disable();
         }
-        let chrome_owned = chrome::before_keys(self, ui, &metrics);
-        self.timed_separately += self.chrome.take_cost();
         board_owned |= board::blocked(self, ui.ctx());
         let (explorer_keys, explorer_pointer) = explorer::before_keys(
             self,
@@ -1425,8 +1425,11 @@ impl eframe::App for Window {
         pane_view::reconcile(self);
         let overlay_owns_pointer =
             viewer_owned || explorer_pointer || board_owned || pane_owned || chrome_owned;
-        let header_owns_pointer =
-            overlay_owns_pointer || header::menu::pointer_blocked(self, ui.ctx());
+        let header_owns_pointer = viewer_owned
+            || explorer_pointer
+            || pane_owned
+            || chrome_owned
+            || header::menu::pointer_blocked(self, ui.ctx());
         let (tab_bar, area) = tab_bar::partition(self, area, &metrics);
 
         // **Everything that changes tab goes before tiling**, and this is what a defect cost: the
@@ -1438,7 +1441,7 @@ impl eframe::App for Window {
         if let Some(tab_bar) = tab_bar {
             tab_bar::handle_clicks(self, ui, tab_bar, &metrics, header_owns_pointer);
         }
-        if header_owns_pointer {
+        if overlay_owns_pointer || header_owns_pointer {
             header::menu::block_pointer(ui, overlay_owns_pointer);
         }
 

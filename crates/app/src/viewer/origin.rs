@@ -44,27 +44,6 @@ fn pin(state: &mut State, source: Source) -> bool {
     true
 }
 
-pub(crate) fn open(window: &mut Window, markdown: bool) {
-    let Some(index) = window.active().where_the_focus_is() else {
-        return;
-    };
-    let name = window.active().panes()[index].name;
-    if !markdown {
-        open_diff_for_pane(window, name);
-        return;
-    }
-    let Some(source) = source(window, name) else {
-        return;
-    };
-    if !pin(&mut window.viewer, source) {
-        return;
-    }
-    window.viewer.open_markdown();
-    if let Some(ctx) = &window.viewer.context {
-        ctx.request_repaint();
-    }
-}
-
 pub(crate) fn open_diff_for_pane(window: &mut Window, name: usize) {
     if window
         .viewer

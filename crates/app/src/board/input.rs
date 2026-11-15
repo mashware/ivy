@@ -65,6 +65,16 @@ pub(super) fn close(window: &mut Window, ctx: &egui::Context) {
     ctx.request_repaint();
 }
 
+pub(crate) fn dismiss_for_chrome(window: &mut Window, ctx: &egui::Context) {
+    close(window, ctx);
+}
+
+pub(crate) fn reanchor(window: &mut Window) {
+    if window.board.open {
+        window.board.original = Some(window.active().focus);
+    }
+}
+
 pub(crate) fn cancel_gestures(window: &mut Window, ctx: &egui::Context) {
     window
         .header_input
@@ -85,9 +95,19 @@ pub(crate) fn cancel_gestures(window: &mut Window, ctx: &egui::Context) {
     }
 }
 
-pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, _metrics: &CellMetrics) -> bool {
+pub(crate) fn before_keys(
+    window: &mut Window,
+    ui: &mut egui::Ui,
+    metrics: &CellMetrics,
+    chrome_owned: bool,
+) -> bool {
     if !window.board.enabled || window.settings_editor.is_open() || window.pane_view.is_modal() {
         return false;
+    }
+    if chrome_owned {
+        window.board.surface.pressed = None;
+        window.board.surface.child_pressed = None;
+        return blocked(window, ui.ctx());
     }
     let frame = ui.ctx().cumulative_frame_nr();
     if window.board.input_frame == Some(frame) {
@@ -126,9 +146,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, _metrics: &Cel
     let started = Instant::now();
     let events = ui.input(|i| i.events.clone());
     window.board.blocked_frame = Some(ui.ctx().cumulative_frame_nr());
-    window
-        .header_input
-        .block_for_settings(ui.ctx().cumulative_frame_nr());
+    let content = crate::tab_bar::geometry(window, ui.max_rect(), metrics).consoles;
     if window.board.open && was_open && !toggle_pressed {
         for event in &events {
             match event {
@@ -158,7 +176,14 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, _metrics: &Cel
                     button: egui::PointerButton::Primary,
                     pressed,
                     ..
-                } => pointer(&mut window.board, *pos, *pressed),
+                } => {
+                    if content.contains(*pos) {
+                        pointer(&mut window.board, *pos, *pressed);
+                    } else {
+                        window.board.surface.pressed = None;
+                        window.board.surface.child_pressed = None;
+                    }
+                }
                 _ => {}
             }
             if !window.board.open {
