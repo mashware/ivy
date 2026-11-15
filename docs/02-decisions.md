@@ -9850,8 +9850,9 @@ named span.
 the accent or a claim's color: green, red and yellow (1, 2, 3 and their twins 9, 10, 11) read as focus
 and claims, and blue (4) is the done claim, with 12 too close to it to tell apart at a glance. So
 there are at most four distinct project colors instead of six, fewer where a theme's slots collapse
-into each other, and past them projects repeat a color (D79's «while available»): the name in the
-header and the details on hover stay what tells two projects apart.
+into each other. Past them a project gets no color of its own: its stripe, name and dots take the
+theme's text color (D79's «while available»), and the name in the header and the details on hover
+stay what tells two projects apart.
 
 **Why this reverses part of D79.** D79 replaced a narrow stripe the owner found almost invisible with
 a strong gradient. The tint stays, flatter, and remains the cue that answers that report; the stripe
@@ -9866,8 +9867,8 @@ close target live on every tab (a press on an inactive tab's right edge closed i
 with no cross painted there); an add button anchored at the band's right edge (it stays put, but the
 design draws it after the tabs, and at full width it would sit far from them); showing the branch from
 the Board's resolver while the Board is closed (stale values with nobody refreshing them); keeping the
-compact threshold at 300 points (between it and about 480 points the full bar left the tabs a band of
-zero, and every card, pill and the add button vanished).
+compact threshold at 300 points (below about 380 points the full bar left the tabs a band of zero, and
+up to about 456 one too narrow for a pill, so cards, pills and the add button vanished or were cut).
 
 **Roles.** Hand-painted surfaces read `Roles` through `ui::style::roles`, which memoizes the last
 theme it was asked about and its roles in egui's memory. It answers any theme correctly, so it is not

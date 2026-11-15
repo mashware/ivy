@@ -128,8 +128,8 @@ mod tests {
         }
     }
 
-    /// Between the old 300-point threshold and about 480 points the full bar used to leave the tabs
-    /// a band of zero: every card, pill and the add button vanished. At every width one tab keeps
+    /// Above the old 300-point threshold the full bar used to leave the tabs a band of zero below
+    /// about 380 points, and one too narrow for a pill up to about 456. At every width one tab keeps
     /// its pill whole, some label and an add target, and a full bar's right-hand buttons all fit
     /// after the left group, so the band starts where the drawn buttons leave it.
     #[test]
@@ -157,8 +157,16 @@ mod tests {
                 assert_eq!(strip.right_start, leftmost);
             }
         }
-        // Both sides of the boundary are reached by the sweep.
+        // Both sides of the boundary are reached by the sweep, and the boundary is the one D96
+        // publishes: 456 points where the window draws its own buttons, 426 on macOS.
         assert!(is_compact(300.0));
         assert!(!is_compact(520.0));
+        let boundary = if cfg!(target_os = "macos") {
+            426.0
+        } else {
+            456.0
+        };
+        assert!(is_compact(boundary - 1.0), "{boundary}");
+        assert!(!is_compact(boundary), "{boundary}");
     }
 }
