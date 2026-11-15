@@ -207,6 +207,11 @@ impl State {
             self.total += std::mem::take(&mut self.frame);
         }
     }
+    pub(crate) fn close_combined_frame(&mut self, other: &mut Self) {
+        self.frame += std::mem::take(&mut other.frame);
+        self.close_frame();
+    }
+
     #[cfg(test)]
     pub(crate) fn publish(&self, to: &mut dyn std::io::Write) -> std::io::Result<()> {
         writeln!(

@@ -453,8 +453,7 @@ fn publish_views(window: &Window, to: &mut dyn std::io::Write) -> std::io::Resul
 fn close_views(window: &mut Window) {
     window.settings_editor.close_frame();
     window.chrome.close_frame();
-    window.viewer.close_frame();
-    window.viewer_other.close_frame();
+    window.viewer.close_combined_frame(&mut window.viewer_other);
     window.board.timing.close_frame();
     window.sidebar.close_frame();
 }

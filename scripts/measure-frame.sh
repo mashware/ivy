@@ -375,7 +375,7 @@ check_sidebar_report() {
     [ -n "$SIDEBAR_LINE" ] && [ -n "$SIDEBAR_WORK" ] || invalidate "dock report omitted host work or witnesses"
     [ "$SIDEBAR_WORK" -gt 0 ] || invalidate "dock recorded no host frames"
     case "$SIDEBAR_LINE" in
-        *"pane_identities=$DUMPING"*) : ;;
+        *"pane_identities=$DUMPING,"*) : ;;
         *) invalidate "dock witness pane identity count does not match the seeded panes" ;;
     esac
     case "$SIDEBAR_LINE" in

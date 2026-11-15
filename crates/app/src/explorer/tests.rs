@@ -35,6 +35,38 @@ fn panes_and_worktrees_restore_independent_navigation_and_restart_hidden() {
 }
 
 #[test]
+fn files_pin_expansion_and_scroll_survive_shared_sidebar_tool_switches() {
+    let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+    let ids: Vec<_> = window.all_panes().map(|pane| pane.name).collect();
+    window.explorer.reconcile(&[
+        (ids[0], Some("/repo/a".into())),
+        (ids[1], Some("/repo/b".into())),
+    ]);
+    let nav = window.explorer.navigation.get_mut(&ids[0]).unwrap();
+    nav.expanded.insert("/repo/a/src".into());
+    nav.selected = Some("/repo/a/src/lib.rs".into());
+    nav.scroll = 189.0;
+    window.explorer.pinned = Some(ids[0]);
+
+    for tool in [
+        crate::sidebar::Tool::Files,
+        crate::sidebar::Tool::Markdown,
+        crate::sidebar::Tool::Board,
+        crate::sidebar::Tool::Files,
+    ] {
+        crate::sidebar::select(&mut window, tool);
+    }
+    let nav = &window.explorer.navigation[&ids[0]];
+    assert!(nav.expanded.contains(Path::new("/repo/a/src")));
+    assert_eq!(
+        nav.selected.as_deref(),
+        Some(Path::new("/repo/a/src/lib.rs"))
+    );
+    assert_eq!(nav.scroll, 189.0);
+    assert_eq!(window.explorer.pinned, Some(ids[0]));
+}
+
+#[test]
 fn source_epochs_and_pane_liveness_reject_stale_results() {
     let mut state = Explorer::default();
     state.reconcile(&sources());

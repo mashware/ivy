@@ -179,6 +179,42 @@ fn host_accounting_counts_a_touched_frame_once_even_below_clock_resolution() {
     );
 }
 
+#[test]
+fn sidebar_state_is_transient_and_each_new_window_starts_closed_at_default_width() {
+    let mut previous = window_of_tabs([["sleep 30", "sleep 30"]]);
+    select(&mut previous, Tool::Git);
+    previous.sidebar.width = 735.0;
+
+    let fresh = window_of_tabs([["sleep 30", "sleep 30"]]);
+    assert_eq!(active(&fresh), None);
+    assert_eq!(fresh.sidebar.width, 480.0);
+
+    let saved = crate::session::serialize(&crate::session::StoredDocument {
+        v: crate::session::VERSION,
+        tabs: vec![crate::session::StoredTab {
+            root: crate::session::StoredNode::Leaf(crate::session::StoredLeaf {
+                panel_width: 80,
+                folded: false,
+                label: None,
+                cwd: None,
+                resume: None,
+            }),
+            label: None,
+        }],
+    })
+    .expect("the ordinary session layout serializes");
+    for transient in [
+        "sidebar",
+        "visibility",
+        "preferred_width",
+        "sidebar_width",
+        "735",
+        "Git",
+    ] {
+        assert!(!saved.contains(transient), "session serialized {transient}");
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn console_mouse_release_crossing_into_each_tool_or_rail_reaches_its_program() {

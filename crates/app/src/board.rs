@@ -305,3 +305,47 @@ pub(crate) fn observe(window: &mut crate::Window, ctx: &egui::Context) {
         .observation(started.elapsed(), live.len(), transitions);
     window.timed_separately += window.board.timing.take_cost();
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn board_selection_and_scroll_survive_shared_sidebar_switches() {
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]; 4]);
+        let ctx = egui::Context::default();
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 650.0));
+        let frame = |window: &mut crate::Window, events| {
+            crate::tests::one_frame_in(window, &ctx, area, events);
+        };
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Board);
+        frame(&mut window, vec![]);
+        let initial_selection = window.board.selected();
+        frame(
+            &mut window,
+            vec![egui::Event::Key {
+                key: egui::Key::End,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        frame(&mut window, vec![]);
+        let selected = window.board.selected().expect("Board has a selection");
+        assert_ne!(
+            Some(selected),
+            initial_selection,
+            "End did not change Board selection"
+        );
+        let selected_rect = window
+            .board
+            .card_rect(selected)
+            .expect("selected card visible");
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Board);
+        frame(&mut window, vec![]);
+        assert_eq!(window.board.selected(), Some(selected));
+        assert_eq!(window.board.card_rect(selected), Some(selected_rect));
+    }
+}

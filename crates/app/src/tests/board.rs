@@ -277,6 +277,31 @@ mod tests {
         frame(&mut window, &ctx, vec![egui::Event::Text("after".into())]);
         assert_eq!(received.wait_for(5, Duration::from_secs(5)), b"after");
     }
+
+    #[test]
+    fn stacked_dock_cards_fit_the_full_board_viewport_width() {
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+        integrated(&mut window);
+        let ctx = egui::Context::default();
+        let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 900.0));
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Board);
+        ui_pass(&mut window, &ctx, viewport, egui::RawInput::default());
+        let metrics = painter::CellMetrics::measure(&ctx, egui::FontId::monospace(14.0));
+        let dock = tab_bar::geometry(&window, viewport, &metrics)
+            .dock
+            .expect("dock has enough room for Board");
+        let cards: Vec<_> = window
+            .all_panes()
+            .filter_map(|pane| window.board.card_rect(pane.name))
+            .collect();
+        assert!(!cards.is_empty(), "the stacked Board painted no cards");
+        for card in cards {
+            assert!(
+                card.left() >= dock.left() - 0.1 && card.right() <= dock.right() + 0.1,
+                "painted card {card:?} exceeds Board viewport {dock:?}"
+            );
+        }
+    }
     #[test]
     fn configurable_board_binding_returns_the_disabled_chord_to_the_program() {
         for (config, opening) in [

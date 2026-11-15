@@ -479,6 +479,217 @@ mod tests {
     use super::*;
     use eframe::egui::epaint::Shape;
 
+    fn window_frame(
+        window: &mut crate::Window,
+        ctx: &egui::Context,
+        area: egui::Rect,
+        events: Vec<egui::Event>,
+    ) -> Vec<(String, egui::Pos2)> {
+        fn collect(shape: &Shape, labels: &mut Vec<(String, egui::Pos2)>) {
+            match shape {
+                Shape::Text(text) => labels.push((
+                    text.galley.job.text.clone(),
+                    text.pos + text.galley.rect.center().to_vec2(),
+                )),
+                Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        collect(shape, labels);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut frame = eframe::Frame::_new_kittest();
+        eframe::App::logic(window, ctx, &mut frame);
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(area),
+                events,
+                ..Default::default()
+            },
+            |ui| eframe::App::ui(window, ui, &mut frame),
+        );
+        let mut labels = Vec::new();
+        for shape in &output.shapes {
+            collect(&shape.shape, &mut labels);
+        }
+        output.drop_without_applying_deltas();
+        labels
+    }
+
+    fn review_comment() -> Comment {
+        Comment {
+            location: Location {
+                path: PathBuf::from("first.rs"),
+                side: "new",
+                line: 1,
+            },
+            text: "unsent review note".into(),
+        }
+    }
+
+    fn loaded_diff() -> Document {
+        Document::parse(
+            "diff --git a/first.rs b/first.rs\n--- a/first.rs\n+++ b/first.rs\n@@ -1 +1 @@\n-old\n+new\n",
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn docked_window_insert_is_live_only_and_other_git_requests_reveal_retained_review() {
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        let ctx = egui::Context::default();
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));
+        crate::tests::one_frame_in(&mut window, &ctx, area, vec![]);
+        crate::viewer::select_state(&mut window, false);
+        let ids: Vec<_> = window.all_panes().map(|pane| pane.name).collect();
+        window.viewer.kind = super::super::load::Kind::Local;
+        window.viewer.path = "/repo".into();
+        window.viewer.origin = Some(super::super::Source {
+            pane: ids[0],
+            label: "console A".into(),
+            cwd: Some(Path::new("/repo").into()),
+        });
+        window.viewer.loaded = Some(super::super::load::Loaded {
+            text: "diff".into(),
+            markdown: None,
+            diff: Some(loaded_diff()),
+        });
+        window.viewer.review.comments.push(review_comment());
+        window.viewer.review.preview = true;
+        window.viewer.open = true;
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Git);
+
+        // An explicit request for another console while Files is selected must reveal the retained
+        // source and the replacement warning instead of leaving Files selected or discarding it.
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+        crate::viewer::origin::open_diff_for_pane(&mut window, ids[1]);
+        assert_eq!(
+            crate::sidebar::active(&window),
+            Some(crate::sidebar::Tool::Git)
+        );
+        assert_eq!(window.viewer.origin.as_ref().unwrap().pane, ids[0]);
+        assert!(window.viewer.message.contains("Send or clear"));
+
+        // The actual Window -> dock -> viewer -> Review path enables Insert for the live origin.
+        window.viewer.message.clear();
+        window_frame(&mut window, &ctx, area, vec![]);
+        let insert = window_frame(&mut window, &ctx, area, vec![])
+            .into_iter()
+            .find(|(text, _)| text == "Insert into console")
+            .expect("live Git dock paints its Insert control")
+            .1;
+        let button = |pressed| egui::Event::PointerButton {
+            pos: insert,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        window_frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::PointerMoved(insert), button(true)],
+        );
+        window_frame(&mut window, &ctx, area, vec![button(false)]);
+        assert!(
+            window.viewer.pending_send.is_some(),
+            "live Insert did not queue review text"
+        );
+
+        // Removing the origin identity makes the same dock render it as unavailable and blocks
+        // delivery; no replacement pane can inherit the review.
+        window.viewer.pending_send = None;
+        window.viewer.origin.as_mut().unwrap().pane = usize::MAX;
+        let labels = window_frame(&mut window, &ctx, area, vec![]);
+        assert!(labels.iter().any(|(text, _)| text.contains("unavailable")));
+        let insert = labels
+            .iter()
+            .find(|(text, _)| text == "Insert into console")
+            .unwrap()
+            .1;
+        window_frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![
+                egui::Event::PointerMoved(insert),
+                button(true),
+                button(false),
+            ],
+        );
+        assert!(window.viewer.pending_send.is_none());
+    }
+
+    #[test]
+    fn git_review_context_survives_switches_through_every_sidebar_tool() {
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        let ctx = egui::Context::default();
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
+        crate::tests::one_frame_in(&mut window, &ctx, area, vec![]);
+        let pane = window.active().panes()[0].name;
+        crate::viewer::select_state(&mut window, false);
+        window.viewer.kind = super::super::load::Kind::AgainstBase;
+        window.viewer.path = "/repo".into();
+        window.viewer.base = "release/73".into();
+        window.viewer.origin = Some(super::super::Source {
+            pane,
+            label: "console A".into(),
+            cwd: Some(Path::new("/repo").into()),
+        });
+        window.viewer.loaded = Some(super::super::load::Loaded {
+            text: "diff".into(),
+            markdown: None,
+            diff: Some(Document::parse(
+                "diff --git a/first.rs b/first.rs\n--- a/first.rs\n+++ b/first.rs\n@@ -1 +1 @@\n-old\n+new\n",
+            ).unwrap()),
+        });
+        window.viewer.review.file = 0;
+        window.viewer.review.hunk = 1;
+        window.viewer.review.comments.push(Comment {
+            location: Location {
+                path: PathBuf::from("first.rs"),
+                side: "new",
+                line: 1,
+            },
+            text: "unsent review note".into(),
+        });
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Git);
+
+        for tool in [
+            crate::sidebar::Tool::Markdown,
+            crate::sidebar::Tool::Files,
+            crate::sidebar::Tool::Board,
+            crate::sidebar::Tool::Git,
+        ] {
+            crate::sidebar::select(&mut window, tool);
+        }
+
+        assert_eq!(
+            crate::sidebar::active(&window),
+            Some(crate::sidebar::Tool::Git)
+        );
+        assert_eq!(window.viewer.path, "/repo");
+        assert_eq!(window.viewer.base, "release/73");
+        assert_eq!(window.viewer.origin.as_ref().unwrap().pane, pane);
+        assert_eq!(
+            window
+                .viewer
+                .loaded
+                .as_ref()
+                .unwrap()
+                .diff
+                .as_ref()
+                .unwrap()
+                .files[0]
+                .path,
+            Path::new("first.rs")
+        );
+        assert_eq!(window.viewer.review.file, 0);
+        assert_eq!(window.viewer.review.hunk, 1);
+        assert_eq!(window.viewer.review.comments[0].text, "unsent review note");
+    }
+
     #[test]
     fn explorer_transition_keeps_comments_and_rejects_a_different_document() {
         let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);

@@ -25,6 +25,23 @@ fn viewers_name_the_frame_work_they_remove() {
 }
 
 #[test]
+fn work_in_both_viewer_banks_counts_as_one_application_frame() {
+    let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+    window.viewer.record(Duration::from_micros(12));
+    window.viewer_other.record(Duration::from_micros(23));
+    window.close_the_frame(Duration::from_millis(1));
+    let mut report = Vec::new();
+    window
+        .viewer
+        .publish_combined(&window.viewer_other, &mut report)
+        .unwrap();
+    assert_eq!(
+        String::from_utf8(report).unwrap(),
+        "document viewers: frames=1, total=35µs\n"
+    );
+}
+
+#[test]
 fn background_refresh_does_not_move_or_hide_the_markdown() {
     fn positions(shape: &egui::Shape, result: &mut Vec<(String, egui::Pos2)>) {
         match shape {
