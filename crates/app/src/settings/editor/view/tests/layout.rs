@@ -149,7 +149,14 @@ fn only_save_and_close_has_the_primary_accent_fill() {
             .filter(|(rect, _)| rect.contains(at))
             .map(|(_, fill)| *fill)
             .collect();
-        assert_eq!(fills.contains(&ACCENT), primary, "{label}: {fills:?}");
+        assert_eq!(
+            fills.contains(
+                &palette::Palette::new(appearance::effective_theme(editor.draft.as_ref().unwrap()))
+                    .accent
+            ),
+            primary,
+            "{label}: {fills:?}"
+        );
     }
 }
 fn visible_text(
@@ -278,7 +285,13 @@ fn viewport_resize_keeps_body_editable_and_footer_reachable_with_notices() {
             }
             let modal = rectangles
                 .iter()
-                .find(|(_, fill)| *fill == egui::Color32::from_rgb(25, 29, 38))
+                .find(|(_, fill)| {
+                    *fill
+                        == palette::Palette::new(appearance::effective_theme(
+                            editor.draft.as_ref().unwrap(),
+                        ))
+                        .surface
+                })
                 .expect("modal background")
                 .0;
             assert!(

@@ -130,7 +130,7 @@ fn explorer_escape_and_keyboard_never_resize_or_close_consoles() {
     let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
     one_frame_in(&mut window, &ctx, area, vec![]);
     let before: Vec<_> = window.all_panes().map(|p| (p.name, p.measured)).collect();
-    toggle(&mut window, &ctx);
+    crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
     one_frame_in(&mut window, &ctx, area, vec![]);
     assert!(window.explorer.visible);
     one_frame_in(

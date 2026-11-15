@@ -267,7 +267,7 @@ fn publish_directory(window: &mut crate::Window, pane: usize, uri: &str) {
 }
 
 #[test]
-fn files_menu_pins_and_follows_across_tabs_without_leaking_input() {
+fn files_rail_pins_and_follows_across_tabs_without_leaking_input() {
     let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
     let ctx = egui::Context::default();
     let worktrees = Worktrees::new();
@@ -297,15 +297,15 @@ fn files_menu_pins_and_follows_across_tabs_without_leaking_input() {
         .collect();
     frame(&mut window, &ctx, area, vec![]);
 
-    // The integrated titlebar menu exposes Files as a user-reachable entry.
-    click_at(&mut window, &ctx, area, egui::pos2(1075.0, 25.0));
-    assert!(
-        frame(&mut window, &ctx, area, vec![])
-            .iter()
-            .any(|(text, _)| text == "Files"),
-        "the titlebar menu should show a Files entry"
+    let metrics =
+        crate::painter::CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
+    let rail = crate::tab_bar::geometry(&window, area, &metrics).rail;
+    click_at(
+        &mut window,
+        &ctx,
+        area,
+        egui::pos2(rail.center().x, rail.top() + 20.0),
     );
-    click_text(&mut window, &ctx, area, "Files");
     frame(&mut window, &ctx, area, vec![]);
     assert!(window.explorer.visible);
     // Native metadata may seed navigation before the shell has completed its initial cd.
@@ -486,7 +486,7 @@ fn files_menu_pins_and_follows_across_tabs_without_leaking_input() {
     window.explorer.navigation.get_mut(&ids[0]).unwrap().scroll = 120.0;
     click_text(&mut window, &ctx, area, "Hide");
     assert!(!window.explorer.visible);
-    toggle(&mut window, &ctx);
+    crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
     frame(&mut window, &ctx, area, vec![]);
     assert!(window.explorer.visible);
     assert_eq!(window.explorer.navigation[&ids[0]].selected, Some(a_child));
@@ -541,7 +541,7 @@ fn markdown_selection_opens_from_the_pinned_pane_only_after_enter() {
     let ids: Vec<_> = window.all_panes().map(|pane| pane.name).collect();
     wait_for_source(&mut window, &ctx, area, ids[0], &first.0);
     wait_for_source(&mut window, &ctx, area, ids[2], &second.0);
-    toggle(&mut window, &ctx);
+    crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
     frame(&mut window, &ctx, area, vec![]);
     click_text(&mut window, &ctx, area, "Use console directory");
     assert_eq!(window.explorer.target(Some(ids[0])), Some(ids[0]));
@@ -610,7 +610,7 @@ fn remote_source_suspends_saved_navigation_and_console_directory_resets_it_expli
     frame(&mut window, &ctx, area, vec![]);
     let pane = window.active().panes()[0].name;
     wait_for_source(&mut window, &ctx, area, pane, &original.0);
-    toggle(&mut window, &ctx);
+    crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
     frame(&mut window, &ctx, area, vec![]);
     click_text(&mut window, &ctx, area, "Use console directory");
 
@@ -680,7 +680,7 @@ fn refresh_clears_a_deleted_selection_and_reports_a_deleted_explorer_root() {
     frame(&mut window, &ctx, area, vec![]);
     let pane = window.active().panes()[0].name;
     wait_for_source(&mut window, &ctx, area, pane, &directory.0);
-    toggle(&mut window, &ctx);
+    crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
     frame(&mut window, &ctx, area, vec![]);
     click_text(&mut window, &ctx, area, "Use console directory");
     wait_for_text(&mut window, &ctx, area, "selected.md");

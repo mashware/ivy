@@ -5,6 +5,7 @@ use std::time::Instant;
 mod appearance;
 mod colors;
 mod footer;
+mod palette;
 pub(super) mod typography;
 
 const SECTIONS: [&str; 4] = ["Appearance", "Cursor", "Shortcuts", "Startup"];
@@ -15,12 +16,15 @@ pub(super) fn show(
     ctx: &egui::Context,
     discoverer: &mut crate::fonts::Discoverer,
 ) {
+    let theme =
+        appearance::effective_theme(editor.draft.as_ref().expect("open editor has a draft"));
+    let palette = palette::Palette::new(theme);
     let mut close = false;
     let popup_was_open = egui::Popup::is_any_open(ctx);
     egui::Modal::new(egui::Id::new("terminal-settings"))
-        .frame(modal_frame())
+        .frame(palette.frame())
         .show(ctx, |ui| {
-            settings_style(ui);
+            palette.apply(ui);
             form(editor, ui, discoverer, &mut close);
         });
     if ctx.input(|i| i.key_pressed(egui::Key::Escape))
@@ -32,6 +36,13 @@ pub(super) fn show(
         } else {
             close = true;
         }
+    }
+    if editor
+        .draft
+        .as_ref()
+        .is_some_and(|draft| appearance::effective_theme(draft) != theme)
+    {
+        ctx.request_repaint();
     }
     if close {
         discoverer.clear_preview(ctx);
@@ -193,12 +204,12 @@ fn form(
                 sw: 14,
                 se: 0,
             },
-            egui::Color32::from_rgb(23, 27, 35),
+            ui.visuals().panel_fill,
         );
         ui.painter().vline(
             side.right(),
             side.y_range(),
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(48, 54, 68)),
+            egui::Stroke::new(1.0, ui.visuals().window_stroke.color),
         );
         ui.painter().text(
             side.min + egui::vec2(28.0, 30.0),
@@ -212,7 +223,7 @@ fn form(
             egui::Align2::LEFT_BOTTOM,
             "Ivy",
             egui::FontId::proportional(11.0),
-            egui::Color32::from_rgb(105, 115, 134),
+            ui.visuals().weak_text_color(),
         );
         let nav = egui::Rect::from_min_max(
             side.min + egui::vec2(14.0, 82.0),
@@ -312,7 +323,7 @@ fn main_column(
             _ => "Choose what opens next time.",
         })
         .size(14.0)
-        .color(egui::Color32::from_rgb(146, 155, 174)),
+        .color(ui.visuals().weak_text_color()),
     );
     let body = egui::Rect::from_min_max(
         egui::pos2(inner.left(), header_bottom),
@@ -346,7 +357,7 @@ fn main_column(
     ui.painter().hline(
         main.x_range(),
         footer_top,
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(48, 54, 68)),
+        egui::Stroke::new(1.0, ui.visuals().window_stroke.color),
     );
     let mut foot_ui = ui.new_child(
         egui::UiBuilder::new()
@@ -371,20 +382,20 @@ fn navigation(editor: &mut Editor, ui: &mut egui::Ui, vertical: bool) {
                     .x
                     + 44.0
             };
-            let ink = if selected {
-                egui::Color32::from_rgb(196, 210, 255)
-            } else {
-                egui::Color32::from_rgb(146, 155, 174)
-            };
             let response = ui.add_sized([width, 40.0], egui::Button::new("").frame(false));
+            let ink = if selected {
+                ui.visuals().selection.stroke.color
+            } else {
+                ui.style().interact(&response).fg_stroke.color
+            };
             if selected || response.hovered() {
                 ui.painter().rect_filled(
                     response.rect,
                     7.0,
                     if selected {
-                        egui::Color32::from_rgb(41, 51, 75)
+                        ui.visuals().selection.bg_fill
                     } else {
-                        egui::Color32::from_rgb(32, 37, 49)
+                        ui.style().interact(&response).bg_fill
                     },
                 );
             }

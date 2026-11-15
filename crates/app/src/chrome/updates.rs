@@ -33,9 +33,9 @@ impl Dialog {
     }
 }
 
-pub(super) fn open(window: &mut Window, ctx: &egui::Context, check: bool) {
+pub(super) fn open(window: &mut Window, ctx: &egui::Context, check: bool, board_handoff: bool) {
     if window.settings_editor.is_open()
-        || crate::board::blocked(window, ctx)
+        || (crate::board::blocked(window, ctx) && !board_handoff)
         || window.pane_view.is_modal()
         || window.chrome.guide.blocked(ctx)
     {

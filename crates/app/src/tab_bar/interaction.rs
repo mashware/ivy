@@ -75,4 +75,7 @@ pub(super) fn handle(
     } else if new_tab {
         window.apply(WindowRequest::NewTab, ui.ctx(), ui.max_rect(), metrics);
     }
+    if action.is_some() || new_tab {
+        crate::board::reanchor(window);
+    }
 }

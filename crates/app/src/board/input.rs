@@ -46,6 +46,16 @@ fn dismiss(window: &mut Window, ctx: &egui::Context) {
     ctx.request_repaint();
 }
 
+pub(crate) fn dismiss_for_chrome(window: &mut Window, ctx: &egui::Context) {
+    dismiss(window, ctx);
+}
+
+pub(crate) fn reanchor(window: &mut Window) {
+    if window.board.open {
+        window.board.original = Some(window.active().focus);
+    }
+}
+
 pub(crate) fn cancel_gestures(window: &mut Window, ctx: &egui::Context) {
     if window.board.pointer_owned {
         window.board.awaiting_release = true;
@@ -73,9 +83,19 @@ pub(crate) fn cancel_gestures(window: &mut Window, ctx: &egui::Context) {
     }
 }
 
-pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, _metrics: &CellMetrics) -> bool {
+pub(crate) fn before_keys(
+    window: &mut Window,
+    ui: &mut egui::Ui,
+    metrics: &CellMetrics,
+    chrome_owned: bool,
+) -> bool {
     if !window.board.enabled || window.settings_editor.is_open() || window.pane_view.is_modal() {
         return false;
+    }
+    if chrome_owned {
+        window.board.surface.pressed = None;
+        window.board.surface.child_pressed = None;
+        return blocked(window, ui.ctx());
     }
     let frame = ui.ctx().cumulative_frame_nr();
     if window.board.input_frame == Some(frame) {
@@ -134,7 +154,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, _metrics: &Cel
         return false;
     }
 
-    let geometry = crate::tab_bar::geometry(window, ui.max_rect(), _metrics);
+    let geometry = crate::tab_bar::geometry(window, ui.max_rect(), metrics);
     let Some(dock) = geometry.dock else {
         window.board.keyboard_focus = false;
         return false;

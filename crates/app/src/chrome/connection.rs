@@ -129,7 +129,7 @@ pub(super) fn compact_button(window: &mut Window, ui: &egui::Ui, row: Rect) {
             window.theme.foreground(),
         )
     {
-        open(window, ui.ctx());
+        open(window, ui.ctx(), false);
     }
 }
 
@@ -149,21 +149,10 @@ pub(super) fn paint_icon(painter: &egui::Painter, rect: Rect, fg: Color32, highl
     }
 }
 
-pub(super) fn open_requested(
-    window: &mut Window,
-    ctx: &egui::Context,
-    action: &mut Option<super::Action>,
-) {
-    if matches!(action, Some(super::Action::Connect)) {
-        open(window, ctx);
-        *action = None;
-    }
-}
-
-pub(super) fn open(window: &mut Window, ctx: &egui::Context) {
+pub(super) fn open(window: &mut Window, ctx: &egui::Context, board_handoff: bool) {
     if window.settings_editor.is_open()
         || window.chrome.updates.blocked(ctx)
-        || crate::board::blocked(window, ctx)
+        || (crate::board::blocked(window, ctx) && !board_handoff)
         || window.pane_view.is_modal()
     {
         return;

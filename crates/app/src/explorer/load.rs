@@ -524,7 +524,7 @@ mod tests {
                 bytes: 0,
             })
         }));
-        crate::explorer::toggle(&mut window, &ctx);
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
         one_frame_in(&mut window, &ctx, area, vec![]);
         started_rx.recv_timeout(Duration::from_secs(3)).unwrap();
         let before = ctx.cumulative_frame_nr();

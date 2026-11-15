@@ -630,11 +630,13 @@ remote OSC 7 directory does not fall back to an unrelated local directory. On ot
 console must publish a usable local OSC 7 directory. If its directory cannot be read, the review
 shows that fact instead of choosing another console's repository.
 
-The global application menu retains **Markdown viewer** and **Git diff viewer**; the latter uses
-the focused console. Markdown can also be opened using its file input.
-The viewer floats above all console partitions, anchored to the right. Drag its left edge to resize,
-use **Expand**/**Restore**, or dismiss it with **Close** or Escape while it owns keyboard focus.
-Opening and resizing it preserves every console's grid. Clicking a console returns typing there.
+Choose **Markdown** or **Git** from the right tool bar to open its retained view in the shared
+sidebar. On first use, Git uses the focused console; changing focus alone never retargets an open
+view. Markdown can also be opened using its file input. Drag the sidebar's left divider to resize,
+or dismiss it with the active tool button, **Close**, or Escape while it owns keyboard focus.
+Consoles resize alongside it and keep their identities. Clicking a console returns typing there.
+A narrow window temporarily hides the sidebar body until both it and the consoles fit. Tool
+selection, navigation and width are retained during the session and reset on application restart.
 
 Markdown displays headings, lists, tables, code and inline formatting. It refreshes every second
 while open, including atomic file replacement; background refresh keeps the document in place.

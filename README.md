@@ -211,19 +211,20 @@ native two-console verification as incomplete rather than claiming isolation is 
 
 ## Read plans and review changes
 
-Read the plan or inspect changes while your consoles keep running. Both viewers float above the
-panes, attached to the right edge. Drag the left edge to resize, expand the viewer, or close it;
-the console layout stays in place.
+Read the plan or inspect changes while your consoles keep running. **Files**, **Markdown**, **Git**
+and **Board** share the right sidebar. Choose a tool from the vertical bar, drag the left divider
+to resize, or click the active tool again to close it. Consoles resize beside the sidebar; switching
+tools preserves their sources and navigation.
 
 ### Markdown previews
 
 Hold **Ctrl** and click a local `.md` path printed by an agent or shell. Ivy opens the document
 inside the terminal, with headings, lists, tables and code. Saving the file updates the preview
-without reopening it. You can also choose **Markdown viewer** from the application menu.
+without reopening it. You can also choose **Markdown** from the right tool bar.
 
 ![Ivy showing a formatted Markdown plan in a floating viewer above running consoles](docs/images/ivy-markdown.png)
 
-*Ivy's Markdown viewer rendered with example session data and the Tokyo Night theme.*
+*Markdown rendered with example session data and the Tokyo Night theme in the earlier floating layout.*
 
 ### Git review from each console
 
@@ -248,7 +249,7 @@ for directory discovery, supported files and platform behavior.
 
 ## Browse a console's files
 
-Choose **Files** from the window menu to show the shared file explorer. It follows the active
+Choose **Files** from the right tool bar to show the shared file explorer. It follows the active
 console and remembers that console's root, expanded folders, selected entry and scroll position.
 Different worktrees and even two consoles in the same directory keep separate navigation.
 **Pin this console** keeps its files visible while you type in another console or switch tabs;

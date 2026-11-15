@@ -217,17 +217,6 @@ pub(crate) fn reveal(window: &mut Window) {
     window.explorer.keyboard = true;
 }
 
-pub(crate) fn toggle(window: &mut Window, ctx: &egui::Context) {
-    if crate::sidebar::active(window) == Some(crate::sidebar::Tool::Files) {
-        crate::sidebar::close(window, ctx);
-    } else {
-        crate::sidebar::select(window, crate::sidebar::Tool::Files);
-    }
-    window.explorer.blocked_frame = Some(ctx.cumulative_frame_nr());
-    window.explorer.pointer_frame = Some(ctx.cumulative_frame_nr());
-    ctx.request_repaint();
-}
-
 fn reconcile(window: &mut Window) {
     let sources: Vec<_> = window
         .all_panes()

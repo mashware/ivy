@@ -106,16 +106,12 @@ fn swatch(
                     &field.value
                 }
             ));
+            let popup_style = ui.style().clone();
             egui::Popup::menu(&response)
-                .frame(
-                    egui::Frame::new()
-                        .fill(egui::Color32::from_rgb(35, 41, 54))
-                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(70, 81, 106)))
-                        .corner_radius(9)
-                        .inner_margin(10),
-                )
+                .frame(super::palette::popup_frame(ui))
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                 .show(|ui| {
-                    super::settings_style(ui);
+                    ui.set_style(popup_style);
                     ui.set_width(235.0);
                     ui.strong(format!("{title} colour"));
                     ui.weak(if field.value.is_empty() {

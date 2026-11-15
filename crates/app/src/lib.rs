@@ -1388,8 +1388,10 @@ impl eframe::App for Window {
 
         // The board claims its input before the console dispatcher. Its named work is discounted
         // from frame accounting; outbound latency still includes this earlier application work.
-        let sidebar_owned = sidebar::before_keys(self, ui, &metrics);
-        let mut board_owned = sidebar_owned || board::before_keys(self, ui, &metrics);
+        let chrome_owned = chrome::before_keys(self, ui, &metrics);
+        self.timed_separately += self.chrome.take_cost();
+        let sidebar_owned = !chrome_owned && sidebar::before_keys(self, ui, &metrics);
+        let mut board_owned = sidebar_owned || board::before_keys(self, ui, &metrics, chrome_owned);
         let pane_owned = !board_owned && pane_view::before_keys(self, ui, &metrics);
         if pane_owned {
             if !self.pane_view.is_renaming() {
@@ -1397,8 +1399,6 @@ impl eframe::App for Window {
             }
             ui.disable();
         }
-        let chrome_owned = chrome::before_keys(self, ui, &metrics);
-        self.timed_separately += self.chrome.take_cost();
         board_owned |= board::blocked(self, ui.ctx());
         let (viewer_owned, explorer_pointer, requests) =
             sidebar::tool_keys(self, ui, &metrics, pane_owned || board_owned, chrome_owned);

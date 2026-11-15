@@ -58,29 +58,6 @@ pub(super) fn initialize(window: &mut Window, markdown: bool) {
     }
 }
 
-pub(crate) fn open(window: &mut Window, markdown: bool) {
-    super::select_state(window, markdown);
-    let Some(index) = window.active().where_the_focus_is() else {
-        return;
-    };
-    let name = window.active().panes()[index].name;
-    if !markdown {
-        open_diff_for_pane(window, name);
-        return;
-    }
-    let Some(source) = source(window, name) else {
-        return;
-    };
-    if !pin(&mut window.viewer, source) {
-        return;
-    }
-    crate::sidebar::select(window, crate::sidebar::Tool::Markdown);
-    window.viewer.open_markdown();
-    if let Some(ctx) = &window.viewer.context {
-        ctx.request_repaint();
-    }
-}
-
 pub(crate) fn open_diff_for_pane(window: &mut Window, name: usize) {
     super::select_state(window, false);
     if window

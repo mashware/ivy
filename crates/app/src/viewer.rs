@@ -427,7 +427,7 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
     window.timed_separately += window.viewer.take_cost();
 }
 
-pub(crate) use origin::{open, open_diff_for_pane, open_markdown_target};
+pub(crate) use origin::{open_diff_for_pane, open_markdown_target};
 
 #[cfg(test)]
 mod interaction_tests;
