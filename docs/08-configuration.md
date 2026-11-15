@@ -612,34 +612,40 @@ and hidden-console pump budgets are preserved. Settings and Board remain separat
 ## File explorer
 
 Choose the folder icon in the right tool bar to show **Files**; click it again or press Escape
-while Files owns keyboard focus to hide it. Each console retains its own tree, selection and
-scroll position when you switch consoles or tools. The folder icon uses the same vector style
-and interaction feedback as the adjacent tools.
+while Files owns keyboard focus to hide it. Each console retains its own tree, selection and scroll
+position. A usable change to that console's local working directory follows automatically, including
+a shell's startup directory change. Remote/unavailable sources suspend local browsing.
 
-Click a folder's chevron to expand or collapse it; double-clicking its name or pressing Enter
-also toggles it without leaving the tree's root. Single-click a regular `.md` file to open it in
-the existing Markdown viewer. Enter and the selected entry's **Open** control remain available.
-Other files can be selected and their paths copied, without a preview notice or execution.
+Click a small folder chevron to expand/collapse it; double-clicking its name or pressing Enter
+also toggles it without leaving the normal tree root. Single-click `.md`, including a file symlink,
+to open the existing Markdown viewer. Its reader validates regular UTF-8 files and applies its
+normal limits. Other files select quietly and their paths can be copied; nothing executes.
 
-The top-right **Refresh** icon reloads directory listings. It keeps expansion and scroll position
-when the console directory is unchanged. When the console publishes a different local directory,
-a notice explains that Refresh adopts it. An unavailable or remote source suspends local browsing
-instead of choosing another console's directory. Files has no pin, up, reset or local close button.
-When expanded folders fill the initial 8192-row tree budget, **Show more** reveals the next
-portion without changing the root or selection. The control appears only while entries remain
-hidden; a new console directory resets the initial budget. General text viewing is not included.
+Type into **Search files and folders** to match names below the displayed folder, including
+collapsed directories. Results show relative paths and match case-insensitively; contents are not
+searched. Double-click a matching directory to open it as the search location. Escape clears the
+query before closing Files. Queries are at most 256 characters. A bounded scan or unreadable folder
+is reported rather than presenting partial results as complete.
+
+The top-right **Refresh** icon reloads listings while preserving same-directory expansion/scroll.
+When expanded folders fill the initial 8192-row budget, **Show more** reveals the next portion
+without changing root or selection; a new directory resets the budget. Files has no pin, up, reset,
+source-console line, changed-directory notice or local close button. Scrolling its body does not
+dim the consoles. General text viewing is not included.
+
+Ctrl-click a local path printed in a console to reveal its directory in Files. A file is selected
+in its parent and scrolled into view; directories open directly. Local `file://` links use the same
+route. Relative paths use that console's reported directory or its known local directory; they
+never fall back to the application's directory. Unknown/remote sources and missing paths report
+unavailability. The clicked console becomes the active Files source. Web links still use their
+existing Ctrl-click behavior; ordinary mouse gestures still select terminal text.
 
 ## Markdown and Git diff viewers
 
-Ctrl-click a local `.md` path printed by a console to open Markdown inside the terminal.
-OSC 8 `file://` links use the same viewer. Relative paths resolve against the directory explicitly
-published by that console using OSC 7; without one, the viewer asks for an absolute path.
-Only empty authorities, localhost and the verified local hostname are accepted as local.
-For a shell without OSC 7 integration, print the directory before printing a relative path:
-
-```sh
-printf '\033]7;file://%s%s\007' "$(hostname)" "$PWD"
-```
+Open a Markdown file from Files with one click, or use the Markdown view's file input. The viewer
+retains its source console and updates saved content. Console path gestures reveal files in Files
+as described above. Only empty authorities, localhost and the verified local hostname are accepted
+as local file links.
 
 Each console header has a **Review changes** control beside its information-panel and maximize
 controls. Its context menu offers the same action when the header is narrow. It opens the clicked

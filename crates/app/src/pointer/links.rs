@@ -55,7 +55,7 @@ fn open_local_press(
     let Some((pane, target)) = local else {
         return false;
     };
-    crate::viewer::open_markdown_target(window, pane, target.path, target.line);
+    crate::explorer::open_path(window, pane, target.path);
     let released = has_primary(&queue[which + 1..], false);
     queue.remove(which);
     window.link_press_in_progress = Some(LinkGesture {

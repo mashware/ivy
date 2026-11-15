@@ -8724,35 +8724,49 @@ The dock-open grid intentionally differs from its closed control, so no painting
 
 ### Explorer interaction refinement — 15 November 2026, #88
 
-The owner rejected the explorer's extra close/pin/navigation controls and filled triangles.
-Files now follows the active console with independent retained navigation. Its rail icon is a
-recognizable folder using the same vector stroke, bounds and feedback as the other tools; that
-button or Escape dismisses Files. Folder arrows are open chevrons. Folder activation expands or
-collapses within the root instead of replacing it, because removing Up must not strand the tree.
+The owner rejected the explorer's extra close/pin/navigation controls and filled triangles,
+then supplied native feedback rejecting the source/cwd-change rows, large chevrons, console
+flicker during scrolling and inactive Markdown links. Files keeps one root caption and a compact
+name-search field. Its rail icon is a recognizable folder with the adjacent tools' vector style;
+that button or Escape dismisses Files. Folder arrows are six-point open chevrons within their
+existing hit areas. Normal tree activation expands/collapses without replacing the root.
 
-Keep one explicit Refresh icon at the top right: directory listings are cached and removing it
-would leave saved files invisible until another invalidation. Same-source refresh preserves tree
-navigation; after an observed console directory change, Refresh adopts that source explicitly.
-This combines the necessary reset behavior without another toolbar. Unavailable/remote source
-handling and asynchronous loading limits remain intact.
+Files follows usable console-directory changes automatically, including the shell's transient
+startup directory. The same source retains navigation; remote/unavailable metadata suspends local
+browsing. Keep one top-right Refresh icon for explicit cache invalidation. Its ink and hover fill
+come from the effective theme. Files gestures claim input without applying modal console dimming;
+other modal owners retain their existing behavior. Files input and painting are counted in the
+existing sidebar application timing span; viewer and Board work remain separate.
 
-One click on a regular `.md` file opens its absolute path through the existing Markdown viewer.
-Other file types select quietly; the unsupported-preview notice is removed. A general text viewer
-is deliberately deferred for separate study. No file executes through tree activation.
+A single click on `.md` opens the existing viewer, including an explicitly selected symlink.
+The reader already opens nonblocking on Unix, validates the opened regular file, bounds its size
+and requires UTF-8. Directory traversal still does not follow symlinks. Other files select quietly;
+there is no unsupported-preview notice. A general text viewer remains separate work.
 
-Discarded: a second close control beside the rail toggle; pin/follow controls the owner removed;
-filled triangles unlike the supplied IDE reference; child-root navigation with no Up control;
-automatic directory resets on every cwd observation, which would discard navigation while reading;
-filesystem watching or a new text renderer, neither needed for this refinement.
+The owner chose **Show more** after review reproduced two valid 4096-directory levels filling the
+8192-row budget before an expanded descendant. Each click admits another 8192 rows for that console,
+retaining root, selection and scroll. A new root resets the initial budget. Existing listing/cache
+limits and virtualized painting remain; extra work requires an explicit click.
 
-Review exposed one loss of access: two expanded levels of 4096 directories can exhaust the
-8192-row flattening budget before reaching a descendant, even with preceding siblings collapsed.
-The owner chose **Show more**, displayed only when that budget truncates the tree. Each click
-admits another 8192 rows for that console while retaining root, selection and scroll. A new root
-resets the initial budget; same-source refresh keeps it. The existing listing/cache limits,
-virtualized painting and asynchronous filesystem worker remain. Removing the cap entirely and
-adding a permanent navigation toolbar were discarded: extra tree work is explicitly requested,
-and the compact everyday view remains the requested one.
+Search matches file and directory names beneath the displayed root, not contents. It runs on the
+existing single cancellable worker, with generation/epoch-tagged replies. Queries are limited to
+256 characters, scans to 100000 entries and 4096 pending directories, and results to the existing
+4096-entry / 4 MiB payload bounds. Partial/unreadable results say so. Changing/clearing a query
+rejects old replies; Escape clears search before closing Files. Matching directories can be
+opened as a new search location. Clearing an ordinary query restores that console's tree.
+
+Ctrl+click on a local console path reveals it in Files: directories open directly and files open
+their parent with the file selected and scrolled into view. It uses the clicked console's explicit
+local context, never the app's directory or a remote file host. The clicked console becomes the
+active source for its Files state. Metadata and directory reading run on the same worker; missing
+paths remain visible errors, not shell commands. Web links and ordinary selection retain their
+existing gestures. The source's line suffix is accepted as path annotation, not executed.
+
+Discarded: duplicate close/pin/navigation controls; filled or oversized arrows unlike the supplied
+IDE reference; fixed-root traversal without a way past its row budget; permanently dimming consoles
+for nonmodal Files scrolling; refusing a Markdown symlink the existing reader already validates;
+content search, a second filesystem worker, unbounded recursive scans, following directory links,
+a general text renderer, and treating a displayed path as executable code.
 
 
 ## D73 — Connection help is global and reports observed publication

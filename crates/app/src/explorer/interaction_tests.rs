@@ -109,12 +109,12 @@ impl Worktrees {
     }
 }
 
-fn frame(
+fn painted_frame(
     window: &mut crate::Window,
     ctx: &egui::Context,
     area: egui::Rect,
     events: Vec<egui::Event>,
-) -> Vec<(String, egui::Pos2)> {
+) -> (Vec<(String, egui::Pos2)>, Vec<egui::epaint::ClippedShape>) {
     fn texts(shape: &Shape, found: &mut Vec<(String, egui::Pos2)>) {
         match shape {
             Shape::Text(text) => found.push((
@@ -130,7 +130,6 @@ fn frame(
         }
     }
     let mut native = eframe::Frame::_new_kittest();
-    eframe::App::logic(window, ctx, &mut native);
     let output = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(area),
@@ -138,14 +137,35 @@ fn frame(
             events,
             ..Default::default()
         },
-        |ui| eframe::App::ui(window, ui, &mut native),
+        |ui| {
+            eframe::App::logic(window, ui.ctx(), &mut native);
+            eframe::App::ui(window, ui, &mut native);
+            if ui
+                .ctx()
+                .data_mut(|data| data.remove_temp::<bool>(egui::Id::new("explorer-test-discard")))
+                .unwrap_or(false)
+            {
+                ui.ctx()
+                    .request_discard("exercise native repeated-pass handoff");
+            }
+        },
     );
     let mut found = Vec::new();
     for shape in &output.shapes {
         texts(&shape.shape, &mut found);
     }
+    let shapes = output.shapes.clone();
     output.drop_without_applying_deltas();
-    found
+    (found, shapes)
+}
+
+fn frame(
+    window: &mut crate::Window,
+    ctx: &egui::Context,
+    area: egui::Rect,
+    events: Vec<egui::Event>,
+) -> Vec<(String, egui::Pos2)> {
+    painted_frame(window, ctx, area, events).0
 }
 
 fn click_at(window: &mut crate::Window, ctx: &egui::Context, area: egui::Rect, pos: egui::Pos2) {
@@ -218,7 +238,13 @@ fn wait_for_text(
     let deadline = Instant::now() + std::time::Duration::from_secs(5);
     loop {
         let visible = frame(window, ctx, area, vec![]);
-        if visible.iter().any(|(text, _)| text.contains(expected)) {
+        if visible.iter().any(|(text, pos)| {
+            text.contains(expected)
+                && window
+                    .sidebar
+                    .last_dock
+                    .is_some_and(|dock| dock.contains(*pos))
+        }) {
             return;
         }
         assert!(
@@ -507,7 +533,7 @@ fn markdown_single_click_opens_the_file_from_the_active_console() {
 }
 
 #[test]
-fn remote_source_suspends_saved_navigation_and_refresh_adopts_a_changed_console_directory() {
+fn remote_source_suspends_navigation_and_local_directory_changes_follow_automatically() {
     let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
     let ctx = egui::Context::default();
     let original = Directory::new("source-original");
@@ -532,7 +558,6 @@ fn remote_source_suspends_saved_navigation_and_refresh_adopts_a_changed_console_
         .unwrap()
         .enter(original.0.join("docs"));
     wait_for_text(&mut window, &ctx, area, "original.md");
-    let saved_root = original.0.join("docs");
 
     publish_directory(
         &mut window,
@@ -540,10 +565,10 @@ fn remote_source_suspends_saved_navigation_and_refresh_adopts_a_changed_console_
         &format!("file://localhost{}", current.0.display()),
     );
     wait_for_source(&mut window, &ctx, area, pane, &current.0);
-    wait_for_text(&mut window, &ctx, area, "Console directory changed");
+    wait_for_text(&mut window, &ctx, area, "current.md");
     assert_eq!(
         window.explorer.navigation[&pane].root,
-        Some(saved_root.clone())
+        Some(current.0.clone())
     );
 
     publish_directory(&mut window, pane, "file://remote.invalid/unsupported");
@@ -556,7 +581,7 @@ fn remote_source_suspends_saved_navigation_and_refresh_adopts_a_changed_console_
     );
     assert_eq!(
         window.explorer.navigation[&pane].root,
-        Some(saved_root.clone())
+        Some(current.0.clone())
     );
 
     publish_directory(
@@ -565,9 +590,12 @@ fn remote_source_suspends_saved_navigation_and_refresh_adopts_a_changed_console_
         &format!("file://localhost{}", current.0.display()),
     );
     wait_for_source(&mut window, &ctx, area, pane, &current.0);
-    wait_for_text(&mut window, &ctx, area, "Console directory changed");
-    assert_eq!(window.explorer.navigation[&pane].root, Some(saved_root));
-    click_refresh(&mut window, &ctx, area);
+    wait_for_text(&mut window, &ctx, area, "current.md");
+    assert!(
+        !frame(&mut window, &ctx, area, vec![])
+            .iter()
+            .any(|(text, _)| text.contains("Console directory changed") || text.starts_with('#'))
+    );
     assert_eq!(
         window.explorer.navigation[&pane].root,
         Some(current.0.clone()),
@@ -682,7 +710,11 @@ fn show_more_reaches_deep_content_without_changing_the_root() {
         window.explorer.cache.insert(
             request,
             Cached {
-                result: Ok(Listing { entries, bytes: 0 }),
+                result: Ok(Listing {
+                    entries,
+                    bytes: 0,
+                    ..Default::default()
+                }),
                 used: 0,
             },
         );
@@ -705,4 +737,275 @@ fn show_more_reaches_deep_content_without_changing_the_root() {
             .iter()
             .any(|(text, _)| text == "Show more")
     );
+}
+
+#[test]
+#[cfg(unix)]
+fn clicking_a_linked_markdown_file_opens_the_existing_viewer() {
+    let ctx = egui::Context::default();
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
+    let directory = Directory::new("linked-markdown");
+    fs::write(directory.0.join("source.md"), "LINKED_MARKDOWN_CONTENT").unwrap();
+    std::os::unix::fs::symlink(directory.0.join("source.md"), directory.0.join("AGENTS.md"))
+        .unwrap();
+    let command = format!("cd '{}' && exec sleep 30", directory.0.display());
+    let mut window = window_of_tabs([[command.as_str(), "sleep 30"]]);
+    crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
+    frame(&mut window, &ctx, area, vec![]);
+    let pane = window.active().panes()[0].name;
+    wait_for_source(&mut window, &ctx, area, pane, &directory.0);
+    crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+    wait_for_text(&mut window, &ctx, area, "AGENTS.md");
+    let painted = frame(&mut window, &ctx, area, vec![]);
+    let dock = window.sidebar.last_dock.unwrap();
+    let pos = painted
+        .iter()
+        .find(|(text, pos)| text == "AGENTS.md ↗" && dock.contains(*pos))
+        .unwrap()
+        .1;
+    for pressed in [true, false] {
+        ctx.data_mut(|data| data.insert_temp(egui::Id::new("explorer-test-discard"), true));
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+    }
+    wait_for_text(&mut window, &ctx, area, "LINKED_MARKDOWN_CONTENT");
+    assert_eq!(
+        crate::sidebar::active(&window),
+        Some(crate::sidebar::Tool::Markdown)
+    );
+}
+
+#[test]
+fn typed_name_search_finds_files_and_folders_below_collapsed_directories() {
+    let ctx = egui::Context::default();
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
+    let directory = Directory::new("name-search");
+    fs::create_dir_all(directory.0.join("src/nested/NeedleFolder")).unwrap();
+    fs::write(directory.0.join("src/nested/NeedleFile.rs"), "not searched").unwrap();
+    fs::write(directory.0.join("unrelated.rs"), "needle in contents only").unwrap();
+    let command = format!("cd '{}' && exec sleep 30", directory.0.display());
+    let mut window = window_of_tabs([[command.as_str(), "sleep 30"]]);
+    crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
+    frame(&mut window, &ctx, area, vec![]);
+    let pane = window.active().panes()[0].name;
+    wait_for_source(&mut window, &ctx, area, pane, &directory.0);
+    crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+    wait_for_text(&mut window, &ctx, area, "src");
+    click_text(&mut window, &ctx, area, "Search files and folders");
+    let before = window.pane_called(pane).unwrap().keystrokes.clone();
+    type_text(&mut window, &ctx, area, "needle");
+    wait_for_text(&mut window, &ctx, area, "src/nested/NeedleFile.rs");
+    let found = frame(&mut window, &ctx, area, vec![]);
+    assert!(
+        found
+            .iter()
+            .any(|(text, _)| text == "src/nested/NeedleFolder")
+    );
+    assert!(!found.iter().any(|(text, _)| text == "unrelated.rs"));
+    assert_eq!(window.pane_called(pane).unwrap().keystrokes, before);
+    frame(
+        &mut window,
+        &ctx,
+        area,
+        vec![egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    wait_for_text(&mut window, &ctx, area, "unrelated.rs");
+    assert!(window.explorer.visible);
+}
+
+#[test]
+fn ctrl_clicking_a_local_path_reveals_its_own_consoles_file_and_scrolls_to_it() {
+    let ctx = egui::Context::default();
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
+    let directory = Directory::new("path-reveal");
+    fs::create_dir(directory.0.join("folder")).unwrap();
+    for index in 0..80 {
+        fs::write(
+            directory.0.join(format!("folder/entry-{index:02}.rs")),
+            "entry",
+        )
+        .unwrap();
+    }
+    let command = format!("cd '{}' && exec sleep 30", directory.0.display());
+    let mut window = window_of_tabs([[command.as_str(), "sleep 30"]]);
+    crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
+    frame(&mut window, &ctx, area, vec![]);
+    let pane = window.active().panes()[0].name;
+    wait_for_source(&mut window, &ctx, area, pane, &directory.0);
+    let target = directory.0.join("folder/entry-60.rs");
+    let other = window.active().panes()[1].name;
+    window.active_mut().focus = other;
+    window
+        .pane_called(pane)
+        .unwrap()
+        .screen
+        .advance(b"\x1b[?25l\x1b[2J\x1b[Hfolder/entry-60.rs");
+    frame(&mut window, &ctx, area, vec![]);
+    let metrics =
+        crate::painter::CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
+    let console = window
+        .pane_called(pane)
+        .unwrap()
+        .painted_console
+        .as_ref()
+        .unwrap()
+        .area;
+    let pos = console.min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5);
+    for pressed in [true, false] {
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::CTRL),
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::CTRL,
+                },
+            ],
+        );
+    }
+    wait_for_text(&mut window, &ctx, area, "entry-60.rs");
+    assert_eq!(
+        window.explorer.navigation[&pane].root,
+        Some(directory.0.join("folder"))
+    );
+    assert_eq!(window.explorer.navigation[&pane].selected, Some(target));
+    assert!(window.explorer.navigation[&pane].scroll > 0.0);
+    assert_eq!(
+        crate::sidebar::active(&window),
+        Some(crate::sidebar::Tool::Files)
+    );
+}
+
+#[test]
+fn scrolling_files_keeps_console_paint_and_geometry_stable() {
+    fn colors(shapes: &[egui::epaint::ClippedShape], area: egui::Rect) -> Vec<egui::Color32> {
+        shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                Shape::Text(text) if area.contains(text.pos) => Some(text),
+                _ => None,
+            })
+            .flat_map(|text| text.galley.rows.iter())
+            .flat_map(|row| {
+                row.row
+                    .visuals
+                    .mesh
+                    .vertices
+                    .iter()
+                    .map(|vertex| vertex.color)
+            })
+            .collect()
+    }
+    let ctx = egui::Context::default();
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
+    let directory = Directory::new("scroll-opacity");
+    for index in 0..100 {
+        fs::write(directory.0.join(format!("entry-{index:03}.txt")), "entry").unwrap();
+    }
+    let command = format!("cd '{}' && exec sleep 30", directory.0.display());
+    let mut window = window_of_tabs([[command.as_str(), "sleep 30"]]);
+    crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
+    frame(&mut window, &ctx, area, vec![]);
+    let pane = window.active().panes()[0].name;
+    wait_for_source(&mut window, &ctx, area, pane, &directory.0);
+    window
+        .pane_called(pane)
+        .unwrap()
+        .screen
+        .advance(b"\x1b[?25l\x1b[2J\x1b[HCONSOLE_OPACITY_WITNESS");
+    crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+    wait_for_text(&mut window, &ctx, area, "entry-000.txt");
+    let baseline = painted_frame(&mut window, &ctx, area, vec![]).1;
+    let console = window
+        .pane_called(pane)
+        .unwrap()
+        .painted_console
+        .as_ref()
+        .unwrap()
+        .area;
+    let before = colors(&baseline, console);
+    assert!(!before.is_empty());
+    let grid = window.pane_called(pane).unwrap().measured;
+    let dock = window.sidebar.last_dock.unwrap();
+    let pos = egui::pos2(dock.right() - 15.0, dock.top() + 110.0);
+    let pressed = painted_frame(
+        &mut window,
+        &ctx,
+        area,
+        vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ],
+    )
+    .1;
+    assert_eq!(colors(&pressed, console), before);
+    let moved = pos + egui::vec2(0.0, 140.0);
+    let dragged = painted_frame(
+        &mut window,
+        &ctx,
+        area,
+        vec![
+            egui::Event::PointerMoved(moved),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, -180.0),
+                modifiers: egui::Modifiers::NONE,
+                phase: egui::TouchPhase::Move,
+            },
+        ],
+    )
+    .1;
+    assert_eq!(colors(&dragged, console), before);
+    assert_eq!(window.pane_called(pane).unwrap().measured, grid);
+    assert!(window.explorer.navigation[&pane].scroll > 0.0);
+}
+
+#[test]
+fn partial_name_search_notice_is_visible_even_when_the_folder_exceeds_listing_limits() {
+    let ctx = egui::Context::default();
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
+    let directory = Directory::new("partial-name-search");
+    for index in 0..4097 {
+        fs::write(directory.0.join(format!("match-{index:04}.txt")), "entry").unwrap();
+    }
+    let command = format!("cd '{}' && exec sleep 30", directory.0.display());
+    let mut window = window_of_tabs([[command.as_str(), "sleep 30"]]);
+    crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
+    frame(&mut window, &ctx, area, vec![]);
+    let pane = window.active().panes()[0].name;
+    wait_for_source(&mut window, &ctx, area, pane, &directory.0);
+    crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+    wait_for_text(&mut window, &ctx, area, "Directory exceeds explorer limit");
+    click_text(&mut window, &ctx, area, "Search files and folders");
+    type_text(&mut window, &ctx, area, "match");
+    wait_for_text(&mut window, &ctx, area, "Search result limit reached");
+    wait_for_text(&mut window, &ctx, area, "match-");
 }

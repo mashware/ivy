@@ -87,6 +87,7 @@ fn cache_eviction_never_discards_navigation() {
                 result: Ok(Listing {
                     entries: vec![],
                     bytes: 0,
+                    ..Default::default()
                 }),
                 used: index,
             },
@@ -156,6 +157,7 @@ fn cache_pressure_keeps_the_current_tree_root_instead_of_reloading_it() {
             result: Ok(Listing {
                 entries: vec![],
                 bytes: 0,
+                ..Default::default()
             }),
             used: 0,
         },
@@ -168,6 +170,7 @@ fn cache_pressure_keeps_the_current_tree_root_instead_of_reloading_it() {
                 result: Ok(Listing {
                     entries: vec![],
                     bytes: 0,
+                    ..Default::default()
                 }),
                 used: index,
             },

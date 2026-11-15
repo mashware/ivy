@@ -9,6 +9,8 @@ pub(super) struct Navigation {
     pub(super) selected: Option<PathBuf>,
     pub(super) scroll: f32,
     pub(super) row_limit: usize,
+    pub(super) query: String,
+    pub(super) reveal_selected: bool,
     pub(super) generation: u64,
     pub(super) epoch: u64,
 }
@@ -20,7 +22,8 @@ impl Navigation {
         }
         self.source = source;
         self.epoch = self.epoch.wrapping_add(1);
-        if self.root.is_none() {
+        if self.source.is_some() && (self.root.is_none() || self.source != self.seeded_source) {
+            self.query.clear();
             self.use_source();
         }
         true
@@ -35,9 +38,11 @@ impl Navigation {
 
     pub(super) fn enter(&mut self, path: PathBuf) {
         self.root = Some(path);
+        self.query.clear();
         self.row_limit = super::ROW_LIMIT;
         self.expanded.clear();
         self.selected = None;
+        self.reveal_selected = false;
         self.scroll = 0.0;
         self.refresh();
     }
@@ -60,7 +65,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cwd_changes_suspend_navigation_until_explicit_reload() {
+    fn cwd_changes_follow_the_console_and_remote_sources_suspend_it() {
         let mut nav = Navigation::default();
         nav.observe(Some("/work/a".into()));
         nav.expanded.insert("/work/a/src".into());
@@ -70,10 +75,6 @@ mod tests {
         nav.observe(None);
         nav.observe(Some("/work/b".into()));
         assert_eq!(nav.epoch, epoch + 2);
-        assert_eq!(nav.root, Some("/work/a".into()));
-        assert_eq!(nav.scroll, 120.0);
-        assert!(nav.expanded.contains(&PathBuf::from("/work/a/src")));
-        nav.reload();
         assert_eq!(nav.root, Some("/work/b".into()));
         assert!(nav.expanded.is_empty());
         assert!(nav.selected.is_none());
@@ -101,8 +102,8 @@ mod tests {
         nav.enter("/work".into());
         assert_eq!(nav.source, nav.seeded_source);
         nav.observe(Some("/work/b".into()));
-        assert_ne!(nav.source, nav.seeded_source);
-        nav.use_source();
+        assert_eq!(nav.root, Some("/work/b".into()));
+        assert_eq!(nav.source, nav.seeded_source);
         assert_eq!(nav.source, nav.seeded_source);
         assert_eq!(nav.root, nav.source);
     }

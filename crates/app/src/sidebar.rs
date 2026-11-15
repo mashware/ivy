@@ -385,24 +385,46 @@ pub(crate) fn tool_keys(
     (viewer_owned, explorer_pointer, requests)
 }
 
+pub(crate) fn paint_file_icon(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    directory: bool,
+    stroke: egui::Stroke,
+) {
+    if directory {
+        let top = rect.min + egui::vec2(2.0, 4.0);
+        painter.add(egui::Shape::closed_line(
+            vec![
+                top,
+                top + egui::vec2(6.0, 0.0),
+                top + egui::vec2(8.0, 2.0),
+                top + egui::vec2(14.0, 2.0),
+                top + egui::vec2(14.0, 11.0),
+                top + egui::vec2(0.0, 11.0),
+            ],
+            stroke,
+        ));
+    } else {
+        let paper =
+            egui::Rect::from_min_size(rect.min + egui::vec2(3.0, 1.0), egui::vec2(10.0, 14.0));
+        painter.rect_stroke(paper, 1.0, stroke, egui::StrokeKind::Inside);
+        for y in [6.0, 9.0, 12.0] {
+            painter.line_segment(
+                [
+                    paper.min + egui::vec2(2.0, y - 1.0),
+                    paper.min + egui::vec2(8.0, y - 1.0),
+                ],
+                stroke,
+            );
+        }
+    }
+}
+
 fn icon(ui: &egui::Ui, rect: egui::Rect, tool: Tool, color: egui::Color32) {
     let stroke = egui::Stroke::new(1.4, color);
     let painter = ui.painter();
     match tool {
-        Tool::Files => {
-            let at = |x, y| rect.min + egui::vec2(x, y);
-            painter.add(egui::Shape::closed_line(
-                vec![
-                    at(0.0, 2.0),
-                    at(6.0, 2.0),
-                    at(9.0, 5.0),
-                    at(16.0, 5.0),
-                    at(16.0, 15.0),
-                    at(0.0, 15.0),
-                ],
-                stroke,
-            ));
-        }
+        Tool::Files => paint_file_icon(painter, rect, true, stroke),
         Tool::Markdown => {
             painter.rect_stroke(rect, 0, stroke, egui::StrokeKind::Inside);
             for y in [5.0, 9.0, 13.0] {

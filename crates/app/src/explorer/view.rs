@@ -1,47 +1,10 @@
 use super::*;
+use crate::sidebar::paint_file_icon;
 
 struct Row {
     entry: Entry,
     depth: usize,
     message: Option<String>,
-}
-
-fn paint_entry_icon(
-    painter: &egui::Painter,
-    rect: egui::Rect,
-    kind: EntryKind,
-    color: egui::Color32,
-) {
-    let stroke = egui::Stroke::new(1.0, color);
-    match kind {
-        EntryKind::Directory => {
-            let top = rect.min + egui::vec2(2.0, 4.0);
-            let points = vec![
-                top,
-                top + egui::vec2(6.0, 0.0),
-                top + egui::vec2(8.0, 2.0),
-                top + egui::vec2(14.0, 2.0),
-                top + egui::vec2(14.0, 11.0),
-                top + egui::vec2(0.0, 11.0),
-                top,
-            ];
-            painter.add(egui::Shape::line(points, stroke));
-        }
-        _ => {
-            let paper =
-                egui::Rect::from_min_size(rect.min + egui::vec2(3.0, 1.0), egui::vec2(10.0, 14.0));
-            painter.rect_stroke(paper, 1.0, stroke, egui::StrokeKind::Inside);
-            for y in [6.0, 9.0, 12.0] {
-                painter.line_segment(
-                    [
-                        paper.min + egui::vec2(2.0, y - 1.0),
-                        paper.min + egui::vec2(8.0, y - 1.0),
-                    ],
-                    stroke,
-                );
-            }
-        }
-    }
 }
 
 fn refresh_button(ui: &mut egui::Ui, available: bool, theme: crate::theme::Theme) -> bool {
@@ -89,6 +52,64 @@ fn rows(state: &mut Explorer, pane: usize) -> (Vec<Row>, Option<Request>, bool) 
     let Some(root) = nav.root.clone().filter(|_| nav.source.is_some()) else {
         return (Vec::new(), None, false);
     };
+    if !nav.query.trim().is_empty() {
+        let request = state.request(pane, root.clone());
+        state.clock = state.clock.wrapping_add(1);
+        return match state.cache.get_mut(&request) {
+            Some(cached) => {
+                cached.used = state.clock;
+                match &cached.result {
+                    Ok(listing) => {
+                        let mut found: Vec<_> = listing
+                            .entries
+                            .iter()
+                            .cloned()
+                            .map(|entry| Row {
+                                entry,
+                                depth: 0,
+                                message: None,
+                            })
+                            .collect();
+                        if found.is_empty() {
+                            found.push(Row {
+                                entry: Entry {
+                                    path: root.clone(),
+                                    kind: EntryKind::Other,
+                                },
+                                depth: 0,
+                                message: Some("No matching files or folders.".into()),
+                            });
+                        }
+                        (found, None, false)
+                    }
+                    Err(error) => (
+                        vec![Row {
+                            entry: Entry {
+                                path: root,
+                                kind: EntryKind::Other,
+                            },
+                            depth: 0,
+                            message: Some(error.clone()),
+                        }],
+                        None,
+                        false,
+                    ),
+                }
+            }
+            None => (
+                vec![Row {
+                    entry: Entry {
+                        path: root,
+                        kind: EntryKind::Other,
+                    },
+                    depth: 0,
+                    message: Some("Searching…".into()),
+                }],
+                Some(request),
+                false,
+            ),
+        };
+    }
     enum Visit {
         Directory(PathBuf, usize),
         Entry(Entry, usize),
@@ -164,6 +185,14 @@ fn rows(state: &mut Explorer, pane: usize) -> (Vec<Row>, Option<Request>, bool) 
 
 fn activate(state: &mut Explorer, pane: usize, entry: &Entry) -> Option<(usize, PathBuf)> {
     match entry.kind {
+        EntryKind::Directory if !state.navigation[&pane].query.trim().is_empty() => {
+            state
+                .navigation
+                .get_mut(&pane)
+                .unwrap()
+                .enter(entry.path.clone());
+            None
+        }
         EntryKind::Directory => {
             let expanded = &mut state.navigation.get_mut(&pane).unwrap().expanded;
             if !expanded.remove(&entry.path) {
@@ -171,7 +200,7 @@ fn activate(state: &mut Explorer, pane: usize, entry: &Entry) -> Option<(usize, 
             }
             None
         }
-        EntryKind::File
+        EntryKind::File | EntryKind::Link
             if entry
                 .path
                 .extension()
@@ -227,7 +256,6 @@ pub(super) fn show(
     parent: &mut egui::Ui,
     area: egui::Rect,
     target: Option<usize>,
-    label: Option<&str>,
     theme: crate::theme::Theme,
 ) -> Option<(usize, PathBuf)> {
     let rect = state.rect(area);
@@ -273,17 +301,6 @@ pub(super) fn show(
                 body.label("No active console.");
                 return;
             };
-            let source_path = state
-                .navigation
-                .get(&pane)
-                .and_then(|nav| nav.source.as_deref())
-                .map(display)
-                .unwrap_or_else(|| "Local directory unavailable or unsupported.".into());
-            body.horizontal(|ui| {
-                let source_label = format!("#{} {}", pane, label.unwrap_or("Console"));
-                ui.add(egui::Label::new(source_label).truncate())
-                    .on_hover_text(source_path.clone());
-            });
             let Some(nav) = state.navigation.get_mut(&pane) else {
                 return;
             };
@@ -293,7 +310,12 @@ pub(super) fn show(
                 body.horizontal(|ui| {
                     let (icon, _) =
                         ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
-                    paint_entry_icon(ui.painter(), icon, EntryKind::Directory, theme.focus());
+                    paint_file_icon(
+                        ui.painter(),
+                        icon,
+                        true,
+                        egui::Stroke::new(1.0, theme.focus()),
+                    );
                     let name = root
                         .file_name()
                         .map(|name| display(Path::new(name)))
@@ -302,21 +324,59 @@ pub(super) fn show(
                         .on_hover_text(display(root));
                 });
             }
+            crate::settings::editor::view::style(&mut body, theme);
+            let mut query = nav.query.clone();
+            if body
+                .add(
+                    egui::TextEdit::singleline(&mut query)
+                        .id(egui::Id::new(("explorer-name-search", pane)))
+                        .hint_text("Search files and folders")
+                        .char_limit(256)
+                        .desired_width(f32::INFINITY),
+                )
+                .changed()
+            {
+                nav.query = query;
+                nav.scroll = 0.0;
+                nav.selected = None;
+                nav.refresh();
+                state.message.clear();
+            }
             if !available {
                 body.label("Local directory unavailable or unsupported.");
                 return;
             }
-            if nav.source != nav.seeded_source {
-                body.label("Console directory changed; refresh to follow it.");
-            }
             if !state.message.is_empty() {
                 body.label(&state.message);
             }
-            let scroll = nav.scroll;
+            let mut scroll = nav.scroll;
+            if !state.navigation[&pane].query.trim().is_empty()
+                && let Some(root) = state.navigation[&pane].root.clone()
+            {
+                let request = state.request(pane, root);
+                if let Some(notice) = state
+                    .cache
+                    .get(&request)
+                    .and_then(|cached| cached.result.as_ref().ok())
+                    .and_then(|listing| listing.notice.as_deref())
+                {
+                    body.label(notice);
+                }
+            }
             state.row_stride = 22.0 + body.spacing().item_spacing.y;
             state.viewport_rows =
                 ((body.available_height() - 32.0).max(22.0) / state.row_stride).ceil() as usize + 1;
             let (rows, pending, truncated) = rows(state, pane);
+            let nav = state.navigation.get_mut(&pane).unwrap();
+            if nav.reveal_selected
+                && let Some(index) = rows
+                    .iter()
+                    .position(|row| nav.selected.as_ref() == Some(&row.entry.path))
+            {
+                scroll = (index as f32 * state.row_stride - body.available_height() * 0.5).max(0.0);
+                nav.scroll = scroll;
+                nav.reveal_selected = false;
+            }
             let activate_key = std::mem::take(&mut state.activate);
             let mut action = if activate_key {
                 rows.iter()
@@ -372,29 +432,28 @@ pub(super) fn show(
                         }
                         let indent = row.depth as f32 * 12.0;
                         let center_y = row_rect.center().y;
-                        if row.entry.kind == EntryKind::Directory {
+                        if row.entry.kind == EntryKind::Directory
+                            && state.navigation[&pane].query.trim().is_empty()
+                        {
                             let expanded =
                                 state.navigation[&pane].expanded.contains(&row.entry.path);
-                            let chevron = egui::Rect::from_min_size(
-                                egui::pos2(row_rect.left() + indent + 3.0, center_y - 5.0),
-                                egui::vec2(10.0, 10.0),
-                            );
+                            let center = egui::pos2(row_rect.left() + indent + 8.0, center_y);
                             let points = if expanded {
                                 vec![
-                                    chevron.left_top(),
-                                    chevron.center_bottom(),
-                                    chevron.right_top(),
+                                    center + egui::vec2(-3.0, -1.5),
+                                    center + egui::vec2(0.0, 1.5),
+                                    center + egui::vec2(3.0, -1.5),
                                 ]
                             } else {
                                 vec![
-                                    chevron.left_top(),
-                                    chevron.right_center(),
-                                    chevron.left_bottom(),
+                                    center + egui::vec2(-1.5, -3.0),
+                                    center + egui::vec2(1.5, 0.0),
+                                    center + egui::vec2(-1.5, 3.0),
                                 ]
                             };
                             ui.painter().add(egui::Shape::line(
                                 points,
-                                egui::Stroke::new(1.4, theme.foreground().gamma_multiply(0.8)),
+                                egui::Stroke::new(1.2, theme.foreground().gamma_multiply(0.7)),
                             ));
                             let toggle_rect = egui::Rect::from_min_size(
                                 egui::pos2(row_rect.left() + indent, row_rect.top()),
@@ -420,9 +479,22 @@ pub(super) fn show(
                         } else {
                             theme.foreground().gamma_multiply(0.78)
                         };
-                        paint_entry_icon(ui.painter(), icon_rect, row.entry.kind, icon_color);
-                        let name =
-                            display(Path::new(row.entry.path.file_name().unwrap_or_default()));
+                        paint_file_icon(
+                            ui.painter(),
+                            icon_rect,
+                            row.entry.kind == EntryKind::Directory,
+                            egui::Stroke::new(1.0, icon_color),
+                        );
+                        let name = if state.navigation[&pane].query.trim().is_empty() {
+                            display(Path::new(row.entry.path.file_name().unwrap_or_default()))
+                        } else {
+                            display(
+                                row.entry
+                                    .path
+                                    .strip_prefix(state.navigation[&pane].root.as_ref().unwrap())
+                                    .unwrap_or(&row.entry.path),
+                            )
+                        };
                         let suffix = if row.entry.kind == EntryKind::Link {
                             " ↗"
                         } else {
@@ -442,7 +514,7 @@ pub(super) fn show(
                         response.clone().on_hover_text(display(&row.entry.path));
                         if response.clicked() {
                             selected = Some(row.entry.path.clone());
-                            if row.entry.kind == EntryKind::File {
+                            if matches!(row.entry.kind, EntryKind::File | EntryKind::Link) {
                                 action = Some(row.entry.clone());
                             }
                         }
@@ -573,7 +645,11 @@ mod tests {
         state.cache.insert(
             key,
             Cached {
-                result: Ok(Listing { entries, bytes: 0 }),
+                result: Ok(Listing {
+                    entries,
+                    bytes: 0,
+                    ..Default::default()
+                }),
                 used: 0,
             },
         );
@@ -634,10 +710,13 @@ mod tests {
     }
 
     #[test]
-    fn activation_is_explicit_and_never_follows_a_symlink() {
+    fn activation_only_opens_markdown_and_keeps_folders_in_the_tree() {
         let mut state = Explorer::default();
         state.reconcile(&[(1, Some("/root".into()))]);
-        assert!(activate(&mut state, 1, &entry("/root/link.md", EntryKind::Link)).is_none());
+        assert_eq!(
+            activate(&mut state, 1, &entry("/root/link.md", EntryKind::Link)),
+            Some((1, "/root/link.md".into()))
+        );
         assert!(state.message.is_empty());
         assert!(activate(&mut state, 1, &entry("/root/code.rs", EntryKind::File)).is_none());
         assert_eq!(

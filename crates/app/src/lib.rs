@@ -1434,7 +1434,7 @@ impl eframe::App for Window {
             ui,
             &metrics,
             header_owns_pointer,
-            overlay_owns_pointer,
+            viewer_owned || board_owned || pane_owned || chrome_owned,
         );
 
         // **Walking the tree is timed, and it is not zeal: it is the instrument's rule.** The

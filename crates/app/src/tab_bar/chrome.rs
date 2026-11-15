@@ -82,7 +82,7 @@ pub(crate) fn partition(
     ui: &mut egui::Ui,
     metrics: &CellMetrics,
     header_owns_pointer: bool,
-    overlay_owns_pointer: bool,
+    dim_consoles: bool,
 ) -> (Option<egui::Rect>, egui::Rect) {
     let started = std::time::Instant::now();
     let area = ui.max_rect();
@@ -93,7 +93,7 @@ pub(crate) fn partition(
         super::handle_clicks(window, ui, cards, metrics, header_owns_pointer);
     }
     if header_owns_pointer {
-        crate::header::menu::block_pointer(ui, overlay_owns_pointer);
+        crate::header::menu::block_pointer(ui, dim_consoles);
     }
     // Tab selection may change both strip visibility and the active tree's console floor.
     let started = std::time::Instant::now();

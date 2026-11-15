@@ -87,7 +87,12 @@ impl PaintedConsole {
             )
             .at_pointer()
             .show(|ui| {
-                ui.label(target.path.display().to_string());
+                let path = target.path.display().to_string();
+                ui.label(
+                    target
+                        .line
+                        .map_or_else(|| path.clone(), |line| format!("{path}:{line}")),
+                );
             });
             return;
         }
