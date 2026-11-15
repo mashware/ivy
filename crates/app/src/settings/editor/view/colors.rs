@@ -109,6 +109,7 @@ fn swatch(
             let popup_style = ui.style().clone();
             egui::Popup::menu(&response)
                 .frame(super::palette::popup_frame(ui))
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                 .show(|ui| {
                     ui.set_style(popup_style);
                     ui.set_width(235.0);

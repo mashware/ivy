@@ -24,6 +24,22 @@ fn fills(shape: &egui::epaint::Shape, out: &mut Vec<(egui::Rect, egui::Color32)>
     }
 }
 
+fn rendered_text_color(shape: &egui::epaint::Shape) -> Option<(String, egui::Rect, egui::Color32)> {
+    match shape {
+        egui::epaint::Shape::Text(text) => Some((
+            text.galley.text().to_owned(),
+            text.galley.rect.translate(text.pos.to_vec2()),
+            text.galley
+                .job
+                .sections
+                .first()
+                .map_or(egui::Color32::PLACEHOLDER, |section| section.format.color),
+        )),
+        egui::epaint::Shape::Vec(shapes) => shapes.iter().find_map(rendered_text_color),
+        _ => None,
+    }
+}
+
 fn assert_dialog_surface(editor: &mut Editor, ctx: &egui::Context) {
     let palette =
         palette::Palette::new(appearance::effective_theme(editor.draft.as_ref().unwrap()));
@@ -53,6 +69,15 @@ fn assert_dialog_surface(editor: &mut Editor, ctx: &egui::Context) {
         egui::Visuals::dark().panel_fill,
         "dialog must not change context style"
     );
+}
+
+fn click_color_swatch(editor: &mut Editor, ctx: &egui::Context, label: &str) {
+    let size = egui::vec2(1100.0, 850.0);
+    paint(editor, ctx, size, vec![]);
+    let text = paint(editor, ctx, size, vec![]);
+    let center = text.iter().find(|(s, _)| s == label).unwrap().1.center();
+    // The swatch sits directly above its caption in the color grid.
+    paint(editor, ctx, size, click(center - egui::vec2(0.0, 29.0)));
 }
 
 #[test]
@@ -141,5 +166,174 @@ fn draft_colors_cancel_reopen_and_save_then_cancel_preserve_applied_theme_and_co
     assert_eq!(
         window.all_panes().map(|p| p.name).collect::<Vec<_>>(),
         panes
+    );
+}
+
+#[test]
+fn gray_overrides_keep_hovered_theme_selector_ink_contrasted_on_its_rendered_fill() {
+    let mut editor = Editor {
+        draft: Some(crate::settings::document::Document::new(
+            "theme=github-light-default\nbackground=#777777\npanel=#777777\nforeground=#777777\nfocus=#777777\ndivider=#777777\n".into(),
+        )),
+        ..Default::default()
+    };
+    let ctx = egui::Context::default();
+    let size = egui::vec2(1100.0, 850.0);
+    click_label(&mut editor, &ctx, "Change");
+    let labels = paint(&mut editor, &ctx, size, vec![]);
+    let target = labels
+        .iter()
+        .find(|(text, _)| text == "Tokyo Night")
+        .unwrap()
+        .1
+        .center();
+    let (_, shapes) = scene(
+        &mut editor,
+        &ctx,
+        size,
+        vec![egui::Event::PointerMoved(target)],
+    );
+    let mut rects = Vec::new();
+    let mut label = None;
+    for clipped in &shapes {
+        fills(&clipped.shape, &mut rects);
+        if let Some(found) = rendered_text_color(&clipped.shape) {
+            if found.0 == "Tokyo Night" {
+                label = Some(found);
+            }
+        }
+    }
+    let (_, text_rect, ink) = label.expect("rendered theme selector label");
+    let center = text_rect.center();
+    let palette =
+        palette::Palette::new(appearance::effective_theme(editor.draft.as_ref().unwrap()));
+    let fill = rects
+        .iter()
+        .filter(|(rect, _)| rect.contains(center))
+        .min_by(|(a, _), (b, _)| a.area().total_cmp(&b.area()))
+        .map(|(_, color)| *color)
+        .expect("rendered selector fill");
+    assert_ne!(
+        fill, palette.surface,
+        "pointer should render the row hover state"
+    );
+    assert!(
+        crate::theme::project_ink_contrast(ink, fill) >= 4.5,
+        "selector ink {ink:?} on hover fill {fill:?}"
+    );
+}
+
+#[test]
+fn font_and_color_popups_render_the_current_light_and_dark_surface() {
+    for theme in ["github-light-default", "tokyonight"] {
+        for popup in ["font", "color"] {
+            let mut editor = Editor {
+                draft: Some(crate::settings::document::Document::new(format!(
+                    "theme={theme}\n"
+                ))),
+                ..Default::default()
+            };
+            editor.fonts = Some(vec!["Fixture Family".into()]);
+            let ctx = egui::Context::default();
+            let size = egui::vec2(1100.0, 850.0);
+            match popup {
+                "font" => click_label(&mut editor, &ctx, "Built-in default"),
+                "color" => {
+                    click_label(&mut editor, &ctx, "Customize colors");
+                    click_color_swatch(&mut editor, &ctx, "Background");
+                }
+                _ => unreachable!(),
+            }
+            assert!(egui::Popup::is_any_open(&ctx), "{popup} popup should open");
+            let palette =
+                palette::Palette::new(appearance::effective_theme(editor.draft.as_ref().unwrap()));
+            let (text, shapes) = scene(&mut editor, &ctx, size, vec![]);
+            let target_label = if popup == "font" {
+                "Fixture Family"
+            } else {
+                "Background colour"
+            };
+            let target = text
+                .iter()
+                .find(|(s, _)| s == target_label)
+                .unwrap_or_else(|| panic!("missing {target_label}: {text:?}"))
+                .1
+                .center();
+            let mut rects = Vec::new();
+            for clipped in &shapes {
+                fills(&clipped.shape, &mut rects);
+            }
+            assert!(
+                rects
+                    .iter()
+                    .any(|(rect, fill)| rect.contains(target) && *fill == palette.surface),
+                "{theme} {popup} popup should inherit its palette surface"
+            );
+        }
+    }
+}
+
+#[test]
+fn color_popup_accepts_exact_hex_edit_without_dismissing() {
+    let mut editor = Editor {
+        draft: Some(crate::settings::document::Document::new(
+            "theme=github-light-default\n".into(),
+        )),
+        ..Default::default()
+    };
+    let ctx = egui::Context::default();
+    let size = egui::vec2(1100.0, 850.0);
+    click_label(&mut editor, &ctx, "Customize colors");
+    click_color_swatch(&mut editor, &ctx, "Background");
+    assert!(egui::Popup::is_any_open(&ctx));
+    let (text, _) = scene(&mut editor, &ctx, size, vec![]);
+    let hint = text
+        .iter()
+        .find(|(label, _)| label.starts_with("#"))
+        .unwrap_or_else(|| panic!("expected inherited hex hint in popup: {text:?}"));
+    let field = hint.1.center();
+    scene(&mut editor, &ctx, size, click(field));
+    let modifiers = egui::Modifiers {
+        ctrl: true,
+        command: true,
+        ..Default::default()
+    };
+    scene(
+        &mut editor,
+        &ctx,
+        size,
+        vec![
+            egui::Event::Key {
+                key: egui::Key::A,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers,
+            },
+            egui::Event::Key {
+                key: egui::Key::A,
+                physical_key: None,
+                pressed: false,
+                repeat: false,
+                modifiers,
+            },
+            egui::Event::Text("#123456".into()),
+        ],
+    );
+    assert!(
+        egui::Popup::is_any_open(&ctx),
+        "editing a popup field must keep the popup open"
+    );
+    assert_eq!(
+        editor
+            .draft
+            .as_ref()
+            .unwrap()
+            .fields
+            .iter()
+            .find(|field| field.key == "background")
+            .unwrap()
+            .value,
+        "#123456"
     );
 }
