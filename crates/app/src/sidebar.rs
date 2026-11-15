@@ -426,12 +426,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
                             ui.painter()
                                 .rect_filled(rect.shrink(1.0), 3, window.theme.divider());
                         }
-                        icon(
-                            ui,
-                            rect.shrink(8.0),
-                            Icon::Tool(tool),
-                            window.theme.foreground(),
-                        );
+                        icon(ui, rect.shrink(8.0), tool, window.theme.foreground());
                         if response.clicked() {
                             clicked = Some(tool);
                         }
@@ -499,13 +494,6 @@ pub(crate) fn tool_keys(
     (viewer_owned, explorer_pointer, requests)
 }
 
-#[derive(Clone, Copy)]
-pub(crate) enum Icon {
-    Tool(Tool),
-    Maximize,
-    Restore,
-}
-
 pub(crate) fn maximize_rect(area: egui::Rect) -> egui::Rect {
     egui::Rect::from_min_size(
         egui::pos2(area.right() - 42.0, area.top() + 16.0),
@@ -513,18 +501,18 @@ pub(crate) fn maximize_rect(area: egui::Rect) -> egui::Rect {
     )
 }
 
-pub(crate) fn icon(ui: &egui::Ui, rect: egui::Rect, icon: Icon, color: egui::Color32) {
+pub(crate) fn icon(ui: &egui::Ui, rect: egui::Rect, tool: Tool, color: egui::Color32) {
     let stroke = egui::Stroke::new(1.4, color);
     let painter = ui.painter();
-    match icon {
-        Icon::Tool(Tool::Files) => {
+    match tool {
+        Tool::Files => {
             painter.rect_stroke(rect, 1, stroke, egui::StrokeKind::Inside);
             painter.line_segment(
                 [rect.left_top(), rect.left_top() + egui::vec2(7.0, -3.0)],
                 stroke,
             );
         }
-        Icon::Tool(Tool::Markdown) => {
+        Tool::Markdown => {
             painter.rect_stroke(rect, 2, stroke, egui::StrokeKind::Inside);
             let at = |x, y| rect.min + egui::vec2(x, y);
             painter.add(egui::Shape::line(
@@ -543,43 +531,7 @@ pub(crate) fn icon(ui: &egui::Ui, rect: egui::Rect, icon: Icon, color: egui::Col
                 stroke,
             ));
         }
-        Icon::Maximize => {
-            for (x, y, dx, dy) in [
-                (0.0, 0.0, 5.0, 5.0),
-                (16.0, 0.0, -5.0, 5.0),
-                (0.0, 16.0, 5.0, -5.0),
-                (16.0, 16.0, -5.0, -5.0),
-            ] {
-                let corner = rect.min + egui::vec2(x, y);
-                painter.add(egui::Shape::line(
-                    vec![
-                        corner + egui::vec2(dx, 0.0),
-                        corner,
-                        corner + egui::vec2(0.0, dy),
-                    ],
-                    stroke,
-                ));
-            }
-        }
-        Icon::Restore => {
-            painter.add(egui::Shape::line(
-                vec![
-                    rect.min + egui::vec2(5.0, 3.0),
-                    rect.min + egui::vec2(5.0, 0.0),
-                    rect.right_top(),
-                    rect.min + egui::vec2(16.0, 11.0),
-                    rect.min + egui::vec2(13.0, 11.0),
-                ],
-                stroke,
-            ));
-            painter.rect_stroke(
-                egui::Rect::from_min_size(rect.min + egui::vec2(0.0, 5.0), egui::vec2(11.0, 11.0)),
-                1,
-                stroke,
-                egui::StrokeKind::Inside,
-            );
-        }
-        Icon::Tool(Tool::Git) => {
+        Tool::Git => {
             let x = rect.left() + 4.0;
             painter.line_segment(
                 [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
@@ -594,7 +546,7 @@ pub(crate) fn icon(ui: &egui::Ui, rect: egui::Rect, icon: Icon, color: egui::Col
                 painter.circle_filled(p, 2.0, color);
             }
         }
-        Icon::Tool(Tool::Board) => {
+        Tool::Board => {
             for x in [0.0, 6.0, 12.0] {
                 painter.rect_stroke(
                     egui::Rect::from_min_size(rect.min + egui::vec2(x, 0.0), egui::vec2(4.0, 16.0)),

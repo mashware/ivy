@@ -335,7 +335,7 @@ fn paint_gradient(
 }
 
 /// The prototype's 24-unit SVG paths, drawn inside a 13-point icon box.
-fn paint_icon(
+pub(crate) fn paint_icon(
     painter: &egui::Painter,
     center: egui::Pos2,
     target: Target,

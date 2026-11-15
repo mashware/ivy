@@ -136,7 +136,7 @@ fn header(
         .map(|(p, _)| p.display().to_string())
         .unwrap_or_else(|| {
             if markdown {
-                "Markdown file".into()
+                String::new()
             } else {
                 "Current console".into()
             }
@@ -146,11 +146,11 @@ fn header(
     crate::sidebar::icon(
         ui,
         icon_rect,
-        crate::sidebar::Icon::Tool(if markdown {
+        if markdown {
             crate::sidebar::Tool::Markdown
         } else {
             crate::sidebar::Tool::Git
-        }),
+        },
         theme.foreground(),
     );
     if markdown {
@@ -175,14 +175,11 @@ fn header(
                 },
             );
         }
-        crate::sidebar::icon(
-            ui,
-            egui::Rect::from_center_size(target.center(), egui::vec2(16.0, 16.0)),
-            if maximized {
-                crate::sidebar::Icon::Restore
-            } else {
-                crate::sidebar::Icon::Maximize
-            },
+        crate::header::integrated::paint_icon(
+            ui.painter(),
+            target.center(),
+            crate::header::integrated::Target::Zoom,
+            maximized,
             theme.foreground(),
         );
     }
@@ -196,16 +193,18 @@ fn header(
     let mut text_ui = ui.new_child(egui::UiBuilder::new().max_rect(text_rect));
     text_ui.spacing_mut().item_spacing.y = 2.0;
     text_ui.add(egui::Label::new(RichText::new(title).size(14.0)).truncate());
-    text_ui
-        .add(
-            egui::Label::new(RichText::new(&path).size(11.0).color(mix(
-                theme.background(),
-                theme.foreground(),
-                0.6,
-            )))
-            .truncate(),
-        )
-        .on_hover_text(path);
+    if !path.is_empty() {
+        text_ui
+            .add(
+                egui::Label::new(RichText::new(&path).size(11.0).color(mix(
+                    theme.background(),
+                    theme.foreground(),
+                    0.6,
+                )))
+                .truncate(),
+            )
+            .on_hover_text(path);
+    }
 }
 
 fn footer(
@@ -425,6 +424,7 @@ mod tests {
                         .any(|text| text == "Choose a Markdown file in Files.")
                 );
                 assert!(!found.iter().any(|text| text == "Open"));
+                assert!(!found.iter().any(|text| text == "Markdown file"));
             }
         }
     }

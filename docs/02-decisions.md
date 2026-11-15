@@ -8739,8 +8739,10 @@ meet their existing minimum widths, Files is temporarily suppressed without losi
 Covered consoles retain the ordinary valid PTY layout and their full output-pump budgets; a hidden
 surface never becomes a zero-sized terminal. Dismissal and tool transitions consume their input.
 
-Markdown's rail, document cue and maximize/restore controls share the existing outline scale,
-stroke and theme colors, with explicit action tooltips and hover/pressed feedback. The empty view
+Markdown's rail and document cue share their outline painter. Maximize/restore reuse the console
+header's exact painter, paths, scale and stroke, as requested during native visual review. Controls
+retain explicit action tooltips and hover/pressed feedback; the empty header omits the redundant
+"Markdown file" subtitle. The empty view
 directs the person to Files. The manual path form and title-click path editor are removed, while
 explicit local Markdown links and the existing bounded loader remain available.
 
