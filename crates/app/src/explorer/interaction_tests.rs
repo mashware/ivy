@@ -742,3 +742,48 @@ fn refresh_clears_a_deleted_selection_and_reports_a_deleted_explorer_root() {
     assert_eq!(window.explorer.navigation[&pane].root, Some(child));
     assert_eq!(window.projects.directory(pane), Some(directory.0.as_path()));
 }
+
+#[test]
+fn files_selects_and_refreshes_markdown_without_leaving_maximized_reading() {
+    let directory = Directory::new("maximized-markdown");
+    let path = directory.0.join("reading.md");
+    fs::write(&path, "# First document\n\nRead beside Files.").unwrap();
+    let script = format!("cd '{}' && exec sleep 30", directory.0.display());
+    let mut window = window_of_tabs([[script.as_str(), "sleep 30"]]);
+    let ctx = egui::Context::default();
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1500.0, 750.0));
+    crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
+    let pane = window.active().panes()[0].name;
+    wait_for_source(&mut window, &ctx, area, pane, &directory.0);
+    crate::viewer::activate(&mut window, true);
+    frame(&mut window, &ctx, area, vec![]);
+    crate::sidebar::toggle_maximize(&mut window, &ctx);
+    crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+    wait_for_text(&mut window, &ctx, area, "reading.md");
+    click_text(&mut window, &ctx, area, "reading.md");
+    click_text(&mut window, &ctx, area, "reading.md");
+    wait_for_text(&mut window, &ctx, area, "First document");
+    assert!(window.sidebar.markdown_maximized);
+    assert!(crate::sidebar::files_visible(&window));
+    assert!(
+        window.sidebar.last_document.unwrap().right() < window.sidebar.last_dock.unwrap().left()
+    );
+    let painted = frame(&mut window, &ctx, area, vec![]);
+    assert!(painted.iter().any(|(text, pos)| text == "First document"
+        && window.sidebar.last_document.unwrap().contains(*pos)));
+    assert!(painted.iter().any(
+        |(text, pos)| text == "reading.md" && window.sidebar.last_dock.unwrap().contains(*pos)
+    ));
+    assert!(
+        !painted
+            .iter()
+            .any(|(text, pos)| text == "Open"
+                && window.sidebar.last_document.unwrap().contains(*pos))
+    );
+    let replacement = directory.0.join("replacement.md");
+    fs::write(&replacement, "# Updated on save").unwrap();
+    fs::rename(&replacement, &path).unwrap();
+    wait_for_text(&mut window, &ctx, area, "Updated on save");
+    assert!(crate::sidebar::files_visible(&window));
+    assert!(window.sidebar.markdown_maximized);
+}

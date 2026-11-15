@@ -8722,6 +8722,35 @@ runs remain overlay-era evidence and the current script refuses to relabel them.
 publish the selected tool, effective width, per-pane grid and pane identity count before comparison.
 The dock-open grid intentionally differs from its closed control, so no painting speedup is inferred.
 
+### Markdown reading mode (owner amendment, 15 November 2026, #89)
+
+The owner requested consistent representative icons, removal of the redundant Markdown path
+picker, and maximize/restore for Markdown alone. In maximized mode the document occupies the
+content below the global chrome and tabs, while the tool rail stays reachable. Files can open as
+a lateral companion without replacing the document. Activating another Markdown file updates the
+same reader and keeps Files available. Restore returns to the ordinary Markdown dock at its prior
+preferred width; a separately sized Files companion cannot overwrite that width. Git and Board
+retain ordinary presentation. This is transient presentation, never a new console or saved layout.
+
+The host keeps Markdown selected and tracks the Files companion separately so opening Files does
+not suspend the visible document's refresh or swap its bank. One common geometry supplies distinct
+document, Files, rail and divider rectangles to input and painting. When the two bodies cannot
+meet their existing minimum widths, Files is temporarily suppressed without losing its selection.
+Covered consoles retain the ordinary valid PTY layout and their full output-pump budgets; a hidden
+surface never becomes a zero-sized terminal. Dismissal and tool transitions consume their input.
+
+Markdown's rail, document cue and maximize/restore controls share the existing outline scale,
+stroke and theme colors, with explicit action tooltips and hover/pressed feedback. The empty view
+directs the person to Files. The manual path form and title-click path editor are removed, while
+explicit local Markdown links and the existing bounded loader remain available.
+
+Discarded: a generic docking framework or document workspace model, because only Markdown with
+Files is requested; maximizing the whole sidebar, because Files must remain lateral; zero-sized
+hidden PTYs, because the programs remain alive; keeping the duplicate path picker, because Files
+already supplies explicit document selection; Unicode icon mixtures or another icon dependency,
+because the existing vector style can represent these actions deterministically. No frame-cost
+improvement is claimed; host, viewer and explorer work retain their named spans.
+
 ## D73 — Connection help is global and reports observed publication
 
 **Selected by the project owner.** A **Connect agents** icon in the integrated title bar opens an

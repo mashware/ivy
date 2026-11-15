@@ -43,7 +43,6 @@ pub(crate) struct State {
     refresh_at: Option<Instant>,
     keyboard: bool,
     held: bool,
-    focus_path: bool,
     blocked_frame: Option<u64>,
     events: Option<Vec<egui::Event>>,
     cost: Duration,
@@ -76,7 +75,6 @@ impl Default for State {
             refresh_at: None,
             keyboard: false,
             held: false,
-            focus_path: false,
             blocked_frame: None,
             events: None,
             cost: Duration::ZERO,
@@ -105,7 +103,6 @@ impl State {
         self.kind = kind;
         self.open = true;
         self.keyboard = true;
-        self.focus_path = true;
         if self.requested.is_some() {
             self.refresh_at = Some(Instant::now());
         }
@@ -267,6 +264,10 @@ pub(crate) fn activate(window: &mut crate::Window, markdown: bool) {
     }
 }
 
+pub(crate) fn release_gesture(window: &mut crate::Window) {
+    window.viewer.held = false;
+}
+
 pub(crate) fn suspend(window: &mut crate::Window) {
     for state in [&mut window.viewer, &mut window.viewer_other] {
         state.open = false;
@@ -316,7 +317,8 @@ pub(crate) fn before_keys(
             _ => return false,
         };
         select_state(window, markdown);
-        let Some(rect) = crate::tab_bar::geometry(window, ui.max_rect(), metrics).dock else {
+        let geometry = crate::tab_bar::geometry(window, ui.max_rect(), metrics);
+        let Some(rect) = geometry.document.or(geometry.dock) else {
             window.viewer.keyboard = false;
             window.viewer.held = false;
             window.viewer.refresh_at = None;
@@ -340,7 +342,22 @@ pub(crate) fn before_keys(
         let pointer_activity =
             ctx.input(|i| i.pointer.any_pressed() || i.smooth_scroll_delta != egui::Vec2::ZERO);
         let was_open = window.viewer.open;
-        let owned = window.viewer.keyboard
+        let reading_keys = window.sidebar.markdown_maximized
+            && ctx.input(|i| {
+                i.events.iter().any(|event| {
+                    matches!(
+                        event,
+                        egui::Event::Key { .. }
+                            | egui::Event::Text(_)
+                            | egui::Event::Paste(_)
+                            | egui::Event::Copy
+                            | egui::Event::Cut
+                            | egui::Event::Ime(_)
+                    )
+                })
+            });
+        let owned = reading_keys
+            || window.viewer.keyboard
             || gesture_owned
             || (over && pointer_activity)
             || window.viewer.blocked_frame == Some(frame);
@@ -358,14 +375,7 @@ pub(crate) fn before_keys(
                 }
             });
             window.header_input.block_for_settings(frame);
-            ctx.input_mut(|i| {
-                i.events.retain(|e| {
-                    matches!(
-                        e,
-                        egui::Event::ModifiersChanged(_) | egui::Event::WindowFocused(_)
-                    )
-                })
-            });
+            crate::sidebar::consume_input(window, &ctx);
         }
         let dismissed = was_open && !window.viewer.open;
         if dismissed {
@@ -421,7 +431,14 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
     if let Some(events) = window.viewer.events.take() {
         ctx.input_mut(|input| input.events = events);
     }
-    view::show(&mut window.viewer, ui, dock, window.theme, unavailable);
+    view::show(
+        &mut window.viewer,
+        ui,
+        dock,
+        window.theme,
+        unavailable,
+        window.sidebar.markdown_maximized,
+    );
     ctx.input_mut(|input| input.events = filtered);
     window.viewer.record(started.elapsed());
     window.timed_separately += window.viewer.take_cost();

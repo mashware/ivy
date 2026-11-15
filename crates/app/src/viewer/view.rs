@@ -9,6 +9,7 @@ pub(super) fn show(
     full: egui::Rect,
     theme: crate::theme::Theme,
     unavailable: bool,
+    maximized: bool,
 ) {
     let namespace = if state.kind == Kind::Markdown {
         "markdown-viewer"
@@ -52,7 +53,7 @@ pub(super) fn show(
                 style(&mut content, theme, surface, line);
                 let (head, rest) =
                     inner.split_top_bottom_at_y((inner.top() + 62.0).min(inner.bottom()));
-                header(state, &mut content, head, theme, line);
+                header(state, &mut content, head, theme, line, maximized);
                 if !state.open {
                     return;
                 }
@@ -112,6 +113,7 @@ fn header(
     rect: egui::Rect,
     theme: crate::theme::Theme,
     line: Color32,
+    maximized: bool,
 ) {
     ui.painter().line_segment(
         [rect.left_bottom(), rect.right_bottom()],
@@ -140,20 +142,48 @@ fn header(
             }
         });
     let icon_rect =
-        egui::Rect::from_min_size(rect.min + egui::vec2(14.0, 21.0), egui::vec2(18.0, 20.0));
-    ui.painter().rect_stroke(
-        icon_rect.shrink2(egui::vec2(3.0, 1.0)),
-        2,
-        egui::Stroke::new(1.0, theme.foreground()),
-        egui::StrokeKind::Inside,
+        egui::Rect::from_min_size(rect.min + egui::vec2(15.0, 23.0), egui::vec2(16.0, 16.0));
+    crate::sidebar::icon(
+        ui,
+        icon_rect,
+        crate::sidebar::Icon::Tool(if markdown {
+            crate::sidebar::Tool::Markdown
+        } else {
+            crate::sidebar::Tool::Git
+        }),
+        theme.foreground(),
     );
-    for y in [7.0, 11.0, 15.0] {
-        ui.painter().line_segment(
-            [
-                icon_rect.min + egui::vec2(6.0, y),
-                icon_rect.min + egui::vec2(13.0, y),
-            ],
-            egui::Stroke::new(1.0, theme.foreground()),
+    if markdown {
+        let target = crate::sidebar::maximize_rect(rect.expand(1.0));
+        let label = if maximized { "Restore" } else { "Maximize" };
+        let response = ui
+            .interact(
+                target,
+                egui::Id::new("markdown-maximize"),
+                egui::Sense::click(),
+            )
+            .on_hover_text(label);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+        if response.hovered() || response.is_pointer_button_down_on() {
+            ui.painter().rect_filled(
+                target,
+                4,
+                if response.is_pointer_button_down_on() {
+                    ui.visuals().widgets.active.bg_fill
+                } else {
+                    ui.visuals().widgets.hovered.bg_fill
+                },
+            );
+        }
+        crate::sidebar::icon(
+            ui,
+            egui::Rect::from_center_size(target.center(), egui::vec2(16.0, 16.0)),
+            if maximized {
+                crate::sidebar::Icon::Restore
+            } else {
+                crate::sidebar::Icon::Maximize
+            },
+            theme.foreground(),
         );
     }
     let text_rect = egui::Rect::from_min_max(
@@ -165,15 +195,7 @@ fn header(
     );
     let mut text_ui = ui.new_child(egui::UiBuilder::new().max_rect(text_rect));
     text_ui.spacing_mut().item_spacing.y = 2.0;
-    let title_response = text_ui.add(
-        egui::Label::new(RichText::new(title).size(14.0))
-            .truncate()
-            .sense(egui::Sense::click()),
-    );
-    if markdown && title_response.on_hover_text("Open another path").clicked() {
-        state.editing_path = true;
-        state.focus_path = true;
-    }
+    text_ui.add(egui::Label::new(RichText::new(title).size(14.0)).truncate());
     text_ui
         .add(
             egui::Label::new(RichText::new(&path).size(11.0).color(mix(
@@ -238,10 +260,10 @@ fn body_content(
     unavailable: bool,
 ) {
     let markdown = state.kind == Kind::Markdown;
-    if markdown && (state.editing_path || (state.requested.is_none() && state.job.is_none())) {
-        egui::Frame::new()
-            .inner_margin(14)
-            .show(ui, |ui| path_form(state, ui));
+    if markdown && state.requested.is_none() && state.job.is_none() && state.loaded.is_none() {
+        egui::Frame::new().inner_margin(14).show(ui, |ui| {
+            ui.label("Choose a Markdown file in Files.");
+        });
     }
     if !markdown {
         egui::Frame::new()
@@ -281,31 +303,6 @@ fn body_content(
                 !unavailable,
             );
         }
-    }
-}
-
-fn path_form(state: &mut State, ui: &mut egui::Ui) {
-    let editable = !state.review.has_comments();
-    ui.label("Markdown file");
-    let response = ui.add_enabled(
-        editable,
-        egui::TextEdit::singleline(&mut state.path)
-            .id(egui::Id::new("viewer-path"))
-            .desired_width(f32::INFINITY),
-    );
-    if state.focus_path {
-        response.request_focus();
-        state.focus_path = false;
-    }
-    let enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-    if (ui
-        .add_enabled(editable, egui::Button::new("Open"))
-        .clicked()
-        || enter)
-        && editable
-    {
-        state.editing_path = false;
-        state.start(ui.ctx());
     }
 }
 
@@ -383,6 +380,56 @@ mod tests {
     use super::*;
 
     #[test]
+    fn empty_markdown_directs_selection_to_files_without_an_open_form() {
+        fn labels(shape: &egui::Shape, found: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Text(text) => found.push(text.galley.text().to_owned()),
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        labels(shape, found);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let ctx = egui::Context::default();
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(480.0, 600.0));
+        let mut state = State::default();
+        state.open_markdown();
+        for pass in 0..2 {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(area),
+                    ..Default::default()
+                },
+                |ui| {
+                    show(
+                        &mut state,
+                        ui,
+                        area,
+                        crate::theme::Theme::default(),
+                        false,
+                        false,
+                    )
+                },
+            );
+            let mut found = Vec::new();
+            for shape in &output.shapes {
+                labels(&shape.shape, &mut found);
+            }
+            output.drop_without_applying_deltas();
+            if pass == 1 {
+                assert!(
+                    found
+                        .iter()
+                        .any(|text| text == "Choose a Markdown file in Files.")
+                );
+                assert!(!found.iter().any(|text| text == "Open"));
+            }
+        }
+    }
+
+    #[test]
     fn dock_content_stays_within_the_supplied_rectangle() {
         let ctx = egui::Context::default();
         let area = egui::Rect::from_min_size(egui::Pos2::new(620.0, 0.0), egui::vec2(360.0, 480.0));
@@ -395,7 +442,7 @@ mod tests {
                     screen_rect: Some(screen),
                     ..Default::default()
                 },
-                |ui| show(state, ui, area, crate::theme::Theme::default(), true),
+                |ui| show(state, ui, area, crate::theme::Theme::default(), true, false),
             )
         };
         frame(&mut state).drop_without_applying_deltas();
