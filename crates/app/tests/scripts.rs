@@ -530,6 +530,14 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/settings/editor/view/colors.rs"),
     ),
     (
+        "app/src/settings/editor/view/palette.rs",
+        include_str!("../src/settings/editor/view/palette.rs"),
+    ),
+    (
+        "app/src/settings/editor/view/tests/theme_preview.rs",
+        include_str!("../src/settings/editor/view/tests/theme_preview.rs"),
+    ),
+    (
         "app/src/settings/editor/view/appearance.rs",
         include_str!("../src/settings/editor/view/appearance.rs"),
     ),

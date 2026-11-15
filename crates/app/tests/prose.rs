@@ -542,6 +542,16 @@ const SOURCES: &[(&str, &str, usize)] = &[
         1,
     ),
     (
+        "src/settings/editor/view/palette.rs",
+        include_str!("../src/settings/editor/view/palette.rs"),
+        4,
+    ),
+    (
+        "src/settings/editor/view/tests/theme_preview.rs",
+        include_str!("../src/settings/editor/view/tests/theme_preview.rs"),
+        1,
+    ),
+    (
         "src/settings/editor/view/appearance.rs",
         include_str!("../src/settings/editor/view/appearance.rs"),
         1,
@@ -839,8 +849,8 @@ const SOURCES: &[(&str, &str, usize)] = &[
 /// deleted declared file a compile error. [`rust_sources`] walks only to find the opposite mistake:
 /// a real file nobody declared. It never supplies the text being judged, so a path cannot disappear
 /// from the guard merely because the directory walk did not return it.
-// Re-measured with the existing comment walker after registering the tab modules.
-const COMMENT_LINES_AT_LEAST: usize = 19_905;
+// Re-measured with the existing comment walker after registering the Preferences modules.
+const COMMENT_LINES_AT_LEAST: usize = 19_921;
 
 /// How many **different** listed words a line needs before it is called Spanish.
 ///

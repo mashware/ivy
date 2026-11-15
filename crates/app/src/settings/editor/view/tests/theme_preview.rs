@@ -1,3 +1,4 @@
+//! Popup witnesses inspect rendered surfaces because each popup owns its UI style.
 use super::*;
 
 fn set(editor: &mut Editor, key: &str, value: &str) {
