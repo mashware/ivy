@@ -241,7 +241,7 @@ mod tests {
             assert!(distance(role, rgb(css)) <= 10, "{role:?} vs #{css:06x}");
         }
         // Muted text is brought back from 46 % to 41 % so it reads at 4.5:1 on hover, the lightest
-        // surface it is set on; the design's #7E8A85 reads at about 4.3 there.
+        // surface it is set on; the design's #7E8A85 reads at about 4.0 there.
         assert_eq!(r.tx3, rgb(0x8e9390));
         assert_eq!(r.on_accent, Color32::BLACK);
     }

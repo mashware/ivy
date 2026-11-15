@@ -9782,8 +9782,8 @@ the definitions — start-up, a configured family, fallback discovery, a Setting
 font — starts from that base, so none of them can drop it. A configured `font` still goes first.
 Embedding needs no enumeration of the machine, so D24 stands.
 
-**D9's symbols over the new face.** The six body marks are all in Geist Mono and measure exactly one
-cell. Two of the three claim symbols, `⊘` and `∎`, are not in Geist Mono and come from the faces behind
+**D9's symbols over the new face.** The six body marks are all in Geist Mono and measure one cell within
+a hundredth of a point. Two of the three claim symbols, `⊘` and `∎`, are not in Geist Mono and come from the faces behind
 it; `⊘` comes from egui's Hack, whose advance is 1233/2048 of the size against Geist Mono's 600/1000,
 0.03 points apart at 14. The claim symbol test bounds the difference to a hundredth of a cell, which
 still fails on a missing glyph (zero) and on an emoji glyph (almost two cells), the two failures D9 was

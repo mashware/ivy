@@ -244,8 +244,8 @@ fn green_focus(green: Color32, bright: Color32, background: Color32) -> Color32 
     } else {
         Color32::BLACK
     };
-    (0..=100)
-        .map(|p| mix(green, ink, f32::from(p as u8) / 100.0))
+    (0..=100u8)
+        .map(|p| mix(green, ink, f32::from(p) / 100.0))
         .find(|c| project_ink_contrast(*c, background) >= MARK_CONTRAST)
         .unwrap_or(ink)
 }
@@ -704,8 +704,11 @@ mod tests {
                     (actual.background, actual.foreground, actual.cursor),
                     (rgb(bg), rgb(fg), rgb(cursor))
                 );
-                // Green, readable as a mark on the background (D94).
+                // Normal green as it comes, except where it does not read as a mark (D94).
                 assert!(project_ink_contrast(actual.focus, actual.background) >= 3.0);
+                if theme != NamedTheme::CatppuccinLatte {
+                    assert_eq!(actual.focus, rgb(colors[2]), "{}", theme.id());
+                }
             }
         }
         assert_eq!(
@@ -724,8 +727,8 @@ mod tests {
         assert_eq!(NamedTheme::Nord.theme().focus, rgb(0xa3be8c));
         let latte = NamedTheme::CatppuccinLatte.theme();
         assert!(project_ink_contrast(rgb(0x40a02b), rgb(0xeff1f5)) < 3.0);
-        assert_ne!(latte.focus, rgb(0x40a02b));
-        assert_ne!(latte.focus, latte.palette[4]);
+        // One percent toward black is enough: 3.03.
+        assert_eq!(latte.focus, rgb(0x3f9e2b));
         assert!(project_ink_contrast(latte.focus, latte.background) >= 3.0);
     }
 

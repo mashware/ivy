@@ -16247,10 +16247,10 @@ mod tests {
         });
     }
 
-    /// The window installs the theme's style on its own frame, including in a measurement batch
-    /// that disables project discovery, where the refresh returns early (D94).
+    /// The theme refresh the window calls every frame installs the theme's style, including in a
+    /// measurement batch that disables project discovery, where the refresh returns early (D94).
     #[test]
-    fn a_window_frame_installs_the_themes_style_even_without_project_discovery() {
+    fn the_theme_refresh_installs_the_style_even_without_project_discovery() {
         let mut window = window_with("true", "true");
         project_view::configure(&mut window, settings::Entry::Measuring, None);
         let ctx = egui::Context::default();
