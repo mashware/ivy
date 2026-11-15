@@ -169,6 +169,12 @@ pub(crate) fn partition(window: &Window, area: egui::Rect, metrics: &CellMetrics
             divider: None,
         };
     }
+    if window.sidebar.active == Some(Tool::Board) {
+        // Cover the console surface without changing the programs' terminal dimensions.
+        let mut result = layout(area, false, window.sidebar.width, MINIMUM);
+        result.dock = Some(result.consoles);
+        return result;
+    }
     let leaf = crate::panel::MINIMUM_CONSOLE * metrics.width()
         + 2.0 * crate::painter::CONSOLE_PADDING
         + 2.0 * window.headers.pane_inset();

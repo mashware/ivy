@@ -100,9 +100,7 @@ impl State {
     }
 }
 
-pub(crate) use input::{
-    before_keys, blocked, cancel_gestures, dismiss_for_chrome, reanchor, toggle,
-};
+pub(crate) use input::{before_keys, blocked, cancel_gestures, dismiss_for_chrome, reanchor};
 
 /// Called by the shared sidebar host when Board becomes the selected tool.
 /// Keep the user's Board navigation and cached geometry across hide/reopen.

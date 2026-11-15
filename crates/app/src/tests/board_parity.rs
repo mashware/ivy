@@ -224,7 +224,7 @@ mod tests {
     }
 
     #[test]
-    fn narrow_dock_stacks_all_status_columns_with_cards_in_reading_order() {
+    fn narrow_window_stacks_all_status_columns_with_cards_in_reading_order() {
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 3]);
         window.chrome.enable();
         window.headers = window.headers.integrated(true);
@@ -247,8 +247,17 @@ mod tests {
                 _ => {}
             }
         }
-        frame(&mut window, &ctx, chord_with(egui::Key::O));
-        let shapes = frame(&mut window, &ctx, vec![]);
+        let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 1600.0));
+        ui_pass(
+            &mut window,
+            &ctx,
+            viewport,
+            egui::RawInput {
+                events: chord_with(egui::Key::O),
+                ..Default::default()
+            },
+        );
+        let shapes = ui_pass(&mut window, &ctx, viewport, egui::RawInput::default());
         let labels = ["WAITING FOR YOU", "STUCK", "WORKING", "FINISHED", "IDLE"];
         let ys: Vec<_> = labels
             .iter()

@@ -2,6 +2,34 @@ use super::*;
 use crate::tests::{one_frame_in, window_of_tabs};
 
 #[test]
+fn board_fills_content_at_every_width_without_resizing_consoles() {
+    let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+    let ctx = egui::Context::default();
+    for width in [500.0, 1600.0] {
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 700.0));
+        close(&mut window, &ctx);
+        one_frame_in(&mut window, &ctx, area, vec![]);
+        let closed: Vec<_> = window.all_panes().map(|p| p.measured).collect();
+        let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
+        let baseline = crate::tab_bar::geometry(&window, area, &metrics);
+        select(&mut window, Tool::Board);
+        one_frame_in(&mut window, &ctx, area, vec![]);
+        let opened = crate::tab_bar::geometry(&window, area, &metrics);
+        assert_eq!(opened.dock, Some(baseline.consoles));
+        assert!(
+            opened.divider.is_none(),
+            "Board must not have a resize handle"
+        );
+        assert_eq!(opened.consoles, baseline.consoles);
+        assert_eq!(window.sidebar.last_dock, opened.dock);
+        assert_eq!(
+            window.all_panes().map(|p| p.measured).collect::<Vec<_>>(),
+            closed
+        );
+    }
+}
+
+#[test]
 fn narrow_windows_suppress_only_the_body_and_restore_preferred_width() {
     for height in [0.0, 20.0, 600.0] {
         for width in [0.0, 12.0, 36.0, 500.0, 681.0, 1000.0, 1400.0] {
@@ -218,7 +246,7 @@ fn sidebar_state_is_transient_and_each_new_window_starts_closed_at_default_width
 #[cfg(unix)]
 #[test]
 fn console_mouse_release_crossing_into_each_tool_or_rail_reaches_its_program() {
-    for tool in [Tool::Files, Tool::Markdown, Tool::Git, Tool::Board] {
+    for tool in [Tool::Files, Tool::Markdown, Tool::Git] {
         for rail in [false, true] {
             let received = term_core::received::Received::new("sidebar-console-release");
             let script = received.script("stty raw -echo");
