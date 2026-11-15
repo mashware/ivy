@@ -56,6 +56,64 @@ fn narrow_windows_suppress_only_the_body_and_restore_preferred_width() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn board_blocks_all_mouse_buttons_and_motion_to_covered_programs() {
+    let received = term_core::received::Received::new("board-covered-mouse");
+    let script = received.script("stty raw -echo");
+    let mut window = window_of_tabs([[script.as_str(), "sleep 30"]]);
+    received.wait_until_ready(Duration::from_secs(5));
+    let ctx = egui::Context::default();
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 700.0));
+    let focus = window.active().focus;
+    window
+        .pane_called(focus)
+        .unwrap()
+        .screen
+        .advance(b"\x1b[?1003h\x1b[?1006h");
+    select(&mut window, Tool::Board);
+    one_frame_in(&mut window, &ctx, area, vec![]);
+    one_frame_in(&mut window, &ctx, area, vec![]);
+    let pos = window
+        .pane_called(focus)
+        .unwrap()
+        .painted_console
+        .as_ref()
+        .unwrap()
+        .area
+        .center();
+    one_frame_in(
+        &mut window,
+        &ctx,
+        area,
+        vec![egui::Event::PointerMoved(pos)],
+    );
+    for button in [egui::PointerButton::Secondary, egui::PointerButton::Middle] {
+        for pressed in [true, false] {
+            one_frame_in(
+                &mut window,
+                &ctx,
+                area,
+                vec![egui::Event::PointerButton {
+                    pos,
+                    button,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+        }
+    }
+    close(&mut window, &ctx);
+    one_frame_in(&mut window, &ctx, area, vec![]);
+    one_frame_in(
+        &mut window,
+        &ctx,
+        area,
+        vec![egui::Event::Text("after".into())],
+    );
+    assert_eq!(received.wait_for(5, Duration::from_secs(5)), b"after");
+}
+
 #[test]
 fn opening_resizing_switching_and_closing_preserve_consoles_and_update_their_grids() {
     let mut window = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
