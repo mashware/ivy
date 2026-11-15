@@ -359,4 +359,3 @@ See [COPYRIGHT](COPYRIGHT) for authorship and [LICENSE](LICENSE) for the complet
 
 Third-party dependencies and bundled assets retain their own licenses. See
 [third-party notices](THIRD-PARTY.md) for the vendored code, themes and test font included here.
-

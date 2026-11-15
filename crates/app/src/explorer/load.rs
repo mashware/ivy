@@ -214,8 +214,8 @@ impl Loader {
 
 impl Drop for Loader {
     fn drop(&mut self) {
-        self.cancel();
         self.shutdown.store(true, Ordering::Release);
+        self.cancel();
         self.mailbox.1.notify_one();
     }
 }
@@ -240,6 +240,8 @@ fn spawn_worker(
                         if shutdown.load(Ordering::Acquire) {
                             return;
                         }
+                        // Bounded: requests notify this condition; dropping Loader sets shutdown
+                        // before taking the mailbox lock, then notifies after the waiter releases it.
                         slot = match wake.wait(slot) {
                             Ok(slot) => slot,
                             Err(_) => return,
@@ -386,6 +388,26 @@ mod tests {
         };
         assert_eq!(reply.request, req);
         assert_eq!(reply.result.unwrap().entries.len(), 1);
+    }
+
+    #[test]
+    fn dropping_an_idle_loader_releases_its_worker() {
+        struct Released(mpsc::Sender<()>);
+        impl Drop for Released {
+            fn drop(&mut self) {
+                let _ = self.0.send(());
+            }
+        }
+        let (released_tx, released_rx) = mpsc::channel();
+        let released = Released(released_tx);
+        let loader = Loader::new_with_reader(Arc::new(move |_, _| {
+            let _ = &released;
+            unreachable!("an idle loader receives no directory requests")
+        }));
+        drop(loader);
+        released_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("idle worker should release its reader after shutdown");
     }
 
     #[test]
