@@ -532,7 +532,10 @@ fn resize_direction(area: Rect, p: egui::Pos2) -> Option<egui::ResizeDirection> 
 }
 
 pub(crate) fn after_panels(window: &mut Window, ui: &mut egui::Ui, area: Rect) {
-    crate::explorer::show(window, ui, area);
+    if let Some(dock) = window.sidebar.last_dock {
+        crate::viewer::paint(window, ui, dock);
+        crate::explorer::show(window, ui, dock);
+    }
     connection::after_panels(window, ui, area);
 }
 

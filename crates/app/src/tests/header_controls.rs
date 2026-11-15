@@ -6,7 +6,8 @@ mod tests {
     use crate::header::controls::{Action, Controls, Hit};
 
     fn parts(window: &Window, area: egui::Rect, metrics: &CellMetrics) -> Vec<egui::Rect> {
-        window.active().root.place(area, metrics.width()).parts
+        let consoles = crate::tab_bar::geometry(window, area, metrics).consoles;
+        window.active().root.place(consoles, metrics.width()).parts
     }
 
     fn targets(window: &Window, area: egui::Rect, which: usize, metrics: &CellMetrics) -> Controls {
@@ -666,8 +667,7 @@ mod tests {
         window.settings_editor = settings::editor::Editor::resolved(settings::Entry::Normal, None);
         let large = area_of(1280.0);
         let metrics = warmed(&mut window, &ctx, large);
-        let content = crate::tab_bar::geometry(&window, large, &metrics).consoles;
-        let before = parts(&window, content, &metrics);
+        let before = parts(&window, large, &metrics);
         let strip = header::set_the_header_aside(before[1], &metrics, window.headers)
             .0
             .unwrap();
@@ -677,12 +677,11 @@ mod tests {
             .find(|h| {
                 let area =
                     egui::Rect::from_min_size(large.min, egui::vec2(large.width(), *h as f32));
+                window.settings_editor = settings::editor::Editor::default();
                 let full = parts(&window, area, &metrics)[1];
-                let reduced = parts(
-                    &window,
-                    crate::tab_bar::geometry(&window, area, &metrics).consoles,
-                    &metrics,
-                )[1];
+                window.settings_editor =
+                    settings::editor::Editor::resolved(settings::Entry::Normal, None);
+                let reduced = parts(&window, area, &metrics)[1];
                 tiling::can_split(full, Orientation::Rows, &metrics, window.headers)
                     && !tiling::can_split(reduced, Orientation::Rows, &metrics, window.headers)
             })

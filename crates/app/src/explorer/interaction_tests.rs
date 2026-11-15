@@ -267,7 +267,7 @@ fn publish_directory(window: &mut crate::Window, pane: usize, uri: &str) {
 }
 
 #[test]
-fn files_menu_pins_and_follows_across_tabs_without_leaking_input_or_retiling() {
+fn files_menu_pins_and_follows_across_tabs_without_leaking_input() {
     let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
     let ctx = egui::Context::default();
     let worktrees = Worktrees::new();
@@ -419,7 +419,7 @@ fn files_menu_pins_and_follows_across_tabs_without_leaking_input_or_retiling() {
         &ctx,
         area,
         vec![
-            egui::Event::PointerMoved(egui::pos2(120.0, 350.0)),
+            egui::Event::PointerMoved(egui::pos2(1000.0, 350.0)),
             egui::Event::MouseWheel {
                 unit: egui::MouseWheelUnit::Line,
                 delta: egui::vec2(0.0, -2.0),
@@ -427,7 +427,7 @@ fn files_menu_pins_and_follows_across_tabs_without_leaking_input_or_retiling() {
                 phase: egui::TouchPhase::Move,
             },
             egui::Event::PointerButton {
-                pos: egui::pos2(120.0, 350.0),
+                pos: egui::pos2(1000.0, 350.0),
                 button: egui::PointerButton::Primary,
                 pressed: false,
                 modifiers: egui::Modifiers::NONE,
@@ -474,7 +474,7 @@ fn files_menu_pins_and_follows_across_tabs_without_leaking_input_or_retiling() {
         Some(second.clone())
     );
 
-    // Hide and reopen retain each pane's tree and pin state. The panel remains an overlay.
+    // Hide and reopen retain each pane's tree and pin state. Closing restores the console area.
     click_text(&mut window, &ctx, area, "Pin this console");
     assert_eq!(window.explorer.pinned, Some(ids[2]));
     window
@@ -517,7 +517,7 @@ fn files_menu_pins_and_follows_across_tabs_without_leaking_input_or_retiling() {
             .map(|pane| (pane.name, pane.measured))
             .collect::<Vec<_>>(),
         before,
-        "the overlay must not change console geometry"
+        "closing the dock must restore console geometry"
     );
 }
 

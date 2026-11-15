@@ -15,8 +15,6 @@ use std::{
 };
 
 const REFRESH: Duration = Duration::from_secs(1);
-const GRIP: f32 = 6.0;
-
 pub(super) struct Source {
     pane: usize,
     label: String,
@@ -32,12 +30,11 @@ pub(crate) struct State {
     job_generation: u64,
     job_base: String,
     editing_path: bool,
-    expanded: bool,
     pending_send: Option<String>,
     context: Option<egui::Context>,
+    tool_markdown: Option<bool>,
     open: bool,
     kind: Kind,
-    width: f32,
     path: String,
     requested: Option<(PathBuf, Kind)>,
     job: Option<(PathBuf, Kind, Job)>,
@@ -46,9 +43,9 @@ pub(crate) struct State {
     refresh_at: Option<Instant>,
     keyboard: bool,
     held: bool,
-    resizing: bool,
     focus_path: bool,
     blocked_frame: Option<u64>,
+    events: Option<Vec<egui::Event>>,
     cost: Duration,
     frame: Duration,
     total: Duration,
@@ -66,12 +63,11 @@ impl Default for State {
             job_generation: 0,
             job_base: "main".into(),
             editing_path: true,
-            expanded: false,
             pending_send: None,
             context: None,
+            tool_markdown: None,
             open: false,
             kind: Kind::Markdown,
-            width: 800.0,
             path: String::new(),
             requested: None,
             job: None,
@@ -80,9 +76,9 @@ impl Default for State {
             refresh_at: None,
             keyboard: false,
             held: false,
-            resizing: false,
             focus_path: false,
             blocked_frame: None,
+            events: None,
             cost: Duration::ZERO,
             frame: Duration::ZERO,
             total: Duration::ZERO,
@@ -119,20 +115,8 @@ impl State {
         self.open = false;
         self.keyboard = false;
         self.refresh_at = None;
-        self.resizing = false;
         // A worker on an unavailable filesystem is abandoned on purpose, never joined by UI.
         // Keep its handle so repeated open/close cannot start unbounded concurrent readers.
-    }
-
-    fn rect(&self, area: egui::Rect) -> egui::Rect {
-        let inset = 8.0_f32.min(area.width().min(area.height()) * 0.5);
-        let area = area.shrink(inset);
-        let width = if self.expanded {
-            area.width()
-        } else {
-            self.width.min(area.width())
-        };
-        egui::Rect::from_min_max(egui::pos2(area.right() - width, area.top()), area.max)
     }
 
     fn start(&mut self, ctx: &egui::Context) {
@@ -223,12 +207,68 @@ impl State {
             self.total += std::mem::take(&mut self.frame);
         }
     }
+    #[cfg(test)]
     pub(crate) fn publish(&self, to: &mut dyn std::io::Write) -> std::io::Result<()> {
         writeln!(
             to,
             "document viewers: frames={}, total={:?}",
             self.frames, self.total
         )
+    }
+
+    pub(crate) fn publish_combined(
+        &self,
+        other: &Self,
+        to: &mut dyn std::io::Write,
+    ) -> std::io::Result<()> {
+        writeln!(
+            to,
+            "document viewers: frames={}, total={:?}",
+            self.frames + other.frames,
+            self.total + other.total
+        )
+    }
+}
+
+pub(super) fn select_state(window: &mut crate::Window, markdown: bool) {
+    if window.viewer.tool_markdown.unwrap_or(true) != markdown {
+        std::mem::swap(&mut window.viewer, &mut window.viewer_other);
+    }
+    window.viewer.tool_markdown = Some(markdown);
+    window.viewer_other.tool_markdown = Some(!markdown);
+}
+
+pub(crate) fn activate(window: &mut crate::Window, markdown: bool) {
+    select_state(window, markdown);
+    let tool = if markdown {
+        crate::sidebar::Tool::Markdown
+    } else {
+        crate::sidebar::Tool::Git
+    };
+    crate::sidebar::select(window, tool);
+    if window.viewer.origin.is_none() && window.viewer.path.is_empty() {
+        origin::initialize(window, markdown);
+    }
+    let kind = if markdown {
+        Kind::Markdown
+    } else if window.viewer.kind == Kind::Markdown {
+        Kind::Local
+    } else {
+        window.viewer.kind
+    };
+    window.viewer.open(kind);
+    if let Some(ctx) = &window.viewer.context {
+        ctx.request_repaint();
+    }
+}
+
+pub(crate) fn suspend(window: &mut crate::Window) {
+    for state in [&mut window.viewer, &mut window.viewer_other] {
+        state.open = false;
+        state.keyboard = false;
+        state.held = false;
+        state.refresh_at = None;
+        state.events = None;
     }
 }
 
@@ -240,6 +280,7 @@ pub(crate) fn keys(
 ) -> (bool, Vec<crate::WindowRequest>) {
     let blocked = blocked || window.chrome.guide_blocked(ui.ctx());
     window.viewer.context = Some(ui.ctx().clone());
+    window.viewer_other.context = Some(ui.ctx().clone());
     let owned = !blocked && before_keys(window, ui, metrics);
     delivery::deliver(window, ui.ctx());
     let requests = if blocked || owned {
@@ -256,67 +297,55 @@ pub(crate) fn before_keys(
     ui: &mut egui::Ui,
     metrics: &crate::painter::CellMetrics,
 ) -> bool {
-    if window.settings_editor.is_open() || window.board.is_open() || window.pane_view.is_modal() {
+    for state in [&mut window.viewer, &mut window.viewer_other] {
+        state.events = None;
+    }
+    if window.settings_editor.is_open() || window.pane_view.is_modal() {
         return false;
     }
-    if !window.viewer.open
-        && !window.viewer.held
-        && window.viewer.blocked_frame != Some(ui.ctx().cumulative_frame_nr())
-    {
+    let markdown = match crate::sidebar::active(window) {
+        Some(crate::sidebar::Tool::Markdown) => true,
+        Some(crate::sidebar::Tool::Git) => false,
+        _ => return false,
+    };
+    select_state(window, markdown);
+    let Some(rect) = crate::tab_bar::geometry(window, ui.max_rect(), metrics).dock else {
+        window.viewer.keyboard = false;
+        window.viewer.held = false;
+        window.viewer.refresh_at = None;
+        return false;
+    };
+    if !window.viewer.open && !window.viewer.held {
         return false;
     }
-    let started = Instant::now();
-    let area = crate::tab_bar::geometry(window, ui.max_rect(), metrics).consoles;
-    let full = area;
-    let state = &mut window.viewer;
     let ctx = ui.ctx().clone();
+    window.viewer.context = Some(ctx.clone());
     let frame = ctx.cumulative_frame_nr();
-    let was_open = state.open;
-    let rect = state.rect(full);
-    let over = ctx.input(|i| {
-        i.pointer
-            .interact_pos()
-            .is_some_and(|p| rect.expand(GRIP).contains(p))
-    });
-    if ctx.input(|i| i.pointer.any_pressed()) && !state.held {
-        state.keyboard = over;
-        state.held = over;
-        state.resizing = over
-            && ctx.input(|i| {
-                i.pointer
-                    .interact_pos()
-                    .is_some_and(|p| (p.x - rect.left()).abs() <= GRIP)
-            });
+    let over = ctx.input(|i| i.pointer.interact_pos().is_some_and(|p| rect.contains(p)));
+    if ctx.input(|i| i.pointer.any_pressed()) && !window.viewer.held {
+        window.viewer.keyboard = over;
+        window.viewer.held = over;
     }
-    let gesture_owned = state.held;
-    if state.resizing
-        && let Some(p) = ctx.input(|i| i.pointer.interact_pos())
-    {
-        state.width =
-            (full.right() - 8.0 - p.x).clamp(280.0_f32.min(full.width()), full.width().max(280.0));
-    }
+    let gesture_owned = window.viewer.held;
     if !ctx.input(|i| i.focused && i.pointer.any_down()) {
-        state.held = false;
-        state.resizing = false;
+        window.viewer.held = false;
     }
     let pointer_activity = ctx.input(|i| {
         i.pointer.any_pressed()
             || i.pointer.any_released()
             || i.smooth_scroll_delta != egui::Vec2::ZERO
     });
-    let owned = state.keyboard
+    let was_open = window.viewer.open;
+    let owned = window.viewer.keyboard
         || gesture_owned
         || (over && pointer_activity)
-        || state.blocked_frame == Some(frame);
-    if was_open {
-        state.poll(&ctx);
-        view::show(state, ui, full, window.theme);
-        if state.keyboard && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            state.close();
-        }
+        || window.viewer.blocked_frame == Some(frame);
+    if window.viewer.keyboard && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        window.viewer.close();
     }
-    if owned || (was_open && !state.open) {
-        state.blocked_frame = Some(frame);
+    if owned || (was_open && !window.viewer.open) {
+        window.viewer.events = Some(ctx.input(|i| i.events.clone()));
+        window.viewer.blocked_frame = Some(frame);
         window.modifiers = ctx.input(|i| {
             if i.focused {
                 i.modifiers
@@ -334,9 +363,60 @@ pub(crate) fn before_keys(
             })
         });
     }
-    state.record(started.elapsed());
-    window.timed_separately += state.take_cost();
-    owned || (was_open && !state.open)
+    let dismissed = was_open && !window.viewer.open;
+    if dismissed {
+        crate::sidebar::close(window, &ctx);
+    }
+    owned || dismissed
+}
+
+/// Paint the active viewer after the console tree has reached its final geometry for this pass.
+pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::Rect) {
+    if window.settings_editor.is_open()
+        || window.pane_view.is_modal()
+        || window.chrome.guide_blocked(ui.ctx())
+    {
+        return;
+    }
+    let markdown = match crate::sidebar::active(window) {
+        Some(crate::sidebar::Tool::Markdown) => true,
+        Some(crate::sidebar::Tool::Git) => false,
+        _ => return,
+    };
+    select_state(window, markdown);
+    if !window.viewer.open {
+        return;
+    }
+    let ctx = ui.ctx().clone();
+    window.viewer.context = Some(ctx.clone());
+    let started = Instant::now();
+    if window.viewer.kind == Kind::Markdown
+        && window.viewer.requested.is_some()
+        && window.viewer.job.is_none()
+        && window.viewer.refresh_at.is_none()
+    {
+        window.viewer.refresh_at = Some(Instant::now());
+    }
+    if window.viewer.requested.is_none()
+        && !window.viewer.path.is_empty()
+        && !window.viewer.editing_path
+    {
+        window.viewer.start(&ctx);
+    }
+    window.viewer.poll(&ctx);
+    let unavailable = window
+        .viewer
+        .origin
+        .as_ref()
+        .is_none_or(|origin| !window.all_panes().any(|pane| pane.name == origin.pane));
+    let filtered = ctx.input(|input| input.events.clone());
+    if let Some(events) = window.viewer.events.take() {
+        ctx.input_mut(|input| input.events = events);
+    }
+    view::show(&mut window.viewer, ui, dock, window.theme, unavailable);
+    ctx.input_mut(|input| input.events = filtered);
+    window.viewer.record(started.elapsed());
+    window.timed_separately += window.viewer.take_cost();
 }
 
 pub(crate) use origin::{open, open_diff_for_pane, open_markdown_target};
@@ -347,8 +427,9 @@ mod interaction_tests;
 mod tests;
 
 /// Explorer transitions use the ordinary close path, retaining unsent review comments.
+#[cfg(test)]
 pub(crate) fn hide(window: &mut crate::Window) {
-    window.viewer.close();
+    suspend(window);
 }
 pub(crate) fn is_open(window: &crate::Window) -> bool {
     window.viewer.open

@@ -255,7 +255,7 @@ mod tests {
             let mut window = window_with("sleep 30", "sleep 30");
             window.chrome.enable();
             window.headers = window.headers.integrated(true);
-            window.viewer.open_markdown();
+            crate::viewer::activate(&mut window, true);
             let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 420.0));
             let shapes = frame(&mut window, &ctx, area, vec![]);
             assert!(connection_highlight(&shapes, area));
@@ -285,10 +285,17 @@ mod tests {
             frame(&mut window, &ctx, area, click_at(close));
             let shapes = frame(&mut window, &ctx, area, vec![]);
             assert!(!has_text(&shapes, "No panels published yet"));
-            assert!(
-                has_text(&shapes, "Markdown viewer"),
-                "viewer did not resume after closure"
-            );
+            if width >= 700.0 {
+                assert!(
+                    has_text(&shapes, "Markdown viewer"),
+                    "viewer did not resume after closure"
+                );
+            } else {
+                assert!(
+                    !has_text(&shapes, "Markdown viewer"),
+                    "the dock body was not suppressed below its minimum width"
+                );
+            }
         }
     }
 

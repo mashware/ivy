@@ -1,4 +1,4 @@
-//! Modal ownership begins before console dispatch and survives the closing frame.
+//! Board owns only its dock gestures and keyboard focus, never the console surface.
 use super::State;
 use crate::{
     Window,
@@ -10,8 +10,7 @@ use std::time::Instant;
 
 pub(crate) fn blocked(window: &Window, ctx: &egui::Context) -> bool {
     window.board.enabled
-        && (window.board.open
-            || window.board.awaiting_release
+        && (window.board.awaiting_release
             || window.board.blocked_frame == Some(ctx.cumulative_frame_nr()))
 }
 
@@ -21,28 +20,17 @@ pub(crate) fn toggle(window: &mut Window, ctx: &egui::Context) {
     }
     let started = Instant::now();
     if window.board.open {
-        close(window, ctx);
+        crate::sidebar::close(window, ctx);
     } else {
-        let selected = window.active().focus;
-        window.board.branches = Default::default();
-        window.board.open = true;
-        window.board.original = Some(selected);
-        window.board.selected = Some(selected);
-        window.board.ordinal = 0;
-        window.board.scroll_selected = true;
-        window.board.surface.pressed = None;
-        window.board.activate = None;
-        window.board.order.clear();
-        cancel_gestures(window, ctx);
-        window.board.blocked_frame = Some(ctx.cumulative_frame_nr());
+        crate::sidebar::select(window, crate::sidebar::Tool::Board);
     }
     window.board.timing.record_work(started.elapsed());
     window.timed_separately += window.board.timing.take_cost();
     ctx.request_repaint();
 }
 
-pub(super) fn close(window: &mut Window, ctx: &egui::Context) {
-    if let Some(original) = window.board.original.take()
+fn dismiss(window: &mut Window, ctx: &egui::Context) {
+    if let Some(original) = window.board.original
         && let Some(owner) = window
             .tabs
             .iter()
@@ -51,14 +39,7 @@ pub(super) fn close(window: &mut Window, ctx: &egui::Context) {
         window.active = owner;
         window.tabs[owner].focus = original;
     }
-    window.board.open = false;
-    window.board.surface.pressed = None;
-    window.board.surface.child_hits.clear();
-    window.board.surface.child_pressed = None;
-    window.board.surface.link_to_open = None;
-    window.board.activate = None;
-    window.board.surface.painted.clear();
-    window.board.order.clear();
+    crate::sidebar::close(window, ctx);
     window.board.blocked_frame = Some(ctx.cumulative_frame_nr());
     window.board.awaiting_release = ctx.input(|i| i.pointer.any_down());
     cancel_gestures(window, ctx);
@@ -66,6 +47,9 @@ pub(super) fn close(window: &mut Window, ctx: &egui::Context) {
 }
 
 pub(crate) fn cancel_gestures(window: &mut Window, ctx: &egui::Context) {
+    window.board.keyboard_focus = false;
+    window.board.surface.pressed = None;
+    window.board.surface.child_pressed = None;
     window
         .header_input
         .block_for_settings(ctx.cumulative_frame_nr());
@@ -116,31 +100,59 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, _metrics: &Cel
     });
     window.board.timing.record_work(scan_started.elapsed());
     window.timed_separately += window.board.timing.take_cost();
-    if !blocked(window, ui.ctx()) && !toggle_pressed {
-        return false;
-    }
-    let was_open = window.board.open;
     if toggle_pressed {
         toggle(window, ui.ctx());
+        // The shortcut's key event must not reach the console on either transition.
+        ui.input_mut(|i| {
+            i.events
+                .retain(|event| !matches!(event, egui::Event::Key { .. }))
+        });
+        return true;
     }
+    if window.board.awaiting_release {
+        let release = ui.input(|i| {
+            i.events
+                .iter()
+                .any(|event| matches!(event, egui::Event::PointerButton { pressed: false, .. }))
+        });
+        if ui.input(|i| i.pointer.any_down()) {
+            return true;
+        }
+        window.board.awaiting_release = false;
+        if release {
+            return true;
+        }
+    }
+    if blocked(window, ui.ctx()) {
+        return true;
+    }
+    if !window.board.open {
+        return false;
+    }
+
+    let geometry = crate::tab_bar::geometry(window, ui.max_rect(), _metrics);
+    let Some(dock) = geometry.dock else {
+        window.board.keyboard_focus = false;
+        return false;
+    };
     let started = Instant::now();
     let events = ui.input(|i| i.events.clone());
-    window.board.blocked_frame = Some(ui.ctx().cumulative_frame_nr());
-    window
-        .header_input
-        .block_for_settings(ui.ctx().cumulative_frame_nr());
-    if window.board.open && was_open && !toggle_pressed {
-        for event in &events {
-            match event {
-                egui::Event::Key {
-                    key: egui::Key::Escape,
-                    pressed: true,
-                    repeat: false,
-                    ..
-                } => close(window, ui.ctx()),
-                egui::Event::Key {
-                    key, pressed: true, ..
-                } if matches!(
+    let mut owns_events = false;
+    for event in &events {
+        match event {
+            egui::Event::Key {
+                key: egui::Key::Escape,
+                pressed: true,
+                repeat: false,
+                ..
+            } if window.board.keyboard_focus => {
+                dismiss(window, ui.ctx());
+                owns_events = true;
+            }
+            egui::Event::Key {
+                key, pressed: true, ..
+            } if window.board.keyboard_focus => {
+                if matches!(
                     key,
                     egui::Key::ArrowUp
                         | egui::Key::ArrowDown
@@ -149,38 +161,60 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, _metrics: &Cel
                         | egui::Key::Home
                         | egui::Key::End
                         | egui::Key::Enter
-                ) =>
-                {
+                ) {
                     navigate(&mut window.board, *key);
                 }
-                egui::Event::PointerButton {
-                    pos,
-                    button: egui::PointerButton::Primary,
-                    pressed,
-                    ..
-                } => pointer(&mut window.board, *pos, *pressed),
-                _ => {}
+                owns_events = true;
             }
-            if !window.board.open {
-                break;
+            egui::Event::Key { pressed: false, .. } if window.board.keyboard_focus => {
+                owns_events = true
             }
+            egui::Event::Text(_) | egui::Event::Paste(_) if window.board.keyboard_focus => {
+                owns_events = true
+            }
+            egui::Event::MouseWheel { .. }
+                if ui
+                    .input(|i| i.pointer.hover_pos())
+                    .is_some_and(|pos| dock.contains(pos)) =>
+            {
+                // Keep the event for Board's ScrollArea, while keeping console dispatch out.
+                owns_events = true;
+            }
+            egui::Event::PointerMoved(pos)
+                if dock.contains(*pos)
+                    || window.board.surface.pressed.is_some()
+                    || window.board.surface.child_pressed.is_some() =>
+            {
+                owns_events = true;
+            }
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                ..
+            } => {
+                let owns_release = !*pressed
+                    && (window.board.surface.pressed.is_some()
+                        || window.board.surface.child_pressed.is_some());
+                if dock.contains(*pos) || owns_release {
+                    window.board.keyboard_focus = true;
+                    pointer(&mut window.board, *pos, *pressed);
+                    owns_events = true;
+                } else if *pressed {
+                    // Clicking a console transfers keyboard ownership without hiding Board.
+                    window.board.keyboard_focus = false;
+                    window.board.surface.pressed = None;
+                }
+            }
+            _ => {}
         }
     }
-    if !window.board.open {
-        window.board.awaiting_release = ui.input(|i| i.pointer.any_down());
-        // No closing gesture, clipboard event or dropped file reaches a console.
-        ui.input_mut(|i| {
-            i.events.retain(|e| {
-                matches!(
-                    e,
-                    egui::Event::WindowFocused(_) | egui::Event::ModifiersChanged(_)
-                )
-            })
-        });
+    if owns_events {
+        window.board.blocked_frame = Some(frame);
     }
     window.board.timing.record_work(started.elapsed());
     window.timed_separately += window.board.timing.take_cost();
-    true
+    owns_events
 }
 
 fn navigate(state: &mut State, key: egui::Key) {

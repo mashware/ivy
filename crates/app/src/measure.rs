@@ -2013,6 +2013,12 @@ mod tests {
         Board::default()
             .publish(&mut window_spans)
             .expect("memory report");
+        // The sidebar's host span and geometry witnesses are part of every application report.
+        // These synthetic values exercise the script's extraction patterns; they are not runtime
+        // measurements or evidence for a performance claim.
+        window_spans.extend_from_slice(
+            b"sidebar application: frames=1, total=1ms\nsidebar witnesses: selected=Board, preferred_width=520, effective_width=520, console_grid=0=49x39;1=49x21, pane_identities=2, switches=2, resize_delta=40\n",
+        );
         // Use the real producer so the script's chrome witnesses are tied to its output.
         let mut chrome = crate::chrome::Chrome::default();
         chrome.enable();

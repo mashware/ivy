@@ -72,6 +72,7 @@ pub mod settings;
 mod shell_integration;
 use shell_integration::the_users_shell;
 mod explorer;
+mod sidebar;
 mod startup;
 mod tab_bar;
 pub mod theme;
@@ -901,6 +902,8 @@ struct Window {
     pane_view: pane_view::State,
     clipboard: clipboard::Service,
     board: board::State,
+    sidebar: sidebar::Sidebar,
+    viewer_other: viewer::State,
     viewer: viewer::State,
     explorer: explorer::Explorer,
     projects: project_view::State,
@@ -1245,6 +1248,7 @@ impl eframe::App for Window {
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         settings::editor::inject(self, raw_input);
         board::probe::inject(self, raw_input, ctx);
+        sidebar::probe::inject(self, raw_input, ctx);
         let Some(injected_drags) = self.injected_drags.as_mut() else {
             return;
         };
@@ -1384,7 +1388,8 @@ impl eframe::App for Window {
 
         // The board claims its input before the console dispatcher. Its named work is discounted
         // from frame accounting; outbound latency still includes this earlier application work.
-        let mut board_owned = board::before_keys(self, ui, &metrics);
+        let sidebar_owned = sidebar::before_keys(self, ui, &metrics);
+        let mut board_owned = sidebar_owned || board::before_keys(self, ui, &metrics);
         let pane_owned = !board_owned && pane_view::before_keys(self, ui, &metrics);
         if pane_owned {
             if !self.pane_view.is_renaming() {
@@ -1395,18 +1400,8 @@ impl eframe::App for Window {
         let chrome_owned = chrome::before_keys(self, ui, &metrics);
         self.timed_separately += self.chrome.take_cost();
         board_owned |= board::blocked(self, ui.ctx());
-        let (explorer_keys, explorer_pointer) = explorer::before_keys(
-            self,
-            ui,
-            &metrics,
-            pane_owned || board_owned || chrome_owned || viewer::is_open(self),
-        );
-        let (viewer_owned, requests) = viewer::keys(
-            self,
-            ui,
-            &metrics,
-            pane_owned || board_owned || explorer_keys,
-        );
+        let (viewer_owned, explorer_pointer, requests) =
+            sidebar::tool_keys(self, ui, &metrics, pane_owned || board_owned, chrome_owned);
         let area = ui.max_rect();
 
         // **The order is applied before tiling**, so that what gets painted in this same frame is
@@ -6952,6 +6947,8 @@ mod tests {
             pane_view: pane_view::State::default(),
             clipboard: clipboard::Service::default(),
             board: crate::board::State::default(),
+            sidebar: sidebar::Sidebar::default(),
+            viewer_other: viewer::State::default(),
             viewer: viewer::State::default(),
             explorer: explorer::Explorer::default(),
             projects: project_view::State::default(),
@@ -10008,7 +10005,7 @@ mod tests {
     #[test]
     fn a_direct_click_opens_the_link_label_the_panel_painted() {
         let ctx = egui::Context::default();
-        let area = area_of(800.0);
+        let area = area_of(1200.0);
         let mut window = window_with("sleep 30", "sleep 30");
         let dir = PanelDir::create().expect("create the pane's directory");
         std::fs::write(
@@ -10037,7 +10034,7 @@ mod tests {
     #[test]
     fn a_panel_label_of_a_pane_no_longer_on_screen_opens_nothing() {
         let ctx = egui::Context::default();
-        let area = area_of(800.0);
+        let area = area_of(1200.0);
         let mut window = window_with("sleep 30", "sleep 30");
         let dir = PanelDir::create().expect("create the pane's directory");
         std::fs::write(
@@ -12541,7 +12538,7 @@ mod tests {
             let rects = window
                 .active()
                 .root
-                .place(area, metrics.width())
+                .place(console_area(&window, area), metrics.width())
                 .parts
                 .clone();
 
@@ -12601,7 +12598,7 @@ mod tests {
         let rects = window
             .active()
             .root
-            .place(area, metrics.width())
+            .place(console_area(&window, area), metrics.width())
             .parts
             .clone();
         let staying = window.active().panes()[1].name;
@@ -12629,7 +12626,7 @@ mod tests {
         let left = window
             .active()
             .root
-            .place(area, metrics.width())
+            .place(console_area(&window, area), metrics.width())
             .parts
             .clone();
         assert_eq!(
@@ -12639,7 +12636,7 @@ mod tests {
         );
         assert_eq!(
             left[0].width(),
-            area.width(),
+            console_area(&window, area).width(),
             "the console that stayed did not take the place of the one that left"
         );
         // **And the grid its program was told about is the new one, in this same frame.** The
@@ -12866,7 +12863,7 @@ mod tests {
         let rects = window
             .active()
             .root
-            .place(area, metrics.width())
+            .place(console_area(&window, area), metrics.width())
             .parts
             .clone();
         let button = close_button_of(&window, &rects, 0, &metrics);
@@ -12971,7 +12968,7 @@ mod tests {
         let rects = window
             .active()
             .root
-            .place(area, metrics.width())
+            .place(console_area(&window, area), metrics.width())
             .parts
             .clone();
         assert_eq!(rects.len(), 3, "the tab did not end up with three consoles");
@@ -13010,7 +13007,7 @@ mod tests {
         let rects = window
             .active()
             .root
-            .place(area, metrics.width())
+            .place(console_area(&window, area), metrics.width())
             .parts
             .clone();
         let typing_in = window.active().panes()[0].name;
@@ -13108,6 +13105,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut window = window_with("sleep 30", "sleep 30");
         window.headers = header::Headers::NOT_PAINTED;
+        crate::sidebar::probe::configure(&mut window, true, None);
         let area = area_of(1200.0);
 
         let shapes = ui_pass(&mut window, &ctx, area, egui::RawInput::default());
@@ -13115,7 +13113,7 @@ mod tests {
         let rects = window
             .active()
             .root
-            .place(area, metrics.width())
+            .place(console_area(&window, area), metrics.width())
             .parts
             .clone();
 
@@ -20621,7 +20619,7 @@ mod tests {
             // it because the fonts exist from the first one (`context.rs:1120`).
             let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
             let tiling = tile(
-                area,
+                console_area(&window, area),
                 Orientation::Columns,
                 &weights_of(A_QUARTER),
                 metrics.width(),
@@ -20681,7 +20679,7 @@ mod tests {
 
         let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
         let tiling = tile(
-            area,
+            console_area(&window, area),
             Orientation::Columns,
             &weights_of(A_QUARTER),
             metrics.width(),
@@ -20945,7 +20943,7 @@ mod tests {
 
         let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
         let tiling = tile(
-            area,
+            console_area(&window, area),
             Orientation::Columns,
             &weights_of(INITIAL_FRACTION),
             metrics.width(),
@@ -21488,8 +21486,9 @@ mod tests {
 
         let metrics =
             painter::CellMetrics::measure(ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
+        let consoles = crate::tab_bar::geometry(window, area, &metrics).consoles;
         let tiling = tile(
-            area,
+            consoles,
             Orientation::Columns,
             &weights_of(INITIAL_FRACTION),
             metrics.width(),
@@ -21596,7 +21595,7 @@ mod tests {
         let metrics =
             painter::CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
         let tiling = tile(
-            area,
+            console_area(&window, area),
             Orientation::Columns,
             &weights_of(INITIAL_FRACTION),
             metrics.width(),
@@ -21675,16 +21674,17 @@ mod tests {
         // which is exactly what is noticed when dragging. Removing that second tiling broke no
         // test, because the drag was tested without painting and the painting without dragging.
         let area = area_of(800.0 + DIVIDER_THICKNESS);
-        // The divider's center with the initial fraction: half of what is shareable, where the
-        // floor per console does not get to bite, so the grip does not depend on the font's width.
+        let mut window = window_with("sleep 30", "sleep 30");
+        // The divider's center with the initial fraction: half of what is shareable after the
+        // rail, where the floor per console does not get to bite.
+        let consoles = console_area(&window, area);
+        let shareable = consoles.width() - DIVIDER_THICKNESS;
         let grip = egui::pos2(
-            area.left() + 400.0 + DIVIDER_THICKNESS / 2.0,
+            consoles.left() + shareable / 2.0 + DIVIDER_THICKNESS / 2.0,
             area.center().y,
         );
-        // Three quarters of what is shareable: a place the initial fraction does not reach on its
-        // own.
-        let drop_at = egui::pos2(area.left() + 600.0, grip.y);
-        let mut window = window_with("sleep 30", "sleep 30");
+        // Three quarters of the same shareable area: a place the initial fraction does not reach.
+        let drop_at = egui::pos2(consoles.left() + shareable * 0.75, grip.y);
         let ctx = egui::Context::default();
 
         // The drag's three passes, for the same reason as in the `drag_the_divider` test: egui
@@ -21694,8 +21694,8 @@ mod tests {
         ui_pass(&mut window, &ctx, area, press(grip));
         ui_pass(&mut window, &ctx, area, move_pane(drop_at));
 
-        // 600 out of 800 shareable is 0.75 with no remainder, so no tolerance is needed here
-        // either.
+        // The pointer is exactly three quarters through the shared console area, so no tolerance
+        // is needed here either.
         assert_eq!(
             window.active().divider_fractions()[0],
             0.75,
@@ -21704,7 +21704,7 @@ mod tests {
 
         let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
         let tiling = tile(
-            area,
+            console_area(&window, area),
             Orientation::Columns,
             &weights_of(0.75),
             metrics.width(),
@@ -21888,9 +21888,15 @@ mod tests {
     /// the same way as in the painting. If production moved that place, the unfolding tests would
     /// grab where there is nothing left and would fall — which is what is wanted of a helper that
     /// replicates a position.
+    fn console_area(window: &Window, area: egui::Rect) -> egui::Rect {
+        with_metrics(|metrics| crate::tab_bar::geometry(window, area, metrics).consoles)
+    }
+
     fn panel_cut(window: &Window, which: usize, area: egui::Rect) -> f32 {
         let cell_width = with_metrics(CellMetrics::width);
-        let its_area = window.active().root.place(area, cell_width).parts[which];
+        let content =
+            with_metrics(|metrics| crate::tab_bar::geometry(window, area, metrics).consoles);
+        let its_area = window.active().root.place(content, cell_width).parts[which];
         match window.active().panes()[which]
             .tile_with_its_panel(
                 its_area,
@@ -22275,7 +22281,11 @@ mod tests {
         drag_the_panel(&mut window, &ctx, area, 0, area.left() - 5000.0);
 
         let cell = with_metrics(CellMetrics::width);
-        let its_area = window.active().root.place(area, cell).parts[0];
+        let its_area = window
+            .active()
+            .root
+            .place(console_area(&window, area), cell)
+            .parts[0];
         let of_the_pane =
             with_metrics(|m| m.cells_in(its_area.size() - egui::vec2(16.0, 0.0)).cols) as usize;
         let fits = of_the_pane - panel::MINIMUM_CONSOLE as usize;
@@ -22304,7 +22314,11 @@ mod tests {
         one_frame_in(&mut window, &ctx, area, Vec::new());
 
         let cell = with_metrics(CellMetrics::width);
-        let its_area = window.active().root.place(area, cell).parts[0];
+        let its_area = window
+            .active()
+            .root
+            .place(console_area(&window, area), cell)
+            .parts[0];
         let panel_split = window.active().panes()[0].tile_with_its_panel(
             its_area,
             &CellMetrics::of(cell, 16.0),
@@ -22321,7 +22335,11 @@ mod tests {
         );
 
         let before = window.active().divider_fractions()[0];
-        let divider = window.active().root.place(area, cell).dividers[0];
+        let divider = window
+            .active()
+            .root
+            .place(console_area(&window, area), cell)
+            .dividers[0];
         let grip = divider.rect.center();
         let mid_y = grip.y;
         one_frame_in(&mut window, &ctx, area, pointer_at(grip.x, mid_y));
@@ -22495,7 +22513,7 @@ mod tests {
         let rects = window
             .active()
             .root
-            .place(area, metrics.width())
+            .place(console_area(&window, area), metrics.width())
             .parts
             .clone();
         let strip = header::set_the_header_aside(rects[0], &metrics, window.headers)
@@ -22695,11 +22713,21 @@ mod tests {
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
         let cell = with_metrics(CellMetrics::width);
         // Each pane keeps the console's floor plus a hair: the panel has two points to spare.
-        let area = area_of(2.0 * (panel::MINIMUM_CONSOLE * cell + 16.0 + 1.0) + DIVIDER_THICKNESS);
+        // Include the rail width reserved by the shared geometry so that each console, rather than
+        // the whole window, receives this carefully chosen width.
+        let console_floor = panel::MINIMUM_CONSOLE * cell + 16.0 + 1.0;
+        let base_width = 2.0 * console_floor + DIVIDER_THICKNESS;
+        let base_area = area_of(base_width);
+        let rail = base_area.width() - console_area(&window, base_area).width();
+        let area = area_of(base_width + rail);
         with_the_panel_in_place(&mut window, 0, r#"{"lines":["working"]}"#);
         one_frame_in(&mut window, &ctx, area, Vec::new());
 
-        let its_area = window.active().root.place(area, cell).parts[0];
+        let its_area = window
+            .active()
+            .root
+            .place(console_area(&window, area), cell)
+            .parts[0];
         let panel_width = window.active().panes()[0]
             .tile_with_its_panel(its_area, &CellMetrics::of(cell, 16.0), SystemTime::now())
             .panel
@@ -22712,7 +22740,11 @@ mod tests {
         );
 
         let before = window.active().divider_fractions()[0];
-        let divider = window.active().root.place(area, cell).dividers[0];
+        let divider = window
+            .active()
+            .root
+            .place(console_area(&window, area), cell)
+            .dividers[0];
         let grip = divider.rect.center();
         one_frame_in(&mut window, &ctx, area, pointer_at(grip.x, grip.y));
         one_frame_in(&mut window, &ctx, area, button(grip.x, grip.y, true));

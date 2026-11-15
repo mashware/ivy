@@ -5,7 +5,7 @@ mod tests {
     use std::time::Instant;
 
     fn area() -> egui::Rect {
-        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1800.0, 1600.0))
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(2000.0, 1600.0))
     }
 
     fn frame(
@@ -27,6 +27,9 @@ mod tests {
     fn prepare(window: &mut Window) {
         window.chrome.enable();
         window.headers = window.headers.integrated(true);
+        // Keep parity tests in the wide, five-column Board regime. Separate tests exercise the
+        // narrow dock's stacked status columns and ordinary preferred-width behavior.
+        window.sidebar.set_width(1500.0);
     }
 
     fn text_position(shapes: &[egui::epaint::ClippedShape], needle: &str) -> Option<egui::Pos2> {
@@ -221,6 +224,57 @@ mod tests {
     }
 
     #[test]
+    fn narrow_dock_stacks_all_status_columns_with_cards_in_reading_order() {
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 3]);
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        let ctx = egui::Context::default();
+        let names: Vec<_> = window.all_panes().map(|pane| pane.name).collect();
+        for (index, pane) in window.all_panes_mut().enumerate() {
+            match index {
+                0 => {
+                    pane.panel = Some(PanelDir::create().unwrap());
+                    publish_at(pane, r#"{"attention":"wait","lines":["fixture"]}"#);
+                    pane.to_reread.raise();
+                }
+                1 => {
+                    pane.panel = Some(PanelDir::create().unwrap());
+                    publish_at(pane, r#"{"attention":"block","lines":["fixture"]}"#);
+                    pane.to_reread.raise();
+                }
+                2 => native(pane, "working"),
+                3 => native(pane, "done"),
+                _ => {}
+            }
+        }
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
+        let shapes = frame(&mut window, &ctx, vec![]);
+        let labels = ["WAITING FOR YOU", "STUCK", "WORKING", "FINISHED", "IDLE"];
+        let ys: Vec<_> = labels
+            .iter()
+            .map(|label| {
+                text_position(&shapes, label)
+                    .unwrap_or_else(|| panic!("missing stacked Board column {label}"))
+                    .y
+            })
+            .collect();
+        assert!(
+            ys.windows(2).all(|pair| pair[0] < pair[1]),
+            "narrow dock did not stack status columns: {ys:?}"
+        );
+        let cards: Vec<_> = names[..5]
+            .iter()
+            .map(|name| window.board.card_rect(*name).expect("state card painted"))
+            .collect();
+        assert!(
+            cards.windows(2).all(|pair| {
+                (pair[0].left() - pair[1].left()).abs() < 1.0 && pair[0].top() < pair[1].top()
+            }),
+            "state cards did not follow their stacked headers: {cards:?}"
+        );
+    }
+
+    #[test]
     fn expanding_a_long_panel_reveals_the_last_line_without_opening_its_console() {
         let mut window = window_with("sleep 30", "sleep 30");
         prepare(&mut window);
@@ -238,11 +292,12 @@ mod tests {
         );
         pane.to_reread.raise();
         frame(&mut window, &ctx, vec![]);
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
+        let shapes = frame(&mut window, &ctx, vec![]);
+        // Docking resizes the console grid once; the card action must preserve that new geometry.
         let focus = window.active().focus;
         let layout = window.active().root.describe();
         let grids: Vec<_> = window.active().panes().iter().map(|p| p.measured).collect();
-        frame(&mut window, &ctx, chord_with(egui::Key::O));
-        let shapes = frame(&mut window, &ctx, vec![]);
         let card = window.board.card_rect(target).expect("long card painted");
         let on_card = |shapes: &[egui::epaint::ClippedShape], needle: &str| {
             shapes.iter().find_map(|shape| match &shape.shape {
@@ -532,7 +587,7 @@ mod tests {
             pass(
                 &mut window,
                 vec![
-                    egui::Event::PointerMoved(egui::pos2(200.0, 600.0)),
+                    egui::Event::PointerMoved(egui::pos2(viewport.right() - 100.0, 600.0)),
                     egui::Event::MouseWheel {
                         unit: egui::MouseWheelUnit::Point,
                         phase: egui::TouchPhase::Move,
@@ -632,7 +687,7 @@ mod tests {
         prepare(&mut window);
         let ctx = egui::Context::default();
         let target = window.active().focus;
-        let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 480.0));
+        let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 480.0));
         let pass = |window: &mut Window, events| {
             ui_pass(
                 window,

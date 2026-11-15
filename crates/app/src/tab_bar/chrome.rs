@@ -7,6 +7,9 @@ pub(crate) struct Geometry {
     pub cards: Option<egui::Rect>,
     pub gear: Option<egui::Rect>,
     pub consoles: egui::Rect,
+    pub dock: Option<egui::Rect>,
+    pub rail: egui::Rect,
+    pub divider: Option<egui::Rect>,
 }
 
 impl Geometry {
@@ -16,6 +19,9 @@ impl Geometry {
             return Self {
                 cards,
                 gear: None,
+                dock: None,
+                rail: egui::Rect::NOTHING,
+                divider: None,
                 consoles,
             };
         }
@@ -28,13 +34,16 @@ impl Geometry {
         Self {
             cards: (cards.width() > 0.0 && tabs > 0).then_some(cards),
             gear: Some(gear),
+            dock: None,
+            rail: egui::Rect::NOTHING,
+            divider: None,
             consoles,
         }
     }
 }
 
 /// Shared window partition without adding layout policy to the window's behaviour.
-pub(crate) fn geometry(window: &Window, area: egui::Rect, metrics: &CellMetrics) -> Geometry {
+fn raw_geometry(window: &Window, area: egui::Rect, metrics: &CellMetrics) -> Geometry {
     if window.chrome.enabled() {
         let top = (area.top() + crate::chrome::HEIGHT).min(area.bottom());
         let (_, rest) = area.split_top_bottom_at_y(top);
@@ -43,6 +52,9 @@ pub(crate) fn geometry(window: &Window, area: egui::Rect, metrics: &CellMetrics)
         return Geometry {
             cards: Some(cards),
             gear: Some(egui::Rect::NOTHING),
+            dock: None,
+            rail: egui::Rect::NOTHING,
+            divider: None,
             consoles,
         };
     }
@@ -54,6 +66,16 @@ pub(crate) fn geometry(window: &Window, area: egui::Rect, metrics: &CellMetrics)
     )
 }
 
+pub(crate) fn geometry(window: &Window, area: egui::Rect, metrics: &CellMetrics) -> Geometry {
+    let mut geometry = raw_geometry(window, area, metrics);
+    let dock = crate::sidebar::partition(window, geometry.consoles, metrics);
+    geometry.consoles = dock.consoles;
+    geometry.dock = dock.dock;
+    geometry.rail = dock.rail;
+    geometry.divider = dock.divider;
+    geometry
+}
+
 /// Frame layout work has its own named span and is discounted exactly once.
 pub(crate) fn partition(
     window: &mut Window,
@@ -61,9 +83,15 @@ pub(crate) fn partition(
     metrics: &CellMetrics,
 ) -> (Option<egui::Rect>, egui::Rect) {
     let started = std::time::Instant::now();
-    let geometry = geometry(window, area, metrics);
+    let mut geometry = raw_geometry(window, area, metrics);
     window.settings_editor.record_geometry(started.elapsed());
     window.timed_separately += window.settings_editor.take_cost();
+    let started = std::time::Instant::now();
+    let dock = crate::sidebar::partition(window, geometry.consoles, metrics);
+    geometry.consoles = dock.consoles;
+    window.sidebar.last_dock = dock.dock;
+    window.sidebar.record(started.elapsed());
+    window.timed_separately += window.sidebar.take_cost();
     (geometry.cards, geometry.consoles)
 }
 

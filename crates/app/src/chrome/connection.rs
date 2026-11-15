@@ -255,8 +255,12 @@ pub(crate) fn begin_pass(window: &mut Window, ui: &mut egui::Ui, frame: &eframe:
 }
 
 /// Paint after every console's refresh, including background tabs (D13).
-pub(crate) fn after_panels(window: &mut Window, ui: &mut egui::Ui, area: Rect) {
-    crate::board::paint(window, ui, area);
+pub(crate) fn after_panels(window: &mut Window, ui: &mut egui::Ui, _area: Rect) {
+    if let Some(dock) = window.sidebar.last_dock {
+        crate::board::paint(window, ui, dock);
+    } else {
+        crate::board::observe(window, ui.ctx());
+    }
     if !window.chrome.enabled() {
         return;
     }

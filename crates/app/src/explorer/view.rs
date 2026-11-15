@@ -167,14 +167,6 @@ pub(super) fn show(
             ui.set_min_size(rect.size());
             ui.set_max_size(rect.size());
             ui.set_clip_rect(rect);
-            if area.width() >= 560.0 {
-                let grip = egui::Rect::from_center_size(
-                    rect.right_center(),
-                    egui::vec2(12.0, rect.height()),
-                );
-                ui.interact(grip, egui::Id::new("explorer-divider"), egui::Sense::drag())
-                    .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
-            }
             ui.painter()
                 .rect_filled(rect, 0.0, theme.panel_background());
             ui.painter().line_segment(

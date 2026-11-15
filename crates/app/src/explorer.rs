@@ -24,7 +24,6 @@ struct Cached {
 
 pub(crate) struct Explorer {
     visible: bool,
-    width: f32,
     pinned: Option<usize>,
     navigation: HashMap<usize, Navigation>,
     cache: HashMap<Request, Cached>,
@@ -47,7 +46,6 @@ impl Default for Explorer {
     fn default() -> Self {
         Self {
             visible: false,
-            width: 280.0,
             pinned: None,
             navigation: HashMap::new(),
             cache: HashMap::new(),
@@ -191,12 +189,7 @@ impl Explorer {
     }
 
     fn rect(&self, area: egui::Rect) -> egui::Rect {
-        let width = if area.width() < 560.0 {
-            area.width()
-        } else {
-            self.width.min(area.width())
-        };
-        egui::Rect::from_min_size(area.min, egui::vec2(width.max(0.0), area.height().max(0.0)))
+        area
     }
 
     fn hide(&mut self) {
@@ -213,11 +206,22 @@ fn active(window: &Window) -> Option<usize> {
         .map(|index| window.active().panes()[index].name)
 }
 
+pub(crate) fn suspend(window: &mut Window) {
+    window.explorer.hide();
+    window.explorer.held = false;
+    window.explorer.queued_open = false;
+}
+
+pub(crate) fn reveal(window: &mut Window) {
+    window.explorer.visible = true;
+    window.explorer.keyboard = true;
+}
+
 pub(crate) fn toggle(window: &mut Window, ctx: &egui::Context) {
-    if window.explorer.visible {
-        window.explorer.hide();
+    if crate::sidebar::active(window) == Some(crate::sidebar::Tool::Files) {
+        crate::sidebar::close(window, ctx);
     } else {
-        window.explorer.queued_open = true;
+        crate::sidebar::select(window, crate::sidebar::Tool::Files);
     }
     window.explorer.blocked_frame = Some(ctx.cumulative_frame_nr());
     window.explorer.pointer_frame = Some(ctx.cumulative_frame_nr());
@@ -252,7 +256,6 @@ pub(crate) fn before_keys(
     reconcile(window);
     let ctx = ui.ctx();
     if window.explorer.queued_open {
-        crate::viewer::hide(window);
         window.explorer.queued_open = false;
         window.explorer.visible = true;
         window.explorer.keyboard = true;
@@ -266,7 +269,11 @@ pub(crate) fn before_keys(
     if !state.visible && !state.held && state.blocked_frame != Some(frame) {
         return (false, false);
     }
-    let area = crate::tab_bar::geometry(window, ui.max_rect(), metrics).consoles;
+    let Some(area) = crate::tab_bar::geometry(window, ui.max_rect(), metrics).dock else {
+        window.explorer.keyboard = false;
+        window.explorer.held = false;
+        return (false, false);
+    };
     let state = &mut window.explorer;
     let rect = state.rect(area);
     let over =
@@ -274,21 +281,8 @@ pub(crate) fn before_keys(
     if ctx.input(|i| i.pointer.any_pressed()) && !state.held {
         state.keyboard = over;
         state.held = over;
-        state.resizing = over
-            && area.width() >= 560.0
-            && ctx.input(|i| {
-                i.pointer
-                    .interact_pos()
-                    .is_some_and(|p| (p.x - rect.right()).abs() <= 6.0)
-            });
     }
     let gesture = state.held;
-    if state.resizing
-        && let Some(p) = ctx.input(|i| i.pointer.interact_pos())
-    {
-        state.width =
-            (p.x - area.left()).clamp(200.0_f32.min(area.width()), 480.0_f32.min(area.width()));
-    }
     if !ctx.input(|i| i.focused && i.pointer.any_down()) {
         state.held = false;
         state.resizing = false;
@@ -330,6 +324,11 @@ pub(crate) fn before_keys(
             })
         });
     }
+    if !window.explorer.visible
+        && crate::sidebar::active(window) == Some(crate::sidebar::Tool::Files)
+    {
+        crate::sidebar::close(window, ctx);
+    }
     (owned, pointer_owned)
 }
 
@@ -359,11 +358,13 @@ pub(crate) fn show(window: &mut Window, ui: &mut egui::Ui, area: egui::Rect) {
         label.as_deref(),
         window.theme,
     );
+    if !window.explorer.visible {
+        crate::sidebar::close(window, ui.ctx());
+    }
     if let Some((pane, path)) = open {
         if crate::viewer::open_markdown_target(window, pane, path, None) {
             window.explorer.hide();
         } else {
-            crate::viewer::hide(window);
             window.explorer.message =
                 "Send or clear the review comments before opening another document.".into();
         }

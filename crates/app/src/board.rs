@@ -41,6 +41,7 @@ pub(crate) struct State {
     scroll_selected: bool,
     blocked_frame: Option<u64>,
     awaiting_release: bool,
+    keyboard_focus: bool,
     pub(crate) timing: crate::measure::Board,
 }
 
@@ -69,6 +70,7 @@ impl Default for State {
             scroll_selected: false,
             blocked_frame: None,
             awaiting_release: false,
+            keyboard_focus: false,
             timing: crate::measure::Board::default(),
         }
     }
@@ -97,6 +99,37 @@ impl State {
 }
 
 pub(crate) use input::{before_keys, blocked, cancel_gestures, toggle};
+
+/// Called by the shared sidebar host when Board becomes the selected tool.
+/// Keep the user's Board navigation and cached geometry across hide/reopen.
+pub(crate) fn reveal(window: &mut crate::Window, ctx: &egui::Context) {
+    if !window.board.enabled {
+        return;
+    }
+    if !window.board.open {
+        window.board.open = true;
+        window.board.original = Some(window.active().focus);
+        if window.board.selected.is_none() {
+            window.board.selected = Some(window.active().focus);
+            window.board.ordinal = 0;
+            window.board.scroll_selected = true;
+        }
+        window.board.surface.pressed = None;
+        window.board.activate = None;
+        window.board.keyboard_focus = true;
+        window.board.blocked_frame = Some(ctx.cumulative_frame_nr());
+    }
+    ctx.request_repaint();
+}
+
+/// Release Board input ownership while leaving its global view state intact.
+pub(crate) fn suspend(window: &mut crate::Window) {
+    window.board.open = false;
+    window.board.keyboard_focus = false;
+    window.board.surface.pressed = None;
+    window.board.surface.child_pressed = None;
+    window.board.activate = None;
+}
 
 /// Runs only after active and background panel refresh, preserving normal PTY geometry.
 pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, area: egui::Rect) {
@@ -205,8 +238,7 @@ pub(crate) fn activate(window: &mut crate::Window, ctx: &egui::Context, target: 
         window.pane_view.clear(tab.name);
     }
     window.board.timing.navigation(changed);
-    window.board.original = None;
-    input::close(window, ctx);
+    crate::sidebar::close(window, ctx);
 }
 
 pub(crate) fn configure(window: &mut crate::Window, settings: &crate::settings::Settings) {

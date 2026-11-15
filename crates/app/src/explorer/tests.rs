@@ -76,14 +76,12 @@ fn cache_eviction_never_discards_navigation() {
 }
 
 #[test]
-fn narrow_overlay_fits_without_changing_remembered_width() {
+fn explorer_uses_the_exact_host_allocation() {
     let state = Explorer::default();
-    let area = |width| egui::Rect::from_min_size(egui::pos2(10.0, 40.0), egui::vec2(width, 600.0));
-    assert_eq!(state.rect(area(700.0)).width(), 280.0);
-    for width in [559.0, 300.0, 120.0] {
-        assert_eq!(state.rect(area(width)), area(width));
+    for width in [700.0, 320.0, 120.0] {
+        let area = egui::Rect::from_min_size(egui::pos2(800.0, 40.0), egui::vec2(width, 600.0));
+        assert_eq!(state.rect(area), area);
     }
-    assert_eq!(state.width, 280.0);
 }
 
 #[test]

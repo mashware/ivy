@@ -151,7 +151,8 @@ fn paint_contents(
     window.board.surface.child_hits.clear();
     window.board.order.clear();
     let reveal = std::mem::take(&mut window.board.scroll_selected);
-    let canvas_width = ui.available_width().max(1360.0);
+    let canvas_width = ui.available_width().max(1.0);
+    let stacked = canvas_width < 1360.0;
     let widths = super::layout::column_widths(canvas_width - 16.0, 8.0);
     let scroll_id = ui.make_persistent_id("board-list");
     let geometry_id = scroll_id.with("geometry");
@@ -166,7 +167,7 @@ fn paint_contents(
         next_offset: Vec2::ZERO,
         cards: Vec::new(),
     };
-    let output = egui::ScrollArea::both()
+    let output = egui::ScrollArea::vertical()
         .animated(false)
         .scroll_offset(offset)
         .id_salt("board-list")
@@ -200,113 +201,96 @@ fn paint_contents(
                 } else {
                     section_top
                 };
-                let counts = COLUMNS.map(|c| {
-                    section
-                        .entries
-                        .iter()
-                        .filter(|e| column(e, signals, now) == c)
-                        .count()
-                });
-                paint_columns(ui, canvas_width, &widths, counts, &theme);
-                let mut longest = 0;
-                egui::Frame::new().inner_margin(8).show(ui, |ui| {
-                    ui.horizontal_top(|ui| {
-                        for (index, c) in COLUMNS.iter().enumerate() {
-                            let mut entries: Vec<_> = section
-                                .entries
-                                .iter()
-                                .filter(|e| column(e, signals, now) == *c)
-                                .collect();
-                            if *c == Column::Wait {
-                                entries.sort_by_key(|e| window.board.observations.since(e.pane));
-                            }
-                            longest = longest.max(entries.len());
-                            ui.allocate_ui_with_layout(
-                                egui::vec2(widths[index], 0.0),
-                                egui::Layout::top_down(egui::Align::Min),
-                                |ui| {
-                                    ui.set_min_width(widths[index]);
-                                    if entries.is_empty() {
-                                        ui.weak("—");
-                                    }
-                                    for (row, entry) in entries.into_iter().enumerate() {
-                                        let signal = signals.get(&entry.pane).copied();
-                                        let panel_wait = entry
-                                            .snapshot
-                                            .document
-                                            .as_ref()
-                                            .and_then(|p| p.attention)
-                                            == Some(panel_contract::Attention::Wait)
-                                            && !signal.is_some_and(|s| s.busy);
-                                        let backed = if *c == Column::Wait && !panel_wait {
-                                            signal.is_some_and(|s| s.backed)
-                                        } else {
-                                            entry.snapshot.attention.is_none_or(|a| a.backed)
-                                        };
-                                        let since = window.board.observations.since(entry.pane);
-                                        let branch = window
-                                            .board
-                                            .branches
-                                            .get(entry.pane)
-                                            .map(str::to_owned);
-                                        let selected = window.board.selected == Some(entry.pane);
-                                        let show_selection =
-                                            selected && window.board.original != Some(entry.pane);
-                                        let board = &mut window.board;
-                                        let reader =
-                                            board.surface.cards.entry(entry.pane).or_default();
-                                        let rect = cards::paint(
-                                            ui,
-                                            entry,
-                                            *c,
-                                            backed,
-                                            since,
-                                            branch.as_deref(),
-                                            show_selection,
-                                            reader,
-                                            &mut window.discoverer,
-                                            &theme,
-                                            &mut board.timing,
-                                            &mut board.surface.child_hits,
-                                        );
-                                        board.order.push(Slot {
-                                            pane: entry.pane,
-                                            row: row_base + row,
-                                            column: index,
-                                        });
-                                        if rect.intersects(ui.clip_rect()) {
-                                            board
-                                                .surface
-                                                .painted
-                                                .push((entry.pane, rect.intersect(ui.clip_rect())));
-                                            board.timing.painted(1);
-                                        }
-                                        let mut context = rect;
-                                        if row == 0 {
-                                            context.min.y = context_top;
-                                        }
-                                        geometry.cards.push((entry.pane, context));
-                                        if selected
-                                            && reveal
-                                            && previous.as_ref().is_none_or(|g| {
-                                                !g.cards.iter().any(|(pane, _)| *pane == entry.pane)
-                                            })
-                                        {
-                                            ui.scroll_to_rect(context, None);
-                                        }
-                                        if let Some(delay) =
-                                            cards::age_refresh(since, Instant::now())
-                                        {
-                                            ui.ctx().request_repaint_after(delay);
-                                        }
-                                        ui.add_space(8.0);
-                                    }
-                                },
-                            );
+                if stacked {
+                    for c in COLUMNS {
+                        let mut entries: Vec<_> = section
+                            .entries
+                            .iter()
+                            .filter(|entry| column(entry, signals, now) == c)
+                            .collect();
+                        if c == Column::Wait {
+                            entries
+                                .sort_by_key(|entry| window.board.observations.since(entry.pane));
                         }
+                        let entry_count = entries.len();
+                        let context_top = ui.next_widget_position().y;
+                        paint_stacked_header(ui, c, entries.len(), canvas_width, &theme);
+                        egui::Frame::new().inner_margin(8).show(ui, |ui| {
+                            if entries.is_empty() {
+                                ui.weak("—");
+                            }
+                            paint_entries(
+                                window,
+                                ui,
+                                entries,
+                                c,
+                                0,
+                                row_base,
+                                context_top,
+                                reveal,
+                                previous.as_ref(),
+                                &mut geometry,
+                                signals,
+                                canvas_width,
+                                &theme,
+                            );
+                        });
+                        row_base += entry_count;
+                    }
+                } else {
+                    let counts = COLUMNS.map(|c| {
+                        section
+                            .entries
+                            .iter()
+                            .filter(|entry| column(entry, signals, now) == c)
+                            .count()
                     });
-                });
-                row_base += longest.max(1);
+                    paint_columns(ui, canvas_width, &widths, counts, &theme);
+                    let mut longest = 0;
+                    egui::Frame::new().inner_margin(8).show(ui, |ui| {
+                        ui.horizontal_top(|ui| {
+                            for (index, c) in COLUMNS.iter().enumerate() {
+                                let mut entries: Vec<_> = section
+                                    .entries
+                                    .iter()
+                                    .filter(|entry| column(entry, signals, now) == *c)
+                                    .collect();
+                                if *c == Column::Wait {
+                                    entries.sort_by_key(|entry| {
+                                        window.board.observations.since(entry.pane)
+                                    });
+                                }
+                                longest = longest.max(entries.len());
+                                ui.allocate_ui_with_layout(
+                                    egui::vec2(widths[index], 0.0),
+                                    egui::Layout::top_down(egui::Align::Min),
+                                    |ui| {
+                                        ui.set_min_width(widths[index]);
+                                        if entries.is_empty() {
+                                            ui.weak("—");
+                                        }
+                                        paint_entries(
+                                            window,
+                                            ui,
+                                            entries,
+                                            *c,
+                                            index,
+                                            row_base,
+                                            context_top,
+                                            reveal,
+                                            previous.as_ref(),
+                                            &mut geometry,
+                                            signals,
+                                            widths[index],
+                                            &theme,
+                                        );
+                                    },
+                                );
+                            }
+                        });
+                    });
+                    row_base += longest.max(1);
+                }
                 ui.separator();
             }
         });
@@ -319,6 +303,133 @@ fn paint_contents(
         .board
         .order
         .sort_by_key(|slot| (slot.row, slot.column));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn paint_entries(
+    window: &mut Window,
+    ui: &mut egui::Ui,
+    entries: Vec<&Entry>,
+    column: Column,
+    column_index: usize,
+    row_base: usize,
+    context_top: f32,
+    reveal: bool,
+    previous: Option<&Geometry>,
+    geometry: &mut Geometry,
+    signals: &HashMap<usize, View>,
+    width: f32,
+    theme: &crate::theme::Theme,
+) {
+    ui.set_min_width(width);
+    for (row, entry) in entries.into_iter().enumerate() {
+        let signal = signals.get(&entry.pane).copied();
+        let panel_wait = entry
+            .snapshot
+            .document
+            .as_ref()
+            .and_then(|panel| panel.attention)
+            == Some(panel_contract::Attention::Wait)
+            && !signal.is_some_and(|view| view.busy);
+        let backed = if column == Column::Wait && !panel_wait {
+            signal.is_some_and(|view| view.backed)
+        } else {
+            entry
+                .snapshot
+                .attention
+                .is_none_or(|attention| attention.backed)
+        };
+        let since = window.board.observations.since(entry.pane);
+        let branch = window.board.branches.get(entry.pane).map(str::to_owned);
+        let selected = window.board.selected == Some(entry.pane);
+        let show_selection = selected && window.board.original != Some(entry.pane);
+        let board = &mut window.board;
+        let reader = board.surface.cards.entry(entry.pane).or_default();
+        let rect = cards::paint(
+            ui,
+            entry,
+            column,
+            backed,
+            since,
+            branch.as_deref(),
+            show_selection,
+            reader,
+            &mut window.discoverer,
+            theme,
+            &mut board.timing,
+            &mut board.surface.child_hits,
+        );
+        board.order.push(Slot {
+            pane: entry.pane,
+            row: row_base + row,
+            column: column_index,
+        });
+        if rect.intersects(ui.clip_rect()) {
+            board
+                .surface
+                .painted
+                .push((entry.pane, rect.intersect(ui.clip_rect())));
+            board.timing.painted(1);
+        }
+        let mut context = rect;
+        if row == 0 {
+            context.min.y = context_top;
+        }
+        geometry.cards.push((entry.pane, context));
+        if selected
+            && reveal
+            && previous.is_none_or(|old| !old.cards.iter().any(|(pane, _)| *pane == entry.pane))
+        {
+            ui.scroll_to_rect(context, None);
+        }
+        if let Some(delay) = cards::age_refresh(since, Instant::now()) {
+            ui.ctx().request_repaint_after(delay);
+        }
+        ui.add_space(8.0);
+    }
+}
+
+fn paint_stacked_header(
+    ui: &mut egui::Ui,
+    column: Column,
+    count: usize,
+    width: f32,
+    theme: &crate::theme::Theme,
+) {
+    let (header, _) = ui.allocate_exact_size(egui::vec2(width, 30.0), egui::Sense::hover());
+    let ink = cards::color(column, theme);
+    let icon = Rect::from_center_size(
+        egui::pos2(header.left() + 14.0, header.center().y),
+        egui::vec2(12.0, 16.0),
+    );
+    super::style::column_mark(ui.painter(), icon, column, ink);
+    ui.painter().text(
+        egui::pos2(header.left() + 26.0, header.center().y),
+        egui::Align2::LEFT_CENTER,
+        column.name().to_uppercase(),
+        egui::FontId::monospace(12.0),
+        ink,
+    );
+    let badge = Rect::from_center_size(
+        egui::pos2(header.right() - 18.0, header.center().y),
+        egui::vec2(28.0, 18.0),
+    );
+    ui.painter().rect_filled(badge, 9.0, theme.divider());
+    ui.painter().text(
+        badge.center(),
+        egui::Align2::CENTER_CENTER,
+        count.to_string(),
+        egui::FontId::monospace(11.0),
+        if count > 0 {
+            ink
+        } else {
+            super::style::dim(theme)
+        },
+    );
+    ui.painter().line_segment(
+        [header.left_bottom(), header.right_bottom()],
+        egui::Stroke::new(1.0, theme.divider()),
+    );
 }
 
 fn paint_columns(
