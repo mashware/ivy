@@ -80,6 +80,8 @@ fn narrow_overlay_fits_without_changing_remembered_width() {
     let state = Explorer::default();
     let area = |width| egui::Rect::from_min_size(egui::pos2(10.0, 40.0), egui::vec2(width, 600.0));
     assert_eq!(state.rect(area(700.0)).width(), 280.0);
+    assert_eq!(state.rect(area(700.0)).right(), area(700.0).right());
+    assert_eq!(state.rect(area(700.0)).left(), 430.0);
     for width in [559.0, 300.0, 120.0] {
         assert_eq!(state.rect(area(width)), area(width));
     }
@@ -159,4 +161,49 @@ fn cache_pressure_keeps_the_current_tree_root_instead_of_reloading_it() {
         state.cache.contains_key(&root),
         "evicting root makes the next frame reload the whole tree"
     );
+}
+
+#[test]
+fn right_overlay_resizes_from_left_edge_and_keeps_console_geometry() {
+    let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+    let ctx = egui::Context::default();
+    let area = egui::Rect::from_min_size(egui::pos2(30.0, 20.0), egui::vec2(1200.0, 700.0));
+    one_frame_in(&mut window, &ctx, area, vec![]);
+    let before: Vec<_> = window.all_panes().map(|p| (p.name, p.measured)).collect();
+    toggle(&mut window, &ctx);
+    one_frame_in(&mut window, &ctx, area, vec![]);
+    let metrics =
+        crate::painter::CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
+    let content = crate::tab_bar::geometry(&window, area, &metrics).consoles;
+    let start = window.explorer.rect(content).left_center() + egui::vec2(2.0, 0.0);
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    one_frame_in(
+        &mut window,
+        &ctx,
+        area,
+        vec![egui::Event::PointerMoved(start), button(start, true)],
+    );
+    let end = start - egui::vec2(70.0, 0.0);
+    one_frame_in(
+        &mut window,
+        &ctx,
+        area,
+        vec![egui::Event::PointerMoved(end)],
+    );
+    one_frame_in(&mut window, &ctx, area, vec![button(end, false)]);
+    assert_eq!(window.explorer.width, 348.0);
+    assert_eq!(window.explorer.rect(content).right(), content.right());
+    assert_eq!(
+        window
+            .all_panes()
+            .map(|p| (p.name, p.measured))
+            .collect::<Vec<_>>(),
+        before
+    );
+    assert!(!window.explorer.resizing && !window.explorer.held);
 }

@@ -163,11 +163,28 @@ fn click_at(window: &mut crate::Window, ctx: &egui::Context, area: egui::Rect, p
     frame(window, ctx, area, vec![button(false)]);
 }
 
+fn control_label(text: &str) -> &str {
+    match text {
+        "Hide" => "×",
+        "Pin this console" => "Pin",
+        "Follow active pane" => "Follow",
+        "Up" => "Up",
+        "Use console directory" => "Reset",
+        "Refresh" => "Refresh",
+        "Copy path" => "Copy",
+        "Open" => "Open",
+        _ => text,
+    }
+}
+
 fn click_text(window: &mut crate::Window, ctx: &egui::Context, area: egui::Rect, text: &str) {
     let painted = frame(window, ctx, area, vec![]);
     let pos = painted
         .iter()
-        .find(|(label, _)| label == text)
+        .find(|(label, pos)| {
+            label == control_label(text)
+                && (control_label(text) == text || window.explorer.rect(area).contains(*pos))
+        })
         .unwrap_or_else(|| panic!("{text:?} not painted; visible text: {painted:?}"))
         .1;
     click_at(window, ctx, area, pos);
@@ -419,7 +436,7 @@ fn files_menu_pins_and_follows_across_tabs_without_leaking_input_or_retiling() {
         &ctx,
         area,
         vec![
-            egui::Event::PointerMoved(egui::pos2(120.0, 350.0)),
+            egui::Event::PointerMoved(egui::pos2(area.right() - 120.0, 350.0)),
             egui::Event::MouseWheel {
                 unit: egui::MouseWheelUnit::Line,
                 delta: egui::vec2(0.0, -2.0),
@@ -427,7 +444,7 @@ fn files_menu_pins_and_follows_across_tabs_without_leaking_input_or_retiling() {
                 phase: egui::TouchPhase::Move,
             },
             egui::Event::PointerButton {
-                pos: egui::pos2(120.0, 350.0),
+                pos: egui::pos2(area.right() - 120.0, 350.0),
                 button: egui::PointerButton::Primary,
                 pressed: false,
                 modifiers: egui::Modifiers::NONE,
@@ -717,11 +734,15 @@ fn refresh_clears_a_deleted_selection_and_reports_a_deleted_explorer_root() {
             .iter()
             .any(|(text, _)| text.contains("Directory unavailable."))
         {
-            assert!(painted.iter().any(|(text, _)| text == "Refresh"));
             assert!(
                 painted
                     .iter()
-                    .any(|(text, _)| text == "Use console directory")
+                    .any(|(text, _)| text == control_label("Refresh"))
+            );
+            assert!(
+                painted
+                    .iter()
+                    .any(|(text, _)| text == control_label("Use console directory"))
             );
             break;
         }
@@ -733,4 +754,32 @@ fn refresh_clears_a_deleted_selection_and_reports_a_deleted_explorer_root() {
     }
     assert_eq!(window.explorer.navigation[&pane].root, Some(child));
     assert_eq!(window.projects.directory(pane), Some(directory.0.as_path()));
+}
+
+#[test]
+fn very_narrow_explorer_keeps_pin_and_hide_controls_reachable() {
+    let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+    let ctx = egui::Context::default();
+    let area = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(120.0, 600.0));
+    frame(&mut window, &ctx, area, vec![]);
+    toggle(&mut window, &ctx);
+    frame(&mut window, &ctx, area, vec![]);
+    let painted = frame(&mut window, &ctx, area, vec![]);
+    for name in ["Files", "Pin", "×", "Up", "Reset", "Refresh"] {
+        let pos = painted
+            .iter()
+            .find(|(text, _)| text == name)
+            .unwrap_or_else(|| panic!("missing {name}: {painted:?}"))
+            .1;
+        assert!(
+            area.contains(pos),
+            "{name} outside narrow overlay at {pos:?}"
+        );
+    }
+    click_text(&mut window, &ctx, area, "Pin this console");
+    assert!(window.explorer.pinned.is_some());
+    click_text(&mut window, &ctx, area, "Follow active pane");
+    assert!(window.explorer.pinned.is_none());
+    click_text(&mut window, &ctx, area, "Hide");
+    assert!(!window.explorer.visible);
 }

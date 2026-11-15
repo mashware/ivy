@@ -196,7 +196,10 @@ impl Explorer {
         } else {
             self.width.min(area.width())
         };
-        egui::Rect::from_min_size(area.min, egui::vec2(width.max(0.0), area.height().max(0.0)))
+        egui::Rect::from_min_size(
+            egui::pos2(area.right() - width.max(0.0), area.top()),
+            egui::vec2(width.max(0.0), area.height().max(0.0)),
+        )
     }
 
     fn hide(&mut self) {
@@ -279,7 +282,7 @@ pub(crate) fn before_keys(
             && ctx.input(|i| {
                 i.pointer
                     .interact_pos()
-                    .is_some_and(|p| (p.x - rect.right()).abs() <= 6.0)
+                    .is_some_and(|p| (p.x - rect.left()).abs() <= 6.0)
             });
     }
     let gesture = state.held;
@@ -287,7 +290,7 @@ pub(crate) fn before_keys(
         && let Some(p) = ctx.input(|i| i.pointer.interact_pos())
     {
         state.width =
-            (p.x - area.left()).clamp(200.0_f32.min(area.width()), 480.0_f32.min(area.width()));
+            (area.right() - p.x).clamp(200.0_f32.min(area.width()), 480.0_f32.min(area.width()));
     }
     if !ctx.input(|i| i.focused && i.pointer.any_down()) {
         state.held = false;
