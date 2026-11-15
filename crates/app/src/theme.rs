@@ -153,7 +153,7 @@ impl NamedTheme {
                 cursor: color(cursor),
                 divider: color(mix(25)),
                 // ANSI green, not blue: blue is the `done` claim (D94), and the accent must differ.
-                focus: color(palette[2]),
+                focus: green_focus(color(palette[2]), color(palette[10]), color(background)),
                 panel_background: color(mix(5)),
             };
         }
@@ -224,6 +224,30 @@ impl NamedTheme {
             panel_background: color(panel),
         }
     }
+}
+
+/// The green a converted palette's focus is taken from: normal green, else bright green, as long as
+/// it reaches 3:1 against the background — a focus border is a non-text mark — else normal green
+/// moved toward the background's opposite until it does. Catppuccin Latte's green reaches only 2.96.
+fn green_focus(green: Color32, bright: Color32, background: Color32) -> Color32 {
+    const MARK_CONTRAST: f32 = 3.0;
+    if let Some(found) = [green, bright]
+        .into_iter()
+        .find(|c| project_ink_contrast(*c, background) >= MARK_CONTRAST)
+    {
+        return found;
+    }
+    let ink = if project_ink_contrast(Color32::WHITE, background)
+        >= project_ink_contrast(Color32::BLACK, background)
+    {
+        Color32::WHITE
+    } else {
+        Color32::BLACK
+    };
+    (0..=100)
+        .map(|p| mix(green, ink, f32::from(p as u8) / 100.0))
+        .find(|c| project_ink_contrast(*c, background) >= MARK_CONTRAST)
+        .unwrap_or(ink)
 }
 
 impl Default for Theme {
@@ -590,8 +614,7 @@ fn brighten(c: TermColor) -> TermColor {
     }
 }
 
-/// Mixes two colors, with `p` as the share the second takes.
-/// Moves `a` toward `b` by `p`, per channel in gamma space.
+/// Mixes two colors, with `p` as the share the second takes, per channel in gamma space.
 pub(crate) fn mix(a: Color32, b: Color32, p: f32) -> Color32 {
     let channel = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * p).round() as u8;
     Color32::from_rgb(
@@ -681,7 +704,8 @@ mod tests {
                     (actual.background, actual.foreground, actual.cursor),
                     (rgb(bg), rgb(fg), rgb(cursor))
                 );
-                assert_eq!(actual.focus, rgb(colors[2]));
+                // Green, readable as a mark on the background (D94).
+                assert!(project_ink_contrast(actual.focus, actual.background) >= 3.0);
             }
         }
         assert_eq!(
@@ -690,6 +714,33 @@ mod tests {
         );
         assert!(!NamedTheme::RosePineDawn.is_dark());
         assert!(NamedTheme::RosePineMoon.is_dark());
+    }
+
+    /// Nord's green reads on its background and is the focus as it comes; Catppuccin Latte's does
+    /// not reach 3:1, so its focus is moved until it does instead of falling back to blue (D94).
+    #[test]
+    fn converted_palettes_take_a_green_focus_that_reads_as_a_mark() {
+        let rgb = |hex: u32| Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+        assert_eq!(NamedTheme::Nord.theme().focus, rgb(0xa3be8c));
+        let latte = NamedTheme::CatppuccinLatte.theme();
+        assert!(project_ink_contrast(rgb(0x40a02b), rgb(0xeff1f5)) < 3.0);
+        assert_ne!(latte.focus, rgb(0x40a02b));
+        assert_ne!(latte.focus, latte.palette[4]);
+        assert!(project_ink_contrast(latte.focus, latte.background) >= 3.0);
+    }
+
+    /// A step in progress paints in the accent, never in the `done` claim's blue (D94).
+    #[test]
+    fn the_current_step_paints_in_the_accent() {
+        let t = theme();
+        assert_eq!(
+            t.by_mark(Mark::Current),
+            Color32::from_rgb(0x3C, 0xC3, 0x84)
+        );
+        assert_ne!(
+            t.by_mark(Mark::Current),
+            t.attention_color(Attention::Done, true)
+        );
     }
 
     #[test]

@@ -9737,19 +9737,24 @@ hex. This amends D59 (what «no theme» means) and D65 (the derived focus of con
 
 **Decision.** `ivy-night` and `ivy-day` join the catalog as hand-written themes of all twenty-two
 colors; with no `theme` line, Ivy Night is the base, and Settings names that choice «Ivy Night
-(default)». The interface reads `Roles` (`theme/roles.rs`): chrome, base, panel, raised, hover, sel,
+(default)». The interface's colors come from `Roles` (`theme/roles.rs`): chrome, base, panel, raised, hover, sel,
 line, line2, three text inks, accent and its ink, the three claim colors and their soft fills,
 diff backgrounds, scrim and one shadow. Each is a stated rule over the theme's colors — for example
 `chrome = mix(background, black, 22 %)` on a dark theme, `accent = focus`, `done = palette[4]`.
-Only text is corrected for contrast: muted text is brought back toward the foreground until it reads
-at 4.5:1, and a collapsed configuration falls back to black or white so Settings stays legible. A
-person's explicit colors are used verbatim. `Roles` is a pure function of a theme, called wherever a
-theme is painted; egui's style is written from it into both of egui's styles, with the preference
+Only text is corrected for contrast: secondary and muted text are brought back toward the foreground
+until they read at 4.5:1 on every surface text is set on (the console background, the panel, raised
+surfaces and hover), and a collapsed configuration falls back to black or white so Settings stays
+legible. A person's explicit colors are used verbatim. `Roles` is a pure function of a theme rather
+than a cache, because the themes it will be asked about differ (the live one, the Settings draft, the
+Board's derived one); egui's style is written from it into both of egui's styles, with the preference
 pinned, only when the effective theme changes.
 
 **Green means accent, blue means unread.** The `done` claim moves from ANSI green to ANSI blue, a
-panel's `current` step moves to the accent, and converted palettes and the two hand-written ones take
-their focus from ANSI green, so the accent never equals the `done` claim. The producer's `accent`
+panel's `current` step moves to the accent, and every theme's focus is a green, so the accent never
+equals the `done` claim: Ivy Night, Ivy Day and Tokyo Night use their normal green, Gruvbox its bright
+green, and converted palettes their normal green, else their bright one, else normal green moved until
+it reads at 3:1 as a mark on the background — Catppuccin Latte's reaches only 2.96. The Board keeps
+D93's owner-chosen blue for Working by naming ANSI blue rather than the focus. The producer's `accent`
 style stays ANSI blue, which the design paints as information.
 
 **Discarded:** a fixed brand palette for the chrome (ignores the person's theme, as D66 already
@@ -9777,11 +9782,12 @@ the definitions — start-up, a configured family, fallback discovery, a Setting
 font — starts from that base, so none of them can drop it. A configured `font` still goes first.
 Embedding needs no enumeration of the machine, so D24 stands.
 
-**D9's symbols over the new face.** The six body marks are all in Geist Mono and measure one cell.
-Of the three claim symbols, `⊘` is not, and comes from egui's Hack behind it: Hack's advance is
-1233/2048 of the size and Geist Mono's 600/1000, 0.03 points apart at 14. The symbol test now bounds
-the difference to a hundredth of a cell, which still fails on a missing glyph (zero) and on an emoji
-glyph (almost two cells), the two failures D9 was written against.
+**D9's symbols over the new face.** The six body marks are all in Geist Mono and measure exactly one
+cell. Two of the three claim symbols, `⊘` and `∎`, are not in Geist Mono and come from the faces behind
+it; `⊘` comes from egui's Hack, whose advance is 1233/2048 of the size against Geist Mono's 600/1000,
+0.03 points apart at 14. The claim symbol test bounds the difference to a hundredth of a cell, which
+still fails on a missing glyph (zero) and on an emoji glyph (almost two cells), the two failures D9 was
+written against; both symbol tests also pin the cell to Geist Mono's, so they cannot pass over Hack.
 
 **Discarded:** keeping egui's monospaced face for the terminal (the owner's choice, against the
 three advisors' recommendation, because the design names Geist Mono); registering the bundled faces

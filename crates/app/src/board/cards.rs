@@ -45,7 +45,9 @@ pub(super) fn color(column: Column, theme: &Theme) -> Color32 {
     match column {
         Column::Wait => theme.color(term_core::TermColor::Indexed(3)),
         Column::Block => theme.color(term_core::TermColor::Indexed(1)),
-        Column::Working => theme.focus(),
+        // ANSI blue as D93's owner chose, not `focus`: since D94 focus is ANSI green, which would
+        // paint Working the colour of Finished.
+        Column::Working => theme.color(term_core::TermColor::Indexed(4)),
         Column::Done => theme.color(term_core::TermColor::Indexed(2)),
         Column::Idle => theme.divider(),
     }
@@ -317,6 +319,20 @@ pub(super) fn age_refresh(since: Option<Instant>, now: Instant) -> Option<Durati
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Working stays the owner's blue and Finished green (D93), written out: since D94 the focus is
+    /// green, so a column taken from it would paint working consoles the colour of finished ones.
+    #[test]
+    fn working_and_finished_columns_keep_their_own_colours() {
+        let theme = Theme::default();
+        assert_eq!(
+            color(Column::Working, &theme),
+            Color32::from_rgb(0x72, 0xB7, 0xF2)
+        );
+        assert_eq!(
+            color(Column::Done, &theme),
+            Color32::from_rgb(0x3C, 0xC3, 0x84)
+        );
+    }
     #[test]
     fn short_and_long_titles_start_at_the_same_left_padding() {
         let mut offsets = Vec::new();

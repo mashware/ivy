@@ -16226,6 +16226,44 @@ mod tests {
         );
     }
 
+    /// A family nobody has leaves the window on the bundled faces, not on egui's (D95): the
+    /// bundled base is installed before the search, whatever the search finds.
+    #[test]
+    fn a_font_the_machine_does_not_have_leaves_geist_mono_in_place() {
+        let ctx = egui::Context::default();
+        let mut discoverer = fonts::Discoverer::default();
+        choose_the_font(
+            Some("no family is called like this 4f7a2b"),
+            &mut discoverer,
+            &ctx,
+        );
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        ctx.fonts(|fonts| {
+            assert_eq!(
+                fonts.definitions().families[&egui::FontFamily::Monospace][0],
+                "Geist Mono"
+            );
+        });
+    }
+
+    /// The window installs the theme's style on its own frame, including in a measurement batch
+    /// that disables project discovery, where the refresh returns early (D94).
+    #[test]
+    fn a_window_frame_installs_the_themes_style_even_without_project_discovery() {
+        let mut window = window_with("true", "true");
+        project_view::configure(&mut window, settings::Entry::Measuring, None);
+        let ctx = egui::Context::default();
+        project_view::refresh(&mut window, &ctx);
+        for slot in [egui::Theme::Dark, egui::Theme::Light] {
+            assert_eq!(
+                ctx.style_of(slot).visuals.extreme_bg_color,
+                egui::Color32::from_rgb(0x13, 0x18, 0x1B),
+                "{slot:?}"
+            );
+        }
+    }
+
     #[test]
     fn a_measurement_batch_does_not_read_the_settings_of_whoever_measures() {
         // **Without this, every published figure of the project stops being comparable.** The

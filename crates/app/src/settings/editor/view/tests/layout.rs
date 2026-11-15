@@ -404,7 +404,7 @@ fn theme_font_and_color_popup_escape_preserves_settings_before_second_escape_dis
                 assert!(editor.fonts.is_none());
                 // Use a deterministic existing cache; opening behavior must not enumerate again.
                 editor.fonts = Some(vec!["Fixture Family".into()]);
-                click_label(&mut editor, &ctx, "Built-in default");
+                click_label(&mut editor, &ctx, "Geist Mono (default)");
                 assert_eq!(editor.font_requests, 1);
             }
             "color" => {

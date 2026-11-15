@@ -239,7 +239,7 @@ fn font_and_color_popups_render_the_current_light_and_dark_surface() {
             let ctx = egui::Context::default();
             let size = egui::vec2(1100.0, 850.0);
             match popup {
-                "font" => click_label(&mut editor, &ctx, "Built-in default"),
+                "font" => click_label(&mut editor, &ctx, "Geist Mono (default)"),
                 "color" => {
                     click_label(&mut editor, &ctx, "Customize colors");
                     click_color_swatch(&mut editor, &ctx, "Background");

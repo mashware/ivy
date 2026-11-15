@@ -15,8 +15,8 @@
 //! JetBrains Mono`— has that name resolved **at start-up**, before the first frame, and resolving a
 //! name is exactly the enumeration above. The settings editor also enumerates on an explicit
 //! installed-font selector request; merely opening Settings does not enumerate.
-//! A file that names no family, or no file at all, never reaches [`Discoverer::use_the_family`] and
-//! the start-up is the one described in the paragraph above, bit for bit. The report declares which
+//! A file that names no family, or no file at all, never reaches [`Discoverer::use_the_family`]: it
+//! starts on the bundled faces (D95), which are part of the binary and enumerate nothing. The report declares which
 //! of the two happened, so a measurement run that paid it cannot be mistaken for one that did not.
 
 use std::collections::BTreeSet;

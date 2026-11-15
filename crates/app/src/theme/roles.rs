@@ -5,13 +5,14 @@
 //! interface built from that palette instead of one painted over it. The table is the design kit's;
 //! each rule is written next to the role it produces.
 //!
-//! It is a pure function of a [`Theme`] and is called wherever a theme is painted — the live one, the
-//! Settings draft, the Board's derived one — because a single cache could not serve all three.
+//! It is a pure function of a [`Theme`] rather than a cache refreshed when the theme changes,
+//! because the themes it will be asked about differ: the live one, the Settings draft, the Board's
+//! derived one. Today its one caller is the egui style install.
 
 use super::{Theme, mix, project_ink_contrast};
 use eframe::egui::{Color32, epaint::Shadow};
 
-/// The minimum contrast every text role keeps over the console background.
+/// The minimum contrast every text role keeps over every surface text is set on.
 const TEXT_CONTRAST: f32 = 4.5;
 
 /// The interface's colors, derived from a theme.
@@ -35,28 +36,34 @@ pub(crate) struct Roles {
     pub line: Color32,
     /// Control borders.
     pub line2: Color32,
+    /// Text: the theme's foreground, or black or white when a configuration made it unreadable.
     pub tx: Color32,
+    /// Secondary text: 30 % toward the background, brought back until it reads.
     pub tx2: Color32,
-    /// Muted text, never under 4.5:1 over `base`.
+    /// Muted text: 46 % toward the background, brought back until it reads.
     pub tx3: Color32,
     /// Focus and the primary action.
     pub accent: Color32,
     /// Text on `accent`.
     pub on_accent: Color32,
+    /// The accent as a translucent tint, painted over a surface: an active background.
     pub accent_soft: Color32,
     pub wait: Color32,
+    /// Translucent tint over a surface, like every `*_soft`.
     pub wait_soft: Color32,
     pub block: Color32,
     pub block_soft: Color32,
     pub done: Color32,
     pub done_soft: Color32,
-    /// The background of an added and a deleted diff line.
+    /// Translucent tints over the content background for an added and a deleted diff line.
     pub add: Color32,
     pub del: Color32,
-    /// What dims the window behind a modal dialog.
+    /// A translucent veil over the window behind a modal dialog.
     pub scrim: Color32,
     /// The one shadow floating surfaces cast.
     pub shadow: Shadow,
+    /// Private, so a `Roles` exists only through [`Roles::of`] and its contrast rules.
+    _derived: (),
 }
 
 /// The kit's radii, in points, by what they round. The design's other measures (chip, card and
@@ -77,6 +84,15 @@ impl Roles {
         let wait = theme.palette[3];
         let block = theme.palette[1];
         let done = theme.palette[4];
+        let panel = theme.panel_background;
+        let raised = if dark {
+            mix(bg, fg, 0.06)
+        } else {
+            Color32::WHITE
+        };
+        let hover = mix(bg, fg, 0.09);
+        // Text is set on all four, so secondary and muted text must read on the worst of them.
+        let surfaces = [bg, panel, raised, hover];
         Self {
             dark,
             chrome: if dark {
@@ -85,19 +101,15 @@ impl Roles {
                 mix(bg, fg, 0.06)
             },
             base: bg,
-            panel: theme.panel_background,
-            raised: if dark {
-                mix(bg, fg, 0.06)
-            } else {
-                Color32::WHITE
-            },
-            hover: mix(bg, fg, 0.09),
+            panel,
+            raised,
+            hover,
             sel: mix(bg, accent, 0.18),
             line: theme.divider,
             line2: mix(bg, fg, 0.17),
             tx,
-            tx2: mix(tx, bg, 0.30),
-            tx3: muted(tx, bg),
+            tx2: faded(tx, bg, 30, &surfaces),
+            tx3: faded(tx, bg, 46, &surfaces),
             accent,
             on_accent: extreme_for(accent),
             accent_soft: with_alpha(accent, 0.14),
@@ -124,6 +136,7 @@ impl Roles {
                     with_alpha(fg, 0.18)
                 },
             },
+            _derived: (),
         }
     }
 }
@@ -159,16 +172,20 @@ fn readable_or_extreme(ink: Color32, surface: Color32) -> Color32 {
     }
 }
 
-/// Muted text: 46 % of the way toward the background, brought back toward the text until it reads.
-fn muted(tx: Color32, bg: Color32) -> Color32 {
-    let mut amount = 0.46;
-    loop {
-        let candidate = mix(tx, bg, amount);
-        if project_ink_contrast(candidate, bg) >= TEXT_CONTRAST || amount <= 0.0 {
-            return candidate;
-        }
-        amount -= 0.02;
-    }
+/// Text `percent` of the way toward the background, brought back toward the text one percent at a
+/// time until it reads on every surface. At zero it is the text itself, which `readable_or_extreme`
+/// already made readable on the background.
+fn faded(tx: Color32, bg: Color32, percent: u8, surfaces: &[Color32]) -> Color32 {
+    let reads = |ink: Color32| {
+        surfaces
+            .iter()
+            .all(|surface| project_ink_contrast(ink, *surface) >= TEXT_CONTRAST)
+    };
+    (0..=percent)
+        .rev()
+        .map(|p| mix(tx, bg, f32::from(p) / 100.0))
+        .find(|candidate| reads(*candidate))
+        .unwrap_or(tx)
 }
 
 #[cfg(test)]
@@ -219,11 +236,13 @@ mod tests {
             (r.sel, 0x1a372e, 0x1f3a2e),
             (r.line2, 0x373b3d, 0x344047),
             (r.tx2, 0xa5aaa6, 0xa4aea9),
-            (r.tx3, 0x848886, 0x7e8a85),
         ] {
             assert_eq!(role, rgb(derived));
             assert!(distance(role, rgb(css)) <= 10, "{role:?} vs #{css:06x}");
         }
+        // Muted text is brought back from 46 % to 41 % so it reads at 4.5:1 on hover, the lightest
+        // surface it is set on; the design's #7E8A85 reads at about 4.3 there.
+        assert_eq!(r.tx3, rgb(0x8e9390));
         assert_eq!(r.on_accent, Color32::BLACK);
     }
 
@@ -242,9 +261,10 @@ mod tests {
         assert_eq!(r.chrome, rgb(0xeceeeb));
         assert!(distance(r.chrome, rgb(0xe9ede8)) <= 10);
         assert_eq!(r.on_accent, Color32::WHITE);
-        // Forty-six percent toward this background does not reach 4.5:1, so muted text is brought back.
-        assert_ne!(r.tx3, rgb(0x7e8380));
-        assert!(project_ink_contrast(r.tx3, r.base) >= TEXT_CONTRAST);
+        // Forty-six percent toward this background does not reach 4.5:1 on hover, so muted text is
+        // brought back to 34 %; secondary text reads at its 30 % as it is.
+        assert_eq!(r.tx2, rgb(0x5a605c));
+        assert_eq!(r.tx3, rgb(0x636865));
     }
 
     #[test]
@@ -258,9 +278,25 @@ mod tests {
             focus: Some(rgb(hex)),
             panel: Some(rgb(hex)),
         };
+        // Secondary and muted text read on every surface text is set on, and never more than the
+        // role above them: a secondary text fainter than muted text inverts the hierarchy.
+        let text_reads = |r: &Roles, label: &str| {
+            for surface in [r.base, r.panel, r.raised, r.hover] {
+                for ink in [r.tx2, r.tx3] {
+                    assert!(
+                        project_ink_contrast(ink, surface) >= TEXT_CONTRAST,
+                        "{label}: {ink:?} on {surface:?}"
+                    );
+                }
+            }
+            let over_base = |ink| project_ink_contrast(ink, r.base);
+            assert!(over_base(r.tx) >= over_base(r.tx2), "{label}");
+            assert!(over_base(r.tx2) >= over_base(r.tx3), "{label}");
+        };
         for &named in NamedTheme::ALL {
             let theme = named.theme();
             let r = Roles::of(&theme);
+            text_reads(&r, &format!("{named:?}"));
             assert!(
                 project_ink_contrast(r.tx, r.base) >= TEXT_CONTRAST,
                 "{named:?}"
@@ -278,6 +314,7 @@ mod tests {
             assert_ne!(r.hover, r.base, "{named:?}");
             for hex in [0x777777, 0xffffff, 0x000000] {
                 let r = Roles::of(&theme.with_colors(&collapsed(hex)));
+                text_reads(&r, &format!("{named:?} {hex:06x}"));
                 assert!(
                     project_ink_contrast(r.tx, r.base) >= TEXT_CONTRAST,
                     "{named:?} {hex:06x}"

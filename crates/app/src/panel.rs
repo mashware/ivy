@@ -2741,13 +2741,15 @@ mod tests {
         })
         .drop_without_applying_deltas();
 
-        // Within a hundredth of a cell, not exactly: `⊘` is not in Geist Mono and comes from egui's
-        // Hack behind it, whose advance is 1233/2048 of the size against Geist Mono's 600/1000 — 0.03
-        // points at 14. A missing glyph measures zero and an emoji one almost double, so the bound
-        // still catches both failures D9 was about (D95).
+        // The cell is Geist Mono's — 600/1000 of the size — so this measures the face the window
+        // starts with and not egui's Hack (D95).
+        assert!(
+            (cell - 0.6 * crate::DEFAULT_FONT_SIZE).abs() < 0.005,
+            "the cell is {cell}"
+        );
         for (symbol, width) in widths {
             assert!(
-                (width - cell).abs() < cell * 0.01,
+                (width - cell).abs() < 0.01,
                 "«{symbol}» measures {width} and a cell measures {cell}: {}",
                 if width == 0.0 {
                     "it is not in the font"
@@ -3625,10 +3627,16 @@ mod tests {
         })
         .drop_without_applying_deltas();
 
-        // Within a hundredth of a cell, not exactly: `⊘` is not in Geist Mono and comes from egui's
-        // Hack behind it, whose advance is 1233/2048 of the size against Geist Mono's 600/1000 — 0.03
-        // points at 14. A missing glyph measures zero and an emoji one almost double, so the bound
-        // still catches both failures D9 was about (D95).
+        // The cell is Geist Mono's — 600/1000 of the size — so this measures the face the window
+        // starts with and not egui's Hack (D95).
+        assert!(
+            (cell - 0.6 * crate::DEFAULT_FONT_SIZE).abs() < 0.005,
+            "the cell is {cell}"
+        );
+        // Within a hundredth of a cell, not exactly: `⊘` and `∎` are not in Geist Mono, and `⊘` comes
+        // from egui's Hack behind it, whose advance is 1233/2048 of the size against Geist Mono's
+        // 600/1000 — 0.03 points at 14. A missing glyph measures zero and an emoji one almost double,
+        // so the bound still catches both failures D9 was about (D95).
         for (symbol, width) in widths {
             assert!(
                 (width - cell).abs() < cell * 0.01,

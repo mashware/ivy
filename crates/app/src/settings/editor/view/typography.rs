@@ -63,7 +63,7 @@ pub(super) fn show(
             let field = draft.fields.iter_mut().find(|f| f.key == "font").unwrap();
             ui.weak("Font family");
             let title = if field.value.is_empty() {
-                "Built-in default"
+                "Geist Mono (default)"
             } else {
                 &field.value
             };
@@ -123,7 +123,7 @@ pub(super) fn show(
                         .show(ui, |ui| {
                             for name in choices {
                                 let title = if name.is_empty() {
-                                    "Built-in default"
+                                    "Geist Mono (default)"
                                 } else {
                                     name
                                 };

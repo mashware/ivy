@@ -51,12 +51,14 @@ pub(crate) fn base_definitions() -> FontDefinitions {
             .font_data
             .insert(name.into(), Arc::new(FontData::from_static(bytes)));
     }
+    // egui ships both families; without them nothing would stand behind Geist for the symbols and
+    // emoji it lacks, so their absence is a broken dependency, not a case to paper over.
     let behind = |family: FontFamily| -> Vec<String> {
         definitions
             .families
             .get(&family)
             .cloned()
-            .unwrap_or_default()
+            .expect("egui's default font definitions carry this family")
     };
     let proportional = behind(FontFamily::Proportional);
     let monospace = behind(FontFamily::Monospace);
@@ -87,8 +89,8 @@ pub(crate) fn base_definitions() -> FontDefinitions {
     definitions
 }
 
-/// Installs the bundled faces when nothing else will: a start-up with no configured font never
-/// reaches the selection path, which is the only other writer of the definitions.
+/// Installs the base before anything else writes the definitions: start-up calls it first, and a
+/// configured family then queues its own definitions on top of it.
 pub(crate) fn install(ctx: &egui::Context) {
     ctx.set_fonts(base_definitions());
 }
@@ -136,6 +138,7 @@ mod tests {
             assert_eq!(families[&FontFamily::Monospace][0], "Geist Mono");
             assert_eq!(families[&FontFamily::Monospace][1], "Hack");
             assert_eq!(families[&FontFamily::Proportional][0], "Geist");
+            assert_eq!(families[&FontFamily::Proportional][1], "Ubuntu-Light");
         });
         // What is laid out changed, not only the list: Geist Mono's row is taller than Hack's, and
         // Geist's lowercase is wider than Ubuntu Light's.
@@ -149,13 +152,13 @@ mod tests {
                 .size()
             })
         };
-        assert_ne!(
-            laid_out(&ctx, "a", FontFamily::Monospace).y,
-            laid_out(&stock, "a", FontFamily::Monospace).y
+        assert!(
+            laid_out(&ctx, "a", FontFamily::Monospace).y
+                > laid_out(&stock, "a", FontFamily::Monospace).y
         );
-        assert_ne!(
-            laid_out(&ctx, "interface", FontFamily::Proportional).x,
-            laid_out(&stock, "interface", FontFamily::Proportional).x
+        assert!(
+            laid_out(&ctx, "interface", FontFamily::Proportional).x
+                > laid_out(&stock, "interface", FontFamily::Proportional).x
         );
     }
 

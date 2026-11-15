@@ -227,8 +227,8 @@ impl Discoverer {
     ///
     /// **It is only called when the file names one, and that is what keeps D24 standing.** Resolving a
     /// name forces building the system collection — between 17.3 and 23.2 ms, the very cost D24
-    /// decided never to pay at start-up. Whoever configures no font never reaches this line and their
-    /// start-up is the one of always, bit for bit.
+    /// decided never to pay at start-up. Whoever configures no font never reaches this line: they
+    /// start on the bundled faces, which enumerate nothing (D95).
     ///
     /// **It runs before the first frame**, like restoring the layout: `set_fonts` takes effect on the
     /// next pass, and there has been no pass yet.
