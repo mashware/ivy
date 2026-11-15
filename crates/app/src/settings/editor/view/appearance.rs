@@ -280,8 +280,7 @@ fn theme_picker(editor: &mut Editor, ui: &mut egui::Ui, count: usize) {
         .unwrap()
         .value
         .clone();
-    let title =
-        NamedTheme::from_written(&selected).map_or("Built-in theme (inherit)", |t| t.title());
+    let title = NamedTheme::from_written(&selected).map_or("Ivy Night (default)", |t| t.title());
     let response = selector(ui, title, ui.available_width());
     let opened = response.clicked();
     let popup_style = ui.style().clone();
@@ -337,9 +336,9 @@ fn theme_picker(editor: &mut Editor, ui: &mut egui::Ui, count: usize) {
             let query = editor.picker_query.to_lowercase();
             let mut choices: Vec<(&str, &str)> = Vec::new();
             if editor.picker_filter != 2
-                && ("built-in theme (inherit)".contains(&query) || "inherit".contains(&query))
+                && ("ivy night (default)".contains(&query) || "inherit".contains(&query))
             {
-                choices.push(("", "Built-in theme (inherit)"));
+                choices.push(("", "Ivy Night (default)"));
             }
             for &theme in NamedTheme::ALL {
                 if (editor.picker_filter == 0 || (editor.picker_filter == 1) == theme.is_dark())

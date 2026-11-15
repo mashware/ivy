@@ -20911,8 +20911,8 @@ mod tests {
     /// moves the search and the subject together, and every assertion holds over two marks nobody
     /// can see. It is the disguise **D36** recorded for the cursor, whose colour is the same grey as
     /// the text in the factory theme; here it is the search key that has to be pinned.
-    const THE_FOCUS_COLOUR: egui::Color32 = egui::Color32::from_rgb(0x75, 0x87, 0xA6);
-    const THE_PANEL_BACKGROUND: egui::Color32 = egui::Color32::from_rgb(0x18, 0x18, 0x18);
+    const THE_FOCUS_COLOUR: egui::Color32 = egui::Color32::from_rgb(0x3C, 0xC3, 0x84);
+    const THE_PANEL_BACKGROUND: egui::Color32 = egui::Color32::from_rgb(0x17, 0x1D, 0x21);
 
     #[test]
     fn the_highlight_surrounds_the_console_with_the_focus_and_not_always_the_left_one() {
@@ -21031,7 +21031,7 @@ mod tests {
 
     /// A window whose cursor colour is **not** the colour of its text.
     ///
-    /// **The factory theme paints both with the same grey** — `the_three_default_colors_are_the_project_ones`
+    /// **The factory theme paints both with the same bone white** — `the_three_default_colors_are_ivy_nights`
     /// pins them side by side — so a test that looked for the cursor by the default colour would
     /// find the letters too, and swapping the two entries of the palette would leave it green.
     fn window_whose_cursor_is_its_own(left: &str, right: &str) -> Window {

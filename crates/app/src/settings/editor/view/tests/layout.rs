@@ -316,17 +316,17 @@ fn all_popup_rows_reach_light_and_dark_palettes_through_visible_scroll_input() {
     let visible = visible_text(&shapes, size);
     let dark = visible
         .iter()
-        .find(|(s, _)| s == "Tokyo Night")
+        .find(|(s, _)| s == "Ivy Night")
         .expect("All initially exposes a dark row")
         .1;
     let at = dark.center();
     let light = visible
         .iter()
-        .find(|(s, _)| s == "Catppuccin Latte")
+        .find(|(s, _)| s == "Ivy Day")
         .expect("All must show the first light palette fully inside its clip without scrolling")
         .1;
     scene(&mut editor, &ctx, size, click(light.center()));
-    assert_eq!(draft_theme(&editor), "catppuccin-latte");
+    assert_eq!(draft_theme(&editor), "ivy-day");
     let mut reached = None;
     for _ in 0..15 {
         let (_, shapes) = scene(&mut editor, &ctx, size, vec![]);
@@ -351,11 +351,11 @@ fn all_popup_rows_reach_light_and_dark_palettes_through_visible_scroll_input() {
     let visible = visible_text(&shapes, size);
     let dark = visible
         .iter()
-        .find(|(s, _)| s == "Tokyo Night")
+        .find(|(s, _)| s == "Ivy Night")
         .expect("All dark row remains reachable")
         .1;
     scene(&mut editor, &ctx, size, click(dark.center()));
-    assert_eq!(draft_theme(&editor), "tokyonight");
+    assert_eq!(draft_theme(&editor), "ivy-night");
 }
 
 #[test]

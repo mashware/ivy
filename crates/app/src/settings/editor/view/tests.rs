@@ -101,7 +101,7 @@ fn draft_theme(editor: &Editor) -> &str {
 }
 fn theme_button(editor: &Editor) -> String {
     let title = crate::theme::NamedTheme::from_written(draft_theme(editor))
-        .map_or("Built-in theme (inherit)", |t| t.title());
+        .map_or("Ivy Night (default)", |t| t.title());
     title.to_owned()
 }
 fn click_label(editor: &mut Editor, ctx: &egui::Context, label: &str) {
@@ -333,7 +333,7 @@ fn opening_appearance_keeps_every_override_inherited_and_fonts_lazy() {
     let size = egui::vec2(1100.0, 850.0);
     paint(&mut editor, &ctx, size, vec![]);
     let text = paint(&mut editor, &ctx, size, vec![]);
-    for label in ["Built-in theme (inherit)", "Theme & colors", "Typography"] {
+    for label in ["Ivy Night (default)", "Theme & colors", "Typography"] {
         assert!(text.iter().any(|(s, _)| s == label), "missing {label}");
     }
     assert!(
