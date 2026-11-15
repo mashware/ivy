@@ -9641,3 +9641,10 @@ mtime or producer dates (republishing is not a new wait); classifying activity f
 **Verification boundary.** Observation while Board is closed and all added layout/input/paint work
 must be named and subtracted once. Native visual and interaction parity needs a real desktop run;
 headless tests alone cannot establish it. No new performance figure is claimed by this decision.
+
+**Presentation correction, 15 November 2026.** At the owner's request, Board fills the content
+surface below the tabs, beside the tool rail, at every window width. There is no reduced or
+resizable Board dock. The covered consoles retain their geometry and pump budget. The duplicate
+top-toolbar shortcut is removed; the rail and keyboard binding remain available.
+Discarded: opening Board in the shared narrow dock, which hides it in narrow windows and makes
+its project overview unnecessarily small. Other sidebar tools keep their existing dock behavior.

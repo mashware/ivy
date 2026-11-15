@@ -210,7 +210,7 @@ mod tests {
     }
 
     #[test]
-    fn clicking_a_console_transfers_keyboard_input_while_board_stays_open() {
+    fn clicking_the_covered_console_does_not_forward_keyboard_input() {
         let received = term_core::received::Received::new("board-console-focus");
         let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
         integrated(&mut window);
@@ -226,7 +226,10 @@ mod tests {
             window.board.is_open(),
             "typing in the console hid the Board"
         );
-        assert_eq!(received.wait_for(7, Duration::from_secs(5)), b"console");
+        frame(&mut window, &ctx, vec![key(egui::Key::Escape)]);
+        assert!(!window.board.is_open());
+        frame(&mut window, &ctx, vec![egui::Event::Text("after".into())]);
+        assert_eq!(received.wait_for(5, Duration::from_secs(5)), b"after");
     }
 
     #[test]
@@ -1107,13 +1110,11 @@ mod tests {
             .apply_to(&mut window);
         let ctx = egui::Context::default();
         frame(&mut window, &ctx, vec![]);
-        // The chrome draws this control as vector strokes, not as a text widget.
-        let from_right = if cfg!(target_os = "macos") {
-            91.0
-        } else {
-            193.0
-        };
-        let at = egui::pos2(area().right() - from_right, 24.0);
+        frame(&mut window, &ctx, vec![]);
+        let metrics =
+            painter::CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
+        let rail = tab_bar::geometry(&window, area(), &metrics).rail;
+        let at = egui::pos2(rail.left() + 16.0, rail.top() + 112.0);
         frame(&mut window, &ctx, click_at(at));
         assert!(
             window.board.is_open(),

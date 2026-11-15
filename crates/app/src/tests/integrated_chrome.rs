@@ -224,9 +224,9 @@ mod tests {
         let from_right = if area.width() < 300.0 {
             57.0
         } else if cfg!(target_os = "macos") {
-            125.0
+            91.0
         } else {
-            227.0
+            193.0
         };
         egui::pos2(area.right() - from_right, area.top() + 24.5)
     }

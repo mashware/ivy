@@ -97,7 +97,7 @@ fn indicator_rect(row: Rect) -> Option<Rect> {
         - if compact {
             40.0
         } else {
-            6.0 + 34.0 * if cfg!(target_os = "macos") { 3.0 } else { 6.0 }
+            6.0 + 34.0 * if cfg!(target_os = "macos") { 2.0 } else { 5.0 }
         };
     let left = right - 34.0;
     let limit = row.left() + left_offset + if compact { 4.0 } else { 116.0 };
