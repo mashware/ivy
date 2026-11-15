@@ -96,6 +96,7 @@ impl Producer {
         // Any failure to reach a whole identity — most often the console closed and its directory
         // gone — is said naming the directory, which the bare system error does not. Its kind is
         // chosen to differ from «outside any pane»; the original error survives only as text.
+        endpoint::private_to_this_user(dir)?;
         Self::of(dir, id).map_err(|failure| {
             io::Error::new(
                 io::ErrorKind::NotConnected,

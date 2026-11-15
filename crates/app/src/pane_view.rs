@@ -45,8 +45,8 @@ impl State {
         self.zoom.get(&tab).copied()
     }
 
-    pub(crate) fn toggle(&mut self, tab: usize, pane: usize) {
-        if self.zoomed(tab) == Some(pane) {
+    pub(crate) fn toggle(&mut self, tab: usize, pane: usize, pane_count: usize) {
+        if pane_count <= 1 || self.zoomed(tab) == Some(pane) {
             self.clear(tab);
         } else {
             self.zoom.insert(tab, pane);
@@ -68,7 +68,7 @@ impl State {
     pub(crate) fn reconcile(&mut self, tab: usize, focus: usize, panes: &[usize]) {
         if self
             .zoomed(tab)
-            .is_some_and(|pane| pane != focus || !panes.contains(&pane))
+            .is_some_and(|pane| panes.len() <= 1 || pane != focus || !panes.contains(&pane))
         {
             self.clear(tab);
         }
@@ -261,6 +261,11 @@ pub(crate) fn before_keys(
                 axes.map(|axis| crate::tiling::can_split(rect, axis, metrics, window.headers))
             })
             .unwrap_or([false; 2]);
+        let pane_count = window
+            .tabs
+            .iter()
+            .find(|t| t.name == tab)
+            .map_or(0, |t| t.panes().len());
         let theme = window.theme;
         let selected = window
             .pane_called(pane)
@@ -304,7 +309,7 @@ pub(crate) fn before_keys(
                                 if menu_item(ui, "Toggle information panel", true) {
                                     action = Some(1);
                                 }
-                                if menu_item(ui, "Maximize / restore", true) {
+                                if pane_count > 1 && menu_item(ui, "Maximize / restore", true) {
                                     action = Some(2);
                                 }
                                 if menu_item(ui, "Close console", can_close) {
@@ -354,7 +359,7 @@ pub(crate) fn before_keys(
             }
             Some(2) => {
                 window.active_mut().focus = pane;
-                window.pane_view.toggle(tab, pane);
+                window.pane_view.toggle(tab, pane, pane_count);
             }
             Some(3) => {
                 window.pane_view.clear(tab);
@@ -518,11 +523,25 @@ mod tests {
     use crate::session::valid_label;
 
     #[test]
+    fn singleton_zoom_is_rejected_and_stale_zoom_is_reconciled() {
+        let mut state = State::default();
+        state.toggle(4, 9, 1);
+        assert_eq!(state.zoomed(4), None);
+        state.toggle(4, 9, 2);
+        assert_eq!(state.zoomed(4), Some(9));
+        state.reconcile(4, 9, &[9]);
+        assert_eq!(state.zoomed(4), None);
+        state.toggle(4, 9, 2);
+        state.toggle(4, 9, 0);
+        assert_eq!(state.zoomed(4), None);
+    }
+
+    #[test]
     fn zoom_changes_only_the_view_and_reconciles_focus() {
         let mut state = State::default();
         let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 300.0));
         let parts = vec![area, area];
-        state.toggle(4, 9);
+        state.toggle(4, 9, 2);
         let result = state.view_tiling(
             4,
             &[8, 9],

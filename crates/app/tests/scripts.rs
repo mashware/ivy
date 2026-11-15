@@ -314,6 +314,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../../panel-control/src/session/tests.rs"),
     ),
     (
+        "panel-control/tests/inherited_directory.rs",
+        include_str!("../../panel-control/tests/inherited_directory.rs"),
+    ),
+    (
         "panel-control/tests/session_helper.rs",
         include_str!("../../panel-control/tests/session_helper.rs"),
     ),
@@ -487,6 +491,18 @@ const MODULES: &[(&str, &str)] = &[
     (
         "app/src/settings/editor/view/tests/layout.rs",
         include_str!("../src/settings/editor/view/tests/layout.rs"),
+    ),
+    (
+        "app/src/tab_bar/layout.rs",
+        include_str!("../src/tab_bar/layout.rs"),
+    ),
+    (
+        "app/src/tab_bar/indicator.rs",
+        include_str!("../src/tab_bar/indicator.rs"),
+    ),
+    (
+        "app/src/tab_bar/feedback.rs",
+        include_str!("../src/tab_bar/feedback.rs"),
     ),
     (
         "app/src/tab_bar/interaction.rs",

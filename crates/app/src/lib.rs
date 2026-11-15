@@ -25089,18 +25089,27 @@ mod tests {
     ) -> Vec<(egui::Rect, String, egui::Color32)> {
         shapes
             .iter()
-            .filter_map(|clipped| match &clipped.shape {
-                egui::Shape::Text(text)
-                    if tab_bar.contains_rect(clipped.clip_rect)
-                        && !text.galley.text().chars().all(|c| c.is_ascii_digit()) =>
-                {
-                    Some((
-                        clipped.clip_rect,
-                        text.galley.text().to_owned(),
-                        text.fallback_color,
-                    ))
+            .filter_map(|clipped| {
+                if !tab_bar.contains_rect(clipped.clip_rect) {
+                    return None;
                 }
-                _ => None,
+                let egui::Shape::Vec(parts) = &clipped.shape else {
+                    return None;
+                };
+                let (symbol, color) = match parts.as_slice() {
+                    [egui::Shape::Path(path), egui::Shape::Circle(_)] => {
+                        ("?", path.stroke.color.clone())
+                    }
+                    [egui::Shape::Circle(circle), egui::Shape::LineSegment { .. }] => {
+                        ("⊘", egui::epaint::ColorMode::Solid(circle.stroke.color))
+                    }
+                    [egui::Shape::Rect(rect)] => ("∎", egui::epaint::ColorMode::Solid(rect.fill)),
+                    _ => return None,
+                };
+                let egui::epaint::ColorMode::Solid(color) = color else {
+                    return None;
+                };
+                Some((clipped.clip_rect, symbol.to_owned(), color))
             })
             .collect()
     }
