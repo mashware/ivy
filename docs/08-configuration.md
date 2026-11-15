@@ -609,17 +609,43 @@ without activating the console. The Board never executes producer action command
 Board control returns to the console. Console dimensions, programs, history, panel ownership
 and hidden-console pump budgets are preserved. Settings and Board remain separate.
 
+## File explorer
+
+Choose the folder icon in the right tool bar to show **Files**; click it again or press Escape
+while Files owns keyboard focus to hide it. Each console retains its own tree, selection and scroll
+position. A usable change to that console's local working directory follows automatically, including
+a shell's startup directory change. Remote/unavailable sources suspend local browsing.
+
+Click a small folder chevron to expand/collapse it; double-clicking its name or pressing Enter
+also toggles it without leaving the normal tree root. Single-click `.md`, including a file symlink,
+to open the existing Markdown viewer. Its reader validates regular UTF-8 files and applies its
+normal limits. Other files select quietly and their paths can be copied; nothing executes.
+
+Type into **Search files and folders** to match names below the displayed folder, including
+collapsed directories. Results show relative paths and match case-insensitively; contents are not
+searched. Double-click a matching directory to expand its contents within the results; the search root stays the same. Escape clears the
+query before closing Files. Queries are at most 256 characters. A bounded scan or unreadable folder
+is reported rather than presenting partial results as complete.
+
+The top-right **Refresh** icon reloads listings while preserving same-directory expansion/scroll.
+When expanded folders fill the initial 8192-row budget, **Show more** reveals the next portion
+without changing root or selection; a new directory resets the budget. Files has no pin, up, reset,
+source-console line, changed-directory notice or local close button. Scrolling its body does not
+dim the consoles. General text viewing is not included.
+
+Ctrl-click a local path printed in a console to reveal its directory in Files. A file is selected
+in its parent and scrolled into view; directories open directly. Local `file://` links use the same
+route. Relative paths use that console's reported directory or its known local directory; they
+never fall back to the application's directory. Unknown/remote sources and missing paths report
+unavailability. The clicked console becomes the active Files source. Web links still use their
+existing Ctrl-click behavior; ordinary mouse gestures still select terminal text.
+
 ## Markdown and Git diff viewers
 
-Ctrl-click a local `.md` path printed by a console to open Markdown inside the terminal.
-OSC 8 `file://` links use the same viewer. Relative paths resolve against the directory explicitly
-published by that console using OSC 7; without one, the viewer asks for an absolute path.
-Only empty authorities, localhost and the verified local hostname are accepted as local.
-For a shell without OSC 7 integration, print the directory before printing a relative path:
-
-```sh
-printf '\033]7;file://%s%s\007' "$(hostname)" "$PWD"
-```
+Open a Markdown file from Files with one click. The viewer retains its source console and updates
+saved content. Console path gestures reveal files in Files
+as described above. Only empty authorities, localhost and the verified local hostname are accepted
+as local file links.
 
 Each console header has a **Review changes** control beside its information-panel and maximize
 controls. Its context menu offers the same action when the header is narrow. It opens the clicked
@@ -632,7 +658,8 @@ shows that fact instead of choosing another console's repository.
 
 Choose **Markdown** or **Git** from the right tool bar to open its retained view in the shared
 sidebar. On first use, Git uses the focused console; changing focus alone never retargets an open
-view. Choose a Markdown document in **Files**, or Ctrl-click an explicit local `.md` path in a console. Drag the sidebar's left divider to resize,
+view. Choose a Markdown document in **Files**. Ctrl-click a local console path to reveal its
+location in Files before opening the document. Drag the sidebar's left divider to resize,
 or dismiss it with the active tool button, **Close**, or Escape while it owns keyboard focus.
 Consoles resize alongside it and keep their identities. Clicking a console returns typing there.
 A narrow window temporarily hides the sidebar body until both it and the consoles fit. Tool

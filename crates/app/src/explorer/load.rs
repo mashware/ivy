@@ -23,10 +23,13 @@ pub(crate) struct Entry {
     pub(crate) kind: EntryKind,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Listing {
     pub(crate) entries: Vec<Entry>,
     pub(crate) bytes: usize,
+    pub(crate) root: Option<PathBuf>,
+    pub(crate) selected: Option<PathBuf>,
+    pub(crate) notice: Option<String>,
 }
 
 /// Enumerates one directory without following symlinks. Cancellation is checked between entries.
@@ -76,7 +79,116 @@ pub(crate) fn read_directory(path: &Path, cancelled: impl Fn() -> bool) -> Resul
             .cmp(&left_dir)
             .then_with(|| left.path.cmp(&right.path))
     });
-    Ok(Listing { entries, bytes })
+    Ok(Listing {
+        entries,
+        bytes,
+        ..Default::default()
+    })
+}
+
+fn reveal_path(path: &Path, cancelled: &dyn Fn() -> bool) -> Result<Listing, String> {
+    let metadata = fs::metadata(path).map_err(|error| format!("Path unavailable: {error}"))?;
+    let (root, selected) = if metadata.is_dir() {
+        (path.to_path_buf(), None)
+    } else if metadata.is_file() {
+        (
+            path.parent()
+                .ok_or("This file has no parent directory.")?
+                .to_path_buf(),
+            Some(path.to_path_buf()),
+        )
+    } else {
+        return Err("This path is not a file or directory.".into());
+    };
+    let mut listing = read_directory(&root, cancelled)?;
+    listing.root = Some(root);
+    listing.selected = selected;
+    Ok(listing)
+}
+
+fn search_names(root: &Path, query: &str, cancelled: &dyn Fn() -> bool) -> Result<Listing, String> {
+    let needle = query.to_lowercase();
+    let mut pending = std::collections::VecDeque::from([root.to_path_buf()]);
+    let mut listing = Listing::default();
+    let mut visited = 0usize;
+    'scan: while let Some(directory) = pending.pop_front() {
+        if cancelled() {
+            return Err("Directory loading cancelled".into());
+        }
+        let entries = match fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if directory == root => {
+                return Err(format!("Directory unavailable. {error}"));
+            }
+            Err(_) => {
+                listing
+                    .notice
+                    .get_or_insert_with(|| "Some folders could not be searched.".into());
+                continue;
+            }
+        };
+        for item in entries {
+            if cancelled() {
+                return Err("Directory loading cancelled".into());
+            }
+            if visited == 100_000 {
+                listing.notice =
+                    Some("Search stopped after 100000 entries; choose a smaller folder.".into());
+                break 'scan;
+            }
+            visited += 1;
+            let entry = match item.and_then(|item| item.file_type().map(|kind| (item.path(), kind)))
+            {
+                Ok((path, kind)) => Entry {
+                    path,
+                    kind: if kind.is_symlink() {
+                        EntryKind::Link
+                    } else if kind.is_dir() {
+                        EntryKind::Directory
+                    } else if kind.is_file() {
+                        EntryKind::File
+                    } else {
+                        EntryKind::Other
+                    },
+                },
+                Err(_) => {
+                    listing
+                        .notice
+                        .get_or_insert_with(|| "Some entries could not be searched.".into());
+                    continue;
+                }
+            };
+            if entry.kind == EntryKind::Directory {
+                if pending.len() < ENTRY_LIMIT {
+                    pending.push_back(entry.path.clone());
+                } else {
+                    listing.notice =
+                        Some("Search folder limit reached; narrow the search location.".into());
+                }
+            }
+            if entry
+                .path
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().to_lowercase().contains(&needle))
+            {
+                let bytes = path_payload_bytes(&entry.path);
+                if listing.entries.len() == ENTRY_LIMIT
+                    || listing.bytes.saturating_add(bytes) > PATH_BYTES_LIMIT
+                {
+                    listing.notice = Some("Search result limit reached; narrow the name.".into());
+                    break 'scan;
+                }
+                listing.bytes += bytes;
+                listing.entries.push(entry);
+            }
+        }
+    }
+    listing.entries.sort_by(|a, b| {
+        (b.kind == EntryKind::Directory)
+            .cmp(&(a.kind == EntryKind::Directory))
+            .then_with(|| a.path.cmp(&b.path))
+    });
+    Ok(listing)
 }
 
 fn limit_error() -> String {
@@ -106,6 +218,8 @@ pub(crate) struct Request {
     pub(crate) generation: u64,
     pub(crate) epoch: u64,
     pub(crate) path: PathBuf,
+    pub(crate) query: String,
+    pub(crate) reveal: bool,
 }
 
 #[derive(Debug)]
@@ -251,7 +365,13 @@ fn spawn_worker(
                 };
                 let token = Arc::clone(&job.cancelled);
                 let cancelled = || token.load(Ordering::Acquire);
-                let result = reader(&job.request.path, &cancelled);
+                let result = if job.request.reveal {
+                    reveal_path(&job.request.path, &cancelled)
+                } else if !job.request.query.is_empty() {
+                    search_names(&job.request.path, &job.request.query, &cancelled)
+                } else {
+                    reader(&job.request.path, &cancelled)
+                };
                 if token.load(Ordering::Acquire) {
                     if shutdown.load(Ordering::Acquire) {
                         return;
@@ -307,6 +427,8 @@ mod tests {
             generation: 3,
             epoch: 11,
             path,
+            query: String::new(),
+            reveal: false,
         }
     }
 
@@ -425,6 +547,7 @@ mod tests {
             Ok(Listing {
                 entries: Vec::new(),
                 bytes: 0,
+                ..Default::default()
             })
         });
         let mut loader = Loader::new_with_reader(reader);
@@ -466,6 +589,7 @@ mod tests {
                 Ok(Listing {
                     entries: Vec::new(),
                     bytes: 0,
+                    ..Default::default()
                 })
             }
         });
@@ -522,6 +646,7 @@ mod tests {
             Ok(Listing {
                 entries: Vec::new(),
                 bytes: 0,
+                ..Default::default()
             })
         }));
         crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
@@ -563,5 +688,52 @@ mod tests {
         assert!(ctx.cumulative_frame_nr() > before);
         assert!(window.explorer.loading.is_some());
         release_tx.send(()).unwrap();
+    }
+    #[test]
+    fn name_search_walks_nested_folders_without_following_directory_links() {
+        let temp = TempDir::new();
+        fs::create_dir_all(temp.0.join("nested/NeedleFolder")).unwrap();
+        fs::write(temp.0.join("nested/NeedleFile.rs"), "content").unwrap();
+        fs::write(temp.0.join("unrelated.rs"), "needle").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&temp.0, temp.0.join("nested/loop")).unwrap();
+        let found = search_names(&temp.0, "nEeDlE", &|| false).unwrap();
+        assert_eq!(found.entries.len(), 2);
+        assert_eq!(found.entries[0].kind, EntryKind::Directory);
+        assert!(found.entries.iter().all(|entry| {
+            entry
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .contains("Needle")
+        }));
+        assert!(search_names(&temp.0, "needle", &|| true).is_err());
+    }
+
+    #[test]
+    fn name_search_says_when_its_result_limit_is_reached() {
+        let temp = TempDir::new();
+        for index in 0..=ENTRY_LIMIT {
+            fs::write(temp.0.join(format!("match-{index}")), "").unwrap();
+        }
+        let found = search_names(&temp.0, "match", &|| false).unwrap();
+        assert_eq!(found.entries.len(), ENTRY_LIMIT);
+        assert!(found.notice.unwrap().contains("limit"));
+    }
+
+    #[test]
+    fn path_reveal_distinguishes_a_directory_file_and_missing_path() {
+        let temp = TempDir::new();
+        fs::create_dir(temp.0.join("child")).unwrap();
+        let file = temp.0.join("file.rs");
+        fs::write(&file, "source").unwrap();
+        let found = reveal_path(&file, &|| false).unwrap();
+        assert_eq!(found.root, Some(temp.0.clone()));
+        assert_eq!(found.selected, Some(file));
+        let folder = reveal_path(&temp.0.join("child"), &|| false).unwrap();
+        assert_eq!(folder.root, Some(temp.0.join("child")));
+        assert!(folder.selected.is_none());
+        assert!(reveal_path(&temp.0.join("missing"), &|| false).is_err());
     }
 }

@@ -18,8 +18,6 @@ fn panes_and_worktrees_restore_independent_navigation_and_restart_hidden() {
     nav.selected = Some("/repo/main/src/a.md".into());
     nav.scroll = 120.0;
     state.visible = true;
-    state.pinned = Some(1);
-    assert_eq!(state.target(Some(2)), Some(1));
     state.hide();
     state.visible = true;
     assert_eq!(state.navigation[&1].scroll, 120.0);
@@ -27,15 +25,12 @@ fn panes_and_worktrees_restore_independent_navigation_and_restart_hidden() {
     assert_eq!(state.navigation[&3].root, Some("/repo/main".into()));
     assert!(state.navigation[&2].expanded.is_empty());
     assert!(state.navigation[&3].selected.is_none());
-    state.pinned = None;
-    assert_eq!(state.target(Some(2)), Some(2));
-    assert_eq!(state.target(Some(1)), Some(1));
     let restarted = Explorer::default();
-    assert!(!restarted.visible && restarted.pinned.is_none() && restarted.navigation.is_empty());
+    assert!(!restarted.visible && restarted.navigation.is_empty());
 }
 
 #[test]
-fn files_pin_expansion_and_scroll_survive_shared_sidebar_tool_switches() {
+fn files_expansion_and_scroll_survive_shared_sidebar_tool_switches() {
     let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
     let ids: Vec<_> = window.all_panes().map(|pane| pane.name).collect();
     window.explorer.reconcile(&[
@@ -46,7 +41,6 @@ fn files_pin_expansion_and_scroll_survive_shared_sidebar_tool_switches() {
     nav.expanded.insert("/repo/a/src".into());
     nav.selected = Some("/repo/a/src/lib.rs".into());
     nav.scroll = 189.0;
-    window.explorer.pinned = Some(ids[0]);
 
     for tool in [
         crate::sidebar::Tool::Files,
@@ -63,7 +57,6 @@ fn files_pin_expansion_and_scroll_survive_shared_sidebar_tool_switches() {
         Some(Path::new("/repo/a/src/lib.rs"))
     );
     assert_eq!(nav.scroll, 189.0);
-    assert_eq!(window.explorer.pinned, Some(ids[0]));
 }
 
 #[test]
@@ -76,10 +69,7 @@ fn source_epochs_and_pane_liveness_reject_stale_results() {
     assert!(!state.current(&request));
     state.reconcile(&sources());
     assert!(!state.current(&request));
-    state.pinned = Some(1);
     state.reconcile(&[(2, Some("/repo/worktree".into()))]);
-    assert_eq!(state.pinned, None);
-    assert!(state.message.contains("Pinned console closed"));
     assert!(!state.navigation.contains_key(&1));
     assert!(!state.current(&request));
 }
@@ -97,6 +87,7 @@ fn cache_eviction_never_discards_navigation() {
                 result: Ok(Listing {
                     entries: vec![],
                     bytes: 0,
+                    ..Default::default()
                 }),
                 used: index,
             },
@@ -166,6 +157,7 @@ fn cache_pressure_keeps_the_current_tree_root_instead_of_reloading_it() {
             result: Ok(Listing {
                 entries: vec![],
                 bytes: 0,
+                ..Default::default()
             }),
             used: 0,
         },
@@ -178,6 +170,7 @@ fn cache_pressure_keeps_the_current_tree_root_instead_of_reloading_it() {
                 result: Ok(Listing {
                     entries: vec![],
                     bytes: 0,
+                    ..Default::default()
                 }),
                 used: index,
             },
