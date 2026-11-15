@@ -12,11 +12,11 @@ use eframe::egui::{self, FontData, FontDefinitions, FontFamily};
 use std::sync::Arc;
 
 /// The family a medium (500) interface label is laid out with.
-pub(crate) const UI_MEDIUM: &str = "ivy-ui-medium";
+const UI_MEDIUM: &str = "ivy-ui-medium";
 /// The family a semibold (600) title is laid out with.
-pub(crate) const UI_SEMIBOLD: &str = "ivy-ui-semibold";
+const UI_SEMIBOLD: &str = "ivy-ui-semibold";
 /// Geist Mono at medium weight, for paths and titles the chrome sets in mono.
-pub(crate) const MONO_MEDIUM: &str = "ivy-mono-medium";
+const MONO_MEDIUM: &str = "ivy-mono-medium";
 
 const FACES: [(&str, &[u8]); 5] = [
     (
@@ -87,15 +87,6 @@ pub(crate) fn base_definitions() -> FontDefinitions {
     definitions
 }
 
-/// The interface family for a design weight: 400, 500 or 600.
-pub(crate) fn ui_family(weight: u16) -> FontFamily {
-    match weight {
-        ..=450 => FontFamily::Proportional,
-        451..=550 => FontFamily::Name(UI_MEDIUM.into()),
-        _ => FontFamily::Name(UI_SEMIBOLD.into()),
-    }
-}
-
 /// Installs the bundled faces when nothing else will: a start-up with no configured font never
 /// reaches the selection path, which is the only other writer of the definitions.
 pub(crate) fn install(ctx: &egui::Context) {
@@ -105,6 +96,15 @@ pub(crate) fn install(ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The family a design weight is laid out with.
+    fn ui_family(weight: u16) -> FontFamily {
+        match weight {
+            400 => FontFamily::Proportional,
+            500 => FontFamily::Name(UI_MEDIUM.into()),
+            _ => FontFamily::Name(UI_SEMIBOLD.into()),
+        }
+    }
 
     fn pass(ctx: &egui::Context) {
         ctx.run_ui(egui::RawInput::default(), |_| {})
@@ -168,9 +168,6 @@ mod tests {
         let regular = drawing(&ctx, 'M', ui_family(400));
         let medium = drawing(&ctx, 'M', ui_family(500));
         let semibold = drawing(&ctx, 'M', ui_family(600));
-        assert_eq!(ui_family(400), FontFamily::Proportional);
-        assert_eq!(ui_family(500), FontFamily::Name(UI_MEDIUM.into()));
-        assert_eq!(ui_family(600), FontFamily::Name(UI_SEMIBOLD.into()));
         ctx.fonts(|fonts| {
             let families = &fonts.definitions().families;
             assert_eq!(families[&ui_family(500)][0], "Geist Medium");

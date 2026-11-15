@@ -27,7 +27,8 @@ use fontique::{Collection, CollectionOptions, GenericFamily, SourceCache};
 use skrifa::MetadataProvider as _;
 mod atlas;
 mod bundled;
-pub(crate) use bundled::{MONO_MEDIUM, install as install_bundled, ui_family};
+#[cfg(test)]
+pub(crate) use bundled::install as install_bundled;
 mod ligatures;
 pub use ligatures::LigatureCost;
 pub(crate) use ligatures::{

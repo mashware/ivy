@@ -6,7 +6,7 @@
 //! the theme the person chose.
 
 use crate::theme::{Roles, Theme, metrics};
-use eframe::egui::{self, Color32, CornerRadius, Stroke};
+use eframe::egui::{self, CornerRadius, Stroke};
 
 /// Installs the style for `theme`, once per change of theme.
 ///
@@ -80,6 +80,7 @@ pub(crate) fn apply(style: &mut egui::Style, roles: &Roles) {
 mod tests {
     use super::*;
     use crate::theme::NamedTheme;
+    use eframe::egui::Color32;
 
     fn rgb(hex: u32) -> Color32 {
         Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)

@@ -591,7 +591,8 @@ fn brighten(c: TermColor) -> TermColor {
 }
 
 /// Mixes two colors, with `p` as the share the second takes.
-fn mix(a: Color32, b: Color32, p: f32) -> Color32 {
+/// Moves `a` toward `b` by `p`, per channel in gamma space.
+pub(crate) fn mix(a: Color32, b: Color32, p: f32) -> Color32 {
     let channel = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * p).round() as u8;
     Color32::from_rgb(
         channel(a.r(), b.r()),

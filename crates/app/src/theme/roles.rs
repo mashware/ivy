@@ -59,19 +59,11 @@ pub(crate) struct Roles {
     pub shadow: Shadow,
 }
 
-/// The kit's measures, in points. Heights are what a control, a list row or a bar occupies.
+/// The kit's radii, in points, by what they round. The design's other measures (chip, card and
+/// dialog radii, control, row, tab and bar heights) arrive with the surfaces that use them.
 pub(crate) mod metrics {
-    pub const SPACING: [f32; 7] = [2.0, 4.0, 8.0, 12.0, 16.0, 24.0, 32.0];
-    pub const RADIUS_CHIP: u8 = 4;
     pub const RADIUS_CONTROL: u8 = 6;
-    pub const RADIUS_CARD: u8 = 8;
     pub const RADIUS_FLOATING: u8 = 10;
-    pub const RADIUS_DIALOG: u8 = 12;
-    pub const CONTROL_HEIGHT: f32 = 28.0;
-    pub const ROW_HEIGHT: f32 = 30.0;
-    pub const TAB_HEIGHT: f32 = 34.0;
-    pub const CONSOLE_HEADER_HEIGHT: f32 = 28.0;
-    pub const TITLE_BAR_HEIGHT: f32 = 40.0;
 }
 
 impl Roles {
