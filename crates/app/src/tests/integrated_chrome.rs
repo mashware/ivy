@@ -1598,7 +1598,7 @@ mod tests {
     }
 
     #[test]
-    fn global_menu_groups_commands_and_operates_panel_and_shortcut_settings() {
+    fn global_menu_keeps_requested_commands_and_opens_shortcut_settings() {
         let ctx = egui::Context::default();
         ctx.global_style_mut(|style| style.animation_time = 0.0);
         let mut window = window_with("sleep 30", "sleep 30");
@@ -1612,39 +1612,33 @@ mod tests {
         frame(&mut window, &ctx, area, click_at(menu));
         let shapes = frame(&mut window, &ctx, area, vec![]);
         for label in [
+            "Check for updates",
+            "What's new",
+            "Preferences",
+            "Keyboard shortcuts",
+            "Connect agents",
+            "Search console",
+        ] {
+            assert!(has_text(&shapes, label), "menu omitted {label}");
+        }
+        for label in [
             "New tab",
             "Split right",
             "Split down",
             "Toggle information panel",
-            "Preferences",
-            "Keyboard shortcuts",
-            "Ctrl Shift T",
-            "Ctrl Shift D",
-            "Ctrl Shift B",
+            "Markdown viewer",
+            "Git diff viewer",
+            "Board",
         ] {
-            assert!(has_text(&shapes, label), "menu omitted {label}");
+            assert!(!has_text(&shapes, label), "menu retained {label}");
         }
-        let new_tab = text_center(&shapes, "New tab").y;
-        let right = text_center(&shapes, "Split right").y;
-        let down = text_center(&shapes, "Split down").y;
-        let panel = text_center(&shapes, "Toggle information panel");
+        let notes = text_center(&shapes, "What's new").y;
+        let check = text_center(&shapes, "Check for updates").y;
         let preferences = text_center(&shapes, "Preferences").y;
         assert!(
-            right - new_tab > down - right,
-            "new-tab group has no visible separation"
+            preferences - notes > notes - check,
+            "preferences group has no separation"
         );
-        assert!(
-            preferences - panel.y > down - right,
-            "preferences group has no visible separation"
-        );
-        let shapes = frame(&mut window, &ctx, area, click_at(panel));
-        assert!(window.active().panes()[0].folded);
-        assert!(
-            !has_text(&shapes, "Visible document"),
-            "menu toggle left the document visible"
-        );
-        frame(&mut window, &ctx, area, click_at(menu));
-        let shapes = frame(&mut window, &ctx, area, vec![]);
         let at = text_center(&shapes, "Keyboard shortcuts");
         frame(&mut window, &ctx, area, click_at(at));
         frame(&mut window, &ctx, area, vec![]);
@@ -1872,7 +1866,7 @@ mod tests {
             window.chrome.start(&ctx, false);
             window.headers = window.headers.integrated(true);
             received.wait_until_ready(Duration::from_secs(5));
-            let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 450.0));
+            let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 250.0));
             open_updates_menu(&mut window, &ctx, area);
             let point = egui::pos2(width - 100.0, 250.0);
             frame(
@@ -2039,6 +2033,225 @@ mod tests {
                 if label == "Keyboard shortcuts" {
                     assert!(has_text(&shapes, "Blank uses the factory chord"));
                 }
+                assert!(
+                    window
+                        .all_panes_mut()
+                        .all(|pane| pane.keystrokes.is_empty())
+                );
+            }
+        }
+    }
+    #[test]
+    fn board_menu_retained_actions_work_at_both_widths() {
+        for board_open in [false, true] {
+            for width in [1400.0, 240.0] {
+                for (label, proof) in [
+                    ("Check for updates", "Installed: Ivy"),
+                    ("What's new", "New in this alpha"),
+                    ("Connect agents", "Copy setup prompt"),
+                    ("Search console", ""),
+                ] {
+                    let ctx = egui::Context::default();
+                    chrome::prepare(&ctx);
+                    let mut window = window_with("sleep 30", "sleep 30");
+                    window.chrome.start(&ctx, false);
+                    window.headers = window.headers.integrated(true);
+                    let area =
+                        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 900.0));
+                    frame(&mut window, &ctx, area, vec![]);
+                    if board_open {
+                        crate::board::toggle(&mut window, &ctx);
+                    }
+                    frame(&mut window, &ctx, area, vec![]);
+                    let shapes = open_updates_menu(&mut window, &ctx, area);
+                    let menu_clip = shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Text(t) if t.galley.text() == "Preferences" => {
+                                Some(shape.clip_rect)
+                            }
+                            _ => None,
+                        })
+                        .unwrap();
+                    for removed in [
+                        "New tab",
+                        "Split right",
+                        "Split down",
+                        "Toggle information panel",
+                        "Markdown viewer",
+                        "Git diff viewer",
+                        "Board",
+                    ] {
+                        assert!(!shapes.iter().any(|shape| shape.clip_rect == menu_clip && matches!(&shape.shape, egui::Shape::Text(t) if t.galley.text() == removed)), "menu retained {removed}");
+                    }
+                    let at = text_center(&shapes, label);
+                    separate_click(&mut window, &ctx, area, at);
+                    assert!(!window.board.is_open(), "{label} did not dismiss Board");
+                    frame(&mut window, &ctx, area, vec![]);
+                    let shapes = frame(&mut window, &ctx, area, vec![]);
+                    if label == "Search console" {
+                        assert!(window.active().panes()[0].search.is_open());
+                    } else {
+                        assert!(
+                            has_text(&shapes, proof),
+                            "Board={board_open}, width={width}: {label} did not open"
+                        );
+                    }
+                    assert!(
+                        window
+                            .all_panes_mut()
+                            .all(|pane| pane.keystrokes.is_empty())
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn board_menu_owns_keyboard_dismissal_and_cross_surface_releases() {
+        for board_open in [false, true] {
+            let ctx = egui::Context::default();
+            chrome::prepare(&ctx);
+            let received = term_core::received::Received::new("board-menu-ownership");
+            let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
+            received.wait_until_ready(Duration::from_secs(5));
+            window.chrome.start(&ctx, false);
+            window.headers = window.headers.integrated(true);
+            window.settings_editor =
+                settings::editor::Editor::resolved(settings::Entry::Normal, None);
+            let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0));
+            frame(&mut window, &ctx, area, vec![]);
+            if board_open {
+                crate::board::toggle(&mut window, &ctx);
+            }
+            frame(&mut window, &ctx, area, vec![]);
+            let selected = window.board.selected();
+            let shapes = open_updates_menu(&mut window, &ctx, area);
+            let row = text_center(&shapes, "Preferences");
+            // A press on the menu followed by release over the canvas cancels, never activates a card.
+            frame(
+                &mut window,
+                &ctx,
+                area,
+                vec![egui::Event::PointerMoved(row), pointer_button(row, true)],
+            );
+            let card = egui::pos2(100.0, 250.0);
+            frame(
+                &mut window,
+                &ctx,
+                area,
+                vec![
+                    egui::Event::PointerMoved(card),
+                    pointer_button(card, false),
+                    egui::Event::Text("LEAK".into()),
+                ],
+            );
+            assert_eq!(window.board.is_open(), board_open);
+            assert_eq!(window.board.selected(), selected);
+            assert!(!window.settings_editor.is_open());
+            frame(&mut window, &ctx, area, vec![menu_key(egui::Key::Escape)]);
+            assert_eq!(
+                window.board.is_open(),
+                board_open,
+                "Escape closed Board behind menu"
+            );
+            let shapes = frame(&mut window, &ctx, area, vec![]);
+            assert!(!has_text(&shapes, "Preferences"));
+            open_updates_menu(&mut window, &ctx, area);
+            // Outside press dismisses; its release over a card is still owned by chrome.
+            frame(
+                &mut window,
+                &ctx,
+                area,
+                vec![egui::Event::PointerMoved(card), pointer_button(card, true)],
+            );
+            frame(
+                &mut window,
+                &ctx,
+                area,
+                vec![
+                    pointer_button(card, false),
+                    egui::Event::Text("LEAK".into()),
+                ],
+            );
+            assert_eq!(window.board.is_open(), board_open);
+            assert_eq!(window.board.selected(), selected);
+            open_updates_menu(&mut window, &ctx, area);
+            for _ in 0..3 {
+                frame(
+                    &mut window,
+                    &ctx,
+                    area,
+                    vec![menu_key(egui::Key::ArrowDown)],
+                );
+            }
+            frame(&mut window, &ctx, area, vec![menu_key(egui::Key::Enter)]);
+            assert!(
+                window.settings_editor.is_open(),
+                "keyboard did not activate Preferences"
+            );
+            assert!(!window.board.is_open());
+            assert!(
+                window
+                    .all_panes_mut()
+                    .all(|pane| pane.keystrokes.is_empty())
+            );
+            // Verify the real PTY after releasing both overlays: only this sentinel may arrive.
+            frame(&mut window, &ctx, area, vec![]);
+            frame(&mut window, &ctx, area, vec![menu_key(egui::Key::Escape)]);
+            frame(&mut window, &ctx, area, vec![]);
+            frame(
+                &mut window,
+                &ctx,
+                area,
+                vec![egui::Event::Text("AFTER".into())],
+            );
+            assert_eq!(received.wait_for(5, Duration::from_secs(5)), b"AFTER");
+        }
+    }
+    #[test]
+    fn compact_menu_window_controls_emit_commands_with_board_open_or_closed() {
+        for board_open in [false, true] {
+            for (label, command) in [
+                ("Minimize window", egui::ViewportCommand::Minimized(true)),
+                ("Maximize window", egui::ViewportCommand::Maximized(true)),
+                ("Close window", egui::ViewportCommand::Close),
+            ] {
+                let ctx = egui::Context::default();
+                let mut window = window_with("sleep 30", "sleep 30");
+                window.chrome.enable();
+                window.headers = window.headers.integrated(true);
+                let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(240.0, 600.0));
+                frame(&mut window, &ctx, area, vec![]);
+                if board_open {
+                    crate::board::toggle(&mut window, &ctx);
+                }
+                frame(&mut window, &ctx, area, vec![]);
+                let shapes = open_updates_menu(&mut window, &ctx, area);
+                let at = text_center(&shapes, label);
+                frame(
+                    &mut window,
+                    &ctx,
+                    area,
+                    vec![egui::Event::PointerMoved(at), pointer_button(at, true)],
+                );
+                let mut native_frame = eframe::Frame::_new_kittest();
+                let output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(area),
+                        events: vec![pointer_button(at, false)],
+                        ..Default::default()
+                    },
+                    |ui| eframe::App::ui(&mut window, ui, &mut native_frame),
+                );
+                assert!(
+                    output.viewport_output[&egui::ViewportId::ROOT]
+                        .commands
+                        .contains(&command),
+                    "{label} did not dispatch with Board={board_open}"
+                );
+                output.drop_without_applying_deltas();
+                assert_eq!(window.board.is_open(), board_open);
                 assert!(
                     window
                         .all_panes_mut()
