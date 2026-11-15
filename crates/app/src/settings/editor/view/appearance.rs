@@ -87,18 +87,14 @@ pub(super) fn show(
         let font = egui::FontId::proportional(10.0);
         let size = ui
             .painter()
-            .layout_no_wrap(
-                badge.clone(),
-                font.clone(),
-                egui::Color32::from_rgb(214, 190, 142),
-            )
+            .layout_no_wrap(badge.clone(), font.clone(), ui.visuals().text_color())
             .size();
         let (rect, _) =
             ui.allocate_exact_size(egui::vec2(size.x + 12.0, 20.0), egui::Sense::hover());
         ui.painter().rect_stroke(
             rect,
             4.0,
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(91, 81, 61)),
+            egui::Stroke::new(1.0, ui.visuals().window_stroke.color),
             egui::StrokeKind::Inside,
         );
         ui.painter().text(
@@ -106,11 +102,11 @@ pub(super) fn show(
             egui::Align2::CENTER_CENTER,
             badge,
             font,
-            egui::Color32::from_rgb(214, 190, 142),
+            ui.visuals().text_color(),
         );
         if color_errors > 0 {
             ui.colored_label(
-                egui::Color32::LIGHT_RED,
+                ui.visuals().error_fg_color,
                 format!(
                     "{color_errors} error{}",
                     if color_errors == 1 { "" } else { "s" }
@@ -146,7 +142,7 @@ pub(super) fn show(
     super::typography::show(editor, ui, discoverer, errors);
 }
 
-fn effective_theme(draft: &crate::settings::document::Document) -> crate::theme::Theme {
+pub(super) fn effective_theme(draft: &crate::settings::document::Document) -> crate::theme::Theme {
     let mut settings = crate::settings::Settings::default();
     for field in &draft.fields {
         if !field.value.is_empty()
@@ -165,10 +161,7 @@ fn effective_theme(draft: &crate::settings::document::Document) -> crate::theme:
             let _ = crate::settings::apply(&mut settings, &field.key, &field.value);
         }
     }
-    settings
-        .theme
-        .map_or_else(crate::theme::Theme::default, |t| t.theme())
-        .with_colors(&settings.colors)
+    settings.resolved_theme()
 }
 
 fn preview(editor: &Editor, ui: &mut egui::Ui) {
@@ -180,13 +173,13 @@ fn preview(editor: &Editor, ui: &mut egui::Ui) {
     let painter = ui.painter();
     painter.rect_filled(rect, 7.0, theme.background());
     let top = egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, rect.min.y + 27.0));
-    painter.rect_filled(top, 5.0, egui::Color32::from_rgb(37, 41, 56));
+    painter.rect_filled(top, 5.0, ui.visuals().panel_fill);
     painter.text(
         top.min + egui::vec2(11.0, 7.0),
         egui::Align2::LEFT_TOP,
         ">_  Preview",
         egui::FontId::proportional(10.0),
-        egui::Color32::from_rgb(151, 160, 183),
+        ui.visuals().text_color(),
     );
     let body = egui::Rect::from_min_max(egui::pos2(rect.min.x, top.max.y), rect.max);
     let panel = egui::Rect::from_min_max(
@@ -291,14 +284,9 @@ fn theme_picker(editor: &mut Editor, ui: &mut egui::Ui, count: usize) {
         NamedTheme::from_written(&selected).map_or("Built-in theme (inherit)", |t| t.title());
     let response = selector(ui, title, ui.available_width());
     let opened = response.clicked();
+    let popup_style = ui.style().clone();
     egui::Popup::menu(&response)
-        .frame(
-            egui::Frame::new()
-                .fill(egui::Color32::from_rgb(35, 41, 54))
-                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(70, 81, 106)))
-                .corner_radius(9)
-                .inner_margin(10),
-        )
+        .frame(super::palette::popup_frame(ui))
         .width(
             300.0_f32
                 .min(ui.ctx().content_rect().width() - 24.0)
@@ -306,15 +294,15 @@ fn theme_picker(editor: &mut Editor, ui: &mut egui::Ui, count: usize) {
         )
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
-            super::settings_style(ui);
+            ui.set_style(popup_style);
             ui.set_width(
                 280.0_f32
                     .min(ui.ctx().content_rect().width() - 44.0)
                     .max(60.0),
             );
             let search = egui::Frame::new()
-                .fill(egui::Color32::from_rgb(23, 28, 37))
-                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(48, 54, 68)))
+                .fill(ui.visuals().extreme_bg_color)
+                .stroke(egui::Stroke::new(1.0, ui.visuals().window_stroke.color))
                 .corner_radius(6)
                 .inner_margin(egui::Margin::symmetric(10, 6))
                 .show(ui, |ui| {
@@ -413,9 +401,9 @@ fn theme_picker(editor: &mut Editor, ui: &mut egui::Ui, count: usize) {
                                 rect,
                                 5.0,
                                 if current == id {
-                                    egui::Color32::from_rgb(50, 57, 74)
+                                    ui.visuals().selection.bg_fill
                                 } else {
-                                    egui::Color32::from_rgb(42, 48, 62)
+                                    ui.style().interact(&response).bg_fill
                                 },
                             );
                         }
@@ -424,7 +412,11 @@ fn theme_picker(editor: &mut Editor, ui: &mut egui::Ui, count: usize) {
                             egui::Align2::LEFT_CENTER,
                             label,
                             egui::FontId::proportional(14.0),
-                            ui.visuals().text_color(),
+                            if current == id {
+                                ui.visuals().selection.stroke.color
+                            } else {
+                                ui.style().interact(&response).fg_stroke.color
+                            },
                         );
                         if direction != 0 && current == id {
                             response.scroll_to_me(Some(egui::Align::Center));
@@ -466,7 +458,7 @@ fn theme_picker(editor: &mut Editor, ui: &mut egui::Ui, count: usize) {
         ui.horizontal(|ui| {
             let (dot, _) = ui.allocate_exact_size(egui::vec2(6.0, 6.0), egui::Sense::hover());
             ui.painter()
-                .circle_filled(dot.center(), 2.5, egui::Color32::from_rgb(196, 167, 110));
+                .circle_filled(dot.center(), 2.5, ui.visuals().text_color());
             ui.label(
                 egui::RichText::new(format!(
                     "{count} color{} customized",
