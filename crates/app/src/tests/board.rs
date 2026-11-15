@@ -297,8 +297,9 @@ mod tests {
         assert!(!cards.is_empty(), "the stacked Board painted no cards");
         for card in cards {
             assert!(
-                card.left() >= dock.left() - 0.1 && card.right() <= dock.right() + 0.1,
-                "painted card {card:?} exceeds Board viewport {dock:?}"
+                (card.left() - dock.left() - 8.0).abs() < 0.1
+                    && (card.right() - dock.right() + 8.0).abs() < 0.1,
+                "card {card:?} must retain both 8pt margins inside Board viewport {dock:?}"
             );
         }
     }
