@@ -640,6 +640,18 @@ const SOURCES: &[(&str, &str, usize)] = &[
         15,
     ),
     (
+        "src/fonts/bundled.rs",
+        include_str!("../src/fonts/bundled.rs"),
+        17,
+    ),
+    (
+        "src/theme/roles.rs",
+        include_str!("../src/theme/roles.rs"),
+        33,
+    ),
+    ("src/ui.rs", include_str!("../src/ui.rs"), 2),
+    ("src/ui/style.rs", include_str!("../src/ui/style.rs"), 12),
+    (
         "src/settings/editor.rs",
         include_str!("../src/settings/editor.rs"),
         3,
@@ -805,7 +817,8 @@ const SOURCES: &[(&str, &str, usize)] = &[
         521,
     ),
     ("src/watcher.rs", include_str!("../src/watcher.rs"), 203),
-    ("src/theme.rs", include_str!("../src/theme.rs"), 202),
+    // Lowered from 202: the old factory palette's per-colour notes and the test of its bright-colour rule left with it (D94).
+    ("src/theme.rs", include_str!("../src/theme.rs"), 176),
     (
         "src/theme/catalog.rs",
         include_str!("../src/theme/catalog.rs"),
@@ -891,8 +904,8 @@ const SOURCES: &[(&str, &str, usize)] = &[
 /// deleted declared file a compile error. [`rust_sources`] walks only to find the opposite mistake:
 /// a real file nobody declared. It never supplies the text being judged, so a path cannot disappear
 /// from the guard merely because the directory walk did not return it.
-// Re-measured with the existing comment walker after registering the Preferences modules.
-const COMMENT_LINES_AT_LEAST: usize = 19_921;
+// Raised by the production comment lines of the theme roles, bundled fonts and style modules.
+const COMMENT_LINES_AT_LEAST: usize = 19_985;
 
 /// How many **different** listed words a line needs before it is called Spanish.
 ///

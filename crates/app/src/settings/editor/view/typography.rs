@@ -63,7 +63,7 @@ pub(super) fn show(
             let field = draft.fields.iter_mut().find(|f| f.key == "font").unwrap();
             ui.weak("Font family");
             let title = if field.value.is_empty() {
-                "Built-in default"
+                "Geist Mono (default)"
             } else {
                 &field.value
             };
@@ -123,7 +123,7 @@ pub(super) fn show(
                         .show(ui, |ui| {
                             for name in choices {
                                 let title = if name.is_empty() {
-                                    "Built-in default"
+                                    "Geist Mono (default)"
                                 } else {
                                     name
                                 };
@@ -310,6 +310,7 @@ mod tests {
     #[test]
     fn specimen_uses_real_selected_face_and_size_without_changing_terminal_or_reloading() {
         let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
         pass(&ctx);
         let baseline = metrics(&ctx, egui::FontId::monospace(14.0));
         let mut fonts = crate::fonts::fixture_discoverer();
@@ -332,6 +333,7 @@ mod tests {
     #[test]
     fn merely_opening_and_reopening_font_preview_never_searches_the_machine() {
         let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
         let mut fonts = crate::fonts::Discoverer::default();
         for name in ["", "A draft family not activated in the terminal"] {
             let mut preview = PreviewState::default();

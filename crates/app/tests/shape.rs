@@ -432,6 +432,13 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/fonts/startup.rs"),
     ),
     (
+        "src/fonts/bundled.rs",
+        include_str!("../src/fonts/bundled.rs"),
+    ),
+    ("src/theme/roles.rs", include_str!("../src/theme/roles.rs")),
+    ("src/ui.rs", include_str!("../src/ui.rs")),
+    ("src/ui/style.rs", include_str!("../src/ui/style.rs")),
+    (
         "src/settings/editor.rs",
         include_str!("../src/settings/editor.rs"),
     ),

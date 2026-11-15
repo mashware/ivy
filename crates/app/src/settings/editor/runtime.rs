@@ -540,6 +540,7 @@ mod tests {
     fn ligatures_save_cancel_and_reset_preserve_programs_grid_and_lazy_fonts() {
         let file = File::new("# retain\nsize=14\n");
         let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
         let mut window = window(&file);
         window.discoverer = crate::fonts::Discoverer::default();
         window.tabs[0]
@@ -625,6 +626,7 @@ mod tests {
     fn title_sizes_save_apply_and_cancel_independently() {
         let file = File::new("# preserved\npane.title_size=12\ntab.label_size=12\n");
         let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
         let mut window = window(&file);
         frame(&mut window, &ctx);
         let original = file.read();
@@ -667,6 +669,7 @@ mod tests {
     fn repeated_save_in_the_same_frame_preserves_success_and_next_frame_checks_conflicts() {
         let file = File::new("size=14\n");
         let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
         let mut window = window(&file);
         frame(&mut window, &ctx);
         set(&mut window, "size", "24");
@@ -703,6 +706,7 @@ mod tests {
     fn failed_save_remains_failed_during_the_same_frame() {
         let file = File::new("size=14\n");
         let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
         let mut window = window(&file);
         frame(&mut window, &ctx);
         set(&mut window, "size", "invalid");
@@ -724,6 +728,7 @@ mod tests {
     fn closing_after_saved_font_discards_later_edits_but_keeps_pending_activation() {
         let file = File::new("size=14\n");
         let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
         let mut window = window(&file);
         frame(&mut window, &ctx);
         let builtin = metrics(&ctx);
@@ -761,6 +766,7 @@ mod tests {
     fn save_commits_once_after_the_next_begin_pass_and_resizes_all_quiet_consoles() {
         let file = File::new("size=14\n");
         let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
         let mut window = window(&file);
         frame(&mut window, &ctx);
         frame(&mut window, &ctx);
@@ -840,6 +846,7 @@ mod tests {
     fn failed_font_preparation_and_external_conflict_preserve_file_runtime_and_draft() {
         let file = File::new("size=14\n");
         let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
         let mut window = window(&file);
         frame(&mut window, &ctx);
         let before = window.font_size;
@@ -881,6 +888,7 @@ mod tests {
     fn selected_fixture_changes_real_metrics_and_defaults_restore_them() {
         let file = File::new("");
         let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
         let mut window = window(&file);
         frame(&mut window, &ctx);
         let builtin = metrics(&ctx);
@@ -901,6 +909,7 @@ mod tests {
     fn unchanged_missing_startup_family_does_not_block_unrelated_save() {
         let file = File::new("font=Missing fixture\nsize=14\n");
         let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
         let mut window = window(&file);
         window.settings_editor.application.family = Some("Missing fixture".into());
         frame(&mut window, &ctx);
@@ -927,6 +936,7 @@ mod tests {
             .0
             .apply_to(&mut window);
         let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
         for _ in 0..32 {
             frame(&mut window, &ctx);
             assert_eq!(

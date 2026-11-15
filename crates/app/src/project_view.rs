@@ -111,6 +111,8 @@ impl State {
 }
 
 pub(crate) fn refresh(window: &mut Window, ctx: &egui::Context) {
+    // Everything derived from the effective theme refreshes here; the style only when it changed.
+    crate::ui::style::install(ctx, &window.theme);
     if !window.projects.enabled {
         return;
     }

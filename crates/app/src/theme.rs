@@ -6,6 +6,9 @@
 //! sequences, and an application that resolves there comes out black.
 
 mod catalog;
+mod roles;
+
+pub(crate) use roles::{Roles, metrics};
 
 use eframe::egui::Color32;
 use panel_contract::{Attention, Mark, Style};
@@ -53,6 +56,8 @@ pub struct Theme {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NamedTheme {
+    IvyNight,
+    IvyDay,
     TokyoNight,
     GruvboxDark,
     CatppuccinMocha,
@@ -67,6 +72,8 @@ pub enum NamedTheme {
 
 impl NamedTheme {
     pub const ALL: &'static [Self] = &[
+        Self::IvyNight,
+        Self::IvyDay,
         Self::TokyoNight,
         Self::GruvboxDark,
         Self::CatppuccinMocha,
@@ -81,6 +88,8 @@ impl NamedTheme {
 
     pub fn id(self) -> &'static str {
         match self {
+            Self::IvyNight => "ivy-night",
+            Self::IvyDay => "ivy-day",
             Self::TokyoNight => "tokyonight",
             Self::GruvboxDark => "gruvbox-dark",
             Self::CatppuccinMocha => "catppuccin-mocha",
@@ -96,6 +105,8 @@ impl NamedTheme {
 
     pub fn title(self) -> &'static str {
         match self {
+            Self::IvyNight => "Ivy Night",
+            Self::IvyDay => "Ivy Day",
             Self::TokyoNight => "Tokyo Night",
             Self::GruvboxDark => "Gruvbox Dark",
             Self::CatppuccinMocha => "Catppuccin Mocha",
@@ -112,7 +123,7 @@ impl NamedTheme {
     pub fn is_dark(self) -> bool {
         !matches!(
             self,
-            Self::CatppuccinLatte | Self::GithubLightDefault | Self::RosePineDawn
+            Self::IvyDay | Self::CatppuccinLatte | Self::GithubLightDefault | Self::RosePineDawn
         )
     }
 
@@ -141,13 +152,41 @@ impl NamedTheme {
                 foreground: color(foreground),
                 cursor: color(cursor),
                 divider: color(mix(25)),
-                focus: color(palette[4]),
+                // ANSI green, not blue: blue is the `done` claim (D94), and the accent must differ.
+                focus: green_focus(color(palette[2]), color(palette[10]), color(background)),
                 panel_background: color(mix(5)),
             };
         }
-        // The sixteen terminal entries follow Tokyo Night Night and Gruvbox dark medium.
+        // The sixteen terminal entries follow Tokyo Night Night and Gruvbox dark medium; the two Ivy
+        // themes are the project's own (D94), their application colors taken from its design kit.
         // The six application colors below are chosen for this terminal's own surfaces.
         let (palette, background, foreground, cursor, divider, focus, panel) = match self {
+            Self::IvyNight => (
+                [
+                    0x1c2327, 0xf27a66, 0x3cc384, 0xf2b84b, 0x72b7f2, 0xb49af0, 0x4fc1b0, 0xa4aea9,
+                    0x5c6863, 0xf59a89, 0x6bd6a2, 0xf6cb78, 0x9acbf5, 0xe59bc0, 0x7dd3c6, 0xf4f6f2,
+                ],
+                0x13181b,
+                0xe4e8e2,
+                0xe4e8e2,
+                0x252e33,
+                0x3cc384,
+                0x171d21,
+            ),
+            // Slots 7 and 15 are dark on purpose, as in Catppuccin Latte: panel titles paint
+            // `palette[15]`, and a near-background one would erase them.
+            Self::IvyDay => (
+                [
+                    0x2a332e, 0xb93a26, 0x0b7a4b, 0x9a5b00, 0x1d63b0, 0x7553c9, 0x0b7a6c, 0x4a5650,
+                    0x5a6660, 0xd0533d, 0x13935d, 0xb67000, 0x3a7fcc, 0xa63d72, 0x149483, 0x0f1612,
+                ],
+                0xfafbf8,
+                0x151d19,
+                0x151d19,
+                0xdde3dc,
+                0x0b7a4b,
+                0xf2f5f0,
+            ),
             Self::TokyoNight => (
                 [
                     0x15161e, 0xf7768e, 0x9ece6a, 0xe0af68, 0x7aa2f7, 0xbb9af7, 0x7dcfff, 0xa9b1d6,
@@ -157,7 +196,7 @@ impl NamedTheme {
                 0xc0caf5,
                 0xc0caf5,
                 0x414868,
-                0x7aa2f7,
+                0x9ece6a,
                 0x15161e,
             ),
             Self::GruvboxDark => (
@@ -169,7 +208,7 @@ impl NamedTheme {
                 0xebdbb2,
                 0xebdbb2,
                 0x504945,
-                0x83a598,
+                0xb8bb26,
                 0x1d2021,
             ),
             _ => unreachable!("external palettes are handled above"),
@@ -187,53 +226,35 @@ impl NamedTheme {
     }
 }
 
+/// The green a converted palette's focus is taken from: normal green, else bright green, as long as
+/// it reaches 3:1 against the background — a focus border is a non-text mark — else normal green
+/// moved toward the background's opposite until it does. Catppuccin Latte's green reaches only 2.96.
+fn green_focus(green: Color32, bright: Color32, background: Color32) -> Color32 {
+    const MARK_CONTRAST: f32 = 3.0;
+    if let Some(found) = [green, bright]
+        .into_iter()
+        .find(|c| project_ink_contrast(*c, background) >= MARK_CONTRAST)
+    {
+        return found;
+    }
+    let ink = if project_ink_contrast(Color32::WHITE, background)
+        >= project_ink_contrast(Color32::BLACK, background)
+    {
+        Color32::WHITE
+    } else {
+        Color32::BLACK
+    };
+    (0..=100u8)
+        .map(|p| mix(green, ink, f32::from(p) / 100.0))
+        .find(|c| project_ink_contrast(*c, background) >= MARK_CONTRAST)
+        .unwrap_or(ink)
+}
+
 impl Default for Theme {
-    /// The aesthetics of the project.
-    ///
-    /// The prototype contributes **nine** colors, and none of them is red, cyan, magenta or a
-    /// bright one: it serves as an aesthetic base, not a palette. The missing ones have been written so they
-    /// belong to the same family —desaturated, medium-contrast— and not to reproduce any canonical palette.
-    ///
-    /// The bright ones come from moving their normal color a quarter of the way toward white, with two
-    /// exceptions that come from the prototype and not from that rule: bright black is its muted gray
-    /// and bright white is pure white.
+    /// The factory theme is Ivy Night (D94): what a person who configures no theme sees, and the base
+    /// explicit colors are laid over (D59).
     fn default() -> Self {
-        Self {
-            palette: [
-                Color32::from_rgb(0x1E, 0x1E, 0x1E), // 0  black — the same as the background
-                Color32::from_rgb(0xCF, 0x6A, 0x4C), // 1  red
-                Color32::from_rgb(0x8F, 0x9D, 0x6A), // 2  green
-                Color32::from_rgb(0xF9, 0xEE, 0x98), // 3  yellow
-                Color32::from_rgb(0x75, 0x87, 0xA6), // 4  blue
-                Color32::from_rgb(0x9B, 0x85, 0x9D), // 5  magenta
-                Color32::from_rgb(0x7F, 0xA5, 0xA0), // 6  cyan — written, was not there
-                Color32::from_rgb(0xA7, 0xA7, 0xA7), // 7  white
-                Color32::from_rgb(0x5F, 0x5A, 0x60), // 8  bright black — the gray from the prototype
-                Color32::from_rgb(0xDB, 0x8F, 0x79), // 9  bright red
-                Color32::from_rgb(0xAB, 0xB6, 0x8F), // 10 bright green
-                Color32::from_rgb(0xFB, 0xF2, 0xB2), // 11 bright yellow
-                Color32::from_rgb(0x98, 0xA5, 0xBC), // 12 bright blue
-                Color32::from_rgb(0xB4, 0xA4, 0xB6), // 13 bright magenta
-                Color32::from_rgb(0x9F, 0xBC, 0xB8), // 14 bright cyan
-                Color32::from_rgb(0xFF, 0xFF, 0xFF), // 15 bright white — pure white
-            ],
-            background: Color32::from_rgb(0x1E, 0x1E, 0x1E),
-            foreground: Color32::from_rgb(0xA7, 0xA7, 0xA7),
-            cursor: Color32::from_rgb(0xA7, 0xA7, 0xA7),
-            // The muted gray from the prototype, which is the bright black of the palette: it shows against the
-            // background without drawing attention. A divider is not content, so competing with the letters
-            // would be exactly what it must not do.
-            divider: Color32::from_rgb(0x5F, 0x5A, 0x60),
-            // The blue of the family, one step above the divider in presence. It has to be
-            // told apart **from the divider** at a glance, because the two are painted next to each other and if they
-            // looked alike there would be no way to tell which console listens to the keyboard.
-            focus: Color32::from_rgb(0x75, 0x87, 0xA6),
-            // One step below the console background, not above: the panel is the margin and the
-            // console is the content, so what has to recede is the panel. Raising it —making it
-            // lighter— would turn each pane into two competing blocks, and with two panes
-            // they would be four.
-            panel_background: Color32::from_rgb(0x18, 0x18, 0x18),
-        }
+        NamedTheme::IvyNight.theme()
     }
 }
 
@@ -330,7 +351,8 @@ impl Theme {
     fn by_mark(&self, mark: Mark) -> Color32 {
         match mark {
             Mark::Done => self.toward_background(self.palette[2]),
-            Mark::Current => self.palette[4],
+            // The app's accent, so a step in progress never paints in the `done` claim's blue (D94).
+            Mark::Current => self.focus,
             Mark::Pending => self.toward_background(self.foreground),
             Mark::Wait => self.palette[3],
             Mark::Block => self.palette[1],
@@ -352,7 +374,8 @@ impl Theme {
         let color = match class {
             Attention::Wait => self.palette[3],
             Attention::Block => self.palette[1],
-            Attention::Done => self.palette[2],
+            // Blue «unread», not green: green is the accent and the producer's «ok» (D94).
+            Attention::Done => self.palette[4],
         };
         if backed {
             color
@@ -591,8 +614,8 @@ fn brighten(c: TermColor) -> TermColor {
     }
 }
 
-/// Mixes two colors, with `p` as the share the second takes.
-fn mix(a: Color32, b: Color32, p: f32) -> Color32 {
+/// Mixes two colors, with `p` as the share the second takes, per channel in gamma space.
+pub(crate) fn mix(a: Color32, b: Color32, p: f32) -> Color32 {
     let channel = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * p).round() as u8;
     Color32::from_rgb(
         channel(a.r(), b.r()),
@@ -659,7 +682,7 @@ mod tests {
         use super::{NamedTheme, catalog};
         use std::collections::HashSet;
         let mut ids = HashSet::new();
-        assert_eq!(NamedTheme::ALL.len(), 10);
+        assert_eq!(NamedTheme::ALL.len(), 12);
         for &theme in NamedTheme::ALL {
             assert!(ids.insert(theme.id()));
             assert_eq!(
@@ -681,7 +704,11 @@ mod tests {
                     (actual.background, actual.foreground, actual.cursor),
                     (rgb(bg), rgb(fg), rgb(cursor))
                 );
-                assert_eq!(actual.focus, rgb(colors[4]));
+                // Normal green as it comes, except where it does not read as a mark (D94).
+                assert!(project_ink_contrast(actual.focus, actual.background) >= 3.0);
+                if theme != NamedTheme::CatppuccinLatte {
+                    assert_eq!(actual.focus, rgb(colors[2]), "{}", theme.id());
+                }
             }
         }
         assert_eq!(
@@ -690,6 +717,33 @@ mod tests {
         );
         assert!(!NamedTheme::RosePineDawn.is_dark());
         assert!(NamedTheme::RosePineMoon.is_dark());
+    }
+
+    /// Nord's green reads on its background and is the focus as it comes; Catppuccin Latte's does
+    /// not reach 3:1, so its focus is moved until it does instead of falling back to blue (D94).
+    #[test]
+    fn converted_palettes_take_a_green_focus_that_reads_as_a_mark() {
+        let rgb = |hex: u32| Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+        assert_eq!(NamedTheme::Nord.theme().focus, rgb(0xa3be8c));
+        let latte = NamedTheme::CatppuccinLatte.theme();
+        assert!(project_ink_contrast(rgb(0x40a02b), rgb(0xeff1f5)) < 3.0);
+        // One percent toward black is enough: 3.03.
+        assert_eq!(latte.focus, rgb(0x3f9e2b));
+        assert!(project_ink_contrast(latte.focus, latte.background) >= 3.0);
+    }
+
+    /// A step in progress paints in the accent, never in the `done` claim's blue (D94).
+    #[test]
+    fn the_current_step_paints_in_the_accent() {
+        let t = theme();
+        assert_eq!(
+            t.by_mark(Mark::Current),
+            Color32::from_rgb(0x3C, 0xC3, 0x84)
+        );
+        assert_ne!(
+            t.by_mark(Mark::Current),
+            t.attention_color(Attention::Done, true)
+        );
     }
 
     #[test]
@@ -771,15 +825,31 @@ mod tests {
     }
 
     #[test]
-    fn the_two_named_themes_have_all_twenty_two_published_colors() {
+    fn the_hand_written_themes_have_all_twenty_two_published_colors() {
         let cases = [
+            (
+                NamedTheme::IvyNight,
+                [
+                    0x1c2327, 0xf27a66, 0x3cc384, 0xf2b84b, 0x72b7f2, 0xb49af0, 0x4fc1b0, 0xa4aea9,
+                    0x5c6863, 0xf59a89, 0x6bd6a2, 0xf6cb78, 0x9acbf5, 0xe59bc0, 0x7dd3c6, 0xf4f6f2,
+                ],
+                [0x13181b, 0xe4e8e2, 0xe4e8e2, 0x252e33, 0x3cc384, 0x171d21],
+            ),
+            (
+                NamedTheme::IvyDay,
+                [
+                    0x2a332e, 0xb93a26, 0x0b7a4b, 0x9a5b00, 0x1d63b0, 0x7553c9, 0x0b7a6c, 0x4a5650,
+                    0x5a6660, 0xd0533d, 0x13935d, 0xb67000, 0x3a7fcc, 0xa63d72, 0x149483, 0x0f1612,
+                ],
+                [0xfafbf8, 0x151d19, 0x151d19, 0xdde3dc, 0x0b7a4b, 0xf2f5f0],
+            ),
             (
                 NamedTheme::TokyoNight,
                 [
                     0x15161e, 0xf7768e, 0x9ece6a, 0xe0af68, 0x7aa2f7, 0xbb9af7, 0x7dcfff, 0xa9b1d6,
                     0x414868, 0xf7768e, 0x9ece6a, 0xe0af68, 0x7aa2f7, 0x9d7cd8, 0x7dcfff, 0xc0caf5,
                 ],
-                [0x1a1b26, 0xc0caf5, 0xc0caf5, 0x414868, 0x7aa2f7, 0x15161e],
+                [0x1a1b26, 0xc0caf5, 0xc0caf5, 0x414868, 0x9ece6a, 0x15161e],
             ),
             (
                 NamedTheme::GruvboxDark,
@@ -787,7 +857,7 @@ mod tests {
                     0x282828, 0xcc241d, 0x98971a, 0xd79921, 0x458588, 0xb16286, 0x689d6a, 0xa89984,
                     0x928374, 0xfb4934, 0xb8bb26, 0xfabd2f, 0x83a598, 0xd3869b, 0x8ec07c, 0xebdbb2,
                 ],
-                [0x282828, 0xebdbb2, 0xebdbb2, 0x504945, 0x83a598, 0x1d2021],
+                [0x282828, 0xebdbb2, 0xebdbb2, 0x504945, 0xb8bb26, 0x1d2021],
             ),
         ];
         let code = |color: Color32| {
@@ -893,20 +963,21 @@ mod tests {
     }
 
     #[test]
-    fn the_three_default_colors_are_the_project_ones() {
+    fn the_three_default_colors_are_ivy_nights() {
         let t = theme();
         assert_eq!(
             t.color(TermColor::Background),
-            Color32::from_rgb(0x1E, 0x1E, 0x1E)
+            Color32::from_rgb(0x13, 0x18, 0x1B)
         );
         assert_eq!(
             t.color(TermColor::Foreground),
-            Color32::from_rgb(0xA7, 0xA7, 0xA7)
+            Color32::from_rgb(0xE4, 0xE8, 0xE2)
         );
         assert_eq!(
             t.color(TermColor::Cursor),
-            Color32::from_rgb(0xA7, 0xA7, 0xA7)
+            Color32::from_rgb(0xE4, 0xE8, 0xE2)
         );
+        assert_eq!(t.focus(), Color32::from_rgb(0x3C, 0xC3, 0x84));
     }
 
     #[test]
@@ -936,7 +1007,7 @@ mod tests {
         // theme's background—. Confusing these two is the error this test exists to catch.
         assert_eq!(
             t.color(TermColor::Indexed(15)),
-            Color32::from_rgb(0xFF, 0xFF, 0xFF)
+            Color32::from_rgb(0xF4, 0xF6, 0xF2)
         );
         assert_eq!(
             t.color(TermColor::Indexed(16)),
@@ -979,26 +1050,6 @@ mod tests {
     }
 
     #[test]
-    fn the_bright_ones_meet_the_rule_they_were_written_with() {
-        let t = theme();
-        // The palette doc claims that the bright ones come from moving their normal color a quarter of the way
-        // toward white. A claim written and not checked becomes a lie as
-        // soon as someone tweaks an entry, so here it is checked.
-        // The two exceptions the doc itself declares are left out: bright black and bright white
-        // come from the prototype, not from the rule.
-        for i in 1..=6u8 {
-            let normal = t.color(TermColor::Indexed(i));
-            let bright = t.color(TermColor::Indexed(i + 8));
-            assert_eq!(
-                bright,
-                mix(normal, Color32::WHITE, 0.25),
-                "the bright entry {} does not come from the rule",
-                i + 8
-            );
-        }
-    }
-
-    #[test]
     fn an_exact_color_passes_untouched() {
         let t = theme();
         let c = TermColor::Rgb { r: 1, g: 2, b: 3 };
@@ -1011,11 +1062,11 @@ mod tests {
         let red = TermColor::Indexed(1);
         assert_eq!(
             t.with_attributes(red, false, false),
-            Color32::from_rgb(0xCF, 0x6A, 0x4C)
+            Color32::from_rgb(0xF2, 0x7A, 0x66)
         );
         assert_eq!(
             t.with_attributes(red, true, false),
-            Color32::from_rgb(0xDB, 0x8F, 0x79)
+            Color32::from_rgb(0xF5, 0x9A, 0x89)
         );
         assert_eq!(
             t.with_attributes(red, true, false),
@@ -1051,10 +1102,10 @@ mod tests {
     #[test]
     fn dimming_moves_the_color_toward_the_background() {
         let t = theme();
-        // Red halfway to #1E1E1E.
+        // Red halfway to #13181B.
         assert_eq!(
             t.with_attributes(TermColor::Indexed(1), false, true),
-            Color32::from_rgb(0x77, 0x44, 0x35)
+            Color32::from_rgb(0x83, 0x49, 0x41)
         );
         // And the dimmed background is still the background: there is nowhere to move toward.
         assert_eq!(
@@ -1119,11 +1170,11 @@ mod tests {
         let t = theme();
         assert_eq!(
             t.color(TermColor::BrightForeground),
-            Color32::from_rgb(0xFF, 0xFF, 0xFF)
+            Color32::from_rgb(0xF4, 0xF6, 0xF2)
         );
         assert_eq!(
             t.color(TermColor::DimForeground),
-            Color32::from_rgb(0x63, 0x63, 0x63)
+            Color32::from_rgb(0x7C, 0x80, 0x7F)
         );
         // Bold on the default foreground leads to its bright variant, not to
         // entry 8 of the palette, which is the muted gray.
@@ -1139,8 +1190,8 @@ mod tests {
         // The order matters and is fixed: first it rises to bright, then it is muted. The other way around
         // would give another color, and two layers that did it in a different order would not match.
         let expected = mix(
-            Color32::from_rgb(0xDB, 0x8F, 0x79),
-            Color32::from_rgb(0x1E, 0x1E, 0x1E),
+            Color32::from_rgb(0xF5, 0x9A, 0x89),
+            Color32::from_rgb(0x13, 0x18, 0x1B),
             DIM_FACTOR,
         );
         assert_eq!(
@@ -1193,7 +1244,7 @@ mod tests {
         );
         assert_eq!(
             t.attention_color(Attention::Done, true),
-            t.palette[2],
+            Color32::from_rgb(0x72, 0xB7, 0xF2),
             "backed it is painted with the whole color, undimmed"
         );
     }
@@ -1206,9 +1257,18 @@ mod tests {
     fn each_attention_claim_carries_the_color_the_decision_assigned_it() {
         let t = theme();
 
-        assert_eq!(t.attention_color(Attention::Wait, true), t.palette[3]);
-        assert_eq!(t.attention_color(Attention::Block, true), t.palette[1]);
-        assert_eq!(t.attention_color(Attention::Done, true), t.palette[2]);
+        assert_eq!(
+            t.attention_color(Attention::Wait, true),
+            Color32::from_rgb(0xF2, 0xB8, 0x4B)
+        );
+        assert_eq!(
+            t.attention_color(Attention::Block, true),
+            Color32::from_rgb(0xF2, 0x7A, 0x66)
+        );
+        assert_eq!(
+            t.attention_color(Attention::Done, true),
+            Color32::from_rgb(0x72, 0xB7, 0xF2)
+        );
     }
 
     /// And unbacked it is **that same color dimmed**, not another: dimming says "nobody backs it",

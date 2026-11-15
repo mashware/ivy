@@ -253,7 +253,7 @@ It is the same thing Kitty and Ghostty do.
 | `size` | the terminal font size, in points |
 | `pane.title_size` | pane-title size in points; 8–32, default 12 |
 | `tab.label_size` | tab-label size in points; 8–32, default 12 |
-| `font` | the font family it paints with, by its name |
+| `font` | the font family it paints with, by its name; omitted means the bundled Geist Mono |
 | `font.ligatures` | programming ligatures from the selected compatible font: `on` or `off`; omitted means `off` |
 | `startup.restore` | what the primary window restores on its next launch: `none`, `layout`, `directories`, or `sessions` |
 | `cursor.blink` | whether the cursor blinks: `on` always, `off` never. Leave the line out and the program inside decides, over a default of «yes» |
@@ -335,10 +335,13 @@ cursor boundaries may separate a ligature into its characters.
 font = JetBrains Mono
 ```
 
+**Without this line the terminal paints with Geist Mono**, which ships inside Ivy together with
+Geist for the interface, so it costs no search of your machine (D95).
+
 Write it **as the font calls itself** — `JetBrains Mono`, not `JetBrainsMono` — with its spaces.
 Upper and lower case make no difference.
 
-**What that font does not carry, the built-in ones still paint.** They stay behind it as a net, so a
+**What that font does not carry, Geist Mono and the built-in ones still paint.** They stay behind it as a net, so a
 kanji or an emoji your font does not have keeps showing.
 
 **The icons of a `Nerd Font` are the exception**: there the font you installed for them keeps
@@ -371,6 +374,8 @@ The bundled catalog contains the following themes:
 
 | Configuration name | Theme | Appearance |
 |---|---|---|
+| `ivy-night` | Ivy Night — the default | Dark |
+| `ivy-day` | Ivy Day | Light |
 | `tokyonight` | Tokyo Night (Night) | Dark |
 | `gruvbox-dark` | Gruvbox Dark (medium contrast) | Dark |
 | `catppuccin-mocha` | Catppuccin Mocha | Dark |
@@ -382,13 +387,18 @@ The bundled catalog contains the following themes:
 | `rose-pine-dawn` | Rose Pine Dawn | Light |
 | `rose-pine-moon` | Rose Pine Moon | Dark |
 
-The factory/inherit choice omits the theme line. Names
+Ivy Night is the default: Settings shows it as «Ivy Night (default)», which omits the theme line. Names
 ignore letter case. Each theme supplies all twenty-two colours. A colour you write yourself replaces
 that one colour in the theme, whether its line comes before or after `theme`.
 
 If you write `theme` more than once, the last valid name wins and the terminal reports the repeated
 key. An unknown name is reported with its line number and the available names; other valid lines
-still apply. With no `theme` line, the current built-in appearance remains the base.
+still apply. With no `theme` line, Ivy Night is the base (D94).
+
+The interface — title bar, tabs, panel, menus — takes its colours from whichever theme is in effect:
+each surface is a role derived from the theme's twenty-two colours, so a person who picks Nord or
+writes their own colours gets an interface built from that palette. Muted text is kept readable on
+any background.
 
 The catalog is part of the binary and works offline. External terminal palettes are converted during
 development from a pinned source revision, with attribution and original license notices in the
@@ -398,7 +408,8 @@ file are read at startup; saving through Settings applies the draft immediately.
 The preview includes explicit color overrides, just as the running terminal will. **Use theme
 colours** clears those staged overrides when you want the complete selected palette. Added external
 palettes supply the ANSI colors, background, foreground and cursor; divider, focus and panel colors
-are completed locally as recorded in D65.
+are completed locally as recorded in D65, with focus taken from ANSI green since D94: blue is the
+colour of a finished task nobody has looked at.
 
 ## The shortcuts
 

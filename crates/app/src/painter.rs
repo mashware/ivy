@@ -2098,8 +2098,8 @@ mod tests {
 
     /// A theme whose cursor is **not** the colour of its text.
     ///
-    /// **Out of the box those two entries hold the same value** — `the_three_default_colors_are_the_project_ones`
-    /// asserts both are the project's grey — so a test that reads the cursor's colour off the default
+    /// **Out of the box those two entries hold the same value** — `the_three_default_colors_are_ivy_nights`
+    /// asserts both are Ivy Night's bone white — so a test that reads the cursor's colour off the default
     /// theme cannot tell the two apart, and swapping them in the palette would leave it green. Every
     /// assertion here about what colour the cursor came out in runs on this one instead.
     fn theme_whose_cursor_is_its_own() -> Theme {

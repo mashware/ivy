@@ -1789,7 +1789,7 @@ mod tests {
         assert_eq!(warnings.total(), 2);
         assert_eq!(
             warnings.kept()[0].to_string(),
-            "line 2: 'unknown' is not a known theme; choose one of: tokyonight, gruvbox-dark, catppuccin-mocha, catppuccin-latte, nord, github-dark-default, github-light-default, rose-pine, rose-pine-dawn, rose-pine-moon"
+            "line 2: 'unknown' is not a known theme; choose one of: ivy-night, ivy-day, tokyonight, gruvbox-dark, catppuccin-mocha, catppuccin-latte, nord, github-dark-default, github-light-default, rose-pine, rose-pine-dawn, rose-pine-moon"
         );
         assert_eq!(
             warnings.kept()[1].to_string(),

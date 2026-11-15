@@ -76,8 +76,20 @@ fn expanding_colors_and_reset_clear_only_overrides() {
     }
     assert!(!text.iter().any(|(s, _)| s == "15"));
     click_label(&mut editor, &ctx, "ANSI palette: 16 colours");
-    let text = paint(&mut editor, &ctx, egui::vec2(1100.0, 850.0), vec![]);
-    for index in 0..16 {
+    let size = egui::vec2(1100.0, 850.0);
+    let text = paint(&mut editor, &ctx, size, vec![]);
+    for index in 0..8 {
+        assert!(
+            text.iter().any(|(s, _)| s == &index.to_string()),
+            "missing ANSI {index}"
+        );
+    }
+    // Geist's line height puts the second row of swatches below this viewport, where it scrolls
+    // into view (D95).
+    let at = text.iter().find(|(s, _)| s == "0").unwrap().1.center();
+    scene(&mut editor, &ctx, size, wheel(at, -240.0));
+    let text = paint(&mut editor, &ctx, size, vec![]);
+    for index in 8..16 {
         assert!(
             text.iter().any(|(s, _)| s == &index.to_string()),
             "missing ANSI {index}"
@@ -112,7 +124,8 @@ fn expanding_colors_and_reset_clear_only_overrides() {
             value
         );
     }
-    let text = paint(&mut editor, &ctx, egui::vec2(1100.0, 850.0), vec![]);
+    scene(&mut editor, &ctx, size, wheel(at, 240.0));
+    let text = paint(&mut editor, &ctx, size, vec![]);
     assert!(
         text.iter()
             .any(|(s, _)| s == "Colors inherit from this theme.")
@@ -316,17 +329,17 @@ fn all_popup_rows_reach_light_and_dark_palettes_through_visible_scroll_input() {
     let visible = visible_text(&shapes, size);
     let dark = visible
         .iter()
-        .find(|(s, _)| s == "Tokyo Night")
+        .find(|(s, _)| s == "Ivy Night")
         .expect("All initially exposes a dark row")
         .1;
     let at = dark.center();
     let light = visible
         .iter()
-        .find(|(s, _)| s == "Catppuccin Latte")
+        .find(|(s, _)| s == "Ivy Day")
         .expect("All must show the first light palette fully inside its clip without scrolling")
         .1;
     scene(&mut editor, &ctx, size, click(light.center()));
-    assert_eq!(draft_theme(&editor), "catppuccin-latte");
+    assert_eq!(draft_theme(&editor), "ivy-day");
     let mut reached = None;
     for _ in 0..15 {
         let (_, shapes) = scene(&mut editor, &ctx, size, vec![]);
@@ -351,11 +364,11 @@ fn all_popup_rows_reach_light_and_dark_palettes_through_visible_scroll_input() {
     let visible = visible_text(&shapes, size);
     let dark = visible
         .iter()
-        .find(|(s, _)| s == "Tokyo Night")
+        .find(|(s, _)| s == "Ivy Night")
         .expect("All dark row remains reachable")
         .1;
     scene(&mut editor, &ctx, size, click(dark.center()));
-    assert_eq!(draft_theme(&editor), "tokyonight");
+    assert_eq!(draft_theme(&editor), "ivy-night");
 }
 
 #[test]
@@ -391,7 +404,7 @@ fn theme_font_and_color_popup_escape_preserves_settings_before_second_escape_dis
                 assert!(editor.fonts.is_none());
                 // Use a deterministic existing cache; opening behavior must not enumerate again.
                 editor.fonts = Some(vec!["Fixture Family".into()]);
-                click_label(&mut editor, &ctx, "Built-in default");
+                click_label(&mut editor, &ctx, "Geist Mono (default)");
                 assert_eq!(editor.font_requests, 1);
             }
             "color" => {

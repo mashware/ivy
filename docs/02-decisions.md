@@ -9727,3 +9727,74 @@ resizable Board dock. The covered consoles retain their geometry and pump budget
 top-toolbar shortcut is removed; the rail and keyboard binding remain available.
 Discarded: opening Board in the shared narrow dock, which hides it in narrow windows and makes
 its project overview unnecessarily small. Other sidebar tools keep their existing dock behavior.
+
+## D94 — Ivy Night is the factory theme, and the interface's colors are roles derived from any theme
+
+**New signal, 15 November 2026 — #93.** The owner commissioned a redesign in Claude Design and asked
+for it to be implemented. Its first artboard defines two default themes, Ivy Night and Ivy Day, and
+states that every interface color is a *role* derived from the selected palette, never a fixed brand
+hex. This amends D59 (what «no theme» means) and D65 (the derived focus of converted palettes).
+
+**Decision.** `ivy-night` and `ivy-day` join the catalog as hand-written themes of all twenty-two
+colors; with no `theme` line, Ivy Night is the base, and Settings names that choice «Ivy Night
+(default)». The interface's colors come from `Roles` (`theme/roles.rs`): chrome, base, panel, raised, hover, sel,
+line, line2, three text inks, accent and its ink, the three claim colors and their soft fills,
+diff backgrounds, scrim and one shadow. Each is a stated rule over the theme's colors — for example
+`chrome = mix(background, black, 22 %)` on a dark theme, `accent = focus`, `done = palette[4]`.
+Only text is corrected for contrast: secondary and muted text are brought back toward the foreground
+until they read at 4.5:1 on every surface text is set on (the console background, the panel, raised
+surfaces and hover), and a collapsed configuration falls back to black or white so Settings stays
+legible. A person's explicit colors are used verbatim. `Roles` is a pure function of a theme rather
+than a cache, because the themes it will be asked about differ (the live one, the Settings draft, the
+Board's derived one); egui's style is written from it into both of egui's styles, with the preference
+pinned, only when the effective theme changes.
+
+**Green means accent, blue means unread.** The `done` claim moves from ANSI green to ANSI blue, a
+panel's `current` step moves to the accent, and every theme's focus is a green, so the accent never
+equals the `done` claim: Ivy Night, Ivy Day and Tokyo Night use their normal green, Gruvbox its bright
+green, and converted palettes their normal green, else their bright one, else normal green moved until
+it reads at 3:1 as a mark on the background — Catppuccin Latte's reaches only 2.96. The Board keeps
+D93's owner-chosen blue for Working by naming ANSI blue rather than the focus. The producer's `accent`
+style stays ANSI blue, which the design paints as information.
+
+**Discarded:** a fixed brand palette for the chrome (ignores the person's theme, as D66 already
+discarded); a 23rd configurable `accent` color (`focus` already is the application's own color);
+contrast floors on every role pair (they recolor arbitrary themes until they no longer look like
+themselves); one cached `Roles` refreshed on theme change (Settings paints a draft theme and the
+Board a derived one, and a single cache serves neither); keeping the old gray factory palette as a
+named theme (no published users rely on it).
+
+**Measured boundary.** The derivation blends in gamma space, so Ivy Night's mixed roles land within
+ten per channel of the design's hand-tuned CSS, not exactly; the slot-backed roles are exact. The
+style install runs inside the existing theme-derived refresh and compares one theme per frame.
+
+## D95 — Geist and Geist Mono ship inside Ivy; Geist Mono is the terminal's default font
+
+**New signal, 15 November 2026 — #93.** The design kit sets the interface in Geist and the terminal
+and panel in Geist Mono. Asked whether to keep egui's monospaced face for the terminal, the owner
+chose Geist Mono as the default.
+
+**Decision.** Geist (400, 500, 600) and Geist Mono (400, 500) are embedded from the `geist` 1.9.2
+package under the SIL OFL 1.1, notice in `resources/fonts/Geist-OFL.txt`. They are the base of every
+font definition: Geist leads the proportional family, Geist Mono the monospaced one, each weight a
+named family because egui has no weight axis, and egui's own faces stay behind them. Every rebuild of
+the definitions — start-up, a configured family, fallback discovery, a Settings preview, clearing the
+font — starts from that base, so none of them can drop it. A configured `font` still goes first.
+Embedding needs no enumeration of the machine, so D24 stands.
+
+**D9's symbols over the new face.** The six body marks are all in Geist Mono and measure one cell within
+a hundredth of a point. Two of the three claim symbols, `⊘` and `∎`, are not in Geist Mono and come from the faces behind
+it; `⊘` comes from egui's Hack, whose advance is 1233/2048 of the size against Geist Mono's 600/1000,
+0.03 points apart at 14. The claim symbol test bounds the difference to a hundredth of a cell, which
+still fails on a missing glyph (zero) and on an emoji glyph (almost two cells), the two failures D9 was
+written against; both symbol tests also pin the cell to Geist Mono's, so they cannot pass over Hack.
+
+**Discarded:** keeping egui's monospaced face for the terminal (the owner's choice, against the
+three advisors' recommendation, because the design names Geist Mono); registering the bundled faces
+as the `chosen` family (clearing `font` or the first discovery round would drop them, and a chosen
+face arms the ligature family); the variable Geist files (one face per weight is what epaint can
+use).
+
+**Measurement.** The cell changes with the face, so a batch measured before this decision and one
+after it lay out a different grid in the same window and are not a comparable pair (D13). The first
+series after D95 is a new baseline, not a delta.

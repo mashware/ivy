@@ -78,6 +78,7 @@ mod tab_bar;
 pub mod theme;
 mod tiling;
 mod tree;
+mod ui;
 mod viewer;
 mod visibility;
 pub mod watcher;
@@ -16225,6 +16226,44 @@ mod tests {
         );
     }
 
+    /// A family nobody has leaves the window on the bundled faces, not on egui's (D95): the
+    /// bundled base is installed before the search, whatever the search finds.
+    #[test]
+    fn a_font_the_machine_does_not_have_leaves_geist_mono_in_place() {
+        let ctx = egui::Context::default();
+        let mut discoverer = fonts::Discoverer::default();
+        choose_the_font(
+            Some("no family is called like this 4f7a2b"),
+            &mut discoverer,
+            &ctx,
+        );
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        ctx.fonts(|fonts| {
+            assert_eq!(
+                fonts.definitions().families[&egui::FontFamily::Monospace][0],
+                "Geist Mono"
+            );
+        });
+    }
+
+    /// The theme refresh the window calls every frame installs the theme's style, including in a
+    /// measurement batch that disables project discovery, where the refresh returns early (D94).
+    #[test]
+    fn the_theme_refresh_installs_the_style_even_without_project_discovery() {
+        let mut window = window_with("true", "true");
+        project_view::configure(&mut window, settings::Entry::Measuring, None);
+        let ctx = egui::Context::default();
+        project_view::refresh(&mut window, &ctx);
+        for slot in [egui::Theme::Dark, egui::Theme::Light] {
+            assert_eq!(
+                ctx.style_of(slot).visuals.extreme_bg_color,
+                egui::Color32::from_rgb(0x13, 0x18, 0x1B),
+                "{slot:?}"
+            );
+        }
+    }
+
     #[test]
     fn a_measurement_batch_does_not_read_the_settings_of_whoever_measures() {
         // **Without this, every published figure of the project stops being comparable.** The
@@ -20911,8 +20950,8 @@ mod tests {
     /// moves the search and the subject together, and every assertion holds over two marks nobody
     /// can see. It is the disguise **D36** recorded for the cursor, whose colour is the same grey as
     /// the text in the factory theme; here it is the search key that has to be pinned.
-    const THE_FOCUS_COLOUR: egui::Color32 = egui::Color32::from_rgb(0x75, 0x87, 0xA6);
-    const THE_PANEL_BACKGROUND: egui::Color32 = egui::Color32::from_rgb(0x18, 0x18, 0x18);
+    const THE_FOCUS_COLOUR: egui::Color32 = egui::Color32::from_rgb(0x3C, 0xC3, 0x84);
+    const THE_PANEL_BACKGROUND: egui::Color32 = egui::Color32::from_rgb(0x17, 0x1D, 0x21);
 
     #[test]
     fn the_highlight_surrounds_the_console_with_the_focus_and_not_always_the_left_one() {
@@ -21031,7 +21070,7 @@ mod tests {
 
     /// A window whose cursor colour is **not** the colour of its text.
     ///
-    /// **The factory theme paints both with the same grey** — `the_three_default_colors_are_the_project_ones`
+    /// **The factory theme paints both with the same bone white** — `the_three_default_colors_are_ivy_nights`
     /// pins them side by side — so a test that looked for the cursor by the default colour would
     /// find the letters too, and swapping the two entries of the palette would leave it green.
     fn window_whose_cursor_is_its_own(left: &str, right: &str) -> Window {
