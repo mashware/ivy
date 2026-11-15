@@ -220,6 +220,33 @@ mod tests {
         )
     }
 
+    /// The active tab's surface: Ivy Night's console background, which it opens onto.
+    const ACTIVE_TAB: egui::Color32 = egui::Color32::from_rgb(0x13, 0x18, 0x1b);
+
+    /// A point on one of the title bar's tab targets, read from the geometry the strip uses.
+    fn tab_target(
+        window: &Window,
+        ctx: &egui::Context,
+        area: egui::Rect,
+        which: usize,
+        target: &str,
+    ) -> egui::Pos2 {
+        let m = CellMetrics::measure(ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
+        let band = tab_bar::geometry(window, area, &m)
+            .cards
+            .expect("the title bar holds the tabs");
+        let count = window.tabs.len();
+        let card = tab_bar::title_card(band, which, count);
+        match target {
+            "body" => egui::pos2(card.left() + 40.0, card.center().y),
+            "close" => egui::pos2(card.right() - 13.0, card.center().y),
+            _ => egui::pos2(
+                tab_bar::occupied(band, count).unwrap().right() - 14.0,
+                card.center().y,
+            ),
+        }
+    }
+
     fn connection_button(area: egui::Rect) -> egui::Pos2 {
         let from_right = if area.width() < 300.0 {
             57.0
@@ -228,7 +255,7 @@ mod tests {
         } else {
             193.0
         };
-        egui::pos2(area.right() - from_right, area.top() + 24.5)
+        egui::pos2(area.right() - from_right, area.top() + 20.0)
     }
 
     fn connection_highlight(shapes: &[egui::epaint::ClippedShape], area: egui::Rect) -> bool {
@@ -687,7 +714,7 @@ mod tests {
     }
 
     #[test]
-    fn ivy_identity_is_painted_in_the_real_title_bar_without_covering_controls() {
+    fn ivy_logo_sits_after_the_split_buttons_and_before_the_tabs() {
         let ctx = egui::Context::default();
         chrome::prepare(&ctx);
         let texture = ctx.data(|data| {
@@ -698,10 +725,14 @@ mod tests {
         let mut window = window_with("sleep 30", "sleep 30");
         window.chrome.enable();
         window.headers = window.headers.integrated(true);
-        for (width, visible) in [(1400.0, true), (480.0, true), (240.0, true), (100.0, false)] {
+        for (width, visible) in [
+            (1400.0, true),
+            (480.0, true),
+            (240.0, false),
+            (100.0, false),
+        ] {
             let area = area_of(width);
             let shapes = frame(&mut window, &ctx, area, vec![]);
-            assert_eq!(has_text(&shapes, "Ivy"), visible);
             assert!(!has_text(&shapes, "agent-terminal"));
             let logos: Vec<_> = shapes
                 .iter()
@@ -710,22 +741,16 @@ mod tests {
                     _ => None,
                 })
                 .collect();
-            assert_eq!(logos.len(), usize::from(visible));
+            assert_eq!(logos.len(), usize::from(visible), "{width}");
+            let m = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
+            let tabs = tab_bar::geometry(&window, area, &m).cards.unwrap();
             for mesh in logos {
                 let bounds = mesh.calc_bounds();
+                let left = if cfg!(target_os = "macos") { 78.0 } else { 6.0 };
                 assert!(bounds.top() >= area.top());
                 assert!(bounds.bottom() <= area.top() + chrome::HEIGHT);
-                let left = if cfg!(target_os = "macos") { 78.0 } else { 6.0 };
-                let right = if width < 300.0 {
-                    40.0
-                } else if cfg!(target_os = "macos") {
-                    108.0
-                } else {
-                    210.0
-                };
-                let left = left + if width < 300.0 { 0.0 } else { 116.0 };
-                assert!(bounds.left() >= area.left() + left);
-                assert!(bounds.right() <= area.right() - right);
+                assert!(bounds.left() >= area.left() + left + 2.0 * 34.0 + 14.0);
+                assert!(bounds.right() <= tabs.left());
             }
         }
     }
@@ -1088,14 +1113,7 @@ mod tests {
             window.headers = window.headers.integrated(true);
             let area = area_of(800.0);
             frame(&mut window, &ctx, area, vec![]);
-            let at = egui::pos2(
-                match target {
-                    "body" => 230.0,
-                    "close" => 375.0,
-                    _ => 420.0,
-                },
-                65.0,
-            );
+            let at = tab_target(&window, &ctx, area, 1, target);
             let pressed = frame(
                 &mut window,
                 &ctx,
@@ -1104,7 +1122,7 @@ mod tests {
             );
             assert_eq!(window.active, 0, "{target} selected on press");
             assert_eq!(window.tabs.len(), 2, "{target} acted on press");
-            assert!(pressed.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == window.theme.focus() && r.rect.height() == 2.0)), "selected underline disappeared");
+            assert!(pressed.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == ACTIVE_TAB && r.rect.height() == 34.0)), "the selected tab lost its surface");
             let away = egui::pos2(50.0, 200.0);
             frame(
                 &mut window,
@@ -1147,8 +1165,8 @@ mod tests {
         window.headers = window.headers.integrated(true);
         let area = area_of(800.0);
         frame(&mut window, &ctx, area, vec![]);
-        let body = egui::pos2(230.0, 65.0);
-        let close = egui::pos2(375.0, 65.0);
+        let body = tab_target(&window, &ctx, area, 1, "body");
+        let close = tab_target(&window, &ctx, area, 1, "close");
         frame(
             &mut window,
             &ctx,
@@ -1192,7 +1210,7 @@ mod tests {
         window.headers = window.headers.integrated(true);
         let area = area_of(900.0);
         frame(&mut window, &ctx, area, vec![]);
-        let at = egui::pos2(230.0, 65.0);
+        let at = tab_target(&window, &ctx, area, 1, "body");
         let button = |pressed| egui::Event::PointerButton {
             pos: at,
             button: egui::PointerButton::Primary,
@@ -1210,7 +1228,7 @@ mod tests {
         window.apply(WindowRequest::CloseTab, &ctx, area, &metrics);
         let held = frame(&mut window, &ctx, area, vec![]);
         assert!(!held.iter().any(|s| matches!(&s.shape,
-            egui::Shape::Rect(r) if r.rect.contains(at) && r.fill == window.theme.foreground().gamma_multiply(0.20)
+            egui::Shape::Rect(r) if r.rect.contains(at) && r.fill == egui::Color32::from_rgb(0x37, 0x3b, 0x3d)
         )), "held feedback transferred to the next tab at the same index");
         frame(&mut window, &ctx, area, vec![button(false)]);
         assert_eq!(window.tabs.len(), 2);
@@ -1221,13 +1239,14 @@ mod tests {
     }
 
     #[test]
-    fn selected_tab_keeps_underline_and_distinct_hover_and_held_feedback() {
+    fn tabs_keep_the_active_surface_and_distinct_hover_and_held_feedback() {
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
         window.chrome.enable();
         window.headers = window.headers.integrated(true);
         let area = area_of(800.0);
-        let at = egui::pos2(70.0, 65.0);
+        ui_pass(&mut window, &ctx, area, Default::default());
+        let at = tab_target(&window, &ctx, area, 1, "body");
         let mut pass = |time, events| {
             ui_pass(
                 &mut window,
@@ -1256,38 +1275,42 @@ mod tests {
             shapes
                 .iter()
                 .filter_map(|s| match &s.shape {
-                    egui::Shape::Rect(r) if r.rect.contains(at) => Some(r.fill),
+                    // The card's own surfaces, not the title bar's row behind them.
+                    egui::Shape::Rect(r) if r.rect.contains(at) && r.rect.height() <= 34.0 => {
+                        Some(r.fill)
+                    }
                     _ => None,
                 })
                 .collect::<Vec<_>>()
         };
-        assert_ne!(
-            fills(&baseline),
-            fills(&hover),
-            "selected tab has no hover feedback"
+        // An inactive tab is transparent until hovered; the hover surface and the held one are
+        // Ivy Night's `hover` and `line2`, written out.
+        assert!(
+            fills(&baseline).is_empty(),
+            "an idle inactive tab is filled"
         );
-        assert_ne!(
+        assert_eq!(
             fills(&hover),
+            vec![egui::Color32::from_rgb(0x26, 0x2b, 0x2d)]
+        );
+        assert_eq!(
             fills(&held),
-            "selected tab has no distinct held feedback"
+            vec![egui::Color32::from_rgb(0x37, 0x3b, 0x3d)]
         );
         assert_eq!(window.active, 0);
-        assert!(held.iter().any(|s| matches!(&s.shape,
-            egui::Shape::Rect(r) if r.rect.contains(at) && r.fill == window.theme.foreground().gamma_multiply(0.20)
-        )), "selected tab has no immediate held fill");
         for shapes in [&baseline, &hover, &held] {
             assert!(
                 shapes.iter().any(|s| matches!(&s.shape,
-                    egui::Shape::Rect(r) if r.fill == window.theme.focus() && r.rect.height() == 2.0
+                    egui::Shape::Rect(r) if r.fill == ACTIVE_TAB && r.rect.height() == 34.0
                 )),
-                "selected underline disappeared"
+                "the selected tab lost its surface"
             );
         }
     }
 
     #[test]
     fn narrow_tab_labels_select_without_invisible_close_targets() {
-        for width in [130.0, 95.0] {
+        for width in [240.0, 200.0] {
             let ctx = egui::Context::default();
             let mut window =
                 window_of_tabs(vec![["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
@@ -1295,9 +1318,12 @@ mod tests {
             window.headers = window.headers.integrated(true);
             let area = area_of(width);
             frame(&mut window, &ctx, area, vec![]);
-            let card_width = (width - 72.0).max(0.0) / 2.0;
+            let m = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
+            let band = tab_bar::geometry(&window, area, &m).cards.unwrap();
+            let card = tab_bar::title_card(band, 1, 2);
+            assert!(card.width() > 20.0 && card.width() < 65.0, "{card:?}");
             // The right-hand part of a narrow card used to contain a close hitbox without a glyph.
-            let at = egui::pos2(10.0 + card_width * 1.5 - 1.5, 65.0);
+            let at = egui::pos2(card.right() - 1.5, card.center().y);
             frame(&mut window, &ctx, area, click_at(at));
             assert_eq!(
                 window.tabs.len(),
@@ -1367,47 +1393,101 @@ mod tests {
     }
 
     #[test]
-    fn narrow_tab_keeps_attention_separate_from_its_number() {
+    fn narrow_tab_keeps_its_claim_pill_whole_and_clear_of_its_number() {
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 3]);
         window.chrome.enable();
         window.headers = window.headers.integrated(true);
         *window.active_mut().panes_mut()[0] =
             pane_with_panel(r#"{"attention":"wait","lines":["Waiting"]}"#);
-        let shapes = frame(&mut window, &ctx, area_of(190.0), vec![]);
-        let texts: Vec<_> = shapes
-            .iter()
-            .filter_map(|s| match &s.shape {
-                egui::Shape::Text(t) if t.pos.y > 49.0 && t.pos.y < 88.0 => Some(t),
-                _ => None,
-            })
-            .collect();
-        let label = texts
-            .iter()
-            .find(|t| t.galley.text() == "1")
-            .expect("narrow tab number painted");
-        let claim = shapes
+        let area = area_of(240.0);
+        let shapes = frame(&mut window, &ctx, area, vec![]);
+        let m = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
+        let card = tab_bar::title_card(tab_bar::geometry(&window, area, &m).cards.unwrap(), 0, 3);
+        assert!(card.width() < 65.0, "the case is a narrow card: {card:?}");
+        let label = shapes
             .iter()
             .find_map(|s| match &s.shape {
-                egui::Shape::Vec(parts)
-                    if s.clip_rect.top() > 49.0
-                        && matches!(
-                            parts.as_slice(),
-                            [egui::Shape::Path(_), egui::Shape::Circle(_)]
-                        ) =>
-                {
-                    parts
-                        .iter()
-                        .map(egui::Shape::visual_bounding_rect)
-                        .reduce(|a, b| a.union(b))
+                egui::Shape::Text(t) if t.galley.text() == "1" && t.pos.y < 40.0 => Some(t),
+                _ => None,
+            })
+            .expect("narrow tab number painted");
+        // Ivy Night's wait slot, filling the whole 18-point pill inside the card.
+        let pill = shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Rect(r) if r.fill == egui::Color32::from_rgb(0xf2, 0xb8, 0x4b) => {
+                    Some(r.rect)
                 }
                 _ => None,
             })
-            .expect("drawn attention painted");
+            .expect("the claim pill is painted");
+        assert_eq!(pill.size(), egui::Vec2::splat(18.0));
+        assert!(card.contains_rect(pill), "{pill:?} spills out of {card:?}");
         assert!(
-            label.pos.x >= claim.right() + 10.0,
-            "attention overlaps the tab number or loses its gap"
+            label.pos.x >= pill.right() + 4.0,
+            "the pill overlaps the tab number or loses its gap"
         );
+    }
+
+    /// The tabs share the title bar's row, so the consoles start 40 points down instead of the
+    /// 88 the separate tab row used to cost (49 of title bar plus 39 of tabs).
+    #[test]
+    fn tabs_live_in_the_title_bar_and_the_consoles_get_the_old_tab_row_back() {
+        let ctx = egui::Context::default();
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        let area = area_of(1400.0);
+        frame(&mut window, &ctx, area, vec![]);
+        let m = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
+        let geometry = tab_bar::geometry(&window, area, &m);
+        let cards = geometry.cards.unwrap();
+        assert_eq!(cards.bottom(), area.top() + 40.0);
+        assert_eq!(cards.height(), 34.0);
+        assert_eq!(geometry.consoles.top(), area.top() + 40.0);
+    }
+
+    /// Between the last tab and the right-hand buttons the bar still drags and maximizes the
+    /// window; on a tab the same double click renames instead.
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn the_title_bar_still_drags_between_the_tabs_and_its_buttons() {
+        let double_click = |at| {
+            let mut events = click_at(at);
+            events.extend(click_at(at));
+            events
+        };
+        for on_tab in [false, true] {
+            let ctx = egui::Context::default();
+            let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
+            window.chrome.enable();
+            window.headers = window.headers.integrated(true);
+            let area = area_of(1400.0);
+            frame(&mut window, &ctx, area, vec![]);
+            let at = if on_tab {
+                tab_target(&window, &ctx, area, 1, "body")
+            } else {
+                let add = tab_target(&window, &ctx, area, 0, "add");
+                egui::pos2(add.x + 40.0, area.top() + 20.0)
+            };
+            let input = egui::RawInput {
+                screen_rect: Some(area),
+                events: double_click(at),
+                ..Default::default()
+            };
+            let mut native_frame = eframe::Frame::_new_kittest();
+            let output = ctx.run_ui(input, |ui| {
+                eframe::App::ui(&mut window, ui, &mut native_frame)
+            });
+            let maximized = output.viewport_output[&egui::ViewportId::ROOT]
+                .commands
+                .contains(&egui::ViewportCommand::Maximized(true));
+            output.drop_without_applying_deltas();
+            assert_eq!(maximized, !on_tab, "on_tab={on_tab}");
+            assert_eq!(window.tabs.len(), 2);
+            assert!(window.all_panes_mut().all(|p| p.keystrokes.is_empty()));
+        }
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -1703,14 +1783,16 @@ mod tests {
         window.headers = window.headers.integrated(true);
         let area = area_of(1400.0);
         for (config, background, foreground) in [
+            // The title bar is the theme's chrome role: one step darker than a dark background,
+            // and 6 % toward the text on a light one.
             (
-                "panel=#112233\nforeground=#efcba9",
-                egui::Color32::from_rgb(0x11, 0x22, 0x33),
+                "background=#112233\nforeground=#efcba9",
+                egui::Color32::from_rgb(0x0d, 0x1b, 0x28),
                 egui::Color32::from_rgb(0xef, 0xcb, 0xa9),
             ),
             (
-                "theme=gruvbox-dark\npanel=#e2d4c6\nforeground=#241c14",
-                egui::Color32::from_rgb(0xe2, 0xd4, 0xc6),
+                "theme=gruvbox-dark\nbackground=#e2d4c6\nforeground=#241c14",
+                egui::Color32::from_rgb(0xd7, 0xc9, 0xbb),
                 egui::Color32::from_rgb(0x24, 0x1c, 0x14),
             ),
         ] {
@@ -1722,7 +1804,7 @@ mod tests {
                 shapes
                     .iter()
                     .any(|s| matches!(&s.shape, egui::Shape::Rect(r)
-                if r.rect.top()==area.top() && r.rect.height()==49.0 && r.fill==background)),
+                if r.rect.top()==area.top() && r.rect.height()==40.0 && r.fill==background)),
                 "titlebar ignored the configured surface"
             );
             assert!(shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Text(t)
@@ -1743,7 +1825,7 @@ mod tests {
         } else {
             125.0
         };
-        let at = egui::pos2(area.right() - offset, area.top() + 24.5);
+        let at = egui::pos2(area.right() - offset, area.top() + 20.0);
         frame(window, ctx, area, vec![]);
         frame(window, ctx, area, click_at(at));
         frame(window, ctx, area, vec![])
@@ -1954,14 +2036,7 @@ mod tests {
                 frame(&mut window, &ctx, area, vec![]);
                 frame(&mut window, &ctx, area, vec![]);
                 let selected = window.board.selected();
-                let at = egui::pos2(
-                    match target {
-                        "body" => 230.0,
-                        "close" => 375.0,
-                        _ => 420.0,
-                    },
-                    65.0,
-                );
+                let at = tab_target(&window, &ctx, area, 1, target);
                 separate_click(&mut window, &ctx, area, at);
                 assert_eq!(
                     window.board.is_open(),

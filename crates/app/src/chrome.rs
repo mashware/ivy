@@ -3,7 +3,27 @@ use crate::{Window, WindowRequest, painter::CellMetrics, tiling::Orientation};
 use eframe::egui::{self, Align2, Color32, FontId, Rect, Sense, Stroke, Vec2, ViewportCommand};
 use std::time::{Duration, Instant};
 
-pub(crate) const HEIGHT: f32 = 49.0;
+/// The title bar's height at the default tab label size; a larger label grows it.
+pub(crate) const HEIGHT: f32 = crate::theme::metrics::TITLE_BAR_HEIGHT;
+
+/// The title bar's partition for this window, shared by its painting, its claim on the pointer
+/// and the tab strip.
+pub(crate) fn strip(window: &Window, area: Rect) -> strip::Strip {
+    let sizes = window.chrome.title_sizes;
+    let row = Rect::from_min_max(
+        area.min,
+        egui::pos2(
+            area.right(),
+            (area.top() + sizes.bar_height()).min(area.bottom()),
+        ),
+    );
+    strip::within(
+        area,
+        sizes.bar_height(),
+        sizes.tab_height(),
+        connection::compact_reserve(row),
+    )
+}
 
 #[derive(Default, Debug)]
 pub(crate) struct Chrome {
@@ -96,6 +116,7 @@ pub(crate) use crate::opening::chrome_viewport as viewport;
 mod branding;
 mod connection;
 mod menu;
+pub(crate) mod strip;
 mod traffic_lights;
 pub(crate) mod typography;
 mod updates;
@@ -106,7 +127,6 @@ pub(crate) use connection::{begin_pass, prepare};
 enum Action {
     SplitRight,
     SplitDown,
-    NewTab,
     Search,
     Connect,
     Updates(bool),
@@ -232,29 +252,30 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     let started = Instant::now();
     let ctx = ui.ctx().clone();
     let area = ui.max_rect();
-    let row = Rect::from_min_max(
-        area.min,
-        egui::pos2(area.right(), (area.top() + HEIGHT).min(area.bottom())),
-    );
-    let bg = window.theme.panel_background();
-    let fg = window.theme.foreground();
-    let hover = window.theme.divider();
-    ui.painter().rect_filled(row, 0.0, bg);
+    let geometry = strip(window, area);
+    let row = geometry.row;
+    let roles = crate::ui::style::roles(&ctx, &window.theme);
+    let fg = roles.tx2;
+    let hover = roles.hover;
+    ui.painter().rect_filled(row, 0.0, roles.chrome);
+    // Inside the row, so the active tab, painted later down to the row's edge, covers it.
     ui.painter().line_segment(
-        [row.left_bottom(), row.right_bottom()],
-        Stroke::new(1.0, hover),
+        [
+            row.left_bottom() - Vec2::new(0.0, 0.5),
+            row.right_bottom() - Vec2::new(0.0, 0.5),
+        ],
+        Stroke::new(1.0, roles.line),
     );
     let mut action = None;
-    let left_offset = if cfg!(target_os = "macos") { 78.0 } else { 6.0 };
-    let width = 34.0;
-    let compact = row.width() < 300.0;
+    let left_offset = strip::left_offset();
+    let width = strip::BUTTON;
+    let compact = geometry.compact;
     let left = [
         ("⊞", "Split right", Action::SplitRight),
         ("⊟", "Split down", Action::SplitDown),
-        ("+", "New tab", Action::NewTab),
     ];
     for (i, (label, hint, cmd)) in left.into_iter().enumerate() {
-        let x = row.left() + left_offset + i as f32 * width + if i > 1 { 14.0 } else { 0.0 };
+        let x = row.left() + left_offset + i as f32 * width;
         let rect = Rect::from_min_size(
             egui::pos2(x, row.top() + 7.0),
             Vec2::new(width, (row.height() - 14.0).max(0.0)),
@@ -262,6 +283,9 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         if !compact && rect.right() <= row.right() && button(ui, rect, label, hint, hover, fg) {
             action = Some(cmd);
         }
+    }
+    if let Some(logo) = geometry.logo {
+        branding::paint_logo(ui, logo);
     }
     let maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
     let right = [
@@ -280,8 +304,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         ("⌕", "Search console", Action::Search),
         ("", "Connect agents", Action::Connect),
     ];
-    let right_count = right.len();
-    let skip = if cfg!(target_os = "macos") { 3 } else { 0 };
+    let skip = right.len() - strip::right_buttons();
     for (i, (label, hint, cmd)) in right.into_iter().skip(skip).enumerate() {
         let x = row.right() - 6.0 - (i + 1) as f32 * width;
         let rect = Rect::from_min_size(
@@ -302,10 +325,10 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         ] {
             ui.painter().line_segment(
                 [
-                    egui::pos2(x, row.top() + 15.0),
-                    egui::pos2(x, row.bottom() - 15.0),
+                    egui::pos2(x, row.center().y - 8.0),
+                    egui::pos2(x, row.center().y + 8.0),
                 ],
-                Stroke::new(1.0, hover),
+                Stroke::new(1.0, roles.line2),
             );
         }
     }
@@ -320,20 +343,13 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     }
     connection::compact_button(window, ui, row);
     updates::indicator(window, ui, row);
-    let left_end = row.left() + left_offset + if compact { 0.0 } else { 3.0 * width + 14.0 };
-    let right_start = row.right()
-        - if compact {
-            connection::compact_reserve(row)
-        } else {
-            6.0 + (right_count - skip) as f32 * width
-        };
+    // The tabs and their add button are the tab strip's targets; the rest of the row drags.
+    let tabs = crate::tab_bar::occupied(geometry.tabs, window.tabs.len());
+    let drag_left = tabs.map_or(geometry.left_end, |tabs| tabs.right());
     let drag = Rect::from_min_max(
-        egui::pos2(left_end, row.top()),
-        egui::pos2(right_start.max(left_end), row.bottom()),
+        egui::pos2(drag_left, row.top()),
+        egui::pos2(geometry.right_start.max(drag_left), row.bottom()),
     );
-    if drag.width() > 75.0 {
-        branding::paint_identity(ui, drag, fg);
-    }
     if drag.is_positive() {
         let response = ui.interact(drag, ui.id().with("chrome-drag"), Sense::click_and_drag());
         if response.double_clicked() {
@@ -360,8 +376,10 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     action = menu_action.or(action);
     let frame = ctx.cumulative_frame_nr();
     let pointer = ctx.input(|i| i.pointer.interact_pos());
-    let over =
-        pointer.is_some_and(|p| row.contains(p) || (window.chrome.menu && menu_rect.contains(p)));
+    let over = pointer.is_some_and(|p| {
+        (row.contains(p) && !tabs.is_some_and(|tabs| tabs.contains(p)))
+            || (window.chrome.menu && menu_rect.contains(p))
+    });
     let gesture = ctx.input(|i| {
         i.pointer.any_pressed() || i.pointer.any_released() || i.smooth_scroll_delta != Vec2::ZERO
     });
@@ -455,10 +473,6 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         ),
         Some(Action::SplitDown) => {
             window.apply(WindowRequest::Split(Orientation::Rows), &ctx, area, metrics)
-        }
-        Some(Action::NewTab) => {
-            window.apply(WindowRequest::NewTab, &ctx, area, metrics);
-            crate::board::reanchor(window);
         }
         Some(Action::Search) => {
             let focus = window.active().focus;

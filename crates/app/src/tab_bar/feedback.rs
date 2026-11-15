@@ -28,6 +28,19 @@ pub(super) fn interact(ui: &egui::Ui, rect: egui::Rect, id: egui::Id) -> egui::R
     response
 }
 
+/// How far the hover has faded in, and whether the target is held, for this pass.
+pub(super) fn hover_and_held(ui: &egui::Ui, id: egui::Id) -> (f32, bool) {
+    let state = ui
+        .ctx()
+        .data(|data| data.get_temp::<State>(id.with("feedback")))
+        .filter(|state| state.pass == ui.ctx().cumulative_pass_nr());
+    let hovered = state.is_some_and(|s| s.hovered);
+    let hover =
+        ui.ctx()
+            .animate_value_with_time(id.with("hover"), if hovered { 1.0 } else { 0.0 }, 0.120);
+    (hover, state.is_some_and(|s| s.held))
+}
+
 pub(super) fn paint(
     ui: &egui::Ui,
     painter: &egui::Painter,
@@ -36,15 +49,7 @@ pub(super) fn paint(
     foreground: egui::Color32,
     selected: bool,
 ) {
-    let state = ui
-        .ctx()
-        .data(|data| data.get_temp::<State>(id.with("feedback")))
-        .filter(|state| state.pass == ui.ctx().cumulative_pass_nr());
-    let hovered = state.is_some_and(|s| s.hovered);
-    let held = state.is_some_and(|s| s.held);
-    let hover =
-        ui.ctx()
-            .animate_value_with_time(id.with("hover"), if hovered { 1.0 } else { 0.0 }, 0.120);
+    let (hover, held) = hover_and_held(ui, id);
     let active = ui.ctx().animate_value_with_time(
         id.with("selected"),
         if selected { 1.0 } else { 0.0 },

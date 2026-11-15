@@ -1,4 +1,5 @@
 //! Title sizes share measured line heights with paint and input geometry.
+use crate::theme::metrics;
 use eframe::egui;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -31,8 +32,15 @@ impl Sizes {
         self.tab
     }
 
+    /// A tab: the kit's 34 points, grown when the configured label needs more.
     pub(crate) fn tab_height(self) -> f32 {
-        39.0_f32.max(self.tab_line_height + 12.0)
+        metrics::TAB_HEIGHT.max(self.tab_line_height + 12.0)
+    }
+
+    /// The title bar that holds the tabs: the kit's 40 points, keeping the same air above a tab
+    /// that a larger label made taller.
+    pub(crate) fn bar_height(self) -> f32 {
+        self.tab_height() + (metrics::TITLE_BAR_HEIGHT - metrics::TAB_HEIGHT)
     }
 }
 

@@ -23,7 +23,11 @@ mod feedback;
 pub(crate) mod indicator;
 mod interaction;
 mod layout;
+mod title;
 pub(crate) use chrome::{geometry, partition};
+#[cfg(test)]
+pub(crate) use title::card as title_card;
+pub(crate) use title::occupied;
 
 use crate::painter::CellMetrics;
 use crate::{Window, WindowRequest};
@@ -128,26 +132,6 @@ pub(crate) fn tab_rect(tab_bar: egui::Rect, which: usize, how_many: usize) -> eg
     )
 }
 
-fn compact_tab_rect(bar: egui::Rect, which: usize, count: usize) -> egui::Rect {
-    let available = (bar.width() - 72.0).max(0.0);
-    let width = (available / count.max(1) as f32).min(190.0);
-    let x = bar.left() + 10.0 + width * which as f32;
-    egui::Rect::from_min_max(
-        egui::pos2(x.min(bar.right()), (bar.top() + 5.0).min(bar.bottom())),
-        egui::pos2((x + (width - 3.0).max(0.0)).min(bar.right()), bar.bottom()),
-    )
-}
-
-/// One padded target shared by the add-tab glyph and its pointer interaction.
-fn add_tab_rect(bar: egui::Rect, count: usize) -> egui::Rect {
-    let last = compact_tab_rect(bar, count.saturating_sub(1), count);
-    let left = (last.right() + 12.0).min(bar.right());
-    egui::Rect::from_min_max(
-        egui::pos2(left, (bar.top() + 5.0).min(bar.bottom())),
-        egui::pos2((left + 40.0).min(bar.right()), bar.bottom()),
-    )
-}
-
 pub(crate) fn handle_clicks(
     window: &mut Window,
     ui: &egui::Ui,
@@ -237,57 +221,28 @@ fn paint_cards(
     now: SystemTime,
 ) -> TabBarOutcome {
     let started = Instant::now();
+    if window.chrome.enabled() {
+        let marked = title::paint(window, ui, tab_bar, now);
+        return TabBarOutcome {
+            cost: started.elapsed(),
+            marked,
+        };
+    }
     let mut marked = 0;
-    ui.painter_at(tab_bar).rect_filled(
-        tab_bar,
-        0.0,
-        if window.chrome.enabled() {
-            window.theme.panel_background()
-        } else {
-            window.theme.background()
-        },
-    );
+    ui.painter_at(tab_bar)
+        .rect_filled(tab_bar, 0.0, window.theme.background());
 
     for which_tab in 0..window.tabs.len() {
-        let tab_area = if window.chrome.enabled() {
-            compact_tab_rect(tab_bar, which_tab, window.tabs.len())
-        } else {
-            tab_rect(tab_bar, which_tab, window.tabs.len())
-        };
+        let tab_area = tab_rect(tab_bar, which_tab, window.tabs.len());
         let attention = window.tabs[which_tab].attention(now);
         let painter = ui.painter_at(tab_area);
         let is_the_active_one = which_tab == window.active;
 
-        // Integrated tabs use a subtle theme-derived surface and an accent underline.
-        // The historical regime keeps the original focus-color fill.
         if is_the_active_one {
-            if window.chrome.enabled() {
-                painter.rect_filled(
-                    tab_area,
-                    egui::CornerRadius {
-                        nw: 5,
-                        ne: 5,
-                        sw: 0,
-                        se: 0,
-                    },
-                    window.theme.chrome_surface(),
-                );
-            } else {
-                painter.rect_filled(tab_area, 0.0, window.theme.focus());
-            }
+            painter.rect_filled(tab_area, 0.0, window.theme.focus());
         }
 
-        let size = if window.chrome.enabled() {
-            window.chrome.title_sizes.tab_size()
-        } else {
-            metrics.font().size
-        };
-        let layout = layout::Layout::new(
-            tab_area,
-            size,
-            attention.is_some(),
-            window.chrome.enabled() && window.tabs.len() > 1,
-        );
+        let layout = layout::Layout::new(tab_area, metrics.font().size, attention.is_some());
         feedback::paint(
             ui,
             &painter,
@@ -296,90 +251,39 @@ fn paint_cards(
             window.theme.foreground(),
             is_the_active_one,
         );
-        if let Some(close) = layout.close {
-            feedback::paint(
-                ui,
-                &painter,
-                close,
-                feedback::id(ui, window.tabs[which_tab].name, "close"),
-                window.theme.foreground(),
-                false,
-            );
-        }
-        if is_the_active_one && window.chrome.enabled() {
-            let underline = egui::Rect::from_min_max(
-                egui::pos2(
-                    tab_area.left(),
-                    (tab_area.bottom() - 2.0).max(tab_area.top()),
-                ),
-                tab_area.right_bottom(),
-            );
-            painter.rect_filled(underline, 0.0, window.theme.focus());
-        }
-        let label_painter = if !window.chrome.enabled() && attention.is_none() {
+        let label_painter = if attention.is_none() {
             painter.clone()
         } else {
             painter.with_clip_rect(layout.label)
         };
         crate::header::title_text::paint(
             &label_painter,
-            if window.chrome.enabled() {
-                layout.label.left_center()
-            } else if attention.is_some() {
+            if attention.is_some() {
                 layout.label.center()
             } else {
                 tab_area.center()
             },
-            if window.chrome.enabled() {
-                egui::Align2::LEFT_CENTER
-            } else {
-                egui::Align2::CENTER_CENTER
-            },
-            &if window.chrome.enabled() {
-                window.tabs[which_tab].label.clone().unwrap_or_else(|| {
-                    let number = window.tabs[which_tab].name + 1;
-                    if tab_area.width() < 100.0 {
-                        number.to_string()
-                    } else {
-                        format!("Terminal {number}")
-                    }
-                })
-            } else {
-                (which_tab + 1).to_string()
-            },
-            if window.chrome.enabled() {
-                egui::FontId::proportional(window.chrome.title_sizes.tab_size())
-            } else {
-                metrics.font()
-            },
-            if is_the_active_one && !window.chrome.enabled() {
+            egui::Align2::CENTER_CENTER,
+            &(which_tab + 1).to_string(),
+            metrics.font(),
+            if is_the_active_one {
                 window.theme.background()
             } else {
                 window.theme.foreground()
             },
         );
-        if let Some(close) = layout.close {
-            painter.text(
-                close.center(),
-                egui::Align2::CENTER_CENTER,
-                "×",
-                egui::FontId::proportional(16.0),
-                window.theme.foreground(),
-            );
-        }
 
         // **The active one is marked too.** In the tab you are looking at the claim can come
         // from the pane next door, and not marking it would be one more conditional rule to
         // maintain.
         if let Some(attention) = attention {
-            // In the historical regime, the symbol is painted over the bar's background.
-            // That card is filled with the focus color, and on top of it these colors **cannot
-            // be seen**: measured, the blocking red gives 1.01 of contrast and the dimmed
-            // yellow 1.02 — that is, the same color as far as reading it goes. The number
-            // beside it is already inverted for this very reason, but inverting the symbol
-            // would be no good: **its color is the class**, and changing it would say something
-            // else. What is changed is what lies behind.
-            if is_the_active_one && !window.chrome.enabled() {
+            // The symbol is painted over the bar's background. That card is filled with the focus
+            // color, and on top of it these colors **cannot be seen**: measured, the blocking red
+            // gives 1.01 of contrast and the dimmed yellow 1.02 — that is, the same color as far
+            // as reading it goes. The number beside it is already inverted for this very reason,
+            // but inverting the symbol would be no good: **its color is the class**, and changing
+            // it would say something else. What is changed is what lies behind.
+            if is_the_active_one {
                 painter.rect_filled(
                     egui::Rect::from_min_max(
                         tab_area.min,
@@ -398,27 +302,6 @@ fn paint_cards(
                     .attention_color(attention.class, attention.backed),
             );
             marked += 1;
-        }
-    }
-
-    if window.chrome.enabled() && !window.tabs.is_empty() {
-        let add = add_tab_rect(tab_bar, window.tabs.len());
-        if add.width() >= 20.0 {
-            feedback::paint(
-                ui,
-                &ui.painter_at(tab_bar),
-                add,
-                ui.id().with("compact-tab-add"),
-                window.theme.foreground(),
-                false,
-            );
-            ui.painter_at(tab_bar).text(
-                add.center(),
-                egui::Align2::CENTER_CENTER,
-                "+",
-                egui::FontId::proportional(16.0),
-                window.theme.foreground(),
-            );
         }
     }
 

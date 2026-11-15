@@ -443,6 +443,14 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/ui/claim_pill.rs"),
     ),
     (
+        "src/chrome/strip.rs",
+        include_str!("../src/chrome/strip.rs"),
+    ),
+    (
+        "src/tab_bar/title.rs",
+        include_str!("../src/tab_bar/title.rs"),
+    ),
+    (
         "src/settings/editor.rs",
         include_str!("../src/settings/editor.rs"),
     ),

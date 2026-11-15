@@ -626,6 +626,14 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/ui/claim_pill.rs"),
     ),
     (
+        "app/src/chrome/strip.rs",
+        include_str!("../src/chrome/strip.rs"),
+    ),
+    (
+        "app/src/tab_bar/title.rs",
+        include_str!("../src/tab_bar/title.rs"),
+    ),
+    (
         "app/src/settings/editor.rs",
         include_str!("../src/settings/editor.rs"),
     ),

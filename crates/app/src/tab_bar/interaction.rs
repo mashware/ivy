@@ -1,7 +1,7 @@
 //! Pointer interactions for the integrated tab strip.
-use super::{CellMetrics, Window, WindowRequest, add_tab_rect, compact_tab_rect, feedback, layout};
+use super::{CellMetrics, Window, WindowRequest, feedback, title};
 use eframe::egui;
-use std::time::{Instant, SystemTime};
+use std::time::Instant;
 
 pub(super) fn handle(
     window: &mut Window,
@@ -14,15 +14,8 @@ pub(super) fn handle(
     let count = window.tabs.len();
     let mut action = None;
     for which_tab in 0..count {
-        let card = compact_tab_rect(tab_bar, which_tab, count);
-        let layout = layout::Layout::new(
-            card,
-            window.chrome.title_sizes.tab_size(),
-            window.tabs[which_tab]
-                .attention(SystemTime::now())
-                .is_some(),
-            count > 1,
-        );
+        let card = title::card(tab_bar, which_tab, count);
+        let layout = title::Layout::new(card, window.tabs[which_tab].panes().len(), count > 1);
         if let Some(close) = layout.close
             && feedback::interact(
                 ui,
@@ -52,7 +45,7 @@ pub(super) fn handle(
         }
     }
 
-    let add = add_tab_rect(tab_bar, count);
+    let add = title::add(tab_bar, count);
     let new_tab = add.width() >= 20.0
         && feedback::interact(ui, add, ui.id().with("compact-tab-add"))
             .on_hover_text("New tab")

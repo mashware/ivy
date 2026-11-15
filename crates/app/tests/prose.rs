@@ -518,7 +518,7 @@ const SOURCES: &[(&str, &str, usize)] = &[
     (
         "src/tab_bar/layout.rs",
         include_str!("../src/tab_bar/layout.rs"),
-        2,
+        1,
     ),
     (
         "src/tab_bar/indicator.rs",
@@ -654,7 +654,17 @@ const SOURCES: &[(&str, &str, usize)] = &[
     (
         "src/ui/claim_pill.rs",
         include_str!("../src/ui/claim_pill.rs"),
-        0,
+        16,
+    ),
+    (
+        "src/chrome/strip.rs",
+        include_str!("../src/chrome/strip.rs"),
+        19,
+    ),
+    (
+        "src/tab_bar/title.rs",
+        include_str!("../src/tab_bar/title.rs"),
+        20,
     ),
     (
         "src/settings/editor.rs",
@@ -851,7 +861,7 @@ const SOURCES: &[(&str, &str, usize)] = &[
     ("src/report.rs", include_str!("../src/report.rs"), 238),
     ("src/search.rs", include_str!("../src/search.rs"), 48),
     // Three comment lines moved with the tab interaction to its own module.
-    ("src/tab_bar.rs", include_str!("../src/tab_bar.rs"), 166),
+    ("src/tab_bar.rs", include_str!("../src/tab_bar.rs"), 162),
     (
         "src/tests/markdown.rs",
         include_str!("../src/tests/markdown.rs"),

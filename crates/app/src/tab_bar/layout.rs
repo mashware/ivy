@@ -1,32 +1,17 @@
-//! Card contents share the same bounds in painting and pointer routing.
-use super::CLOSE_MIN_WIDTH;
+//! The historical strip's card contents: the claim's symbol and the tab's number.
 use eframe::egui;
 
 pub(super) struct Layout {
     pub body: egui::Rect,
-    pub close: Option<egui::Rect>,
     pub indicator: egui::Rect,
     pub label: egui::Rect,
 }
 
 impl Layout {
-    pub fn new(card: egui::Rect, size: f32, status: bool, close: bool) -> Self {
+    pub fn new(card: egui::Rect, size: f32, status: bool) -> Self {
         let padding = 6.0_f32.min(card.width() / 2.0);
         let extent = size + 2.0;
-        // Attention is reread after input; reserve its slot even before a claim arrives.
-        let close = (close
-            && card.width() >= CLOSE_MIN_WIDTH
-            && card.width() >= padding + extent + 10.0 + 25.0)
-            .then(|| {
-                egui::Rect::from_min_max(
-                    egui::pos2(card.right() - 25.0, card.top()),
-                    card.right_bottom(),
-                )
-            });
-        let body = egui::Rect::from_min_max(
-            card.min,
-            egui::pos2(close.map_or(card.right(), |r| r.left()), card.bottom()),
-        );
+        let body = card;
         let left = body.left() + padding;
         let d = extent
             .min((body.width() - padding * 2.0).max(0.0))
@@ -46,7 +31,6 @@ impl Layout {
         );
         Self {
             body,
-            close,
             indicator,
             label,
         }
@@ -64,7 +48,7 @@ mod tests {
                 for status in [false, true] {
                     let card =
                         egui::Rect::from_min_size(egui::pos2(7.0, 9.0), egui::vec2(width, 50.0));
-                    let layout = Layout::new(card, size, status, true);
+                    let layout = Layout::new(card, size, status);
                     assert!(card.contains_rect(layout.body));
                     assert!(layout.body.contains_rect(layout.indicator));
                     assert!(layout.body.contains_rect(layout.label));
@@ -73,13 +57,6 @@ mod tests {
                         assert_eq!(layout.indicator.width(), size + 2.0);
                         if status {
                             assert_eq!(layout.label.left() - layout.indicator.right(), 10.0);
-                        }
-                    }
-                    if let Some(close) = layout.close {
-                        assert_eq!(layout.body.right(), close.left());
-                        assert!(layout.label.right() <= close.left());
-                        if status {
-                            assert!(layout.indicator.right() + 10.0 <= close.left());
                         }
                     }
                 }
