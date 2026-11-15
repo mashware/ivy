@@ -373,6 +373,7 @@ check_sidebar_report() {
     SIDEBAR_LINE=$(sed -n 's/^sidebar witnesses: //p' "$REPORT" | head -1)
     SIDEBAR_WORK=$(sed -n 's/^sidebar application: frames=\([0-9]*\),.*/\1/p' "$REPORT" | head -1)
     [ -n "$SIDEBAR_LINE" ] && [ -n "$SIDEBAR_WORK" ] || invalidate "dock report omitted host work or witnesses"
+    [ "$SIDEBAR_WORK" -gt 0 ] || invalidate "dock recorded no host frames"
     case "$SIDEBAR_LINE" in
         *"pane_identities=$DUMPING"*) : ;;
         *) invalidate "dock witness pane identity count does not match the seeded panes" ;;
@@ -388,7 +389,6 @@ check_sidebar_report() {
         esac
         DOCK_WIDTH=$(printf '%s\n' "$SIDEBAR_LINE" | sed -n 's/.*effective_width=\([0-9.]*\).*/\1/p')
         LC_ALL=C awk -v width="${DOCK_WIDTH:-0}" 'BEGIN { exit !(width >= 320) }' || invalidate "open dock body was suppressed or narrower than its floor"
-        [ "$SIDEBAR_WORK" -gt 0 ] || invalidate "open dock recorded no host frames"
         SWITCHES=$(printf '%s\n' "$SIDEBAR_LINE" | sed -n 's/.*switches=\([0-9]*\), resize_delta=.*/\1/p')
         RESIZE=$(printf '%s\n' "$SIDEBAR_LINE" | sed -n 's/.*resize_delta=\([0-9.]*\)$/\1/p')
         [ "${SWITCHES:-0}" -ge 2 ] || invalidate "open dock probe did not witness both tool switches"

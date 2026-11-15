@@ -98,10 +98,11 @@ pub(crate) fn open_diff_for_pane(window: &mut Window, name: usize) {
             return;
         };
         let cwd = source.cwd.clone();
+        crate::sidebar::select(window, crate::sidebar::Tool::Git);
         if !pin(&mut window.viewer, source) {
+            window.viewer.keyboard = true;
             return;
         }
-        crate::sidebar::select(window, crate::sidebar::Tool::Git);
         window.viewer.open_diff();
         window.viewer.editing_path = false;
         if let Some(cwd) = cwd {

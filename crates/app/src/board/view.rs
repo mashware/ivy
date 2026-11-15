@@ -151,9 +151,6 @@ fn paint_contents(
     window.board.surface.child_hits.clear();
     window.board.order.clear();
     let reveal = std::mem::take(&mut window.board.scroll_selected);
-    let canvas_width = ui.available_width().max(1.0);
-    let stacked = canvas_width < 1360.0;
-    let widths = super::layout::column_widths(canvas_width - 16.0, 8.0);
     let scroll_id = ui.make_persistent_id("board-list");
     let geometry_id = scroll_id.with("geometry");
     let previous = ui.ctx().data(|data| data.get_temp::<Geometry>(geometry_id));
@@ -173,7 +170,9 @@ fn paint_contents(
         .id_salt("board-list")
         .auto_shrink([false, false])
         .show(&mut ui, |ui| {
-            ui.set_min_width(canvas_width);
+            let canvas_width = ui.available_width().max(1.0);
+            let stacked = canvas_width < 1360.0;
+            let widths = super::layout::column_widths(canvas_width - 16.0, 8.0);
             let mut row_base = 0;
             for (section_index, section) in sections.iter().enumerate() {
                 let section_top = ui.next_widget_position().y;
@@ -216,6 +215,7 @@ fn paint_contents(
                         let context_top = ui.next_widget_position().y;
                         paint_stacked_header(ui, c, entries.len(), canvas_width, &theme);
                         egui::Frame::new().inner_margin(8).show(ui, |ui| {
+                            let card_width = ui.available_width().max(1.0);
                             if entries.is_empty() {
                                 ui.weak("—");
                             }
@@ -231,7 +231,7 @@ fn paint_contents(
                                 previous.as_ref(),
                                 &mut geometry,
                                 signals,
-                                canvas_width,
+                                card_width,
                                 &theme,
                             );
                         });
