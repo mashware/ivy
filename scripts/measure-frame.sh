@@ -461,7 +461,7 @@ validate_project_records() {
                 if (accents != 1 || timings != 1) exit 1
                 if (batch == "projects") {
                     if (a[1] != "true" || a[2] != "true" || a[3]+0 < 4 || a[4]+0 < 4 || a[5]+0 < 4 || frames < 1) exit 1
-                } else if (batch ~ /^board-/) {
+                } else if (batch ~ /^board-/ || batch ~ /^dock-v1-/) {
                     # The board covers the headers while open, so no painted floor: resolved identities
                     # are what the grouping needs, one per console.
                     if (consoles+0 < 1 || a[1] != "true" || a[2] != "true" || a[4]+0 < consoles || frames < 1) exit 1
@@ -806,7 +806,7 @@ CONFIG="$OUTPUT/.config"
 rm -rf "$CONFIG"
 mkdir -p "$CONFIG"
 
-case "$BATCH" in projects|board-*) MEASURES_PROJECTS=1 ;; *) MEASURES_PROJECTS= ;; esac
+case "$BATCH" in projects|dock-v1-*|board-*) MEASURES_PROJECTS=1 ;; *) MEASURES_PROJECTS= ;; esac
 if [ -n "$MEASURES_PROJECTS" ]; then
     # Real repositories, with synthetic directory sources supplied to the measurement probe. The
     # board batches take it too, so the board they measure has two sections, as it has in use.

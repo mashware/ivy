@@ -297,77 +297,80 @@ pub(crate) fn before_keys(
     ui: &mut egui::Ui,
     metrics: &crate::painter::CellMetrics,
 ) -> bool {
-    for state in [&mut window.viewer, &mut window.viewer_other] {
-        state.events = None;
-    }
-    if window.settings_editor.is_open() || window.pane_view.is_modal() {
-        return false;
-    }
-    let markdown = match crate::sidebar::active(window) {
-        Some(crate::sidebar::Tool::Markdown) => true,
-        Some(crate::sidebar::Tool::Git) => false,
-        _ => return false,
-    };
-    select_state(window, markdown);
-    let Some(rect) = crate::tab_bar::geometry(window, ui.max_rect(), metrics).dock else {
-        window.viewer.keyboard = false;
-        window.viewer.held = false;
-        window.viewer.refresh_at = None;
-        return false;
-    };
-    if !window.viewer.open && !window.viewer.held {
-        return false;
-    }
-    let ctx = ui.ctx().clone();
-    window.viewer.context = Some(ctx.clone());
-    let frame = ctx.cumulative_frame_nr();
-    let over = ctx.input(|i| i.pointer.interact_pos().is_some_and(|p| rect.contains(p)));
-    if ctx.input(|i| i.pointer.any_pressed()) && !window.viewer.held {
-        window.viewer.keyboard = over;
-        window.viewer.held = over;
-    }
-    let gesture_owned = window.viewer.held;
-    if !ctx.input(|i| i.focused && i.pointer.any_down()) {
-        window.viewer.held = false;
-    }
-    let pointer_activity = ctx.input(|i| {
-        i.pointer.any_pressed()
-            || i.pointer.any_released()
-            || i.smooth_scroll_delta != egui::Vec2::ZERO
-    });
-    let was_open = window.viewer.open;
-    let owned = window.viewer.keyboard
-        || gesture_owned
-        || (over && pointer_activity)
-        || window.viewer.blocked_frame == Some(frame);
-    if window.viewer.keyboard && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-        window.viewer.close();
-    }
-    if owned || (was_open && !window.viewer.open) {
-        window.viewer.events = Some(ctx.input(|i| i.events.clone()));
-        window.viewer.blocked_frame = Some(frame);
-        window.modifiers = ctx.input(|i| {
-            if i.focused {
-                i.modifiers
-            } else {
-                egui::Modifiers::NONE
-            }
-        });
-        window.header_input.block_for_settings(frame);
-        ctx.input_mut(|i| {
-            i.events.retain(|e| {
-                matches!(
-                    e,
-                    egui::Event::ModifiersChanged(_) | egui::Event::WindowFocused(_)
-                )
-            })
-        });
-    }
-    let dismissed = was_open && !window.viewer.open;
-    if dismissed {
-        crate::sidebar::close(window, &ctx);
-    }
-    owned || dismissed
+    let started = Instant::now();
+    let owned = (|| {
+        for state in [&mut window.viewer, &mut window.viewer_other] {
+            state.events = None;
+        }
+        if window.settings_editor.is_open() || window.pane_view.is_modal() {
+            return false;
+        }
+        let markdown = match crate::sidebar::active(window) {
+            Some(crate::sidebar::Tool::Markdown) => true,
+            Some(crate::sidebar::Tool::Git) => false,
+            _ => return false,
+        };
+        select_state(window, markdown);
+        let Some(rect) = crate::tab_bar::geometry(window, ui.max_rect(), metrics).dock else {
+            window.viewer.keyboard = false;
+            window.viewer.held = false;
+            window.viewer.refresh_at = None;
+            return false;
+        };
+        if !window.viewer.open && !window.viewer.held {
+            return false;
+        }
+        let ctx = ui.ctx().clone();
+        window.viewer.context = Some(ctx.clone());
+        let frame = ctx.cumulative_frame_nr();
+        let over = ctx.input(|i| i.pointer.interact_pos().is_some_and(|p| rect.contains(p)));
+        if ctx.input(|i| i.pointer.any_pressed()) && !window.viewer.held {
+            window.viewer.keyboard = over;
+            window.viewer.held = over;
+        }
+        let gesture_owned = window.viewer.held;
+        if !ctx.input(|i| i.focused && i.pointer.any_down()) {
+            window.viewer.held = false;
+        }
+        let pointer_activity =
+            ctx.input(|i| i.pointer.any_pressed() || i.smooth_scroll_delta != egui::Vec2::ZERO);
+        let was_open = window.viewer.open;
+        let owned = window.viewer.keyboard
+            || gesture_owned
+            || (over && pointer_activity)
+            || window.viewer.blocked_frame == Some(frame);
+        if window.viewer.keyboard && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            window.viewer.close();
+        }
+        if owned || (was_open && !window.viewer.open) {
+            window.viewer.events = Some(ctx.input(|i| i.events.clone()));
+            window.viewer.blocked_frame = Some(frame);
+            window.modifiers = ctx.input(|i| {
+                if i.focused {
+                    i.modifiers
+                } else {
+                    egui::Modifiers::NONE
+                }
+            });
+            window.header_input.block_for_settings(frame);
+            ctx.input_mut(|i| {
+                i.events.retain(|e| {
+                    matches!(
+                        e,
+                        egui::Event::ModifiersChanged(_) | egui::Event::WindowFocused(_)
+                    )
+                })
+            });
+        }
+        let dismissed = was_open && !window.viewer.open;
+        if dismissed {
+            crate::sidebar::close(window, &ctx);
+        }
+        owned || dismissed
+    })();
+    window.viewer.record(started.elapsed());
+    window.timed_separately += window.viewer.take_cost();
+    owned
 }
 
 /// Paint the active viewer after the console tree has reached its final geometry for this pass.

@@ -47,6 +47,10 @@ fn dismiss(window: &mut Window, ctx: &egui::Context) {
 }
 
 pub(crate) fn cancel_gestures(window: &mut Window, ctx: &egui::Context) {
+    if window.board.pointer_owned {
+        window.board.awaiting_release = true;
+        window.board.pointer_owned = false;
+    }
     window.board.keyboard_focus = false;
     window.board.surface.pressed = None;
     window.board.surface.child_pressed = None;
@@ -180,11 +184,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, _metrics: &Cel
                 // Keep the event for Board's ScrollArea, while keeping console dispatch out.
                 owns_events = true;
             }
-            egui::Event::PointerMoved(pos)
-                if dock.contains(*pos)
-                    || window.board.surface.pressed.is_some()
-                    || window.board.surface.child_pressed.is_some() =>
-            {
+            egui::Event::PointerMoved(_) if window.board.pointer_owned => {
                 owns_events = true;
             }
             egui::Event::PointerButton {
@@ -193,17 +193,25 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, _metrics: &Cel
                 pressed,
                 ..
             } => {
-                let owns_release = !*pressed
-                    && (window.board.surface.pressed.is_some()
-                        || window.board.surface.child_pressed.is_some());
-                if dock.contains(*pos) || owns_release {
+                if *pressed {
+                    if dock.contains(*pos) {
+                        // Own the whole gesture, including presses on empty dock space.
+                        window.board.pointer_owned = true;
+                        window.board.keyboard_focus = true;
+                        pointer(&mut window.board, *pos, true);
+                        owns_events = true;
+                    } else {
+                        // Clicking a console transfers keyboard ownership without hiding Board.
+                        window.board.pointer_owned = false;
+                        window.board.keyboard_focus = false;
+                        window.board.surface.pressed = None;
+                        window.board.surface.child_pressed = None;
+                    }
+                } else if window.board.pointer_owned {
                     window.board.keyboard_focus = true;
-                    pointer(&mut window.board, *pos, *pressed);
+                    pointer(&mut window.board, *pos, false);
+                    window.board.pointer_owned = false;
                     owns_events = true;
-                } else if *pressed {
-                    // Clicking a console transfers keyboard ownership without hiding Board.
-                    window.board.keyboard_focus = false;
-                    window.board.surface.pressed = None;
                 }
             }
             _ => {}

@@ -287,11 +287,8 @@ pub(crate) fn before_keys(
         state.held = false;
         state.resizing = false;
     }
-    let pointer = ctx.input(|i| {
-        i.pointer.any_pressed()
-            || i.pointer.any_released()
-            || i.smooth_scroll_delta != egui::Vec2::ZERO
-    });
+    let pointer =
+        ctx.input(|i| i.pointer.any_pressed() || i.smooth_scroll_delta != egui::Vec2::ZERO);
     let pointer_owned = gesture || (over && pointer) || state.pointer_frame == Some(frame);
     let owned =
         state.keyboard || gesture || (over && pointer) || state.blocked_frame == Some(frame);

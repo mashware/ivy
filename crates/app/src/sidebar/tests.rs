@@ -178,3 +178,134 @@ fn host_accounting_counts_a_touched_frame_once_even_below_clock_resolution() {
         "sidebar application: frames=1, total=0ns\n"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn console_mouse_release_crossing_into_each_tool_or_rail_reaches_its_program() {
+    for tool in [Tool::Files, Tool::Markdown, Tool::Git, Tool::Board] {
+        for rail in [false, true] {
+            let received = term_core::received::Received::new("sidebar-console-release");
+            let script = received.script("stty raw -echo");
+            let mut window = window_of_tabs([[script.as_str(), "sleep 30"]]);
+            received.wait_until_ready(Duration::from_secs(5));
+            let ctx = egui::Context::default();
+            let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 700.0));
+            match tool {
+                Tool::Markdown => crate::viewer::activate(&mut window, true),
+                Tool::Git => crate::viewer::activate(&mut window, false),
+                _ => select(&mut window, tool),
+            }
+            let name = window.active().panes()[0].name;
+            window
+                .pane_called(name)
+                .unwrap()
+                .screen
+                .advance(b"\x1b[?1000h\x1b[?1006h");
+            for _ in 0..2 {
+                one_frame_in(&mut window, &ctx, area, vec![]);
+            }
+            let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
+            let geometry = crate::tab_bar::geometry(&window, area, &metrics);
+            let from = window
+                .pane_called(name)
+                .unwrap()
+                .painted_console
+                .as_ref()
+                .unwrap()
+                .area
+                .center();
+            let to = if rail {
+                geometry.rail.center()
+            } else {
+                geometry.dock.unwrap().center()
+            };
+            let button = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            one_frame_in(
+                &mut window,
+                &ctx,
+                area,
+                vec![egui::Event::PointerMoved(from), button(from, true)],
+            );
+            assert!(
+                !window.presses_for_the_program.is_empty(),
+                "{tool:?}: program never received press"
+            );
+            let press = received.wait_for(1, Duration::from_secs(5));
+            assert!(press.ends_with(b"M"), "missing SGR press: {press:?}");
+            one_frame_in(
+                &mut window,
+                &ctx,
+                area,
+                vec![egui::Event::PointerMoved(to), button(to, false)],
+            );
+            assert!(
+                window.presses_for_the_program.is_empty(),
+                "{tool:?}: release captured by dock (rail={rail})"
+            );
+            let complete = received.wait_for(press.len() + 1, Duration::from_secs(5));
+            assert!(
+                complete.ends_with(b"m"),
+                "{tool:?}: missing SGR release: {complete:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn tab_click_repartitions_the_dock_for_the_new_tree_in_the_same_frame() {
+    let mut window = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+    if let Node::Branch { children, .. } = &mut window.tabs[1].root {
+        children[0].weight = crate::tiling::Weight::new(0.02).unwrap();
+        children[1].weight = crate::tiling::Weight::new(0.98).unwrap();
+    } else {
+        panic!("two-pane fixture needs a split");
+    }
+    let ctx = egui::Context::default();
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 700.0));
+    select(&mut window, Tool::Files);
+    for _ in 0..2 {
+        one_frame_in(&mut window, &ctx, area, vec![]);
+    }
+    assert!(window.sidebar.last_dock.is_some());
+    let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
+    let strip = crate::tab_bar::geometry(&window, area, &metrics)
+        .cards
+        .unwrap();
+    let pos = crate::tab_bar::tab_rect(strip, 1, 2).center();
+    for pressed in [true, false] {
+        one_frame_in(
+            &mut window,
+            &ctx,
+            area,
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+    }
+    assert_eq!(window.active, 1);
+    assert!(
+        window.sidebar.last_dock.is_none(),
+        "new tree needs the full console width immediately"
+    );
+    let grids: Vec<_> = window.all_panes().map(|pane| pane.measured).collect();
+    one_frame_in(&mut window, &ctx, area, vec![]);
+    assert_eq!(
+        window
+            .all_panes()
+            .map(|pane| pane.measured)
+            .collect::<Vec<_>>(),
+        grids,
+        "tab switch published a transient grid"
+    );
+}

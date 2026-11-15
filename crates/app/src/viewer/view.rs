@@ -278,7 +278,7 @@ fn body_content(
                     .requested
                     .as_ref()
                     .map_or(Path::new(&state.path), |(path, _)| path.as_path()),
-                unavailable,
+                !unavailable,
             );
         }
     }

@@ -41,6 +41,7 @@ pub(crate) struct State {
     scroll_selected: bool,
     blocked_frame: Option<u64>,
     awaiting_release: bool,
+    pointer_owned: bool,
     keyboard_focus: bool,
     pub(crate) timing: crate::measure::Board,
 }
@@ -70,6 +71,7 @@ impl Default for State {
             scroll_selected: false,
             blocked_frame: None,
             awaiting_release: false,
+            pointer_owned: false,
             keyboard_focus: false,
             timing: crate::measure::Board::default(),
         }
@@ -115,6 +117,7 @@ pub(crate) fn reveal(window: &mut crate::Window, ctx: &egui::Context) {
             window.board.scroll_selected = true;
         }
         window.board.surface.pressed = None;
+        window.board.pointer_owned = false;
         window.board.activate = None;
         window.board.keyboard_focus = true;
         window.board.blocked_frame = Some(ctx.cumulative_frame_nr());
@@ -126,6 +129,10 @@ pub(crate) fn reveal(window: &mut crate::Window, ctx: &egui::Context) {
 pub(crate) fn suspend(window: &mut crate::Window) {
     window.board.open = false;
     window.board.keyboard_focus = false;
+    if window.board.pointer_owned {
+        window.board.awaiting_release = true;
+        window.board.pointer_owned = false;
+    }
     window.board.surface.pressed = None;
     window.board.surface.child_pressed = None;
     window.board.activate = None;

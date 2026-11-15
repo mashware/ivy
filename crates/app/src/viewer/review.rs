@@ -153,15 +153,14 @@ impl Review {
                     });
                 });
             ui.separator();
-            self.right_column(
+            send = self.right_column(
                 ui,
                 doc,
                 source_label,
                 repository,
                 (height - 60.0).max(80.0),
-                &mut send,
                 can_send,
-            );
+            )
         } else {
             ui.horizontal_top(|ui| {
                 ui.allocate_ui_with_layout(
@@ -183,15 +182,8 @@ impl Review {
                     egui::vec2(ui.available_width().max(20.0), height),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
-                        self.right_column(
-                            ui,
-                            doc,
-                            source_label,
-                            repository,
-                            height,
-                            &mut send,
-                            can_send,
-                        );
+                        send =
+                            self.right_column(ui, doc, source_label, repository, height, can_send);
                     },
                 );
             });
@@ -206,37 +198,19 @@ impl Review {
         source_label: &str,
         repository: &Path,
         height: f32,
-        send: &mut Option<String>,
         can_send: bool,
-    ) {
+    ) -> Option<String> {
         if height < 360.0 {
             egui::ScrollArea::vertical()
                 .id_salt("review-short-column")
                 .max_height(height)
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    right_column_content(
-                        self,
-                        ui,
-                        doc,
-                        source_label,
-                        repository,
-                        height,
-                        send,
-                        can_send,
-                    );
-                });
+                    right_column_content(self, ui, doc, source_label, repository, height, can_send)
+                })
+                .inner
         } else {
-            right_column_content(
-                self,
-                ui,
-                doc,
-                source_label,
-                repository,
-                height,
-                send,
-                can_send,
-            );
+            right_column_content(self, ui, doc, source_label, repository, height, can_send)
         }
     }
 }
@@ -248,9 +222,8 @@ fn right_column_content(
     source_label: &str,
     repository: &Path,
     height: f32,
-    send: &mut Option<String>,
     can_send: bool,
-) {
+) -> Option<String> {
     let footer = if review.preview {
         245.0
     } else if review.draft.is_some() {
@@ -279,6 +252,7 @@ fn right_column_content(
             });
         });
     }
+    let mut send = None;
     if review.preview {
         let text = preview_text(review, source_label, repository);
         ui.separator();
@@ -318,7 +292,7 @@ fn right_column_content(
                         )
                         .clicked()
                     {
-                        *send = Some(text);
+                        send = Some(text);
                     }
                     if !can_send {
                         ui.label("Origin console unavailable; comments cannot be inserted.");
@@ -327,6 +301,7 @@ fn right_column_content(
             });
         }
     }
+    send
 }
 
 fn file_list(review: &mut Review, ui: &mut egui::Ui, doc: &Document, height: f32) {
@@ -538,6 +513,17 @@ mod tests {
         doc: &Document,
         events: Vec<egui::Event>,
     ) -> (Vec<(String, egui::Pos2)>, Option<String>) {
+        frame_for_source(review, ctx, doc, events, "console", true)
+    }
+
+    fn frame_for_source(
+        review: &mut Review,
+        ctx: &egui::Context,
+        doc: &Document,
+        events: Vec<egui::Event>,
+        source_label: &str,
+        can_send: bool,
+    ) -> (Vec<(String, egui::Pos2)>, Option<String>) {
         fn collect(shape: &Shape, labels: &mut Vec<(String, egui::Pos2)>) {
             match shape {
                 Shape::Text(text) => labels.push((
@@ -564,7 +550,7 @@ mod tests {
             },
             |ui| {
                 ui.horizontal_wrapped(|ui| review.toolbar(ui, doc));
-                sent = review.show(ui, doc, "console", Path::new("/repo"), true);
+                sent = review.show(ui, doc, source_label, Path::new("/repo"), can_send);
             },
         );
         let mut labels = Vec::new();
@@ -672,6 +658,104 @@ mod tests {
             !labels
                 .iter()
                 .any(|(label, _)| label == "Insert into console")
+        );
+    }
+
+    #[test]
+    fn live_source_enables_insert_and_removed_source_disables_it() {
+        let doc = Document::parse(
+            "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n",
+        )
+        .unwrap();
+        let comment = Comment {
+            location: Location {
+                path: PathBuf::from("a.txt"),
+                side: "new",
+                line: 1,
+            },
+            text: "Please revise".into(),
+        };
+        let ctx = egui::Context::default();
+        let mut review = Review {
+            preview: true,
+            comments: vec![comment],
+            ..Review::default()
+        };
+        let (labels, sent) = frame_for_source(&mut review, &ctx, &doc, vec![], "pane-1", true);
+        assert!(sent.is_none());
+        let insert = labels
+            .iter()
+            .find(|(label, _)| label == "Insert into console")
+            .unwrap()
+            .1;
+        let button = |pressed| egui::Event::PointerButton {
+            pos: insert,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame_for_source(
+            &mut review,
+            &ctx,
+            &doc,
+            vec![egui::Event::PointerMoved(insert), button(true)],
+            "pane-1",
+            true,
+        );
+        assert!(
+            frame_for_source(&mut review, &ctx, &doc, vec![button(false)], "pane-1", true,)
+                .1
+                .is_some()
+        );
+
+        let (labels, sent) = frame_for_source(
+            &mut review,
+            &ctx,
+            &doc,
+            vec![],
+            "pane-1 - unavailable",
+            false,
+        );
+        assert!(sent.is_none());
+        assert!(
+            labels
+                .iter()
+                .any(|(label, _)| label.contains("unavailable"))
+        );
+        let insert = labels
+            .iter()
+            .find(|(label, _)| label == "Insert into console")
+            .unwrap()
+            .1;
+        let unavailable_button = |pressed| egui::Event::PointerButton {
+            pos: insert,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame_for_source(
+            &mut review,
+            &ctx,
+            &doc,
+            vec![
+                egui::Event::PointerMoved(insert),
+                unavailable_button(true),
+                unavailable_button(false),
+            ],
+            "pane-1 - unavailable",
+            false,
+        );
+        assert!(
+            frame_for_source(
+                &mut review,
+                &ctx,
+                &doc,
+                vec![],
+                "pane-1 - unavailable",
+                false,
+            )
+            .1
+            .is_none()
         );
     }
     #[test]

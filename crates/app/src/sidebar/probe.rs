@@ -1,7 +1,7 @@
 //! Deterministic rail and divider exercise for the versioned dock measurement regimes.
 use eframe::egui;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum Stage {
     ClickMarkdown,
     ReleaseMarkdown,
@@ -16,6 +16,7 @@ enum Stage {
     ReleaseMarkdownAgain,
     ReturnToBoard,
     ReleaseBoardAgain,
+    #[default]
     Done,
 }
 
@@ -29,12 +30,6 @@ pub(crate) struct Probe {
     switches: usize,
     minimum_width: f32,
     maximum_width: f32,
-}
-
-impl Default for Stage {
-    fn default() -> Self {
-        Self::Done
-    }
 }
 
 pub(crate) fn configure(window: &mut crate::Window, measuring: bool, mode: Option<&str>) {
@@ -113,6 +108,13 @@ pub(crate) fn inject(window: &mut crate::Window, raw: &mut egui::RawInput, ctx: 
     };
     probe.frame = Some(frame);
     if !last_consoles.is_positive() {
+        window.spent_injecting += started.elapsed();
+        return;
+    }
+    // Native backends may deliver several frames before the window receives desktop focus.
+    // Do not consume the scripted clicks or divider drag during those frames: egui ignores
+    // pointer input while unfocused, so advancing here would make later events land out of sync.
+    if !raw.focused {
         window.spent_injecting += started.elapsed();
         return;
     }

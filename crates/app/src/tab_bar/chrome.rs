@@ -79,20 +79,33 @@ pub(crate) fn geometry(window: &Window, area: egui::Rect, metrics: &CellMetrics)
 /// Frame layout work has its own named span and is discounted exactly once.
 pub(crate) fn partition(
     window: &mut Window,
-    area: egui::Rect,
+    ui: &mut egui::Ui,
     metrics: &CellMetrics,
+    header_owns_pointer: bool,
+    overlay_owns_pointer: bool,
 ) -> (Option<egui::Rect>, egui::Rect) {
     let started = std::time::Instant::now();
-    let mut geometry = raw_geometry(window, area, metrics);
+    let area = ui.max_rect();
+    let geometry = raw_geometry(window, area, metrics);
+    window.settings_editor.record_geometry(started.elapsed());
+    window.timed_separately += window.settings_editor.take_cost();
+    if let Some(cards) = geometry.cards {
+        super::handle_clicks(window, ui, cards, metrics, header_owns_pointer);
+    }
+    if header_owns_pointer {
+        crate::header::menu::block_pointer(ui, overlay_owns_pointer);
+    }
+    // Tab selection may change both strip visibility and the active tree's console floor.
+    let started = std::time::Instant::now();
+    let geometry = raw_geometry(window, area, metrics);
     window.settings_editor.record_geometry(started.elapsed());
     window.timed_separately += window.settings_editor.take_cost();
     let started = std::time::Instant::now();
     let dock = crate::sidebar::partition(window, geometry.consoles, metrics);
-    geometry.consoles = dock.consoles;
     window.sidebar.last_dock = dock.dock;
     window.sidebar.record(started.elapsed());
     window.timed_separately += window.sidebar.take_cost();
-    (geometry.cards, geometry.consoles)
+    (geometry.cards, dock.consoles)
 }
 
 #[cfg(test)]

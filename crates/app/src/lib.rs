@@ -1422,7 +1422,6 @@ impl eframe::App for Window {
             viewer_owned || explorer_pointer || board_owned || pane_owned || chrome_owned;
         let header_owns_pointer =
             overlay_owns_pointer || header::menu::pointer_blocked(self, ui.ctx());
-        let (tab_bar, area) = tab_bar::partition(self, area, &metrics);
 
         // **Everything that changes tab goes before tiling**, and this is what a defect cost: the
         // tiling comes out of the active tab's fraction, so attending to the click afterwards left
@@ -1430,12 +1429,13 @@ impl eframe::App for Window {
         // out of those rectangles comes `measured`, so the two pseudoterminals of the just-opened
         // tab were given a wrong grid and corrected it on the following frame — a double
         // readjustment, visible in any full-screen program.
-        if let Some(tab_bar) = tab_bar {
-            tab_bar::handle_clicks(self, ui, tab_bar, &metrics, header_owns_pointer);
-        }
-        if header_owns_pointer {
-            header::menu::block_pointer(ui, overlay_owns_pointer);
-        }
+        let (tab_bar, area) = tab_bar::partition(
+            self,
+            ui,
+            &metrics,
+            header_owns_pointer,
+            overlay_owns_pointer,
+        );
 
         // **Walking the tree is timed, and it is not zeal: it is the instrument's rule.** The
         // frame's cost is split by subtraction —what no console declares is published as the

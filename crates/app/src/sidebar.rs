@@ -333,11 +333,8 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
             ctx.set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
         }
     }
-    let pointer = ctx.input(|i| {
-        i.pointer.any_pressed()
-            || i.pointer.any_released()
-            || i.smooth_scroll_delta != egui::Vec2::ZERO
-    });
+    let pointer =
+        ctx.input(|i| i.pointer.any_pressed() || i.smooth_scroll_delta != egui::Vec2::ZERO);
     let own = held
         || (over && pointer)
         || clicked.is_some()
