@@ -220,7 +220,10 @@ tools preserves their sources and navigation.
 
 Hold **Ctrl** and click a local `.md` path printed by an agent or shell. Ivy opens the document
 inside the terminal, with headings, lists, tables and code. Saving the file updates the preview
-without reopening it. You can also choose **Markdown** from the right tool bar.
+without reopening it. Choose documents through **Files**, or return to the retained document with
+**Markdown** on the right tool bar. **Maximize** gives the document the content area; **Restore**
+returns to the previous sidebar width. While maximized, open **Files** as a lateral panel to choose
+another document without leaving the reading view. Running consoles remain active underneath.
 
 ![Ivy showing a formatted Markdown plan in a floating viewer above running consoles](docs/images/ivy-markdown.png)
 

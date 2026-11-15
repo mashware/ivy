@@ -207,6 +207,9 @@ pub(crate) fn before_keys(
             egui::Event::PointerMoved(_) if window.board.pointer_owned => {
                 owns_events = true;
             }
+            egui::Event::PointerMoved(pos) if dock.contains(*pos) => {
+                owns_events = true;
+            }
             egui::Event::PointerButton {
                 pos,
                 button: egui::PointerButton::Primary,
@@ -234,11 +237,15 @@ pub(crate) fn before_keys(
                     owns_events = true;
                 }
             }
+            egui::Event::PointerButton { pos, .. } if dock.contains(*pos) => {
+                owns_events = true;
+            }
             _ => {}
         }
     }
     if owns_events {
         window.board.blocked_frame = Some(frame);
+        window.header_input.block_for_settings(frame);
     }
     window.board.timing.record_work(started.elapsed());
     window.timed_separately += window.board.timing.take_cost();

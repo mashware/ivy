@@ -8769,6 +8769,37 @@ for nonmodal Files scrolling; refusing a Markdown symlink the existing reader al
 content search, a second filesystem worker, unbounded recursive scans, following directory links,
 a general text renderer, and treating a displayed path as executable code.
 
+### Markdown reading mode (owner amendment, 15 November 2026, #89)
+
+The owner requested consistent representative icons, removal of the redundant Markdown path
+picker, and maximize/restore for Markdown alone. In maximized mode the document occupies the
+content below the global chrome and tabs, while the tool rail stays reachable. Files can open as
+a lateral companion without replacing the document. Activating another Markdown file updates the
+same reader and keeps Files available. Restore returns to the ordinary Markdown dock at its prior
+preferred width; a separately sized Files companion cannot overwrite that width. Git keeps its
+ordinary dock and Board retains its independently selected full-size presentation. This is transient presentation, never a new console or saved layout.
+
+The host keeps Markdown selected and tracks the Files companion separately so opening Files does
+not suspend the visible document's refresh or swap its bank. One common geometry supplies distinct
+document, Files, rail and divider rectangles to input and painting. When the two bodies cannot
+meet their existing minimum widths, Files is temporarily suppressed without losing its selection.
+Covered consoles retain the ordinary valid PTY layout and their full output-pump budgets; a hidden
+surface never becomes a zero-sized terminal. Dismissal and tool transitions consume their input.
+
+Markdown's rail and document cue share their outline painter. Maximize/restore reuse the console
+header's painter and paths, with a larger 24-point icon box suited to the document header, as
+requested during native visual review. The document icon and title share a centered row. Controls
+retain explicit action tooltips and hover/pressed feedback; the empty header omits the redundant
+"Markdown file" subtitle. The empty view directs the person to Files. The manual path form and title-click path editor are removed, while
+explicit local Markdown links and the existing bounded loader remain available.
+
+Discarded: a generic docking framework or document workspace model, because only Markdown with
+Files is requested; maximizing the whole sidebar, because Files must remain lateral; zero-sized
+hidden PTYs, because the programs remain alive; keeping the duplicate path picker, because Files
+already supplies explicit document selection; Unicode icon mixtures or another icon dependency,
+because the existing vector style can represent these actions deterministically. No frame-cost
+improvement is claimed; host, viewer and explorer work retain their named spans.
+
 
 ## D73 — Connection help is global and reports observed publication
 
@@ -9689,3 +9720,10 @@ mtime or producer dates (republishing is not a new wait); classifying activity f
 **Verification boundary.** Observation while Board is closed and all added layout/input/paint work
 must be named and subtracted once. Native visual and interaction parity needs a real desktop run;
 headless tests alone cannot establish it. No new performance figure is claimed by this decision.
+
+**Presentation correction, 15 November 2026.** At the owner's request, Board fills the content
+surface below the tabs, beside the tool rail, at every window width. There is no reduced or
+resizable Board dock. The covered consoles retain their geometry and pump budget. The duplicate
+top-toolbar shortcut is removed; the rail and keyboard binding remain available.
+Discarded: opening Board in the shared narrow dock, which hides it in narrow windows and makes
+its project overview unnecessarily small. Other sidebar tools keep their existing dock behavior.

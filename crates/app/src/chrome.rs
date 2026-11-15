@@ -108,7 +108,6 @@ enum Action {
     SplitDown,
     NewTab,
     Search,
-    Board,
     Connect,
     Updates(bool),
     Menu,
@@ -185,12 +184,6 @@ pub(crate) fn paint_button_icon(
         "Search console" => {
             p.circle_stroke(at(-1.5, -1.5), 6.5 * scale, stroke);
             line((4.0, 4.0), (9.0, 9.0));
-        }
-        "Board" => {
-            outline((-9.0, -8.0), (9.0, 8.0), 2.0);
-            for y in [-4.0, 0.0, 4.0] {
-                line((-5.0, y), (5.0, y));
-            }
         }
         "Menu" => {
             for y in [-6.0, 0.0, 6.0] {
@@ -285,9 +278,9 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         ("−", "Minimize window", Action::Minimize),
         ("☰", "Menu", Action::Menu),
         ("⌕", "Search console", Action::Search),
-        ("≡", "Board", Action::Board),
         ("", "Connect agents", Action::Connect),
     ];
+    let right_count = right.len();
     let skip = if cfg!(target_os = "macos") { 3 } else { 0 };
     for (i, (label, hint, cmd)) in right.into_iter().skip(skip).enumerate() {
         let x = row.right() - 6.0 - (i + 1) as f32 * width;
@@ -332,7 +325,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         - if compact {
             connection::compact_reserve(row)
         } else {
-            6.0 + (7 - skip) as f32 * width
+            6.0 + (right_count - skip) as f32 * width
         };
     let drag = Rect::from_min_max(
         egui::pos2(left_end, row.top()),
@@ -419,7 +412,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
             && !window.board.is_open()
             && !matches!(
                 action,
-                Some(Action::Board | Action::Minimize | Action::Maximize | Action::Close)
+                Some(Action::Minimize | Action::Maximize | Action::Close)
             ))
     {
         return owned;
@@ -480,7 +473,6 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
                 crate::search::apply(&mut pane.search, &mut pane.screen, steps);
             }
         }
-        Some(Action::Board) => crate::board::toggle(window, &ctx),
         Some(Action::Connect) => connection::open(window, &ctx, board_handoff),
         Some(Action::Updates(check)) => updates::open(window, &ctx, check, board_handoff),
         Some(Action::Menu) => window.chrome.menu = !window.chrome.menu,
@@ -541,8 +533,10 @@ fn resize_direction(area: Rect, p: egui::Pos2) -> Option<egui::ResizeDirection> 
 }
 
 pub(crate) fn after_panels(window: &mut Window, ui: &mut egui::Ui, area: Rect) {
+    if let Some(document) = window.sidebar.last_document.or(window.sidebar.last_dock) {
+        crate::viewer::paint(window, ui, document);
+    }
     if let Some(dock) = window.sidebar.last_dock {
-        crate::viewer::paint(window, ui, dock);
         crate::explorer::show(window, ui, dock);
     }
     connection::after_panels(window, ui, area);
