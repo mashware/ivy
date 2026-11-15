@@ -365,30 +365,32 @@ pub(crate) fn show(window: &mut Window, ui: &mut egui::Ui, area: egui::Rect) {
     {
         return;
     }
-    reconcile(window);
-    if !window.explorer.visible {
-        return;
-    }
     let started = Instant::now();
-    let target = active(window);
-    let filtered = ui.ctx().input(|input| input.events.clone());
-    if let Some(events) = window.explorer.events.take() {
-        ui.ctx().input_mut(|input| input.events = events);
-    }
-    let open = view::show(&mut window.explorer, ui, area, target, window.theme);
-    ui.ctx().input_mut(|input| input.events = filtered);
-    if !window.explorer.visible {
-        crate::sidebar::close(window, ui.ctx());
-    }
-    if let Some((pane, path)) = open {
-        if crate::viewer::open_markdown_target(window, pane, path, None) {
-            window.explorer.hide();
-            ui.ctx().request_repaint();
-        } else {
-            window.explorer.message =
-                "Send or clear the review comments before opening another document.".into();
+    (|| {
+        reconcile(window);
+        if !window.explorer.visible {
+            return;
         }
-    }
+        let target = active(window);
+        let filtered = ui.ctx().input(|input| input.events.clone());
+        if let Some(events) = window.explorer.events.take() {
+            ui.ctx().input_mut(|input| input.events = events);
+        }
+        let open = view::show(&mut window.explorer, ui, area, target, window.theme);
+        ui.ctx().input_mut(|input| input.events = filtered);
+        if !window.explorer.visible {
+            crate::sidebar::close(window, ui.ctx());
+        }
+        if let Some((pane, path)) = open {
+            if crate::viewer::open_markdown_target(window, pane, path, None) {
+                window.explorer.hide();
+                ui.ctx().request_repaint();
+            } else {
+                window.explorer.message =
+                    "Send or clear the review comments before opening another document.".into();
+            }
+        }
+    })();
     window.sidebar.record(started.elapsed());
     window.timed_separately += window.sidebar.take_cost();
 }

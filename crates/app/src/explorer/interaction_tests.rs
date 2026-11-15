@@ -1085,3 +1085,20 @@ fn partial_name_search_notice_is_visible_even_when_the_folder_exceeds_listing_li
     wait_for_text(&mut window, &ctx, area, "Search result limit reached");
     wait_for_text(&mut window, &ctx, area, "match-");
 }
+
+#[test]
+fn hidden_files_reconciliation_is_discounted_from_framework_time() {
+    let ctx = egui::Context::default();
+    let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+    assert!(!window.explorer.visible);
+    let before = window.timed_separately;
+    let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+        show(&mut window, ui, ui.max_rect());
+    });
+    output.drop_without_applying_deltas();
+    assert!(window.timed_separately > before);
+    window.sidebar.close_frame();
+    let mut report = Vec::new();
+    window.sidebar.publish(&mut report).unwrap();
+    assert!(String::from_utf8(report).unwrap().contains("frames=1"));
+}

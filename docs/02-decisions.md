@@ -8735,8 +8735,10 @@ Files follows usable console-directory changes automatically, including the shel
 startup directory. The same source retains navigation; remote/unavailable metadata suspends local
 browsing. Keep one top-right Refresh icon for explicit cache invalidation. Its ink and hover fill
 come from the effective theme. Files gestures claim input without applying modal console dimming;
-other modal owners retain their existing behavior. Files input and painting are counted in the
-existing sidebar application timing span; viewer and Board work remain separate.
+other modal owners retain their existing behavior. Files key handling, result reconciliation and
+painting are counted in the existing sidebar application timing span, including hidden-result
+processing. Console Ctrl+click reveal remains within the existing pointer span, counted once;
+viewer and Board work remain separate.
 
 A single click on `.md` opens the existing viewer, including an explicitly selected symlink.
 The reader already opens nonblocking on Unix, validates the opened regular file, bounds its size
