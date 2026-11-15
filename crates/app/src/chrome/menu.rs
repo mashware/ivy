@@ -74,6 +74,10 @@ pub(super) fn show(
             }
         });
         window.chrome.menu_scroll = (window.chrome.menu_scroll - wheel).clamp(0.0, scroll_max);
+        window.chrome.menu_selected = window
+            .chrome
+            .menu_selected
+            .filter(|index| *index < menu_entries.len());
         let mut moved = false;
         let mut activate = false;
         ctx.input(|input| {

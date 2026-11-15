@@ -349,6 +349,13 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
             ctx.send_viewport_cmd(ViewportCommand::StartDrag);
         }
     }
+    if window.settings_editor.is_open()
+        || window.pane_view.is_modal()
+        || window.chrome.guide_blocked(&ctx)
+    {
+        action = None;
+        window.chrome.menu = false;
+    }
     if matches!(action, Some(Action::Menu)) {
         window.chrome.menu = !window.chrome.menu;
         window.chrome.menu_scroll = 0.0;

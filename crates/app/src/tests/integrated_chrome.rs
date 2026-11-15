@@ -2260,4 +2260,53 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn compact_menu_selection_is_cleared_when_window_controls_disappear() {
+        for board_open in [false, true] {
+            let ctx = egui::Context::default();
+            let mut window = window_with("sleep 30", "sleep 30");
+            window.chrome.enable();
+            window.headers = window.headers.integrated(true);
+            let compact = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(240.0, 600.0));
+            let wide = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 600.0));
+            frame(&mut window, &ctx, compact, vec![]);
+            if board_open {
+                crate::board::toggle(&mut window, &ctx);
+            }
+            frame(&mut window, &ctx, compact, vec![]);
+            open_updates_menu(&mut window, &ctx, compact);
+            // Up selects Close window, which is unavailable after widening.
+            frame(
+                &mut window,
+                &ctx,
+                compact,
+                vec![menu_key(egui::Key::ArrowUp)],
+            );
+            frame(&mut window, &ctx, wide, vec![menu_key(egui::Key::Enter)]);
+            assert_eq!(window.board.is_open(), board_open);
+            let shapes = frame(&mut window, &ctx, wide, vec![]);
+            assert!(
+                has_text(&shapes, "Preferences"),
+                "invalid selection dispatched an action"
+            );
+        }
+    }
+    #[test]
+    fn application_menu_does_not_intercept_escape_from_a_pane_dialog() {
+        let ctx = egui::Context::default();
+        let mut window = window_with("sleep 30", "sleep 30");
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        let area = area_of(1400.0);
+        let tab = window.active().name;
+        let pane = window.active().focus;
+        window.pane_view.begin_rename(tab, pane, "Console".into());
+        frame(&mut window, &ctx, area, vec![]);
+        open_updates_menu(&mut window, &ctx, area);
+        frame(&mut window, &ctx, area, vec![menu_key(egui::Key::Escape)]);
+        assert!(
+            !window.pane_view.is_modal(),
+            "hidden chrome menu stole dialog dismissal"
+        );
+    }
 }
