@@ -44,7 +44,7 @@ fn paint_entry_icon(
     }
 }
 
-fn refresh_button(ui: &mut egui::Ui, available: bool) -> bool {
+fn refresh_button(ui: &mut egui::Ui, available: bool, theme: crate::theme::Theme) -> bool {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::click());
     let response = response
         .on_hover_text("Refresh")
@@ -53,14 +53,13 @@ fn refresh_button(ui: &mut egui::Ui, available: bool) -> bool {
         } else {
             egui::CursorIcon::NotAllowed
         });
-    let visuals = ui.style().interact(&response);
     if available && (response.hovered() || response.is_pointer_button_down_on()) {
-        ui.painter().rect_filled(rect, 3.0, visuals.bg_fill);
+        ui.painter().rect_filled(rect, 3.0, theme.divider());
     }
     let color = if available {
-        visuals.fg_stroke.color
+        theme.foreground()
     } else {
-        ui.visuals().weak_text_color()
+        theme.foreground().gamma_multiply(0.4)
     };
     let stroke = egui::Stroke::new(1.4, color);
     let center = rect.center();
@@ -264,7 +263,7 @@ pub(super) fn show(
                             .get(&pane)
                             .is_some_and(|nav| nav.source.is_some())
                     });
-                    if refresh_button(ui, available) {
+                    if refresh_button(ui, available, theme) {
                         state.navigation.get_mut(&target.unwrap()).unwrap().reload();
                         state.message.clear();
                     }
@@ -516,6 +515,58 @@ pub(super) fn show(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn refresh_icon_and_hover_use_the_effective_light_and_dark_theme() {
+        use egui::epaint::{ColorMode, Shape};
+        for named in [
+            crate::theme::NamedTheme::GithubLightDefault,
+            crate::theme::NamedTheme::TokyoNight,
+        ] {
+            let theme = named.theme();
+            let ctx = egui::Context::default();
+            let mut center = egui::Pos2::ZERO;
+            for hover in [false, true] {
+                let events = if hover {
+                    vec![egui::Event::PointerMoved(center)]
+                } else {
+                    vec![]
+                };
+                let output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(200.0, 100.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        center = ui.cursor().min + egui::vec2(12.0, 12.0);
+                        refresh_button(ui, true, theme);
+                    },
+                );
+                let strokes: Vec<_> = output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        Shape::Path(path) => Some(path.stroke.color.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                let hover_fill = output.shapes.iter().any(|shape| matches!(&shape.shape, Shape::Rect(rect) if rect.rect.size() == egui::vec2(24.0, 24.0) && rect.fill == theme.divider()));
+                output.drop_without_applying_deltas();
+                assert_eq!(
+                    strokes,
+                    vec![ColorMode::Solid(theme.foreground()); 2],
+                    "{named:?}, hover={hover}"
+                );
+                if hover {
+                    assert!(hover_fill, "hover did not paint the effective theme's fill");
+                }
+            }
+        }
+    }
 
     fn listing(state: &mut Explorer, path: &str, entries: Vec<Entry>) {
         let key = state.request(1, path.into());
