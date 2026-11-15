@@ -1,5 +1,5 @@
 //! Fixed save actions and bounded notices share one measured row layout.
-use super::{ACCENT, Editor};
+use super::Editor;
 use eframe::egui;
 
 pub(super) const FOOTER_NOTE: &str = "Changes apply when saved. Your running programs stay open.";
@@ -100,7 +100,7 @@ pub(super) fn show(
         // A newly invalid field must not disappear behind a previous notice's scroll offset.
         if !errors.is_empty() {
             notice_ui.colored_label(
-                egui::Color32::LIGHT_RED,
+                ui.visuals().error_fg_color,
                 format!("{} setting errors: fix them before saving.", errors.len()),
             );
         }
@@ -133,21 +133,13 @@ pub(super) fn show(
             }
             let primary = label == "Save and close";
             let quiet = matches!(label, "Restore defaults" | "Cancel");
-            let mut button =
-                egui::Button::new(egui::RichText::new(label).size(14.0).color(if primary {
-                    egui::Color32::from_rgb(22, 38, 77)
-                } else if quiet {
-                    egui::Color32::from_rgb(146, 155, 174)
-                } else {
-                    ui.visuals().text_color()
-                }))
-                .frame(!quiet);
-            if primary {
-                button = button.fill(ACCENT);
-            }
+            let button = egui::Button::new(egui::RichText::new(label).size(14.0)).frame(!quiet);
             let rect = egui::Rect::from_min_size(egui::pos2(left, top), egui::vec2(width, 40.0));
             let mut button_ui = ui.new_child(egui::UiBuilder::new().id_salt(label).max_rect(rect));
             button_ui.set_clip_rect(rect.intersect(ui.clip_rect()));
+            if primary {
+                super::palette::primary_style(&mut button_ui);
+            }
             if !(quiet || can_save) {
                 button_ui.disable();
             }
@@ -176,12 +168,12 @@ pub(super) fn show(
     let note = ui.painter().layout(
         FOOTER_NOTE.to_owned(),
         egui::FontId::proportional(12.0),
-        egui::Color32::from_rgb(129, 140, 162),
+        ui.visuals().weak_text_color(),
         bounds.width(),
     );
     ui.painter().galley(
         egui::pos2(bounds.left(), top + 2.0),
         note,
-        egui::Color32::from_rgb(129, 140, 162),
+        ui.visuals().weak_text_color(),
     );
 }
