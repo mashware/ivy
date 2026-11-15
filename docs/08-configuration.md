@@ -644,7 +644,7 @@ maximized, **Files** opens as a lateral panel beside the document; choosing anot
 keeps both visible. Resizing that Files panel does not change the width Restore returns to. If the
 window cannot fit both surfaces, Files is temporarily hidden and returns when the window widens.
 Covered consoles keep running with valid terminal grids and their full output budgets. Git and
-Board retain their ordinary sidebar presentation. Maximized reading is not saved across restarts.
+Board retain their own presentation behavior. Maximized reading is not saved across restarts.
 
 Markdown displays headings, lists, tables, code and inline formatting. It refreshes every second
 while open, including atomic file replacement; background refresh keeps the document in place.

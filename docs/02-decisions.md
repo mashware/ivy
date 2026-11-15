@@ -8729,8 +8729,8 @@ picker, and maximize/restore for Markdown alone. In maximized mode the document 
 content below the global chrome and tabs, while the tool rail stays reachable. Files can open as
 a lateral companion without replacing the document. Activating another Markdown file updates the
 same reader and keeps Files available. Restore returns to the ordinary Markdown dock at its prior
-preferred width; a separately sized Files companion cannot overwrite that width. Git and Board
-retain ordinary presentation. This is transient presentation, never a new console or saved layout.
+preferred width; a separately sized Files companion cannot overwrite that width. Git keeps its
+ordinary dock and Board retains its independently selected full-size presentation. This is transient presentation, never a new console or saved layout.
 
 The host keeps Markdown selected and tracks the Files companion separately so opening Files does
 not suspend the visible document's refresh or swap its bank. One common geometry supplies distinct
