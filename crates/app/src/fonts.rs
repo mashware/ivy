@@ -29,6 +29,7 @@ mod atlas;
 mod bundled;
 #[cfg(test)]
 pub(crate) use bundled::install as install_bundled;
+pub(crate) use bundled::ui_weight;
 mod ligatures;
 pub use ligatures::LigatureCost;
 pub(crate) use ligatures::{

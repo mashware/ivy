@@ -491,7 +491,9 @@ impl Theme {
 
 pub(crate) fn project_accents(theme: &Theme) -> Vec<Color32> {
     let mut colors = Vec::new();
-    for slot in [4, 2, 5, 6, 3, 1, 12, 10, 13, 14, 11, 9] {
+    // Cyan, magenta, pink first, never the accent or claim slots 1, 2, 3, 9, 10, 11 (D94): a
+    // project painted in the focus green or a claim colour would read as a state.
+    for slot in [6, 5, 13, 14, 12, 4] {
         let original = theme.color(term_core::TermColor::Indexed(slot));
         let mut color = original;
         for step in 0..=10 {

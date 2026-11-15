@@ -175,7 +175,12 @@ fn paint(
     } = appearance;
     let roles = crate::ui::style::roles(ui.ctx(), theme);
     let painter = ui.painter().with_clip_rect(strip.intersect(ui.clip_rect()));
-    let surface = if focused { roles.panel } else { roles.chrome };
+    // The whole header carries a low tint of its project's ink over the stripe: a stripe alone was
+    // reported almost invisible (#48), and the design kit tints the header 18 % when focused.
+    let ground = if focused { roles.panel } else { roles.chrome };
+    let surface = project.map_or(ground, |project| {
+        crate::theme::mix(ground, project.ink, if focused { 0.18 } else { 0.14 })
+    });
     painter.rect_filled(
         strip,
         egui::CornerRadius {
@@ -199,6 +204,7 @@ fn paint(
     }
     let text = if focused { roles.tx } else { roles.tx2 };
     let font = egui::FontId::proportional(title_size);
+    let name_font = egui::FontId::new(title_size, crate::fonts::ui_weight(ui.ctx(), 600));
     for (target, rect) in targets(strip, m, can_close) {
         let tooltip = match target {
             Target::Label => "Double-click to rename",
@@ -273,7 +279,7 @@ fn paint(
         }
         if let (Some(project), Some(ink)) = (project, ink) {
             let available = (rect.right() - left.x - 8.0).max(0.0);
-            let galley = painter.layout_no_wrap(project.name.clone(), font.clone(), ink);
+            let galley = painter.layout_no_wrap(project.name.clone(), name_font.clone(), ink);
             let width = galley.size().x.min(available * 0.45).min(140.0);
             if width > 0.0 {
                 let name = egui::Rect::from_min_size(
@@ -546,7 +552,8 @@ mod tests {
     }
 
     /// **Literal Ivy Night colours, written out**: the focused header sits on the panel and the
-    /// others on the chrome; the project is a 3-point stripe and its name in its own ink, beside
+    /// others on the chrome, each tinted with the project's ink; the project is a 3-point stripe
+    /// and its name in its own ink, beside
     /// the task in the text role of the surface — and no gradient and no «01» any more.
     #[test]
     fn project_stripe_and_ink_replace_the_gradient_and_focus_picks_the_surface() {
@@ -556,9 +563,10 @@ mod tests {
         let strip = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(500.0, 28.0));
         let metrics = CellMetrics::of(8.0, 16.0);
         let label_rect = targets(strip, &metrics, true)[0].1;
+        // The panel #171D21 with 18 % of the ink when focused; the chrome #0F1315 with 14 % when not.
         for (focused, surface, text) in [
-            (true, rgb(0x171d21), rgb(0xe4e8e2)),
-            (false, rgb(0x0f1315), rgb(0xa5aaa6)),
+            (true, rgb(0x1f3a2f), rgb(0xe4e8e2)),
+            (false, rgb(0x162b22), rgb(0xa5aaa6)),
         ] {
             let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
                 paint(

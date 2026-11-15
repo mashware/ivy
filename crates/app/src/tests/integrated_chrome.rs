@@ -160,8 +160,9 @@ mod tests {
             });
         }
         let area = area_of(1400.0);
-        let panel = egui::Color32::from_rgb(0x17, 0x1d, 0x21);
-        let chrome = egui::Color32::from_rgb(0x0f, 0x13, 0x15);
+        // Ivy Night's panel #171D21 with 18 % of the ink, and its chrome #0F1315 with 14 %.
+        let panel = egui::Color32::from_rgb(0x3b, 0x37, 0x2e);
+        let chrome = egui::Color32::from_rgb(0x2c, 0x29, 0x21);
         let accent = egui::Color32::from_rgb(0x3c, 0xc3, 0x84);
         let stripes = |shapes: &[egui::epaint::ClippedShape]| -> Vec<egui::Rect> {
             shapes
