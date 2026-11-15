@@ -163,11 +163,23 @@ fn click_at(window: &mut crate::Window, ctx: &egui::Context, area: egui::Rect, p
     frame(window, ctx, area, vec![button(false)]);
 }
 
+fn control_label(text: &str) -> &str {
+    match text {
+        "Hide" => "×",
+        "Pin this console" => "Pin",
+        "Follow active pane" => "Follow",
+        "Use console directory" => "Reset",
+        "Copy path" => "Copy",
+        _ => text,
+    }
+}
+
 fn click_text(window: &mut crate::Window, ctx: &egui::Context, area: egui::Rect, text: &str) {
     let painted = frame(window, ctx, area, vec![]);
+    let dock = window.sidebar.last_dock.expect("Files dock is visible");
     let pos = painted
         .iter()
-        .find(|(label, _)| label == text)
+        .find(|(label, pos)| label == control_label(text) && dock.contains(*pos))
         .unwrap_or_else(|| panic!("{text:?} not painted; visible text: {painted:?}"))
         .1;
     click_at(window, ctx, area, pos);
@@ -718,11 +730,7 @@ fn refresh_clears_a_deleted_selection_and_reports_a_deleted_explorer_root() {
             .any(|(text, _)| text.contains("Directory unavailable."))
         {
             assert!(painted.iter().any(|(text, _)| text == "Refresh"));
-            assert!(
-                painted
-                    .iter()
-                    .any(|(text, _)| text == "Use console directory")
-            );
+            assert!(painted.iter().any(|(text, _)| text == "Reset"));
             break;
         }
         assert!(

@@ -249,7 +249,8 @@ for directory discovery, supported files and platform behavior.
 
 ## Browse a console's files
 
-Choose **Files** from the right tool bar to show the shared file explorer. It follows the active
+Choose **Files** from the right tool bar to show the shared file explorer.
+A compact toolbar sits above the project tree; hover its controls for action details. It follows the active
 console and remembers that console's root, expanded folders, selected entry and scroll position.
 Different worktrees and even two consoles in the same directory keep separate navigation.
 **Pin this console** keeps its files visible while you type in another console or switch tabs;
@@ -265,8 +266,8 @@ to the console's latest known local directory. Browsing never changes the runnin
 directory. Later console directory changes leave the saved tree intact. Unknown or remote console
 directories show an unavailable message. Missing directories and listing failures are shown explicitly.
 
-The overlay leaves console dimensions unchanged; drag its right edge to adjust its width. Below
-560 points it uses the full console content width. **Hide** or Escape preserves navigation and pin
+The explorer shares the dock width with the other tools; drag its left edge to resize it.
+Narrow windows hide the dock body until it fits again. **Hide** or Escape preserves navigation and pin
 state. Clicking outside transfers keyboard input back to the console. Navigation is kept only while
 Ivy is running; restarting starts with Files hidden and fresh navigation from restored console directories.
 

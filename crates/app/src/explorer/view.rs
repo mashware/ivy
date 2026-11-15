@@ -6,6 +6,44 @@ struct Row {
     message: Option<String>,
 }
 
+fn paint_entry_icon(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    kind: EntryKind,
+    color: egui::Color32,
+) {
+    let stroke = egui::Stroke::new(1.0, color);
+    match kind {
+        EntryKind::Directory => {
+            let top = rect.min + egui::vec2(2.0, 4.0);
+            let points = vec![
+                top,
+                top + egui::vec2(6.0, 0.0),
+                top + egui::vec2(8.0, 2.0),
+                top + egui::vec2(14.0, 2.0),
+                top + egui::vec2(14.0, 11.0),
+                top + egui::vec2(0.0, 11.0),
+                top,
+            ];
+            painter.add(egui::Shape::line(points, stroke));
+        }
+        _ => {
+            let paper =
+                egui::Rect::from_min_size(rect.min + egui::vec2(3.0, 1.0), egui::vec2(10.0, 14.0));
+            painter.rect_stroke(paper, 1.0, stroke, egui::StrokeKind::Inside);
+            for y in [6.0, 9.0, 12.0] {
+                painter.line_segment(
+                    [
+                        paper.min + egui::vec2(2.0, y - 1.0),
+                        paper.min + egui::vec2(8.0, y - 1.0),
+                    ],
+                    stroke,
+                );
+            }
+        }
+    }
+}
+
 fn rows(state: &mut Explorer, pane: usize) -> (Vec<Row>, Option<Request>, Vec<String>) {
     let Some(nav) = state.navigation.get(&pane) else {
         return (Vec::new(), None, Vec::new());
@@ -174,51 +212,60 @@ pub(super) fn show(
                 egui::Stroke::new(1.0, theme.divider()),
             );
             ui.style_mut().visuals.override_text_color = Some(theme.foreground());
-            let inner = rect.shrink(8.0);
+            let inner = rect.shrink2(egui::vec2(10.0, 7.0));
             let mut body = ui.new_child(
                 egui::UiBuilder::new()
                     .max_rect(inner)
                     .layout(egui::Layout::top_down(egui::Align::Min)),
             );
             body.set_clip_rect(inner);
-            body.horizontal_wrapped(|ui| {
+            body.horizontal(|ui| {
                 ui.strong("Files");
-                if ui.button("Hide").clicked() {
-                    state.hide();
-                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.small_button("×").on_hover_text("Hide").clicked() {
+                        state.hide();
+                    }
+                });
             });
             let Some(pane) = target else {
                 body.label("No active console.");
                 return;
             };
-            body.add(
-                egui::Label::new(format!(
-                    "{}: #{pane} {}",
-                    if state.pinned.is_some() {
+            let source_path = state
+                .navigation
+                .get(&pane)
+                .and_then(|nav| nav.source.as_deref())
+                .map(display)
+                .unwrap_or_else(|| "Local directory unavailable or unsupported.".into());
+            body.horizontal(|ui| {
+                let source_label = format!(
+                    "{}: #{} {}",
+                    if state.pinned == Some(pane) {
                         "Pinned"
                     } else {
                         "Following"
                     },
+                    pane,
                     label.unwrap_or("Console")
-                ))
-                .truncate(),
-            )
-            .on_hover_text(
-                state
-                    .navigation
-                    .get(&pane)
-                    .and_then(|nav| nav.source.as_deref())
-                    .map(display)
-                    .unwrap_or_else(|| "Local directory unavailable or unsupported.".into()),
-            );
-            body.horizontal_wrapped(|ui| {
+                );
                 if state.pinned.is_some() {
-                    if ui.button("Follow active pane").clicked() {
+                    if ui
+                        .small_button("Follow")
+                        .on_hover_text("Follow active pane")
+                        .clicked()
+                    {
                         state.pinned = None;
                     }
-                } else if ui.button("Pin this console").clicked() {
+                } else if ui
+                    .small_button("Pin")
+                    .on_hover_text("Pin this console")
+                    .clicked()
+                {
                     state.pinned = Some(pane);
                 }
+
+                ui.add(egui::Label::new(source_label).truncate())
+                    .on_hover_text(source_path.clone());
             });
             let Some(nav) = state.navigation.get_mut(&pane) else {
                 return;
@@ -226,8 +273,17 @@ pub(super) fn show(
             let available = nav.source.is_some();
             let root = nav.root.clone();
             if let Some(root) = &root {
-                body.add(egui::Label::new(display(root)).truncate())
-                    .on_hover_text(display(root));
+                body.horizontal(|ui| {
+                    let (icon, _) =
+                        ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
+                    paint_entry_icon(ui.painter(), icon, EntryKind::Directory, theme.focus());
+                    let name = root
+                        .file_name()
+                        .map(|name| display(Path::new(name)))
+                        .unwrap_or_else(|| display(root));
+                    ui.add(egui::Label::new(name).truncate())
+                        .on_hover_text(display(root));
+                });
             }
             body.horizontal_wrapped(|ui| {
                 if ui
@@ -235,18 +291,21 @@ pub(super) fn show(
                         available && root.as_ref().and_then(|path| path.parent()).is_some(),
                         egui::Button::new("Up"),
                     )
+                    .on_hover_text("Up")
                     .clicked()
                 {
                     nav.enter(root.as_ref().unwrap().parent().unwrap().to_path_buf());
                 }
                 if ui
-                    .add_enabled(available, egui::Button::new("Use console directory"))
+                    .add_enabled(available, egui::Button::new("Reset"))
+                    .on_hover_text("Use console directory")
                     .clicked()
                 {
                     nav.use_source();
                 }
                 if ui
                     .add_enabled(available, egui::Button::new("Refresh"))
+                    .on_hover_text("Refresh")
                     .clicked()
                 {
                     nav.refresh();
@@ -263,10 +322,9 @@ pub(super) fn show(
                 body.label(&state.message);
             }
             let scroll = nav.scroll;
-            state.row_stride = 24.0 + body.spacing().item_spacing.y;
-            state.viewport_rows = ((body.available_height() - 110.0).max(24.0) / state.row_stride)
-                .ceil() as usize
-                + 1;
+            state.row_stride = 22.0 + body.spacing().item_spacing.y;
+            state.viewport_rows =
+                ((body.available_height() - 32.0).max(22.0) / state.row_stride).ceil() as usize + 1;
             let (rows, pending, messages) = rows(state, pane);
             let activate_key = std::mem::take(&mut state.activate);
             let mut action = if activate_key {
@@ -287,45 +345,111 @@ pub(super) fn show(
                 .is_some_and(|path| state.cache.contains_key(&state.request(pane, path.clone())));
             let result = egui::ScrollArea::both()
                 .id_salt(("explorer-tree", pane))
-                .max_height((body.available_height() - 110.0).max(24.0))
+                .max_height((body.available_height() - 32.0).max(22.0))
                 .vertical_scroll_offset(scroll)
                 .auto_shrink([false, false])
-                .show_rows(&mut body, 24.0, rows.len(), |ui, range| {
+                .show_rows(&mut body, 22.0, rows.len(), |ui, range| {
                     for row in &rows[range] {
                         if let Some(message) = &row.message {
                             ui.label(message).on_hover_text(display(&row.entry.path));
                             continue;
                         }
-                        ui.horizontal(|ui| {
-                            ui.add_space(row.depth as f32 * 14.0);
-                            if row.entry.kind == EntryKind::Directory {
-                                let expanded =
-                                    state.navigation[&pane].expanded.contains(&row.entry.path);
-                                if ui.small_button(if expanded { "v" } else { ">" }).clicked() {
-                                    toggle = Some(row.entry.path.clone());
-                                }
+                        let (row_rect, response) = ui.allocate_exact_size(
+                            egui::vec2(ui.available_width(), 22.0),
+                            egui::Sense::click(),
+                        );
+                        let chosen =
+                            state.navigation[&pane].selected.as_ref() == Some(&row.entry.path);
+                        if chosen {
+                            ui.painter().rect_filled(
+                                row_rect,
+                                2.0,
+                                theme.focus().gamma_multiply(0.22),
+                            );
+                        } else if response.hovered() {
+                            ui.painter().rect_filled(
+                                row_rect,
+                                2.0,
+                                theme.foreground().gamma_multiply(0.07),
+                            );
+                        }
+                        let indent = row.depth as f32 * 12.0;
+                        let center_y = row_rect.center().y;
+                        if row.entry.kind == EntryKind::Directory {
+                            let expanded =
+                                state.navigation[&pane].expanded.contains(&row.entry.path);
+                            let chevron = egui::Rect::from_min_size(
+                                egui::pos2(row_rect.left() + indent + 3.0, center_y - 5.0),
+                                egui::vec2(10.0, 10.0),
+                            );
+                            let points = if expanded {
+                                vec![
+                                    chevron.left_top(),
+                                    chevron.right_top(),
+                                    chevron.center_bottom(),
+                                ]
                             } else {
-                                ui.add_space(18.0);
-                            }
-                            let chosen =
-                                state.navigation[&pane].selected.as_ref() == Some(&row.entry.path);
-                            let suffix = if row.entry.kind == EntryKind::Link {
-                                " ↗"
-                            } else {
-                                ""
+                                vec![
+                                    chevron.left_top(),
+                                    chevron.right_center(),
+                                    chevron.left_bottom(),
+                                ]
                             };
-                            let name =
-                                display(Path::new(row.entry.path.file_name().unwrap_or_default()));
-                            let response = ui
-                                .selectable_label(chosen, format!("{name}{suffix}"))
-                                .on_hover_text(display(&row.entry.path));
-                            if response.clicked() {
-                                selected = Some(row.entry.path.clone());
+                            ui.painter().add(egui::Shape::convex_polygon(
+                                points,
+                                theme.foreground().gamma_multiply(0.8),
+                                egui::Stroke::NONE,
+                            ));
+                            let toggle_rect = egui::Rect::from_min_size(
+                                egui::pos2(row_rect.left() + indent, row_rect.top()),
+                                egui::vec2(18.0, row_rect.height()),
+                            );
+                            if ui
+                                .interact(
+                                    toggle_rect,
+                                    egui::Id::new(("explorer-toggle", pane, &row.entry.path)),
+                                    egui::Sense::click(),
+                                )
+                                .clicked()
+                            {
+                                toggle = Some(row.entry.path.clone());
                             }
-                            if response.double_clicked() {
-                                action = Some(row.entry.clone());
-                            }
-                        });
+                        }
+                        let icon_rect = egui::Rect::from_min_size(
+                            egui::pos2(row_rect.left() + indent + 18.0, center_y - 8.0),
+                            egui::vec2(16.0, 16.0),
+                        );
+                        let icon_color = if row.entry.kind == EntryKind::Directory {
+                            theme.focus()
+                        } else {
+                            theme.foreground().gamma_multiply(0.78)
+                        };
+                        paint_entry_icon(ui.painter(), icon_rect, row.entry.kind, icon_color);
+                        let name =
+                            display(Path::new(row.entry.path.file_name().unwrap_or_default()));
+                        let suffix = if row.entry.kind == EntryKind::Link {
+                            " ↗"
+                        } else {
+                            ""
+                        };
+                        ui.painter().text(
+                            egui::pos2(icon_rect.right() + 5.0, center_y),
+                            egui::Align2::LEFT_CENTER,
+                            format!("{name}{suffix}"),
+                            egui::TextStyle::Body.resolve(ui.style()),
+                            if chosen {
+                                theme.foreground()
+                            } else {
+                                theme.foreground().gamma_multiply(0.9)
+                            },
+                        );
+                        response.clone().on_hover_text(display(&row.entry.path));
+                        if response.clicked() {
+                            selected = Some(row.entry.path.clone());
+                        }
+                        if response.double_clicked() {
+                            action = Some(row.entry.clone());
+                        }
                     }
                 });
             let incomplete = rows
@@ -350,7 +474,7 @@ pub(super) fn show(
             }
             if let Some(path) = state.navigation[&pane].selected.clone() {
                 body.horizontal_wrapped(|ui| {
-                    if ui.button("Copy path").clicked() {
+                    if ui.small_button("Copy").on_hover_text("Copy path").clicked() {
                         if let Some(path) = path.to_str() {
                             ui.ctx().copy_text(path.into());
                         } else {
@@ -358,7 +482,7 @@ pub(super) fn show(
                                 "This path is unavailable for copying as Unicode text.".into();
                         }
                     }
-                    if ui.button("Open").clicked() {
+                    if ui.small_button("Open").on_hover_text("Open").clicked() {
                         action = rows
                             .iter()
                             .find(|row| row.entry.path == path)
