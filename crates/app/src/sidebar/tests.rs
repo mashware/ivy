@@ -304,7 +304,12 @@ fn sidebar_state_is_transient_and_each_new_window_starts_closed_at_default_width
 #[cfg(unix)]
 #[test]
 fn console_mouse_release_crossing_into_each_tool_or_rail_reaches_its_program() {
-    for tool in [Tool::Files, Tool::Markdown, Tool::Git] {
+    for (tool, maximized) in [
+        (Tool::Files, false),
+        (Tool::Markdown, false),
+        (Tool::Git, false),
+        (Tool::Markdown, true),
+    ] {
         for rail in [false, true] {
             let received = term_core::received::Received::new("sidebar-console-release");
             let script = received.script("stty raw -echo");
@@ -358,6 +363,9 @@ fn console_mouse_release_crossing_into_each_tool_or_rail_reaches_its_program() {
                 "{tool:?}: program never received press"
             );
             let press = received.wait_for(1, Duration::from_secs(5));
+            if maximized {
+                toggle_maximize(&mut window, &ctx);
+            }
             assert!(press.ends_with(b"M"), "missing SGR press: {press:?}");
             one_frame_in(
                 &mut window,
@@ -430,4 +438,115 @@ fn tab_click_repartitions_the_dock_for_the_new_tree_in_the_same_frame() {
         grids,
         "tab switch published a transient grid"
     );
+}
+
+#[test]
+fn markdown_maximize_restores_width_and_files_remains_a_lateral_companion() {
+    let mut window = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+    let ctx = egui::Context::default();
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1500.0, 750.0));
+    window.sidebar.width = 390.0;
+    crate::viewer::activate(&mut window, true);
+    for _ in 0..2 {
+        one_frame_in(&mut window, &ctx, area, vec![]);
+    }
+    let before: Vec<_> = window.all_panes().map(|p| (p.name, p.measured)).collect();
+    let click = |window: &mut Window, pos| {
+        for pressed in [true, false] {
+            one_frame_in(
+                window,
+                &ctx,
+                area,
+                vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+        }
+    };
+    let maximize = maximize_rect(window.sidebar.last_dock.unwrap()).center();
+    click(&mut window, maximize);
+    assert!(
+        window.sidebar.markdown_maximized,
+        "painted maximize control did not change presentation"
+    );
+    let document = window.sidebar.last_document.unwrap();
+    assert!(document.width() > 1400.0);
+    assert_eq!(
+        window
+            .all_panes()
+            .map(|p| (p.name, p.measured))
+            .collect::<Vec<_>>(),
+        before
+    );
+    let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
+    let cards = crate::tab_bar::geometry(&window, area, &metrics)
+        .cards
+        .unwrap();
+    click(&mut window, crate::tab_bar::tab_rect(cards, 1, 2).center());
+    assert_eq!(window.active, 1, "maximized reading captured a tab click");
+    let files = window
+        .sidebar
+        .buttons
+        .iter()
+        .find(|(tool, _)| *tool == Tool::Files)
+        .unwrap()
+        .1
+        .center();
+    click(&mut window, files);
+    assert!(files_visible(&window));
+    let dock = window.sidebar.last_dock.unwrap();
+    let document = window.sidebar.last_document.unwrap();
+    assert_eq!(dock.width(), 390.0);
+    assert!(document.right() < dock.left());
+    assert_eq!(active(&window), Some(Tool::Markdown));
+    let from = egui::pos2(dock.left() - 3.0, dock.center().y);
+    let to = from - egui::vec2(130.0, 0.0);
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    one_frame_in(
+        &mut window,
+        &ctx,
+        area,
+        vec![egui::Event::PointerMoved(from), button(from, true)],
+    );
+    one_frame_in(&mut window, &ctx, area, vec![egui::Event::PointerMoved(to)]);
+    one_frame_in(&mut window, &ctx, area, vec![button(to, false)]);
+    one_frame_in(&mut window, &ctx, area, vec![]);
+    let resized = window.sidebar.last_dock.unwrap().width();
+    assert!(resized > dock.width() + 120.0);
+    let narrow = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 750.0));
+    one_frame_in(&mut window, &ctx, narrow, vec![]);
+    assert!(window.sidebar.last_dock.is_none());
+    assert!(window.sidebar.last_document.is_some());
+    assert!(files_visible(&window));
+    one_frame_in(&mut window, &ctx, area, vec![]);
+    assert_eq!(window.sidebar.last_dock.unwrap().width(), resized);
+    let restore = maximize_rect(window.sidebar.last_document.unwrap()).center();
+    click(&mut window, restore);
+    assert!(!window.sidebar.markdown_maximized);
+    assert!(!files_visible(&window));
+    assert!(window.sidebar.last_document.is_none());
+    assert_eq!(window.sidebar.last_dock.unwrap().width(), 390.0);
+    assert_eq!(
+        window
+            .all_panes()
+            .map(|p| (p.name, p.measured))
+            .collect::<Vec<_>>(),
+        before
+    );
+    toggle_maximize(&mut window, &ctx);
+    select(&mut window, Tool::Git);
+    one_frame_in(&mut window, &ctx, area, vec![]);
+    assert!(!window.sidebar.markdown_maximized);
+    assert!(window.sidebar.last_document.is_none());
 }

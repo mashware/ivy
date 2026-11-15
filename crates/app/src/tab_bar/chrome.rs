@@ -8,6 +8,7 @@ pub(crate) struct Geometry {
     pub gear: Option<egui::Rect>,
     pub consoles: egui::Rect,
     pub dock: Option<egui::Rect>,
+    pub document: Option<egui::Rect>,
     pub rail: egui::Rect,
     pub divider: Option<egui::Rect>,
 }
@@ -19,6 +20,7 @@ impl Geometry {
             return Self {
                 cards,
                 gear: None,
+                document: None,
                 dock: None,
                 rail: egui::Rect::NOTHING,
                 divider: None,
@@ -34,6 +36,7 @@ impl Geometry {
         Self {
             cards: (cards.width() > 0.0 && tabs > 0).then_some(cards),
             gear: Some(gear),
+            document: None,
             dock: None,
             rail: egui::Rect::NOTHING,
             divider: None,
@@ -52,6 +55,7 @@ fn raw_geometry(window: &Window, area: egui::Rect, metrics: &CellMetrics) -> Geo
         return Geometry {
             cards: Some(cards),
             gear: Some(egui::Rect::NOTHING),
+            document: None,
             dock: None,
             rail: egui::Rect::NOTHING,
             divider: None,
@@ -71,6 +75,7 @@ pub(crate) fn geometry(window: &Window, area: egui::Rect, metrics: &CellMetrics)
     let dock = crate::sidebar::partition(window, geometry.consoles, metrics);
     geometry.consoles = dock.consoles;
     geometry.dock = dock.dock;
+    geometry.document = dock.document;
     geometry.rail = dock.rail;
     geometry.divider = dock.divider;
     geometry
@@ -103,6 +108,7 @@ pub(crate) fn partition(
     let started = std::time::Instant::now();
     let dock = crate::sidebar::partition(window, geometry.consoles, metrics);
     window.sidebar.last_dock = dock.dock;
+    window.sidebar.last_document = dock.document;
     window.sidebar.record(started.elapsed());
     window.timed_separately += window.sidebar.take_cost();
     (geometry.cards, dock.consoles)

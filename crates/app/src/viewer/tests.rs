@@ -69,7 +69,14 @@ fn background_refresh_does_not_move_or_hide_the_markdown() {
                 ..Default::default()
             },
             |ui| {
-                view::show(state, ui, rect, crate::theme::Theme::default(), false);
+                view::show(
+                    state,
+                    ui,
+                    rect,
+                    crate::theme::Theme::default(),
+                    false,
+                    false,
+                );
             },
         );
         let mut found = Vec::new();
@@ -110,7 +117,7 @@ fn background_refresh_does_not_move_or_hide_the_markdown() {
 #[test]
 fn viewer_typing_and_dismissal_never_reach_the_program() {
     use crate::tests::{one_frame_in, window_of_tabs};
-    for markdown in [true, false] {
+    for (markdown, maximized) in [(true, false), (false, false), (true, true)] {
         let received = term_core::received::Received::new("viewer-input");
         let script = received.script("stty raw -echo");
         let mut window = window_of_tabs([[script.as_str(), "sleep 30"]]);
@@ -119,6 +126,9 @@ fn viewer_typing_and_dismissal_never_reach_the_program() {
         received.wait_until_ready(Duration::from_secs(5));
         let names: Vec<_> = window.all_panes().map(|p| p.name).collect();
         crate::viewer::activate(&mut window, markdown);
+        if maximized {
+            crate::sidebar::toggle_maximize(&mut window, &ctx);
+        }
         one_frame_in(&mut window, &ctx, area, vec![]);
         one_frame_in(
             &mut window,

@@ -301,14 +301,13 @@ pub(crate) fn before_keys(
             state.pointer_frame = Some(frame);
             window.header_input.block_for_settings(frame);
         }
-        ctx.input_mut(|i| {
-            i.events.retain(|e| {
-                matches!(
-                    e,
-                    egui::Event::ModifiersChanged(_) | egui::Event::WindowFocused(_)
-                )
-            })
-        });
+        crate::sidebar::consume_input(window, ctx);
+    }
+    if !window.explorer.visible
+        && window.sidebar.markdown_maximized
+        && crate::sidebar::files_visible(window)
+    {
+        crate::sidebar::select(window, crate::sidebar::Tool::Files);
     }
     if !window.explorer.visible
         && crate::sidebar::active(window) == Some(crate::sidebar::Tool::Files)
@@ -323,7 +322,7 @@ pub(crate) fn show(window: &mut Window, ui: &mut egui::Ui, area: egui::Rect) {
         || window.board.is_open()
         || window.pane_view.is_modal()
         || window.chrome.guide_blocked(ui.ctx())
-        || crate::viewer::is_open(window)
+        || (crate::viewer::is_open(window) && !window.sidebar.markdown_maximized)
     {
         return;
     }
@@ -345,11 +344,17 @@ pub(crate) fn show(window: &mut Window, ui: &mut egui::Ui, area: egui::Rect) {
         window.theme,
     );
     if !window.explorer.visible {
-        crate::sidebar::close(window, ui.ctx());
+        if window.sidebar.markdown_maximized {
+            crate::sidebar::select(window, crate::sidebar::Tool::Files);
+        } else {
+            crate::sidebar::close(window, ui.ctx());
+        }
     }
     if let Some((pane, path)) = open {
         if crate::viewer::open_markdown_target(window, pane, path, None) {
-            window.explorer.hide();
+            if !window.sidebar.markdown_maximized {
+                window.explorer.hide();
+            }
         } else {
             window.explorer.message =
                 "Send or clear the review comments before opening another document.".into();

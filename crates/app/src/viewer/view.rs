@@ -9,6 +9,7 @@ pub(super) fn show(
     full: egui::Rect,
     theme: crate::theme::Theme,
     unavailable: bool,
+    maximized: bool,
 ) {
     let namespace = if state.kind == Kind::Markdown {
         "markdown-viewer"
@@ -52,7 +53,7 @@ pub(super) fn show(
                 style(&mut content, theme, surface, line);
                 let (head, rest) =
                     inner.split_top_bottom_at_y((inner.top() + 62.0).min(inner.bottom()));
-                header(state, &mut content, head, theme, line);
+                header(state, &mut content, head, theme, line, maximized);
                 if !state.open {
                     return;
                 }
@@ -112,6 +113,7 @@ fn header(
     rect: egui::Rect,
     theme: crate::theme::Theme,
     line: Color32,
+    maximized: bool,
 ) {
     ui.painter().line_segment(
         [rect.left_bottom(), rect.right_bottom()],
@@ -134,56 +136,86 @@ fn header(
         .map(|(p, _)| p.display().to_string())
         .unwrap_or_else(|| {
             if markdown {
-                "Markdown file".into()
+                String::new()
             } else {
                 "Current console".into()
             }
         });
-    let icon_rect =
-        egui::Rect::from_min_size(rect.min + egui::vec2(14.0, 21.0), egui::vec2(18.0, 20.0));
-    ui.painter().rect_stroke(
-        icon_rect.shrink2(egui::vec2(3.0, 1.0)),
-        2,
-        egui::Stroke::new(1.0, theme.foreground()),
-        egui::StrokeKind::Inside,
+    let title_y = rect.center().y - if path.is_empty() { 0.0 } else { 9.0 };
+    let icon_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + 23.0, title_y),
+        egui::vec2(16.0, 16.0),
     );
-    for y in [7.0, 11.0, 15.0] {
-        ui.painter().line_segment(
-            [
-                icon_rect.min + egui::vec2(6.0, y),
-                icon_rect.min + egui::vec2(13.0, y),
-            ],
-            egui::Stroke::new(1.0, theme.foreground()),
+    crate::sidebar::icon(
+        ui,
+        icon_rect,
+        if markdown {
+            crate::sidebar::Tool::Markdown
+        } else {
+            crate::sidebar::Tool::Git
+        },
+        theme.foreground(),
+    );
+    if markdown {
+        let target = crate::sidebar::maximize_rect(rect.expand(1.0));
+        let label = if maximized { "Restore" } else { "Maximize" };
+        let response = ui
+            .interact(
+                target,
+                egui::Id::new("markdown-maximize"),
+                egui::Sense::click(),
+            )
+            .on_hover_text(label);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+        if response.hovered() || response.is_pointer_button_down_on() {
+            ui.painter().rect_filled(
+                target,
+                4,
+                if response.is_pointer_button_down_on() {
+                    ui.visuals().widgets.active.bg_fill
+                } else {
+                    ui.visuals().widgets.hovered.bg_fill
+                },
+            );
+        }
+        crate::header::integrated::paint_icon(
+            ui.painter(),
+            target.center(),
+            crate::header::integrated::Target::Zoom,
+            maximized,
+            theme.foreground(),
+            24.0,
         );
     }
-    let text_rect = egui::Rect::from_min_max(
-        rect.min + egui::vec2(42.0, 10.0),
-        egui::pos2(
-            (rect.right() - 92.0).max(rect.left() + 42.0),
-            rect.bottom() - 8.0,
-        ),
+    let right = (rect.right() - 54.0).max(rect.left() + 42.0);
+    let title_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + 42.0, title_y - 10.0),
+        egui::pos2(right, title_y + 10.0),
     );
-    let mut text_ui = ui.new_child(egui::UiBuilder::new().max_rect(text_rect));
-    text_ui.spacing_mut().item_spacing.y = 2.0;
-    let title_response = text_ui.add(
-        egui::Label::new(RichText::new(title).size(14.0))
-            .truncate()
-            .sense(egui::Sense::click()),
+    let mut text_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(title_rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
     );
-    if markdown && title_response.on_hover_text("Open another path").clicked() {
-        state.editing_path = true;
-        state.focus_path = true;
+    text_ui.set_min_height(20.0);
+    text_ui.add(egui::Label::new(RichText::new(title).size(14.0)).truncate());
+    if !path.is_empty() {
+        let path_rect = egui::Rect::from_min_max(
+            egui::pos2(title_rect.left(), title_y + 12.0),
+            egui::pos2(right, rect.bottom() - 5.0),
+        );
+        let mut path_ui = ui.new_child(egui::UiBuilder::new().max_rect(path_rect));
+        path_ui
+            .add(
+                egui::Label::new(RichText::new(&path).size(11.0).color(mix(
+                    theme.background(),
+                    theme.foreground(),
+                    0.6,
+                )))
+                .truncate(),
+            )
+            .on_hover_text(path);
     }
-    text_ui
-        .add(
-            egui::Label::new(RichText::new(&path).size(11.0).color(mix(
-                theme.background(),
-                theme.foreground(),
-                0.6,
-            )))
-            .truncate(),
-        )
-        .on_hover_text(path);
 }
 
 fn footer(
@@ -238,10 +270,10 @@ fn body_content(
     unavailable: bool,
 ) {
     let markdown = state.kind == Kind::Markdown;
-    if markdown && (state.editing_path || (state.requested.is_none() && state.job.is_none())) {
-        egui::Frame::new()
-            .inner_margin(14)
-            .show(ui, |ui| path_form(state, ui));
+    if markdown && state.requested.is_none() && state.job.is_none() && state.loaded.is_none() {
+        egui::Frame::new().inner_margin(14).show(ui, |ui| {
+            ui.label("Choose a Markdown file in Files.");
+        });
     }
     if !markdown {
         egui::Frame::new()
@@ -281,31 +313,6 @@ fn body_content(
                 !unavailable,
             );
         }
-    }
-}
-
-fn path_form(state: &mut State, ui: &mut egui::Ui) {
-    let editable = !state.review.has_comments();
-    ui.label("Markdown file");
-    let response = ui.add_enabled(
-        editable,
-        egui::TextEdit::singleline(&mut state.path)
-            .id(egui::Id::new("viewer-path"))
-            .desired_width(f32::INFINITY),
-    );
-    if state.focus_path {
-        response.request_focus();
-        state.focus_path = false;
-    }
-    let enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-    if (ui
-        .add_enabled(editable, egui::Button::new("Open"))
-        .clicked()
-        || enter)
-        && editable
-    {
-        state.editing_path = false;
-        state.start(ui.ctx());
     }
 }
 
@@ -383,6 +390,117 @@ mod tests {
     use super::*;
 
     #[test]
+    fn markdown_header_centers_title_on_its_icon_and_draws_a_readable_zoom_control() {
+        fn inspect(
+            shape: &egui::Shape,
+            title: &mut Option<f32>,
+            icon: &mut Option<f32>,
+            zoom: &mut Option<(f32, f32)>,
+        ) {
+            match shape {
+                egui::Shape::Text(text) if text.galley.text() == "Markdown viewer" => {
+                    *title = Some(text.pos.y + text.galley.rect.center().y)
+                }
+                egui::Shape::Rect(rect)
+                    if rect.rect.center().x < 100.0 && (rect.rect.width() - 16.0).abs() < 0.1 =>
+                {
+                    *icon = Some(rect.rect.center().y)
+                }
+                egui::Shape::Rect(rect) if rect.rect.center().x > 400.0 => {
+                    *zoom = Some((rect.rect.width(), rect.rect.center().y))
+                }
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        inspect(shape, title, icon, zoom);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let ctx = egui::Context::default();
+        let area = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(480.0, 62.0));
+        let mut state = State::default();
+        let output = ctx.run_ui(Default::default(), |ui| {
+            header(
+                &mut state,
+                ui,
+                area,
+                crate::theme::Theme::default(),
+                Color32::GRAY,
+                false,
+            )
+        });
+        let (mut title, mut icon, mut zoom) = (None, None, None);
+        for shape in &output.shapes {
+            inspect(&shape.shape, &mut title, &mut icon, &mut zoom);
+        }
+        output.drop_without_applying_deltas();
+        assert!(
+            (title.expect("title painted") - icon.expect("document icon painted")).abs() < 1.0,
+            "title and icon are on different rows"
+        );
+        assert!(
+            (title.unwrap() - zoom.expect("zoom outline painted").1).abs() < 1.0,
+            "zoom control is not centered on the header row"
+        );
+        assert!(
+            zoom.expect("zoom outline painted").0 >= 14.0,
+            "zoom glyph is too small for the document header"
+        );
+    }
+
+    #[test]
+    fn empty_markdown_directs_selection_to_files_without_an_open_form() {
+        fn labels(shape: &egui::Shape, found: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Text(text) => found.push(text.galley.text().to_owned()),
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        labels(shape, found);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let ctx = egui::Context::default();
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(480.0, 600.0));
+        let mut state = State::default();
+        state.open_markdown();
+        for pass in 0..2 {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(area),
+                    ..Default::default()
+                },
+                |ui| {
+                    show(
+                        &mut state,
+                        ui,
+                        area,
+                        crate::theme::Theme::default(),
+                        false,
+                        false,
+                    )
+                },
+            );
+            let mut found = Vec::new();
+            for shape in &output.shapes {
+                labels(&shape.shape, &mut found);
+            }
+            output.drop_without_applying_deltas();
+            if pass == 1 {
+                assert!(
+                    found
+                        .iter()
+                        .any(|text| text == "Choose a Markdown file in Files.")
+                );
+                assert!(!found.iter().any(|text| text == "Open"));
+                assert!(!found.iter().any(|text| text == "Markdown file"));
+            }
+        }
+    }
+
+    #[test]
     fn dock_content_stays_within_the_supplied_rectangle() {
         let ctx = egui::Context::default();
         let area = egui::Rect::from_min_size(egui::Pos2::new(620.0, 0.0), egui::vec2(360.0, 480.0));
@@ -395,7 +513,7 @@ mod tests {
                     screen_rect: Some(screen),
                     ..Default::default()
                 },
-                |ui| show(state, ui, area, crate::theme::Theme::default(), true),
+                |ui| show(state, ui, area, crate::theme::Theme::default(), true, false),
             )
         };
         frame(&mut state).drop_without_applying_deltas();

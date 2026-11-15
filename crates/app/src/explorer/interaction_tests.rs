@@ -742,3 +742,207 @@ fn refresh_clears_a_deleted_selection_and_reports_a_deleted_explorer_root() {
     assert_eq!(window.explorer.navigation[&pane].root, Some(child));
     assert_eq!(window.projects.directory(pane), Some(directory.0.as_path()));
 }
+
+#[test]
+fn files_selects_and_refreshes_markdown_without_leaving_maximized_reading() {
+    let directory = Directory::new("maximized-markdown");
+    let path = directory.0.join("reading.md");
+    fs::write(&path, "# First document\n\nRead beside Files.").unwrap();
+    let script = format!("cd '{}' && exec sleep 30", directory.0.display());
+    let mut window = window_of_tabs([[script.as_str(), "sleep 30"]]);
+    let ctx = egui::Context::default();
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1500.0, 750.0));
+    crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
+    let pane = window.active().panes()[0].name;
+    wait_for_source(&mut window, &ctx, area, pane, &directory.0);
+    crate::viewer::activate(&mut window, true);
+    frame(&mut window, &ctx, area, vec![]);
+    crate::sidebar::toggle_maximize(&mut window, &ctx);
+    crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+    wait_for_text(&mut window, &ctx, area, "reading.md");
+    click_text(&mut window, &ctx, area, "reading.md");
+    click_text(&mut window, &ctx, area, "reading.md");
+    wait_for_text(&mut window, &ctx, area, "First document");
+    assert!(window.sidebar.markdown_maximized);
+    assert!(crate::sidebar::files_visible(&window));
+    assert!(
+        window.sidebar.last_document.unwrap().right() < window.sidebar.last_dock.unwrap().left()
+    );
+    let painted = frame(&mut window, &ctx, area, vec![]);
+    assert!(painted.iter().any(|(text, pos)| text == "First document"
+        && window.sidebar.last_document.unwrap().contains(*pos)));
+    assert!(painted.iter().any(
+        |(text, pos)| text == "reading.md" && window.sidebar.last_dock.unwrap().contains(*pos)
+    ));
+    assert!(
+        !painted
+            .iter()
+            .any(|(text, pos)| text == "Open"
+                && window.sidebar.last_document.unwrap().contains(*pos))
+    );
+    let replacement = directory.0.join("replacement.md");
+    fs::write(&replacement, "# Updated on save").unwrap();
+    fs::rename(&replacement, &path).unwrap();
+    wait_for_text(&mut window, &ctx, area, "Updated on save");
+    assert!(crate::sidebar::files_visible(&window));
+    assert!(window.sidebar.markdown_maximized);
+}
+
+#[cfg(unix)]
+#[test]
+fn maximized_files_input_and_document_handoff_never_reach_covered_programs() {
+    use std::time::Duration;
+
+    let directory = Directory::new("maximized-files-input");
+    fs::write(directory.0.join("reading.md"), "# Selected through Files").unwrap();
+    let received = [
+        term_core::received::Received::new("maximized-files-left"),
+        term_core::received::Received::new("maximized-files-right"),
+    ];
+    let prelude = format!("cd '{}' && stty raw -echo", directory.0.display());
+    let scripts = received
+        .each_ref()
+        .map(|recorder| recorder.script(&prelude));
+    let mut window = window_of_tabs([[scripts[0].as_str(), scripts[1].as_str()]]);
+    for recorder in &received {
+        recorder.wait_until_ready(Duration::from_secs(5));
+    }
+    let ctx = egui::Context::default();
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1500.0, 750.0));
+    crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
+    let names: Vec<_> = window.all_panes().map(|pane| pane.name).collect();
+    wait_for_source(&mut window, &ctx, area, names[0], &directory.0);
+    // Both covered programs request mouse reports, so a pointer leak is observable as bytes.
+    for pane in window.all_panes_mut() {
+        pane.screen.advance(b"\x1b[?1000h\x1b[?1006h");
+    }
+    crate::viewer::activate(&mut window, true);
+    frame(&mut window, &ctx, area, vec![]);
+    crate::sidebar::toggle_maximize(&mut window, &ctx);
+    crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+    wait_for_text(&mut window, &ctx, area, "reading.md");
+    click_text(&mut window, &ctx, area, "Use console directory");
+    wait_for_text(&mut window, &ctx, area, "reading.md");
+    click_text(&mut window, &ctx, area, "reading.md");
+
+    let key = |key, pressed| egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    frame(
+        &mut window,
+        &ctx,
+        area,
+        vec![
+            egui::Event::Text("FILES_PRIVATE_TEXT".into()),
+            egui::Event::Paste("FILES_PRIVATE_PASTE".into()),
+            key(egui::Key::ArrowDown, true),
+        ],
+    );
+    frame(
+        &mut window,
+        &ctx,
+        area,
+        vec![key(egui::Key::ArrowDown, false)],
+    );
+    let dock = window.sidebar.last_dock.unwrap();
+    let from = egui::pos2(dock.left() - 3.0, dock.center().y);
+    let to = egui::pos2(area.left() + 360.0, from.y);
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    frame(
+        &mut window,
+        &ctx,
+        area,
+        vec![egui::Event::PointerMoved(from), button(from, true)],
+    );
+    frame(&mut window, &ctx, area, vec![egui::Event::PointerMoved(to)]);
+    frame(&mut window, &ctx, area, vec![button(to, false)]);
+    assert!(window.sidebar.last_dock.unwrap().width() > dock.width() + 60.0);
+    let dock = window.sidebar.last_dock.unwrap();
+    let body = egui::Rect::from_min_max(
+        dock.min + egui::vec2(0.0, 130.0),
+        dock.max - egui::vec2(0.0, 60.0),
+    );
+    let overlap = window
+        .all_panes()
+        .filter_map(|pane| pane.painted_console.as_ref())
+        .map(|console| body.intersect(console.area.shrink(8.0)))
+        .find(|rect| rect.width() > 4.0 && rect.height() > 4.0)
+        .expect("Files must cover actual terminal cells so pointer leaks are observable");
+    let pos = overlap.center();
+    assert!(window.all_panes().any(|pane| {
+        pane.painted_console
+            .as_ref()
+            .is_some_and(|console| console.area.contains(pos))
+    }));
+    click_at(&mut window, &ctx, area, pos);
+    frame(
+        &mut window,
+        &ctx,
+        area,
+        vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Line,
+                delta: egui::vec2(0.0, -2.0),
+                modifiers: egui::Modifiers::NONE,
+                phase: egui::TouchPhase::Move,
+            },
+        ],
+    );
+
+    click_text(&mut window, &ctx, area, "reading.md");
+    frame(&mut window, &ctx, area, vec![key(egui::Key::Enter, true)]);
+    frame(&mut window, &ctx, area, vec![key(egui::Key::Enter, false)]);
+    wait_for_text(&mut window, &ctx, area, "Selected through Files");
+    assert!(window.sidebar.markdown_maximized);
+    assert!(crate::sidebar::files_visible(&window));
+    // File activation must preserve ownership for the next Files gesture too.
+    click_text(&mut window, &ctx, area, "reading.md");
+    frame(
+        &mut window,
+        &ctx,
+        area,
+        vec![
+            egui::Event::Text("AFTER_HANDOFF_TEXT".into()),
+            egui::Event::Paste("AFTER_HANDOFF_PASTE".into()),
+        ],
+    );
+    click_text(&mut window, &ctx, area, "Hide");
+    assert!(!crate::sidebar::files_visible(&window));
+    let document = window.sidebar.last_document.unwrap();
+    click_at(&mut window, &ctx, area, document.center());
+    frame(&mut window, &ctx, area, vec![key(egui::Key::Escape, true)]);
+    frame(&mut window, &ctx, area, vec![key(egui::Key::Escape, false)]);
+    assert!(!crate::viewer::is_open(&window));
+
+    // End each recorder's ordered stream with real console input. Waiting for that marker
+    // proves all earlier queued bytes arrived, rather than sampling an empty file too soon.
+    for pane in window.all_panes_mut() {
+        pane.screen.advance(b"\x1b[?1000l\x1b[?1006l");
+    }
+    for (index, name) in names.iter().enumerate() {
+        let console = window
+            .pane_called(*name)
+            .unwrap()
+            .painted_console
+            .as_ref()
+            .unwrap()
+            .area;
+        click_at(&mut window, &ctx, area, console.center());
+        type_text(&mut window, &ctx, area, "SAFE_AFTER_FILES");
+        assert_eq!(
+            received[index].wait_for(b"SAFE_AFTER_FILES".len(), Duration::from_secs(5)),
+            b"SAFE_AFTER_FILES",
+            "Files input reached covered console {index}"
+        );
+    }
+}
