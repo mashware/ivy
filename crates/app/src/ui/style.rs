@@ -27,7 +27,7 @@ pub(crate) fn install(ctx: &egui::Context, theme: &Theme) {
     ctx.data_mut(|d| d.insert_temp(id, *theme));
 }
 
-/// The roles of `theme`, derived once per theme and kept in egui's memory.
+/// The roles of `theme`, memoized for the last theme asked about in egui's memory.
 ///
 /// Hand-painted surfaces ask for them every frame, and deriving them walks the contrast search of
 /// every text role; the comparison against the theme last asked about is the whole of the work on a

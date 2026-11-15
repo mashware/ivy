@@ -491,9 +491,10 @@ impl Theme {
 
 pub(crate) fn project_accents(theme: &Theme) -> Vec<Color32> {
     let mut colors = Vec::new();
-    // Cyan, magenta, pink first, never the accent or claim slots 1, 2, 3, 9, 10, 11 (D94): a
-    // project painted in the focus green or a claim colour would read as a state.
-    for slot in [6, 5, 13, 14, 12, 4] {
+    // Cyan and magenta and their bright twins only (D96): green, red and yellow (1, 2, 3, 9, 10,
+    // 11) are the accent and the wait and block claims, and blue (4) is the done claim, with 12 too
+    // close to it — a project painted in any of them would read as a state.
+    for slot in [6, 5, 13, 14] {
         let original = theme.color(term_core::TermColor::Indexed(slot));
         let mut color = original;
         for step in 0..=10 {
@@ -1179,6 +1180,32 @@ mod tests {
                 t.attention_color(class, false),
                 "{class:?} looks the same whether someone backs it or not"
             );
+        }
+    }
+
+    /// A project never takes the done claim's blue (slot 4) or its bright twin (12), even where
+    /// they are the theme's most distinct colours: a project in blue would read as finished work.
+    #[test]
+    fn project_colours_never_take_the_done_blue_or_its_twin() {
+        use eframe::egui::Color32;
+        let blue = Color32::from_rgb(0x30, 0x50, 0xff);
+        let bright = Color32::from_rgb(0x90, 0x20, 0xff);
+        let mut palette = [None; 16];
+        palette[4] = Some(blue);
+        palette[12] = Some(bright);
+        for &named in super::NamedTheme::ALL {
+            let theme = named.theme().with_colors(&crate::settings::Colors {
+                palette,
+                ..Default::default()
+            });
+            let accents = super::project_accents(&theme);
+            assert!(accents.len() <= 4, "{named:?}: {accents:?}");
+            for slot in [blue, bright] {
+                for step in 0..=10 {
+                    let lifted = super::mix(slot, theme.foreground(), step as f32 / 10.0);
+                    assert!(!accents.contains(&lifted), "{named:?}: {lifted:?}");
+                }
+            }
         }
     }
 }

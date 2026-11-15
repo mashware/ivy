@@ -7,7 +7,7 @@
 //!
 //! It is a pure function of a [`Theme`] rather than a cache refreshed when the theme changes,
 //! because the themes it will be asked about differ: the live one, the Settings draft, the Board's
-//! derived one. Today its one caller is the egui style install.
+//! derived one.
 
 use super::{Theme, mix, project_ink_contrast};
 use eframe::egui::{Color32, epaint::Shadow};
@@ -98,15 +98,18 @@ impl Roles {
             Color32::WHITE
         };
         let hover = mix(bg, fg, 0.09);
-        // Text is set on all four, so secondary and muted text must read on the worst of them.
-        let surfaces = [bg, panel, raised, hover];
+        let chrome = if dark {
+            mix(bg, Color32::BLACK, 0.22)
+        } else {
+            mix(bg, fg, 0.06)
+        };
+        // Secondary and muted text must read on the worst of the surfaces the roles themselves
+        // name. A surface painted from them — a console header tinted with its project — brings
+        // its text back on its own (D96).
+        let surfaces = [bg, panel, raised, hover, chrome];
         Self {
             dark,
-            chrome: if dark {
-                mix(bg, Color32::BLACK, 0.22)
-            } else {
-                mix(bg, fg, 0.06)
-            },
+            chrome,
             base: bg,
             panel,
             raised,
@@ -288,7 +291,7 @@ mod tests {
         // Secondary and muted text read on every surface text is set on, and never more than the
         // role above them: a secondary text fainter than muted text inverts the hierarchy.
         let text_reads = |r: &Roles, label: &str| {
-            for surface in [r.base, r.panel, r.raised, r.hover] {
+            for surface in [r.base, r.panel, r.raised, r.hover, r.chrome] {
                 for ink in [r.tx2, r.tx3] {
                     assert!(
                         project_ink_contrast(ink, surface) >= TEXT_CONTRAST,

@@ -147,13 +147,56 @@ struct Appearance<'a> {
 /// The stripe a project paints down the header's left edge.
 const STRIPE: f32 = 3.0;
 
-/// The project's ink, brought toward the text until it reads at 3:1 on `surface`: the inks are
-/// chosen against the panel, and an unfocused header sits on the chrome instead.
-fn readable_ink(ink: Color32, surface: Color32, text: Color32) -> Color32 {
+/// `ink` brought toward `toward` a tenth at a time until it reads at `contrast` on `surface`, and
+/// black or white, whichever reads better, when even `toward` does not. The roles' text is chosen
+/// against the plain panel and chrome, and a header is tinted with its project's ink.
+fn readable(ink: Color32, surface: Color32, toward: Color32, contrast: f32) -> Color32 {
+    use crate::theme::{mix, project_ink_contrast};
     (0..=10)
-        .map(|step| crate::theme::mix(ink, text, step as f32 / 10.0))
-        .find(|candidate| crate::theme::project_ink_contrast(*candidate, surface) >= 3.0)
-        .unwrap_or(text)
+        .map(|step| mix(ink, toward, step as f32 / 10.0))
+        .find(|candidate| project_ink_contrast(*candidate, surface) >= contrast)
+        .unwrap_or_else(|| {
+            if project_ink_contrast(Color32::WHITE, surface)
+                >= project_ink_contrast(Color32::BLACK, surface)
+            {
+                Color32::WHITE
+            } else {
+                Color32::BLACK
+            }
+        })
+}
+
+/// What a header paints its surface and its words in.
+struct Colors {
+    surface: Color32,
+    /// The project's name: its ink, readable at 3:1 like any mark.
+    name: Option<Color32>,
+    /// The task, readable at 4.5:1 like any text.
+    text: Color32,
+    separator: Color32,
+}
+
+fn colors(roles: &crate::theme::Roles, ink: Option<Color32>, focused: bool) -> Colors {
+    // The whole header carries a low tint of its project's ink over the stripe: a stripe alone was
+    // reported almost invisible (#48), and the design kit tints the header 18 % when focused.
+    let ground = if focused { roles.panel } else { roles.chrome };
+    let text = if focused { roles.tx } else { roles.tx2 };
+    let Some(ink) = ink else {
+        // A role surface, where the roles' own text rules already hold (D94, D59).
+        return Colors {
+            surface: ground,
+            name: None,
+            text,
+            separator: roles.tx3,
+        };
+    };
+    let surface = crate::theme::mix(ground, ink, if focused { 0.18 } else { 0.14 });
+    Colors {
+        surface,
+        name: Some(readable(ink, surface, roles.tx, 3.0)),
+        text: readable(text, surface, roles.tx, 4.5),
+        separator: readable(roles.tx3, surface, roles.tx, 4.5),
+    }
 }
 
 fn paint(
@@ -175,12 +218,8 @@ fn paint(
     } = appearance;
     let roles = crate::ui::style::roles(ui.ctx(), theme);
     let painter = ui.painter().with_clip_rect(strip.intersect(ui.clip_rect()));
-    // The whole header carries a low tint of its project's ink over the stripe: a stripe alone was
-    // reported almost invisible (#48), and the design kit tints the header 18 % when focused.
-    let ground = if focused { roles.panel } else { roles.chrome };
-    let surface = project.map_or(ground, |project| {
-        crate::theme::mix(ground, project.ink, if focused { 0.18 } else { 0.14 })
-    });
+    let colors = colors(&roles, project.map(|project| project.ink), focused);
+    let surface = colors.surface;
     painter.rect_filled(
         strip,
         egui::CornerRadius {
@@ -191,7 +230,7 @@ fn paint(
         },
         surface,
     );
-    let ink = project.map(|project| readable_ink(project.ink, surface, roles.tx));
+    let ink = colors.name;
     if let Some(project) = project {
         painter.rect_filled(
             egui::Rect::from_min_max(strip.min, egui::pos2(strip.left() + STRIPE, strip.bottom())),
@@ -202,7 +241,7 @@ fn paint(
             .painted
             .store(true, std::sync::atomic::Ordering::Relaxed);
     }
-    let text = if focused { roles.tx } else { roles.tx2 };
+    let text = colors.text;
     let font = egui::FontId::proportional(title_size);
     let name_font = egui::FontId::new(title_size, crate::fonts::ui_weight(ui.ctx(), 600));
     for (target, rect) in targets(strip, m, can_close) {
@@ -294,7 +333,7 @@ fn paint(
                     egui::Align2::LEFT_CENTER,
                     " / ",
                     font.clone(),
-                    roles.tx3,
+                    colors.separator,
                 );
                 left.x = separator.right();
             }
@@ -564,9 +603,11 @@ mod tests {
         let metrics = CellMetrics::of(8.0, 16.0);
         let label_rect = targets(strip, &metrics, true)[0].1;
         // The panel #171D21 with 18 % of the ink when focused; the chrome #0F1315 with 14 % when not.
-        for (focused, surface, text) in [
-            (true, rgb(0x1f3a2f), rgb(0xe4e8e2)),
-            (false, rgb(0x162b22), rgb(0xa5aaa6)),
+        // The separator, muted text #8E9390, is brought back until it reads at 4.5:1 on the focused
+        // tint; on the darker unfocused one it already does.
+        for (focused, surface, text, separator) in [
+            (true, rgb(0x1f3a2f), rgb(0xe4e8e2), rgb(0x9fa4a0)),
+            (false, rgb(0x162b22), rgb(0xa5aaa6), rgb(0x8e9390)),
         ] {
             let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
                 paint(
@@ -600,7 +641,7 @@ mod tests {
                 "the old gradient is still painted"
             );
             assert_eq!(text_color(&out.shapes, "Backend"), Some(ink));
-            assert_eq!(text_color(&out.shapes, " / "), Some(rgb(0x8e9390)));
+            assert_eq!(text_color(&out.shapes, " / "), Some(separator));
             assert_eq!(text_color(&out.shapes, "Fix login"), Some(text));
             assert_eq!(text_color(&out.shapes, "01"), None);
             for s in &out.shapes {
@@ -637,10 +678,45 @@ mod tests {
     fn an_unreadable_project_ink_is_brought_toward_the_text() {
         let chrome = rgb(0x0f1315);
         let tx = rgb(0xe4e8e2);
-        assert_eq!(readable_ink(rgb(0x43c071), chrome, tx), rgb(0x43c071));
-        let dark = readable_ink(rgb(0x202020), chrome, tx);
+        assert_eq!(readable(rgb(0x43c071), chrome, tx, 3.0), rgb(0x43c071));
+        let dark = readable(rgb(0x202020), chrome, tx, 3.0);
         assert_ne!(dark, rgb(0x202020));
         assert!(crate::theme::project_ink_contrast(dark, chrome) >= 3.0);
+    }
+
+    /// Every factory theme, with each of its project colours and with inks too dark and too light
+    /// for it, focused and not: the task and the separator read at 4.5:1 on the tinted header and
+    /// the project's name at 3:1.
+    #[test]
+    fn project_headers_keep_their_text_readable_across_the_catalog() {
+        use crate::theme::{NamedTheme, Roles, project_accents, project_ink_contrast};
+        for &named in NamedTheme::ALL {
+            let theme = named.theme();
+            let roles = Roles::of(&theme);
+            let mut inks: Vec<Option<egui::Color32>> =
+                project_accents(&theme).into_iter().map(Some).collect();
+            inks.extend([Some(rgb(0x202020)), Some(rgb(0xf0f0f0))]);
+            for ink in inks {
+                for focused in [true, false] {
+                    let c = colors(&roles, ink, focused);
+                    let label = format!("{named:?} {ink:?} focused={focused}");
+                    assert!(
+                        project_ink_contrast(c.text, c.surface) >= 4.5,
+                        "{label}: task"
+                    );
+                    assert!(
+                        project_ink_contrast(c.separator, c.surface) >= 4.5,
+                        "{label}: separator"
+                    );
+                    if let Some(name) = c.name {
+                        assert!(
+                            project_ink_contrast(name, c.surface) >= 3.0,
+                            "{label}: name"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     /// An unfocused header with an ink too dark for its tinted surface paints the name in a
