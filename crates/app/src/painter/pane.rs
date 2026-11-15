@@ -1,7 +1,5 @@
 //! Paint one complete pane: terminal snapshot, notices, panel and application chrome.
-#[cfg(test)]
-use super::Keys;
-use super::{Blink, CellMetrics, CursorInk, notices, paint_with_ligatures};
+use super::{Blink, CellMetrics, CursorInk, Keys, notices, paint_with_ligatures};
 use crate::theme::Theme;
 use eframe::egui::{Painter, Rect};
 
@@ -343,6 +341,7 @@ pub(crate) fn paint_pane(
                 integrated,
                 maximized,
                 now,
+                focused: blink.keys != Keys::Elsewhere,
             },
         )
     });

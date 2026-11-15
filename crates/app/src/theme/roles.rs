@@ -7,12 +7,12 @@
 //!
 //! It is a pure function of a [`Theme`] rather than a cache refreshed when the theme changes,
 //! because the themes it will be asked about differ: the live one, the Settings draft, the Board's
-//! derived one. Today its one caller is the egui style install.
+//! derived one.
 
 use super::{Theme, mix, project_ink_contrast};
 use eframe::egui::{Color32, epaint::Shadow};
 
-/// The minimum contrast every text role keeps over every surface text is set on.
+/// The minimum contrast every text role keeps over every role surface text is set on.
 const TEXT_CONTRAST: f32 = 4.5;
 
 /// The interface's colors, derived from a theme.
@@ -66,11 +66,18 @@ pub(crate) struct Roles {
     _derived: (),
 }
 
-/// The kit's radii, in points, by what they round. The design's other measures (chip, card and
-/// dialog radii, control, row, tab and bar heights) arrive with the surfaces that use them.
+/// The kit's measures, in points. The ones not listed here (the dialog radius, control and row
+/// heights) arrive with the surfaces that use them.
 pub(crate) mod metrics {
+    pub const RADIUS_CHIP: u8 = 4;
     pub const RADIUS_CONTROL: u8 = 6;
+    pub const RADIUS_CARD: u8 = 8;
     pub const RADIUS_FLOATING: u8 = 10;
+    /// The title bar, which holds the tabs: the design's single 40-point strip.
+    pub const TITLE_BAR_HEIGHT: f32 = 40.0;
+    /// A tab inside the title bar, sitting on its bottom edge.
+    pub const TAB_HEIGHT: f32 = 34.0;
+    pub const CONSOLE_HEADER_HEIGHT: f32 = 28.0;
 }
 
 impl Roles {
@@ -91,15 +98,18 @@ impl Roles {
             Color32::WHITE
         };
         let hover = mix(bg, fg, 0.09);
-        // Text is set on all four, so secondary and muted text must read on the worst of them.
-        let surfaces = [bg, panel, raised, hover];
+        let chrome = if dark {
+            mix(bg, Color32::BLACK, 0.22)
+        } else {
+            mix(bg, fg, 0.06)
+        };
+        // Secondary and muted text must read on the worst of the surfaces the roles themselves
+        // name. A surface painted from them — a console header tinted with its project — brings
+        // its text back on its own (D96).
+        let surfaces = [bg, panel, raised, hover, chrome];
         Self {
             dark,
-            chrome: if dark {
-                mix(bg, Color32::BLACK, 0.22)
-            } else {
-                mix(bg, fg, 0.06)
-            },
+            chrome,
             base: bg,
             panel,
             raised,
@@ -281,7 +291,7 @@ mod tests {
         // Secondary and muted text read on every surface text is set on, and never more than the
         // role above them: a secondary text fainter than muted text inverts the hierarchy.
         let text_reads = |r: &Roles, label: &str| {
-            for surface in [r.base, r.panel, r.raised, r.hover] {
+            for surface in [r.base, r.panel, r.raised, r.hover, r.chrome] {
                 for ink in [r.tx2, r.tx3] {
                     assert!(
                         project_ink_contrast(ink, surface) >= TEXT_CONTRAST,

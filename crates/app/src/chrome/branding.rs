@@ -1,5 +1,5 @@
 //! The approved Ivy identity, embedded at startup (D71).
-use eframe::egui::{self, Color32, FontId, Rect, Vec2};
+use eframe::egui::{self, Color32, Rect, Vec2};
 
 // D71: decode the embedded artwork before the first frame and share it with the title bar.
 fn icon() -> &'static egui::IconData {
@@ -29,29 +29,20 @@ pub(crate) fn install_logo(ctx: &egui::Context) {
     ctx.data_mut(|data| data.insert_temp(egui::Id::new("ivy-logo"), texture));
 }
 
-pub(super) fn paint_identity(ui: &egui::Ui, drag: Rect, fg: Color32) {
-    let painter = ui.painter_at(drag);
-    let text = painter.layout_no_wrap(crate::APP_NAME.to_owned(), FontId::proportional(13.0), fg);
+/// The mark alone in its slot after the split buttons, as the kit draws it: the window's name is
+/// the native title's job, and the tabs need the width the word took.
+pub(super) fn paint_logo(ui: &egui::Ui, slot: Rect) {
     let texture = ui
         .ctx()
         .data(|data| data.get_temp::<egui::TextureHandle>(egui::Id::new("ivy-logo")));
-    let logo_width = if texture.is_some() { 32.0 } else { 0.0 };
-    let left = drag.center().x - (logo_width + text.size().x) / 2.0;
     if let Some(texture) = texture {
-        let rect =
-            Rect::from_center_size(egui::pos2(left + 13.0, drag.center().y), Vec2::splat(26.0));
-        painter.image(
+        ui.painter_at(slot).image(
             texture.id(),
-            rect,
+            Rect::from_center_size(slot.center(), Vec2::splat(20.0)),
             Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
             Color32::WHITE,
         );
     }
-    painter.galley(
-        egui::pos2(left + logo_width, drag.center().y - text.size().y / 2.0),
-        text,
-        fg,
-    );
 }
 
 #[cfg(test)]

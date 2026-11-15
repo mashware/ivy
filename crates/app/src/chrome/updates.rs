@@ -57,12 +57,12 @@ pub(super) fn indicator(window: &Window, ui: &egui::Ui, row: Rect) {
     if !window.chrome.updates.notify() {
         return;
     }
-    let from_right = if row.width() < 300.0 {
-        20.0
-    } else if cfg!(target_os = "macos") {
-        23.0
+    use super::strip;
+    // Over the menu button's top-right corner, wherever this platform and width put the menu.
+    let from_right = if strip::is_compact(row.width()) {
+        strip::COMPACT_MENU / 2.0
     } else {
-        125.0
+        strip::RIGHT_MARGIN + (strip::right_buttons() - 3) as f32 * strip::BUTTON + 17.0
     };
     let point = egui::pos2(row.right() - from_right + 9.0, row.top() + 15.0);
     ui.painter_at(row).circle_filled(

@@ -518,11 +518,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
     (
         "src/tab_bar/layout.rs",
         include_str!("../src/tab_bar/layout.rs"),
-        2,
+        1,
     ),
     (
-        "src/tab_bar/indicator.rs",
-        include_str!("../src/tab_bar/indicator.rs"),
+        "src/ui/claim_pill/glyph.rs",
+        include_str!("../src/ui/claim_pill/glyph.rs"),
         2,
     ),
     (
@@ -651,6 +651,21 @@ const SOURCES: &[(&str, &str, usize)] = &[
     ),
     ("src/ui.rs", include_str!("../src/ui.rs"), 2),
     ("src/ui/style.rs", include_str!("../src/ui/style.rs"), 12),
+    (
+        "src/ui/claim_pill.rs",
+        include_str!("../src/ui/claim_pill.rs"),
+        16,
+    ),
+    (
+        "src/chrome/strip.rs",
+        include_str!("../src/chrome/strip.rs"),
+        19,
+    ),
+    (
+        "src/tab_bar/title.rs",
+        include_str!("../src/tab_bar/title.rs"),
+        20,
+    ),
     (
         "src/settings/editor.rs",
         include_str!("../src/settings/editor.rs"),
@@ -846,7 +861,7 @@ const SOURCES: &[(&str, &str, usize)] = &[
     ("src/report.rs", include_str!("../src/report.rs"), 238),
     ("src/search.rs", include_str!("../src/search.rs"), 48),
     // Three comment lines moved with the tab interaction to its own module.
-    ("src/tab_bar.rs", include_str!("../src/tab_bar.rs"), 166),
+    ("src/tab_bar.rs", include_str!("../src/tab_bar.rs"), 162),
     (
         "src/tests/markdown.rs",
         include_str!("../src/tests/markdown.rs"),
@@ -904,8 +919,8 @@ const SOURCES: &[(&str, &str, usize)] = &[
 /// deleted declared file a compile error. [`rust_sources`] walks only to find the opposite mistake:
 /// a real file nobody declared. It never supplies the text being judged, so a path cannot disappear
 /// from the guard merely because the directory walk did not return it.
-// Raised by the production comment lines of the theme roles, bundled fonts and style modules.
-const COMMENT_LINES_AT_LEAST: usize = 19_985;
+// Re-measured with the claim pill, the title bar's partition and the tab strip in the list.
+const COMMENT_LINES_AT_LEAST: usize = 20_189;
 
 /// How many **different** listed words a line needs before it is called Spanish.
 ///

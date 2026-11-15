@@ -89,6 +89,21 @@ pub(crate) fn base_definitions() -> FontDefinitions {
     definitions
 }
 
+/// The interface family for a design weight (400, 500 or 600), or the regular one when the bundled
+/// faces are not installed in this context: asking egui for a family it was never given panics.
+pub(crate) fn ui_weight(ctx: &egui::Context, weight: u16) -> FontFamily {
+    let family = match weight {
+        ..=450 => return FontFamily::Proportional,
+        451..=550 => FontFamily::Name(UI_MEDIUM.into()),
+        _ => FontFamily::Name(UI_SEMIBOLD.into()),
+    };
+    if ctx.fonts(|fonts| fonts.definitions().families.contains_key(&family)) {
+        family
+    } else {
+        FontFamily::Proportional
+    }
+}
+
 /// Installs the base before anything else writes the definitions: start-up calls it first, and a
 /// configured family then queues its own definitions on top of it.
 pub(crate) fn install(ctx: &egui::Context) {
@@ -193,5 +208,26 @@ mod tests {
             widths[0] < widths[1] && widths[1] < widths[2],
             "heavier weights are wider in Geist: {widths:?}"
         );
+    }
+
+    /// A heavier weight is asked for only where the bundled faces exist; elsewhere the regular family
+    /// stands in, because egui panics on a family it was never given.
+    #[test]
+    fn a_weight_falls_back_to_regular_where_the_bundled_faces_are_missing() {
+        let bare = egui::Context::default();
+        pass(&bare);
+        assert_eq!(super::ui_weight(&bare, 600), FontFamily::Proportional);
+        let ctx = egui::Context::default();
+        install(&ctx);
+        pass(&ctx);
+        assert_eq!(
+            super::ui_weight(&ctx, 600),
+            FontFamily::Name(UI_SEMIBOLD.into())
+        );
+        assert_eq!(
+            super::ui_weight(&ctx, 500),
+            FontFamily::Name(UI_MEDIUM.into())
+        );
+        assert_eq!(super::ui_weight(&ctx, 400), FontFamily::Proportional);
     }
 }

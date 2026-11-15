@@ -1,4 +1,5 @@
 //! Title sizes share measured line heights with paint and input geometry.
+use crate::theme::metrics;
 use eframe::egui;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -31,8 +32,15 @@ impl Sizes {
         self.tab
     }
 
+    /// A tab: the kit's 34 points, grown when the configured label needs more.
     pub(crate) fn tab_height(self) -> f32 {
-        39.0_f32.max(self.tab_line_height + 12.0)
+        metrics::TAB_HEIGHT.max(self.tab_line_height + 12.0)
+    }
+
+    /// The title bar that holds the tabs: the kit's 40 points, keeping the same air above a tab
+    /// that a larger label made taller.
+    pub(crate) fn bar_height(self) -> f32 {
+        self.tab_height() + (metrics::TITLE_BAR_HEIGHT - metrics::TAB_HEIGHT)
     }
 }
 
@@ -57,4 +65,24 @@ pub(crate) fn begin_pass(window: &mut crate::Window, ctx: &egui::Context) {
     window.chrome.title_sizes.tab_line_height = tab;
     window.settings_editor.record_geometry(started.elapsed());
     window.timed_separately += window.settings_editor.take_cost();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A tab label whose line needs more than the kit's 34 points grows the tab, and the bar keeps
+    /// the same six points above it.
+    #[test]
+    fn a_large_tab_label_grows_the_tab_and_the_bar_with_it() {
+        let default = Sizes::default();
+        assert_eq!(default.tab_height(), 34.0);
+        assert_eq!(default.bar_height(), 40.0);
+        let large = Sizes {
+            tab_line_height: 40.0,
+            ..Sizes::new(12.0, 32.0)
+        };
+        assert_eq!(large.tab_height(), 52.0);
+        assert_eq!(large.bar_height(), 58.0);
+    }
 }

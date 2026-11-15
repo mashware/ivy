@@ -510,8 +510,8 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/tab_bar/layout.rs"),
     ),
     (
-        "app/src/tab_bar/indicator.rs",
-        include_str!("../src/tab_bar/indicator.rs"),
+        "app/src/ui/claim_pill/glyph.rs",
+        include_str!("../src/ui/claim_pill/glyph.rs"),
     ),
     (
         "app/src/tab_bar/feedback.rs",
@@ -621,6 +621,18 @@ const MODULES: &[(&str, &str)] = &[
     ),
     ("app/src/ui.rs", include_str!("../src/ui.rs")),
     ("app/src/ui/style.rs", include_str!("../src/ui/style.rs")),
+    (
+        "app/src/ui/claim_pill.rs",
+        include_str!("../src/ui/claim_pill.rs"),
+    ),
+    (
+        "app/src/chrome/strip.rs",
+        include_str!("../src/chrome/strip.rs"),
+    ),
+    (
+        "app/src/tab_bar/title.rs",
+        include_str!("../src/tab_bar/title.rs"),
+    ),
     (
         "app/src/settings/editor.rs",
         include_str!("../src/settings/editor.rs"),

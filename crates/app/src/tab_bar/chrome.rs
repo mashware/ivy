@@ -48,12 +48,11 @@ impl Geometry {
 /// Shared window partition without adding layout policy to the window's behaviour.
 fn raw_geometry(window: &Window, area: egui::Rect, metrics: &CellMetrics) -> Geometry {
     if window.chrome.enabled() {
-        let top = (area.top() + crate::chrome::HEIGHT).min(area.bottom());
-        let (_, rest) = area.split_top_bottom_at_y(top);
-        let bottom = (rest.top() + window.chrome.title_sizes.tab_height()).min(rest.bottom());
-        let (cards, consoles) = rest.split_top_bottom_at_y(bottom);
+        // The tabs share the title bar's row (D96): the consoles start right under it.
+        let strip = crate::chrome::strip(window, area);
+        let (_, consoles) = area.split_top_bottom_at_y(strip.row.bottom());
         return Geometry {
-            cards: Some(cards),
+            cards: Some(strip.tabs),
             gear: Some(egui::Rect::NOTHING),
             document: None,
             dock: None,

@@ -1,6 +1,9 @@
 //! Shared paint and hit geometry for the integrated pane header.
-use crate::{painter::CellMetrics, theme::Theme};
-use eframe::egui;
+use crate::{
+    painter::CellMetrics,
+    theme::{Theme, metrics},
+};
+use eframe::egui::{self, Color32};
 
 /// Inputs shared by the historical and integrated strip painting regimes.
 pub(crate) struct Strip {
@@ -11,6 +14,8 @@ pub(crate) struct Strip {
     pub(crate) integrated: bool,
     pub(crate) maximized: Option<usize>,
     pub(crate) now: std::time::SystemTime,
+    /// Whether the window hands its keys to this console.
+    pub(crate) focused: bool,
 }
 
 /// Paint and time exactly one strip, preserving the existing accounting boundary.
@@ -32,11 +37,11 @@ pub(crate) fn paint_strip(
             Appearance {
                 label: &label,
                 agent: pane.signals.view(std::time::Instant::now()),
-                number: pane.name + 1,
                 title_size: strip.headers.title_size(),
                 can_close: strip.button.is_drawn(),
                 zoomed: strip.maximized == Some(pane.name),
                 folded: pane.folded,
+                focused: strip.focused,
                 project: pane.project.as_ref(),
             },
         );
@@ -130,12 +135,68 @@ pub(crate) fn hit(
 struct Appearance<'a> {
     agent: Option<crate::agent_signals::View>,
     label: &'a str,
-    number: usize,
     title_size: f32,
     can_close: bool,
     zoomed: bool,
     folded: bool,
+    /// Whether this console is the one the window hands its keys to.
+    focused: bool,
     project: Option<&'a crate::project_view::Badge>,
+}
+
+/// The stripe a project paints down the header's left edge.
+const STRIPE: f32 = 3.0;
+
+/// `ink` brought toward `toward` a tenth at a time until it reads at `contrast` on `surface`, and
+/// black or white, whichever reads better, when even `toward` does not. The roles' text is chosen
+/// against the plain panel and chrome, and a header is tinted with its project's ink.
+fn readable(ink: Color32, surface: Color32, toward: Color32, contrast: f32) -> Color32 {
+    use crate::theme::{mix, project_ink_contrast};
+    (0..=10)
+        .map(|step| mix(ink, toward, step as f32 / 10.0))
+        .find(|candidate| project_ink_contrast(*candidate, surface) >= contrast)
+        .unwrap_or_else(|| {
+            if project_ink_contrast(Color32::WHITE, surface)
+                >= project_ink_contrast(Color32::BLACK, surface)
+            {
+                Color32::WHITE
+            } else {
+                Color32::BLACK
+            }
+        })
+}
+
+/// What a header paints its surface and its words in.
+struct Colors {
+    surface: Color32,
+    /// The project's name: its ink, readable at 3:1 like any mark.
+    name: Option<Color32>,
+    /// The task, readable at 4.5:1 like any text.
+    text: Color32,
+    separator: Color32,
+}
+
+fn colors(roles: &crate::theme::Roles, ink: Option<Color32>, focused: bool) -> Colors {
+    // The whole header carries a low tint of its project's ink over the stripe: a stripe alone was
+    // reported almost invisible (#48), and the design kit tints the header 18 % when focused.
+    let ground = if focused { roles.panel } else { roles.chrome };
+    let text = if focused { roles.tx } else { roles.tx2 };
+    let Some(ink) = ink else {
+        // A role surface, where the roles' own text rules already hold (D94, D59).
+        return Colors {
+            surface: ground,
+            name: None,
+            text,
+            separator: roles.tx3,
+        };
+    };
+    let surface = crate::theme::mix(ground, ink, if focused { 0.18 } else { 0.14 });
+    Colors {
+        surface,
+        name: Some(readable(ink, surface, roles.tx, 3.0)),
+        text: readable(text, surface, roles.tx, 4.5),
+        separator: readable(roles.tx3, surface, roles.tx, 4.5),
+    }
 }
 
 fn paint(
@@ -148,31 +209,41 @@ fn paint(
     let Appearance {
         agent,
         label,
-        number,
         title_size,
         can_close,
         zoomed,
         folded,
+        focused,
         project,
     } = appearance;
+    let roles = crate::ui::style::roles(ui.ctx(), theme);
     let painter = ui.painter().with_clip_rect(strip.intersect(ui.clip_rect()));
-    let colors = project.map(|project| crate::theme::project_header_colors(theme, project.ink));
-    let foreground = colors.as_ref().map_or(theme.foreground(), |c| c.foreground);
-    let secondary = if project.is_some() {
-        foreground
-    } else {
-        foreground.gamma_multiply(0.65)
-    };
-    if let Some(colors) = &colors {
-        paint_gradient(&painter, strip, strip, colors.left, colors.right);
-    } else {
-        painter.rect_filled(strip, 0.0, theme.panel_background());
-    }
+    let colors = colors(&roles, project.map(|project| project.ink), focused);
+    let surface = colors.surface;
+    painter.rect_filled(
+        strip,
+        egui::CornerRadius {
+            nw: metrics::RADIUS_CARD,
+            ne: metrics::RADIUS_CARD,
+            sw: 0,
+            se: 0,
+        },
+        surface,
+    );
+    let ink = colors.name;
     if let Some(project) = project {
+        painter.rect_filled(
+            egui::Rect::from_min_max(strip.min, egui::pos2(strip.left() + STRIPE, strip.bottom())),
+            0.0,
+            project.ink,
+        );
         project
             .painted
             .store(true, std::sync::atomic::Ordering::Relaxed);
     }
+    let text = colors.text;
+    let font = egui::FontId::proportional(title_size);
+    let name_font = egui::FontId::new(title_size, crate::fonts::ui_weight(ui.ctx(), 600));
     for (target, rect) in targets(strip, m, can_close) {
         let tooltip = match target {
             Target::Label => "Double-click to rename",
@@ -193,19 +264,7 @@ fn paint(
             )),
             egui::Sense::hover(),
         );
-        if response.hovered() {
-            if let Some(colors) = &colors {
-                paint_gradient(
-                    &painter.with_clip_rect(rect),
-                    strip,
-                    rect,
-                    colors.hover_left,
-                    colors.hover_right,
-                );
-            } else {
-                painter.rect_filled(rect, 2.0, theme.focus().gamma_multiply(0.2));
-            }
-        }
+        let hovered = response.hovered();
         if target == Target::Label
             && let Some(project) = project
         {
@@ -216,122 +275,78 @@ fn paint(
         } else {
             response.on_hover_text(tooltip);
         }
-        if target == Target::Label {
-            let left = rect.left_center() + egui::vec2(11.0, 0.0);
-            let number_text = format!("{number:02}");
-            let number_galley =
-                painter.layout_no_wrap(number_text, egui::FontId::proportional(10.0), secondary);
-            let offset = number_galley.size().x + 7.0;
-            painter.with_clip_rect(rect).galley(
-                left - egui::vec2(0.0, number_galley.size().y / 2.0),
-                number_galley,
-                foreground,
-            );
-            let mut title_left = left + egui::vec2(offset, 0.0);
-            if let Some(agent) = agent {
-                let logo = egui::Rect::from_center_size(
-                    title_left + egui::vec2(8.0, 0.0),
-                    egui::Vec2::splat(16.0),
-                )
-                .intersect(rect);
-                if logo.is_positive() {
-                    if project.is_some() {
-                        // A transparent brand mark can match a configured project accent exactly.
-                        painter.with_clip_rect(rect).rect_filled(
-                            logo.expand(2.0),
-                            2.0,
-                            theme.panel_background(),
-                        );
-                    }
-                    crate::agent_signals::logos::paint(ui, logo, agent);
-                }
-                title_left.x += 23.0;
-                if agent.waiting {
-                    let marker = painter.layout_no_wrap(
-                        "?".into(),
-                        egui::FontId::proportional(title_size),
-                        theme
-                            .color(term_core::TermColor::Indexed(3))
-                            .gamma_multiply(if agent.backed { 1.0 } else { 0.45 }),
-                    );
-                    let position = title_left - egui::vec2(0.0, marker.size().y / 2.0);
-                    if project.is_some() {
-                        // The semantic yellow can also be this project's header color.
-                        painter.with_clip_rect(rect).rect_filled(
-                            egui::Rect::from_min_size(position, marker.size()).expand(2.0),
-                            2.0,
-                            theme.panel_background(),
-                        );
-                    }
-                    painter
-                        .with_clip_rect(rect)
-                        .galley(position, marker, foreground);
-                    title_left.x += title_size * 0.8;
-                }
-            }
-            if let Some(project) = project {
-                let available = (rect.right() - title_left.x - 8.0).max(0.0);
-                let galley = painter.layout_no_wrap(
-                    project.name.clone(),
-                    egui::FontId::proportional(title_size),
-                    foreground,
+        if target != Target::Label {
+            if hovered {
+                painter.rect_filled(
+                    egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(22.0))
+                        .intersect(rect),
+                    metrics::RADIUS_CHIP,
+                    roles.hover,
                 );
-                let width = galley.size().x.min(available * 0.45).min(140.0);
-                let name_rect = egui::Rect::from_min_size(
-                    egui::pos2(title_left.x, rect.center().y - galley.size().y / 2.0),
-                    egui::vec2(width, galley.size().y),
-                );
-                if width > 0.0 {
-                    painter.with_clip_rect(name_rect).galley(
-                        name_rect.left_center() - egui::vec2(0.0, galley.size().y / 2.0),
-                        galley,
-                        foreground,
-                    );
-                    let separator = painter.with_clip_rect(rect).text(
-                        egui::pos2(name_rect.right(), rect.center().y),
-                        egui::Align2::LEFT_CENTER,
-                        " | ",
-                        egui::FontId::proportional(title_size),
-                        secondary,
-                    );
-                    title_left.x = separator.right();
-                }
             }
-            crate::header::title_text::paint(
-                &painter.with_clip_rect(rect),
-                title_left,
-                egui::Align2::LEFT_CENTER,
-                label,
-                egui::FontId::proportional(title_size),
-                foreground,
-            );
+            // Closing is the one control that destroys something, so it stays quiet until reached.
+            let icon = match target {
+                Target::Close if !hovered => roles.tx3,
+                _ if hovered => roles.tx,
+                _ => roles.tx2,
+            };
+            paint_icon(&painter, rect.center(), target, zoomed, icon, 13.0);
             continue;
         }
-        paint_icon(&painter, rect.center(), target, zoomed, foreground, 13.0);
+        let clipped = painter.with_clip_rect(rect.intersect(painter.clip_rect()));
+        let mut left = egui::pos2(rect.left() + STRIPE + 8.0, rect.center().y);
+        if let Some(agent) = agent {
+            let logo =
+                egui::Rect::from_center_size(left + egui::vec2(8.0, 0.0), egui::Vec2::splat(16.0))
+                    .intersect(rect);
+            if logo.is_positive() {
+                crate::agent_signals::logos::paint(ui, logo, agent);
+            }
+            left.x += 23.0;
+            if agent.waiting {
+                let marker = clipped.text(
+                    left,
+                    egui::Align2::LEFT_CENTER,
+                    "?",
+                    font.clone(),
+                    roles
+                        .wait
+                        .gamma_multiply(if agent.backed { 1.0 } else { 0.45 }),
+                );
+                left.x = marker.right() + 6.0;
+            }
+        }
+        if let (Some(project), Some(ink)) = (project, ink) {
+            let available = (rect.right() - left.x - 8.0).max(0.0);
+            let galley = painter.layout_no_wrap(project.name.clone(), name_font.clone(), ink);
+            let width = galley.size().x.min(available * 0.45).min(140.0);
+            if width > 0.0 {
+                let name = egui::Rect::from_min_size(
+                    egui::pos2(left.x, rect.center().y - galley.size().y / 2.0),
+                    egui::vec2(width, galley.size().y),
+                );
+                painter
+                    .with_clip_rect(name.intersect(clipped.clip_rect()))
+                    .galley(name.min, galley, ink);
+                let separator = clipped.text(
+                    egui::pos2(name.right(), rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    " / ",
+                    font.clone(),
+                    colors.separator,
+                );
+                left.x = separator.right();
+            }
+        }
+        crate::header::title_text::paint(
+            &clipped,
+            left,
+            egui::Align2::LEFT_CENTER,
+            label,
+            font.clone(),
+            text,
+        );
     }
-}
-
-fn paint_gradient(
-    painter: &egui::Painter,
-    strip: egui::Rect,
-    clip: egui::Rect,
-    left: egui::Color32,
-    right: egui::Color32,
-) {
-    let mut mesh = egui::Mesh::default();
-    for (pos, color) in [
-        (strip.left_top(), left),
-        (strip.right_top(), right),
-        (strip.right_bottom(), right),
-        (strip.left_bottom(), left),
-    ] {
-        mesh.colored_vertex(pos, color);
-    }
-    mesh.add_triangle(0, 1, 2);
-    mesh.add_triangle(0, 2, 3);
-    painter
-        .with_clip_rect(clip.intersect(painter.clip_rect()))
-        .add(mesh);
 }
 
 /// The prototype's 24-unit SVG paths, scaled to the caller's icon box.
@@ -448,7 +463,7 @@ mod tests {
             (crate::tiling::Orientation::Columns, 20.0 * 8.0 + 16.0 + 5.0),
             (
                 crate::tiling::Orientation::Rows,
-                3.0 * 16.0 + 16.0 + 33.0 + 5.0,
+                3.0 * 16.0 + 16.0 + 28.0 + 5.0,
             ),
         ] {
             let threshold = 2.0 * minimum + crate::DIVIDER_THICKNESS;
@@ -502,17 +517,17 @@ mod tests {
                 Appearance {
                     agent: None,
                     label: "Review changes",
-                    number: 1,
                     title_size: 32.0,
                     can_close: true,
                     zoomed: false,
                     folded: false,
+                    focused: true,
                     project: Some(&badge),
                 },
             );
         });
         output.textures_delta.clear();
-        for label in ["Backend", " | ", "Review changes"] {
+        for label in ["Backend", " / ", "Review changes"] {
             let (clipped, text) = output
                 .shapes
                 .iter()
@@ -535,110 +550,221 @@ mod tests {
         }
     }
 
-    #[test]
-    fn project_color_fills_the_whole_header_and_retains_the_console_title() {
-        let ctx = egui::Context::default();
-        let ink = egui::Color32::from_rgb(67, 192, 113);
-        let theme = Theme::default().with_colors(&crate::settings::Colors {
-            foreground: Some(egui::Color32::from_rgb(210, 225, 240)),
-            panel: Some(egui::Color32::BLACK),
-            ..Default::default()
-        });
-        let badge = crate::project_view::Badge {
+    fn rgb(hex: u32) -> egui::Color32 {
+        egui::Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
+    }
+
+    fn badge(ink: egui::Color32) -> crate::project_view::Badge {
+        crate::project_view::Badge {
             key: crate::project::Key::Repository("/work/backend".into()),
             name: "Backend".into(),
             details: "/work/backend".into(),
             ink,
             painted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        };
-        for width in [500.0, 185.0, 35.0] {
-            let strip = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 33.0));
-            let metrics = CellMetrics::of(8.0, 16.0);
-            let label_rect = targets(strip, &metrics, true)[0].1;
+        }
+    }
+
+    fn appearance<'a>(
+        project: Option<&'a crate::project_view::Badge>,
+        focused: bool,
+        agent: Option<crate::agent_signals::View>,
+    ) -> Appearance<'a> {
+        Appearance {
+            agent,
+            label: "Fix login",
+            title_size: 12.0,
+            can_close: true,
+            zoomed: false,
+            folded: false,
+            focused,
+            project,
+        }
+    }
+
+    fn text_color(shapes: &[egui::epaint::ClippedShape], text: &str) -> Option<egui::Color32> {
+        shapes.iter().find_map(|s| match &s.shape {
+            egui::Shape::Text(t) if t.galley.text() == text => {
+                Some(t.galley.job.sections[0].format.color)
+            }
+            _ => None,
+        })
+    }
+
+    /// **Literal Ivy Night colours, written out**: the focused header sits on the panel and the
+    /// others on the chrome, each tinted with the project's ink; the project is a 3-point stripe
+    /// and its name in its own ink, beside
+    /// the task in the text role of the surface — and no gradient and no «01» any more.
+    #[test]
+    fn project_stripe_and_ink_replace_the_gradient_and_focus_picks_the_surface() {
+        let ctx = egui::Context::default();
+        let ink = rgb(0x43c071);
+        let badge = badge(ink);
+        let strip = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(500.0, 28.0));
+        let metrics = CellMetrics::of(8.0, 16.0);
+        let label_rect = targets(strip, &metrics, true)[0].1;
+        // The panel #171D21 with 18 % of the ink when focused; the chrome #0F1315 with 14 % when not.
+        // The separator, muted text #8E9390, is brought back until it reads at 4.5:1 on the focused
+        // tint; on the darker unfocused one it already does.
+        for (focused, surface, text, separator) in [
+            (true, rgb(0x1f3a2f), rgb(0xe4e8e2), rgb(0x9fa4a0)),
+            (false, rgb(0x162b22), rgb(0xa5aaa6), rgb(0x8e9390)),
+        ] {
             let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
                 paint(
                     ui,
                     strip,
                     &metrics,
-                    &theme,
-                    Appearance {
-                        agent: None,
-                        label: "Fix login",
-                        number: 1,
-                        title_size: 12.0,
-                        can_close: true,
-                        zoomed: false,
-                        folded: false,
-                        project: Some(&badge),
-                    },
+                    &Theme::default(),
+                    appearance(Some(&badge), focused, None),
                 );
             });
             out.textures_delta.clear();
             assert!(
                 out.shapes
                     .iter()
-                    .any(|s| matches!(&s.shape, egui::Shape::Mesh(mesh)
-                    if mesh.calc_bounds() == strip && mesh.vertices.len() == 4
-                    && mesh.vertices[0].color == egui::Color32::from_rgb(19, 54, 32)
-                    && mesh.vertices[1].color == egui::Color32::from_rgb(4, 12, 7)
-                    && mesh.vertices[2].color == mesh.vertices[1].color
-                    && mesh.vertices[3].color == mesh.vertices[0].color
-                    && mesh.indices == [0, 1, 2, 0, 2, 3])),
-                "project color must cover the full header, including the controls"
+                    .any(|s| matches!(&s.shape, egui::Shape::Rect(r)
+                    if r.rect == strip && r.fill == surface)),
+                "focused={focused}: the header is not on its surface"
             );
-            let text: Vec<_> = out
-                .shapes
-                .iter()
-                .filter_map(|s| {
-                    if let egui::Shape::Text(text) = &s.shape {
-                        assert!(s.clip_rect.right() <= label_rect.right());
-                        if text.galley.job.text == "Backend" {
-                            assert_ne!(ink, theme.foreground());
-                            assert!(
-                                text.galley.job.sections.iter().all(|section| {
-                                    section.format.color == egui::Color32::WHITE
-                                }),
-                                "project text must contrast with the full colored header"
-                            );
-                        }
-                        Some(text.galley.job.text.as_str())
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            if width == 500.0 {
-                assert!(text.contains(&"Backend"));
-                assert!(text.contains(&" | "));
-                assert!(text.contains(&"Fix login"));
+            let stripe = egui::Rect::from_min_size(strip.min, egui::vec2(3.0, 28.0));
+            assert!(
+                out.shapes
+                    .iter()
+                    .any(|s| matches!(&s.shape, egui::Shape::Rect(r)
+                    if r.rect == stripe && r.fill == ink)),
+                "the project stripe is missing"
+            );
+            assert!(
+                !out.shapes
+                    .iter()
+                    .any(|s| matches!(&s.shape, egui::Shape::Mesh(_))),
+                "the old gradient is still painted"
+            );
+            assert_eq!(text_color(&out.shapes, "Backend"), Some(ink));
+            assert_eq!(text_color(&out.shapes, " / "), Some(separator));
+            assert_eq!(text_color(&out.shapes, "Fix login"), Some(text));
+            assert_eq!(text_color(&out.shapes, "01"), None);
+            for s in &out.shapes {
+                if matches!(s.shape, egui::Shape::Text(_)) {
+                    assert!(s.clip_rect.right() <= label_rect.right());
+                }
             }
             out.drop_without_applying_deltas();
         }
         assert!(badge.painted.load(std::sync::atomic::Ordering::Relaxed));
+        // Without a project there is no stripe and the task starts after the same inset.
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            paint(
+                ui,
+                strip,
+                &metrics,
+                &Theme::default(),
+                appearance(None, true, None),
+            );
+        });
+        out.textures_delta.clear();
+        assert!(
+            !out.shapes
+                .iter()
+                .any(|s| matches!(&s.shape, egui::Shape::Rect(r)
+            if r.rect.width() == 3.0))
+        );
+        assert_eq!(text_color(&out.shapes, "Fix login"), Some(rgb(0xe4e8e2)));
+        out.drop_without_applying_deltas();
     }
 
+    /// A project ink that would not read on the chrome is brought toward the text until it does.
     #[test]
-    fn project_headers_render_contrasting_hover_and_back_the_yellow_waiting_marker() {
-        let theme = Theme::default();
-        let yellow = theme.color(term_core::TermColor::Indexed(3));
-        for fill in [egui::Color32::BLACK, egui::Color32::WHITE, yellow] {
-            let colors = crate::theme::project_header_colors(&theme, fill);
-            let ink = colors.foreground;
+    fn an_unreadable_project_ink_is_brought_toward_the_text() {
+        let chrome = rgb(0x0f1315);
+        let tx = rgb(0xe4e8e2);
+        assert_eq!(readable(rgb(0x43c071), chrome, tx, 3.0), rgb(0x43c071));
+        let dark = readable(rgb(0x202020), chrome, tx, 3.0);
+        assert_ne!(dark, rgb(0x202020));
+        assert!(crate::theme::project_ink_contrast(dark, chrome) >= 3.0);
+    }
+
+    /// Every factory theme, with each of its project colours and with inks too dark and too light
+    /// for it, focused and not: the task and the separator read at 4.5:1 on the tinted header and
+    /// the project's name at 3:1.
+    #[test]
+    fn project_headers_keep_their_text_readable_across_the_catalog() {
+        use crate::theme::{NamedTheme, Roles, project_accents, project_ink_contrast};
+        for &named in NamedTheme::ALL {
+            let theme = named.theme();
+            let roles = Roles::of(&theme);
+            let mut inks: Vec<Option<egui::Color32>> =
+                project_accents(&theme).into_iter().map(Some).collect();
+            inks.extend([Some(rgb(0x202020)), Some(rgb(0xf0f0f0))]);
+            for ink in inks {
+                for focused in [true, false] {
+                    let c = colors(&roles, ink, focused);
+                    let label = format!("{named:?} {ink:?} focused={focused}");
+                    assert!(
+                        project_ink_contrast(c.text, c.surface) >= 4.5,
+                        "{label}: task"
+                    );
+                    assert!(
+                        project_ink_contrast(c.separator, c.surface) >= 4.5,
+                        "{label}: separator"
+                    );
+                    if let Some(name) = c.name {
+                        assert!(
+                            project_ink_contrast(name, c.surface) >= 3.0,
+                            "{label}: name"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// An unfocused header with an ink too dark for its tinted surface paints the name in a
+    /// colour brought toward the text, which reads at 3:1 there.
+    #[test]
+    fn a_dark_project_ink_is_lifted_on_the_painted_header() {
+        let ctx = egui::Context::default();
+        let ink = rgb(0x202020);
+        let badge = badge(ink);
+        let strip = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(500.0, 28.0));
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            paint(
+                ui,
+                strip,
+                &CellMetrics::of(8.0, 16.0),
+                &Theme::default(),
+                appearance(Some(&badge), false, None),
+            );
+        });
+        out.textures_delta.clear();
+        let surface = out
+            .shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Rect(r) if r.rect == strip => Some(r.fill),
+                _ => None,
+            })
+            .expect("the header surface is painted");
+        let name = text_color(&out.shapes, "Backend").expect("the project name is painted");
+        assert_ne!(name, ink);
+        assert!(crate::theme::project_ink_contrast(name, surface) >= 3.0);
+        out.drop_without_applying_deltas();
+    }
+
+    /// Controls hover on the hover surface in the text colour; close stays muted until reached;
+    /// the waiting marker is the wait role, dimmed when nobody holds the claim up.
+    #[test]
+    fn header_controls_hover_on_the_kit_surface_and_close_stays_quiet_until_reached() {
+        let strip = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(500.0, 28.0));
+        let metrics = CellMetrics::of(8.0, 16.0);
+        let review = targets(strip, &metrics, true)[1].1;
+        let close = targets(strip, &metrics, true)[4].1;
+        for backed in [true, false] {
             let ctx = egui::Context::default();
-            let strip = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(500.0, 33.0));
-            let metrics = CellMetrics::of(8.0, 16.0);
-            let control = targets(strip, &metrics, true)[1].1;
-            let badge = crate::project_view::Badge {
-                key: crate::project::Key::Repository("/work/backend".into()),
-                name: "Backend".into(),
-                details: "/work/backend".into(),
-                ink: fill,
-                painted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            };
-            for backed in [true, false] {
-                let mut output = ctx.run_ui(
+            let run = |events| {
+                ctx.run_ui(
                     egui::RawInput {
-                        events: vec![egui::Event::PointerMoved(control.center())],
+                        events,
                         ..Default::default()
                     },
                     |ui| {
@@ -646,76 +772,78 @@ mod tests {
                             ui,
                             strip,
                             &metrics,
-                            &theme,
-                            Appearance {
-                                agent: Some(crate::agent_signals::View {
+                            &Theme::default(),
+                            appearance(
+                                Some(&badge(rgb(0x43c071))),
+                                true,
+                                Some(crate::agent_signals::View {
                                     client: crate::agent_signals::Client::Codex,
                                     busy: false,
                                     done: false,
                                     waiting: true,
                                     backed,
                                 }),
-                                label: "Fix login",
-                                number: 1,
-                                title_size: 12.0,
-                                can_close: true,
-                                zoomed: false,
-                                folded: false,
-                                project: Some(&badge),
-                            },
+                            ),
                         )
                     },
-                );
-                output.textures_delta.clear();
-                assert!(output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Mesh(mesh) if mesh.calc_bounds() == strip && mesh.vertices[0].color == colors.left && mesh.vertices[1].color == colors.right)));
-                let mut text_count = 0;
-                for (index, shape) in output.shapes.iter().enumerate() {
-                    match &shape.shape {
-                        egui::Shape::Text(text) => {
-                            text_count += 1;
-                            if text.galley.text() == "?" {
-                                let bounds =
-                                    egui::Rect::from_min_size(text.pos, text.galley.size());
-                                assert!(output.shapes[..index].iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == theme.panel_background() && r.rect.contains_rect(bounds))), "waiting marker needs its neutral backing before it is drawn");
-                                assert!(text.galley.job.sections.iter().all(|s| s.format.color
-                                    == yellow.gamma_multiply(if backed { 1.0 } else { 0.45 })));
-                            } else {
-                                assert!(
-                                    text.galley
-                                        .job
-                                        .sections
-                                        .iter()
-                                        .all(|s| s.format.color == ink),
-                                    "ordinary header text must use opaque contrast-selected ink"
-                                );
-                            }
-                        }
-                        egui::Shape::LineSegment { stroke, .. } => assert_eq!(stroke.color, ink),
-                        _ => {}
+                )
+            };
+            run(vec![egui::Event::PointerMoved(close.center())]).drop_without_applying_deltas();
+            let mut reached = run(vec![]);
+            reached.textures_delta.clear();
+            let reached_close: Vec<_> = reached
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::LineSegment { points, stroke } if close.contains(points[0]) => {
+                        Some(stroke.color)
                     }
-                }
-                assert!(text_count >= 5);
-                if backed {
-                    // Interaction rectangles are known on the next pass too.
-                    output.drop_without_applying_deltas();
-                    continue;
-                }
-                assert!(output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Mesh(mesh) if s.clip_rect == control && mesh.calc_bounds() == strip && mesh.vertices[0].color == colors.hover_left && mesh.vertices[1].color == colors.hover_right)), "hover must preserve the full-header gradient's direction and use contrasting shades");
-                output.drop_without_applying_deltas();
-            }
+                    _ => None,
+                })
+                .collect();
+            assert!(
+                !reached_close.is_empty() && reached_close.iter().all(|c| *c == rgb(0xe4e8e2)),
+                "a reached close is not in the text colour: {reached_close:?}"
+            );
+            reached.drop_without_applying_deltas();
+            run(vec![egui::Event::PointerMoved(review.center())]).drop_without_applying_deltas();
+            let mut out = run(vec![]);
+            out.textures_delta.clear();
+            let hover = egui::Rect::from_center_size(review.center(), egui::Vec2::splat(22.0))
+                .intersect(review);
+            assert!(
+                out.shapes
+                    .iter()
+                    .any(|s| matches!(&s.shape, egui::Shape::Rect(r)
+                if r.rect == hover && r.fill == rgb(0x262b2d)))
+            );
+            let strokes_in = |rect: egui::Rect| -> Vec<egui::Color32> {
+                out.shapes
+                    .iter()
+                    .filter_map(|s| match &s.shape {
+                        egui::Shape::LineSegment { points, stroke } if rect.contains(points[0]) => {
+                            Some(stroke.color)
+                        }
+                        _ => None,
+                    })
+                    .collect()
+            };
+            let hovered = strokes_in(review);
+            assert!(!hovered.is_empty() && hovered.iter().all(|c| *c == rgb(0xe4e8e2)));
+            let quiet = strokes_in(close);
+            assert!(!quiet.is_empty() && quiet.iter().all(|c| *c == rgb(0x8e9390)));
+            assert_eq!(
+                text_color(&out.shapes, "?"),
+                Some(rgb(0xf2b84b).gamma_multiply(if backed { 1.0 } else { 0.45 }))
+            );
+            out.drop_without_applying_deltas();
         }
     }
 
     #[test]
-    fn claude_logo_keeps_neutral_backing_and_signal_opacity_on_matching_project_fill() {
+    fn agent_logo_keeps_its_signal_opacity_in_the_header() {
         let theme = Theme::default();
-        let badge = crate::project_view::Badge {
-            key: crate::project::Key::Repository("/work/backend".into()),
-            name: "Backend".into(),
-            details: "/work/backend".into(),
-            ink: egui::Color32::from_rgb(0xD9, 0x77, 0x57),
-            painted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        };
+        let badge = badge(rgb(0xd97757));
         for (backed, busy, opacity) in [(true, false, 1.0), (true, true, 0.8), (false, true, 0.45)]
         {
             let ctx = egui::Context::default();
@@ -729,63 +857,44 @@ mod tests {
                 |ui| {
                     paint(
                         ui,
-                        egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(500.0, 33.0)),
+                        egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(500.0, 28.0)),
                         &CellMetrics::of(8.0, 16.0),
                         &theme,
-                        Appearance {
-                            agent: Some(crate::agent_signals::View {
+                        appearance(
+                            Some(&badge),
+                            true,
+                            Some(crate::agent_signals::View {
                                 client: crate::agent_signals::Client::Claude,
                                 busy,
                                 done: false,
                                 waiting: false,
                                 backed,
                             }),
-                            label: "Fix login",
-                            number: 1,
-                            title_size: 12.0,
-                            can_close: true,
-                            zoomed: false,
-                            folded: false,
-                            project: Some(&badge),
-                        },
+                        ),
                     );
                 },
             );
-            let installed_textures: Vec<_> = output.textures_delta.set.keys().copied().collect();
+            let installed: Vec<_> = output.textures_delta.set.keys().copied().collect();
             output.textures_delta.clear();
             let images: Vec<_> = output
                 .shapes
                 .iter()
-                .enumerate()
-                .filter_map(|(index, shape)| match &shape.shape {
+                .filter_map(|shape| match &shape.shape {
                     egui::Shape::Mesh(mesh) if mesh.texture_id != egui::TextureId::default() => {
-                        Some((index, mesh))
+                        Some(mesh)
                     }
                     _ => None,
                 })
                 .collect();
-            assert_eq!(
-                images.len(),
-                1,
-                "the installed Claude logo must actually be painted"
-            );
-            let (index, mesh) = images[0];
-            assert!(installed_textures.contains(&mesh.texture_id));
-            let bounds = mesh.calc_bounds();
-            assert_eq!(bounds.size(), egui::Vec2::splat(16.0));
+            assert_eq!(images.len(), 1, "the installed Claude logo must be painted");
+            assert!(installed.contains(&images[0].texture_id));
+            assert_eq!(images[0].calc_bounds().size(), egui::Vec2::splat(16.0));
             assert!(
-                output.shapes[..index].iter().any(|shape| matches!(
-                    &shape.shape,
-                    egui::Shape::Rect(rect)
-                        if rect.fill == theme.panel_background() && rect.rect.contains_rect(bounds)
-                )),
-                "the real transparent logo needs neutral backing before its image is drawn"
-            );
-            assert!(
-                mesh.vertices
+                images[0]
+                    .vertices
                     .iter()
-                    .all(|vertex| { vertex.color == egui::Color32::WHITE.gamma_multiply(opacity) }),
-                "fresh, busy and stale logo opacity must survive the project fill"
+                    .all(|vertex| vertex.color == egui::Color32::WHITE.gamma_multiply(opacity)),
+                "fresh, busy and stale logo opacity must survive"
             );
             output.drop_without_applying_deltas();
         }

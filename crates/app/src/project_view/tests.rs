@@ -556,12 +556,18 @@ fn exhausted_palette_keeps_distinct_project_names_in_actual_headers() {
                     "project name must remain painted after color exhaustion"
                 );
             }
-            assert_eq!(output.shapes.iter().filter(|shape| matches!(
-                &shape.shape,
-                egui::Shape::Mesh(mesh) if mesh.calc_bounds().width() > 100.0 && mesh.vertices.len() == 4
-                    && mesh.vertices[0].color == Color32::from_gray(71)
-                    && mesh.vertices[1].color == Color32::from_gray(15)
-            )).count(), 2, "both full header backgrounds must use the resulting project color");
+            assert_eq!(
+                output
+                    .shapes
+                    .iter()
+                    .filter(|shape| matches!(
+                        &shape.shape,
+                        egui::Shape::Rect(r) if r.rect.width() == 3.0 && r.fill == Color32::WHITE
+                    ))
+                    .count(),
+                2,
+                "both headers' stripes must use the resulting project color"
+            );
         }
         output.drop_without_applying_deltas();
         if ready {
