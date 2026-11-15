@@ -164,14 +164,20 @@ pub(crate) fn paint_borders(window: &mut crate::Window, ui: &egui::Ui, rects: &[
         if rect == egui::Rect::NOTHING || (!integrated && focused != Some(index)) {
             continue;
         }
-        let color = if focused == Some(index) {
+        let color = if !integrated {
             window.theme.focus()
+        } else if focused == Some(index) {
+            crate::ui::style::roles(ui.ctx(), &window.theme).accent
         } else {
-            window.theme.chrome_outline()
+            crate::ui::style::roles(ui.ctx(), &window.theme).line
         };
         ui.painter().rect_stroke(
             rect,
-            if integrated { 5.0 } else { 0.0 },
+            if integrated {
+                f32::from(crate::theme::metrics::RADIUS_CARD)
+            } else {
+                0.0
+            },
             egui::Stroke::new(1.0, color),
             egui::StrokeKind::Inside,
         );

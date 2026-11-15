@@ -108,6 +108,18 @@ mod tests {
                 window.active().panes().len(),
                 if action == "close" { 1 } else { 2 }
             );
+            // Closing hands the keys to the sibling, which lights its task label from Ivy Night's
+            // secondary text to its text; nothing else about its painting may change.
+            let expected = if action == "close" {
+                assert!(
+                    baseline
+                        .iter()
+                        .all(|c| *c == egui::Color32::from_rgb(0xa5, 0xaa, 0xa6))
+                );
+                vec![egui::Color32::from_rgb(0xe4, 0xe8, 0xe2); baseline.len()]
+            } else {
+                baseline.clone()
+            };
             for (phase, shapes) in [
                 ("press", pressed),
                 ("held", held),
@@ -116,7 +128,7 @@ mod tests {
             ] {
                 assert_eq!(
                     colors(&shapes),
-                    baseline,
+                    expected,
                     "{action} changes an unrelated console's rendered colors on {phase}"
                 );
             }
@@ -127,8 +139,11 @@ mod tests {
         }
     }
 
+    /// Same-project headers both carry the project's stripe; focus moves the panel surface and the
+    /// accent outline between them; a console without a project has no stripe. Ivy Night's panel,
+    /// chrome and accent are written out.
     #[test]
-    fn same_project_headers_keep_their_fill_when_focus_changes_and_unknown_stays_neutral() {
+    fn project_stripes_stay_put_while_focus_moves_the_surface_and_outline() {
         let ctx = egui::Context::default();
         chrome::prepare(&ctx);
         let mut window = window_with("sleep 30", "sleep 30");
@@ -145,35 +160,70 @@ mod tests {
             });
         }
         let area = area_of(1400.0);
-        let colors = crate::theme::project_header_colors(&window.theme, ink);
-        let headers = |shapes: &[egui::epaint::ClippedShape]| -> Vec<egui::Rect> {
+        let panel = egui::Color32::from_rgb(0x17, 0x1d, 0x21);
+        let chrome = egui::Color32::from_rgb(0x0f, 0x13, 0x15);
+        let accent = egui::Color32::from_rgb(0x3c, 0xc3, 0x84);
+        let stripes = |shapes: &[egui::epaint::ClippedShape]| -> Vec<egui::Rect> {
             shapes
                 .iter()
                 .filter_map(|s| match &s.shape {
-                    egui::Shape::Mesh(mesh)
-                        if mesh.calc_bounds().width() > 100.0
-                            && mesh.vertices[0].color == colors.left
-                            && mesh.vertices[1].color == colors.right =>
+                    egui::Shape::Rect(r) if r.rect.width() == 3.0 && r.fill == ink => Some(r.rect),
+                    _ => None,
+                })
+                .collect()
+        };
+        let header_on = |shapes: &[egui::epaint::ClippedShape], stripe: egui::Rect| {
+            shapes.iter().find_map(|s| match &s.shape {
+                egui::Shape::Rect(r)
+                    if r.rect.min == stripe.min
+                        && r.rect.height() == stripe.height()
+                        && r.rect.width() > 100.0 =>
+                {
+                    Some(r.fill)
+                }
+                _ => None,
+            })
+        };
+        let outlined = |shapes: &[egui::epaint::ClippedShape]| -> Vec<egui::Color32> {
+            shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Rect(r)
+                        if r.fill == egui::Color32::TRANSPARENT
+                            && r.stroke.width == 1.0
+                            && r.rect.height() > 100.0 =>
                     {
-                        Some(mesh.calc_bounds())
+                        Some(r.stroke.color)
                     }
                     _ => None,
                 })
                 .collect()
         };
         let baseline = frame(&mut window, &ctx, area, vec![]);
-        let rects = headers(&baseline);
+        let rects = stripes(&baseline);
+        assert_eq!(rects.len(), 2, "both project headers carry the stripe");
+        assert_eq!(header_on(&baseline, rects[0]), Some(panel));
+        assert_eq!(header_on(&baseline, rects[1]), Some(chrome));
+        let line = egui::Color32::from_rgb(0x25, 0x2e, 0x33);
+        let outlines = outlined(&baseline);
         assert_eq!(
-            rects.len(),
-            2,
-            "both project headers must fill their whole width"
+            outlines.iter().filter(|c| **c == accent).count(),
+            1,
+            "{outlines:?}"
+        );
+        assert_eq!(
+            outlines.iter().filter(|c| **c == line).count(),
+            1,
+            "{outlines:?}"
         );
         window.active_mut().focus = 1;
-        assert_eq!(headers(&frame(&mut window, &ctx, area, vec![])), rects);
+        let moved = frame(&mut window, &ctx, area, vec![]);
+        assert_eq!(stripes(&moved), rects);
+        assert_eq!(header_on(&moved, rects[0]), Some(chrome));
+        assert_eq!(header_on(&moved, rects[1]), Some(panel));
         window.active_mut().panes_mut()[0].project = None;
         let neutral = frame(&mut window, &ctx, area, vec![]);
-        assert_eq!(headers(&neutral), vec![rects[1]]);
-        assert!(neutral.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect == rects[0] && r.fill == window.theme.panel_background())));
+        assert_eq!(stripes(&neutral), vec![rects[1]]);
     }
 
     fn has_text(shapes: &[egui::epaint::ClippedShape], needle: &str) -> bool {

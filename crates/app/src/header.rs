@@ -302,7 +302,7 @@ pub(crate) fn height(metrics: &CellMetrics, headers: Headers) -> f32 {
     }
     if headers.integrated {
         (metrics.height() + 2.0 * MARGIN)
-            .max(33.0)
+            .max(crate::theme::metrics::CONSOLE_HEADER_HEIGHT)
             .max(headers.title_line_height + 12.0)
     } else {
         metrics.height() + 2.0 * MARGIN
@@ -437,7 +437,7 @@ mod tests {
 
     #[test]
     fn integrated_height_reserves_the_demo_spacing_without_changing_legacy() {
-        assert_eq!(height(&metrics(), Headers::PAINTED.integrated(true)), 33.0);
+        assert_eq!(height(&metrics(), Headers::PAINTED.integrated(true)), 28.0);
         assert_eq!(height(&metrics(), Headers::PAINTED), 22.0);
         assert_eq!(
             height(&metrics(), Headers::NOT_PAINTED.integrated(true)),
