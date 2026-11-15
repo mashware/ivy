@@ -307,7 +307,7 @@ fn paint(
             );
             continue;
         }
-        paint_icon(&painter, rect.center(), target, zoomed, foreground);
+        paint_icon(&painter, rect.center(), target, zoomed, foreground, 13.0);
     }
 }
 
@@ -334,15 +334,16 @@ fn paint_gradient(
         .add(mesh);
 }
 
-/// The prototype's 24-unit SVG paths, drawn inside a 13-point icon box.
+/// The prototype's 24-unit SVG paths, scaled to the caller's icon box.
 pub(crate) fn paint_icon(
     painter: &egui::Painter,
     center: egui::Pos2,
     target: Target,
     zoomed: bool,
     color: egui::Color32,
+    size: f32,
 ) {
-    let scale = 13.0 / 24.0;
+    let scale = size / 24.0;
     let at = |x, y| center + egui::vec2(x, y) * scale;
     let stroke = egui::Stroke::new(1.6 * scale, color);
     let line = |a, b| {
@@ -405,6 +406,7 @@ mod tests {
                 Target::Close,
                 false,
                 egui::Color32::WHITE,
+                13.0,
             );
             let targets = targets(
                 egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 33.0)),

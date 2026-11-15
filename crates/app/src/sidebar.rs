@@ -496,7 +496,7 @@ pub(crate) fn tool_keys(
 
 pub(crate) fn maximize_rect(area: egui::Rect) -> egui::Rect {
     egui::Rect::from_min_size(
-        egui::pos2(area.right() - 42.0, area.top() + 16.0),
+        egui::pos2(area.right() - 42.0, area.top() + 18.0),
         egui::vec2(28.0, 28.0),
     )
 }

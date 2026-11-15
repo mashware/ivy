@@ -8740,10 +8740,10 @@ Covered consoles retain the ordinary valid PTY layout and their full output-pump
 surface never becomes a zero-sized terminal. Dismissal and tool transitions consume their input.
 
 Markdown's rail and document cue share their outline painter. Maximize/restore reuse the console
-header's exact painter, paths, scale and stroke, as requested during native visual review. Controls
+header's painter and paths, with a larger 24-point icon box suited to the document header, as
+requested during native visual review. The document icon and title share a centered row. Controls
 retain explicit action tooltips and hover/pressed feedback; the empty header omits the redundant
-"Markdown file" subtitle. The empty view
-directs the person to Files. The manual path form and title-click path editor are removed, while
+"Markdown file" subtitle. The empty view directs the person to Files. The manual path form and title-click path editor are removed, while
 explicit local Markdown links and the existing bounded loader remain available.
 
 Discarded: a generic docking framework or document workspace model, because only Markdown with

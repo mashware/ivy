@@ -141,8 +141,11 @@ fn header(
                 "Current console".into()
             }
         });
-    let icon_rect =
-        egui::Rect::from_min_size(rect.min + egui::vec2(15.0, 23.0), egui::vec2(16.0, 16.0));
+    let title_y = rect.center().y - if path.is_empty() { 0.0 } else { 9.0 };
+    let icon_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + 23.0, title_y),
+        egui::vec2(16.0, 16.0),
+    );
     crate::sidebar::icon(
         ui,
         icon_rect,
@@ -181,20 +184,28 @@ fn header(
             crate::header::integrated::Target::Zoom,
             maximized,
             theme.foreground(),
+            24.0,
         );
     }
-    let text_rect = egui::Rect::from_min_max(
-        rect.min + egui::vec2(42.0, 10.0),
-        egui::pos2(
-            (rect.right() - 92.0).max(rect.left() + 42.0),
-            rect.bottom() - 8.0,
-        ),
+    let right = (rect.right() - 54.0).max(rect.left() + 42.0);
+    let title_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + 42.0, title_y - 10.0),
+        egui::pos2(right, title_y + 10.0),
     );
-    let mut text_ui = ui.new_child(egui::UiBuilder::new().max_rect(text_rect));
-    text_ui.spacing_mut().item_spacing.y = 2.0;
+    let mut text_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(title_rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    text_ui.set_min_height(20.0);
     text_ui.add(egui::Label::new(RichText::new(title).size(14.0)).truncate());
     if !path.is_empty() {
-        text_ui
+        let path_rect = egui::Rect::from_min_max(
+            egui::pos2(title_rect.left(), title_y + 12.0),
+            egui::pos2(right, rect.bottom() - 5.0),
+        );
+        let mut path_ui = ui.new_child(egui::UiBuilder::new().max_rect(path_rect));
+        path_ui
             .add(
                 egui::Label::new(RichText::new(&path).size(11.0).color(mix(
                     theme.background(),
@@ -377,6 +388,66 @@ fn controls(state: &mut State, ui: &mut egui::Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn markdown_header_centers_title_on_its_icon_and_draws_a_readable_zoom_control() {
+        fn inspect(
+            shape: &egui::Shape,
+            title: &mut Option<f32>,
+            icon: &mut Option<f32>,
+            zoom: &mut Option<(f32, f32)>,
+        ) {
+            match shape {
+                egui::Shape::Text(text) if text.galley.text() == "Markdown viewer" => {
+                    *title = Some(text.pos.y + text.galley.rect.center().y)
+                }
+                egui::Shape::Rect(rect)
+                    if rect.rect.center().x < 100.0 && (rect.rect.width() - 16.0).abs() < 0.1 =>
+                {
+                    *icon = Some(rect.rect.center().y)
+                }
+                egui::Shape::Rect(rect) if rect.rect.center().x > 400.0 => {
+                    *zoom = Some((rect.rect.width(), rect.rect.center().y))
+                }
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        inspect(shape, title, icon, zoom);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let ctx = egui::Context::default();
+        let area = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(480.0, 62.0));
+        let mut state = State::default();
+        let output = ctx.run_ui(Default::default(), |ui| {
+            header(
+                &mut state,
+                ui,
+                area,
+                crate::theme::Theme::default(),
+                Color32::GRAY,
+                false,
+            )
+        });
+        let (mut title, mut icon, mut zoom) = (None, None, None);
+        for shape in &output.shapes {
+            inspect(&shape.shape, &mut title, &mut icon, &mut zoom);
+        }
+        output.drop_without_applying_deltas();
+        assert!(
+            (title.expect("title painted") - icon.expect("document icon painted")).abs() < 1.0,
+            "title and icon are on different rows"
+        );
+        assert!(
+            (title.unwrap() - zoom.expect("zoom outline painted").1).abs() < 1.0,
+            "zoom control is not centered on the header row"
+        );
+        assert!(
+            zoom.expect("zoom outline painted").0 >= 14.0,
+            "zoom glyph is too small for the document header"
+        );
+    }
 
     #[test]
     fn empty_markdown_directs_selection_to_files_without_an_open_form() {
