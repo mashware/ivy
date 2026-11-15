@@ -308,6 +308,9 @@ fn files_menu_pins_and_follows_across_tabs_without_leaking_input_or_retiling() {
     click_text(&mut window, &ctx, area, "Files");
     frame(&mut window, &ctx, area, vec![]);
     assert!(window.explorer.visible);
+    // Native metadata may seed navigation before the shell has completed its initial cd.
+    // Adopt the now-observed fixture directory explicitly, as the user would.
+    click_text(&mut window, &ctx, area, "Use console directory");
     wait_for_text(&mut window, &ctx, area, "entry-00.md");
     assert_eq!(
         window.explorer.navigation[&ids[0]].root.as_deref(),
@@ -358,6 +361,7 @@ fn files_menu_pins_and_follows_across_tabs_without_leaking_input_or_retiling() {
 
     // Follow B, then switch away and back: A's rendered navigation survives while B stays fresh.
     click_text(&mut window, &ctx, area, "Follow active pane");
+    click_text(&mut window, &ctx, area, "Use console directory");
     wait_for_text(&mut window, &ctx, area, "branch");
     let b_before = (
         window.explorer.navigation[&ids[2]].root.clone(),
@@ -539,6 +543,7 @@ fn markdown_selection_opens_from_the_pinned_pane_only_after_enter() {
     wait_for_source(&mut window, &ctx, area, ids[2], &second.0);
     toggle(&mut window, &ctx);
     frame(&mut window, &ctx, area, vec![]);
+    click_text(&mut window, &ctx, area, "Use console directory");
     assert_eq!(window.explorer.target(Some(ids[0])), Some(ids[0]));
     click_text(&mut window, &ctx, area, "handoff.md");
     assert!(window.explorer.visible);
@@ -607,6 +612,7 @@ fn remote_source_suspends_saved_navigation_and_console_directory_resets_it_expli
     wait_for_source(&mut window, &ctx, area, pane, &original.0);
     toggle(&mut window, &ctx);
     frame(&mut window, &ctx, area, vec![]);
+    click_text(&mut window, &ctx, area, "Use console directory");
 
     window
         .explorer
@@ -676,6 +682,7 @@ fn refresh_clears_a_deleted_selection_and_reports_a_deleted_explorer_root() {
     wait_for_source(&mut window, &ctx, area, pane, &directory.0);
     toggle(&mut window, &ctx);
     frame(&mut window, &ctx, area, vec![]);
+    click_text(&mut window, &ctx, area, "Use console directory");
     wait_for_text(&mut window, &ctx, area, "selected.md");
     click_text(&mut window, &ctx, area, "selected.md");
     assert_eq!(
