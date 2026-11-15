@@ -134,7 +134,7 @@ pub(super) fn queue_definitions(
     preview: Option<&SystemFace>,
     ctx: &egui::Context,
 ) {
-    let mut definitions = egui::FontDefinitions::default();
+    let mut definitions = super::bundled::base_definitions();
     let factory = definitions
         .families
         .get(&egui::FontFamily::Monospace)
@@ -538,6 +538,7 @@ mod tests {
     #[test]
     fn selection_and_same_pass_discovered_icons_take_effect_together_then_reset_to_builtins() {
         let ctx = egui::Context::default();
+        super::super::bundled::install(&ctx);
         pass(&ctx);
         let mut discoverer = fixture_discoverer();
         let builtin = appearance(&ctx, 'M', egui::FontFamily::Monospace);
@@ -546,7 +547,9 @@ mod tests {
             Chosen::Registered("Hack".into())
         );
         pass(&ctx);
-        assert_eq!(appearance(&ctx, 'M', egui::FontFamily::Monospace), builtin);
+        // Choosing a family replaces the bundled Geist Mono the window starts with (D95).
+        let hack = appearance(&ctx, 'M', egui::FontFamily::Monospace);
+        assert_ne!(hack, builtin);
         add_fixture(&mut discoverer, "Fixture icons", '\u{E000}');
         let prepared = PreparedSelection::prepare(&mut discoverer, Some("Ubuntu")).unwrap();
         // Discovery is a competing same-pass writer, after preparation and before the final queue.
@@ -557,18 +560,12 @@ mod tests {
         prepared.queue(&discoverer, &ctx);
         assert_eq!(discoverer.chosen.as_ref().unwrap().family, "chosen:Hack");
         assert!(!discoverer.icon_family_ready);
-        assert_eq!(appearance(&ctx, 'M', egui::FontFamily::Monospace), builtin);
+        assert_eq!(appearance(&ctx, 'M', egui::FontFamily::Monospace), hack);
         pass(&ctx);
         prepared.activate(&mut discoverer);
         let chosen = appearance(&ctx, 'M', egui::FontFamily::Monospace);
-        assert_ne!(
-            chosen.0, builtin.0,
-            "selected font must change actual metrics"
-        );
-        assert_ne!(
-            chosen.1, builtin.1,
-            "selected font must change raster bounds"
-        );
+        assert_ne!(chosen.0, hack.0, "selected font must change actual metrics");
+        assert_ne!(chosen.1, hack.1, "selected font must change raster bounds");
         let icon = appearance(&ctx, '\u{E000}', discoverer.family_of('\u{E000}'));
         assert_eq!(
             icon, chosen,
@@ -601,6 +598,7 @@ mod tests {
     #[test]
     fn clearing_reconsiders_glyphs_previously_covered_by_the_selected_family() {
         let ctx = egui::Context::default();
+        super::super::bundled::install(&ctx);
         pass(&ctx);
         let mut discoverer = fixture_discoverer();
         add_fixture(&mut discoverer, "Fixture selected", '日');
@@ -635,7 +633,10 @@ mod tests {
             "old selected-family coverage or failure brake hid the missing glyph"
         );
         pass(&ctx);
-        assert_eq!(appearance(&ctx, '日', egui::FontFamily::Monospace), covered);
+        // The drawing and the advance come back; the row height is the first face's, and that is now
+        // the bundled Geist Mono rather than the fixture that was chosen when `covered` was taken.
+        let again = appearance(&ctx, '日', egui::FontFamily::Monospace);
+        assert_eq!((again.0.x, again.1), (covered.0.x, covered.1));
     }
 
     #[test]

@@ -26,6 +26,8 @@ use eframe::egui;
 use fontique::{Collection, CollectionOptions, GenericFamily, SourceCache};
 use skrifa::MetadataProvider as _;
 mod atlas;
+mod bundled;
+pub(crate) use bundled::{MONO_MEDIUM, install as install_bundled, ui_family};
 mod ligatures;
 pub use ligatures::LigatureCost;
 pub(crate) use ligatures::{
@@ -1039,8 +1041,10 @@ mod tests {
     use eframe::egui;
 
     /// An egui context with its text engine already assembled.
+    /// A context that starts the way the window does: with the bundled faces (D95).
     fn context() -> egui::Context {
         let ctx = egui::Context::default();
+        bundled::install(&ctx);
         pass(&ctx);
         ctx
     }

@@ -17,6 +17,9 @@ pub(crate) fn choose_the_font(
     discoverer: &mut super::Discoverer,
     ctx: &egui::Context,
 ) -> measure::ChoosingTheFont {
+    // The bundled faces first, whatever comes next: a family that resolves queues its own definitions
+    // on top of these, and one that does not leaves these standing instead of egui's (D95).
+    super::bundled::install(ctx);
     let Some(asked_for) = family else {
         return measure::ChoosingTheFont::NotAsked;
     };

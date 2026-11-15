@@ -310,6 +310,7 @@ mod tests {
     #[test]
     fn specimen_uses_real_selected_face_and_size_without_changing_terminal_or_reloading() {
         let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
         pass(&ctx);
         let baseline = metrics(&ctx, egui::FontId::monospace(14.0));
         let mut fonts = crate::fonts::fixture_discoverer();
@@ -332,6 +333,7 @@ mod tests {
     #[test]
     fn merely_opening_and_reopening_font_preview_never_searches_the_machine() {
         let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
         let mut fonts = crate::fonts::Discoverer::default();
         for name in ["", "A draft family not activated in the terminal"] {
             let mut preview = PreviewState::default();

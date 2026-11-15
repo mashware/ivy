@@ -76,8 +76,20 @@ fn expanding_colors_and_reset_clear_only_overrides() {
     }
     assert!(!text.iter().any(|(s, _)| s == "15"));
     click_label(&mut editor, &ctx, "ANSI palette: 16 colours");
-    let text = paint(&mut editor, &ctx, egui::vec2(1100.0, 850.0), vec![]);
-    for index in 0..16 {
+    let size = egui::vec2(1100.0, 850.0);
+    let text = paint(&mut editor, &ctx, size, vec![]);
+    for index in 0..8 {
+        assert!(
+            text.iter().any(|(s, _)| s == &index.to_string()),
+            "missing ANSI {index}"
+        );
+    }
+    // Geist's line height puts the second row of swatches below this viewport, where it scrolls
+    // into view (D95).
+    let at = text.iter().find(|(s, _)| s == "0").unwrap().1.center();
+    scene(&mut editor, &ctx, size, wheel(at, -240.0));
+    let text = paint(&mut editor, &ctx, size, vec![]);
+    for index in 8..16 {
         assert!(
             text.iter().any(|(s, _)| s == &index.to_string()),
             "missing ANSI {index}"
@@ -112,7 +124,8 @@ fn expanding_colors_and_reset_clear_only_overrides() {
             value
         );
     }
-    let text = paint(&mut editor, &ctx, egui::vec2(1100.0, 850.0), vec![]);
+    scene(&mut editor, &ctx, size, wheel(at, 240.0));
+    let text = paint(&mut editor, &ctx, size, vec![]);
     assert!(
         text.iter()
             .any(|(s, _)| s == "Colors inherit from this theme.")
