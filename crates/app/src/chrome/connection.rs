@@ -91,16 +91,17 @@ fn published(window: &Window) -> Published {
 }
 
 fn indicator_rect(row: Rect) -> Option<Rect> {
-    let left_offset = if cfg!(target_os = "macos") { 78.0 } else { 6.0 };
-    let compact = row.width() < 300.0;
+    use super::strip;
+    let compact = strip::is_compact(row.width());
+    // The last of the right-hand buttons, or the slot left of a compact bar's menu.
     let right = row.right()
         - if compact {
-            40.0
+            strip::COMPACT_MENU
         } else {
-            6.0 + 34.0 * if cfg!(target_os = "macos") { 2.0 } else { 5.0 }
+            strip::RIGHT_MARGIN + (strip::right_buttons() - 1) as f32 * strip::BUTTON
         };
-    let left = right - 34.0;
-    let limit = row.left() + left_offset + if compact { 4.0 } else { 116.0 };
+    let left = right - strip::BUTTON;
+    let limit = row.left() + strip::left_offset() + if compact { 4.0 } else { strip::LEFT_GROUP };
     (left >= limit && row.height() > 14.0).then(|| {
         Rect::from_min_max(
             egui::pos2(left, row.top() + 7.0),
@@ -111,23 +112,17 @@ fn indicator_rect(row: Rect) -> Option<Rect> {
 
 pub(super) fn compact_reserve(row: Rect) -> f32 {
     if indicator_rect(row).is_some() {
-        74.0
+        super::strip::COMPACT_MENU + super::strip::BUTTON
     } else {
-        40.0
+        super::strip::COMPACT_MENU
     }
 }
 
 pub(super) fn compact_button(window: &mut Window, ui: &egui::Ui, row: Rect) {
-    if row.width() < 300.0
+    let roles = crate::ui::style::roles(ui.ctx(), &window.theme);
+    if super::strip::is_compact(row.width())
         && let Some(rect) = indicator_rect(row)
-        && super::button(
-            ui,
-            rect,
-            "",
-            "Connect agents",
-            window.theme.divider(),
-            window.theme.foreground(),
-        )
+        && super::button(ui, rect, "", "Connect agents", roles.hover, roles.tx2)
     {
         open(window, ui.ctx(), false);
     }
@@ -185,7 +180,7 @@ pub(crate) fn begin_pass(window: &mut Window, ui: &mut egui::Ui, frame: &eframe:
     #[cfg(target_os = "macos")]
     if window.chrome.enabled() {
         let started = Instant::now();
-        let header = f64::from(super::HEIGHT * ui.ctx().zoom_factor());
+        let header = f64::from(window.chrome.title_sizes.bar_height() * ui.ctx().zoom_factor());
         if super::traffic_lights::center(frame, header) {
             window.chrome.buttons_moved = window.chrome.buttons_moved.saturating_add(1);
             if window.chrome.buttons_moved <= 3 {
@@ -267,29 +262,24 @@ pub(crate) fn after_panels(window: &mut Window, ui: &mut egui::Ui, _area: Rect) 
         }
         window.chrome.guide.recovery = recovery;
     }
-    let bounds = ui.max_rect();
-    let row = Rect::from_min_max(
-        bounds.min,
-        egui::pos2(
-            bounds.right(),
-            (bounds.top() + super::HEIGHT).min(bounds.bottom()),
-        ),
-    );
+    let row = super::strip(window, ui.max_rect()).row;
     if let Some(rect) = indicator_rect(row) {
+        let roles = crate::ui::style::roles(ui.ctx(), &window.theme);
         let hovered = ui
             .ctx()
             .pointer_hover_pos()
             .is_some_and(|p| rect.contains(p));
         let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, 0.0, window.theme.panel_background());
+        // The same surfaces as the title bar's other buttons, which this repaint covers.
+        painter.rect_filled(rect, 0.0, roles.chrome);
         if hovered {
-            painter.rect_filled(rect.shrink(2.0), 4.0, window.theme.divider());
+            painter.rect_filled(rect.shrink(2.0), 4.0, roles.hover);
         }
         let highlighted = current.documents == 0;
         let fg = if highlighted {
             window.theme.color(term_core::TermColor::Indexed(3))
         } else {
-            window.theme.foreground()
+            roles.tx2
         };
         paint_icon(&painter, rect, fg, highlighted);
     }

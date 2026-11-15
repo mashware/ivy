@@ -7,25 +7,38 @@
 use super::{CLOSE_MIN_WIDTH, feedback};
 use crate::Window;
 use crate::theme::{Roles, metrics};
+use crate::tree::Tab;
 use crate::ui::claim_pill;
 use eframe::egui::{self, Color32, CornerRadius, Rect, Stroke, pos2, vec2};
 use std::time::SystemTime;
 
 const ADD_WIDTH: f32 = 28.0;
+/// The space between the last card and the add button.
+const ADD_GAP: f32 = 4.0;
+/// Below this the add button is neither painted nor answered.
+const ADD_MIN_WIDTH: f32 = 20.0;
 const MAX_WIDTH: f32 = 190.0;
 const GAP: f32 = 2.0;
 const PADDING: f32 = 10.0;
+/// What a card too narrow for [`PADDING`] keeps on each side, and between its pill and label.
+const TIGHT: f32 = 4.0;
 const DOT: f32 = 6.0;
 const DOT_GAP: f32 = 3.0;
 /// The close target's width at the card's right edge.
 const CLOSE_WIDTH: f32 = 26.0;
+/// The narrowest card that keeps its pill whole and room for one character of its label.
+const MIN_CARD: f32 = 2.0 * TIGHT + claim_pill::SIZE + TIGHT + 12.0;
+/// The narrowest band that holds one such card, its gap and the add button; the title bar turns
+/// compact rather than give the tabs less.
+pub(crate) const MIN_BAND: f32 = MIN_CARD + GAP + ADD_GAP + ADD_WIDTH;
 
 /// Where the tab `which` of `count` falls inside the tab band.
 ///
 /// **All of the same width, and with no scrolling**, as the historical strip: past the point where
-/// they stop fitting, the label is cut off inside its own card and navigation is by shortcut.
+/// they stop fitting, the label is shortened inside its own card and navigation is by shortcut.
 pub(crate) fn card(band: Rect, which: usize, count: usize) -> Rect {
-    let width = ((band.width() - ADD_WIDTH - 4.0).max(0.0) / count.max(1) as f32).min(MAX_WIDTH);
+    let width =
+        ((band.width() - ADD_WIDTH - ADD_GAP).max(0.0) / count.max(1) as f32).min(MAX_WIDTH);
     let left = band.left() + width * which as f32;
     Rect::from_min_max(
         pos2(left.min(band.right()), band.top()),
@@ -36,12 +49,12 @@ pub(crate) fn card(band: Rect, which: usize, count: usize) -> Rect {
     )
 }
 
-/// The add button, right after the last card.
+/// The add button's slot, right after the last card.
 pub(super) fn add(band: Rect, count: usize) -> Rect {
     let left = if count == 0 {
         band.left()
     } else {
-        card(band, count - 1, count).right() + 4.0
+        card(band, count - 1, count).right() + ADD_GAP
     }
     .min(band.right());
     Rect::from_min_max(
@@ -50,9 +63,19 @@ pub(super) fn add(band: Rect, count: usize) -> Rect {
     )
 }
 
-/// The part of the band the cards and the add button take; the title bar drags by the rest.
+/// The add button where it is painted and answered: absent with no tabs or no room for it.
+pub(crate) fn add_target(band: Rect, count: usize) -> Option<Rect> {
+    Some(add(band, count)).filter(|add| count > 0 && add.width() >= ADD_MIN_WIDTH)
+}
+
+/// The part of the band the cards and the add button take; the title bar drags by the rest,
+/// including an add slot too narrow to be a button.
 pub(crate) fn occupied(band: Rect, count: usize) -> Option<Rect> {
-    (count > 0).then(|| Rect::from_min_max(band.min, pos2(add(band, count).right(), band.bottom())))
+    (count > 0).then(|| {
+        let right = add_target(band, count)
+            .map_or_else(|| card(band, count - 1, count).right(), |add| add.right());
+        Rect::from_min_max(band.min, pos2(right, band.bottom()))
+    })
 }
 
 /// What a card holds, left to right.
@@ -64,22 +87,54 @@ pub(super) struct Layout {
     pub dots: Option<Rect>,
 }
 
-/// The cross is painted on the active tab and on the one under the pointer only, but its target
-/// exists on every card: egui resolves a press against the targets of the pass before, so a target
-/// that appeared with the hover would lose the first press over it to the card's body.
-pub(super) fn shows_close(ui: &egui::Ui, card: Rect, active: bool) -> bool {
+/// Whether the cross shows: on the active tab, and on the one under the pointer.
+///
+/// Its target exists exactly where the cross shows, so a press on an inactive tab's right edge
+/// selects it instead of closing it unseen. egui resolves a press against the targets of the pass
+/// before, so the cross has to have been under the pointer for one pass before it can be pressed —
+/// which is what a pointer moving onto it gives.
+fn shows_close(ui: &egui::Ui, card: Rect, active: bool) -> bool {
     active
         || ui
             .input(|i| i.pointer.hover_pos())
             .is_some_and(|p| card.contains(p))
 }
 
+/// How many consoles a tab holds, counted without collecting them.
+fn pane_count(tab: &Tab) -> usize {
+    let mut count = 0;
+    tab.root.walk(&mut |_| count += 1);
+    count
+}
+
+/// Every card in tab order with its rectangle and its layout: the one walk painting and pointer
+/// routing both read, so a card cannot paint one target and answer another.
+///
+/// Where the cross is not shown its slot is the body's, while the label keeps the room it has with
+/// the cross, so pointing at a tab does not reflow its label.
+pub(super) fn cards<'a>(
+    window: &'a Window,
+    ui: &'a egui::Ui,
+    band: Rect,
+) -> impl Iterator<Item = (usize, Rect, Layout)> + 'a {
+    let count = window.tabs.len();
+    window.tabs.iter().enumerate().map(move |(which, tab)| {
+        let card = card(band, which, count);
+        let mut layout = Layout::new(card, pane_count(tab), count > 1);
+        if !shows_close(ui, card, which == window.active) {
+            layout.close = None;
+            layout.body = card;
+        }
+        (which, card, layout)
+    })
+}
+
 impl Layout {
     pub fn new(card: Rect, dots: usize, close: bool) -> Self {
         // A card too narrow for the kit's air keeps the pill whole and gives the label what is left.
         let roomy = card.width() >= 2.0 * PADDING + claim_pill::SIZE + 20.0;
-        let padding = if roomy { PADDING } else { 4.0 }.min(card.width() / 2.0);
-        let gap = if roomy { 8.0 } else { 4.0 };
+        let padding = if roomy { PADDING } else { TIGHT }.min(card.width() / 2.0);
+        let gap = if roomy { 8.0 } else { TIGHT };
         let close = (close && card.width() >= CLOSE_MIN_WIDTH).then(|| {
             Rect::from_min_max(
                 pos2(card.right() - CLOSE_WIDTH, card.top()),
@@ -122,14 +177,23 @@ impl Layout {
     }
 }
 
-/// The fill a target takes under the pointer: the hover surface fading in, a step further when held.
-fn feedback_fill(ui: &egui::Ui, id: egui::Id, roles: &Roles) -> Option<Color32> {
+/// The pill and the label of a card, for tests outside this module.
+#[cfg(test)]
+pub(crate) fn pill_and_label(card: Rect, dots: usize, close: bool) -> (Rect, Rect) {
+    let layout = Layout::new(card, dots, close);
+    (layout.pill, layout.label)
+}
+
+/// The fill a target takes under the pointer — the hover surface fading in, a step further when
+/// held — and whether it is held.
+fn feedback_fill(ui: &egui::Ui, id: egui::Id, roles: &Roles) -> (Option<Color32>, bool) {
     let (hover, held) = feedback::hover_and_held(ui, id);
-    if held {
+    let fill = if held {
         Some(roles.line2)
     } else {
         (hover > 0.0).then(|| roles.hover.gamma_multiply(hover))
-    }
+    };
+    (fill, held)
 }
 
 fn cross(painter: &egui::Painter, center: egui::Pos2, half: f32, color: Color32) {
@@ -145,6 +209,44 @@ fn cross(painter: &egui::Painter, center: egui::Pos2, half: f32, color: Color32)
     }
 }
 
+/// A card's label as it fits in its room.
+enum Fitted {
+    /// Painted as it is, braille spinners included.
+    Whole(String),
+    /// Cut at the room with «…».
+    Cut(std::sync::Arc<egui::Galley>),
+}
+
+/// The whole label when it fits; an unnamed tab's number when «Terminal N» does not; a named tab's
+/// label cut with «…» while two of its characters still show, and its number below that.
+fn fitted(
+    painter: &egui::Painter,
+    tab: &Tab,
+    room: f32,
+    font: &egui::FontId,
+    color: Color32,
+) -> Fitted {
+    let number = (tab.name + 1).to_string();
+    let width = |text: String| painter.layout_no_wrap(text, font.clone(), color).size().x;
+    let Some(label) = &tab.label else {
+        let whole = format!("Terminal {number}");
+        return Fitted::Whole(if width(whole.clone()) <= room {
+            whole
+        } else {
+            number
+        });
+    };
+    if width(label.clone()) <= room {
+        return Fitted::Whole(label.clone());
+    }
+    if width(label.chars().take(2).chain(['…']).collect()) > room {
+        return Fitted::Whole(number);
+    }
+    let mut job = egui::text::LayoutJob::simple_singleline(label.clone(), font.clone(), color);
+    job.wrap = egui::text::TextWrapping::truncate_at_width(room);
+    Fitted::Cut(painter.layout_job(job))
+}
+
 /// Paints every card and the add button; returns how many cards carried a claim.
 pub(super) fn paint(window: &Window, ui: &egui::Ui, band: Rect, now: SystemTime) -> usize {
     let roles = crate::ui::style::roles(ui.ctx(), &window.theme);
@@ -155,13 +257,12 @@ pub(super) fn paint(window: &Window, ui: &egui::Ui, band: Rect, now: SystemTime)
         sw: 0,
         se: 0,
     };
+    let font = egui::FontId::proportional(window.chrome.title_sizes.tab_size());
     let mut marked = 0;
-    for (which, tab) in window.tabs.iter().enumerate() {
-        let card = card(band, which, count);
+    for (which, card, layout) in cards(window, ui, band) {
+        let tab = &window.tabs[which];
         let active = which == window.active;
         let painter = ui.painter_at(card);
-        let panes = tab.panes();
-        let layout = Layout::new(card, panes.len(), count > 1);
         if active {
             painter.rect_filled(card, top, roles.base);
             painter.rect_stroke(
@@ -180,36 +281,52 @@ pub(super) fn paint(window: &Window, ui: &egui::Ui, band: Rect, now: SystemTime)
                 roles.base,
             );
         }
-        if let Some(fill) = feedback_fill(ui, feedback::id(ui, tab.name, "body"), &roles)
-            && (!active || fill == roles.line2)
+        // The whole card's shape, short of the bar's bottom line, which stays drawn under it.
+        let (fill, held) = feedback_fill(ui, feedback::id(ui, tab.name, "body"), &roles);
+        if let Some(fill) = fill
+            && (!active || held)
         {
-            painter.rect_filled(layout.body, top, fill);
+            painter.rect_filled(
+                Rect::from_min_max(card.min, pos2(card.right(), card.bottom() - 1.0)),
+                top,
+                fill,
+            );
         }
         let attention = tab.attention(now);
         marked += usize::from(attention.is_some());
-        claim_pill::paint(&painter, layout.pill, attention, &roles);
-        let label = tab.label.clone().unwrap_or_else(|| {
-            let number = tab.name + 1;
-            if card.width() < 100.0 {
-                number.to_string()
-            } else {
-                format!("Terminal {number}")
+        match attention {
+            Some(claim) => claim_pill::paint(&painter, layout.pill, claim, &roles),
+            None => claim_pill::paint_unclaimed(&painter, layout.pill, &roles),
+        }
+        let ink = if active { roles.tx } else { roles.tx2 };
+        let clip = painter.with_clip_rect(layout.label.intersect(card));
+        match fitted(&painter, tab, layout.label.width(), &font, ink) {
+            Fitted::Whole(text) => {
+                crate::header::title_text::paint(
+                    &clip,
+                    layout.label.left_center(),
+                    egui::Align2::LEFT_CENTER,
+                    &text,
+                    font.clone(),
+                    ink,
+                );
             }
-        });
-        crate::header::title_text::paint(
-            &painter.with_clip_rect(layout.label.intersect(card)),
-            layout.label.left_center(),
-            egui::Align2::LEFT_CENTER,
-            &label,
-            egui::FontId::proportional(window.chrome.title_sizes.tab_size()),
-            if active { roles.tx } else { roles.tx2 },
-        );
+            Fitted::Cut(galley) => {
+                let at = pos2(
+                    layout.label.left(),
+                    layout.label.center().y - galley.size().y / 2.0,
+                );
+                clip.galley(at, galley, ink);
+            }
+        }
         if let Some(dots) = layout.dots {
-            for (n, pane) in panes.iter().enumerate() {
+            let mut n = 0;
+            tab.root.walk(&mut |pane| {
                 let center = pos2(
                     dots.left() + DOT / 2.0 + n as f32 * (DOT + DOT_GAP),
                     dots.center().y,
                 );
+                n += 1;
                 match &pane.project {
                     Some(project) => {
                         painter.circle_filled(center, DOT / 2.0, project.ink);
@@ -218,19 +335,20 @@ pub(super) fn paint(window: &Window, ui: &egui::Ui, band: Rect, now: SystemTime)
                         painter.circle_stroke(center, DOT / 2.0 - 0.5, Stroke::new(1.0, roles.tx3));
                     }
                 }
-            }
+            });
         }
-        if let Some(close) = layout.close.filter(|_| shows_close(ui, card, active)) {
-            let id = feedback::id(ui, tab.name, "close");
-            let hovered = feedback_fill(ui, id, &roles);
-            if let Some(fill) = hovered {
+        // Advanced every pass, shown or not, so a pointer that leaves from the cross does not leave
+        // its hover at full strength for the next time the cross appears.
+        let (close_fill, _) = feedback_fill(ui, feedback::id(ui, tab.name, "close"), &roles);
+        if let Some(close) = layout.close {
+            if let Some(fill) = close_fill {
                 painter.rect_filled(
                     Rect::from_center_size(close.center(), egui::Vec2::splat(20.0)),
                     metrics::RADIUS_CHIP,
                     fill,
                 );
             }
-            let ink = if hovered.is_some() {
+            let ink = if close_fill.is_some() {
                 roles.tx
             } else {
                 roles.tx3
@@ -238,10 +356,9 @@ pub(super) fn paint(window: &Window, ui: &egui::Ui, band: Rect, now: SystemTime)
             cross(&painter, close.center(), 3.5, ink);
         }
     }
-    let add = add(band, count);
-    if count > 0 && add.width() >= 20.0 {
+    if let Some(add) = add_target(band, count) {
         let painter = ui.painter_at(add);
-        if let Some(fill) = feedback_fill(ui, ui.id().with("compact-tab-add"), &roles) {
+        if let (Some(fill), _) = feedback_fill(ui, ui.id().with("compact-tab-add"), &roles) {
             painter.rect_filled(
                 Rect::from_center_size(add.center(), egui::Vec2::splat(ADD_WIDTH)),
                 metrics::RADIUS_CONTROL,
@@ -290,7 +407,9 @@ mod tests {
                         }
                     }
                 }
-                assert_eq!(occupied(band, count).map(|r| r.right()), Some(add.right()));
+                let end = add_target(band, count)
+                    .map_or_else(|| card(band, count - 1, count).right(), |add| add.right());
+                assert_eq!(occupied(band, count).map(|r| r.right()), Some(end));
             }
         }
         let wide = Rect::from_min_size(pos2(0.0, 6.0), vec2(1200.0, 34.0));

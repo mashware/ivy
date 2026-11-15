@@ -185,20 +185,30 @@ mod tests {
                 _ => None,
             })
         };
+        let outlined_rects =
+            |shapes: &[egui::epaint::ClippedShape]| -> Vec<(egui::Color32, egui::Rect)> {
+                shapes
+                    .iter()
+                    .filter_map(|s| match &s.shape {
+                        egui::Shape::Rect(r)
+                            if r.fill == egui::Color32::TRANSPARENT
+                                && r.stroke.width == 1.0
+                                && r.rect.height() > 100.0 =>
+                        {
+                            Some((r.stroke.color, r.rect))
+                        }
+                        _ => None,
+                    })
+                    .collect()
+            };
         let outlined = |shapes: &[egui::epaint::ClippedShape]| -> Vec<egui::Color32> {
-            shapes
-                .iter()
-                .filter_map(|s| match &s.shape {
-                    egui::Shape::Rect(r)
-                        if r.fill == egui::Color32::TRANSPARENT
-                            && r.stroke.width == 1.0
-                            && r.rect.height() > 100.0 =>
-                    {
-                        Some(r.stroke.color)
-                    }
-                    _ => None,
-                })
-                .collect()
+            outlined_rects(shapes).into_iter().map(|(c, _)| c).collect()
+        };
+        // The accent outline goes round the focused console: the one whose stripe it contains.
+        let accent_around = |shapes: &[egui::epaint::ClippedShape], stripe: egui::Rect| {
+            outlined_rects(shapes)
+                .into_iter()
+                .any(|(c, rect)| c == accent && rect.contains_rect(stripe))
         };
         let baseline = frame(&mut window, &ctx, area, vec![]);
         let rects = stripes(&baseline);
@@ -217,9 +227,16 @@ mod tests {
             1,
             "{outlines:?}"
         );
+        assert!(accent_around(&baseline, rects[0]));
+        assert!(!accent_around(&baseline, rects[1]));
         window.active_mut().focus = 1;
         let moved = frame(&mut window, &ctx, area, vec![]);
         assert_eq!(stripes(&moved), rects);
+        assert!(
+            accent_around(&moved, rects[1]),
+            "the outline did not follow the focus"
+        );
+        assert!(!accent_around(&moved, rects[0]));
         assert_eq!(header_on(&moved, rects[0]), Some(chrome));
         assert_eq!(header_on(&moved, rects[1]), Some(panel));
         window.active_mut().panes_mut()[0].project = None;
@@ -299,7 +316,7 @@ mod tests {
     }
 
     fn connection_button(area: egui::Rect) -> egui::Pos2 {
-        let from_right = if area.width() < 300.0 {
+        let from_right = if chrome::strip::is_compact(area.width()) {
             57.0
         } else if cfg!(target_os = "macos") {
             91.0
@@ -799,7 +816,7 @@ mod tests {
                 let bounds = mesh.calc_bounds();
                 let left = if cfg!(target_os = "macos") { 78.0 } else { 6.0 };
                 assert!(bounds.top() >= area.top());
-                assert!(bounds.bottom() <= area.top() + chrome::HEIGHT);
+                assert!(bounds.bottom() <= area.top() + crate::theme::metrics::TITLE_BAR_HEIGHT);
                 assert!(bounds.left() >= area.left() + left + 2.0 * 34.0 + 14.0);
                 assert!(bounds.right() <= tabs.left());
             }
@@ -1165,12 +1182,9 @@ mod tests {
             let area = area_of(800.0);
             frame(&mut window, &ctx, area, vec![]);
             let at = tab_target(&window, &ctx, area, 1, target);
-            let pressed = frame(
-                &mut window,
-                &ctx,
-                area,
-                vec![egui::Event::PointerMoved(at), button(at, true)],
-            );
+            // An inactive tab's cross exists once the pointer has been over its card for a pass.
+            frame(&mut window, &ctx, area, vec![egui::Event::PointerMoved(at)]);
+            let pressed = frame(&mut window, &ctx, area, vec![button(at, true)]);
             assert_eq!(window.active, 0, "{target} selected on press");
             assert_eq!(window.tabs.len(), 2, "{target} acted on press");
             assert!(pressed.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == ACTIVE_TAB && r.rect.height() == 34.0)), "the selected tab lost its surface");
@@ -1184,12 +1198,8 @@ mod tests {
             frame(&mut window, &ctx, area, vec![button(away, false)]);
             assert_eq!(window.active, 0);
             assert_eq!(window.tabs.len(), 2, "cancelled {target} acted");
-            frame(
-                &mut window,
-                &ctx,
-                area,
-                vec![egui::Event::PointerMoved(at), button(at, true)],
-            );
+            frame(&mut window, &ctx, area, vec![egui::Event::PointerMoved(at)]);
+            frame(&mut window, &ctx, area, vec![button(at, true)]);
             frame(&mut window, &ctx, area, vec![button(at, false)]);
             match target {
                 "body" => {
@@ -1344,6 +1354,11 @@ mod tests {
             fills(&hover),
             vec![egui::Color32::from_rgb(0x26, 0x2b, 0x2d)]
         );
+        // The whole card, cross included, short of the bar's bottom line.
+        let card = title_card(&window, &ctx, area, 1);
+        assert!(hover.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r)
+            if r.fill == egui::Color32::from_rgb(0x26, 0x2b, 0x2d)
+                && r.rect == egui::Rect::from_min_max(card.min, egui::pos2(card.right(), card.bottom() - 1.0)))));
         assert_eq!(
             fills(&held),
             vec![egui::Color32::from_rgb(0x37, 0x3b, 0x3d)]
@@ -1509,18 +1524,25 @@ mod tests {
             events.extend(click_at(at));
             events
         };
-        for on_tab in [false, true] {
+        for place in ["gap", "tab", "above"] {
+            let on_tab = place == "tab";
             let ctx = egui::Context::default();
             let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
             window.chrome.enable();
             window.headers = window.headers.integrated(true);
             let area = area_of(1400.0);
             frame(&mut window, &ctx, area, vec![]);
-            let at = if on_tab {
-                tab_target(&window, &ctx, area, 1, "body")
-            } else {
-                let add = tab_target(&window, &ctx, area, 0, "add");
-                egui::pos2(add.x + 40.0, area.top() + 20.0)
+            let at = match place {
+                "tab" => tab_target(&window, &ctx, area, 1, "body"),
+                // The six points over a tab, under the window's resize edge.
+                "above" => egui::pos2(
+                    tab_target(&window, &ctx, area, 1, "body").x,
+                    area.top() + 5.5,
+                ),
+                _ => {
+                    let add = tab_target(&window, &ctx, area, 0, "add");
+                    egui::pos2(add.x + 40.0, area.top() + 20.0)
+                }
             };
             let input = egui::RawInput {
                 screen_rect: Some(area),
@@ -1535,7 +1557,7 @@ mod tests {
                 .commands
                 .contains(&egui::ViewportCommand::Maximized(true));
             output.drop_without_applying_deltas();
-            assert_eq!(maximized, !on_tab, "on_tab={on_tab}");
+            assert_eq!(maximized, !on_tab, "{place}");
             assert_eq!(window.tabs.len(), 2);
             assert!(window.all_panes_mut().all(|p| p.keystrokes.is_empty()));
         }
@@ -1869,7 +1891,7 @@ mod tests {
         ctx: &egui::Context,
         area: egui::Rect,
     ) -> Vec<egui::epaint::ClippedShape> {
-        let offset = if area.width() < 300.0 {
+        let offset = if chrome::strip::is_compact(area.width()) {
             20.0
         } else if cfg!(target_os = "macos") {
             23.0
@@ -2062,12 +2084,9 @@ mod tests {
     }
 
     fn separate_click(window: &mut Window, ctx: &egui::Context, area: egui::Rect, at: egui::Pos2) {
-        frame(
-            window,
-            ctx,
-            area,
-            vec![egui::Event::PointerMoved(at), pointer_button(at, true)],
-        );
+        // A tab's cross exists once the pointer has been over its card for a pass.
+        frame(window, ctx, area, vec![egui::Event::PointerMoved(at)]);
+        frame(window, ctx, area, vec![pointer_button(at, true)]);
         frame(window, ctx, area, vec![pointer_button(at, false)]);
     }
 
@@ -2470,5 +2489,265 @@ mod tests {
             !window.pane_view.is_modal(),
             "hidden chrome menu stole dialog dismissal"
         );
+    }
+
+    /// The title bar's band of tab cards, and one of its cards.
+    fn title_card(
+        window: &Window,
+        ctx: &egui::Context,
+        area: egui::Rect,
+        which: usize,
+    ) -> egui::Rect {
+        let m = CellMetrics::measure(ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
+        let band = tab_bar::geometry(window, area, &m)
+            .cards
+            .expect("the title bar holds the tabs");
+        tab_bar::title_card(band, which, window.tabs.len())
+    }
+
+    /// The colours of a tab cross's strokes inside `close`: the 1.2-point segments the tab paints.
+    fn cross_strokes(
+        shapes: &[egui::epaint::ClippedShape],
+        close: egui::Rect,
+    ) -> Vec<egui::Color32> {
+        shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::LineSegment { points, stroke }
+                    if stroke.width == 1.2
+                        && close.contains(points[0])
+                        && close.contains(points[1]) =>
+                {
+                    Some(stroke.color)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// An inactive tab's cross shows only under the pointer: none while idle, muted text over the
+    /// card, full text over the cross itself, and muted again the next time the card is reached
+    /// after leaving from the cross. Ivy Night's tx3 and tx, written out.
+    #[test]
+    fn an_inactive_tabs_cross_shows_under_the_pointer_and_brightens_over_itself() {
+        let tx3 = egui::Color32::from_rgb(0x8e, 0x93, 0x90);
+        let tx = egui::Color32::from_rgb(0xe4, 0xe8, 0xe2);
+        let ctx = egui::Context::default();
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        let area = area_of(800.0);
+        let mut time = 0.0;
+        let mut pass = |window: &mut Window, events: Vec<egui::Event>| {
+            time += 0.05;
+            ui_pass(
+                window,
+                &ctx,
+                area,
+                egui::RawInput {
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+            )
+        };
+        pass(&mut window, vec![]);
+        let card = title_card(&window, &ctx, area, 1);
+        let close = egui::Rect::from_min_max(
+            egui::pos2(card.right() - 26.0, card.top()),
+            card.right_bottom(),
+        );
+        let idle = pass(&mut window, vec![]);
+        assert!(
+            cross_strokes(&idle, close).is_empty(),
+            "an idle inactive tab shows its cross"
+        );
+        let body = tab_target(&window, &ctx, area, 1, "body");
+        let settle = |pass: &mut dyn FnMut(
+            &mut Window,
+            Vec<egui::Event>,
+        ) -> Vec<egui::epaint::ClippedShape>,
+                      window: &mut Window,
+                      at: egui::Pos2| {
+            pass(window, vec![egui::Event::PointerMoved(at)]);
+            for _ in 0..4 {
+                pass(window, vec![]);
+            }
+            pass(window, vec![])
+        };
+        let over_card = settle(&mut pass, &mut window, body);
+        let strokes = cross_strokes(&over_card, close);
+        assert!(
+            !strokes.is_empty() && strokes.iter().all(|c| *c == tx3),
+            "{strokes:?}"
+        );
+        let over_cross = settle(&mut pass, &mut window, close.center());
+        let strokes = cross_strokes(&over_cross, close);
+        assert!(
+            !strokes.is_empty() && strokes.iter().all(|c| *c == tx),
+            "{strokes:?}"
+        );
+        let away = settle(&mut pass, &mut window, egui::pos2(50.0, 200.0));
+        assert!(cross_strokes(&away, close).is_empty());
+        let back = pass(&mut window, vec![egui::Event::PointerMoved(body)]);
+        let strokes = cross_strokes(&back, close);
+        assert!(
+            !strokes.is_empty() && strokes.iter().all(|c| *c == tx3),
+            "the cross came back still hovered: {strokes:?}"
+        );
+    }
+
+    /// The right edge of an inactive tab nobody pointed at is its body: a press there selects the
+    /// tab and leaves its consoles running.
+    #[test]
+    fn a_press_on_an_idle_inactive_tabs_right_edge_selects_it_instead_of_closing_it() {
+        let ctx = egui::Context::default();
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        let area = area_of(800.0);
+        frame(&mut window, &ctx, area, vec![]);
+        frame(&mut window, &ctx, area, vec![]);
+        let at = tab_target(&window, &ctx, area, 1, "close");
+        frame(&mut window, &ctx, area, click_at(at));
+        assert_eq!(window.tabs.len(), 2, "an unseen cross closed the tab");
+        assert_eq!(window.active, 1);
+    }
+
+    /// The add button stays after the last card, so the second click of a double click lands on
+    /// the tab the first one created: one new tab, and no rename of it.
+    #[test]
+    fn a_double_click_on_the_add_button_opens_a_tab_without_renaming_it() {
+        let ctx = egui::Context::default();
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        let area = area_of(1400.0);
+        frame(&mut window, &ctx, area, vec![]);
+        let at = tab_target(&window, &ctx, area, 0, "add");
+        let pass = |window: &mut Window, time: f64, events: Vec<egui::Event>| {
+            ui_pass(
+                window,
+                &ctx,
+                area,
+                egui::RawInput {
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+            );
+        };
+        pass(&mut window, 0.0, vec![egui::Event::PointerMoved(at)]);
+        pass(&mut window, 0.02, click_at(at));
+        assert_eq!(window.tabs.len(), 3);
+        pass(&mut window, 0.05, vec![]);
+        let card = title_card(&window, &ctx, area, 2);
+        assert!(
+            card.contains(at),
+            "the case is a second click on the new card: {card:?}"
+        );
+        pass(&mut window, 0.1, click_at(at));
+        pass(&mut window, 0.15, vec![]);
+        assert_eq!(window.tabs.len(), 3);
+        assert!(
+            !window.pane_view.is_renaming(),
+            "the second half of a double click on the add button renamed the new tab"
+        );
+        // A real double click on that tab still renames it.
+        pass(&mut window, 1.0, click_at(at));
+        pass(&mut window, 1.1, click_at(at));
+        assert!(window.pane_view.is_renaming());
+    }
+
+    /// Between 100 and 150 points a card cannot hold «Terminal N» or a long name: the unnamed tab
+    /// shows its number and the named one its name cut with «…», both inside the label's room.
+    #[test]
+    fn tab_labels_fit_their_room_whole_cut_or_as_a_number() {
+        for width in [616.0, 650.0, 690.0, 716.0, 1400.0] {
+            let ctx = egui::Context::default();
+            let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
+            window.chrome.enable();
+            window.headers = window.headers.integrated(true);
+            window.tabs[1].label = Some("Release notes for the week".into());
+            let area = area_of(width);
+            frame(&mut window, &ctx, area, vec![]);
+            let shapes = frame(&mut window, &ctx, area, vec![]);
+            for which in 0..2 {
+                let card = title_card(&window, &ctx, area, which);
+                if width < 1400.0 {
+                    assert!((100.0..=150.0).contains(&card.width()), "{width}: {card:?}");
+                }
+                let (_, label) = tab_bar::title_pill_and_label(card, 2, true);
+                let texts: Vec<_> = shapes
+                    .iter()
+                    .filter_map(|s| match &s.shape {
+                        egui::Shape::Text(t) if card.contains(t.pos) => Some(t),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(texts.len(), 1, "{width}: tab {which}");
+                let text = texts[0];
+                assert!(
+                    text.pos.x + text.galley.size().x <= label.right() + 0.5,
+                    "{width}: tab {which} «{}» overflows its room {label:?}",
+                    text.galley.text()
+                );
+                let ellipsis = text
+                    .galley
+                    .rows
+                    .iter()
+                    .any(|row| row.glyphs.iter().any(|g| g.chr == '…'));
+                match which {
+                    0 if width == 616.0 => assert_eq!(text.galley.text(), "1", "{width}"),
+                    0 if width == 1400.0 => assert_eq!(text.galley.text(), "Terminal 1"),
+                    0 => assert!(["1", "Terminal 1"].contains(&text.galley.text()), "{width}"),
+                    _ => assert!(ellipsis, "{width}: the name is not cut"),
+                }
+            }
+        }
+    }
+
+    /// The tab strip of the measurement batches keeps D13's look: the bar on the console
+    /// background, the active card filled with the focus colour and its number in the background
+    /// colour over it. Ivy Night's literals, written out.
+    #[test]
+    fn the_historical_tab_strip_keeps_its_painting() {
+        let ctx = egui::Context::default();
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
+        let area = area_of(800.0);
+        frame(&mut window, &ctx, area, vec![]);
+        let shapes = frame(&mut window, &ctx, area, vec![]);
+        let m = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
+        let bar = tab_bar::geometry(&window, area, &m)
+            .cards
+            .expect("two tabs have a bar");
+        assert_eq!(Some(bar), tab_bar::set_the_tab_bar_aside(area, 2, &m).0);
+        let filled = |rect: egui::Rect, color: egui::Color32| {
+            shapes.iter().any(
+                |s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect == rect && r.fill == color),
+            )
+        };
+        assert!(filled(bar, egui::Color32::from_rgb(0x13, 0x18, 0x1b)));
+        assert!(filled(
+            tab_bar::tab_rect(bar, 0, 2),
+            egui::Color32::from_rgb(0x3c, 0xc3, 0x84)
+        ));
+        assert_eq!(
+            text_color_of(&shapes, "1"),
+            Some(egui::Color32::from_rgb(0x13, 0x18, 0x1b))
+        );
+        assert_eq!(
+            text_color_of(&shapes, "2"),
+            Some(egui::Color32::from_rgb(0xe4, 0xe8, 0xe2))
+        );
+    }
+
+    fn text_color_of(shapes: &[egui::epaint::ClippedShape], text: &str) -> Option<egui::Color32> {
+        shapes.iter().find_map(|s| match &s.shape {
+            egui::Shape::Text(t) if t.galley.text() == text => {
+                Some(t.galley.job.sections[0].format.color)
+            }
+            _ => None,
+        })
     }
 }

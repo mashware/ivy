@@ -20,14 +20,13 @@
 
 mod chrome;
 mod feedback;
-pub(crate) mod indicator;
 mod interaction;
 mod layout;
 mod title;
 pub(crate) use chrome::{geometry, partition};
+pub(crate) use title::{MIN_BAND, occupied};
 #[cfg(test)]
-pub(crate) use title::card as title_card;
-pub(crate) use title::occupied;
+pub(crate) use title::{add_target, card as title_card, pill_and_label as title_pill_and_label};
 
 use crate::painter::CellMetrics;
 use crate::{Window, WindowRequest};
@@ -293,7 +292,7 @@ fn paint_cards(
                     window.theme.background(),
                 );
             }
-            indicator::paint(
+            crate::ui::claim_pill::glyph::paint(
                 &painter,
                 layout.indicator,
                 attention.class,

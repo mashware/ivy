@@ -66,3 +66,23 @@ pub(crate) fn begin_pass(window: &mut crate::Window, ctx: &egui::Context) {
     window.settings_editor.record_geometry(started.elapsed());
     window.timed_separately += window.settings_editor.take_cost();
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A tab label whose line needs more than the kit's 34 points grows the tab, and the bar keeps
+    /// the same six points above it.
+    #[test]
+    fn a_large_tab_label_grows_the_tab_and_the_bar_with_it() {
+        let default = Sizes::default();
+        assert_eq!(default.tab_height(), 34.0);
+        assert_eq!(default.bar_height(), 40.0);
+        let large = Sizes {
+            tab_line_height: 40.0,
+            ..Sizes::new(12.0, 32.0)
+        };
+        assert_eq!(large.tab_height(), 52.0);
+        assert_eq!(large.bar_height(), 58.0);
+    }
+}

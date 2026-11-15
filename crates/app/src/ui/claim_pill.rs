@@ -1,36 +1,38 @@
-//! The claim a tab carries, as the design kit's 18-point pill.
+//! A claim as the design kit's 18-point pill.
 //!
 //! Wait and block are solid because they ask for action; done is soft because it does not urge; a
-//! claim nobody is holding up is a dashed outline, so a stale claim never reads as a live one; no
-//! claim at all is a small muted dot, which keeps the column occupied so eight tabs still scan as
-//! one vertical line. The glyph is the application's own drawing, not a font character (D9).
+//! claim nobody is holding up is a dashed outline, so a stale claim never reads as a live one. The
+//! glyph is the application's own drawing, not a font character (D9). The tab strip adds a muted
+//! dot for a tab with no claim, which keeps its column occupied so eight tabs still scan as one
+//! vertical line; another surface paints nothing there.
+
+pub(crate) mod glyph;
 
 use crate::panel::AttentionState;
 use crate::theme::Roles;
 use eframe::egui::{self, Color32, CornerRadius, Rect, Shape, Stroke};
 use panel_contract::Attention;
 
-/// The pill's side.
+/// The pill's side when its slot has room for it.
 pub(crate) const SIZE: f32 = 18.0;
-const RADIUS: u8 = 5;
-/// The glyph's box inside the pill, the kit's 12-point mono character.
+const RADIUS: f32 = 5.0;
+/// The glyph's box inside a full-size pill, leaving four points of pill around it.
 const GLYPH: f32 = 10.0;
 const NONE_DOT: f32 = 6.0;
 
+/// The pill centred in `slot`, shrunk to the slot when the slot is smaller than [`SIZE`].
+fn pill_in(slot: Rect) -> Rect {
+    let side = SIZE.min(slot.width()).min(slot.height()).max(0.0);
+    Rect::from_center_size(slot.center(), egui::Vec2::splat(side))
+}
+
 /// Paints the pill for `claim` centred in `slot`.
-pub(crate) fn paint(
-    painter: &egui::Painter,
-    slot: Rect,
-    claim: Option<AttentionState>,
-    roles: &Roles,
-) {
-    let pill = Rect::from_center_size(slot.center(), egui::Vec2::splat(SIZE));
-    let Some(claim) = claim else {
-        painter.circle_filled(pill.center(), NONE_DOT / 2.0, roles.tx3);
-        return;
-    };
+pub(crate) fn paint(painter: &egui::Painter, slot: Rect, claim: AttentionState, roles: &Roles) {
+    let pill = pill_in(slot);
+    let scale = pill.width() / SIZE;
+    let radius = RADIUS * scale;
     let glyph = if !claim.backed {
-        dashed_outline(painter, pill, roles.tx3);
+        dashed_outline(painter, pill, radius, roles.tx3);
         roles.tx3
     } else {
         let (fill, ink) = match claim.class {
@@ -38,18 +40,24 @@ pub(crate) fn paint(
             Attention::Block => (roles.block, roles.chrome),
             Attention::Done => (roles.done_soft, roles.done),
         };
-        painter.rect_filled(pill, CornerRadius::same(RADIUS), fill);
+        painter.rect_filled(pill, CornerRadius::same(radius.round() as u8), fill);
         ink
     };
-    let mark = Rect::from_center_size(pill.center(), egui::Vec2::splat(GLYPH));
-    crate::tab_bar::indicator::paint(painter, mark, claim.class, glyph);
+    let mark = Rect::from_center_size(pill.center(), egui::Vec2::splat(GLYPH * scale));
+    glyph::paint(painter, mark, claim.class, glyph);
+}
+
+/// The tab strip's mark for a tab with no claim: a muted dot where the pill would be.
+pub(crate) fn paint_unclaimed(painter: &egui::Painter, slot: Rect, roles: &Roles) {
+    let side = pill_in(slot).width();
+    painter.circle_filled(slot.center(), NONE_DOT.min(side) / 2.0, roles.tx3);
 }
 
 /// A rounded outline cannot be dashed by egui, so the dashes run along the four straight sides
 /// and the corners stay open, which at this size reads as the kit's dashed border.
-fn dashed_outline(painter: &egui::Painter, pill: Rect, color: Color32) {
+fn dashed_outline(painter: &egui::Painter, pill: Rect, radius: f32, color: Color32) {
     let r = pill.shrink(0.5);
-    let inset = f32::from(RADIUS) - 1.0;
+    let inset = (radius - 1.0).max(0.0);
     let stroke = Stroke::new(1.0, color);
     for side in [
         [
@@ -83,10 +91,18 @@ mod tests {
     }
 
     fn painted(theme: &Theme, claim: Option<AttentionState>) -> Vec<Shape> {
+        painted_in(
+            theme,
+            claim,
+            Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(18.0, 34.0)),
+        )
+    }
+
+    fn painted_in(theme: &Theme, claim: Option<AttentionState>, slot: Rect) -> Vec<Shape> {
         let ctx = egui::Context::default();
-        let output = ctx.run_ui(Default::default(), |ui| {
-            let slot = Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(18.0, 34.0));
-            paint(ui.painter(), slot, claim, &Roles::of(theme));
+        let output = ctx.run_ui(Default::default(), |ui| match claim {
+            Some(claim) => paint(ui.painter(), slot, claim, &Roles::of(theme)),
+            None => paint_unclaimed(ui.painter(), slot, &Roles::of(theme)),
         });
         let shapes = output.shapes.iter().map(|s| s.shape.clone()).collect();
         output.drop_without_applying_deltas();
@@ -155,23 +171,42 @@ mod tests {
             assert!(!glyph.is_empty(), "{class:?}: no glyph");
             assert!(glyph.iter().all(|c| *c == ink), "{class:?}: {glyph:?}");
         }
-        // Unbacked: no fill, four dashed sides and the glyph in muted text.
-        let shapes = painted(&night, claim(Attention::Wait, false));
-        assert_eq!(pill_fill(&shapes), None);
-        let dashes = shapes
-            .iter()
-            .filter(
-                |s| matches!(s, Shape::LineSegment { stroke, .. } if stroke.color == rgb(0x8e9390)),
-            )
-            .count();
-        assert!(dashes >= 8, "the outline is dashed on four sides: {dashes}");
-        assert!(glyph_colors(&shapes).iter().all(|c| *c == rgb(0x8e9390)));
+        // Unbacked, whatever the class: no fill, four dashed sides and the glyph in muted text.
+        for class in [Attention::Wait, Attention::Block, Attention::Done] {
+            let shapes = painted(&night, claim(class, false));
+            assert_eq!(pill_fill(&shapes), None, "{class:?}");
+            let dashes = shapes
+                .iter()
+                .filter(|s| {
+                    matches!(s, Shape::LineSegment { stroke, .. } if stroke.color == rgb(0x8e9390))
+                })
+                .count();
+            assert!(
+                dashes >= 8,
+                "{class:?}: the outline is dashed on four sides: {dashes}"
+            );
+            let glyph = glyph_colors(&shapes);
+            assert!(!glyph.is_empty(), "{class:?}: no glyph");
+            assert!(glyph.iter().all(|c| *c == rgb(0x8e9390)), "{class:?}");
+        }
         // No claim: one 6-point muted dot at the slot's centre and nothing else.
         let shapes = painted(&night, None);
         assert!(matches!(
             shapes.as_slice(),
             [Shape::Circle(c)] if c.radius == 3.0 && c.fill == rgb(0x8e9390) && c.center == egui::pos2(19.0, 27.0)
         ));
+    }
+
+    /// A slot narrower than the pill gets a pill of its own width, never one that spills over the
+    /// label beside it.
+    #[test]
+    fn a_narrow_slot_shrinks_the_pill_instead_of_overflowing_it() {
+        let slot = Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(12.0, 34.0));
+        let shapes = painted_in(&Theme::default(), claim(Attention::Wait, true), slot);
+        let (pill, _, radius) = pill_fill(&shapes).expect("the pill is painted");
+        assert_eq!(pill.size(), egui::Vec2::splat(12.0));
+        assert_eq!(pill.center(), slot.center());
+        assert_eq!(radius, CornerRadius::same(3));
     }
 
     #[test]

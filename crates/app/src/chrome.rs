@@ -3,25 +3,15 @@ use crate::{Window, WindowRequest, painter::CellMetrics, tiling::Orientation};
 use eframe::egui::{self, Align2, Color32, FontId, Rect, Sense, Stroke, Vec2, ViewportCommand};
 use std::time::{Duration, Instant};
 
-/// The title bar's height at the default tab label size; a larger label grows it.
-pub(crate) const HEIGHT: f32 = crate::theme::metrics::TITLE_BAR_HEIGHT;
-
 /// The title bar's partition for this window, shared by its painting, its claim on the pointer
 /// and the tab strip.
 pub(crate) fn strip(window: &Window, area: Rect) -> strip::Strip {
     let sizes = window.chrome.title_sizes;
-    let row = Rect::from_min_max(
-        area.min,
-        egui::pos2(
-            area.right(),
-            (area.top() + sizes.bar_height()).min(area.bottom()),
-        ),
-    );
     strip::within(
         area,
         sizes.bar_height(),
         sizes.tab_height(),
-        connection::compact_reserve(row),
+        connection::compact_reserve,
     )
 }
 
@@ -197,10 +187,6 @@ pub(crate) fn paint_button_icon(
                 line((-2.0, 4.0), (2.0, 4.0));
             }
         }
-        "New tab" => {
-            line((-7.0, 0.0), (7.0, 0.0));
-            line((0.0, -7.0), (0.0, 7.0));
-        }
         "Search console" => {
             p.circle_stroke(at(-1.5, -1.5), 6.5 * scale, stroke);
             line((4.0, 4.0), (9.0, 9.0));
@@ -269,7 +255,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     let mut action = None;
     let left_offset = strip::left_offset();
     let width = strip::BUTTON;
-    let compact = geometry.compact;
+    let compact = geometry.compact();
     let left = [
         ("⊞", "Split right", Action::SplitRight),
         ("⊟", "Split down", Action::SplitDown),
@@ -311,9 +297,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
             egui::pos2(x, row.top() + 7.0),
             Vec2::new(width, (row.height() - 14.0).max(0.0)),
         );
-        if !compact
-            && rect.left() >= row.left() + left_offset + 3.0 * width + 14.0
-            && button(ui, rect, label, hint, hover, fg)
+        if !compact && rect.left() >= geometry.left_end && button(ui, rect, label, hint, hover, fg)
         {
             action = Some(cmd);
         }
@@ -334,7 +318,10 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     }
     if compact {
         let menu = Rect::from_min_max(
-            egui::pos2((row.right() - 40.0).max(row.left()), row.top() + 7.0),
+            egui::pos2(
+                (row.right() - strip::COMPACT_MENU).max(row.left()),
+                row.top() + 7.0,
+            ),
             egui::pos2(row.right(), (row.bottom() - 7.0).max(row.top() + 7.0)),
         );
         if button(ui, menu, "", "Menu", hover, fg) {
@@ -350,8 +337,19 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         egui::pos2(drag_left, row.top()),
         egui::pos2(geometry.right_start.max(drag_left), row.bottom()),
     );
-    if drag.is_positive() {
-        let response = ui.interact(drag, ui.id().with("chrome-drag"), Sense::click_and_drag());
+    // The air above the tabs belongs to the bar too: the claim below swallows a press anywhere in
+    // the row outside the tabs, so a strip nobody answers would be a dead spot.
+    let above = tabs.map(|tabs| {
+        Rect::from_min_max(
+            egui::pos2(tabs.left(), row.top()),
+            egui::pos2(tabs.right(), tabs.top()),
+        )
+    });
+    for (rect, id) in [(Some(drag), "chrome-drag"), (above, "chrome-drag-above")] {
+        let Some(rect) = rect.filter(|rect| rect.is_positive()) else {
+            continue;
+        };
+        let response = ui.interact(rect, ui.id().with(id), Sense::click_and_drag());
         if response.double_clicked() {
             action = Some(Action::Maximize);
         } else if response.drag_started() {

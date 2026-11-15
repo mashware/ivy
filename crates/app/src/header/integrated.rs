@@ -643,6 +643,38 @@ mod tests {
         assert!(crate::theme::project_ink_contrast(dark, chrome) >= 3.0);
     }
 
+    /// An unfocused header with an ink too dark for its tinted surface paints the name in a
+    /// colour brought toward the text, which reads at 3:1 there.
+    #[test]
+    fn a_dark_project_ink_is_lifted_on_the_painted_header() {
+        let ctx = egui::Context::default();
+        let ink = rgb(0x202020);
+        let badge = badge(ink);
+        let strip = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(500.0, 28.0));
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            paint(
+                ui,
+                strip,
+                &CellMetrics::of(8.0, 16.0),
+                &Theme::default(),
+                appearance(Some(&badge), false, None),
+            );
+        });
+        out.textures_delta.clear();
+        let surface = out
+            .shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Rect(r) if r.rect == strip => Some(r.fill),
+                _ => None,
+            })
+            .expect("the header surface is painted");
+        let name = text_color(&out.shapes, "Backend").expect("the project name is painted");
+        assert_ne!(name, ink);
+        assert!(crate::theme::project_ink_contrast(name, surface) >= 3.0);
+        out.drop_without_applying_deltas();
+    }
+
     /// Controls hover on the hover surface in the text colour; close stays muted until reached;
     /// the waiting marker is the wait role, dimmed when nobody holds the claim up.
     #[test]
@@ -680,6 +712,24 @@ mod tests {
                     },
                 )
             };
+            run(vec![egui::Event::PointerMoved(close.center())]).drop_without_applying_deltas();
+            let mut reached = run(vec![]);
+            reached.textures_delta.clear();
+            let reached_close: Vec<_> = reached
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::LineSegment { points, stroke } if close.contains(points[0]) => {
+                        Some(stroke.color)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert!(
+                !reached_close.is_empty() && reached_close.iter().all(|c| *c == rgb(0xe4e8e2)),
+                "a reached close is not in the text colour: {reached_close:?}"
+            );
+            reached.drop_without_applying_deltas();
             run(vec![egui::Event::PointerMoved(review.center())]).drop_without_applying_deltas();
             let mut out = run(vec![]);
             out.textures_delta.clear();

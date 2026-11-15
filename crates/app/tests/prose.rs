@@ -521,8 +521,8 @@ const SOURCES: &[(&str, &str, usize)] = &[
         1,
     ),
     (
-        "src/tab_bar/indicator.rs",
-        include_str!("../src/tab_bar/indicator.rs"),
+        "src/ui/claim_pill/glyph.rs",
+        include_str!("../src/ui/claim_pill/glyph.rs"),
         2,
     ),
     (

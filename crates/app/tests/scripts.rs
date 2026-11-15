@@ -510,8 +510,8 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/tab_bar/layout.rs"),
     ),
     (
-        "app/src/tab_bar/indicator.rs",
-        include_str!("../src/tab_bar/indicator.rs"),
+        "app/src/ui/claim_pill/glyph.rs",
+        include_str!("../src/ui/claim_pill/glyph.rs"),
     ),
     (
         "app/src/tab_bar/feedback.rs",
