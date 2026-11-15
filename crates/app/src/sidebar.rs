@@ -390,11 +390,18 @@ fn icon(ui: &egui::Ui, rect: egui::Rect, tool: Tool, color: egui::Color32) {
     let painter = ui.painter();
     match tool {
         Tool::Files => {
-            painter.rect_stroke(rect, 1, stroke, egui::StrokeKind::Inside);
-            painter.line_segment(
-                [rect.left_top(), rect.left_top() + egui::vec2(7.0, -3.0)],
+            let at = |x, y| rect.min + egui::vec2(x, y);
+            painter.add(egui::Shape::closed_line(
+                vec![
+                    at(0.0, 2.0),
+                    at(6.0, 2.0),
+                    at(9.0, 5.0),
+                    at(16.0, 5.0),
+                    at(16.0, 15.0),
+                    at(0.0, 15.0),
+                ],
                 stroke,
-            );
+            ));
         }
         Tool::Markdown => {
             painter.rect_stroke(rect, 0, stroke, egui::StrokeKind::Inside);

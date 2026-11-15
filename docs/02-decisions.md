@@ -8722,6 +8722,30 @@ runs remain overlay-era evidence and the current script refuses to relabel them.
 publish the selected tool, effective width, per-pane grid and pane identity count before comparison.
 The dock-open grid intentionally differs from its closed control, so no painting speedup is inferred.
 
+### Explorer interaction refinement — 15 November 2026, #88
+
+The owner rejected the explorer's extra close/pin/navigation controls and filled triangles.
+Files now follows the active console with independent retained navigation. Its rail icon is a
+recognizable folder using the same vector stroke, bounds and feedback as the other tools; that
+button or Escape dismisses Files. Folder arrows are open chevrons. Folder activation expands or
+collapses within the root instead of replacing it, because removing Up must not strand the tree.
+
+Keep one explicit Refresh icon at the top right: directory listings are cached and removing it
+would leave saved files invisible until another invalidation. Same-source refresh preserves tree
+navigation; after an observed console directory change, Refresh adopts that source explicitly.
+This combines the necessary reset behavior without another toolbar. Unavailable/remote source
+handling and asynchronous loading limits remain intact.
+
+One click on a regular `.md` file opens its absolute path through the existing Markdown viewer.
+Other file types select quietly; the unsupported-preview notice is removed. A general text viewer
+is deliberately deferred for separate study. No file executes through tree activation.
+
+Discarded: a second close control beside the rail toggle; pin/follow controls the owner removed;
+filled triangles unlike the supplied IDE reference; child-root navigation with no Up control;
+automatic directory resets on every cwd observation, which would discard navigation while reading;
+filesystem watching or a new text renderer, neither needed for this refinement.
+
+
 ## D73 — Connection help is global and reports observed publication
 
 **Selected by the project owner.** A **Connect agents** icon in the integrated title bar opens an

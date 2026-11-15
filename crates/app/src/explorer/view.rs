@@ -44,6 +44,45 @@ fn paint_entry_icon(
     }
 }
 
+fn refresh_button(ui: &mut egui::Ui, available: bool) -> bool {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::click());
+    let response = response
+        .on_hover_text("Refresh")
+        .on_hover_cursor(if available {
+            egui::CursorIcon::PointingHand
+        } else {
+            egui::CursorIcon::NotAllowed
+        });
+    let visuals = ui.style().interact(&response);
+    if available && (response.hovered() || response.is_pointer_button_down_on()) {
+        ui.painter().rect_filled(rect, 3.0, visuals.bg_fill);
+    }
+    let color = if available {
+        visuals.fg_stroke.color
+    } else {
+        ui.visuals().weak_text_color()
+    };
+    let stroke = egui::Stroke::new(1.4, color);
+    let center = rect.center();
+    let points = (0..=20)
+        .map(|i| {
+            let angle = (45.0 + i as f32 * 14.0).to_radians();
+            center + egui::vec2(angle.cos(), angle.sin()) * 6.5
+        })
+        .collect();
+    ui.painter().add(egui::Shape::line(points, stroke));
+    let tip = center + egui::vec2(6.5, -3.5);
+    ui.painter().add(egui::Shape::line(
+        vec![
+            tip + egui::vec2(-4.0, 0.0),
+            tip,
+            tip + egui::vec2(0.0, -4.0),
+        ],
+        stroke,
+    ));
+    available && response.clicked()
+}
+
 fn rows(state: &mut Explorer, pane: usize) -> (Vec<Row>, Option<Request>, Vec<String>) {
     let Some(nav) = state.navigation.get(&pane) else {
         return (Vec::new(), None, Vec::new());
@@ -63,7 +102,7 @@ fn rows(state: &mut Explorer, pane: usize) -> (Vec<Row>, Option<Request>, Vec<St
     let visible_end = visible_start.saturating_add(state.viewport_rows);
     while let Some(visit) = stack.pop() {
         if rows.len() >= ROW_LIMIT {
-            messages.push("More entries hidden; collapse folders or open a directory.".into());
+            messages.push("More entries hidden; collapse folders to reveal other entries.".into());
             break;
         }
         match visit {
@@ -126,11 +165,10 @@ fn rows(state: &mut Explorer, pane: usize) -> (Vec<Row>, Option<Request>, Vec<St
 fn activate(state: &mut Explorer, pane: usize, entry: &Entry) -> Option<(usize, PathBuf)> {
     match entry.kind {
         EntryKind::Directory => {
-            state
-                .navigation
-                .get_mut(&pane)
-                .unwrap()
-                .enter(entry.path.clone());
+            let expanded = &mut state.navigation.get_mut(&pane).unwrap().expanded;
+            if !expanded.remove(&entry.path) {
+                expanded.insert(entry.path.clone());
+            }
             None
         }
         EntryKind::File
@@ -146,10 +184,7 @@ fn activate(state: &mut Explorer, pane: usize, entry: &Entry) -> Option<(usize, 
                 Some((pane, entry.path.clone()))
             }
         }
-        _ => {
-            state.message = "Preview unavailable for this file type.".into();
-            None
-        }
+        _ => None,
     }
 }
 
@@ -222,8 +257,15 @@ pub(super) fn show(
             body.horizontal(|ui| {
                 ui.strong("Files");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button("×").on_hover_text("Hide").clicked() {
-                        state.hide();
+                    let available = target.is_some_and(|pane| {
+                        state
+                            .navigation
+                            .get(&pane)
+                            .is_some_and(|nav| nav.source.is_some())
+                    });
+                    if refresh_button(ui, available) {
+                        state.navigation.get_mut(&target.unwrap()).unwrap().reload();
+                        state.message.clear();
                     }
                 });
             });
@@ -238,32 +280,7 @@ pub(super) fn show(
                 .map(display)
                 .unwrap_or_else(|| "Local directory unavailable or unsupported.".into());
             body.horizontal(|ui| {
-                let source_label = format!(
-                    "{}: #{} {}",
-                    if state.pinned == Some(pane) {
-                        "Pinned"
-                    } else {
-                        "Following"
-                    },
-                    pane,
-                    label.unwrap_or("Console")
-                );
-                if state.pinned.is_some() {
-                    if ui
-                        .small_button("Follow")
-                        .on_hover_text("Follow active pane")
-                        .clicked()
-                    {
-                        state.pinned = None;
-                    }
-                } else if ui
-                    .small_button("Pin")
-                    .on_hover_text("Pin this console")
-                    .clicked()
-                {
-                    state.pinned = Some(pane);
-                }
-
+                let source_label = format!("#{} {}", pane, label.unwrap_or("Console"));
                 ui.add(egui::Label::new(source_label).truncate())
                     .on_hover_text(source_path.clone());
             });
@@ -285,38 +302,12 @@ pub(super) fn show(
                         .on_hover_text(display(root));
                 });
             }
-            body.horizontal_wrapped(|ui| {
-                if ui
-                    .add_enabled(
-                        available && root.as_ref().and_then(|path| path.parent()).is_some(),
-                        egui::Button::new("Up"),
-                    )
-                    .on_hover_text("Up")
-                    .clicked()
-                {
-                    nav.enter(root.as_ref().unwrap().parent().unwrap().to_path_buf());
-                }
-                if ui
-                    .add_enabled(available, egui::Button::new("Reset"))
-                    .on_hover_text("Use console directory")
-                    .clicked()
-                {
-                    nav.use_source();
-                }
-                if ui
-                    .add_enabled(available, egui::Button::new("Refresh"))
-                    .on_hover_text("Refresh")
-                    .clicked()
-                {
-                    nav.refresh();
-                }
-            });
             if !available {
                 body.label("Local directory unavailable or unsupported.");
                 return;
             }
             if nav.source != nav.seeded_source {
-                body.label("Console directory changed");
+                body.label("Console directory changed; refresh to follow it.");
             }
             if !state.message.is_empty() {
                 body.label(&state.message);
@@ -385,8 +376,8 @@ pub(super) fn show(
                             let points = if expanded {
                                 vec![
                                     chevron.left_top(),
-                                    chevron.right_top(),
                                     chevron.center_bottom(),
+                                    chevron.right_top(),
                                 ]
                             } else {
                                 vec![
@@ -395,10 +386,9 @@ pub(super) fn show(
                                     chevron.left_bottom(),
                                 ]
                             };
-                            ui.painter().add(egui::Shape::convex_polygon(
+                            ui.painter().add(egui::Shape::line(
                                 points,
-                                theme.foreground().gamma_multiply(0.8),
-                                egui::Stroke::NONE,
+                                egui::Stroke::new(1.4, theme.foreground().gamma_multiply(0.8)),
                             ));
                             let toggle_rect = egui::Rect::from_min_size(
                                 egui::pos2(row_rect.left() + indent, row_rect.top()),
@@ -446,8 +436,14 @@ pub(super) fn show(
                         response.clone().on_hover_text(display(&row.entry.path));
                         if response.clicked() {
                             selected = Some(row.entry.path.clone());
+                            if row.entry.kind == EntryKind::File {
+                                action = Some(row.entry.clone());
+                            }
                         }
-                        if response.double_clicked() {
+                        if response.double_clicked()
+                            && row.entry.kind == EntryKind::Directory
+                            && toggle.as_ref() != Some(&row.entry.path)
+                        {
                             action = Some(row.entry.clone());
                         }
                     }
@@ -581,14 +577,25 @@ mod tests {
         let mut state = Explorer::default();
         state.reconcile(&[(1, Some("/root".into()))]);
         assert!(activate(&mut state, 1, &entry("/root/link.md", EntryKind::Link)).is_none());
-        assert!(state.message.contains("Preview unavailable"));
+        assert!(state.message.is_empty());
         assert!(activate(&mut state, 1, &entry("/root/code.rs", EntryKind::File)).is_none());
         assert_eq!(
             activate(&mut state, 1, &entry("/root/README.MD", EntryKind::File)),
             Some((1, "/root/README.MD".into()))
         );
         activate(&mut state, 1, &entry("/root/src", EntryKind::Directory));
-        assert_eq!(state.navigation[&1].root, Some("/root/src".into()));
+        assert_eq!(state.navigation[&1].root, Some("/root".into()));
+        assert!(
+            state.navigation[&1]
+                .expanded
+                .contains(Path::new("/root/src"))
+        );
+        activate(&mut state, 1, &entry("/root/src", EntryKind::Directory));
+        assert!(
+            !state.navigation[&1]
+                .expanded
+                .contains(Path::new("/root/src"))
+        );
     }
 
     #[test]

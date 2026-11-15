@@ -24,7 +24,6 @@ struct Cached {
 
 pub(crate) struct Explorer {
     visible: bool,
-    pinned: Option<usize>,
     navigation: HashMap<usize, Navigation>,
     cache: HashMap<Request, Cached>,
     loader: Loader,
@@ -46,7 +45,6 @@ impl Default for Explorer {
     fn default() -> Self {
         Self {
             visible: false,
-            pinned: None,
             navigation: HashMap::new(),
             cache: HashMap::new(),
             loader: Loader::default(),
@@ -67,20 +65,9 @@ impl Default for Explorer {
 }
 
 impl Explorer {
-    fn target(&self, active: Option<usize>) -> Option<usize> {
-        self.pinned.or(active)
-    }
-
     fn reconcile(&mut self, sources: &[(usize, Option<PathBuf>)]) {
         self.navigation
             .retain(|id, _| sources.iter().any(|(live, _)| live == id));
-        if self
-            .pinned
-            .is_some_and(|id| !self.navigation.contains_key(&id))
-        {
-            self.pinned = None;
-            self.message = "Pinned console closed; following active console.".into();
-        }
         for (id, source) in sources {
             self.navigation
                 .entry(*id)
@@ -252,7 +239,7 @@ pub(crate) fn before_keys(
     if blocked || window.settings_editor.is_open() || window.chrome.guide_blocked(ctx) {
         return (false, false);
     }
-    let target = window.explorer.target(active(window));
+    let target = active(window);
     let state = &mut window.explorer;
     let frame = ctx.cumulative_frame_nr();
     if !state.visible && !state.held && state.blocked_frame != Some(frame) {
@@ -332,7 +319,7 @@ pub(crate) fn show(window: &mut Window, ui: &mut egui::Ui, area: egui::Rect) {
         return;
     }
     let started = Instant::now();
-    let target = window.explorer.target(active(window));
+    let target = active(window);
     let label = target
         .and_then(|id| window.all_panes().find(|p| p.name == id))
         .map(|pane| crate::pane_view::display_label(pane).into_owned());

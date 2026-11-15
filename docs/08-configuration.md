@@ -609,6 +609,24 @@ without activating the console. The Board never executes producer action command
 Board control returns to the console. Console dimensions, programs, history, panel ownership
 and hidden-console pump budgets are preserved. Settings and Board remain separate.
 
+## File explorer
+
+Choose the folder icon in the right tool bar to show **Files**; click it again or press Escape
+while Files owns keyboard focus to hide it. Each console retains its own tree, selection and
+scroll position when you switch consoles or tools. The folder icon uses the same vector style
+and interaction feedback as the adjacent tools.
+
+Click a folder's chevron to expand or collapse it; double-clicking its name or pressing Enter
+also toggles it without leaving the tree's root. Single-click a regular `.md` file to open it in
+the existing Markdown viewer. Enter and the selected entry's **Open** control remain available.
+Other files can be selected and their paths copied, without a preview notice or execution.
+
+The top-right **Refresh** icon reloads directory listings. It keeps expansion and scroll position
+when the console directory is unchanged. When the console publishes a different local directory,
+a notice explains that Refresh adopts it. An unavailable or remote source suspends local browsing
+instead of choosing another console's directory. Files has no pin, up, reset or local close button.
+General text viewing is not included.
+
 ## Markdown and Git diff viewers
 
 Ctrl-click a local `.md` path printed by a console to open Markdown inside the terminal.

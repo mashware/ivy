@@ -134,6 +134,7 @@ fn frame(
     let output = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(area),
+            time: Some(ctx.cumulative_frame_nr() as f64 * 0.01),
             events,
             ..Default::default()
         },
@@ -163,15 +164,15 @@ fn click_at(window: &mut crate::Window, ctx: &egui::Context, area: egui::Rect, p
     frame(window, ctx, area, vec![button(false)]);
 }
 
-fn control_label(text: &str) -> &str {
-    match text {
-        "Hide" => "×",
-        "Pin this console" => "Pin",
-        "Follow active pane" => "Follow",
-        "Use console directory" => "Reset",
-        "Copy path" => "Copy",
-        _ => text,
-    }
+fn click_refresh(window: &mut crate::Window, ctx: &egui::Context, area: egui::Rect) {
+    frame(window, ctx, area, vec![]);
+    let dock = window.sidebar.last_dock.unwrap();
+    click_at(
+        window,
+        ctx,
+        area,
+        egui::pos2(dock.right() - 22.0, dock.top() + 19.0),
+    );
 }
 
 fn click_text(window: &mut crate::Window, ctx: &egui::Context, area: egui::Rect, text: &str) {
@@ -179,7 +180,7 @@ fn click_text(window: &mut crate::Window, ctx: &egui::Context, area: egui::Rect,
     let dock = window.sidebar.last_dock.expect("Files dock is visible");
     let pos = painted
         .iter()
-        .find(|(label, pos)| label == control_label(text) && dock.contains(*pos))
+        .find(|(label, pos)| label == text && dock.contains(*pos))
         .unwrap_or_else(|| panic!("{text:?} not painted; visible text: {painted:?}"))
         .1;
     click_at(window, ctx, area, pos);
@@ -279,14 +280,15 @@ fn publish_directory(window: &mut crate::Window, pane: usize, uri: &str) {
 }
 
 #[test]
-fn files_rail_pins_and_follows_across_tabs_without_leaking_input() {
+fn files_rail_follows_tabs_and_restores_navigation_without_leaking_input() {
     let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
     let ctx = egui::Context::default();
     let worktrees = Worktrees::new();
     let first = &worktrees.main;
     let second = &worktrees.branch;
     let marker = second.join("outside-click.marker");
-    fs::write(second.join("second.md"), "second").unwrap();
+    fs::write(first.join("src/a.txt"), "text").unwrap();
+    fs::write(second.join("00-second.txt"), "text").unwrap();
     let first_command = format!("cd '{}' && exec sleep 30", first.display());
     let target_command = format!(
         "cd '{}' && exec cat > '{}'",
@@ -307,155 +309,100 @@ fn files_rail_pins_and_follows_across_tabs_without_leaking_input() {
         .all_panes()
         .map(|pane| (pane.name, pane.measured))
         .collect();
-    frame(&mut window, &ctx, area, vec![]);
-
     let metrics =
         crate::painter::CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
     let rail = crate::tab_bar::geometry(&window, area, &metrics).rail;
-    click_at(
-        &mut window,
-        &ctx,
-        area,
-        egui::pos2(rail.center().x, rail.top() + 20.0),
-    );
-    frame(&mut window, &ctx, area, vec![]);
+    let rail_button = egui::pos2(rail.center().x, rail.top() + 20.0);
+    click_at(&mut window, &ctx, area, rail_button);
     assert!(window.explorer.visible);
-    // Native metadata may seed navigation before the shell has completed its initial cd.
-    // Adopt the now-observed fixture directory explicitly, as the user would.
-    click_text(&mut window, &ctx, area, "Use console directory");
+    click_refresh(&mut window, &ctx, area);
     wait_for_text(&mut window, &ctx, area, "entry-00.md");
-    assert_eq!(
-        window.explorer.navigation[&ids[0]].root.as_deref(),
-        Some(first.as_path())
-    );
-
-    // Expand A/src, select its Markdown child, then render with enough rows to retain 120 points.
-    let a_child = first.join("src/a.md");
-    window
-        .explorer
-        .navigation
-        .get_mut(&ids[0])
+    let painted = frame(&mut window, &ctx, area, vec![]);
+    let dock = window.sidebar.last_dock.unwrap();
+    for removed in ["×", "Pin", "Follow", "Up", "Reset", "Refresh"] {
+        assert!(
+            !painted
+                .iter()
+                .any(|(text, pos)| text == removed && dock.contains(*pos)),
+            "removed toolbar control {removed} remains"
+        );
+    }
+    // Click the actual folder disclosure control, then select a plain-text child quietly.
+    let src = painted
+        .iter()
+        .find(|(text, pos)| text == "src" && dock.contains(*pos))
         .unwrap()
-        .expanded
-        .insert(first.join("src"));
-    frame(&mut window, &ctx, area, vec![]);
-    wait_for_text(&mut window, &ctx, area, "a.md");
-    click_text(&mut window, &ctx, area, "a.md");
-    window.explorer.navigation.get_mut(&ids[0]).unwrap().scroll = 120.0;
-    frame(&mut window, &ctx, area, vec![]);
-    assert_eq!(
-        window.explorer.navigation[&ids[0]].selected,
-        Some(a_child.clone())
-    );
-    assert_eq!(window.explorer.navigation[&ids[0]].scroll, 120.0);
-
-    click_text(&mut window, &ctx, area, "Pin this console");
-    assert_eq!(window.explorer.pinned, Some(ids[0]));
-    // A tab card changes active focus after explorer ownership is captured in the same frame.
-    let metrics =
-        crate::painter::CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
-    click_tab(&mut window, &ctx, area, 1);
-    assert_eq!(
-        window.active, 1,
-        "explorer did not allow the real tab-card click"
-    );
+        .1;
+    let arrow = egui::pos2(dock.left() + 17.0, src.y);
+    click_at(&mut window, &ctx, area, arrow);
+    wait_for_text(&mut window, &ctx, area, "a.txt");
+    click_text(&mut window, &ctx, area, "a.txt");
+    assert!(!crate::viewer::is_open(&window));
+    assert!(window.explorer.message.is_empty());
+    let selected = first.join("src/a.txt");
+    // Advance simulated time so these pairs are double-clicks, not part of the preceding clicks.
+    for _ in 0..70 {
+        frame(&mut window, &ctx, area, vec![]);
+    }
+    click_text(&mut window, &ctx, area, "src");
+    click_text(&mut window, &ctx, area, "src");
     assert!(
-        frame(&mut window, &ctx, area, vec![])
-            .iter()
-            .any(|(text, _)| text.contains("Pinned:") && text.contains(&format!("#{}", ids[0]))),
-        "pinned A should remain the displayed target after switching tabs"
+        !window.explorer.navigation[&ids[0]]
+            .expanded
+            .contains(&first.join("src"))
     );
-    assert_eq!(window.explorer.target(Some(ids[2])), Some(ids[0]));
+    // A rapid double-click on the chevron toggles once per click, never again via row activation.
+    for _ in 0..70 {
+        frame(&mut window, &ctx, area, vec![]);
+    }
+    click_at(&mut window, &ctx, area, arrow);
+    click_at(&mut window, &ctx, area, arrow);
+    assert!(
+        !window.explorer.navigation[&ids[0]]
+            .expanded
+            .contains(&first.join("src"))
+    );
     assert_eq!(
         window.explorer.navigation[&ids[0]].root,
         Some(first.clone())
     );
-
-    // Follow B, then switch away and back: A's rendered navigation survives while B stays fresh.
-    click_text(&mut window, &ctx, area, "Follow active pane");
-    click_text(&mut window, &ctx, area, "Use console directory");
-    wait_for_text(&mut window, &ctx, area, "branch");
-    let b_before = (
-        window.explorer.navigation[&ids[2]].root.clone(),
-        window.explorer.navigation[&ids[2]].expanded.clone(),
-        window.explorer.navigation[&ids[2]].selected.clone(),
-        window.explorer.navigation[&ids[2]].scroll,
-    );
-    click_tab(&mut window, &ctx, area, 0);
-    assert_eq!(window.active, 0);
-    wait_for_text(&mut window, &ctx, area, "main");
-    assert_eq!(window.explorer.target(Some(ids[0])), Some(ids[0]));
-    let a_restored = &window.explorer.navigation[&ids[0]];
-    assert_eq!(a_restored.root, Some(first.clone()));
-    assert!(a_restored.expanded.contains(&first.join("src")));
-    assert_eq!(a_restored.selected, Some(a_child.clone()));
-    assert_eq!(a_restored.scroll, 120.0);
-    click_tab(&mut window, &ctx, area, 1);
-    assert_eq!(window.active, 1);
-    wait_for_text(&mut window, &ctx, area, "branch");
-    let b_after = (
-        window.explorer.navigation[&ids[2]].root.clone(),
-        window.explorer.navigation[&ids[2]].expanded.clone(),
-        window.explorer.navigation[&ids[2]].selected.clone(),
-        window.explorer.navigation[&ids[2]].scroll,
-    );
-    assert_eq!(b_after, b_before, "B's navigation changed while browsing A");
-
-    // Pin A again while it is active, then return to B to exercise its outside-click delivery.
-    click_tab(&mut window, &ctx, area, 0);
-    wait_for_text(&mut window, &ctx, area, "main");
-    click_text(&mut window, &ctx, area, "Pin this console");
-    click_tab(&mut window, &ctx, area, 1);
-    assert_eq!(window.explorer.pinned, Some(ids[0]));
-    assert_eq!(window.active, 1);
-
-    // Explorer keys and pointer gestures are consumed before the terminal dispatcher.
-    // Reclaim keyboard ownership after the tab click transferred it to the active console.
-    click_text(&mut window, &ctx, area, "entry-01.md");
-    let before_keystrokes = window.pane_called(ids[2]).unwrap().keystrokes.len();
-    type_text(&mut window, &ctx, area, "SHOULD_NOT_REACH_PTY");
-    frame(
-        &mut window,
-        &ctx,
-        area,
-        vec![egui::Event::Key {
-            key: egui::Key::ArrowDown,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: egui::Modifiers::NONE,
-        }],
-    );
-    frame(
-        &mut window,
-        &ctx,
-        area,
-        vec![
-            egui::Event::PointerMoved(egui::pos2(1000.0, 350.0)),
-            egui::Event::MouseWheel {
-                unit: egui::MouseWheelUnit::Line,
-                delta: egui::vec2(0.0, -2.0),
-                modifiers: egui::Modifiers::NONE,
-                phase: egui::TouchPhase::Move,
-            },
-            egui::Event::PointerButton {
-                pos: egui::pos2(1000.0, 350.0),
-                button: egui::PointerButton::Primary,
-                pressed: false,
-                modifiers: egui::Modifiers::NONE,
-            },
-        ],
-    );
-    assert_eq!(
-        window.pane_called(ids[2]).unwrap().keystrokes.len(),
-        before_keystrokes
-    );
-
-    // A click on the console transfers focus to B while preserving the pinned A tree.
-    let content = crate::tab_bar::geometry(&window, area, &metrics).consoles;
-    let b_rect = crate::pane_view::view_tiling(&window, content, &metrics).parts[0];
-    click_at(&mut window, &ctx, area, b_rect.center());
+    click_at(&mut window, &ctx, area, arrow);
+    wait_for_text(&mut window, &ctx, area, "a.txt");
+    click_text(&mut window, &ctx, area, "a.txt");
+    window.explorer.navigation.get_mut(&ids[0]).unwrap().scroll = 120.0;
     frame(&mut window, &ctx, area, vec![]);
+    // Reload expanded, scrolled contents through the real icon and wait through loading frames.
+    fs::write(first.join("entry-10a.txt"), "new").unwrap();
+    click_refresh(&mut window, &ctx, area);
+    wait_for_text(&mut window, &ctx, area, "entry-10a.txt");
+    assert_eq!(window.explorer.navigation[&ids[0]].scroll, 120.0);
+    assert!(
+        window.explorer.navigation[&ids[0]]
+            .expanded
+            .contains(&first.join("src"))
+    );
+    click_tab(&mut window, &ctx, area, 1);
+    assert_eq!(window.active, 1);
+    click_refresh(&mut window, &ctx, area);
+    wait_for_text(&mut window, &ctx, area, "00-second.txt");
+    let b_before = window.explorer.navigation[&ids[2]].root.clone();
+    click_tab(&mut window, &ctx, area, 0);
+    wait_for_text(&mut window, &ctx, area, "main");
+    let restored = &window.explorer.navigation[&ids[0]];
+    assert_eq!(restored.root, Some(first.clone()));
+    assert_eq!(restored.selected, Some(selected.clone()));
+    assert!(restored.expanded.contains(&first.join("src")));
+    assert_eq!(restored.scroll, 120.0);
+    click_tab(&mut window, &ctx, area, 1);
+    wait_for_text(&mut window, &ctx, area, "00-second.txt");
+    assert_eq!(window.explorer.navigation[&ids[2]].root, b_before);
+    click_text(&mut window, &ctx, area, "00-second.txt");
+    let before_keys = window.pane_called(ids[2]).unwrap().keystrokes.clone();
+    type_text(&mut window, &ctx, area, "SHOULD_NOT_REACH_PTY");
+    assert_eq!(window.pane_called(ids[2]).unwrap().keystrokes, before_keys);
+    let content = crate::tab_bar::geometry(&window, area, &metrics).consoles;
+    let console = crate::pane_view::view_tiling(&window, content, &metrics).parts[0];
+    click_at(&mut window, &ctx, area, console.center());
     type_text(&mut window, &ctx, area, "outside-marker\n");
     let deadline = Instant::now() + std::time::Duration::from_secs(5);
     while !matches!(
@@ -468,42 +415,14 @@ fn files_rail_pins_and_follows_across_tabs_without_leaking_input() {
         );
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
-    assert_eq!(window.explorer.target(Some(ids[2])), Some(ids[0]));
-
-    // Follow resolves to B immediately, and the same frame paints B's root.
-    click_text(&mut window, &ctx, area, "Follow active pane");
-    assert_eq!(window.explorer.pinned, None);
-    let painted = frame(&mut window, &ctx, area, vec![]);
-    assert!(
-        painted
-            .iter()
-            .any(|(text, _)| !text.contains("Pinned:") && text.contains("Following:"))
-    );
-    wait_for_text(&mut window, &ctx, area, "branch");
-    assert_eq!(window.explorer.target(Some(ids[2])), Some(ids[2]));
-    assert_eq!(
-        window.explorer.navigation[&ids[2]].root,
-        Some(second.clone())
-    );
-
-    // Hide and reopen retain each pane's tree and pin state. Closing restores the console area.
-    click_text(&mut window, &ctx, area, "Pin this console");
-    assert_eq!(window.explorer.pinned, Some(ids[2]));
-    window
-        .explorer
-        .navigation
-        .get_mut(&ids[0])
-        .unwrap()
-        .selected = Some(a_child.clone());
-    window.explorer.navigation.get_mut(&ids[0]).unwrap().scroll = 120.0;
-    click_text(&mut window, &ctx, area, "Hide");
+    click_at(&mut window, &ctx, area, rail_button);
     assert!(!window.explorer.visible);
-    crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
-    frame(&mut window, &ctx, area, vec![]);
+    click_at(&mut window, &ctx, area, rail_button);
     assert!(window.explorer.visible);
-    assert_eq!(window.explorer.navigation[&ids[0]].selected, Some(a_child));
+    assert_eq!(window.explorer.navigation[&ids[0]].selected, Some(selected));
     assert_eq!(window.explorer.navigation[&ids[0]].scroll, 120.0);
-    assert_eq!(window.explorer.pinned, Some(ids[2]));
+    // Give the explorer keyboard focus before checking Escape ownership.
+    click_text(&mut window, &ctx, area, "00-second.txt");
     let before_escape = window.pane_called(ids[2]).unwrap().keystrokes.clone();
     frame(
         &mut window,
@@ -517,30 +436,28 @@ fn files_rail_pins_and_follows_across_tabs_without_leaking_input() {
             modifiers: egui::Modifiers::NONE,
         }],
     );
-    assert!(!window.explorer.visible, "Escape should close the explorer");
+    assert!(!window.explorer.visible);
     assert_eq!(
         window.pane_called(ids[2]).unwrap().keystrokes,
-        before_escape,
-        "Escape leaked to the active PTY"
+        before_escape
     );
     assert_eq!(
         window
             .all_panes()
             .map(|pane| (pane.name, pane.measured))
             .collect::<Vec<_>>(),
-        before,
-        "closing the dock must restore console geometry"
+        before
     );
 }
 
 #[test]
-fn markdown_selection_opens_from_the_pinned_pane_only_after_enter() {
+fn markdown_single_click_opens_the_file_from_the_active_console() {
     let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
     let ctx = egui::Context::default();
     let first = Directory::new("markdown-handoff-a");
     let second = Directory::new("markdown-handoff-b");
-    fs::write(first.0.join("handoff.md"), "PINNED_SOURCE_CONTENT").unwrap();
-    fs::write(second.0.join("handoff.md"), "ACTIVE_SOURCE_CONTENT").unwrap();
+    fs::write(first.0.join("handoff.md"), "FIRST_SOURCE_CONTENT").unwrap();
+    fs::write(second.0.join("handoff.md"), "SECOND_SOURCE_CONTENT").unwrap();
     let first_command = format!("cd '{}' && exec sleep 30", first.0.display());
     let second_command = format!("cd '{}' && exec sleep 30", second.0.display());
     let mut window = window_of_tabs([
@@ -553,30 +470,26 @@ fn markdown_selection_opens_from_the_pinned_pane_only_after_enter() {
     let ids: Vec<_> = window.all_panes().map(|pane| pane.name).collect();
     wait_for_source(&mut window, &ctx, area, ids[0], &first.0);
     wait_for_source(&mut window, &ctx, area, ids[2], &second.0);
+    for (tab, expected) in [(0, "FIRST_SOURCE_CONTENT"), (1, "SECOND_SOURCE_CONTENT")] {
+        click_tab(&mut window, &ctx, area, tab);
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+        frame(&mut window, &ctx, area, vec![]);
+        click_refresh(&mut window, &ctx, area);
+        wait_for_text(&mut window, &ctx, area, "handoff.md");
+        click_text(&mut window, &ctx, area, "handoff.md");
+        assert!(
+            crate::viewer::is_open(&window),
+            "single click did not open Markdown"
+        );
+        assert!(!window.explorer.visible);
+        assert_eq!(window.active, tab);
+        wait_for_text(&mut window, &ctx, area, expected);
+    }
+    // Keyboard activation remains available without first clicking the file.
     crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
     frame(&mut window, &ctx, area, vec![]);
-    click_text(&mut window, &ctx, area, "Use console directory");
-    assert_eq!(window.explorer.target(Some(ids[0])), Some(ids[0]));
-    click_text(&mut window, &ctx, area, "handoff.md");
-    assert!(window.explorer.visible);
-    assert!(
-        !crate::viewer::is_open(&window),
-        "single click opened the viewer"
-    );
-    assert_eq!(
-        window.explorer.navigation[&ids[0]].selected,
-        Some(first.0.join("handoff.md"))
-    );
-
-    click_text(&mut window, &ctx, area, "Pin this console");
-    click_tab(&mut window, &ctx, area, 1);
-    assert_eq!(window.active, 1);
-    assert_eq!(window.explorer.target(Some(ids[2])), Some(ids[0]));
-    click_text(&mut window, &ctx, area, "handoff.md");
-    assert_eq!(
-        window.active, 1,
-        "selecting the pinned tree changed active tab"
-    );
+    let pane = ids[2];
+    window.explorer.navigation.get_mut(&pane).unwrap().selected = Some(second.0.join("handoff.md"));
     frame(
         &mut window,
         &ctx,
@@ -589,26 +502,12 @@ fn markdown_selection_opens_from_the_pinned_pane_only_after_enter() {
             modifiers: egui::Modifiers::NONE,
         }],
     );
-    assert!(
-        crate::viewer::is_open(&window),
-        "Enter did not open the selected file"
-    );
-    assert!(
-        !window.explorer.visible,
-        "the explorer stayed over the viewer"
-    );
-    wait_for_text(&mut window, &ctx, area, "PINNED_SOURCE_CONTENT");
-    assert!(
-        frame(&mut window, &ctx, area, vec![])
-            .iter()
-            .any(|(text, _)| text
-                .contains(&first.0.join("handoff.md").to_string_lossy().to_string())),
-        "viewer did not open the Markdown file from the pinned pane"
-    );
+    assert!(crate::viewer::is_open(&window));
+    wait_for_text(&mut window, &ctx, area, "SECOND_SOURCE_CONTENT");
 }
 
 #[test]
-fn remote_source_suspends_saved_navigation_and_console_directory_resets_it_explicitly() {
+fn remote_source_suspends_saved_navigation_and_refresh_adopts_a_changed_console_directory() {
     let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
     let ctx = egui::Context::default();
     let original = Directory::new("source-original");
@@ -624,7 +523,7 @@ fn remote_source_suspends_saved_navigation_and_console_directory_resets_it_expli
     wait_for_source(&mut window, &ctx, area, pane, &original.0);
     crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
     frame(&mut window, &ctx, area, vec![]);
-    click_text(&mut window, &ctx, area, "Use console directory");
+    click_refresh(&mut window, &ctx, area);
 
     window
         .explorer
@@ -668,7 +567,7 @@ fn remote_source_suspends_saved_navigation_and_console_directory_resets_it_expli
     wait_for_source(&mut window, &ctx, area, pane, &current.0);
     wait_for_text(&mut window, &ctx, area, "Console directory changed");
     assert_eq!(window.explorer.navigation[&pane].root, Some(saved_root));
-    click_text(&mut window, &ctx, area, "Use console directory");
+    click_refresh(&mut window, &ctx, area);
     assert_eq!(
         window.explorer.navigation[&pane].root,
         Some(current.0.clone()),
@@ -681,7 +580,7 @@ fn refresh_clears_a_deleted_selection_and_reports_a_deleted_explorer_root() {
     let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
     let ctx = egui::Context::default();
     let directory = Directory::new("delete-refresh");
-    let selected = directory.0.join("selected.md");
+    let selected = directory.0.join("selected.txt");
     let child = directory.0.join("child");
     fs::write(&selected, "selected").unwrap();
     fs::create_dir(&child).unwrap();
@@ -694,15 +593,15 @@ fn refresh_clears_a_deleted_selection_and_reports_a_deleted_explorer_root() {
     wait_for_source(&mut window, &ctx, area, pane, &directory.0);
     crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
     frame(&mut window, &ctx, area, vec![]);
-    click_text(&mut window, &ctx, area, "Use console directory");
-    wait_for_text(&mut window, &ctx, area, "selected.md");
-    click_text(&mut window, &ctx, area, "selected.md");
+    click_refresh(&mut window, &ctx, area);
+    wait_for_text(&mut window, &ctx, area, "selected.txt");
+    click_text(&mut window, &ctx, area, "selected.txt");
     assert_eq!(
         window.explorer.navigation[&pane].selected,
         Some(selected.clone())
     );
     fs::remove_file(selected).unwrap();
-    click_text(&mut window, &ctx, area, "Refresh");
+    click_refresh(&mut window, &ctx, area);
     let deadline = Instant::now() + std::time::Duration::from_secs(5);
     while window.explorer.navigation[&pane].selected.is_some() {
         frame(&mut window, &ctx, area, vec![]);
@@ -721,7 +620,7 @@ fn refresh_clears_a_deleted_selection_and_reports_a_deleted_explorer_root() {
         .enter(child.clone());
     wait_for_text(&mut window, &ctx, area, "child.md");
     fs::remove_dir_all(&child).unwrap();
-    click_text(&mut window, &ctx, area, "Refresh");
+    click_refresh(&mut window, &ctx, area);
     let deadline = Instant::now() + std::time::Duration::from_secs(5);
     loop {
         let painted = frame(&mut window, &ctx, area, vec![]);
@@ -729,8 +628,7 @@ fn refresh_clears_a_deleted_selection_and_reports_a_deleted_explorer_root() {
             .iter()
             .any(|(text, _)| text.contains("Directory unavailable."))
         {
-            assert!(painted.iter().any(|(text, _)| text == "Refresh"));
-            assert!(painted.iter().any(|(text, _)| text == "Reset"));
+            assert!(!painted.iter().any(|(text, _)| text == "Reset"));
             break;
         }
         assert!(

@@ -40,6 +40,14 @@ impl Navigation {
         self.refresh();
     }
 
+    pub(super) fn reload(&mut self) {
+        if self.source.is_some() && self.source != self.seeded_source {
+            self.use_source();
+        } else {
+            self.refresh();
+        }
+    }
+
     pub(super) fn refresh(&mut self) {
         self.generation = self.generation.wrapping_add(1);
     }
@@ -50,7 +58,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cwd_changes_suspend_and_restore_navigation_until_explicit_reset() {
+    fn cwd_changes_suspend_navigation_until_explicit_reload() {
         let mut nav = Navigation::default();
         nav.observe(Some("/work/a".into()));
         nav.expanded.insert("/work/a/src".into());
@@ -63,12 +71,27 @@ mod tests {
         assert_eq!(nav.root, Some("/work/a".into()));
         assert_eq!(nav.scroll, 120.0);
         assert!(nav.expanded.contains(&PathBuf::from("/work/a/src")));
-        nav.use_source();
+        nav.reload();
         assert_eq!(nav.root, Some("/work/b".into()));
         assert!(nav.expanded.is_empty());
         assert!(nav.selected.is_none());
         assert_eq!(nav.scroll, 0.0);
     }
+    #[test]
+    fn same_source_reload_preserves_expansion_selection_and_scroll() {
+        let mut nav = Navigation::default();
+        nav.observe(Some("/work/a".into()));
+        nav.expanded.insert("/work/a/src".into());
+        nav.selected = Some("/work/a/src/a.md".into());
+        nav.scroll = 120.0;
+        let generation = nav.generation;
+        nav.reload();
+        assert_eq!(nav.generation, generation + 1);
+        assert!(nav.expanded.contains(std::path::Path::new("/work/a/src")));
+        assert_eq!(nav.selected, Some("/work/a/src/a.md".into()));
+        assert_eq!(nav.scroll, 120.0);
+    }
+
     #[test]
     fn deliberate_browsing_does_not_report_a_console_directory_change() {
         let mut nav = Navigation::default();
