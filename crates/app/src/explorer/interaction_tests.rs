@@ -849,24 +849,8 @@ fn maximized_files_input_and_document_handoff_never_reach_covered_programs() {
         vec![key(egui::Key::ArrowDown, false)],
     );
     let dock = window.sidebar.last_dock.unwrap();
-    let pos = egui::pos2(dock.center().x, dock.bottom() - 60.0);
-    click_at(&mut window, &ctx, area, pos);
-    frame(
-        &mut window,
-        &ctx,
-        area,
-        vec![
-            egui::Event::PointerMoved(pos),
-            egui::Event::MouseWheel {
-                unit: egui::MouseWheelUnit::Line,
-                delta: egui::vec2(0.0, -2.0),
-                modifiers: egui::Modifiers::NONE,
-                phase: egui::TouchPhase::Move,
-            },
-        ],
-    );
     let from = egui::pos2(dock.left() - 3.0, dock.center().y);
-    let to = from - egui::vec2(70.0, 0.0);
+    let to = egui::pos2(area.left() + 360.0, from.y);
     let button = |pos, pressed| egui::Event::PointerButton {
         pos,
         button: egui::PointerButton::Primary,
@@ -882,6 +866,38 @@ fn maximized_files_input_and_document_handoff_never_reach_covered_programs() {
     frame(&mut window, &ctx, area, vec![egui::Event::PointerMoved(to)]);
     frame(&mut window, &ctx, area, vec![button(to, false)]);
     assert!(window.sidebar.last_dock.unwrap().width() > dock.width() + 60.0);
+    let dock = window.sidebar.last_dock.unwrap();
+    let body = egui::Rect::from_min_max(
+        dock.min + egui::vec2(0.0, 130.0),
+        dock.max - egui::vec2(0.0, 60.0),
+    );
+    let overlap = window
+        .all_panes()
+        .filter_map(|pane| pane.painted_console.as_ref())
+        .map(|console| body.intersect(console.area.shrink(8.0)))
+        .find(|rect| rect.width() > 4.0 && rect.height() > 4.0)
+        .expect("Files must cover actual terminal cells so pointer leaks are observable");
+    let pos = overlap.center();
+    assert!(window.all_panes().any(|pane| {
+        pane.painted_console
+            .as_ref()
+            .is_some_and(|console| console.area.contains(pos))
+    }));
+    click_at(&mut window, &ctx, area, pos);
+    frame(
+        &mut window,
+        &ctx,
+        area,
+        vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Line,
+                delta: egui::vec2(0.0, -2.0),
+                modifiers: egui::Modifiers::NONE,
+                phase: egui::TouchPhase::Move,
+            },
+        ],
+    );
 
     click_text(&mut window, &ctx, area, "reading.md");
     frame(&mut window, &ctx, area, vec![key(egui::Key::Enter, true)]);
