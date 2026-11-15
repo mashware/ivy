@@ -79,17 +79,12 @@ pub(super) fn show(
                     editor.timing.record_work(3, started.elapsed());
                 }
             }
+            let popup_style = ui.style().clone();
             egui::Popup::menu(&response)
-                .frame(
-                    egui::Frame::new()
-                        .fill(egui::Color32::from_rgb(35, 41, 54))
-                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(70, 81, 106)))
-                        .corner_radius(9)
-                        .inner_margin(10),
-                )
+                .frame(super::palette::popup_frame(ui))
                 .width(width)
                 .show(|ui| {
-                    super::settings_style(ui);
+                    ui.set_style(popup_style);
                     let choices: Vec<&str> = std::iter::once("")
                         .chain(editor.fonts.iter().flatten().map(String::as_str))
                         .collect();
@@ -154,11 +149,11 @@ pub(super) fn show(
             let (rect, outer) =
                 ui.allocate_exact_size(egui::vec2(113.0, 40.0), egui::Sense::click());
             ui.painter()
-                .rect_filled(rect, 6.0, egui::Color32::from_rgb(32, 37, 49));
+                .rect_filled(rect, 6.0, ui.visuals().extreme_bg_color);
             ui.painter().rect_stroke(
                 rect,
                 6.0,
-                egui::Stroke::new(1.0, egui::Color32::from_rgb(54, 62, 80)),
+                egui::Stroke::new(1.0, ui.visuals().window_stroke.color),
                 egui::StrokeKind::Inside,
             );
             let font = egui::FontId::proportional(14.0);
@@ -197,12 +192,7 @@ pub(super) fn show(
                 );
                 ui.add_sized(
                     [52.0, 40.0],
-                    egui::Button::new(
-                        egui::RichText::new("Reset")
-                            .size(14.0)
-                            .color(ui.visuals().weak_text_color()),
-                    )
-                    .frame(false),
+                    egui::Button::new(egui::RichText::new("Reset").size(14.0)).frame(false),
                 )
                 .clicked()
             })
@@ -258,8 +248,8 @@ pub(super) fn show(
     }
     ui.add_space(10.0);
     egui::Frame::new()
-        .fill(egui::Color32::from_rgb(21, 25, 35))
-        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(40, 47, 63)))
+        .fill(ui.visuals().panel_fill)
+        .stroke(egui::Stroke::new(1.0, ui.visuals().window_stroke.color))
         .corner_radius(7)
         .inner_margin(egui::Margin::symmetric(14, 12))
         .show(ui, |ui| {

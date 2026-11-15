@@ -536,3 +536,5 @@ fn filtered_arrow_navigation_starts_at_first_result() {
 mod layout;
 
 mod usability;
+
+mod theme_preview;

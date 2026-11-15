@@ -377,6 +377,14 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/settings/editor/view/colors.rs"),
     ),
     (
+        "src/settings/editor/view/palette.rs",
+        include_str!("../src/settings/editor/view/palette.rs"),
+    ),
+    (
+        "src/settings/editor/view/tests/theme_preview.rs",
+        include_str!("../src/settings/editor/view/tests/theme_preview.rs"),
+    ),
+    (
         "src/settings/editor/view/appearance.rs",
         include_str!("../src/settings/editor/view/appearance.rs"),
     ),
