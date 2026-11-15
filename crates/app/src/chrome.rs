@@ -13,6 +13,7 @@ pub(crate) struct Chrome {
     zoom_probe: bool,
     menu: bool,
     menu_scroll: f32,
+    menu_selected: Option<usize>,
     guide: connection::Guide,
     updates: updates::Dialog,
     held: bool,
@@ -112,9 +113,7 @@ enum Action {
     Updates(bool),
     Menu,
     Preferences,
-    Viewer(bool),
     Shortcuts,
-    TogglePanel,
     Minimize,
     Maximize,
     Close,
@@ -350,13 +349,20 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
             ctx.send_viewport_cmd(ViewportCommand::StartDrag);
         }
     }
+    if window.settings_editor.is_open()
+        || window.pane_view.is_modal()
+        || window.chrome.guide_blocked(&ctx)
+    {
+        action = None;
+        window.chrome.menu = false;
+    }
     if matches!(action, Some(Action::Menu)) {
         window.chrome.menu = !window.chrome.menu;
         window.chrome.menu_scroll = 0.0;
+        window.chrome.menu_selected = None;
         action = None;
         ctx.request_repaint();
     }
-    connection::open_requested(window, &ctx, &mut action);
     let (menu_rect, menu_action) = menu::show(window, ui, row, area, compact);
     action = menu_action.or(action);
     let frame = ctx.cumulative_frame_nr();
@@ -406,8 +412,11 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     let elapsed = started.elapsed();
     window.chrome.record_work(elapsed);
     if window.settings_editor.is_open()
+        || window.pane_view.is_modal()
+        || window.chrome.guide_blocked(&ctx)
         || !ui.is_enabled()
         || (crate::board::blocked(window, &ctx)
+            && !window.board.is_open()
             && !matches!(
                 action,
                 Some(Action::Board | Action::Minimize | Action::Maximize | Action::Close)
@@ -418,13 +427,25 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     if action.is_some() && !matches!(action, Some(Action::Menu)) {
         window.chrome.menu = false;
     }
+    let board_handoff = window.board.is_open()
+        && matches!(
+            action,
+            Some(
+                Action::Preferences
+                    | Action::Shortcuts
+                    | Action::Connect
+                    | Action::Updates(_)
+                    | Action::Search
+            )
+        );
+    if board_handoff {
+        crate::board::dismiss_for_chrome(window, &ctx);
+    }
     let dispatch = Instant::now();
     let inline = matches!(
         action,
         Some(
             Action::Search
-                | Action::Viewer(_)
-                | Action::TogglePanel
                 | Action::Minimize
                 | Action::Maximize
                 | Action::Close
@@ -442,7 +463,10 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         Some(Action::SplitDown) => {
             window.apply(WindowRequest::Split(Orientation::Rows), &ctx, area, metrics)
         }
-        Some(Action::NewTab) => window.apply(WindowRequest::NewTab, &ctx, area, metrics),
+        Some(Action::NewTab) => {
+            window.apply(WindowRequest::NewTab, &ctx, area, metrics);
+            crate::board::reanchor(window);
+        }
         Some(Action::Search) => {
             let focus = window.active().focus;
             if let Some(pane) = window
@@ -457,26 +481,14 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
             }
         }
         Some(Action::Board) => crate::board::toggle(window, &ctx),
-        Some(Action::Connect) => connection::open(window, &ctx),
-        Some(Action::Updates(check)) => updates::open(window, &ctx, check),
+        Some(Action::Connect) => connection::open(window, &ctx, board_handoff),
+        Some(Action::Updates(check)) => updates::open(window, &ctx, check, board_handoff),
         Some(Action::Menu) => window.chrome.menu = !window.chrome.menu,
         Some(Action::Preferences) => {
             window.chrome.menu = false;
             window.settings_editor.open_from_chrome();
         }
         Some(Action::Shortcuts) => window.settings_editor.open_shortcuts_from_chrome(),
-        Some(Action::Viewer(markdown)) => crate::viewer::open(window, markdown),
-        Some(Action::TogglePanel) => {
-            let focus = window.active().focus;
-            if let Some(pane) = window
-                .active_mut()
-                .panes_mut()
-                .into_iter()
-                .find(|p| p.name == focus)
-            {
-                pane.folded = !pane.folded;
-            }
-        }
         Some(Action::Minimize) => ctx.send_viewport_cmd(ViewportCommand::Minimized(true)),
         Some(Action::Maximize) => {
             let maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
