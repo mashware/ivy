@@ -2020,6 +2020,7 @@ mod tests {
                     crate::board::toggle(&mut window, &ctx);
                 }
                 frame(&mut window, &ctx, area, vec![]);
+                let focus_before_menu_action = window.active().focus;
                 let shapes = open_updates_menu(&mut window, &ctx, area);
                 let at = text_center(&shapes, label);
                 separate_click(&mut window, &ctx, area, at);
@@ -2037,6 +2038,18 @@ mod tests {
                     window
                         .all_panes_mut()
                         .all(|pane| pane.keystrokes.is_empty())
+                );
+                assert_eq!(
+                    window.active().focus,
+                    focus_before_menu_action,
+                    "{label} changed the active application focus"
+                );
+                frame(&mut window, &ctx, area, vec![menu_key(egui::Key::Escape)]);
+                assert!(!window.settings_editor.is_open(), "{label} did not close");
+                assert_eq!(
+                    window.active().focus,
+                    focus_before_menu_action,
+                    "closing {label} did not restore the active application focus"
                 );
             }
         }
