@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use super::*;
 use crate::tests::window_of_tabs;
 use eframe::egui::epaint::Shape;
