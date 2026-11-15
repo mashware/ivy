@@ -2063,6 +2063,7 @@ mod tests {
                     ("What's new", "New in this alpha"),
                     ("Connect agents", "Copy setup prompt"),
                     ("Search console", ""),
+                    ("Files", "Files"),
                 ] {
                     let ctx = egui::Context::default();
                     chrome::prepare(&ctx);

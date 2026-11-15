@@ -87,12 +87,12 @@ pub(crate) fn open_markdown_target(
     pane: usize,
     path: PathBuf,
     _line: Option<u32>,
-) {
+) -> bool {
     let Some(source) = source(window, pane) else {
-        return;
+        return false;
     };
     if !pin(&mut window.viewer, source) {
-        return;
+        return false;
     }
     window.viewer.open_markdown();
     window.viewer.path = path.to_string_lossy().into_owned();
@@ -108,6 +108,7 @@ pub(crate) fn open_markdown_target(
     if let Some(ctx) = &window.viewer.context {
         ctx.request_repaint();
     }
+    true
 }
 
 #[cfg(test)]

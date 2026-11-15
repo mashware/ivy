@@ -325,6 +325,7 @@ fn initial_window(
         clipboard: crate::clipboard::Service::default(),
         board: crate::board::State::default(),
         viewer: crate::viewer::State::default(),
+        explorer: crate::explorer::Explorer::default(),
         projects: crate::project_view::State::default(),
         restoration: crate::restoration::State::default(),
         link_press_in_progress: None,

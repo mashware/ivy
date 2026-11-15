@@ -100,7 +100,7 @@ mod traffic_lights;
 pub(crate) mod typography;
 mod updates;
 pub(crate) use branding::native_options;
-pub(crate) use connection::{after_panels, begin_pass, prepare};
+pub(crate) use connection::{begin_pass, prepare};
 
 #[derive(Clone, Copy)]
 enum Action {
@@ -113,6 +113,7 @@ enum Action {
     Updates(bool),
     Menu,
     Preferences,
+    Files,
     Shortcuts,
     Minimize,
     Maximize,
@@ -436,6 +437,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
                     | Action::Connect
                     | Action::Updates(_)
                     | Action::Search
+                    | Action::Files
             )
         );
     if board_handoff {
@@ -446,6 +448,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         action,
         Some(
             Action::Search
+                | Action::Files
                 | Action::Minimize
                 | Action::Maximize
                 | Action::Close
@@ -489,6 +492,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
             window.settings_editor.open_from_chrome();
         }
         Some(Action::Shortcuts) => window.settings_editor.open_shortcuts_from_chrome(),
+        Some(Action::Files) => crate::explorer::toggle(window, &ctx),
         Some(Action::Minimize) => ctx.send_viewport_cmd(ViewportCommand::Minimized(true)),
         Some(Action::Maximize) => {
             let maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
@@ -538,6 +542,11 @@ fn resize_direction(area: Rect, p: egui::Pos2) -> Option<egui::ResizeDirection> 
         (_, _, _, true) => Some(East),
         _ => None,
     }
+}
+
+pub(crate) fn after_panels(window: &mut Window, ui: &mut egui::Ui, area: Rect) {
+    crate::explorer::show(window, ui, area);
+    connection::after_panels(window, ui, area);
 }
 
 #[cfg(test)]

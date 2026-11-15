@@ -8,6 +8,7 @@ pub(super) fn handle(
     ui: &egui::Ui,
     tab_bar: egui::Rect,
     metrics: &CellMetrics,
+    blocked: bool,
 ) {
     let started = Instant::now();
     let count = window.tabs.len();
@@ -39,7 +40,7 @@ pub(super) fn handle(
             feedback::id(ui, window.tabs[which_tab].name, "body"),
         )
         .on_hover_text("Double-click or right-click to rename tab");
-        if response.double_clicked() || response.secondary_clicked() {
+        if !blocked && (response.double_clicked() || response.secondary_clicked()) {
             let tab = &window.tabs[which_tab];
             let initial = tab
                 .label
@@ -58,6 +59,9 @@ pub(super) fn handle(
             .clicked();
     window.chrome.record_work(started.elapsed());
     window.timed_separately += window.chrome.take_cost();
+    if blocked {
+        return;
+    }
     if let Some((which, close)) = action {
         window.apply(
             WindowRequest::Go(which as isize - window.active as isize),

@@ -611,6 +611,34 @@ mod tests {
     use super::*;
     use eframe::egui::epaint::Shape;
 
+    #[test]
+    fn explorer_transition_keeps_comments_and_rejects_a_different_document() {
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        let ctx = egui::Context::default();
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
+        crate::tests::one_frame_in(&mut window, &ctx, area, vec![]);
+        window.viewer.path = "/tmp/original.md".into();
+        window.viewer.review.draft = Some(Draft {
+            location: Location {
+                path: "original.rs".into(),
+                side: "new",
+                line: 1,
+            },
+            text: "Keep this comment".into(),
+        });
+        crate::viewer::hide(&mut window);
+        let pane = window.active().panes()[0].name;
+        assert!(!crate::viewer::open_markdown_target(
+            &mut window,
+            pane,
+            "/tmp/other.md".into(),
+            None
+        ));
+        assert_eq!(window.viewer.path, "/tmp/original.md");
+        assert!(window.viewer.review.has_comments());
+        assert!(window.viewer.message.contains("Send or clear"));
+    }
+
     fn frame(
         review: &mut Review,
         ctx: &egui::Context,

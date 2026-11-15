@@ -71,6 +71,7 @@ pub mod session;
 pub mod settings;
 mod shell_integration;
 use shell_integration::the_users_shell;
+mod explorer;
 mod startup;
 mod tab_bar;
 pub mod theme;
@@ -901,6 +902,7 @@ struct Window {
     clipboard: clipboard::Service,
     board: board::State,
     viewer: viewer::State,
+    explorer: explorer::Explorer,
     projects: project_view::State,
     restoration: restoration::State,
     /// The previous frame's mirror. **The deadline is armed against it**, so the deadline is
@@ -1393,7 +1395,18 @@ impl eframe::App for Window {
             ui.disable();
         }
         board_owned |= board::blocked(self, ui.ctx());
-        let (viewer_owned, requests) = viewer::keys(self, ui, &metrics, pane_owned || board_owned);
+        let (explorer_keys, explorer_pointer) = explorer::before_keys(
+            self,
+            ui,
+            &metrics,
+            pane_owned || board_owned || chrome_owned || viewer::is_open(self),
+        );
+        let (viewer_owned, requests) = viewer::keys(
+            self,
+            ui,
+            &metrics,
+            pane_owned || board_owned || explorer_keys,
+        );
         let area = ui.max_rect();
 
         // **The order is applied before tiling**, so that what gets painted in this same frame is
@@ -1410,8 +1423,10 @@ impl eframe::App for Window {
         self.answer_the_windows_requests(ui.ctx(), area, &metrics);
 
         pane_view::reconcile(self);
-        let overlay_owns_pointer = viewer_owned || board_owned || pane_owned || chrome_owned;
+        let overlay_owns_pointer =
+            viewer_owned || explorer_pointer || board_owned || pane_owned || chrome_owned;
         let header_owns_pointer = viewer_owned
+            || explorer_pointer
             || pane_owned
             || chrome_owned
             || header::menu::pointer_blocked(self, ui.ctx());
@@ -1423,8 +1438,8 @@ impl eframe::App for Window {
         // out of those rectangles comes `measured`, so the two pseudoterminals of the just-opened
         // tab were given a wrong grid and corrected it on the following frame — a double
         // readjustment, visible in any full-screen program.
-        if let Some(tab_bar) = tab_bar.filter(|_| !header_owns_pointer) {
-            self.handle_tab_bar_clicks(ui, tab_bar, &metrics);
+        if let Some(tab_bar) = tab_bar {
+            tab_bar::handle_clicks(self, ui, tab_bar, &metrics, header_owns_pointer);
         }
         if overlay_owns_pointer || header_owns_pointer {
             header::menu::block_pointer(ui, overlay_owns_pointer);
@@ -6941,6 +6956,7 @@ mod tests {
             clipboard: clipboard::Service::default(),
             board: crate::board::State::default(),
             viewer: viewer::State::default(),
+            explorer: explorer::Explorer::default(),
             projects: project_view::State::default(),
             restoration: restoration::State::default(),
             link_press_in_progress: None,

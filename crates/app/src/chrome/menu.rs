@@ -20,6 +20,7 @@ pub(super) fn show(
         ("What's new", Action::Updates(false), None, false),
         ("Preferences", Action::Preferences, None, true),
         ("Keyboard shortcuts", Action::Shortcuts, None, false),
+        ("Files", Action::Files, None, true),
         ("Connect agents", Action::Connect, None, true),
         (
             "Search console",

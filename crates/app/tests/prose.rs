@@ -75,6 +75,32 @@ use std::path::Path;
 /// moved the measurement bench's injected gestures out into `src/injected.rs`, which is the next
 /// entry down.
 const SOURCES: &[(&str, &str, usize)] = &[
+    ("src/explorer.rs", include_str!("../src/explorer.rs"), 0),
+    (
+        "src/explorer/model.rs",
+        include_str!("../src/explorer/model.rs"),
+        0,
+    ),
+    (
+        "src/explorer/load.rs",
+        include_str!("../src/explorer/load.rs"),
+        0,
+    ),
+    (
+        "src/explorer/view.rs",
+        include_str!("../src/explorer/view.rs"),
+        0,
+    ),
+    (
+        "src/explorer/tests.rs",
+        include_str!("../src/explorer/tests.rs"),
+        0,
+    ),
+    (
+        "src/explorer/interaction_tests.rs",
+        include_str!("../src/explorer/interaction_tests.rs"),
+        0,
+    ),
     (
         "src/board/style.rs",
         include_str!("../src/board/style.rs"),

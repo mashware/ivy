@@ -345,3 +345,11 @@ pub(crate) use origin::{open_diff_for_pane, open_markdown_target};
 mod interaction_tests;
 #[cfg(test)]
 mod tests;
+
+/// Explorer transitions use the ordinary close path, retaining unsent review comments.
+pub(crate) fn hide(window: &mut crate::Window) {
+    window.viewer.close();
+}
+pub(crate) fn is_open(window: &crate::Window) -> bool {
+    window.viewer.open
+}
