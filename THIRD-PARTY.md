@@ -22,6 +22,13 @@ Theme origins, modifications and attribution are documented in
 - [Nord](resources/themes/nord-LICENSE)
 - [Rose Pine](resources/themes/rose-pine-LICENSE)
 
+## Bundled fonts
+
+Geist and Geist Mono (`resources/fonts/*.ttf`), by Vercel in collaboration with basement.studio, are
+distributed under the [SIL Open Font License 1.1](resources/fonts/Geist-OFL.txt). They are copied
+unmodified from the `geist` 1.9.2 package and embedded in the binary as Ivy's interface and default
+terminal fonts (D95).
+
 ## Test font
 
 `crates/app/tests/fixtures/ligatures/JetBrainsMono-Regular.ttf` is distributed under the
