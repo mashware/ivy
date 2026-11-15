@@ -9,33 +9,26 @@ status: active
 superseded_by: null
 confidence: 80
 created_at: '2026-09-28T10:27:50.497Z'
-updated_at: '2026-09-28T10:27:50.497Z'
-last_verified: '2026-09-28T10:27:50.497Z'
+updated_at: '2026-11-15T19:14:38.264Z'
+last_verified: '2026-11-15T19:14:38.264Z'
 file_paths:
-  - crates/app/src/settings.rs
   - crates/app/src/theme.rs
-  - docs/02-decisions.md
-symbols:
-  - 'Settings::resolved_theme'
-  - 'NamedTheme::theme'
-  - 'Theme::with_colors'
+  - crates/app/src/settings.rs
+symbols: []
 content_hashes:
-  crates/app/src/settings.rs: 'sha256:0f5d3514c630adc0cc813d9b0a408717d52b6a6770e45cce09f24d5d3276bb49'
-  crates/app/src/theme.rs: 'sha256:6db6707e13762f2ac1656a5bef79c24434e39aa8f8a1e1ff5d54e6ca15d958af'
-  docs/02-decisions.md: 'sha256:d081c660a24d5d7a7ac70e572491483b7c104f4b18af4645ff4d3fe3f5378526'
+  crates/app/src/theme.rs: 'sha256:ac839d79a999f104e16c41147c83070eebb8db531a49325d51ae00dfe94d51d8'
+  crates/app/src/settings.rs: 'sha256:850f221a17b6a2731950bde335fe43b0d8b68b0739a533031434bda0ea0a08bb'
 tags:
-  - configuration
-  - themes
+  - theme
   - D59
+  - D94
 feature_id: feat_term-core_nx0g1r
 ---
 
 ## What it does
 
-D59 makes a named theme the base for all twenty-two colors. Each explicitly configured color overrides only its own slot, regardless of whether that line appears before or after `theme`; this preserves a person's hand-tuned colors when they move or change the theme line. With no theme selected, the existing factory palette remains the base. An unknown theme name warns without erasing the last valid selection.
-
-A theme line does not reset colors written above it: `theme` and each color are distinct keys, so merely reordering the file must not change its appearance.
+D59 makes a named theme the base for all twenty-two colors. Each explicitly configured color overrides only its own slot, regardless of whether that line appears before or after `theme`; this preserves a person's hand-tuned colors when they move or change the theme line. With no theme selected, the base is Ivy Night since D94 (#93, November 2026) — no longer the old gray factory palette; Settings names that choice «Ivy Night (default)». An unknown theme name warns without erasing the last valid selection. Since D94 every theme's focus is a green (converted palettes: normal green, else bright, else moved until 3:1), so the interface accent never equals the `done` claim's ANSI blue; an explicit `focus` is used verbatim.
 
 ## Where it lives
 
-`Settings::resolved_theme` composes `NamedTheme::theme` with `Theme::with_colors` in `crates/app/src/settings.rs` and `crates/app/src/theme.rs`; D59 in `docs/02-decisions.md` records the reason and discarded alternatives.
+crates/app/src/theme.rs (Default for Theme, NamedTheme, green_focus); crates/app/src/settings.rs (theme parsing)
