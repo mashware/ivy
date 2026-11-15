@@ -78,6 +78,7 @@ mod tab_bar;
 pub mod theme;
 mod tiling;
 mod tree;
+mod ui;
 mod viewer;
 mod visibility;
 pub mod watcher;

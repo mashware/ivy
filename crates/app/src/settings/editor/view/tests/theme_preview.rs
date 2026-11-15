@@ -45,6 +45,7 @@ fn assert_dialog_surface(editor: &mut Editor, ctx: &egui::Context) {
     let palette =
         palette::Palette::new(appearance::effective_theme(editor.draft.as_ref().unwrap()));
     let size = egui::vec2(1100.0, 850.0);
+    let before = ctx.style_of(egui::Theme::Dark).visuals.panel_fill;
     paint(editor, ctx, size, vec![]);
     let (text, shapes) = scene(editor, ctx, size, vec![]);
     let mut rects = Vec::new();
@@ -67,7 +68,7 @@ fn assert_dialog_surface(editor: &mut Editor, ctx: &egui::Context) {
     }
     assert_eq!(
         ctx.style_of(egui::Theme::Dark).visuals.panel_fill,
-        egui::Visuals::dark().panel_fill,
+        before,
         "dialog must not change context style"
     );
 }

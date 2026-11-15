@@ -6,6 +6,9 @@
 //! sequences, and an application that resolves there comes out black.
 
 mod catalog;
+mod roles;
+
+pub(crate) use roles::{Roles, metrics};
 
 use eframe::egui::Color32;
 use panel_contract::{Attention, Mark, Style};
