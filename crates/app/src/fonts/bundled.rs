@@ -101,3 +101,97 @@ pub(crate) fn ui_family(weight: u16) -> FontFamily {
 pub(crate) fn install(ctx: &egui::Context) {
     ctx.set_fonts(base_definitions());
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pass(ctx: &egui::Context) {
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+    }
+
+    /// The raster bounds of `c` laid out at 14 points in `family`: what the eye sees of the face.
+    fn drawing(ctx: &egui::Context, c: char, family: FontFamily) -> Option<(u16, u16)> {
+        ctx.fonts_mut(|fonts| super::super::drawing_of(fonts, c, family))
+    }
+
+    /// With no font configured the window starts on Geist Mono and Geist, with egui's faces behind
+    /// them; the machine's fonts are not enumerated for it.
+    #[test]
+    fn a_start_up_with_no_font_paints_with_the_bundled_faces() {
+        let stock = egui::Context::default();
+        pass(&stock);
+        let ctx = egui::Context::default();
+        let mut discoverer = super::super::Discoverer::default();
+        let published = super::super::choose_the_font(None, &mut discoverer, &ctx);
+        pass(&ctx);
+        assert!(matches!(
+            published,
+            crate::measure::ChoosingTheFont::NotAsked
+        ));
+        assert!(!discoverer.has_searched_the_machine());
+        ctx.fonts(|fonts| {
+            let families = &fonts.definitions().families;
+            assert_eq!(families[&FontFamily::Monospace][0], "Geist Mono");
+            assert_eq!(families[&FontFamily::Monospace][1], "Hack");
+            assert_eq!(families[&FontFamily::Proportional][0], "Geist");
+        });
+        // What is laid out changed, not only the list: Geist Mono's row is taller than Hack's, and
+        // Geist's lowercase is wider than Ubuntu Light's.
+        let laid_out = |ctx: &egui::Context, text: &str, family: FontFamily| {
+            ctx.fonts_mut(|f| {
+                f.layout_no_wrap(
+                    text.into(),
+                    egui::FontId::new(14.0, family),
+                    egui::Color32::WHITE,
+                )
+                .size()
+            })
+        };
+        assert_ne!(
+            laid_out(&ctx, "a", FontFamily::Monospace).y,
+            laid_out(&stock, "a", FontFamily::Monospace).y
+        );
+        assert_ne!(
+            laid_out(&ctx, "interface", FontFamily::Proportional).x,
+            laid_out(&stock, "interface", FontFamily::Proportional).x
+        );
+    }
+
+    /// Each design weight reaches its own face: a 500 label is not drawn with the 400 or 600 one.
+    #[test]
+    fn each_interface_weight_is_drawn_with_its_own_face() {
+        let ctx = egui::Context::default();
+        install(&ctx);
+        pass(&ctx);
+        let regular = drawing(&ctx, 'M', ui_family(400));
+        let medium = drawing(&ctx, 'M', ui_family(500));
+        let semibold = drawing(&ctx, 'M', ui_family(600));
+        assert_eq!(ui_family(400), FontFamily::Proportional);
+        assert_eq!(ui_family(500), FontFamily::Name(UI_MEDIUM.into()));
+        assert_eq!(ui_family(600), FontFamily::Name(UI_SEMIBOLD.into()));
+        ctx.fonts(|fonts| {
+            let families = &fonts.definitions().families;
+            assert_eq!(families[&ui_family(500)][0], "Geist Medium");
+            assert_eq!(families[&ui_family(600)][0], "Geist SemiBold");
+            assert_eq!(
+                families[&FontFamily::Name(MONO_MEDIUM.into())][0],
+                "Geist Mono Medium"
+            );
+        });
+        assert!(regular.is_some() && medium.is_some() && semibold.is_some());
+        let advance = |family: FontFamily| {
+            ctx.fonts_mut(|f| f.glyph_width(&egui::FontId::new(14.0, family), 'M'))
+        };
+        let widths = [
+            advance(ui_family(400)),
+            advance(ui_family(500)),
+            advance(ui_family(600)),
+        ];
+        assert!(
+            widths[0] < widths[1] && widths[1] < widths[2],
+            "heavier weights are wider in Geist: {widths:?}"
+        );
+    }
+}

@@ -2722,7 +2722,11 @@ mod tests {
             Mark::Info,
         ];
 
+        // Over the faces the window starts with, Geist Mono in front (D95).
         let ctx = eframe::egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
+        ctx.run_ui(eframe::egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
         let mut widths = Vec::new();
         let mut cell = 0.0;
         ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
@@ -2737,9 +2741,13 @@ mod tests {
         })
         .drop_without_applying_deltas();
 
+        // Within a hundredth of a cell, not exactly: `⊘` is not in Geist Mono and comes from egui's
+        // Hack behind it, whose advance is 1233/2048 of the size against Geist Mono's 600/1000 — 0.03
+        // points at 14. A missing glyph measures zero and an emoji one almost double, so the bound
+        // still catches both failures D9 was about (D95).
         for (symbol, width) in widths {
             assert!(
-                (width - cell).abs() < 0.01,
+                (width - cell).abs() < cell * 0.01,
                 "«{symbol}» measures {width} and a cell measures {cell}: {}",
                 if width == 0.0 {
                     "it is not in the font"
@@ -3595,7 +3603,11 @@ mod tests {
     /// like a badly aligned panel. The obvious candidates of this vocabulary already fell that way.
     #[test]
     fn the_three_claim_symbols_measure_one_cell() {
+        // Over the faces the window starts with, Geist Mono in front (D95).
         let ctx = eframe::egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
+        ctx.run_ui(eframe::egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
         let mut widths = Vec::new();
         let mut cell = 0.0;
         ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
@@ -3613,9 +3625,13 @@ mod tests {
         })
         .drop_without_applying_deltas();
 
+        // Within a hundredth of a cell, not exactly: `⊘` is not in Geist Mono and comes from egui's
+        // Hack behind it, whose advance is 1233/2048 of the size against Geist Mono's 600/1000 — 0.03
+        // points at 14. A missing glyph measures zero and an emoji one almost double, so the bound
+        // still catches both failures D9 was about (D95).
         for (symbol, width) in widths {
             assert!(
-                (width - cell).abs() < 0.01,
+                (width - cell).abs() < cell * 0.01,
                 "«{symbol}» measures {width} and a cell measures {cell}: {}",
                 if width == 0.0 {
                     "it is not in the font"
