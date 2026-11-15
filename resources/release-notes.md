@@ -1,6 +1,16 @@
-# Ivy 0.1.0-alpha.8
+# Ivy 0.1.0-alpha.9
 
 ## New in this alpha
+
+- Files, Markdown, Git review and Board now share a right sidebar, keeping running consoles visible beside the tools you use.
+- Browse files independently in each console, with navigation and file previews tied to that console.
+- The Board presents complete agent panels and foldable project roadmaps, with clearer states, branch information and console navigation. Menus and tabs remain clickable while it is open.
+- Tabs make agent status easier to recognize, interactive controls show pointer feedback, and single-pane tabs no longer offer an unnecessary maximize control.
+- Preview the selected theme throughout Preferences before applying it.
+- Codex conversations support mobile control while each console keeps its own status-panel route.
+- Selected terminal backgrounds no longer leave gaps, and unsafe inherited panel directories are rejected.
+
+## Previously in 0.1.0-alpha.8
 
 - The board now shows persistent project roadmaps, published by agents or read from a configured Markdown file, with console cards grouped under milestones and deliverables.
 - Open and fold individual panel block headers to keep the information you need in view.
@@ -73,12 +83,12 @@
 
 ## Choose a download
 
-- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.8_amd64.deb`.
-- Arch Linux x86_64: `ivy-terminal-0.1.0alpha8-1-x86_64.pkg.tar.zst`.
-- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.8-macos-arm64.dmg`.
-- macOS 15+ Intel: `Ivy-0.1.0-alpha.8-macos-x86_64.dmg`.
-- Windows 11 x64: `Ivy-0.1.0-alpha.8-windows-x86_64-setup.exe`.
+- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.9_amd64.deb`.
+- Arch Linux x86_64: `ivy-terminal-0.1.0alpha9-1-x86_64.pkg.tar.zst`.
+- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.9-macos-arm64.dmg`.
+- macOS 15+ Intel: `Ivy-0.1.0-alpha.9-macos-x86_64.dmg`.
+- Windows 11 x64: `Ivy-0.1.0-alpha.9-windows-x86_64-setup.exe`.
 
 Download `release-manifest.json` and `SHA256SUMS` with the chosen package and verify its SHA-256
-before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.8/docs/10-installation.md)
+before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.9/docs/10-installation.md)
 for verification, installation, upgrade and removal commands. No Rust toolchain is needed.
