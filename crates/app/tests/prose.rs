@@ -625,6 +625,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         28,
     ),
     (
+        "src/panel/marks.rs",
+        include_str!("../src/panel/marks.rs"),
+        17,
+    ),
+    (
         "src/settings/editor/runtime.rs",
         include_str!("../src/settings/editor/runtime.rs"),
         7,

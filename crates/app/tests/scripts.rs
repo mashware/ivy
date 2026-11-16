@@ -600,6 +600,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/panel/identity.rs"),
     ),
     (
+        "app/src/panel/marks.rs",
+        include_str!("../src/panel/marks.rs"),
+    ),
+    (
         "app/src/settings/editor/runtime.rs",
         include_str!("../src/settings/editor/runtime.rs"),
     ),

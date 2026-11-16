@@ -1478,11 +1478,15 @@ mod tests {
                 _ => None,
             })
             .expect("narrow tab number painted");
-        // Ivy Night's wait slot, filling the whole 18-point pill inside the card.
+        // Ivy Night's wait slot, filling the whole 18-point pill inside the card. The console's own
+        // panel paints the same pill in its claim strip, below the title bar.
         let pill = shapes
             .iter()
             .find_map(|s| match &s.shape {
-                egui::Shape::Rect(r) if r.fill == egui::Color32::from_rgb(0xf2, 0xb8, 0x4b) => {
+                egui::Shape::Rect(r)
+                    if r.fill == egui::Color32::from_rgb(0xf2, 0xb8, 0x4b)
+                        && r.rect.top() < 40.0 =>
+                {
                     Some(r.rect)
                 }
                 _ => None,

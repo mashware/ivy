@@ -92,6 +92,7 @@ impl Body {
             .min(width.saturating_sub(super::MINIMUM_SLOT + 3));
         let mut rows = Vec::new();
         let mut prefixes = HashMap::new();
+        let roles = crate::theme::Roles::of(theme);
         for line in &document.lines {
             if line.style == Some(Style::Section) {
                 let key = line.key.as_ref().map_or_else(
@@ -109,7 +110,7 @@ impl Body {
                 rows.push(row);
                 continue;
             }
-            let mut laid = super::lay_out_line(line, column, width, theme);
+            let mut laid = super::lay_out_line(line, column, width, theme, &roles);
             let text_color = match line.style {
                 Some(Style::Dim) => theme.foreground().gamma_multiply(0.5),
                 Some(style) => theme.panel_color(None, Some(style)),
@@ -428,8 +429,18 @@ pub(super) fn paint_row(
     {
         return inked;
     }
-    fold::paint_header(painter, at, row, metrics, width, discoverer, glyphs)
-        .unwrap_or_else(|| color::paint_text(painter, at, row, metrics, discoverer, glyphs))
+    let inked = fold::paint_header(painter, at, row, metrics, width, discoverer, glyphs)
+        .unwrap_or_else(|| color::paint_text(painter, at, row, metrics, discoverer, glyphs));
+    match row.glyph {
+        Some((symbol, ink)) => inked.union(painter.text(
+            at,
+            eframe::egui::Align2::LEFT_TOP,
+            symbol,
+            metrics.font(),
+            ink,
+        )),
+        None => inked,
+    }
 }
 
 #[cfg(test)]

@@ -38,6 +38,7 @@ pub(crate) mod provenance_route;
 use fold::lay_out;
 pub(crate) use fold::toggle_header_at;
 mod links;
+mod marks;
 pub(crate) mod pane;
 pub(crate) mod summary;
 use buttons::buttons_drawn;
@@ -766,6 +767,8 @@ struct Row {
     header: Option<fold::Header>,
     /// The integrated identity row's phase chip, when this row is that row.
     chip: Option<identity::Chip>,
+    /// A line's mark, painted in its first cell in its own ink.
+    glyph: Option<(char, Color32)>,
     /// A compact link label painted on this row, independently of its body text.
     link: Option<LaidOutLink>,
     /// Which of its characters go to color, as ranges of character indices, set once the whole layout
@@ -783,6 +786,7 @@ impl Row {
             role: RowRole::Text,
             header: None,
             chip: None,
+            glyph: None,
             link: None,
             color_spans: Vec::new(),
         }
@@ -933,8 +937,17 @@ fn blocks(lines: &[Line]) -> Vec<Vec<&Line>> {
 }
 
 /// Lays out a line: its symbol, its aligned reference, its indent and its wrapped text.
-fn lay_out_line(line: &Line, column: usize, width: usize, theme: &Theme) -> Vec<Row> {
-    let color = theme.panel_color(line.mark, line.style);
+///
+/// The symbol rides on the first row as its own glyph rather than inside the text, so it can take
+/// a different ink from the words it marks (D97).
+fn lay_out_line(
+    line: &Line,
+    column: usize,
+    width: usize,
+    theme: &Theme,
+    roles: &crate::theme::Roles,
+) -> Vec<Row> {
+    let (glyph, color) = marks::inks(line.mark, line.style, theme, roles);
     let reference = line.reference.as_deref().map(sanitize).unwrap_or_default();
     let text = sanitize(&line.text);
 
@@ -953,14 +966,9 @@ fn lay_out_line(line: &Line, column: usize, width: usize, theme: &Theme) -> Vec<
     // column, the reference would push the text of its own line and break the block's alignment.
     let reference: String = reference.chars().take(column).collect();
 
-    let mut head = String::new();
-    match line.mark {
-        Some(mark) => head.push(symbol(mark)),
-        // The symbol's slot is reserved even without a mark: it is what keeps the text of all the lines in
-        // the same column, which is what aligning is about.
-        None => head.push(' '),
-    }
-    head.push(' ');
+    // The symbol's slot is reserved with or without a mark: it is what keeps the text of all the
+    // lines in the same column, which is what aligning is about.
+    let mut head = String::from("  ");
     if column > 0 {
         head.push_str(&format!("{reference:column$} "));
     }
@@ -991,6 +999,7 @@ fn lay_out_line(line: &Line, column: usize, width: usize, theme: &Theme) -> Vec<
         }
         None => rows.push(Row::text(0, head, color)),
     }
+    rows[0].glyph = line.mark.map(|mark| (symbol(mark), glyph));
     if let Some(target) = line.link.as_deref() {
         links::attach(&mut rows, target, indent, width, color);
     }
@@ -2108,11 +2117,22 @@ mod tests {
                     theme.panel_color(None, Some(panel_contract::Style::Error))
                 ),
                 (
-                    "× blocked".to_owned(),
+                    "  blocked".to_owned(),
                     theme.panel_color(Some(panel_contract::Mark::Block), None)
                 ),
                 (
-                    "› and its color is the data".to_owned(),
+                    "×".to_owned(),
+                    theme.panel_color(Some(panel_contract::Mark::Block), None)
+                ),
+                (
+                    "  and its color is the data".to_owned(),
+                    theme.panel_color(
+                        Some(panel_contract::Mark::Info),
+                        Some(panel_contract::Style::Ok)
+                    )
+                ),
+                (
+                    "›".to_owned(),
                     theme.panel_color(
                         Some(panel_contract::Mark::Info),
                         Some(panel_contract::Style::Ok)
@@ -2908,7 +2928,8 @@ mod tests {
             - "words".chars().count();
         let under_the_text = first.0.x + head as f32 * cell_width;
 
-        for (where_at, text) in rest {
+        // The mark's glyph is a shape of its own, painted in the first cell; it is not a row.
+        for (where_at, text) in rest.iter().filter(|(_, text)| text != "●") {
             assert!(
                 (where_at.x - under_the_text).abs() < 0.01,
                 "«{text}» started at {} and the text of the first starts at {under_the_text}",
@@ -3840,7 +3861,7 @@ mod tests {
         );
 
         let texts: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
-        assert_eq!(texts, ["× I waited for approval on Tuesday"]);
+        assert_eq!(texts, ["  I waited for approval on Tuesday", "×"]);
     }
 
     /// **A claim nobody holds dims, and does not go out.** The language of this panel is to confess and

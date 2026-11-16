@@ -91,7 +91,7 @@ pub(super) fn append_blocks(
                 });
                 rows.push(row);
             } else if !hidden || is_gap(line) {
-                rows.extend(lay_out_line(line, column, width, theme));
+                rows.extend(lay_out_line(line, column, width, theme, &roles));
             }
         }
     }
