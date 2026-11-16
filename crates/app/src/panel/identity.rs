@@ -1,13 +1,13 @@
 //! The panel's identity row: what this pane is working on, and who is driving it.
 //!
-//! **Two forms, chosen by the window's chrome.** The historical one — kept for the measured runs,
-//! so no published series changes (D13) — writes the pane's identifier, the phase and the driver
-//! in one line of text. The integrated one paints the phase as a chip and the driver beside it,
-//! and never the identifier: a hexadecimal name says nothing to a person, who already finds the
-//! console by its header (D97).
+//! **Two forms, chosen by the window's chrome.** The historical one — what the batches without the
+//! integrated chrome still paint (D13) — writes the pane's identifier, the phase and the driver in
+//! one line of text. The integrated one paints the phase as a chip and the driver beside it, and
+//! never the identifier: a hexadecimal name says nothing to a person, who already finds the console
+//! by its header (D96, D97).
 //!
 //! Both say only what the application knows of its own and what the producer published (D6): the
-//! phase is the producer's free text, the driver is the connection that holds the panel.
+//! phase is the producer's free text, the driver is the connection or hook that holds the panel.
 
 use super::{Row, color, fold, sanitize, wrap};
 use crate::fonts::Discoverer;
@@ -18,41 +18,44 @@ use eframe::egui::{Color32, Painter, Pos2, Rect, vec2};
 /// The room around the phase inside its chip, and between the chip and the driver.
 const PAD: f32 = 6.0;
 
-/// How the integrated identity row is split and coloured: the first `len` characters of its text
-/// are the phase, painted in the row's colour on `fill`; the rest is the driver, in `rest`.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// The integrated identity row's two parts and their inks: the phase, painted in the row's colour
+/// on `fill`, and the driver in `rest`. Either may be empty, never both.
+#[derive(Debug, Clone, PartialEq)]
 pub(super) struct Chip {
-    len: usize,
+    phase: String,
+    driver: String,
     fill: Color32,
     rest: Color32,
 }
 
-/// Adds the identity row, in the historical form when `id` is given and in the integrated one
-/// when it is not.
+/// Adds the identity row: the historical text when `kit` is nothing, the integrated chip when it
+/// carries the integrated chrome's roles.
 pub(super) fn lay_out(
     rows: &mut Vec<Row>,
-    id: Option<&str>,
+    id: &str,
     phase: Option<&str>,
     held_by: Option<&str>,
     width: usize,
     theme: &Theme,
+    kit: Option<&Roles>,
 ) {
-    let Some(id) = id else {
-        let phase = phase.map(sanitize).unwrap_or_default();
-        let driver = held_by.map(sanitize).unwrap_or_default();
-        if phase.trim().is_empty() && driver.trim().is_empty() {
+    if let Some(roles) = kit {
+        let phase = phase.map(sanitize).unwrap_or_default().trim().to_owned();
+        let driver = held_by.map(sanitize).unwrap_or_default().trim().to_owned();
+        if phase.is_empty() && driver.is_empty() {
             return;
         }
-        let roles = Roles::of(theme);
+        // The text is what the font discovery and the overflow read; the chip is what is painted.
         let mut row = Row::text(0, format!("{phase} {driver}"), roles.tx2);
         row.chip = Some(Chip {
-            len: phase.chars().count(),
+            phase,
+            driver,
             fill: roles.hover,
             rest: roles.tx3,
         });
         rows.push(row);
         return;
-    };
+    }
     // **Who is driving goes on the identity row, beside the pane's own name and its phase.** That
     // row answers «what is this pane», and with two transports the answer includes which one is in
     // charge — a person looking at a panel that will not change from the file has to be able to
@@ -75,8 +78,9 @@ pub(super) fn lay_out(
 /// Paints the integrated identity row at `origin`, inside `width` cells, and returns what it inked
 /// — or nothing when `row` is not that row.
 ///
-/// **One row and cut, not wrapped**: the chip is a single shape, and a phase long enough to need a
-/// second row is cut to what fits rather than split across two chips.
+/// **One row and cut, not wrapped**: the chip is a single shape. What is cut ends in «…», so a
+/// shortened phase or driver never reads as a whole one, and a part that cannot show even that is
+/// left out rather than drawn as an empty chip.
 pub(super) fn paint(
     painter: &Painter,
     origin: Pos2,
@@ -86,7 +90,7 @@ pub(super) fn paint(
     discoverer: &mut Discoverer,
     glyphs: &mut Vec<ColorGlyph>,
 ) -> Option<Rect> {
-    let chip = row.chip?;
+    let chip = row.chip.as_ref()?;
     let right = origin.x + width as f32 * metrics.width();
     let measure = |text: &str| {
         painter
@@ -94,13 +98,6 @@ pub(super) fn paint(
             .size()
             .x
     };
-    let at = row
-        .text
-        .char_indices()
-        .nth(chip.len)
-        .map_or(row.text.len(), |(at, _)| at);
-    let (phase, driver) = row.text.split_at(at);
-    let driver = driver.trim();
     let mut x = origin.x;
     let mut inked = Rect::NOTHING;
     let mut piece = |text: &str, x: f32, ink: Color32| {
@@ -116,21 +113,19 @@ pub(super) fn paint(
             glyphs,
         )
     };
-    if !phase.trim().is_empty() {
-        let shown = fold::fit(phase.trim(), (right - x - 2.0 * PAD).max(0.0), &measure);
+    let phase = fold::fit_marked(&chip.phase, (right - x - 2.0 * PAD).max(0.0), &measure);
+    if !phase.is_empty() {
         let face = Rect::from_min_size(
             Pos2::new(x, origin.y + 1.0),
-            vec2(measure(shown) + 2.0 * PAD, metrics.height() - 2.0),
+            vec2(measure(&phase) + 2.0 * PAD, metrics.height() - 2.0),
         );
         painter.rect_filled(face, RADIUS_CHIP, chip.fill);
-        inked = face.union(piece(shown, x + PAD, row.color));
+        inked = face.union(piece(&phase, x + PAD, row.color));
         x = face.right() + PAD;
     }
+    let driver = fold::fit_marked(&chip.driver, (right - x).max(0.0), &measure);
     if !driver.is_empty() {
-        let shown = fold::fit(driver, (right - x).max(0.0), &measure);
-        if !shown.is_empty() {
-            inked = inked.union(piece(shown, x, chip.rest));
-        }
+        inked = inked.union(piece(&driver, x, chip.rest));
     }
     Some(inked)
 }

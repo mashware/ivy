@@ -1,24 +1,47 @@
 //! Resolved panel rows carry the theme that gave their colours meaning.
-use super::{AttentionState, PanelState, Row, Theme, color, fold, lay_out_head};
+use super::head::{lay_out_buttons, lay_out_head, lay_out_notices, separate};
+use super::{AttentionState, Line, PanelState, Row, Style, Theme, color, fold, identity};
 use crate::theme::Roles;
 
-/// What a layout was made for: the width in cells, the theme, the application's warning line and
-/// whether the window paints its integrated chrome.
+/// Which panel the window paints.
+///
+/// **One value for the whole decision**, mapped once in [`PanelLayout::new`] into everything that
+/// differs: the claim's row, the identity's form, the marks' inks, the headers, the order of the
+/// head and the buttons' frames. Passing it in pieces would let a layout mix the two.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Chrome {
+    /// The panel as it was before the restyle, which the batches without the integrated chrome
+    /// still paint and measure (D13).
+    Historical,
+    /// The restyled panel: the claim as a strip, the phase as a chip, framed buttons, drawn
+    /// chevrons and marks in two inks (D97).
+    Integrated,
+}
+
+/// What a layout was made for.
 ///
 /// **The line the app puts in enters the key.** A panel that ages changes what has to be painted
 /// without its file having been touched, so a cache that only looked at the width would keep
 /// showing the layout from when the panel was fresh — and the warning would never appear.
 ///
-/// **And so does the chrome**: the measured, historical one keeps the claim as a row of text and
-/// the identity as the pane's id, the integrated one paints both outside that text (D97).
-pub(super) type LayoutKey = (usize, Theme, Option<String>, bool);
+/// **And so does the chrome**: the historical panel lays the claim out as a row and the identity
+/// with the pane's id, the integrated one omits the claim row, lays the identity out as a chip
+/// and splits marks into glyphs, so the rows differ (D97).
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct LayoutKey {
+    pub(super) width: usize,
+    pub(super) theme: Theme,
+    pub(super) warning: Option<String>,
+    pub(super) chrome: Chrome,
+}
 
 /// A layout and its resolved-colour cache key: changing the theme must repaint quiet producers.
 pub(super) struct PanelLayout {
     pub(super) key: LayoutKey,
-    /// The interface roles of the key's theme, kept beside it: deriving them walks contrast
-    /// ratios, which is work a frame should not repeat for a theme that did not change.
-    pub(super) roles: Roles,
+    /// The interface roles of the key's theme for the integrated chrome, kept beside it: deriving
+    /// them walks contrast ratios, which is work neither a frame nor the historical panel should
+    /// pay for.
+    pub(super) kit: Option<Roles>,
     pub(super) rows: Vec<Row>,
 }
 
@@ -29,24 +52,74 @@ impl PanelLayout {
         key: LayoutKey,
         attention: Option<AttentionState>,
     ) -> Self {
-        let (width, theme, warning, integrated) = &key;
-        let (width, theme, integrated) = (*width, theme, *integrated);
-        let roles = Roles::of(theme);
-        let mut rows = lay_out_head(
-            state.last_good.as_deref(),
-            (!integrated).then_some(id),
-            width,
-            theme,
-            warning.as_deref(),
-            attention.filter(|_| !integrated),
-            state.displayed_source(),
-        );
-        super::provenance::append_row(&mut rows, state, width, theme);
-        if let Some(panel) = state.last_good.as_deref() {
-            let kit = integrated.then_some(&roles);
-            fold::append_blocks(&mut rows, panel, &state.folds, width, theme, kit);
-        }
+        let (width, theme) = (key.width, &key.theme);
+        let panel = state.last_good.as_deref();
+        let lines: &[Line] = panel.map_or(&[], |panel| &panel.lines);
+        let held_by = state.displayed_source();
+        let mut rows;
+        let kit = match key.chrome {
+            Chrome::Historical => {
+                let warning = key.warning.as_deref();
+                rows = lay_out_head(panel, id, width, theme, warning, attention, held_by);
+                super::provenance::append_row(&mut rows, state, width, theme);
+                fold::append_blocks(&mut rows, lines, &state.folds, width, theme, None);
+                None
+            }
+            Chrome::Integrated => {
+                let roles = Roles::of(theme);
+                rows = Vec::new();
+                if panel.is_none_or(|panel| panel.header) {
+                    let phase = panel.and_then(|panel| panel.phase.as_deref());
+                    identity::lay_out(&mut rows, id, phase, held_by, width, theme, Some(&roles));
+                }
+                lay_out_notices(&mut rows, None, key.warning.as_deref(), width, theme);
+                super::provenance::append_row(&mut rows, state, width, theme);
+                // The design reads identity, title, summary, buttons, sections: a leading block
+                // that opens with a title goes above the buttons, and nothing else does, so a
+                // long body never pushes the buttons into the clip (D97).
+                let lead = leading_title_block(lines);
+                fold::append_blocks(
+                    &mut rows,
+                    &lines[..lead],
+                    &state.folds,
+                    width,
+                    theme,
+                    Some(&roles),
+                );
+                lay_out_buttons(&mut rows, panel, width, theme, Some(&roles));
+                if lead < lines.len() {
+                    separate(&mut rows);
+                }
+                fold::append_blocks(
+                    &mut rows,
+                    &lines[lead..],
+                    &state.folds,
+                    width,
+                    theme,
+                    Some(&roles),
+                );
+                Some(roles)
+            }
+        };
         color::flag(&mut rows);
-        Self { key, roles, rows }
+        Self { key, kit, rows }
     }
+}
+
+/// How many lines open the panel as its title block: from a first line styled `title` up to and
+/// including the first gap, stopping before a section. Nothing when the panel does not open with
+/// a title.
+fn leading_title_block(lines: &[Line]) -> usize {
+    if lines
+        .first()
+        .is_none_or(|line| line.style != Some(Style::Title))
+    {
+        return 0;
+    }
+    lines
+        .iter()
+        .position(|line| line.style == Some(Style::Section) || fold::is_gap(line))
+        .map_or(lines.len(), |at| {
+            if fold::is_gap(&lines[at]) { at + 1 } else { at }
+        })
 }

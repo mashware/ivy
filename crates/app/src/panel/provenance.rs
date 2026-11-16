@@ -137,14 +137,32 @@ mod tests {
         )
         .unwrap();
         let (rows, cached, _) = state
-            .lay_out_if_needed("pane", (100, theme, None, false), None)
+            .lay_out_if_needed(
+                "pane",
+                super::super::cache::LayoutKey {
+                    width: 100,
+                    theme: theme,
+                    warning: None,
+                    chrome: super::super::Chrome::Historical,
+                },
+                None,
+            )
             .unwrap();
         assert!(!cached);
         assert!(rows.iter().any(|row| row.text == OUTSIDE));
         assert!(!rows.iter().any(|row| row.text == "content"));
         assert!(
             state
-                .lay_out_if_needed("pane", (100, theme, None, false), None)
+                .lay_out_if_needed(
+                    "pane",
+                    super::super::cache::LayoutKey {
+                        width: 100,
+                        theme: theme,
+                        warning: None,
+                        chrome: super::super::Chrome::Historical
+                    },
+                    None
+                )
                 .unwrap()
                 .1
         );
@@ -158,7 +176,16 @@ mod tests {
         )
         .unwrap();
         let (rows, cached, _) = state
-            .lay_out_if_needed("pane", (100, theme, None, false), None)
+            .lay_out_if_needed(
+                "pane",
+                super::super::cache::LayoutKey {
+                    width: 100,
+                    theme: theme,
+                    warning: None,
+                    chrome: super::super::Chrome::Historical,
+                },
+                None,
+            )
             .unwrap();
         assert!(!cached);
         assert!(!rows.iter().any(|row| row.text == OUTSIDE));
@@ -228,7 +255,16 @@ mod tests {
             .expect("outside publish accepted");
         let (rows, _, _) = pane
             .panel_state
-            .lay_out_if_needed("pane", (100, Theme::default(), None, false), None)
+            .lay_out_if_needed(
+                "pane",
+                super::super::cache::LayoutKey {
+                    width: 100,
+                    theme: Theme::default(),
+                    warning: None,
+                    chrome: super::super::Chrome::Historical,
+                },
+                None,
+            )
             .expect("outside document layout");
         assert!(rows.iter().any(|row| row.text == OUTSIDE));
         assert!(
@@ -256,7 +292,16 @@ mod tests {
         });
         let (rows, _, _) = pane
             .panel_state
-            .lay_out_if_needed("pane", (100, Theme::default(), None, false), None)
+            .lay_out_if_needed(
+                "pane",
+                super::super::cache::LayoutKey {
+                    width: 100,
+                    theme: Theme::default(),
+                    warning: None,
+                    chrome: super::super::Chrome::Historical,
+                },
+                None,
+            )
             .expect("inside document layout");
         assert!(!rows.iter().any(|row| row.text == OUTSIDE));
     }

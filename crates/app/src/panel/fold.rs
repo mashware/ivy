@@ -1,7 +1,7 @@
 //! Reader-owned block folds; the producer supplies only the initial choice.
 use std::collections::HashMap;
 
-use super::{Line, Panel, PanelState, Row, RowRole, Style, Theme, blocks, lay_out_line, sanitize};
+use super::{Line, PanelState, Row, RowRole, Style, Theme, blocks, lay_out_line, sanitize};
 use crate::painter::CellMetrics;
 use crate::theme::Roles;
 use eframe::egui::{Color32, Painter, Pos2, Rect, Stroke, vec2};
@@ -67,13 +67,13 @@ pub(super) fn is_gap(line: &Line) -> bool {
 /// are laid out the historical way the measured runs keep (D97).
 pub(super) fn append_blocks(
     rows: &mut Vec<Row>,
-    panel: &Panel,
+    lines: &[Line],
     folds: &Folds,
     width: usize,
     theme: &Theme,
     roles: Option<&Roles>,
 ) {
-    for block in blocks(&panel.lines) {
+    for block in blocks(lines) {
         let column = block
             .iter()
             .filter(|line| line.style != Some(Style::Section))
@@ -245,6 +245,20 @@ fn paint_text_header(
     inked
 }
 
+/// The same as [`fit`], but what is cut ends in «…», so a shortened text never reads as a whole one;
+/// and when not even one grapheme fits beside the «…», nothing is shown at all.
+pub(super) fn fit_marked(text: &str, width: f32, measure: &impl Fn(&str) -> f32) -> String {
+    if measure(text) <= width {
+        return text.to_owned();
+    }
+    let cut = fit(text, (width - measure("…")).max(0.0), measure).trim_end();
+    if cut.is_empty() {
+        String::new()
+    } else {
+        format!("{cut}…")
+    }
+}
+
 pub(super) fn fit<'a>(text: &'a str, width: f32, measure: &impl Fn(&str) -> f32) -> &'a str {
     let boundaries: Vec<usize> = text
         .grapheme_indices(true)
@@ -290,7 +304,7 @@ pub(super) fn record_header(
 
 #[cfg(test)]
 pub(super) fn lay_out(
-    panel: Option<&Panel>,
+    panel: Option<&super::Panel>,
     id: &str,
     width: usize,
     theme: &Theme,
@@ -298,9 +312,16 @@ pub(super) fn lay_out(
     attention: Option<super::AttentionState>,
     held_by: Option<&str>,
 ) -> Vec<Row> {
-    let mut rows = super::lay_out_head(panel, Some(id), width, theme, warning, attention, held_by);
+    let mut rows = super::head::lay_out_head(panel, id, width, theme, warning, attention, held_by);
     if let Some(panel) = panel {
-        append_blocks(&mut rows, panel, &Folds::default(), width, theme, None);
+        append_blocks(
+            &mut rows,
+            &panel.lines,
+            &Folds::default(),
+            width,
+            theme,
+            None,
+        );
     }
     rows
 }

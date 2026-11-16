@@ -427,16 +427,32 @@ pub(super) fn paint_row(
     {
         return inked;
     }
-    let inked = fold::paint_header(painter, at, row, metrics, width, discoverer, glyphs)
-        .unwrap_or_else(|| color::paint_text(painter, at, row, metrics, discoverer, glyphs));
+    let inked = if row.ui_face {
+        // A button's label in the interface face: the grid keeps its row, and the ink the face
+        // really drew is what decides whether the label fits.
+        let face = eframe::egui::FontId::new(
+            metrics.font().size,
+            crate::fonts::ui_weight(painter.ctx(), 500),
+        );
+        let text = row.text.trim_start();
+        painter.text(at, eframe::egui::Align2::LEFT_TOP, text, face, row.color)
+    } else {
+        fold::paint_header(painter, at, row, metrics, width, discoverer, glyphs)
+            .unwrap_or_else(|| color::paint_text(painter, at, row, metrics, discoverer, glyphs))
+    };
     match row.glyph {
-        Some((symbol, ink)) => inked.union(painter.text(
-            at,
-            eframe::egui::Align2::LEFT_TOP,
-            symbol,
-            metrics.font(),
-            ink,
-        )),
+        Some((symbol, ink)) => {
+            // The sign sits in the row's first cell, wherever the row's own text starts.
+            let first_cell = at - eframe::egui::vec2(row.column as f32 * metrics.width(), 0.0);
+            discoverer.note(symbol);
+            inked.union(painter.text(
+                first_cell,
+                eframe::egui::Align2::LEFT_TOP,
+                symbol,
+                metrics.font(),
+                ink,
+            ))
+        }
         None => inked,
     }
 }

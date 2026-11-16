@@ -419,6 +419,7 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/panel/identity.rs"),
     ),
     ("src/panel/marks.rs", include_str!("../src/panel/marks.rs")),
+    ("src/panel/head.rs", include_str!("../src/panel/head.rs")),
     ("src/panel/fold.rs", include_str!("../src/panel/fold.rs")),
     (
         "src/settings/editor/runtime.rs",

@@ -27999,7 +27999,7 @@ mod tests {
                 metrics,
                 SystemTime::now(),
                 &mut discoverer,
-                false,
+                panel::Chrome::Historical,
             );
         });
         output.drop_without_applying_deltas();

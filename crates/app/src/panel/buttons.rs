@@ -100,26 +100,50 @@ fn keep_if_whole(
 /// painted** — one function for the two, so the edge a person sees is the edge a click obeys.
 ///
 /// Framed, it sits half a cell in from each side of the strip, where the text's margin leaves room,
-/// and a point in from its first and last row, so two buttons in a row read as two.
+/// and [`GAP`] in from its first and last row, so two buttons in a row read as two.
 fn painted(run: Run, rect: Rect, metrics: &CellMetrics, framed: bool) -> PaintedButton {
     let row_top = |row: usize| rect.top() + row as f32 * metrics.height();
-    let (inset, gap) = if framed {
-        (MARGIN * metrics.width() / 2.0, GAP)
-    } else {
-        (0.0, 0.0)
-    };
+    let gap = if framed { GAP } else { 0.0 };
     PaintedButton {
         action: run.action,
         area: Rect::from_min_max(
-            Pos2::new(rect.left() + inset, row_top(run.first) + gap),
-            Pos2::new(rect.right() - inset, row_top(run.last + 1) - gap),
+            Pos2::new(
+                rect.left() + inset(metrics, framed),
+                row_top(run.first) + gap,
+            ),
+            Pos2::new(
+                right_edge(rect, metrics, framed),
+                row_top(run.last + 1) - gap,
+            ),
         ),
-        command: row_top(run.body.unwrap_or(run.last + 1)),
+        command: run.body.map(row_top),
     }
 }
 
-/// What separates a button's frame from the rows above and below it.
-const GAP: f32 = 1.0;
+/// How far a button's frame stands in from each side of the strip: half a cell when framed.
+fn inset(metrics: &CellMetrics, framed: bool) -> f32 {
+    if framed {
+        MARGIN * metrics.width() / 2.0
+    } else {
+        0.0
+    }
+}
+
+/// A button's right edge: the frame's when framed, the strip's otherwise. Ink past it is outside the
+/// button it belongs to, so the painting treats it as overflow and the button stays unreachable.
+pub(super) fn right_edge(rect: Rect, metrics: &CellMetrics, framed: bool) -> f32 {
+    rect.right() - inset(metrics, framed)
+}
+
+/// What separates a framed button from the rows above and below it: two buttons in a row stand
+/// twice this apart, the design's six points.
+const GAP: f32 = 3.0;
+
+/// The frame's border. The kit's control border, `line2`, all but vanishes against the panel on a dark
+/// theme, so the frame takes the muted text at half strength, which reads on both kinds of theme.
+pub(super) fn border(roles: &Roles) -> eframe::egui::Color32 {
+    roles.tx3.gamma_multiply(0.5)
+}
 
 /// The shape of a button's frame, queued under its text: the label on the raised surface, the
 /// command on the console's own background below a rule, all inside a bordered rounded box.
@@ -129,13 +153,13 @@ const GAP: f32 = 1.0;
 pub(super) fn frame(button: &PaintedButton, roles: &Roles) -> Shape {
     let radius = metrics::RADIUS_CONTROL;
     let area = button.area;
-    let command = Rect::from_min_max(
-        Pos2::new(area.left(), button.command.clamp(area.top(), area.bottom())),
-        area.max,
-    );
-    Shape::Vec(vec![
-        Shape::rect_filled(area, radius, roles.raised),
-        Shape::rect_filled(
+    let mut shapes = vec![Shape::rect_filled(area, radius, roles.raised)];
+    if let Some(top) = button.command {
+        let command = Rect::from_min_max(
+            Pos2::new(area.left(), top.clamp(area.top(), area.bottom())),
+            area.max,
+        );
+        shapes.push(Shape::rect_filled(
             command,
             CornerRadius {
                 nw: 0,
@@ -144,16 +168,17 @@ pub(super) fn frame(button: &PaintedButton, roles: &Roles) -> Shape {
                 se: radius,
             },
             roles.base,
-        ),
-        Shape::line_segment(
+        ));
+        shapes.push(Shape::line_segment(
             [command.left_top(), command.right_top()],
             Stroke::new(1.0, roles.line),
-        ),
-        Shape::rect_stroke(
-            area,
-            radius,
-            Stroke::new(1.0, roles.line2),
-            StrokeKind::Inside,
-        ),
-    ])
+        ));
+    }
+    shapes.push(Shape::rect_stroke(
+        area,
+        radius,
+        Stroke::new(1.0, border(roles)),
+        StrokeKind::Inside,
+    ));
+    Shape::Vec(shapes)
 }

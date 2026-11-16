@@ -1,8 +1,8 @@
 //! The claim as a band across the top of the panel (D97).
 //!
-//! **It replaces the claim's row of text only in the integrated chrome.** The measured runs keep
-//! that row, because a strip 32 points tall moves every body row and a published series would then
-//! be measuring a different panel (D13).
+//! **It replaces the claim's row of text only in the integrated chrome.** The historical panel —
+//! what the batches without the integrated chrome paint — keeps that row; the integrated-chrome
+//! batches paint this band, so their series are not comparable across D97 (D13).
 //!
 //! What it paints is the producer's declaration and nothing else (D18): the class picks the band,
 //! the pill and the words, and whether somebody holds the claim decides between the live band and
@@ -27,17 +27,23 @@ const TEXT_SIZE: f32 = 12.5;
 ///
 /// **A band nobody holds gets no tint.** The tint is what reads as «this is live» from across the
 /// window; a dimmed claim on a coloured band would say the opposite of its own words.
+///
+/// **The band gives way before the rows' last one does**: on a panel too short for the band and
+/// one row of `cell`, it shrinks to leave that row — which is where «… N more» says what the panel
+/// holds below — down to one row of its own, and only below that does the claim take the panel.
 pub(super) fn paint(
     painter: &Painter,
     rect: Rect,
+    cell: f32,
     claim: AttentionState,
     theme: &Theme,
     roles: &Roles,
 ) -> Rect {
-    let band = Rect::from_min_max(
-        rect.min,
-        Pos2::new(rect.right(), (rect.top() + HEIGHT).min(rect.bottom())),
-    );
+    let height = HEIGHT
+        .min(rect.height() - cell)
+        .max(cell)
+        .min(rect.height());
+    let band = Rect::from_min_size(rect.min, vec2(rect.width(), height));
     if claim.backed {
         painter.rect_filled(band, 0.0, soft(claim.class, roles));
     }
@@ -50,12 +56,12 @@ pub(super) fn paint(
     );
     let slot = Rect::from_min_size(
         Pos2::new(band.left() + PADDING, band.top()),
-        vec2(claim_pill::SIZE, HEIGHT),
+        vec2(claim_pill::SIZE, band.height()),
     );
     claim_pill::paint(painter, slot, claim, roles);
 
-    // **The words take the colour the rest of the application answers with**, so the panel and
-    // `PanelState::attention` can never disagree on what a claim looks like.
+    // **The words take `Theme::attention_color`**, the colour the historical row and the rest of the
+    // application paint a claim with, so the two panels can never disagree on it.
     let ink = theme.attention_color(claim.class, claim.backed);
     let font = FontId::new(TEXT_SIZE, crate::fonts::ui_weight(painter.ctx(), 600));
     let left = slot.right() + GAP;
@@ -67,11 +73,13 @@ pub(super) fn paint(
             .x
     };
     // A band cannot wrap the way the old row did, so a narrow panel cuts the phrase rather than
-    // letting it run under the console beside it.
-    let shown = fold::fit(attention_text(claim.class), room, &measure);
+    // letting it run under the console beside it — with «…», because «stuck on something» alone
+    // would lose the «not you» that sets it apart; and with no words at all, only the pill, when not
+    // even one letter fits beside the «…».
+    let shown = fold::fit_marked(attention_text(claim.class), room, &measure);
     if !shown.is_empty() {
         painter.text(
-            Pos2::new(left, slot.center().y),
+            Pos2::new(left, band.center().y),
             Align2::LEFT_CENTER,
             shown,
             font,
@@ -117,6 +125,7 @@ mod tests {
             left = paint(
                 &ui.painter_at(place),
                 place,
+                17.0,
                 claim,
                 &theme,
                 &Roles::of(&theme),
@@ -152,7 +161,7 @@ mod tests {
     }
 
     /// **Literal colours, written out**: Ivy Night's wait, block and done, their 15 % tints for the
-    /// band and the solid pill, and the band 32 points tall across the whole panel.
+    /// band and the solid pill (soft for done), and the band 32 points tall across the whole panel.
     #[test]
     fn each_live_claim_paints_its_tinted_band_its_pill_and_its_words() {
         for (class, solid, phrase) in [
@@ -227,7 +236,8 @@ mod tests {
         }
     }
 
-    /// A narrow panel cuts the phrase inside the band instead of running it under the console.
+    /// A narrow panel cuts the phrase inside the band instead of running it under the console, and
+    /// marks the cut with «…».
     #[test]
     fn a_narrow_panel_cuts_the_words_inside_the_band() {
         let narrow = Rect::from_min_size(PANEL.min, vec2(120.0, 300.0));
@@ -240,9 +250,15 @@ mod tests {
         );
         let painted = words(&shapes);
         assert_eq!(painted.len(), 1);
+        // Cut, and said to be cut: a shortened phrase must not read as a whole one.
+        let kept = painted[0]
+            .0
+            .strip_suffix('…')
+            .expect("a cut phrase ends in «…»");
         assert!(
-            "stuck on something else, not you".starts_with(&painted[0].0)
-                && painted[0].0.len() < "stuck on something else, not you".len(),
+            !kept.is_empty()
+                && "stuck on something else, not you".starts_with(kept)
+                && kept.len() < "stuck on something else, not you".len(),
             "{painted:?}"
         );
         let ink = shapes
