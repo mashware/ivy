@@ -1,5 +1,5 @@
 //! Resolved panel rows carry the theme that gave their colours meaning.
-use super::head::{lay_out_buttons, lay_out_head, lay_out_notices, separate};
+use super::head::{has_buttons, lay_out_buttons, lay_out_head, lay_out_notices, separate};
 use super::{AttentionState, Line, PanelState, Row, Style, Theme, color, fold, identity};
 use crate::theme::Roles;
 
@@ -74,18 +74,22 @@ impl PanelLayout {
                 }
                 lay_out_notices(&mut rows, None, key.warning.as_deref(), width, theme);
                 super::provenance::append_row(&mut rows, state, width, theme);
-                // The design reads identity, title, summary, buttons, sections: a leading title and
-                // at most one line under it go above the buttons, and nothing else does, so no body
-                // can push the buttons more than two rows down (D97).
-                let lead = leading_title_block(lines);
-                fold::append_blocks(
-                    &mut rows,
-                    &lines[..lead],
-                    &state.folds,
-                    width,
-                    theme,
-                    Some(&roles),
-                );
+                // The design reads identity, title, summary, buttons, sections. Only when there are
+                // buttons to place does a leading title — and an unmarked summary under it — go
+                // above them, each cut to one row, with the producer's own gap if one closes them:
+                // the first label starts at most four rows below the application's own rows (D97).
+                // Without buttons the body is painted exactly in the producer's order.
+                let lead = if has_buttons(panel, width, true) {
+                    leading_title_block(lines)
+                } else {
+                    0
+                };
+                for line in &lines[..lead] {
+                    let start = rows.len();
+                    let line = std::slice::from_ref(line);
+                    fold::append_blocks(&mut rows, line, &state.folds, width, theme, Some(&roles));
+                    cut_to_one_row(&mut rows, start);
+                }
                 lay_out_buttons(&mut rows, panel, width, theme, Some(&roles));
                 if lead < lines.len() {
                     separate(&mut rows);
@@ -106,9 +110,21 @@ impl PanelLayout {
     }
 }
 
+/// Keeps only the first of the rows laid out from `start`, ending it in «…» when more followed.
+fn cut_to_one_row(rows: &mut Vec<Row>, start: usize) {
+    if rows.len() > start + 1 {
+        rows.truncate(start + 1);
+        let row = &mut rows[start];
+        let keep = row.text.chars().count().saturating_sub(1);
+        let kept: String = row.text.chars().take(keep).collect();
+        row.text = format!("{}…", kept.trim_end());
+    }
+}
+
 /// How many lines open the panel as its title block: a first line styled `title`, at most one line
-/// under it that is neither a gap nor a section — the design's summary — and the gap that closes
-/// them, if one does. Nothing when the panel does not open with a title.
+/// under it that is unmarked and neither a gap nor a section — the design's summary; a marked line
+/// is a step of a list, and a list is never split — and the producer's gap that closes them, if one
+/// does. Nothing when the panel does not open with a title.
 fn leading_title_block(lines: &[Line]) -> usize {
     if lines
         .first()
@@ -117,9 +133,9 @@ fn leading_title_block(lines: &[Line]) -> usize {
         return 0;
     }
     let ordinary = |at: usize| {
-        lines
-            .get(at)
-            .is_some_and(|line| line.style != Some(Style::Section) && !fold::is_gap(line))
+        lines.get(at).is_some_and(|line| {
+            line.style != Some(Style::Section) && line.mark.is_none() && !fold::is_gap(line)
+        })
     };
     let lead = if ordinary(1) { 2 } else { 1 };
     lead + usize::from(lines.get(lead).is_some_and(fold::is_gap))

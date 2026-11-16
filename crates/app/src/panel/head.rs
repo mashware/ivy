@@ -119,11 +119,10 @@ pub(super) fn lay_out_buttons(
     // it lays the text out wider than the strip and the painting clips what does not fit: the person
     // would see a fragment and the press would send the whole string. Leaving these rows untagged is
     // the same mechanism as a button the clip cut in half: unreachable rather than refused.
-    let shows_a_command = width.saturating_sub(MARGIN as usize) >= MINIMUM_SLOT;
     for (nth, action) in panel
         .iter()
         .flat_map(|panel| panel.actions.iter())
-        .filter(|_| shows_a_command)
+        .filter(|_| shows_a_command(width, kit.is_some()))
         .enumerate()
     {
         if kit.is_some() {
@@ -173,6 +172,22 @@ pub(super) fn lay_out_buttons(
     if kit.is_some() && rows.last().is_some_and(|row| row.role != RowRole::Text) {
         pad(rows);
     }
+}
+
+/// Whether a command has room at all: its own column — after the prompt in the integrated chrome —
+/// leaves the wrapping at least its floor.
+fn shows_a_command(width: usize, integrated: bool) -> bool {
+    let column = if integrated {
+        MARGIN as usize + PROMPT
+    } else {
+        MARGIN as usize
+    };
+    width.saturating_sub(column) >= MINIMUM_SLOT
+}
+
+/// Whether [`lay_out_buttons`] would lay out any button for this panel at this width.
+pub(super) fn has_buttons(panel: Option<&Panel>, width: usize, integrated: bool) -> bool {
+    shows_a_command(width, integrated) && panel.is_some_and(|panel| !panel.actions.is_empty())
 }
 
 /// The cells the `›` prompt and the space after it take before a command.

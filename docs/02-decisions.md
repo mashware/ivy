@@ -9911,9 +9911,13 @@ even that is left out rather than drawn as an empty chip. The pane's hexadecimal
 longer painted: a person finds the console by its header (D96), and the identifier is a name for
 programs. With neither a phase nor a driver there is no row.
 
-**Decision — order and buttons.** A leading `title` line, at most one line under it — the design's
-summary — and the gap closing them go above the buttons, as the design reads; nothing else does, so no
-body pushes the buttons more than two rows down. An action is a rounded, bordered frame: the label,
+**Decision — order and buttons.** When there are buttons to place, a leading `title` line, at most
+one unmarked line under it — the design's summary — and the producer's own gap closing them, if one
+does, go above the buttons, as the design reads; title and summary are cut to one row each with «…»,
+so the first label starts at most four rows below the application's own rows: title, summary, gap,
+and the blank row its frame reaches into. A marked line under the title is a step of a list, and a
+list is never split. Without buttons the body is painted exactly in the producer's order, with no
+row added. An action is a rounded, bordered frame: the label,
 without D9's `>` sign, in the interface face at medium weight on the raised surface, and the literal
 command below a rule on the console's own background; a `›` prompt is drawn at the label's inset and
 the command starts after it and a space — the prompt is never part of the text that is sent. Every
@@ -9947,7 +9951,8 @@ the file's date (it would claim an observation Ivy never made); cutting the clai
 was (the frame would touch the panel's edges and two buttons would read as one block); a frame inset
 inside its own rows (the label and the command touched its borders); a frame for every laid-out button
 (one the clip cut would look pressable and not be); putting a whole leading block above the buttons
-(a long titled block would push them into the clip); wrapping labels by measured width at layout time
+(a long titled block would push them into the clip); reordering a panel with no buttons, or taking a
+marked step as the summary (it added a row into a list and split it); wrapping labels by measured width at layout time
 (the layout has no font to measure with, and a cut marked with «…» keeps the button whole); the design's `›` inside the command
 text (what is painted must be what is sent); new font glyphs for the marks such as `✓` (D9 measured
 them out, and a glyph outside the bundled faces triggers discovery).
@@ -9961,8 +9966,9 @@ whole body; their series are unaffected (D13). The integrated-chrome batches —
 paint the restyled panel: every bench panel declares `attention` and carries marks, so they paint the
 32-point band in place of the identity row, the claim row and the blank under them, and the two-ink
 marks. They paint no identity row at all — the bench panels declare no `phase` and no connection holds
-them — so the body starts higher than in the historical panel and more of its rows show. The frames
-and the chevron are painted only where a batch's panels publish actions or a section. **Their series are not comparable across D97**:
+them — so the body starts higher than in the historical panel and more of its rows show. No
+integrated batch publishes actions, so the buttons' frames, their blank rows and the title block
+above them are not measured; the chevron is painted only where a batch's panels publish a section. **Their series are not comparable across D97**:
 a run from before this decision and one after measure different panels, the report does not say which
 panel it painted, and nothing invalidates the older runs on its own — a comparison needs a new pair
 measured after it, the same day.

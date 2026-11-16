@@ -5351,10 +5351,140 @@ mod pressing {
             "the button was pushed into the clip"
         );
         let texts = texts_at(&shapes);
-        let at = |name: &str| texts.iter().position(|t| t.1.trim() == name);
+        let at = |name: &str| {
+            texts
+                .iter()
+                .position(|t| t.1.trim() == name)
+                .unwrap_or_else(|| panic!("«{name}» is not painted: {texts:?}"))
+        };
         assert!(
             at("summary") < at("Approve") && at("Approve") < at("line 0"),
             "{texts:?}"
+        );
+    }
+
+    /// The integrated layout's rows for `document` at a panel of `width` points, painted twice.
+    fn integrated_rows(
+        document: &str,
+        width: f32,
+        height: f32,
+    ) -> (PanelState, Vec<eframe::egui::Shape>) {
+        let dir = PanelDir::create().expect("create the directory");
+        publish(&dir, document);
+        let mut state = PanelState::default();
+        state.refresh(dir.path());
+        let place = Rect::from_min_size(a_wide_strip().min, eframe::egui::vec2(width, height));
+        super::tests::paint_integrated(&mut state, place, SystemTime::now());
+        let shapes = super::tests::paint_integrated(&mut state, place, SystemTime::now());
+        (state, shapes)
+    }
+
+    /// The tops of the painted texts whose words start with `prefix`, in queue order.
+    fn tops(shapes: &[eframe::egui::Shape], prefix: &str) -> Vec<f32> {
+        texts_at(shapes)
+            .into_iter()
+            .filter(|t| t.1.trim_start().starts_with(prefix))
+            .map(|t| t.2.top())
+            .collect()
+    }
+
+    /// **Without buttons the body is painted exactly as the producer ordered it** — a title and a
+    /// list of marked steps get no blank row between them — and **with buttons a list is never
+    /// split**: a marked line is a step, not the summary, so the buttons go under the title alone and
+    /// the steps stay one row apart.
+    #[test]
+    fn a_marked_list_under_a_title_is_never_split() {
+        let (_, cell) = super::tests::cell();
+        let steps = r#"{"text":"step 1","mark":"done"},{"text":"step 2","mark":"done"},
+            {"text":"step 3","mark":"current"},{"text":"step 4","mark":"pending"},
+            {"text":"step 5","mark":"pending"}"#;
+        let plain = format!(
+            r#"{{"header":false,"lines":[{{"text":"main @ 9f3c2ab","style":"title"}},{steps}]}}"#
+        );
+        let (_, shapes) = integrated_rows(&plain, 400.0, 600.0);
+        let title = tops(&shapes, "main @");
+        let rows = tops(&shapes, "step");
+        assert_eq!(rows.len(), 5);
+        assert!(
+            (rows[0] - title[0] - cell).abs() < 0.01,
+            "a blank row under the title: {title:?} {rows:?}"
+        );
+        assert!(
+            rows.windows(2).all(|w| (w[1] - w[0] - cell).abs() < 0.01),
+            "{rows:?}"
+        );
+
+        let with_buttons = format!(
+            r#"{{"header":false,"actions":[{{"label":"Approve","send":"yes"}}],
+                "lines":[{{"text":"main @ 9f3c2ab","style":"title"}},{steps}]}}"#
+        );
+        let (_, shapes) = integrated_rows(&with_buttons, 400.0, 600.0);
+        let title = tops(&shapes, "main @")[0];
+        let label = tops(&shapes, "Approve")[0];
+        let rows = tops(&shapes, "step");
+        assert!(title < label && label < rows[0], "{title} {label} {rows:?}");
+        assert!(
+            rows.windows(2).all(|w| (w[1] - w[0] - cell).abs() < 0.01),
+            "the list was split: {rows:?}"
+        );
+    }
+
+    /// **The lead is one row per line**: a summary long enough to wrap many times is cut to one row
+    /// with «…», so the first label starts at most four rows below the panel's top — title,
+    /// summary, the producer's gap, the blank row its frame reaches into — and stays reachable on a
+    /// short panel.
+    #[test]
+    fn a_long_summary_is_cut_to_one_row_and_the_buttons_stay_close() {
+        let (_, cell) = super::tests::cell();
+        let summary = "word ".repeat(100);
+        let document = serde_json::json!({
+            "header": false,
+            "actions": [{"label": "Approve", "send": "yes"}],
+            "lines": [{"text":"Title","style":"title"}, summary.trim(), "", "body"],
+        })
+        .to_string();
+        let (state, shapes) = integrated_rows(&document, 200.0, 9.0 * cell);
+        assert_eq!(
+            state.buttons_drawn().count(),
+            1,
+            "the button was pushed into the clip"
+        );
+        let cut: Vec<_> = texts_at(&shapes)
+            .into_iter()
+            .filter(|t| t.1.trim_start().starts_with("word"))
+            .collect();
+        assert_eq!(cut.len(), 1, "the summary took more than one row: {cut:?}");
+        assert!(cut[0].1.ends_with('…'), "{cut:?}");
+        let label = tops(&shapes, "Approve")[0];
+        assert!(
+            label - a_wide_strip().top() <= 4.0 * cell + 0.01,
+            "the label starts {} rows down",
+            (label - a_wide_strip().top()) / cell
+        );
+    }
+
+    /// **A command needs room after its prompt**: at a text width of ten cells the integrated
+    /// command, which starts three cells in, would wrap below its floor and be laid out past the
+    /// strip, so no button is laid out at all; the historical one, one cell in, still fits.
+    #[test]
+    fn an_integrated_command_without_room_after_its_prompt_lays_out_no_button() {
+        let (cell, _) = super::tests::cell();
+        let document = r#"{"header":false,"actions":[{"label":"Run","send":"a-long-command-here"}],"lines":["b"]}"#;
+        let width = 12.5 * cell;
+        let (state, _) = integrated_rows(document, width, 600.0);
+        let rows = &state.layout.as_ref().expect("a layout").rows;
+        assert!(
+            !rows.iter().any(|row| row.role != RowRole::Text),
+            "a button was laid out with no room for its command"
+        );
+        let historical = painted(
+            document,
+            Rect::from_min_size(a_wide_strip().min, eframe::egui::vec2(width, 600.0)),
+        );
+        assert_eq!(
+            historical.buttons_drawn().count(),
+            1,
+            "the case needs the historical button"
         );
     }
 }
