@@ -30,6 +30,7 @@ mod color;
 mod document;
 mod driving;
 mod fold;
+mod identity;
 pub(crate) mod overlay;
 pub(crate) mod provenance;
 pub(crate) mod provenance_route;
@@ -760,6 +761,8 @@ struct Row {
     /// which button without laying the panel out a second time.
     role: RowRole,
     header: Option<fold::Header>,
+    /// The integrated identity row's phase chip, when this row is that row.
+    chip: Option<identity::Chip>,
     /// A compact link label painted on this row, independently of its body text.
     link: Option<LaidOutLink>,
     /// Which of its characters go to color, as ranges of character indices, set once the whole layout
@@ -776,6 +779,7 @@ impl Row {
             color,
             role: RowRole::Text,
             header: None,
+            chip: None,
             link: None,
             color_spans: Vec::new(),
         }
@@ -804,9 +808,12 @@ enum RowRole {
 /// the result between frames: as long as the file and the width do not change, the layout is the same.
 /// Without it, wrapping the panel would be recalculated sixty times per second while the console beside it
 /// dumps.
+///
+/// `id` is the pane's identifier for the historical identity row, and nothing for the integrated
+/// chrome, whose identity row is the phase as a chip and never the identifier (D97).
 fn lay_out_head(
     panel: Option<&Panel>,
-    id: &str,
+    id: Option<&str>,
     width: usize,
     theme: &Theme,
     warning: Option<&str>,
@@ -817,23 +824,7 @@ fn lay_out_head(
 
     if panel.is_none_or(|panel| panel.header) {
         let phase = panel.and_then(|panel| panel.phase.as_deref());
-        // **Who is driving goes on the identity row, beside the pane's own name and its phase.**
-        // That row answers «what is this pane», and with two transports the answer includes which
-        // one is in charge — a person looking at a panel that will not change from the file has to
-        // be able to see why without editing anything to find out.
-        let identity = match (phase, held_by) {
-            (Some(phase), Some(source)) => format!("{id} · {phase} · {source}"),
-            (Some(phase), None) => format!("{id} · {phase}"),
-            (None, Some(source)) => format!("{id} · {source}"),
-            (None, None) => id.to_owned(),
-        };
-        wrap(
-            &mut rows,
-            0,
-            &sanitize(&identity),
-            theme.panel_color(None, None),
-            width,
-        );
+        identity::lay_out(&mut rows, id, phase, held_by, width, theme);
     }
 
     // **The claim goes in the application's row and not in the identity one**, and that frontier is the

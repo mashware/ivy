@@ -34,7 +34,7 @@ impl PanelLayout {
         let roles = Roles::of(theme);
         let mut rows = lay_out_head(
             state.last_good.as_deref(),
-            id,
+            Some(id).filter(|_| !integrated),
             width,
             theme,
             warning.as_deref(),

@@ -201,7 +201,7 @@ pub(super) fn lay_out(
     attention: Option<super::AttentionState>,
     held_by: Option<&str>,
 ) -> Vec<Row> {
-    let mut rows = super::lay_out_head(panel, id, width, theme, warning, attention, held_by);
+    let mut rows = super::lay_out_head(panel, Some(id), width, theme, warning, attention, held_by);
     if let Some(panel) = panel {
         append_blocks(&mut rows, panel, &Folds::default(), width, theme);
     }

@@ -421,6 +421,11 @@ pub(super) fn paint_row(
     discoverer: &mut Discoverer,
     glyphs: &mut Vec<ColorGlyph>,
 ) -> Rect {
+    if let Some(inked) =
+        super::identity::paint(painter, at, row, metrics, width, discoverer, glyphs)
+    {
+        return inked;
+    }
     fold::paint_header(painter, at, row, metrics, width, discoverer, glyphs)
         .unwrap_or_else(|| color::paint_text(painter, at, row, metrics, discoverer, glyphs))
 }
