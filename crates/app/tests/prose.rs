@@ -615,6 +615,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         5,
     ),
     (
+        "src/panel/claim_strip.rs",
+        include_str!("../src/panel/claim_strip.rs"),
+        28,
+    ),
+    (
         "src/settings/editor/runtime.rs",
         include_str!("../src/settings/editor/runtime.rs"),
         7,

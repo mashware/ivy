@@ -136,15 +136,15 @@ mod tests {
             PublicationOrigin::Outside,
         )
         .unwrap();
-        let (rows, cached) = state
-            .lay_out_if_needed("pane", 100, &theme, None, None)
+        let (rows, cached, _) = state
+            .lay_out_if_needed("pane", (100, theme, None, false), None)
             .unwrap();
         assert!(!cached);
         assert!(rows.iter().any(|row| row.text == OUTSIDE));
         assert!(!rows.iter().any(|row| row.text == "content"));
         assert!(
             state
-                .lay_out_if_needed("pane", 100, &theme, None, None)
+                .lay_out_if_needed("pane", (100, theme, None, false), None)
                 .unwrap()
                 .1
         );
@@ -157,8 +157,8 @@ mod tests {
             PublicationOrigin::Unknown,
         )
         .unwrap();
-        let (rows, cached) = state
-            .lay_out_if_needed("pane", 100, &theme, None, None)
+        let (rows, cached, _) = state
+            .lay_out_if_needed("pane", (100, theme, None, false), None)
             .unwrap();
         assert!(!cached);
         assert!(!rows.iter().any(|row| row.text == OUTSIDE));
@@ -226,9 +226,9 @@ mod tests {
             .join()
             .expect("outside worker")
             .expect("outside publish accepted");
-        let (rows, _) = pane
+        let (rows, _, _) = pane
             .panel_state
-            .lay_out_if_needed("pane", 100, &Theme::default(), None, None)
+            .lay_out_if_needed("pane", (100, Theme::default(), None, false), None)
             .expect("outside document layout");
         assert!(rows.iter().any(|row| row.text == OUTSIDE));
         assert!(
@@ -254,9 +254,9 @@ mod tests {
                 .as_ref()
                 .is_some_and(|panel| panel.lines.iter().any(|line| line.text == "inside"))
         });
-        let (rows, _) = pane
+        let (rows, _, _) = pane
             .panel_state
-            .lay_out_if_needed("pane", 100, &Theme::default(), None, None)
+            .lay_out_if_needed("pane", (100, Theme::default(), None, false), None)
             .expect("inside document layout");
         assert!(!rows.iter().any(|row| row.text == OUTSIDE));
     }

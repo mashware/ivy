@@ -25,6 +25,7 @@ pub(crate) mod body;
 mod buttons;
 mod cache;
 use cache::PanelLayout;
+mod claim_strip;
 mod color;
 mod document;
 mod driving;
@@ -511,30 +512,30 @@ impl PanelState {
     }
 
     /// The layout for this width, this warning and this claim, computing it only if the one there is no
-    /// good.
+    /// good. The roles travel with it because they are derived from the same theme and cost too much
+    /// to derive on every frame.
     fn lay_out_if_needed(
         &mut self,
         id: &str,
-        width: usize,
-        theme: &Theme,
-        warning: Option<String>,
+        key: cache::LayoutKey,
         attention: Option<AttentionState>,
-    ) -> Option<(&[Row], bool)> {
-        if self.last_good.is_none() && warning.is_none() {
+    ) -> Option<(&[Row], bool, crate::theme::Roles)> {
+        if self.last_good.is_none() && key.2.is_none() {
             return None;
         }
 
         // **The claim is not in the key, and it is on purpose**: it dims exactly when the warning appears
         // —which is in it— and its class only changes on re-reading the file, which throws away the whole
         // layout. Putting it in would be a term no test can knock down. Whoever changes the criterion of
-        // «backed» and detaches it from the warning has to add it here.
-        let still_valid = matches!(&self.layout, Some(done) if done.width == width && done.warning == warning && done.theme == *theme);
+        // «backed» and detaches it from the warning has to add it here. With the integrated chrome the
+        // claim is not laid out at all: the strip paints it from the frame's own answer (D97).
+        let still_valid = self.layout.as_ref().is_some_and(|done| done.key == key);
         if !still_valid {
-            self.layout = Some(PanelLayout::new(self, id, width, theme, warning, attention));
+            self.layout = Some(PanelLayout::new(self, id, key, attention));
         }
         self.layout
             .as_ref()
-            .map(|done| (done.rows.as_slice(), still_valid))
+            .map(|done| (done.rows.as_slice(), still_valid, done.roles))
     }
 }
 
@@ -1059,6 +1060,14 @@ fn wrap(rows: &mut Vec<Row>, indent: usize, text: &str, color: Color32, width: u
 ///
 /// The framing comes from the painter itself and not from a separate argument: with the two ways, nothing
 /// would prevent them from ceasing to coincide one day.
+///
+/// `integrated` is the window's chrome decision: the measured runs keep the historical panel, whose
+/// claim is a row of text, so no published series changes its geometry (D13, D97).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the chrome decision is one more input of the same painting, and bundling it with \
+              unrelated ones would only hide which is which"
+)]
 pub fn paint(
     painter: &Painter,
     state: &mut PanelState,
@@ -1067,6 +1076,7 @@ pub fn paint(
     metrics: &CellMetrics,
     now: SystemTime,
     discoverer: &mut crate::fonts::Discoverer,
+    integrated: bool,
 ) -> std::time::Duration {
     let rect = painter.clip_rect();
     painter.rect_filled(rect, 0.0, theme.panel_background());
@@ -1082,14 +1092,23 @@ pub fn paint(
     // **Taken away first and put back only at the end.** Every way out of this function below is a
     // frame in which nothing was drawn, and a press must not land on what the previous one left.
     state.nothing_was_drawn();
-    let Some((rows, settled)) = state.lay_out_if_needed(id, width, theme, warning, attention)
-    else {
+    let key = (width, *theme, warning, integrated);
+    let Some((rows, settled, roles)) = state.lay_out_if_needed(id, key, attention) else {
         return std::time::Duration::ZERO;
     };
 
     // **Without a whole row nothing is painted, not even the warning.** With a floor of one, a panel of
     // zero height queued «… N more» outside its rectangle: a warning that content is missing, in a place
     // where no content fits.
+    if ((rect.height() / metrics.height()) as usize) == 0 {
+        return std::time::Duration::ZERO;
+    }
+    // **The strip goes before the rows are fitted**, so the claim stays the last thing a short panel
+    // loses, and every row, press and marker below is measured from what the strip leaves.
+    let rect = match attention.filter(|_| integrated) {
+        Some(claim) => claim_strip::paint(painter, rect, claim, theme, &roles),
+        None => rect,
+    };
     let fit = (rect.height() / metrics.height()) as usize;
     if fit == 0 {
         return std::time::Duration::ZERO;
@@ -1244,6 +1263,7 @@ mod tests {
                     &metrics,
                     SystemTime::now(),
                     &mut discoverer,
+                    false,
                 );
             });
             let mut overflow = None;
@@ -1480,12 +1500,38 @@ mod tests {
         paint_the_state_with(state, place, now, &mut crate::fonts::Discoverer::default())
     }
 
+    /// The same, with the window's integrated chrome: the claim as a strip and the identity as a
+    /// chip (D97).
+    pub(super) fn paint_integrated(
+        state: &mut PanelState,
+        place: Rect,
+        now: SystemTime,
+    ) -> Vec<eframe::egui::Shape> {
+        paint_in_chrome(
+            state,
+            place,
+            now,
+            &mut crate::fonts::Discoverer::default(),
+            true,
+        )
+    }
+
     /// The same, with the font discoverer the test hands it — which is how a test gets a full atlas.
     pub(super) fn paint_the_state_with(
         state: &mut PanelState,
         place: Rect,
         now: SystemTime,
         discoverer: &mut crate::fonts::Discoverer,
+    ) -> Vec<eframe::egui::Shape> {
+        paint_in_chrome(state, place, now, discoverer, false)
+    }
+
+    fn paint_in_chrome(
+        state: &mut PanelState,
+        place: Rect,
+        now: SystemTime,
+        discoverer: &mut crate::fonts::Discoverer,
+        integrated: bool,
     ) -> Vec<eframe::egui::Shape> {
         let ctx = eframe::egui::Context::default();
         let mut output = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
@@ -1501,6 +1547,7 @@ mod tests {
                 &metrics,
                 now,
                 discoverer,
+                integrated,
             );
         });
 
@@ -2275,7 +2322,7 @@ mod tests {
             .expect("nobody was holding it");
         let reader = state.reader();
         state
-            .lay_out_if_needed("a1b2", 40, &Theme::default(), None, None)
+            .lay_out_if_needed("a1b2", (40, Theme::default(), None, false), None)
             .expect("there is a layout");
         state.drawn = Some(Drawn {
             headers: Vec::new(),
@@ -2928,19 +2975,19 @@ mod tests {
         let theme = Theme::default();
 
         let first = state
-            .lay_out_if_needed("a1b2", 40, &theme, None, None)
+            .lay_out_if_needed("a1b2", (40, theme, None, false), None)
             .expect("there is a panel")
             .0
             .to_vec();
         let repeated = state
-            .lay_out_if_needed("a1b2", 40, &theme, None, None)
+            .lay_out_if_needed("a1b2", (40, theme, None, false), None)
             .expect("there is a panel")
             .0
             .to_vec();
         assert_eq!(first, repeated, "the same width gives the same layout");
 
         let narrow = state
-            .lay_out_if_needed("a1b2", 12, &theme, None, None)
+            .lay_out_if_needed("a1b2", (12, theme, None, false), None)
             .expect("there is a panel")
             .0
             .to_vec();
@@ -2961,7 +3008,7 @@ mod tests {
         state.refresh(dir.path());
         let document = state.last_good.clone().unwrap();
         let before = state
-            .lay_out_if_needed("a1b2", 40, &Theme::default(), None, None)
+            .lay_out_if_needed("a1b2", (40, Theme::default(), None, false), None)
             .unwrap()
             .0
             .to_vec();
@@ -2969,8 +3016,8 @@ mod tests {
             foreground: Some(Color32::from_rgb(19, 71, 113)),
             ..Default::default()
         });
-        let (rows, reused) = state
-            .lay_out_if_needed("a1b2", 40, &changed, None, None)
+        let (rows, reused, _) = state
+            .lay_out_if_needed("a1b2", (40, changed, None, false), None)
             .unwrap();
         assert!(!reused);
         assert_ne!(before, rows);
@@ -2982,7 +3029,7 @@ mod tests {
         assert!(Arc::ptr_eq(&document, state.last_good.as_ref().unwrap()));
         assert!(
             state
-                .lay_out_if_needed("a1b2", 40, &changed, None, None)
+                .lay_out_if_needed("a1b2", (40, changed, None, false), None)
                 .unwrap()
                 .1
         );
@@ -2996,14 +3043,14 @@ mod tests {
         let mut state = PanelState::default();
         state.refresh(dir.path());
         let theme = Theme::default();
-        state.lay_out_if_needed("a1b2", 40, &theme, None, None);
+        state.lay_out_if_needed("a1b2", (40, theme, None, false), None);
 
         publish(&dir, r#"{"header":false,"lines":["the new"]}"#);
         age_the_file(&dir, 1);
         state.refresh(dir.path());
 
         let rows = state
-            .lay_out_if_needed("a1b2", 40, &theme, None, None)
+            .lay_out_if_needed("a1b2", (40, theme, None, false), None)
             .expect("there is a panel");
         assert!(
             rows.0.iter().any(|row| row.text.contains("the new")),
@@ -3032,7 +3079,7 @@ mod tests {
                 SystemTime::now(),
             )
             .expect("nobody was holding it");
-        state.lay_out_if_needed("a1b2", 40, &theme, None, None);
+        state.lay_out_if_needed("a1b2", (40, theme, None, false), None);
         let published = state
             .last_understood()
             .expect("there is a panel")
@@ -3051,7 +3098,7 @@ mod tests {
             .expect("the holder may patch");
 
         let rows = state
-            .lay_out_if_needed("a1b2", 40, &theme, None, None)
+            .lay_out_if_needed("a1b2", (40, theme, None, false), None)
             .expect("there is a panel");
         assert!(
             rows.0.iter().any(|row| row.text.contains("the new")),
@@ -3318,12 +3365,12 @@ mod tests {
         let theme = Theme::default();
 
         let first = state
-            .lay_out_if_needed("a1b2", 40, &theme, None, None)
+            .lay_out_if_needed("a1b2", (40, theme, None, false), None)
             .expect("there is a panel")
             .0
             .as_ptr();
         let second = state
-            .lay_out_if_needed("a1b2", 40, &theme, None, None)
+            .lay_out_if_needed("a1b2", (40, theme, None, false), None)
             .expect("there is a panel")
             .0
             .as_ptr();
@@ -3588,7 +3635,7 @@ mod tests {
 
         for width in [0usize, 1, 2, 3] {
             let rows = state
-                .lay_out_if_needed("probe", width, &theme, None, None)
+                .lay_out_if_needed("probe", (width, theme, None, false), None)
                 .expect("there is a panel to lay out");
             assert!(
                 !rows.0.is_empty(),
@@ -3712,6 +3759,53 @@ mod tests {
                 ("  whatever".to_owned(), theme.panel_color(None, None)),
             ]
         );
+    }
+
+    /// **In the integrated chrome the claim is a strip, and the rows start under it** (D97). The
+    /// strip's words are painted first, in the claim's colour, and the body's first row falls exactly
+    /// 32 points below the panel's top — the band the cell grid gives up — while the same panel
+    /// with no claim starts its body at the top. Without the offset the first row would be painted
+    /// under the band.
+    #[test]
+    fn an_integrated_claim_is_a_strip_and_the_rows_start_below_it() {
+        let theme = Theme::default();
+        let dir = PanelDir::create().expect("create the directory");
+        publish(
+            &dir,
+            r#"{"header":false,"attention":"wait","lines":["whatever"]}"#,
+        );
+        let mut state = PanelState::default();
+        state.refresh(dir.path());
+
+        let painted: Vec<(String, Color32, Pos2)> =
+            tests_shapes::texts(paint_integrated(&mut state, PLACE, SystemTime::now()));
+        assert_eq!(painted.len(), 2, "{painted:?}");
+        assert_eq!(painted[0].0, attention_text(Attention::Wait));
+        assert_eq!(painted[0].1, theme.attention_color(Attention::Wait, true));
+        assert!(painted[0].2.y < PLACE.top() + claim_strip::HEIGHT);
+        assert_eq!(painted[1].0, "  whatever");
+        assert_eq!(painted[1].2.y, PLACE.top() + claim_strip::HEIGHT);
+
+        publish(&dir, r#"{"header":false,"lines":["whatever"]}"#);
+        age_the_file(&dir, 1);
+        state.refresh(dir.path());
+        let painted = tests_shapes::texts(paint_integrated(&mut state, PLACE, SystemTime::now()));
+        assert_eq!(painted.len(), 1, "no claim, no strip: {painted:?}");
+        assert_eq!(painted[0].2.y, PLACE.top());
+    }
+
+    /// The text, colour and place of every text shape, in queue order.
+    mod tests_shapes {
+        use eframe::egui::{Color32, Pos2, Shape};
+        pub(super) fn texts(shapes: Vec<Shape>) -> Vec<(String, Color32, Pos2)> {
+            shapes
+                .into_iter()
+                .filter_map(|shape| match shape {
+                    Shape::Text(t) => Some((t.galley.text().to_owned(), t.fallback_color, t.pos)),
+                    _ => None,
+                })
+                .collect()
+        }
     }
 
     /// And with the header in place, the claim goes **below the identity and above the body**: on top,
@@ -4489,7 +4583,7 @@ mod pressing {
             publish(&dir, &document);
             state.refresh(dir.path());
             let rows = state
-                .lay_out_if_needed("a1b2", 30, &Theme::default(), None, None)
+                .lay_out_if_needed("a1b2", (30, Theme::default(), None, false), None)
                 .expect("there is a panel")
                 .0
                 .to_vec();

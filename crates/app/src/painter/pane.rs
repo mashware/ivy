@@ -285,6 +285,7 @@ pub(crate) fn paint_pane(
             metrics,
             now,
             discoverer,
+            integrated,
         );
     }
     let links = console_links

@@ -27999,6 +27999,7 @@ mod tests {
                 metrics,
                 SystemTime::now(),
                 &mut discoverer,
+                false,
             );
         });
         output.drop_without_applying_deltas();
