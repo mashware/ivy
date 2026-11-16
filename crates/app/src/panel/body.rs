@@ -103,6 +103,8 @@ impl Body {
                     id: key.clone(),
                     folded: reader.folds.get(&key).copied().unwrap_or(line.collapsed),
                     summary: super::sanitize(line.summary.as_deref().unwrap_or("")),
+                    muted: theme.foreground().gamma_multiply(0.5),
+                    rule: theme.divider(),
                 });
                 rows.push(row);
                 continue;

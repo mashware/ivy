@@ -3,7 +3,8 @@ use std::collections::HashMap;
 
 use super::{Line, Panel, PanelState, Row, RowRole, Style, Theme, blocks, lay_out_line, sanitize};
 use crate::painter::CellMetrics;
-use eframe::egui::{Painter, Pos2, Rect};
+use crate::theme::Roles;
+use eframe::egui::{Color32, Painter, Pos2, Rect, Stroke, vec2};
 use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -17,6 +18,10 @@ pub(super) struct Header {
     pub(super) id: HeaderId,
     pub(super) folded: bool,
     pub(super) summary: String,
+    /// The summary's ink, muted beside the title.
+    pub(super) muted: Color32,
+    /// The rule's ink between the title and the summary.
+    pub(super) rule: Color32,
 }
 pub(super) type Folds = HashMap<HeaderId, bool>;
 
@@ -57,6 +62,7 @@ pub(super) fn append_blocks(
     width: usize,
     theme: &Theme,
 ) {
+    let roles = Roles::of(theme);
     for block in blocks(&panel.lines) {
         let column = block
             .iter()
@@ -74,16 +80,14 @@ pub(super) fn append_blocks(
                     None => HeaderId::Text(line.text.clone()),
                 };
                 hidden = folds.get(&id).copied().unwrap_or(line.collapsed);
-                let mut row = Row::text(
-                    0,
-                    sanitize(&line.text),
-                    theme.panel_color(None, Some(Style::Section)),
-                );
+                let mut row = Row::text(0, sanitize(&line.text), roles.tx);
                 row.role = RowRole::Fold(rows.len());
                 row.header = Some(Header {
                     id,
                     folded: hidden,
                     summary: sanitize(line.summary.as_deref().unwrap_or("")),
+                    muted: roles.tx3,
+                    rule: roles.line,
                 });
                 rows.push(row);
             } else if !hidden || is_gap(line) {
@@ -93,6 +97,11 @@ pub(super) fn append_blocks(
     }
 }
 
+/// Paints a section header: the chevron that says it folds — down when open, right when folded —
+/// the title, a one-point rule across the middle, and the summary held to the right edge (D97).
+///
+/// **It returns everything it inked**, chevron included, because whether a header can be clicked
+/// depends on its ink staying inside the strip.
 pub(super) fn paint_header(
     painter: &Painter,
     origin: Pos2,
@@ -109,41 +118,55 @@ pub(super) fn paint_header(
             .size()
             .x
     };
-    let width = width as f32 * metrics.width();
-    let prefix = if header.folded { "▸ " } else { "▾ " };
-    let prefix = fit(prefix, width, &measure);
-    let summary = fit(
-        &header.summary,
-        (width - measure(prefix)).max(0.0),
+    let cell = metrics.width();
+    let width = width as f32 * cell;
+    // The chevron keeps the two cells the old text prefix had, so the title does not move.
+    let chevron = Rect::from_min_size(origin, vec2(cell.min(width), metrics.height()));
+    let lead = (2.0 * cell).min(width);
+    let summary = fit(&header.summary, (width - lead).max(0.0), &measure);
+    let summary_left = origin.x + width - measure(summary);
+    let title = fit(
+        &row.text,
+        (summary_left - origin.x - lead - cell).max(0.0),
         &measure,
     );
-    let left_width = (width - measure(summary)).max(0.0);
-    let title_room = (left_width - measure(prefix) - measure(" ─ ")).max(0.0);
-    let title = fit(&row.text, title_room, &measure);
-    let mut head = format!("{prefix}{title}");
-    let rule_width = (left_width - measure(&head) - measure("  ")).max(0.0);
-    let rule = "─".repeat((rule_width / measure("─")) as usize);
-    head.push_str(&format!(" {rule}"));
-    let head = fit(&head, left_width, &measure).to_owned();
+    super::body::paint_chevron(painter, chevron, !header.folded, row.color);
     let mut pieces = [
-        Row::text(0, head, row.color),
-        Row::text(0, summary.to_owned(), row.color),
+        Row::text(0, title.to_owned(), row.color),
+        Row::text(0, summary.to_owned(), header.muted),
     ];
     super::color::flag(&mut pieces);
-    let mut inked = Rect::NOTHING;
-    for (piece, x) in pieces
+    let mut inked = chevron;
+    let mut title_right = origin.x + lead;
+    for (index, (piece, x)) in pieces
         .iter()
-        .zip([origin.x, origin.x + width - measure(summary)])
+        .zip([origin.x + lead, summary_left])
+        .enumerate()
     {
+        if piece.text.is_empty() {
+            continue;
+        }
         discoverer.note_text(&piece.text);
-        inked = inked.union(super::color::paint_text(
+        let ink = super::color::paint_text(
             painter,
             Pos2::new(x, origin.y),
             piece,
             metrics,
             discoverer,
             glyphs,
-        ));
+        );
+        if index == 0 {
+            title_right = ink.right();
+        }
+        inked = inked.union(ink);
+    }
+    let (from, to) = (title_right + cell / 2.0, summary_left - cell / 2.0);
+    if to > from {
+        let y = (origin.y + metrics.height() / 2.0).round() + 0.5;
+        painter.line_segment(
+            [Pos2::new(from, y), Pos2::new(to, y)],
+            Stroke::new(1.0, header.rule),
+        );
     }
     Some(inked)
 }
@@ -212,7 +235,7 @@ pub(super) fn lay_out(
 mod tests {
     use super::*;
     use crate::panel::tests::paint_the_state;
-    use eframe::egui::{Shape, vec2};
+    use eframe::egui::{Color32, Shape, vec2};
     use std::time::SystemTime;
 
     fn state(lines: serde_json::Value) -> PanelState {
@@ -507,14 +530,14 @@ mod tests {
             .iter()
             .find(|(text, _)| text == "日本語")
             .expect("whole summary painted");
-        let title_and_rule = texts
+        let title = texts
             .iter()
-            .find(|(text, _)| text.starts_with('▸') || text.starts_with('▾'))
-            .expect("header title and rule painted");
+            .find(|(text, _)| text != "日本語" && text.starts_with('日'))
+            .expect("header title painted");
         assert!(
-            title_and_rule.1.right() <= summary.1.left() + 0.1,
+            title.1.right() <= summary.1.left() + 0.1,
             "header ink {:?} overlaps summary ink {:?}",
-            title_and_rule.1,
+            title.1,
             summary.1
         );
         let ctx = eframe::egui::Context::default();
@@ -546,19 +569,68 @@ mod tests {
         assert_eq!(fit(text, 2.0, &measured), "a\u{301}");
     }
 
-    #[test]
-    fn fold_glyphs_fit_one_cell_in_the_builtin_font() {
-        let ctx = eframe::egui::Context::default();
-        let output = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
-            let font = eframe::egui::FontId::monospace(crate::DEFAULT_FONT_SIZE);
-            ui.ctx().fonts_mut(|fonts| {
-                let cell = fonts.glyph_width(&font, 'M');
-                for glyph in ['▸', '▾', '─'] {
-                    let width = fonts.glyph_width(&font, glyph);
-                    assert!(width > 0.0 && width <= cell, "{glyph}: {width} > {cell}");
+    /// The chevron's points, the rule's ink and the summary's, as painted.
+    fn header_shapes(
+        state: &mut PanelState,
+    ) -> (Vec<Vec<Pos2>>, Vec<Color32>, Vec<(String, Color32)>) {
+        let mut chevrons = Vec::new();
+        let mut rules = Vec::new();
+        let mut texts = Vec::new();
+        for shape in paint_the_state(
+            state,
+            Rect::from_min_size(Pos2::ZERO, vec2(420.0, 600.0)),
+            SystemTime::now(),
+        ) {
+            match shape {
+                Shape::Path(path) if path.closed => chevrons.push(path.points),
+                Shape::LineSegment { stroke, .. } => rules.push(stroke.color),
+                Shape::Text(text) => {
+                    texts.push((text.galley.text().to_owned(), text.fallback_color))
                 }
-            });
-        });
-        output.drop_without_applying_deltas();
+                _ => {}
+            }
+        }
+        (chevrons, rules, texts)
+    }
+
+    /// **A header shows that it folds**: a chevron that points down while open and right while
+    /// folded, the title in the text colour, a one-point rule in the separator colour and the
+    /// summary muted at the right — Ivy Night's literal values.
+    #[test]
+    fn the_chevron_turns_with_the_fold_and_the_rule_and_summary_take_the_kits_inks() {
+        let rgb = |hex: u32| Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+        let mut state = state(serde_json::json!([header(), "#1"]));
+        let (chevrons, rules, texts) = header_shapes(&mut state);
+        assert_eq!(chevrons.len(), 1, "{chevrons:?}");
+        let folded = &chevrons[0];
+        // Folded: one vertex sits to the right of the other two, at their middle height.
+        let (tip, base): (Vec<&Pos2>, Vec<&Pos2>) = folded
+            .iter()
+            .partition(|p| folded.iter().all(|q| p.x >= q.x));
+        assert_eq!(
+            (tip.len(), base.len()),
+            (1, 2),
+            "folded points right: {folded:?}"
+        );
+        assert_eq!(rules, [rgb(0x252e33)], "one rule, in the separator ink");
+        assert!(
+            texts.contains(&("MRs".to_owned(), rgb(0xe4e8e2))),
+            "{texts:?}"
+        );
+        assert!(
+            texts.contains(&("2/4 merged".to_owned(), rgb(0x8e9390))),
+            "{texts:?}"
+        );
+
+        click(&mut state);
+        let (chevrons, _, _) = header_shapes(&mut state);
+        let open = &chevrons[0];
+        let (tip, base): (Vec<&Pos2>, Vec<&Pos2>) =
+            open.iter().partition(|p| open.iter().all(|q| p.y >= q.y));
+        assert_eq!(
+            (tip.len(), base.len()),
+            (1, 2),
+            "open points down: {open:?}"
+        );
     }
 }
