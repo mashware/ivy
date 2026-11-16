@@ -361,12 +361,15 @@ struct Drawn {
 
 /// A button as it was drawn: which action it is, and the rectangle it occupied.
 ///
-/// The rectangle is the union of the button's rows — its label and the wrapped command under it — so
-/// a press anywhere on the command reaches the same button as a press on the label.
+/// The rectangle spans the button's rows — its label and the wrapped command under it — so a press
+/// anywhere on the command reaches the same button as a press on the label, and it is the frame
+/// that is painted around them (D97).
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct PaintedButton {
     action: usize,
     area: Rect,
+    /// Where the command under the label starts, which is where the frame's lower half begins.
+    command: f32,
 }
 
 impl PanelState {
@@ -1114,6 +1117,13 @@ pub fn paint(
     let walking = std::time::Instant::now();
     let mut drawn = buttons_drawn(rows, whole, rect, metrics);
     let walked = walking.elapsed();
+    // **A frame's place is reserved under the text now and filled at the end**, once the ink has
+    // said which buttons stayed reachable: only those get a frame, so nothing looks pressable that
+    // a press would not reach.
+    let frames: Vec<_> = drawn
+        .iter()
+        .map(|_| painter.add(eframe::egui::Shape::Noop))
+        .collect();
 
     let text_left = rect.left() + MARGIN * metrics.width();
     let mut overflowed: std::collections::BTreeSet<RowRole> = std::collections::BTreeSet::new();
@@ -1184,10 +1194,16 @@ pub fn paint(
     // **A button whose ink left the strip is taken off the list**, for the same reason one the clip
     // cut in half never went on it: unreachable rather than refused, with no branch anywhere that
     // has to remember.
-    drawn.retain(|button| {
+    let reachable = |button: &PaintedButton| {
         !overflowed.contains(&RowRole::ButtonLabel(button.action))
             && !overflowed.contains(&RowRole::ButtonBody(button.action))
-    });
+    };
+    for (button, slot) in drawn.iter().zip(frames) {
+        if reachable(button) {
+            painter.set(slot, buttons::frame(button, &roles));
+        }
+    }
+    drawn.retain(reachable);
     // **D51 gives this to the panel's painting, not to the buttons' walk**: `walked` is published
     // under the buttons' name, so only `buttons_drawn` belongs inside the `walking` clock above. No
     // test can tell which span a few microseconds landed in; the clock's placement is the guard.
@@ -1978,7 +1994,7 @@ mod tests {
     /// It is needed to assert about positions: the margin and the identity gap are counted in cells, so
     /// comparing them with a hand-written number would be checking this machine's font instead of the
     /// panel's arithmetic.
-    fn cell() -> (f32, f32) {
+    pub(super) fn cell() -> (f32, f32) {
         let ctx = eframe::egui::Context::default();
         let mut measured = (0.0, 0.0);
         ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
@@ -2321,6 +2337,7 @@ mod tests {
             buttons: vec![PaintedButton {
                 action: 0,
                 area: PLACE,
+                command: PLACE.bottom(),
             }],
             links: Vec::new(),
         });
@@ -4765,5 +4782,81 @@ mod pressing {
         assert_eq!(state.buttons_drawn().count(), 0);
         assert_eq!(state.links_drawn().count(), 0);
         assert!(state.button_at(a_wide_strip().center()).is_none());
+    }
+
+    /// Every filled or stroked rectangle queued, with the frame's grouped shape opened up.
+    fn rects(shapes: Vec<eframe::egui::Shape>) -> Vec<eframe::egui::epaint::RectShape> {
+        let mut found = Vec::new();
+        for shape in shapes {
+            match shape {
+                eframe::egui::Shape::Rect(rect) => found.push(rect),
+                eframe::egui::Shape::Vec(inner) => found.extend(rects(inner)),
+                _ => {}
+            }
+        }
+        found
+    }
+
+    /// **The frame a person sees is the rectangle a press reaches** (D97), painted in the kit's
+    /// colours — written out as Ivy Night's literal raised, base and control-border values — with
+    /// the command's lower half starting at the command's row. And a button the clip cut in half
+    /// gets no frame at all: nothing looks pressable that a press would not reach.
+    #[test]
+    fn the_painted_frame_is_the_reach_and_a_half_clipped_button_has_none() {
+        let rgb = |hex: u32| Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+        let dir = PanelDir::create().expect("create the directory");
+        publish(&dir, RUN);
+        let mut state = PanelState::default();
+        state.refresh(dir.path());
+        paint_the_state(&mut state, a_wide_strip(), SystemTime::now());
+        let found = rects(paint_the_state(
+            &mut state,
+            a_wide_strip(),
+            SystemTime::now(),
+        ));
+        let reach = state.buttons_drawn().next().expect("a button was drawn");
+        let face = found
+            .iter()
+            .find(|r| r.fill == rgb(0x202427))
+            .expect("the label's raised face is painted");
+        assert_eq!(
+            face.rect, reach,
+            "what is painted is not what a press reaches"
+        );
+        assert_eq!(face.corner_radius, eframe::egui::CornerRadius::same(6));
+        let border = found
+            .iter()
+            .find(|r| r.stroke.color == rgb(0x373b3d))
+            .expect("the control border is painted");
+        assert_eq!(border.rect, reach);
+        let rows = &state.layout.as_ref().expect("a layout").rows;
+        let body = rows
+            .iter()
+            .position(|row| matches!(row.role, RowRole::ButtonBody(0)))
+            .expect("the command has a row");
+        let (_, cell) = super::tests::cell();
+        let command = found
+            .iter()
+            .find(|r| r.fill == rgb(0x13181b))
+            .expect("the command sits on the console's background");
+        assert_eq!(
+            command.rect.top(),
+            a_wide_strip().top() + body as f32 * cell
+        );
+        assert_eq!(command.rect.bottom(), reach.bottom());
+        assert!(
+            reach.contains(Pos2::new(reach.center().x, command.rect.top() - 1.0))
+                && state
+                    .button_at(Pos2::new(a_wide_strip().left() + 1.0, reach.center().y))
+                    .is_none(),
+            "the reach is the frame, not the strip's whole width"
+        );
+
+        let short = Rect::from_min_size(a_wide_strip().min, eframe::egui::vec2(400.0, cell * 3.0));
+        let clipped = rects(paint_the_state(&mut state, short, SystemTime::now()));
+        assert!(
+            !clipped.iter().any(|r| r.fill == rgb(0x202427)),
+            "a half-drawn button got a frame"
+        );
     }
 }

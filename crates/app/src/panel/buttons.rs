@@ -9,9 +9,10 @@
 //! The delivery that wrote it is the one that filled that ceiling, and this is the piece that
 //! delivery was already editing — which is the way through **D28** records.
 
-use super::{PaintedButton, Row, RowRole};
+use super::{MARGIN, PaintedButton, Row, RowRole};
 use crate::painter::CellMetrics;
-use eframe::egui::{Pos2, Rect};
+use crate::theme::{Roles, metrics};
+use eframe::egui::{CornerRadius, Pos2, Rect, Shape, Stroke, StrokeKind};
 
 /// Which buttons were drawn **whole**, and where.
 ///
@@ -32,60 +33,119 @@ pub(super) fn buttons_drawn(
     metrics: &CellMetrics,
 ) -> Vec<PaintedButton> {
     let mut drawn: Vec<PaintedButton> = Vec::new();
-    let mut open: Option<(usize, usize, usize)> = None;
+    let mut open: Option<Run> = None;
 
     for (nth, row) in rows.iter().enumerate() {
         let belongs = match row.role {
             RowRole::Text | RowRole::Fold(_) => None,
             RowRole::ButtonLabel(action) | RowRole::ButtonBody(action) => Some(action),
         };
+        let body = matches!(row.role, RowRole::ButtonBody(_)).then_some(nth);
         let closes = match (open, belongs) {
-            (Some((action, first, _)), Some(same)) if same == action => {
-                open = Some((action, first, nth));
+            (Some(run), Some(same)) if same == run.action => {
+                open = Some(Run {
+                    last: nth,
+                    body: run.body.or(body),
+                    ..run
+                });
                 None
             }
             (was, here) => {
-                open = here.map(|action| (action, nth, nth));
+                open = here.map(|action| Run {
+                    action,
+                    first: nth,
+                    last: nth,
+                    body,
+                });
                 was
             }
         };
-        if let Some((action, first, last)) = closes {
-            keep_if_whole(&mut drawn, action, first, last, whole, rect, metrics);
+        if let Some(run) = closes {
+            keep_if_whole(&mut drawn, run, whole, rect, metrics);
         }
     }
-    if let Some((action, first, last)) = open {
-        keep_if_whole(&mut drawn, action, first, last, whole, rect, metrics);
+    if let Some(run) = open {
+        keep_if_whole(&mut drawn, run, whole, rect, metrics);
     }
     drawn
+}
+
+/// One button's rows: the first, the last, and where its command starts.
+#[derive(Clone, Copy)]
+struct Run {
+    action: usize,
+    first: usize,
+    last: usize,
+    body: Option<usize>,
 }
 
 /// Records that button **only if every one of its rows survived the clip**.
 fn keep_if_whole(
     drawn: &mut Vec<PaintedButton>,
-    action: usize,
-    first: usize,
-    last: usize,
+    run: Run,
     whole: usize,
     rect: Rect,
     metrics: &CellMetrics,
 ) {
-    if last < whole {
-        drawn.push(painted(action, first, last, rect, metrics));
+    if run.last < whole {
+        drawn.push(painted(run, rect, metrics));
     }
 }
 
-/// The rectangle a button's rows occupy, from the first to the last.
-fn painted(
-    action: usize,
-    first: usize,
-    last: usize,
-    rect: Rect,
-    metrics: &CellMetrics,
-) -> PaintedButton {
-    let top = rect.top() + first as f32 * metrics.height();
-    let bottom = rect.top() + (last + 1) as f32 * metrics.height();
+/// The rectangle a button occupies, which is **both what a press reaches and the frame that is
+/// painted** — one function for the two, so the edge a person sees is the edge a click obeys.
+///
+/// Half a cell in from each side of the strip, where the text's margin leaves room, and a point in
+/// from its first and last row, so two buttons in a row read as two.
+fn painted(run: Run, rect: Rect, metrics: &CellMetrics) -> PaintedButton {
+    let row_top = |row: usize| rect.top() + row as f32 * metrics.height();
+    let inset = MARGIN * metrics.width() / 2.0;
     PaintedButton {
-        action,
-        area: Rect::from_min_max(Pos2::new(rect.left(), top), Pos2::new(rect.right(), bottom)),
+        action: run.action,
+        area: Rect::from_min_max(
+            Pos2::new(rect.left() + inset, row_top(run.first) + GAP),
+            Pos2::new(rect.right() - inset, row_top(run.last + 1) - GAP),
+        ),
+        command: row_top(run.body.unwrap_or(run.last + 1)),
     }
+}
+
+/// What separates a button's frame from the rows above and below it.
+const GAP: f32 = 1.0;
+
+/// The shape of a button's frame, queued under its text: the label on the raised surface, the
+/// command on the console's own background below a rule, all inside a bordered rounded box.
+///
+/// **The command keeps the console's background on purpose**: it is the text that runs, and it is
+/// set where text that runs is always set.
+pub(super) fn frame(button: &PaintedButton, roles: &Roles) -> Shape {
+    let radius = metrics::RADIUS_CONTROL;
+    let area = button.area;
+    let command = Rect::from_min_max(
+        Pos2::new(area.left(), button.command.clamp(area.top(), area.bottom())),
+        area.max,
+    );
+    Shape::Vec(vec![
+        Shape::rect_filled(area, radius, roles.raised),
+        Shape::rect_filled(
+            command,
+            CornerRadius {
+                nw: 0,
+                ne: 0,
+                sw: radius,
+                se: radius,
+            },
+            roles.base,
+        ),
+        Shape::line_segment(
+            [command.left_top(), command.right_top()],
+            Stroke::new(1.0, roles.line),
+        ),
+        Shape::rect_stroke(
+            area,
+            radius,
+            Stroke::new(1.0, roles.line2),
+            StrokeKind::Inside,
+        ),
+    ])
 }
