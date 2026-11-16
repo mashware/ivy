@@ -4858,5 +4858,22 @@ mod pressing {
             !clipped.iter().any(|r| r.fill == rgb(0x202427)),
             "a half-drawn button got a frame"
         );
+
+        // A command whose ink ran past the strip is unreachable, so it gets no frame either.
+        let wide = "☀".repeat(40);
+        let document =
+            format!(r#"{{"actions": [{{"label": "Wide", "send": "{wide}"}}], "lines": ["b"]}}"#);
+        let narrow = Rect::from_min_size(a_wide_strip().min, eframe::egui::vec2(260.0, 600.0));
+        let mut state = painted(&document, narrow);
+        assert_eq!(
+            state.buttons_drawn().count(),
+            0,
+            "the case needs the overflow"
+        );
+        let overflowed = rects(paint_the_state(&mut state, narrow, SystemTime::now()));
+        assert!(
+            !overflowed.iter().any(|r| r.fill == rgb(0x202427)),
+            "a button inked past the strip got a frame"
+        );
     }
 }
