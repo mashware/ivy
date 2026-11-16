@@ -141,7 +141,7 @@ mod tests {
                 "pane",
                 super::super::cache::LayoutKey {
                     width: 100,
-                    theme: theme,
+                    theme,
                     warning: None,
                     chrome: super::super::Chrome::Historical,
                 },
@@ -157,7 +157,7 @@ mod tests {
                     "pane",
                     super::super::cache::LayoutKey {
                         width: 100,
-                        theme: theme,
+                        theme,
                         warning: None,
                         chrome: super::super::Chrome::Historical
                     },
@@ -180,7 +180,7 @@ mod tests {
                 "pane",
                 super::super::cache::LayoutKey {
                     width: 100,
-                    theme: theme,
+                    theme,
                     warning: None,
                     chrome: super::super::Chrome::Historical,
                 },

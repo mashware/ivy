@@ -2933,7 +2933,7 @@ mod tests {
                 "a1b2",
                 super::cache::LayoutKey {
                     width: 40,
-                    theme: theme,
+                    theme,
                     warning: None,
                     chrome: super::Chrome::Historical,
                 },
@@ -2947,7 +2947,7 @@ mod tests {
                 "a1b2",
                 super::cache::LayoutKey {
                     width: 40,
-                    theme: theme,
+                    theme,
                     warning: None,
                     chrome: super::Chrome::Historical,
                 },
@@ -2963,7 +2963,7 @@ mod tests {
                 "a1b2",
                 super::cache::LayoutKey {
                     width: 12,
-                    theme: theme,
+                    theme,
                     warning: None,
                     chrome: super::Chrome::Historical,
                 },
@@ -3055,7 +3055,7 @@ mod tests {
             "a1b2",
             super::cache::LayoutKey {
                 width: 40,
-                theme: theme,
+                theme,
                 warning: None,
                 chrome: super::Chrome::Historical,
             },
@@ -3071,7 +3071,7 @@ mod tests {
                 "a1b2",
                 super::cache::LayoutKey {
                     width: 40,
-                    theme: theme,
+                    theme,
                     warning: None,
                     chrome: super::Chrome::Historical,
                 },
@@ -3109,7 +3109,7 @@ mod tests {
             "a1b2",
             super::cache::LayoutKey {
                 width: 40,
-                theme: theme,
+                theme,
                 warning: None,
                 chrome: super::Chrome::Historical,
             },
@@ -3137,7 +3137,7 @@ mod tests {
                 "a1b2",
                 super::cache::LayoutKey {
                     width: 40,
-                    theme: theme,
+                    theme,
                     warning: None,
                     chrome: super::Chrome::Historical,
                 },
@@ -3413,7 +3413,7 @@ mod tests {
                 "a1b2",
                 super::cache::LayoutKey {
                     width: 40,
-                    theme: theme,
+                    theme,
                     warning: None,
                     chrome: super::Chrome::Historical,
                 },
@@ -3427,7 +3427,7 @@ mod tests {
                 "a1b2",
                 super::cache::LayoutKey {
                     width: 40,
-                    theme: theme,
+                    theme,
                     warning: None,
                     chrome: super::Chrome::Historical,
                 },
@@ -3700,8 +3700,8 @@ mod tests {
                 .lay_out_if_needed(
                     "probe",
                     super::cache::LayoutKey {
-                        width: width,
-                        theme: theme,
+                        width,
+                        theme,
                         warning: None,
                         chrome: super::Chrome::Historical,
                     },
