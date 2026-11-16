@@ -57,7 +57,7 @@ transports feed it.
 | `attention` | no | **Whether this pane claims something, and of what kind.** `wait` `block` `done`. Absent = it claims nothing. See below |
 | `milestone` | no | Project roadmap milestone id this console's work belongs to |
 | `deliverable` | no | Deliverable id within that milestone; both ids are required for deliverable placement |
-| `header` | no (`true` by default) | Whether the app adds its identity line at the top: the pane's identifier and its `phase` |
+| `header` | no (`true` by default) | Whether the app adds its identity line at the top: the `phase` as a small chip and who is driving the panel beside it (D97) |
 | `stale_after_minutes` | no (30 by default) | How much silence is legitimate before warning |
 | `actions` | no | **The buttons this pane offers.** Each one is painted with its command underneath, and one click sends it to the program in that pane. See below |
 | `lines` | **yes** | The body |
@@ -81,10 +81,12 @@ in [02-decisions.md](02-decisions.md) → D18.
   from the body, nor from `phase`, nor from whether the console writes. A line with `mark: block` is
   content of the summary, not a signal: an «I waited for approval on Tuesday» would mark the tab
   forever.
-- **How it looks**, so that you know what you are asking for: in the pane's panel a row of the
-  application appears —`? it is waiting for you`, `⊘ stuck on something else, not you`,
+- **How it looks**, so that you know what you are asking for: a band of the application's appears
+  across the top of the pane's panel, tinted in the claim's colour, with the claim's mark in a pill
+  and its words —`? it is waiting for you`, `⊘ stuck on something else, not you`,
   `∎ it finished and nobody looked`—, **above the body and also with `header: false`**, because this
-  signal is not one the producer hides. And on its tab's label **only the symbol** appears.
+  signal is not one the producer hides. And on its tab's label **only the mark** appears, in the
+  same pill (D97).
 - **And if you stop publishing, the claim is seen dimmed**: it is still there, and it says that
   nobody is holding it. With one exception: `done` does **not** get dimmed by falling silent, because
   falling silent is what whoever finished does (D18).
@@ -167,7 +169,8 @@ it is not painted blank: an empty line where there was garbage would be inventin
 #### Block headers
 
 A line with `style: "section"` opens a block, ending before the next gap or section header.
-The header paints a fold indicator, title, rule and summary pinned to the right edge. When space
+The header paints a chevron (down while open, right while folded), the title, a rule and the
+summary pinned to the right edge. When space
 runs out the title is cut before the summary; below the width of the indicator and summary,
 the summary is cut from the right. A header ignores `mark`, `ref`, `link` and `indent`, and
 its reference does not widen the block's reference column. On other lines, `summary` and
