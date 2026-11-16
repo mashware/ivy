@@ -18,8 +18,8 @@ pub(super) struct Header {
     pub(super) id: HeaderId,
     pub(super) folded: bool,
     pub(super) summary: String,
-    /// The kit's inks for the integrated chrome, or nothing for the historical text header that
-    /// the measured runs keep (D97).
+    /// The kit's inks for the integrated chrome, or nothing for the text header the historical
+    /// panel and the Board paint (D97).
     pub(super) kit: Option<HeaderInks>,
 }
 
@@ -64,7 +64,7 @@ pub(super) fn is_gap(line: &Line) -> bool {
 }
 
 /// Adds the body's blocks. `roles` are the integrated chrome's; without them the lines and headers
-/// are laid out the historical way the measured runs keep (D97).
+/// are laid out the historical way (D97).
 pub(super) fn append_blocks(
     rows: &mut Vec<Row>,
     lines: &[Line],
@@ -110,8 +110,9 @@ pub(super) fn append_blocks(
     }
 }
 
-/// Paints a section header: the chevron that says it folds — down when open, right when folded —
-/// the title, a one-point rule across the middle, and the summary held to the right edge (D97).
+/// Paints a section header. In the integrated chrome: the chevron that says it folds — down when
+/// open, right when folded — the title, a one-point rule across the middle, and the summary held to
+/// the right edge (D97); otherwise the historical text header.
 ///
 /// **It returns everything it inked**, chevron included, because whether a header can be clicked
 /// depends on its ink staying inside the strip.
@@ -189,7 +190,7 @@ pub(super) fn paint_header(
     Some(inked)
 }
 
-/// The historical header, all of it text: `▸`/`▾`, the title, a run of `─` and the summary.
+/// The historical header the panel without the integrated chrome and the Board paint, all of it text: `▸`/`▾`, the title, a run of `─` and the summary.
 fn paint_text_header(
     painter: &Painter,
     origin: Pos2,
@@ -667,7 +668,7 @@ mod tests {
     /// Each chevron's points, each rule's ink and each text with its ink, as painted.
     type Painted = (Vec<Vec<Pos2>>, Vec<Color32>, Vec<(String, Color32)>);
 
-    /// The chevron's points, the rule's ink and the summary's, as painted.
+    /// The chevron's points, the rule's ink and every text with its ink, as painted.
     fn header_shapes(state: &mut PanelState) -> Painted {
         let mut chevrons = Vec::new();
         let mut rules = Vec::new();

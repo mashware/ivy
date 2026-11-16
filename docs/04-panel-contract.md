@@ -57,7 +57,7 @@ transports feed it.
 | `attention` | no | **Whether this pane claims something, and of what kind.** `wait` `block` `done`. Absent = it claims nothing. See below |
 | `milestone` | no | Project roadmap milestone id this console's work belongs to |
 | `deliverable` | no | Deliverable id within that milestone; both ids are required for deliverable placement |
-| `header` | no (`true` by default) | Whether the app adds its identity line at the top: the `phase` as a small chip and who is driving the panel beside it (D97) |
+| `header` | no (`true` by default) | Whether the app adds its identity line at the top: the `phase` as a small chip and who is driving the panel beside it in the integrated chrome (D97); the pane's identifier, the `phase` and the driver as one line of text without it |
 | `stale_after_minutes` | no (30 by default) | How much silence is legitimate before warning |
 | `actions` | no | **The buttons this pane offers.** Each one is painted with its command underneath, and one click sends it to the program in that pane. See below |
 | `lines` | **yes** | The body |
@@ -81,12 +81,14 @@ in [02-decisions.md](02-decisions.md) → D18.
   from the body, nor from `phase`, nor from whether the console writes. A line with `mark: block` is
   content of the summary, not a signal: an «I waited for approval on Tuesday» would mark the tab
   forever.
-- **How it looks**, so that you know what you are asking for: a band of the application's appears
-  across the top of the pane's panel, tinted in the claim's colour, with the claim's mark in a pill
-  and its words —`? it is waiting for you`, `⊘ stuck on something else, not you`,
-  `∎ it finished and nobody looked`—, **above the body and also with `header: false`**, because this
-  signal is not one the producer hides. And on its tab's label **only the mark** appears, in the
-  same pill (D97).
+- **How it looks**, so that you know what you are asking for: **above the body and also with
+  `header: false`**, because this signal is not one the producer hides. In the integrated chrome a
+  band of the application's crosses the top of the pane's panel, tinted in the claim's colour, with
+  the claim's mark drawn in a pill and its words beside it — «it is waiting for you», «stuck on
+  something else, not you», «it finished and nobody looked» — cut with «…» on a narrow panel (D97).
+  Without the integrated chrome the panel keeps a row of text, mark and words — `? it is waiting for
+  you`, `⊘ stuck on something else, not you`, `∎ it finished and nobody looked`. And on its tab's
+  label **only the mark** appears, in the same pill (D96).
 - **And if you stop publishing, the claim is seen dimmed**: it is still there, and it says that
   nobody is holding it. With one exception: `done` does **not** get dimmed by falling silent, because
   falling silent is what whoever finished does (D18).

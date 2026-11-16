@@ -840,7 +840,7 @@ fn blocks(lines: &[Line]) -> Vec<Vec<&Line>> {
 ///
 /// With the integrated chrome's `roles` the symbol rides on the first row as its own glyph rather
 /// than inside the text, so it can take a different ink from the words it marks; without them it is
-/// the first character of the text, in the line's one colour, as the measured runs keep it (D97).
+/// the first character of the text, in the line's one colour, as the historical panel keeps it (D97).
 fn lay_out_line(
     line: &Line,
     column: usize,
@@ -4884,7 +4884,7 @@ mod pressing {
         publish(&dir, RUN);
         let mut state = PanelState::default();
         state.refresh(dir.path());
-        // The historical regime the measured runs paint has no frame, and its reach keeps the
+        // The historical panel has no frame, and its reach keeps the
         // strip's whole width (D13).
         let historical = rects(paint_the_state(
             &mut state,

@@ -939,8 +939,9 @@ const SOURCES: &[(&str, &str, usize)] = &[
 /// deleted declared file a compile error. [`rust_sources`] walks only to find the opposite mistake:
 /// a real file nobody declared. It never supplies the text being judged, so a path cannot disappear
 /// from the guard merely because the directory walk did not return it.
-// Re-measured with the claim pill, the title bar's partition and the tab strip in the list.
-const COMMENT_LINES_AT_LEAST: usize = 20_449;
+// Re-measured with the claim pill, the title bar's partition, the tab strip and the panel's claim
+// strip, identity, marks and head modules in the list.
+const COMMENT_LINES_AT_LEAST: usize = 20_536;
 
 /// How many **different** listed words a line needs before it is called Spanish.
 ///

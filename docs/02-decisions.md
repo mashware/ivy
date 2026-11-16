@@ -9885,53 +9885,78 @@ series stay comparable (D13); the new tab painting runs under the same tab-bar s
 
 **New signal, 16 November 2026 — #93.** The redesign D94 started draws the status panel with a band
 for the claim, the phase as a chip, framed action buttons, section headers with a chevron and step
-marks in two inks. This amends how D9 and D18 present the claim — not what it says or when it dims —
-and how the identity row of F1.6 reads.
+marks in two inks, in the order identity, title, summary, buttons, sections. This amends how D9 and
+D18 present the claim — not what it says or when it dims — and how the identity row of F1.6 reads.
+The choice between the two panels travels as one value (`panel::Chrome`) in the layout's key.
 
-**Decision — the claim.** In the integrated regime a declared claim is a 32-point band across the
+**Decision — the claim.** In the integrated chrome a declared claim is a 32-point band across the
 panel's top: the claim's 15 % tint, D96's 18-point pill, and the claim's words in the colour
-`Theme::attention_color` already answers with. The words are D18's three phrases, word for word, and a
-band cannot wrap, so a narrow panel cuts them inside the band. A claim nobody holds keeps D18's dimmed
-look: no tint, the dashed pill and the dimmed words; `done` stays whole while its file is read, which
-is the same `backed` answer, not a second rule. No claim, no band. The rows, the buttons' reach and the
-fold headers are all measured from what the band leaves, and a panel too short for one row paints
-nothing, band included. The design shows how long ago Ivy observed the claim beside the words; that is
-not painted, because the panel holds no moment at which a claim was first seen — the file's date is the
-last publication, which a producer republishing every minute would keep at «just now» — and the only
-observed-since time, the Board's, exists for waits alone.
+`Theme::attention_color` already answers with. The words are D18's three phrases, word for word; a
+band cannot wrap, so a narrow panel cuts them inside the band and ends the cut with «…» — «stuck on
+something» alone would lose the «not you» that sets it apart — and shows only the pill when not even
+one letter fits beside the «…». A claim nobody holds keeps D18's dimmed look: no tint, the dashed pill
+and the dimmed words; `done` stays whole while its file is read, which is the same `backed` answer,
+not a second rule. No claim, no band. The rows, the buttons' reach and the fold headers are all
+measured from what the band leaves. On a panel too short for the band and one row, the band shrinks
+to leave that row — where «… N more» says what is below — down to one row of its own; a panel shorter
+than one row paints nothing, band included. The design shows how long ago Ivy observed the claim
+beside the words; that is not painted, because the panel holds no moment at which a claim was first
+seen — the file's date is the last publication, which a producer republishing every minute would keep
+at «just now» — and the only observed-since time, the Board's, exists for waits alone.
 
 **Decision — identity.** The integrated identity row paints the producer's `phase` on a chip (hover
-fill, secondary text, chip radius) and who drives the panel beside it in muted text, on one row cut to
-fit. The pane's hexadecimal identifier is no longer painted: a person finds the console by its header
-(D96), and the identifier is a name for programs. With neither a phase nor a driver there is no row.
+fill, secondary text, chip radius) and who drives the panel — the connection or hook that holds it —
+beside it in muted text, on one row; a part that does not fit ends in «…», and a part that cannot show
+even that is left out rather than drawn as an empty chip. The pane's hexadecimal identifier is no
+longer painted: a person finds the console by its header (D96), and the identifier is a name for
+programs. With neither a phase nor a driver there is no row.
 
-**Decision — buttons.** An action is a rounded, bordered frame: the label on the raised surface, the
-literal command below a rule on the console's own background. The frame **is** the reach: one function
-gives both, half a cell in from the strip's sides and a point in from the first and last row, so the
-edge a person sees is the edge a click obeys. A frame's place is reserved under the text and filled
-only once the ink has said the button stayed reachable, so a button the clip cut or whose command ran
-past the strip looks like plain text. The command stays in ordinary ink, not the design's secondary
-one, for the reason the layout already gives: it is the one sentence that must be read before
-pressing. The label keeps its `>` sign (D9's tenth). No shortcut number is shown: actions have none.
+**Decision — order and buttons.** A leading block that opens with a `title` line — up to its first
+gap, stopping before a section — goes above the buttons, as the design reads; nothing else does, so a
+long body without a title never pushes the buttons down into the clip. An action is a rounded,
+bordered frame: the label, without D9's `>` sign, in the interface face at medium weight on the raised
+surface, and the literal command below a rule on the console's own background, both at one inset, the
+command's first row carrying a `›` prompt drawn in the cell before it — never part of the text that
+is sent. Two buttons stand six points apart. The border is the muted text at half strength: the kit's
+`line2` all but vanishes against the panel on Ivy Night. The frame **is** the reach: one function
+gives both, half a cell in from the strip's sides and three points in from the first and last row, so
+the edge a person sees is the edge a click obeys, and a row whose ink passes the frame's right edge
+leaves its button unreachable, as a row past the strip's edge always did. A frame's place is reserved
+under the text and filled only once the ink has said the button stayed reachable, so a button the clip
+cut or whose command ran past its frame looks like plain text. The label stays in the cell grid's row:
+the face changes what is drawn, not where, and the ink it draws — not its character count — decides
+whether it fits. The command stays in ordinary ink, not the design's secondary one, for the reason the
+layout already gives: it is the one sentence that must be read before pressing. No shortcut number is
+shown: actions have none.
 
 **Decision — sections and marks.** A section header paints a chevron (down open, right folded) where
 the old `▸`/`▾` stood, the title in the text colour, a one-point rule in the separator colour and the
 summary muted at the right; its ink still decides whether it can be clicked. A line's mark is its own
-glyph in the first cell, so it takes its own ink: done muted on both, current the accent on the glyph
-and plain words, pending a muted glyph and secondary words, wait and block in their claim colour. The
-glyphs are still D9's measured characters. A style still rules over a mark, glyph included.
+glyph in the first cell, so it takes its own ink: done muted on both, current the accent on the glyph,
+pending a muted glyph and secondary words, wait and block in their claim colour. Words that read as
+ordinary text — current's and info's — take the same ink as a line with no mark. The glyphs are still
+D9's measured characters. A style still rules over a mark, glyph included.
 
 **Discarded:** keeping the claim as a row and only restyling it (the band is what reads from across
 the window, and a row wraps where a band cannot be read at a glance); painting the observed age from
-the file's date (it would claim an observation Ivy never made); painting the frame on the strip's
-whole width as the old reach was (the frame would touch the panel's edges and two buttons would read
-as one block); a frame for every laid-out button (one the clip cut would look pressable and not be);
-the design's `›` before the command (what is painted must be what is sent); new font glyphs for the
-marks such as `✓` (D9 measured them out, and a glyph outside the bundled faces triggers discovery).
+the file's date (it would claim an observation Ivy never made); cutting the claim's words with no mark
+(a cut phrase reads as a whole one); painting the frame on the strip's whole width as the old reach
+was (the frame would touch the panel's edges and two buttons would read as one block); a blank row
+between buttons (a whole cell where the design asks for six points); a frame for every laid-out button
+(one the clip cut would look pressable and not be); putting every line before the first section above
+the buttons (a long untitled body would push them into the clip); the design's `›` inside the command
+text (what is painted must be what is sent); new font glyphs for the marks such as `✓` (D9 measured
+them out, and a glyph outside the bundled faces triggers discovery).
 
-**Measurement.** Only the integrated regime changes. The historical regime — the one the measured
-runs paint — keeps the claim as a row of text, the identity as «id · phase · driver», the mark inside
-its line's text in one colour, the text header with `▸`/`▾` and a run of `─`, and buttons without a
-frame whose reach spans the strip's width, so no published series changes its layout or its painting
-(D13). The bench's panels carry marks, sections and actions, which is why all five are gated and not
-only the two that move rows.
+**Measurement.** The batches without the integrated chrome — the lettered ones and every other batch
+that does not set `MEASURE_CHROME` — paint the historical panel: the claim as a row of text, the
+identity as «id · phase · driver», the mark inside its line's text in one colour, the text header with
+`▸`/`▾` and a run of `─`, frameless buttons whose reach spans the strip, and the buttons above the
+whole body; their series are unaffected (D13). The integrated-chrome batches — `chrome`,
+`chrome-zoom`, `projects`, `dock-v1-4-closed` and `dock-v1-4-open`, which set `MEASURE_CHROME` — now
+paint the restyled panel: every bench panel declares `attention` and carries marks, so they paint the
+32-point band, the chip and the two-ink marks over fewer body rows, and the frames and the chevron
+wherever their panels publish actions or a section. **Their series are not comparable across D97**:
+a run from before this decision and one after measure different panels, the report does not say which
+panel it painted, and nothing invalidates the older runs on its own — a comparison needs a new pair
+measured after it, the same day.

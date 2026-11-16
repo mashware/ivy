@@ -28,7 +28,7 @@ use eframe::egui::{CornerRadius, Pos2, Rect, Shape, Stroke, StrokeKind};
 /// that has to remember to refuse it.
 ///
 /// `framed` is the integrated chrome, whose buttons are painted inside a frame: there the reach is
-/// that frame. The measured runs paint no frame and keep the rows' whole width (D97).
+/// that frame. The historical panel paints no frame and keeps the rows' whole width (D97).
 pub(super) fn buttons_drawn(
     rows: &[Row],
     whole: usize,
