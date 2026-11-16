@@ -5251,4 +5251,73 @@ mod pressing {
             "{historical:?}"
         );
     }
+
+    /// **A wide label never takes its button away**: laid out by character count but drawn in a
+    /// proportional face, an all-caps label that fills its rows is fitted by measured width, cut with
+    /// «…», and its button stays reachable with the label's ink inside the frame.
+    #[test]
+    fn a_wide_label_is_fitted_inside_its_frame_and_stays_reachable() {
+        let label = "W".repeat(60);
+        let document = format!(
+            r#"{{"header":false,"actions":[{{"label":"{label}","send":"go"}}],"lines":["b"]}}"#
+        );
+        let place = Rect::from_min_size(a_wide_strip().min, eframe::egui::vec2(200.0, 600.0));
+        let dir = PanelDir::create().expect("create the directory");
+        publish(&dir, &document);
+        let mut state = PanelState::default();
+        state.refresh(dir.path());
+        super::tests::paint_integrated(&mut state, place, SystemTime::now());
+        let shapes = super::tests::paint_integrated(&mut state, place, SystemTime::now());
+        let reach = state
+            .buttons_drawn()
+            .next()
+            .expect("the button stays reachable");
+        let rows: Vec<_> = texts_at(&shapes)
+            .into_iter()
+            .filter(|t| t.1.starts_with('W'))
+            .collect();
+        assert!(!rows.is_empty(), "the label is painted");
+        assert!(
+            rows.iter().any(|t| t.1.ends_with('…')),
+            "a cut label says so: {rows:?}"
+        );
+        assert!(
+            rows.iter().all(|t| t.2.right() <= reach.right()),
+            "{rows:?} inks past {reach:?}"
+        );
+    }
+
+    /// **A frame counts as drawn only with the blank row it reaches into below**: where «… N more»
+    /// takes that row, the button is neither reachable nor framed; one row taller, it is both.
+    #[test]
+    fn a_frame_whose_lower_room_the_clip_took_is_not_reachable() {
+        let rgb = |hex: u32| Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+        let (_, cell) = super::tests::cell();
+        let dir = PanelDir::create().expect("create the directory");
+        publish(
+            &dir,
+            r#"{"header":false,"actions":[{"label":"Run","send":"go"}],"lines":["a","b","c"]}"#,
+        );
+        let mut state = PanelState::default();
+        state.refresh(dir.path());
+        let at = |rows: f32| {
+            Rect::from_min_size(a_wide_strip().min, eframe::egui::vec2(400.0, rows * cell))
+        };
+        // Blank, label, command, then «… N more» where the blank under the command would be.
+        super::tests::paint_integrated(&mut state, at(4.0), SystemTime::now());
+        let short = rects(super::tests::paint_integrated(
+            &mut state,
+            at(4.0),
+            SystemTime::now(),
+        ));
+        assert_eq!(state.buttons_drawn().count(), 0);
+        assert!(!short.iter().any(|r| r.fill == rgb(0x202427)));
+        super::tests::paint_integrated(&mut state, at(5.0), SystemTime::now());
+        super::tests::paint_integrated(&mut state, at(5.0), SystemTime::now());
+        assert_eq!(
+            state.buttons_drawn().count(),
+            1,
+            "one row taller, the case is whole"
+        );
+    }
 }

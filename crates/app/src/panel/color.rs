@@ -322,6 +322,36 @@ mod tests {
             .is_some()
     }
 
+    /// **An integrated button's label keeps its emoji in color**: drawn in the interface face, it
+    /// still goes through this module's path, so «🚀 Deploy» queues the rocket as an image and leaves
+    /// its outline transparent, as every other row of the panel does.
+    #[test]
+    fn an_integrated_button_label_keeps_its_emoji_in_color() {
+        let dir = PanelDir::create().expect("create the directory");
+        publish(
+            &dir,
+            r#"{"header":false,"actions":[{"label":"🚀 Deploy","send":"deploy"}],"lines":["b"]}"#,
+        );
+        let mut state = PanelState::default();
+        state.refresh(dir.path());
+        let shapes = flat(super::super::tests::paint_integrated(
+            &mut state,
+            PLACE,
+            SystemTime::now(),
+        ));
+        if there_is_color_on_this_machine() {
+            assert_eq!(
+                images(&shapes),
+                1,
+                "the label's emoji was not drawn as an image"
+            );
+            assert_eq!(ink_of(&shapes, '\u{1F680}'), Color32::TRANSPARENT);
+        } else {
+            assert_eq!(images(&shapes), 0);
+            assert_ne!(ink_of(&shapes, '\u{1F680}'), Color32::TRANSPARENT);
+        }
+    }
+
     #[test]
     fn an_emoji_in_a_panel_line_comes_out_in_color_and_its_outline_does_not() {
         // AC1. Asserted in both scenarios, like the console's: without a color font the emoji still has

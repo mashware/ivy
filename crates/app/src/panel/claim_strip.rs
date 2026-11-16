@@ -360,10 +360,23 @@ mod tests {
         );
         let painted = words(&shapes);
         assert!(painted.iter().any(|w| w.0 == "… 3 more"), "{painted:?}");
-        let (pill, _) = pill(&shapes).map_or((band, Color32::TRANSPARENT), |p| p);
+        let (pill, _) = pill(&shapes).expect("the pill is painted");
         assert!(
             (pill.center().y - band.center().y).abs() < 0.01,
             "{pill:?} {band:?}"
+        );
+        let words_box = shapes
+            .iter()
+            .find_map(|s| match s {
+                Shape::Text(t) if t.galley.text() == "it is waiting for you" => {
+                    Some(t.galley.rect.translate(t.pos.to_vec2()))
+                }
+                _ => None,
+            })
+            .expect("the words are painted");
+        assert!(
+            (words_box.center().y - band.center().y).abs() < 0.5,
+            "{words_box:?} {band:?}"
         );
     }
 
@@ -381,5 +394,20 @@ mod tests {
                 .iter()
                 .any(|s| matches!(s, Shape::Rect(r) if r.fill == tint(0xf2b84b)))
         );
+    }
+
+    /// **Only the pill when not one letter fits beside «…»** — never a lone «…».
+    #[test]
+    fn a_strip_barely_wider_than_its_pill_paints_no_words() {
+        let narrow = Rect::from_min_size(PANEL.min, vec2(52.0, 300.0));
+        let (shapes, _) = strip(
+            AttentionState {
+                class: Attention::Wait,
+                backed: true,
+            },
+            narrow,
+        );
+        assert!(pill(&shapes).is_some(), "the pill is painted");
+        assert!(words(&shapes).is_empty(), "{:?}", words(&shapes));
     }
 }

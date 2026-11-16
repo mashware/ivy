@@ -275,4 +275,31 @@ mod tests {
         );
         assert!(driver.2.right() <= place.right(), "{driver:?}");
     }
+
+    /// **No empty chip**: a phase too long for a panel where not one letter fits beside «…» paints no
+    /// chip at all rather than an empty face.
+    #[test]
+    fn a_phase_that_cannot_show_a_letter_paints_no_chip() {
+        let mut state = PanelState::default();
+        let dir = panel_contract::PanelDir::create().expect("dir");
+        crate::panel::tests::publish(
+            &dir,
+            r#"{"phase":"a-phase-far-too-long-for-this-panel","lines":["b"]}"#,
+        );
+        state.refresh(dir.path());
+        let (cell, _) = crate::panel::tests::cell();
+        let place = Rect::from_min_size(Pos2::ZERO, vec2(cell * 4.5, 400.0));
+        let shapes = paint_integrated(&mut state, place, SystemTime::now());
+        assert!(
+            texts(&shapes).iter().all(|r| !r.0.starts_with('a')),
+            "the case needs the phase not to fit: {:?}",
+            texts(&shapes)
+        );
+        assert!(
+            !shapes
+                .iter()
+                .any(|s| matches!(s, Shape::Rect(r) if r.fill == rgb(0x262b2d))),
+            "an empty chip is painted"
+        );
+    }
 }
