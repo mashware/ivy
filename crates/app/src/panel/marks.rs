@@ -21,21 +21,24 @@ pub(super) fn inks(
     theme: &Theme,
     roles: Option<&Roles>,
 ) -> (Color32, Color32) {
-    let Some(roles) = roles.filter(|_| style.is_none() && mark.is_some()) else {
+    let (Some(roles), None, Some(mark)) = (roles, style, mark) else {
         let ink = theme.panel_color(mark, style);
         return (ink, ink);
     };
+    // Words that read as ordinary text take the same ink as a line with no mark, so a marked line
+    // and a plain one never differ where a configured foreground had to be corrected.
+    let plain = theme.panel_color(None, None);
     match mark {
         // Finished and quiet: both muted, so what is left to do stands out.
-        Some(Mark::Done) => (roles.tx3, roles.tx3),
+        Mark::Done => (roles.tx3, roles.tx3),
         // Where the work is: the glyph carries the accent, the words read as ordinary text.
-        Some(Mark::Current) => (roles.accent, roles.tx),
+        Mark::Current => (roles.accent, plain),
         // Not started: a faint glyph and secondary words.
-        Some(Mark::Pending) => (roles.tx3, roles.tx2),
+        Mark::Pending => (roles.tx3, roles.tx2),
         // What waits or is stuck keeps the claim's colour on both, glyph and words.
-        Some(Mark::Wait) => (roles.wait, roles.wait),
-        Some(Mark::Block) => (roles.block, roles.block),
-        Some(Mark::Info) | None => (roles.tx, roles.tx),
+        Mark::Wait => (roles.wait, roles.wait),
+        Mark::Block => (roles.block, roles.block),
+        Mark::Info => (plain, plain),
     }
 }
 
@@ -105,5 +108,26 @@ mod tests {
                 .map(|(t, c)| (t.to_string(), *c))
                 .collect::<Vec<_>>()
         );
+    }
+
+    /// **A marked line's ordinary words take the plain line's ink**, even where a configured
+    /// foreground could not be read and the roles corrected their own text: a current step must not
+    /// read in a different colour from the unmarked line under it.
+    #[test]
+    fn ordinary_words_of_a_marked_line_take_the_plain_lines_ink() {
+        let theme = crate::theme::Theme::default().with_colors(&crate::settings::Colors {
+            foreground: Some(rgb(0x13181b)),
+            ..Default::default()
+        });
+        let roles = crate::theme::Roles::of(&theme);
+        let plain = theme.panel_color(None, None);
+        assert_ne!(
+            roles.tx, plain,
+            "the case needs the roles to have corrected the text"
+        );
+        for mark in [panel_contract::Mark::Current, panel_contract::Mark::Info] {
+            let (_, words) = super::inks(Some(mark), None, &theme, Some(&roles));
+            assert_eq!(words, plain, "{mark:?}");
+        }
     }
 }

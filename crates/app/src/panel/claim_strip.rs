@@ -270,4 +270,108 @@ mod tests {
             .unwrap();
         assert!(ink.right() <= narrow.right() - 12.0 + 0.01, "{ink:?}");
     }
+
+    /// A state with `document` published, its file aged by `minutes`.
+    fn published(document: &str, minutes: u64) -> crate::panel::PanelState {
+        let dir = panel_contract::PanelDir::create().expect("dir");
+        crate::panel::tests::publish(&dir, document);
+        std::fs::File::open(dir.path().join(panel_contract::PANEL_FILE))
+            .expect("open")
+            .set_modified(
+                std::time::SystemTime::now() - std::time::Duration::from_secs(minutes * 60),
+            )
+            .expect("move the date");
+        let mut state = crate::panel::PanelState::default();
+        state.refresh(dir.path());
+        state
+    }
+
+    fn integrated(state: &mut crate::panel::PanelState, place: Rect) -> Vec<Shape> {
+        crate::panel::tests::paint_integrated(state, place, std::time::SystemTime::now())
+    }
+
+    /// **D18 through the painted panel**: a `wait` its producer stopped holding loses the band's
+    /// tint and dims its words, while a `done` that fell silent keeps both — silence is what
+    /// finishing looks like.
+    #[test]
+    fn a_stale_wait_dims_and_a_stale_done_stays_whole_on_the_strip() {
+        let theme = Theme::default();
+        let place = PANEL;
+        for (class, name, backed) in [
+            (Attention::Wait, "wait", false),
+            (Attention::Done, "done", true),
+        ] {
+            let mut state = published(
+                &format!(
+                    r#"{{"header":false,"attention":"{name}","stale_after_minutes":1,"lines":["x"]}}"#
+                ),
+                60,
+            );
+            let shapes = integrated(&mut state, place);
+            let tinted = shapes.iter().any(
+                |s| matches!(s, Shape::Rect(r) if r.rect.height() == HEIGHT && r.fill.a() == 38),
+            );
+            assert_eq!(tinted, backed, "{class:?}: tint");
+            let phrase = attention_text(class);
+            let color = words(&shapes)
+                .into_iter()
+                .find(|w| w.0 == phrase)
+                .map(|w| w.1)
+                .expect("the words are painted");
+            assert_eq!(
+                color,
+                theme.attention_color(class, backed),
+                "{class:?}: words"
+            );
+        }
+    }
+
+    /// **A short panel keeps a row for what it holds below**: the band shrinks so «… N more» still
+    /// has its row, and pill and words centre on the band that was painted, not on 32 points.
+    #[test]
+    fn a_short_panel_shrinks_the_band_and_keeps_the_marker_row() {
+        let (_, cell) = crate::panel::tests::cell();
+        let mut state = published(
+            r#"{"header":false,"attention":"wait","lines":["a","b","c"]}"#,
+            0,
+        );
+        let place = Rect::from_min_size(PANEL.min, vec2(300.0, HEIGHT + cell * 0.5));
+        let shapes = integrated(&mut state, place);
+        let band = shapes
+            .iter()
+            .find_map(|s| match s {
+                Shape::Rect(r) if r.fill == tint(0xf2b84b) && r.rect.width() == 300.0 => {
+                    Some(r.rect)
+                }
+                _ => None,
+            })
+            .expect("the band is painted");
+        assert!(
+            (band.height() - (place.height() - cell)).abs() < 0.01,
+            "{band:?}"
+        );
+        let painted = words(&shapes);
+        assert!(painted.iter().any(|w| w.0 == "… 3 more"), "{painted:?}");
+        let (pill, _) = pill(&shapes).map_or((band, Color32::TRANSPARENT), |p| p);
+        assert!(
+            (pill.center().y - band.center().y).abs() < 0.01,
+            "{pill:?} {band:?}"
+        );
+    }
+
+    /// **Below one row nothing is painted, band included**, so a sliver of a panel shows neither a
+    /// cut band nor a claim with nothing under it.
+    #[test]
+    fn a_panel_shorter_than_a_row_paints_no_band() {
+        let (_, cell) = crate::panel::tests::cell();
+        let mut state = published(r#"{"header":false,"attention":"wait","lines":["a"]}"#, 0);
+        let place = Rect::from_min_size(PANEL.min, vec2(300.0, cell * 0.5));
+        let shapes = integrated(&mut state, place);
+        assert!(words(&shapes).is_empty(), "{:?}", words(&shapes));
+        assert!(
+            !shapes
+                .iter()
+                .any(|s| matches!(s, Shape::Rect(r) if r.fill == tint(0xf2b84b)))
+        );
+    }
 }
