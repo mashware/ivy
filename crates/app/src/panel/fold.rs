@@ -603,13 +603,11 @@ mod tests {
         let (chevrons, rules, texts) = header_shapes(&mut state);
         assert_eq!(chevrons.len(), 1, "{chevrons:?}");
         let folded = &chevrons[0];
-        // Folded: one vertex sits to the right of the other two, at their middle height.
-        let (tip, base): (Vec<&Pos2>, Vec<&Pos2>) = folded
-            .iter()
-            .partition(|p| folded.iter().all(|q| p.x >= q.x));
-        assert_eq!(
-            (tip.len(), base.len()),
-            (1, 2),
+        // Folded: the base is vertical and the tip lies to its right.
+        let tip = folded.iter().max_by(|a, b| a.x.total_cmp(&b.x)).unwrap();
+        let base: Vec<&Pos2> = folded.iter().filter(|p| *p != tip).collect();
+        assert!(
+            base[0].x == base[1].x && tip.x > base[0].x,
             "folded points right: {folded:?}"
         );
         assert_eq!(rules, [rgb(0x252e33)], "one rule, in the separator ink");
@@ -625,11 +623,11 @@ mod tests {
         click(&mut state);
         let (chevrons, _, _) = header_shapes(&mut state);
         let open = &chevrons[0];
-        let (tip, base): (Vec<&Pos2>, Vec<&Pos2>) =
-            open.iter().partition(|p| open.iter().all(|q| p.y >= q.y));
-        assert_eq!(
-            (tip.len(), base.len()),
-            (1, 2),
+        // Open: the base is horizontal and the tip lies below it.
+        let tip = open.iter().max_by(|a, b| a.y.total_cmp(&b.y)).unwrap();
+        let base: Vec<&Pos2> = open.iter().filter(|p| *p != tip).collect();
+        assert!(
+            base[0].y == base[1].y && tip.y > base[0].y,
             "open points down: {open:?}"
         );
     }
