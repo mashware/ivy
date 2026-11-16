@@ -18,8 +18,8 @@ pub(super) struct Header {
     pub(super) id: HeaderId,
     pub(super) folded: bool,
     pub(super) summary: String,
-    /// The kit's inks for the integrated chrome, or nothing for the text header the historical
-    /// panel and the Board paint (D97).
+    /// The kit's inks for the integrated chrome, or nothing for the historical panel's text header
+    /// (D97). The Board's rows carry nothing here too, and paint a header of their own.
     pub(super) kit: Option<HeaderInks>,
 }
 
@@ -190,7 +190,7 @@ pub(super) fn paint_header(
     Some(inked)
 }
 
-/// The historical header the panel without the integrated chrome and the Board paint, all of it text: `▸`/`▾`, the title, a run of `─` and the summary.
+/// The historical panel's header, all of it text: `▸`/`▾`, the title, a run of `─` and the summary.
 fn paint_text_header(
     painter: &Painter,
     origin: Pos2,

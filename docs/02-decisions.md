@@ -9911,21 +9911,24 @@ even that is left out rather than drawn as an empty chip. The pane's hexadecimal
 longer painted: a person finds the console by its header (D96), and the identifier is a name for
 programs. With neither a phase nor a driver there is no row.
 
-**Decision — order and buttons.** A leading block that opens with a `title` line — up to its first
-gap, stopping before a section — goes above the buttons, as the design reads; nothing else does, so a
-long body without a title never pushes the buttons down into the clip. An action is a rounded,
-bordered frame: the label, without D9's `>` sign, in the interface face at medium weight on the raised
-surface, and the literal command below a rule on the console's own background, both at one inset, the
-command's first row carrying a `›` prompt drawn in the cell before it — never part of the text that
-is sent. Two buttons stand six points apart. The border is the muted text at half strength: the kit's
-`line2` all but vanishes against the panel on Ivy Night. The frame **is** the reach: one function
-gives both, half a cell in from the strip's sides and three points in from the first and last row, so
-the edge a person sees is the edge a click obeys, and a row whose ink passes the frame's right edge
-leaves its button unreachable, as a row past the strip's edge always did. A frame's place is reserved
-under the text and filled only once the ink has said the button stayed reachable, so a button the clip
-cut or whose command ran past its frame looks like plain text. The label stays in the cell grid's row:
-the face changes what is drawn, not where, and the ink it draws — not its character count — decides
-whether it fits. The command stays in ordinary ink, not the design's secondary one, for the reason the
+**Decision — order and buttons.** A leading `title` line, at most one line under it — the design's
+summary — and the gap closing them go above the buttons, as the design reads; nothing else does, so no
+body pushes the buttons more than two rows down. An action is a rounded, bordered frame: the label,
+without D9's `>` sign, in the interface face at medium weight on the raised surface, and the literal
+command below a rule on the console's own background; a `›` prompt is drawn at the label's inset and
+the command starts after it and a space — the prompt is never part of the text that is sent. Every
+button stands between blank rows its frame reaches into, which gives the label and the command room
+inside the frame and leaves two buttons six points apart. The border is the muted text at half
+strength: the kit's `line2` all but vanishes against the panel on Ivy Night. The frame **is** the
+reach: one function gives both, half a cell in from the strip's sides, so the edge a person sees is
+the edge a click obeys; a frame counts as drawn only when the blank row under it survived the clip,
+and a row whose ink passes the frame's right edge leaves its button unreachable, as a row past the
+strip's edge always did. A frame's place is reserved under the text and filled only once the ink has
+said the button stayed reachable, so a button the clip cut or whose command ran past its frame looks
+like plain text. The label stays in the cell grid's row and goes through the same colour path as
+every other row, so its emoji stay in colour; it is wrapped by character count for the grid but drawn
+in a proportional face, so each of its rows is fitted by what that face measures and cut with «…»
+where it does not fit — a wide label never inks past its frame and takes its button away. The command stays in ordinary ink, not the design's secondary one, for the reason the
 layout already gives: it is the one sentence that must be read before pressing. No shortcut number is
 shown: actions have none.
 
@@ -9941,10 +9944,11 @@ D9's measured characters. A style still rules over a mark, glyph included.
 the window, and a row wraps where a band cannot be read at a glance); painting the observed age from
 the file's date (it would claim an observation Ivy never made); cutting the claim's words with no mark
 (a cut phrase reads as a whole one); painting the frame on the strip's whole width as the old reach
-was (the frame would touch the panel's edges and two buttons would read as one block); a blank row
-between buttons (a whole cell where the design asks for six points); a frame for every laid-out button
-(one the clip cut would look pressable and not be); putting every line before the first section above
-the buttons (a long untitled body would push them into the clip); the design's `›` inside the command
+was (the frame would touch the panel's edges and two buttons would read as one block); a frame inset
+inside its own rows (the label and the command touched its borders); a frame for every laid-out button
+(one the clip cut would look pressable and not be); putting a whole leading block above the buttons
+(a long titled block would push them into the clip); wrapping labels by measured width at layout time
+(the layout has no font to measure with, and a cut marked with «…» keeps the button whole); the design's `›` inside the command
 text (what is painted must be what is sent); new font glyphs for the marks such as `✓` (D9 measured
 them out, and a glyph outside the bundled faces triggers discovery).
 
@@ -9955,8 +9959,10 @@ identity as «id · phase · driver», the mark inside its line's text in one co
 whole body; their series are unaffected (D13). The integrated-chrome batches — `chrome`,
 `chrome-zoom`, `projects`, `dock-v1-4-closed` and `dock-v1-4-open`, which set `MEASURE_CHROME` — now
 paint the restyled panel: every bench panel declares `attention` and carries marks, so they paint the
-32-point band, the chip and the two-ink marks over fewer body rows, and the frames and the chevron
-wherever their panels publish actions or a section. **Their series are not comparable across D97**:
+32-point band in place of the identity row, the claim row and the blank under them, and the two-ink
+marks. They paint no identity row at all — the bench panels declare no `phase` and no connection holds
+them — so the body starts higher than in the historical panel and more of its rows show. The frames
+and the chevron are painted only where a batch's panels publish actions or a section. **Their series are not comparable across D97**:
 a run from before this decision and one after measure different panels, the report does not say which
 panel it painted, and nothing invalidates the older runs on its own — a comparison needs a new pair
 measured after it, the same day.
