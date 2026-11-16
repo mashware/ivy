@@ -569,10 +569,11 @@ mod tests {
         assert_eq!(fit(text, 2.0, &measured), "a\u{301}");
     }
 
+    /// Each chevron's points, each rule's ink and each text with its ink, as painted.
+    type Painted = (Vec<Vec<Pos2>>, Vec<Color32>, Vec<(String, Color32)>);
+
     /// The chevron's points, the rule's ink and the summary's, as painted.
-    fn header_shapes(
-        state: &mut PanelState,
-    ) -> (Vec<Vec<Pos2>>, Vec<Color32>, Vec<(String, Color32)>) {
+    fn header_shapes(state: &mut PanelState) -> Painted {
         let mut chevrons = Vec::new();
         let mut rules = Vec::new();
         let mut texts = Vec::new();
