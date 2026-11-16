@@ -285,6 +285,11 @@ pub(crate) fn paint_pane(
             metrics,
             now,
             discoverer,
+            if integrated {
+                crate::panel::Chrome::Integrated
+            } else {
+                crate::panel::Chrome::Historical
+            },
         );
     }
     let links = console_links

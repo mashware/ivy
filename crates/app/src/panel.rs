@@ -24,11 +24,15 @@ use std::time::{Duration, SystemTime};
 pub(crate) mod body;
 mod buttons;
 mod cache;
+pub use cache::Chrome;
 use cache::PanelLayout;
+mod claim_strip;
 mod color;
 mod document;
 mod driving;
 mod fold;
+mod head;
+mod identity;
 pub(crate) mod overlay;
 pub(crate) mod provenance;
 pub(crate) mod provenance_route;
@@ -36,6 +40,7 @@ pub(crate) mod provenance_route;
 use fold::lay_out;
 pub(crate) use fold::toggle_header_at;
 mod links;
+mod marks;
 pub(crate) mod pane;
 pub(crate) mod summary;
 use buttons::buttons_drawn;
@@ -359,12 +364,16 @@ struct Drawn {
 
 /// A button as it was drawn: which action it is, and the rectangle it occupied.
 ///
-/// The rectangle is the union of the button's rows — its label and the wrapped command under it — so
-/// a press anywhere on the command reaches the same button as a press on the label.
+/// The rectangle spans the button's rows — its label and the wrapped command under it — so a press
+/// anywhere on the command reaches the same button as a press on the label. In the integrated chrome
+/// it is also the frame painted around them (D97).
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct PaintedButton {
     action: usize,
     area: Rect,
+    /// Where the command under the label starts, which is where the frame's lower half begins;
+    /// nothing for a button whose rows carry no command.
+    command: Option<f32>,
 }
 
 impl PanelState {
@@ -511,30 +520,30 @@ impl PanelState {
     }
 
     /// The layout for this width, this warning and this claim, computing it only if the one there is no
-    /// good.
+    /// good. The roles travel with it because they are derived from the same theme and cost too much
+    /// to derive on every frame.
     fn lay_out_if_needed(
         &mut self,
         id: &str,
-        width: usize,
-        theme: &Theme,
-        warning: Option<String>,
+        key: cache::LayoutKey,
         attention: Option<AttentionState>,
-    ) -> Option<(&[Row], bool)> {
-        if self.last_good.is_none() && warning.is_none() {
+    ) -> Option<(&[Row], bool, Option<crate::theme::Roles>)> {
+        if self.last_good.is_none() && key.warning.is_none() {
             return None;
         }
 
         // **The claim is not in the key, and it is on purpose**: it dims exactly when the warning appears
         // —which is in it— and its class only changes on re-reading the file, which throws away the whole
         // layout. Putting it in would be a term no test can knock down. Whoever changes the criterion of
-        // «backed» and detaches it from the warning has to add it here.
-        let still_valid = matches!(&self.layout, Some(done) if done.width == width && done.warning == warning && done.theme == *theme);
+        // «backed» and detaches it from the warning has to add it here. With the integrated chrome the
+        // claim is not laid out at all: the strip paints it from the frame's own answer (D97).
+        let still_valid = self.layout.as_ref().is_some_and(|done| done.key == key);
         if !still_valid {
-            self.layout = Some(PanelLayout::new(self, id, width, theme, warning, attention));
+            self.layout = Some(PanelLayout::new(self, id, key, attention));
         }
         self.layout
             .as_ref()
-            .map(|done| (done.rows.as_slice(), still_valid))
+            .map(|done| (done.rows.as_slice(), still_valid, done.kit))
     }
 }
 
@@ -698,8 +707,8 @@ fn action_symbol() -> char {
 ///
 /// The three phrases are **the contract's, word for word**, including the «for you» of the first —
 /// which is exactly what separates it from the second, «something that is **not** you». Shortening
-/// them to fit is losing the opposition that tells them apart; what does not fit is wrapped, like
-/// everything else in the panel.
+/// them to fit is losing the opposition that tells them apart. The historical row wraps what does
+/// not fit; the integrated strip is one band and cuts it instead (D97).
 fn attention_text(class: Attention) -> &'static str {
     match class {
         Attention::Wait => "it is waiting for you",
@@ -759,6 +768,15 @@ struct Row {
     /// which button without laying the panel out a second time.
     role: RowRole,
     header: Option<fold::Header>,
+    /// The integrated identity row's phase chip, when this row is that row.
+    chip: Option<identity::Chip>,
+    /// A sign painted at a cell of its own — counted from the text's left margin, not from the
+    /// row's column — in its own ink, integrated chrome only: a line's mark in the first cell, or
+    /// the prompt before a command at the button's inset. The historical panel keeps a mark inside the text.
+    glyph: Option<(usize, char, Color32)>,
+    /// Whether the row is painted in the interface face rather than the cell grid's: a button's
+    /// label in the integrated chrome. Its ink, not its character count, decides whether it fits.
+    ui_face: bool,
     /// A compact link label painted on this row, independently of its body text.
     link: Option<LaidOutLink>,
     /// Which of its characters go to color, as ranges of character indices, set once the whole layout
@@ -775,6 +793,9 @@ impl Row {
             color,
             role: RowRole::Text,
             header: None,
+            chip: None,
+            glyph: None,
+            ui_face: false,
             link: None,
             color_spans: Vec::new(),
         }
@@ -797,127 +818,6 @@ enum RowRole {
     Fold(usize),
 }
 
-/// Turns a panel into the rows that are going to be painted, at the given width in cells.
-///
-/// **Here is everything it costs and nothing it draws**, and that separation is what allows remembering
-/// the result between frames: as long as the file and the width do not change, the layout is the same.
-/// Without it, wrapping the panel would be recalculated sixty times per second while the console beside it
-/// dumps.
-fn lay_out_head(
-    panel: Option<&Panel>,
-    id: &str,
-    width: usize,
-    theme: &Theme,
-    warning: Option<&str>,
-    attention: Option<AttentionState>,
-    held_by: Option<&str>,
-) -> Vec<Row> {
-    let mut rows = Vec::new();
-
-    if panel.is_none_or(|panel| panel.header) {
-        let phase = panel.and_then(|panel| panel.phase.as_deref());
-        // **Who is driving goes on the identity row, beside the pane's own name and its phase.**
-        // That row answers «what is this pane», and with two transports the answer includes which
-        // one is in charge — a person looking at a panel that will not change from the file has to
-        // be able to see why without editing anything to find out.
-        let identity = match (phase, held_by) {
-            (Some(phase), Some(source)) => format!("{id} · {phase} · {source}"),
-            (Some(phase), None) => format!("{id} · {phase}"),
-            (None, Some(source)) => format!("{id} · {source}"),
-            (None, None) => id.to_owned(),
-        };
-        wrap(
-            &mut rows,
-            0,
-            &sanitize(&identity),
-            theme.panel_color(None, None),
-            width,
-        );
-    }
-
-    // **The claim goes in the application's row and not in the identity one**, and that frontier is the
-    // reason this milestone exists: `header: false` hides the pane's identity, and the answer to «do I
-    // have to go there?» cannot be turned off by the producer with a flag of its own. It is the same
-    // frontier that the warning below already fulfills.
-    if let Some(attention) = attention {
-        wrap(
-            &mut rows,
-            0,
-            &format!(
-                "{} {}",
-                attention_symbol(attention.class),
-                attention_text(attention.class)
-            ),
-            theme.attention_color(attention.class, attention.backed),
-            width,
-        );
-    }
-
-    // **The warning goes on top and not at the end**, because below is where the clip eats what does not
-    // fit: the warning that a panel is not trustworthy would be exactly the first thing to disappear from
-    // a long panel.
-    if let Some(warning) = warning {
-        wrap(
-            &mut rows,
-            0,
-            &sanitize(warning),
-            theme.panel_color(None, Some(Style::Warn)),
-            width,
-        );
-    }
-
-    // **The buttons go above the body and below the warning, inside the block the application owns.**
-    // Below is where the clip eats what does not fit, and a button whose command row got eaten would be
-    // a label you can press over a command you cannot read — the one state the rule about seeing a
-    // command before it runs forbids.
-    // **A panel too narrow to show a command at all declares no buttons.** The wrapping has a floor
-    // on its slot — without one it would put zero characters per row and hang — so below that floor
-    // it lays the text out wider than the strip and the painting clips what does not fit: the person
-    // would see a fragment and the press would send the whole string. Leaving these rows untagged is
-    // the same mechanism as a button the clip cut in half: unreachable rather than refused.
-    let shows_a_command = width.saturating_sub(MARGIN as usize) >= MINIMUM_SLOT;
-    for (nth, action) in panel
-        .iter()
-        .flat_map(|panel| panel.actions.iter())
-        .filter(|_| shows_a_command)
-        .enumerate()
-    {
-        let first = rows.len();
-        wrap(
-            &mut rows,
-            0,
-            &sanitize(&format!("{} {}", action_symbol(), action.label())),
-            theme.panel_color(None, None),
-            width,
-        );
-        let body = rows.len();
-        // **The command is painted in the ordinary ink and not in the dimmed one.** `clip`'s «… N more»
-        // uses the dim colour to say «this is elided», and the one sentence on this panel that a person
-        // has to read before pressing anything must not be styled as de-emphasis.
-        wrap_verbatim(
-            &mut rows,
-            MARGIN as usize,
-            action.send(),
-            theme.panel_color(None, None),
-            width,
-        );
-        for row in &mut rows[first..body] {
-            row.role = RowRole::ButtonLabel(nth);
-        }
-        for row in &mut rows[body..] {
-            row.role = RowRole::ButtonBody(nth);
-        }
-    }
-
-    // The blank row is written by the layout, not by the painting: separated from the body, what the
-    // application puts reads as what it is and not as the producer's first line.
-    if !rows.is_empty() {
-        rows.push(Row::text(0, String::new(), Color32::TRANSPARENT));
-    }
-
-    rows
-}
-
 /// Splits the lines into blocks by the empty lines, which is what the contract uses to group them.
 ///
 /// The gap **belongs to the block it closes**: this way it is kept as a row and the layout does not have
@@ -938,8 +838,18 @@ fn blocks(lines: &[Line]) -> Vec<Vec<&Line>> {
 }
 
 /// Lays out a line: its symbol, its aligned reference, its indent and its wrapped text.
-fn lay_out_line(line: &Line, column: usize, width: usize, theme: &Theme) -> Vec<Row> {
-    let color = theme.panel_color(line.mark, line.style);
+///
+/// With the integrated chrome's `roles` the symbol rides on the first row as its own glyph rather
+/// than inside the text, so it can take a different ink from the words it marks; without them it is
+/// the first character of the text, in the line's one colour, as the historical panel keeps it (D97).
+fn lay_out_line(
+    line: &Line,
+    column: usize,
+    width: usize,
+    theme: &Theme,
+    roles: Option<&crate::theme::Roles>,
+) -> Vec<Row> {
+    let (glyph, color) = marks::inks(line.mark, line.style, theme, roles);
     let reference = line.reference.as_deref().map(sanitize).unwrap_or_default();
     let text = sanitize(&line.text);
 
@@ -960,10 +870,10 @@ fn lay_out_line(line: &Line, column: usize, width: usize, theme: &Theme) -> Vec<
 
     let mut head = String::new();
     match line.mark {
-        Some(mark) => head.push(symbol(mark)),
+        Some(mark) if roles.is_none() => head.push(symbol(mark)),
         // The symbol's slot is reserved even without a mark: it is what keeps the text of all the lines in
         // the same column, which is what aligning is about.
-        None => head.push(' '),
+        _ => head.push(' '),
     }
     head.push(' ');
     if column > 0 {
@@ -996,6 +906,10 @@ fn lay_out_line(line: &Line, column: usize, width: usize, theme: &Theme) -> Vec<
         }
         None => rows.push(Row::text(0, head, color)),
     }
+    rows[0].glyph = line
+        .mark
+        .filter(|_| roles.is_some())
+        .map(|mark| (0, symbol(mark), glyph));
     if let Some(target) = line.link.as_deref() {
         links::attach(&mut rows, target, indent, width, color);
     }
@@ -1053,12 +967,21 @@ fn wrap(rows: &mut Vec<Row>, indent: usize, text: &str, color: Color32, width: u
 /// —laying out outside and passing the rows— would force whoever paints to keep track of when the layout
 /// expired, and that account belongs here.
 ///
-/// The identifier is the pane's, and it is the only thing the application contributes of its own: the
-/// identity line. **It is composed only with what the app already knows and with what the file itself
-/// brings**, never by reading a neighboring `meta.json` — that would be deducing another's state.
+/// The identifier is the pane's: the historical identity line carries it, and it also names the pane
+/// for the link disclosure. **The identity line is composed only with what the app already knows and
+/// with what the file itself brings**, never by reading a neighboring `meta.json` — that would be
+/// deducing another's state.
 ///
 /// The framing comes from the painter itself and not from a separate argument: with the two ways, nothing
 /// would prevent them from ceasing to coincide one day.
+///
+/// `chrome` is the window's decision: without the integrated chrome the panel is the historical one,
+/// whose claim is a row of text (D97).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the chrome decision is one more input of the same painting, and bundling it with \
+              unrelated ones would only hide which is which"
+)]
 pub fn paint(
     painter: &Painter,
     state: &mut PanelState,
@@ -1067,6 +990,7 @@ pub fn paint(
     metrics: &CellMetrics,
     now: SystemTime,
     discoverer: &mut crate::fonts::Discoverer,
+    chrome: Chrome,
 ) -> std::time::Duration {
     let rect = painter.clip_rect();
     painter.rect_filled(rect, 0.0, theme.panel_background());
@@ -1082,14 +1006,30 @@ pub fn paint(
     // **Taken away first and put back only at the end.** Every way out of this function below is a
     // frame in which nothing was drawn, and a press must not land on what the previous one left.
     state.nothing_was_drawn();
-    let Some((rows, settled)) = state.lay_out_if_needed(id, width, theme, warning, attention)
-    else {
+    let key = cache::LayoutKey {
+        width,
+        theme: *theme,
+        warning,
+        chrome,
+    };
+    let Some((rows, settled, kit)) = state.lay_out_if_needed(id, key, attention) else {
         return std::time::Duration::ZERO;
     };
 
     // **Without a whole row nothing is painted, not even the warning.** With a floor of one, a panel of
     // zero height queued «… N more» outside its rectangle: a warning that content is missing, in a place
-    // where no content fits.
+    // where no content fits. Checked before the strip too, so a sub-row panel gets no band either.
+    if ((rect.height() / metrics.height()) as usize) == 0 {
+        return std::time::Duration::ZERO;
+    }
+    // **The strip goes before the rows are fitted**, so the claim stays the last thing a short panel
+    // loses, and every row, press and marker below is measured from what the strip leaves.
+    let rect = match (attention, kit.as_ref()) {
+        (Some(claim), Some(roles)) => {
+            claim_strip::paint(painter, rect, metrics.height(), claim, theme, roles)
+        }
+        _ => rect,
+    };
     let fit = (rect.height() / metrics.height()) as usize;
     if fit == 0 {
         return std::time::Duration::ZERO;
@@ -1102,8 +1042,16 @@ pub fn paint(
     // split by subtraction: a path that is not declared is published as the interface framework's,
     // which is the figure **D3** judges egui by.
     let walking = std::time::Instant::now();
-    let mut drawn = buttons_drawn(rows, whole, rect, metrics);
+    let mut drawn = buttons_drawn(rows, whole, rect, metrics, kit.is_some());
     let walked = walking.elapsed();
+    // **A frame's place is reserved under the text now and filled at the end**, once the ink has
+    // said which buttons stayed reachable: only those get a frame, so nothing looks pressable that
+    // a press would not reach.
+    let frames: Vec<_> = drawn
+        .iter()
+        .filter(|_| kit.is_some())
+        .map(|_| painter.add(eframe::egui::Shape::Noop))
+        .collect();
 
     let text_left = rect.left() + MARGIN * metrics.width();
     let mut overflowed: std::collections::BTreeSet<RowRole> = std::collections::BTreeSet::new();
@@ -1133,7 +1081,15 @@ pub fn paint(
             // characters, and a character is not a column: twenty-nine kanji are fifty-eight columns,
             // so a command in Japanese is drawn past the strip's edge and the painter clips what
             // sticks out — the person sees a fragment and the press would send the whole string.
-            if inked.right() > rect.right() {
+            // A framed button's edge is its frame's, not the strip's: ink between the two would be
+            // read outside the button it belongs to.
+            let edge = match row.role {
+                RowRole::ButtonLabel(_) | RowRole::ButtonBody(_) => {
+                    buttons::right_edge(rect, metrics, kit.is_some())
+                }
+                _ => rect.right(),
+            };
+            if inked.right() > edge {
                 overflowed.insert(row.role);
             }
         }
@@ -1174,10 +1130,18 @@ pub fn paint(
     // **A button whose ink left the strip is taken off the list**, for the same reason one the clip
     // cut in half never went on it: unreachable rather than refused, with no branch anywhere that
     // has to remember.
-    drawn.retain(|button| {
+    let reachable = |button: &PaintedButton| {
         !overflowed.contains(&RowRole::ButtonLabel(button.action))
             && !overflowed.contains(&RowRole::ButtonBody(button.action))
-    });
+    };
+    if let Some(roles) = &kit {
+        for (button, slot) in drawn.iter().zip(frames) {
+            if reachable(button) {
+                painter.set(slot, buttons::frame(button, roles));
+            }
+        }
+    }
+    drawn.retain(reachable);
     // **D51 gives this to the panel's painting, not to the buttons' walk**: `walked` is published
     // under the buttons' name, so only `buttons_drawn` belongs inside the `walking` clock above. No
     // test can tell which span a few microseconds landed in; the clock's placement is the guard.
@@ -1244,6 +1208,7 @@ mod tests {
                     &metrics,
                     SystemTime::now(),
                     &mut discoverer,
+                    Chrome::Historical,
                 );
             });
             let mut overflow = None;
@@ -1480,12 +1445,38 @@ mod tests {
         paint_the_state_with(state, place, now, &mut crate::fonts::Discoverer::default())
     }
 
+    /// The same, with the window's integrated chrome: the claim as a strip and the identity as a
+    /// chip (D97).
+    pub(super) fn paint_integrated(
+        state: &mut PanelState,
+        place: Rect,
+        now: SystemTime,
+    ) -> Vec<eframe::egui::Shape> {
+        paint_in_chrome(
+            state,
+            place,
+            now,
+            &mut crate::fonts::Discoverer::default(),
+            Chrome::Integrated,
+        )
+    }
+
     /// The same, with the font discoverer the test hands it — which is how a test gets a full atlas.
     pub(super) fn paint_the_state_with(
         state: &mut PanelState,
         place: Rect,
         now: SystemTime,
         discoverer: &mut crate::fonts::Discoverer,
+    ) -> Vec<eframe::egui::Shape> {
+        paint_in_chrome(state, place, now, discoverer, Chrome::Historical)
+    }
+
+    fn paint_in_chrome(
+        state: &mut PanelState,
+        place: Rect,
+        now: SystemTime,
+        discoverer: &mut crate::fonts::Discoverer,
+        chrome: Chrome,
     ) -> Vec<eframe::egui::Shape> {
         let ctx = eframe::egui::Context::default();
         let mut output = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
@@ -1501,6 +1492,7 @@ mod tests {
                 &metrics,
                 now,
                 discoverer,
+                chrome,
             );
         });
 
@@ -1940,7 +1932,7 @@ mod tests {
     /// It is needed to assert about positions: the margin and the identity gap are counted in cells, so
     /// comparing them with a hand-written number would be checking this machine's font instead of the
     /// panel's arithmetic.
-    fn cell() -> (f32, f32) {
+    pub(super) fn cell() -> (f32, f32) {
         let ctx = eframe::egui::Context::default();
         let mut measured = (0.0, 0.0);
         ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
@@ -2275,7 +2267,16 @@ mod tests {
             .expect("nobody was holding it");
         let reader = state.reader();
         state
-            .lay_out_if_needed("a1b2", 40, &Theme::default(), None, None)
+            .lay_out_if_needed(
+                "a1b2",
+                super::cache::LayoutKey {
+                    width: 40,
+                    theme: Theme::default(),
+                    warning: None,
+                    chrome: super::Chrome::Historical,
+                },
+                None,
+            )
             .expect("there is a layout");
         state.drawn = Some(Drawn {
             headers: Vec::new(),
@@ -2283,6 +2284,7 @@ mod tests {
             buttons: vec![PaintedButton {
                 action: 0,
                 area: PLACE,
+                command: None,
             }],
             links: Vec::new(),
         });
@@ -2928,19 +2930,46 @@ mod tests {
         let theme = Theme::default();
 
         let first = state
-            .lay_out_if_needed("a1b2", 40, &theme, None, None)
+            .lay_out_if_needed(
+                "a1b2",
+                super::cache::LayoutKey {
+                    width: 40,
+                    theme,
+                    warning: None,
+                    chrome: super::Chrome::Historical,
+                },
+                None,
+            )
             .expect("there is a panel")
             .0
             .to_vec();
         let repeated = state
-            .lay_out_if_needed("a1b2", 40, &theme, None, None)
+            .lay_out_if_needed(
+                "a1b2",
+                super::cache::LayoutKey {
+                    width: 40,
+                    theme,
+                    warning: None,
+                    chrome: super::Chrome::Historical,
+                },
+                None,
+            )
             .expect("there is a panel")
             .0
             .to_vec();
         assert_eq!(first, repeated, "the same width gives the same layout");
 
         let narrow = state
-            .lay_out_if_needed("a1b2", 12, &theme, None, None)
+            .lay_out_if_needed(
+                "a1b2",
+                super::cache::LayoutKey {
+                    width: 12,
+                    theme,
+                    warning: None,
+                    chrome: super::Chrome::Historical,
+                },
+                None,
+            )
             .expect("there is a panel")
             .0
             .to_vec();
@@ -2961,7 +2990,16 @@ mod tests {
         state.refresh(dir.path());
         let document = state.last_good.clone().unwrap();
         let before = state
-            .lay_out_if_needed("a1b2", 40, &Theme::default(), None, None)
+            .lay_out_if_needed(
+                "a1b2",
+                super::cache::LayoutKey {
+                    width: 40,
+                    theme: Theme::default(),
+                    warning: None,
+                    chrome: super::Chrome::Historical,
+                },
+                None,
+            )
             .unwrap()
             .0
             .to_vec();
@@ -2969,8 +3007,17 @@ mod tests {
             foreground: Some(Color32::from_rgb(19, 71, 113)),
             ..Default::default()
         });
-        let (rows, reused) = state
-            .lay_out_if_needed("a1b2", 40, &changed, None, None)
+        let (rows, reused, _) = state
+            .lay_out_if_needed(
+                "a1b2",
+                super::cache::LayoutKey {
+                    width: 40,
+                    theme: changed,
+                    warning: None,
+                    chrome: super::Chrome::Historical,
+                },
+                None,
+            )
             .unwrap();
         assert!(!reused);
         assert_ne!(before, rows);
@@ -2982,7 +3029,16 @@ mod tests {
         assert!(Arc::ptr_eq(&document, state.last_good.as_ref().unwrap()));
         assert!(
             state
-                .lay_out_if_needed("a1b2", 40, &changed, None, None)
+                .lay_out_if_needed(
+                    "a1b2",
+                    super::cache::LayoutKey {
+                        width: 40,
+                        theme: changed,
+                        warning: None,
+                        chrome: super::Chrome::Historical
+                    },
+                    None
+                )
                 .unwrap()
                 .1
         );
@@ -2996,14 +3052,32 @@ mod tests {
         let mut state = PanelState::default();
         state.refresh(dir.path());
         let theme = Theme::default();
-        state.lay_out_if_needed("a1b2", 40, &theme, None, None);
+        state.lay_out_if_needed(
+            "a1b2",
+            super::cache::LayoutKey {
+                width: 40,
+                theme,
+                warning: None,
+                chrome: super::Chrome::Historical,
+            },
+            None,
+        );
 
         publish(&dir, r#"{"header":false,"lines":["the new"]}"#);
         age_the_file(&dir, 1);
         state.refresh(dir.path());
 
         let rows = state
-            .lay_out_if_needed("a1b2", 40, &theme, None, None)
+            .lay_out_if_needed(
+                "a1b2",
+                super::cache::LayoutKey {
+                    width: 40,
+                    theme,
+                    warning: None,
+                    chrome: super::Chrome::Historical,
+                },
+                None,
+            )
             .expect("there is a panel");
         assert!(
             rows.0.iter().any(|row| row.text.contains("the new")),
@@ -3032,7 +3106,16 @@ mod tests {
                 SystemTime::now(),
             )
             .expect("nobody was holding it");
-        state.lay_out_if_needed("a1b2", 40, &theme, None, None);
+        state.lay_out_if_needed(
+            "a1b2",
+            super::cache::LayoutKey {
+                width: 40,
+                theme,
+                warning: None,
+                chrome: super::Chrome::Historical,
+            },
+            None,
+        );
         let published = state
             .last_understood()
             .expect("there is a panel")
@@ -3051,7 +3134,16 @@ mod tests {
             .expect("the holder may patch");
 
         let rows = state
-            .lay_out_if_needed("a1b2", 40, &theme, None, None)
+            .lay_out_if_needed(
+                "a1b2",
+                super::cache::LayoutKey {
+                    width: 40,
+                    theme,
+                    warning: None,
+                    chrome: super::Chrome::Historical,
+                },
+                None,
+            )
             .expect("there is a panel");
         assert!(
             rows.0.iter().any(|row| row.text.contains("the new")),
@@ -3318,12 +3410,30 @@ mod tests {
         let theme = Theme::default();
 
         let first = state
-            .lay_out_if_needed("a1b2", 40, &theme, None, None)
+            .lay_out_if_needed(
+                "a1b2",
+                super::cache::LayoutKey {
+                    width: 40,
+                    theme,
+                    warning: None,
+                    chrome: super::Chrome::Historical,
+                },
+                None,
+            )
             .expect("there is a panel")
             .0
             .as_ptr();
         let second = state
-            .lay_out_if_needed("a1b2", 40, &theme, None, None)
+            .lay_out_if_needed(
+                "a1b2",
+                super::cache::LayoutKey {
+                    width: 40,
+                    theme,
+                    warning: None,
+                    chrome: super::Chrome::Historical,
+                },
+                None,
+            )
             .expect("there is a panel")
             .0
             .as_ptr();
@@ -3588,7 +3698,16 @@ mod tests {
 
         for width in [0usize, 1, 2, 3] {
             let rows = state
-                .lay_out_if_needed("probe", width, &theme, None, None)
+                .lay_out_if_needed(
+                    "probe",
+                    super::cache::LayoutKey {
+                        width,
+                        theme,
+                        warning: None,
+                        chrome: super::Chrome::Historical,
+                    },
+                    None,
+                )
                 .expect("there is a panel to lay out");
             assert!(
                 !rows.0.is_empty(),
@@ -3712,6 +3831,57 @@ mod tests {
                 ("  whatever".to_owned(), theme.panel_color(None, None)),
             ]
         );
+    }
+
+    /// **In the integrated chrome the claim is a strip, and the rows start under it** (D97). The
+    /// strip's words are painted first, in the claim's colour, and the body's first row falls exactly
+    /// 32 points below the panel's top — the band the cell grid gives up — while the same panel
+    /// with no claim starts its body at the top. Without the offset the first row would be painted
+    /// under the band.
+    #[test]
+    fn an_integrated_claim_is_a_strip_and_the_rows_start_below_it() {
+        let theme = Theme::default();
+        let dir = PanelDir::create().expect("create the directory");
+        publish(
+            &dir,
+            r#"{"header":false,"attention":"wait","lines":["whatever"]}"#,
+        );
+        let mut state = PanelState::default();
+        state.refresh(dir.path());
+        // The historical regime first, on the same state and width: its layout carries the claim
+        // as a row, so a layout reused across regimes would paint the claim twice below.
+        let historical = texts_and_colors(paint_the_state(&mut state, PLACE, SystemTime::now()));
+        assert_eq!(historical[0].0, claim_row(Attention::Wait));
+
+        let painted: Vec<(String, Color32, Pos2)> =
+            tests_shapes::texts(paint_integrated(&mut state, PLACE, SystemTime::now()));
+        assert_eq!(painted.len(), 2, "{painted:?}");
+        assert_eq!(painted[0].0, attention_text(Attention::Wait));
+        assert_eq!(painted[0].1, theme.attention_color(Attention::Wait, true));
+        assert!(painted[0].2.y < PLACE.top() + claim_strip::HEIGHT);
+        assert_eq!(painted[1].0, "  whatever");
+        assert_eq!(painted[1].2.y, PLACE.top() + claim_strip::HEIGHT);
+
+        publish(&dir, r#"{"header":false,"lines":["whatever"]}"#);
+        age_the_file(&dir, 1);
+        state.refresh(dir.path());
+        let painted = tests_shapes::texts(paint_integrated(&mut state, PLACE, SystemTime::now()));
+        assert_eq!(painted.len(), 1, "no claim, no strip: {painted:?}");
+        assert_eq!(painted[0].2.y, PLACE.top());
+    }
+
+    /// The text, colour and place of every text shape, in queue order.
+    mod tests_shapes {
+        use eframe::egui::{Color32, Pos2, Shape};
+        pub(super) fn texts(shapes: Vec<Shape>) -> Vec<(String, Color32, Pos2)> {
+            shapes
+                .into_iter()
+                .filter_map(|shape| match shape {
+                    Shape::Text(t) => Some((t.galley.text().to_owned(), t.fallback_color, t.pos)),
+                    _ => None,
+                })
+                .collect()
+        }
     }
 
     /// And with the header in place, the claim goes **below the identity and above the body**: on top,
@@ -4489,7 +4659,16 @@ mod pressing {
             publish(&dir, &document);
             state.refresh(dir.path());
             let rows = state
-                .lay_out_if_needed("a1b2", 30, &Theme::default(), None, None)
+                .lay_out_if_needed(
+                    "a1b2",
+                    super::cache::LayoutKey {
+                        width: 30,
+                        theme: Theme::default(),
+                        warning: None,
+                        chrome: super::Chrome::Historical,
+                    },
+                    None,
+                )
                 .expect("there is a panel")
                 .0
                 .to_vec();
@@ -4680,5 +4859,632 @@ mod pressing {
         assert_eq!(state.buttons_drawn().count(), 0);
         assert_eq!(state.links_drawn().count(), 0);
         assert!(state.button_at(a_wide_strip().center()).is_none());
+    }
+
+    /// Every filled or stroked rectangle queued, with the frame's grouped shape opened up.
+    fn rects(shapes: Vec<eframe::egui::Shape>) -> Vec<eframe::egui::epaint::RectShape> {
+        let mut found = Vec::new();
+        for shape in shapes {
+            match shape {
+                eframe::egui::Shape::Rect(rect) => found.push(rect),
+                eframe::egui::Shape::Vec(inner) => found.extend(rects(inner)),
+                _ => {}
+            }
+        }
+        found
+    }
+
+    /// **The frame a person sees is the rectangle a press reaches** (D97), painted in the kit's
+    /// colours — written out as Ivy Night's literal raised, base and control-border values — with
+    /// the command's lower half starting at the command's row. And a button the clip cut in half
+    /// gets no frame at all: nothing looks pressable that a press would not reach.
+    #[test]
+    fn the_painted_frame_is_the_reach_and_a_half_clipped_button_has_none() {
+        let rgb = |hex: u32| Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+        let dir = PanelDir::create().expect("create the directory");
+        publish(&dir, RUN);
+        let mut state = PanelState::default();
+        state.refresh(dir.path());
+        // The historical panel has no frame, and its reach keeps the
+        // strip's whole width (D13).
+        let historical = rects(paint_the_state(
+            &mut state,
+            a_wide_strip(),
+            SystemTime::now(),
+        ));
+        assert!(!historical.iter().any(|r| r.fill == rgb(0x202427)));
+        let old_reach = state.buttons_drawn().next().expect("a button was drawn");
+        assert_eq!(
+            (old_reach.left(), old_reach.right()),
+            (a_wide_strip().left(), a_wide_strip().right())
+        );
+        super::tests::paint_integrated(&mut state, a_wide_strip(), SystemTime::now());
+        let found = rects(super::tests::paint_integrated(
+            &mut state,
+            a_wide_strip(),
+            SystemTime::now(),
+        ));
+        let reach = state.buttons_drawn().next().expect("a button was drawn");
+        let face = found
+            .iter()
+            .find(|r| r.fill == rgb(0x202427))
+            .expect("the label's raised face is painted");
+        assert_eq!(
+            face.rect, reach,
+            "what is painted is not what a press reaches"
+        );
+        assert_eq!(face.corner_radius, eframe::egui::CornerRadius::same(6));
+        let border = found
+            .iter()
+            .find(|r| r.stroke.color == rgb(0x8e9390).gamma_multiply(0.5))
+            .expect("the frame's border, the muted text at half strength, is painted");
+        assert_eq!(border.rect, reach);
+        let rows = &state.layout.as_ref().expect("a layout").rows;
+        let body = rows
+            .iter()
+            .position(|row| matches!(row.role, RowRole::ButtonBody(0)))
+            .expect("the command has a row");
+        let (_, cell) = super::tests::cell();
+        let command = found
+            .iter()
+            .find(|r| r.fill == rgb(0x13181b))
+            .expect("the command sits on the console's background");
+        assert_eq!(
+            command.rect.top(),
+            a_wide_strip().top() + body as f32 * cell
+        );
+        assert_eq!(command.rect.bottom(), reach.bottom());
+        assert!(
+            reach.contains(Pos2::new(reach.center().x, command.rect.top() - 1.0))
+                && state
+                    .button_at(Pos2::new(a_wide_strip().left() + 1.0, reach.center().y))
+                    .is_none(),
+            "the reach is the frame, not the strip's whole width"
+        );
+
+        let short = Rect::from_min_size(a_wide_strip().min, eframe::egui::vec2(400.0, cell * 2.0));
+        let clipped = rects(super::tests::paint_integrated(
+            &mut state,
+            short,
+            SystemTime::now(),
+        ));
+        assert_eq!(
+            state.buttons_drawn().count(),
+            0,
+            "the case needs the command cut"
+        );
+        assert!(
+            !clipped.iter().any(|r| r.fill == rgb(0x202427)),
+            "a half-drawn button got a frame"
+        );
+
+        // A command whose ink ran past the strip is unreachable, so it gets no frame either.
+        let wide = "☀".repeat(40);
+        let document =
+            format!(r#"{{"actions": [{{"label": "Wide", "send": "{wide}"}}], "lines": ["b"]}}"#);
+        let narrow = Rect::from_min_size(a_wide_strip().min, eframe::egui::vec2(260.0, 600.0));
+        let mut state = painted(&document, narrow);
+        assert_eq!(
+            state.buttons_drawn().count(),
+            0,
+            "the case needs the overflow"
+        );
+        let overflowed = rects(super::tests::paint_integrated(
+            &mut state,
+            narrow,
+            SystemTime::now(),
+        ));
+        assert!(
+            !overflowed.iter().any(|r| r.fill == rgb(0x202427)),
+            "a button inked past the strip got a frame"
+        );
+        assert_eq!(
+            state.buttons_drawn().count(),
+            0,
+            "the integrated painting left it reachable"
+        );
+    }
+
+    /// **Under a claim strip, every reach is measured from what the band leaves** (D97): the
+    /// button's frame and the section header's area both start below the band, the frame is still
+    /// the reach, and where the band pushes the command out of the panel nothing is reachable and
+    /// nothing is framed.
+    #[test]
+    fn under_a_claim_strip_the_frames_and_headers_start_below_the_band() {
+        let rgb = |hex: u32| Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+        let document = r#"{"attention":"wait",
+            "actions":[{"label":"Run tests","send":"npm test"}],
+            "lines":[{"text":"MRs","style":"section","summary":"2/4"},"the body"]}"#;
+        let dir = PanelDir::create().expect("create the directory");
+        publish(&dir, document);
+        let mut state = PanelState::default();
+        state.refresh(dir.path());
+        let place = a_wide_strip();
+        let below = place.top() + claim_strip::HEIGHT;
+        let (_, cell) = super::tests::cell();
+        super::tests::paint_integrated(&mut state, place, SystemTime::now());
+        let found = rects(super::tests::paint_integrated(
+            &mut state,
+            place,
+            SystemTime::now(),
+        ));
+
+        let reach = state.buttons_drawn().next().expect("a button was drawn");
+        assert!(reach.top() >= below, "{reach:?} reaches into the band");
+        assert!(
+            reach.top() < below + cell,
+            "the button is the first row under the band"
+        );
+        let face = found
+            .iter()
+            .find(|r| r.fill == rgb(0x202427))
+            .expect("the frame is painted");
+        assert_eq!(face.rect, reach);
+        let header = state.drawn.as_ref().expect("drawn").headers[0].area;
+        let rows_down = (header.top() - below) / cell;
+        assert!(
+            rows_down >= 1.0 && (rows_down - rows_down.round()).abs() < 1e-3,
+            "the header sits on the grid under the band: {header:?}"
+        );
+        assert!(
+            state.button_at(reach.center()).is_some()
+                && fold::toggle_header_at(&mut state, header.center()),
+            "both are reachable where they are painted"
+        );
+
+        let short = Rect::from_min_size(
+            place.min,
+            eframe::egui::vec2(400.0, claim_strip::HEIGHT + 2.0 * cell),
+        );
+        super::tests::paint_integrated(&mut state, short, SystemTime::now());
+        let cut = rects(super::tests::paint_integrated(
+            &mut state,
+            short,
+            SystemTime::now(),
+        ));
+        assert_eq!(
+            state.buttons_drawn().count(),
+            0,
+            "the band pushed the command out"
+        );
+        assert!(
+            !cut.iter().any(|r| r.fill == rgb(0x202427)),
+            "a cut button got a frame"
+        );
+    }
+
+    /// Every text queued, with where it starts and the index it was queued at.
+    fn texts_at(shapes: &[eframe::egui::Shape]) -> Vec<(usize, String, Rect)> {
+        shapes
+            .iter()
+            .enumerate()
+            .filter_map(|(at, shape)| match shape {
+                eframe::egui::Shape::Text(t) => Some((
+                    at,
+                    t.galley.text().to_owned(),
+                    t.galley.rect.translate(t.pos.to_vec2()),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// **Integrated buttons read as the design's** (D97): two in a row stand six points apart, the
+    /// label carries no `>`, a `›` prompt sits at the label's inset with a space before the command
+    /// without being part of it, the frame leaves room above the label and below the command, and
+    /// each frame is queued under its label's text.
+    #[test]
+    fn integrated_buttons_stand_apart_with_label_and_command_at_one_inset() {
+        let rgb = |hex: u32| Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+        let dir = PanelDir::create().expect("create the directory");
+        publish(
+            &dir,
+            r#"{"actions":[{"label":"Approve","send":"yes"},{"label":"Show","send":"show it"}],
+                "lines":["the body"]}"#,
+        );
+        let mut state = PanelState::default();
+        state.refresh(dir.path());
+        super::tests::paint_integrated(&mut state, a_wide_strip(), SystemTime::now());
+        let shapes = super::tests::paint_integrated(&mut state, a_wide_strip(), SystemTime::now());
+        let reaches: Vec<Rect> = state.buttons_drawn().collect();
+        assert_eq!(reaches.len(), 2);
+        assert!(
+            (reaches[1].top() - reaches[0].bottom() - 6.0).abs() < 0.01,
+            "consecutive buttons stand six points apart: {reaches:?}"
+        );
+        let texts = texts_at(&shapes);
+        let find = |name: &str| {
+            texts
+                .iter()
+                .find(|t| t.1 == name)
+                .unwrap_or_else(|| panic!("{name}: {texts:?}"))
+        };
+        let label = find("Approve");
+        let command = find("yes");
+        let prompt = find("›");
+        assert!(texts.iter().all(|t| !t.1.contains('>')), "{texts:?}");
+        let (cell, _) = super::tests::cell();
+        assert!(
+            (prompt.2.left() - label.2.left()).abs() < 1.0,
+            "the prompt sits at the label's inset: {prompt:?} {label:?}"
+        );
+        assert!(
+            (command.2.left() - (prompt.2.left() + 2.0 * cell)).abs() < 1.0,
+            "a space separates the prompt from the command: {prompt:?} {command:?}"
+        );
+        assert!(
+            reaches[0].top() <= label.2.top() - 4.0
+                && reaches[0].bottom() >= command.2.bottom() + 4.0,
+            "the frame leaves room around its text: {:?} {label:?} {command:?}",
+            reaches[0]
+        );
+        assert!(
+            prompt.2.top() >= label.2.bottom() - 0.5,
+            "the prompt is on the command's row"
+        );
+        let face = shapes
+            .iter()
+            .position(|shape| match shape {
+                eframe::egui::Shape::Vec(parts) => parts.iter().any(
+                    |part| matches!(part, eframe::egui::Shape::Rect(r) if r.fill == rgb(0x202427)),
+                ),
+                _ => false,
+            })
+            .expect("a frame is queued");
+        assert!(
+            face < label.0,
+            "the frame is queued after the label and would cover it"
+        );
+    }
+
+    /// **A framed button's edge is its frame** (D97): a command whose ink ends between the frame's
+    /// right edge and the strip's — read outside the button it belongs to — is neither reachable
+    /// nor framed. The panel width is searched for that band, because where wide glyphs end depends
+    /// on the font; the search itself must find it, or the test proves nothing.
+    #[test]
+    fn a_command_inked_past_its_frame_but_inside_the_strip_is_not_pressable() {
+        let rgb = |hex: u32| Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+        let (cell, _) = super::tests::cell();
+        let mut found = false;
+        'search: for count in 8..16 {
+            let wide = "☀".repeat(count);
+            let document = format!(
+                r#"{{"actions": [{{"label": "Wide", "send": "{wide}"}}], "lines": ["b"]}}"#
+            );
+            let dir = PanelDir::create().expect("create the directory");
+            publish(&dir, &document);
+            let mut state = PanelState::default();
+            state.refresh(dir.path());
+            for step in 0..400 {
+                let width = 90.0 + step as f32 * 0.5;
+                let place =
+                    Rect::from_min_size(a_wide_strip().min, eframe::egui::vec2(width, 600.0));
+                super::tests::paint_integrated(&mut state, place, SystemTime::now());
+                let shapes = super::tests::paint_integrated(&mut state, place, SystemTime::now());
+                let Some(ink) = texts_at(&shapes)
+                    .into_iter()
+                    .find(|t| t.1 == wide)
+                    .map(|t| t.2)
+                else {
+                    continue;
+                };
+                if ink.right() > place.right() - cell / 2.0 + 0.01 && ink.right() <= place.right() {
+                    assert_eq!(
+                        state.buttons_drawn().count(),
+                        0,
+                        "pressable past its frame at {width}"
+                    );
+                    assert!(
+                        !rects(shapes).iter().any(|r| r.fill == rgb(0x202427)),
+                        "framed past its frame at {width}"
+                    );
+                    found = true;
+                    break 'search;
+                }
+            }
+        }
+        assert!(
+            found,
+            "no width put the command's ink between the frame and the strip"
+        );
+    }
+
+    /// **The title block reads above the buttons in the integrated panel** (D97), as the design
+    /// does: identity, title, summary, buttons, sections — while the historical panel keeps its
+    /// buttons above the whole body.
+    #[test]
+    fn the_title_block_sits_above_the_buttons_only_in_the_integrated_panel() {
+        let document = r#"{"phase":"review","actions":[{"label":"Approve","send":"yes"}],
+            "lines":[{"text":"Partial refunds","style":"title"},"Plan ready","",
+                     {"text":"Plan","style":"section","summary":"2/4"},"step"]}"#;
+        let dir = PanelDir::create().expect("create the directory");
+        publish(&dir, document);
+        let mut state = PanelState::default();
+        state.refresh(dir.path());
+        let order = |shapes: Vec<eframe::egui::Shape>| {
+            let mut texts = texts_at(&shapes);
+            texts.sort_by(|a, b| a.2.top().total_cmp(&b.2.top()));
+            texts
+                .into_iter()
+                .map(|t| t.1)
+                .filter(|t| {
+                    [
+                        "review",
+                        "  Partial refunds",
+                        "  Plan ready",
+                        "Approve",
+                        "> Approve",
+                        "Plan",
+                        "▾ Plan",
+                    ]
+                    .iter()
+                    .any(|n| t.starts_with(n))
+                })
+                .collect::<Vec<_>>()
+        };
+        let integrated = order(super::tests::paint_integrated(
+            &mut state,
+            a_wide_strip(),
+            SystemTime::now(),
+        ));
+        assert_eq!(
+            integrated,
+            [
+                "review",
+                "  Partial refunds",
+                "  Plan ready",
+                "Approve",
+                "Plan"
+            ],
+            "{integrated:?}"
+        );
+        let historical = order(paint_the_state(
+            &mut state,
+            a_wide_strip(),
+            SystemTime::now(),
+        ));
+        assert!(
+            historical.iter().position(|t| t.starts_with("> Approve"))
+                < historical
+                    .iter()
+                    .position(|t| t.starts_with("  Partial refunds")),
+            "{historical:?}"
+        );
+    }
+
+    /// **A wide label never takes its button away**: laid out by character count but drawn in a
+    /// proportional face, an all-caps label that fills its rows is fitted by measured width, cut with
+    /// «…», and its button stays reachable with the label's ink inside the frame.
+    #[test]
+    fn a_wide_label_is_fitted_inside_its_frame_and_stays_reachable() {
+        let label = "W".repeat(60);
+        let document = format!(
+            r#"{{"header":false,"actions":[{{"label":"{label}","send":"go"}}],"lines":["b"]}}"#
+        );
+        let place = Rect::from_min_size(a_wide_strip().min, eframe::egui::vec2(200.0, 600.0));
+        let dir = PanelDir::create().expect("create the directory");
+        publish(&dir, &document);
+        let mut state = PanelState::default();
+        state.refresh(dir.path());
+        super::tests::paint_integrated(&mut state, place, SystemTime::now());
+        let shapes = super::tests::paint_integrated(&mut state, place, SystemTime::now());
+        let reach = state
+            .buttons_drawn()
+            .next()
+            .expect("the button stays reachable");
+        let rows: Vec<_> = texts_at(&shapes)
+            .into_iter()
+            .filter(|t| t.1.starts_with('W'))
+            .collect();
+        assert!(!rows.is_empty(), "the label is painted");
+        assert!(
+            rows.iter().any(|t| t.1.ends_with('…')),
+            "a cut label says so: {rows:?}"
+        );
+        assert!(
+            rows.iter().all(|t| t.2.right() <= reach.right()),
+            "{rows:?} inks past {reach:?}"
+        );
+    }
+
+    /// **A frame counts as drawn only with the blank row it reaches into below**: where «… N more»
+    /// takes that row, the button is neither reachable nor framed; one row taller, it is both.
+    #[test]
+    fn a_frame_whose_lower_room_the_clip_took_is_not_reachable() {
+        let rgb = |hex: u32| Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+        let (_, cell) = super::tests::cell();
+        let dir = PanelDir::create().expect("create the directory");
+        publish(
+            &dir,
+            r#"{"header":false,"actions":[{"label":"Run","send":"go"}],"lines":["a","b","c"]}"#,
+        );
+        let mut state = PanelState::default();
+        state.refresh(dir.path());
+        let at = |rows: f32| {
+            Rect::from_min_size(a_wide_strip().min, eframe::egui::vec2(400.0, rows * cell))
+        };
+        // Blank, label, command, then «… N more» where the blank under the command would be.
+        super::tests::paint_integrated(&mut state, at(4.0), SystemTime::now());
+        let short = rects(super::tests::paint_integrated(
+            &mut state,
+            at(4.0),
+            SystemTime::now(),
+        ));
+        assert_eq!(state.buttons_drawn().count(), 0);
+        assert!(!short.iter().any(|r| r.fill == rgb(0x202427)));
+        super::tests::paint_integrated(&mut state, at(5.0), SystemTime::now());
+        super::tests::paint_integrated(&mut state, at(5.0), SystemTime::now());
+        assert_eq!(
+            state.buttons_drawn().count(),
+            1,
+            "one row taller, the case is whole"
+        );
+    }
+
+    /// **A long titled body does not push the buttons off a short panel**: only the title and one
+    /// summary line go above them, so with forty lines under the title and room for ten rows the
+    /// button is still painted and reachable, right under the summary.
+    #[test]
+    fn a_long_titled_body_keeps_the_buttons_on_a_short_panel() {
+        let (_, cell) = super::tests::cell();
+        let mut lines = vec![
+            serde_json::json!({"text":"Title","style":"title"}),
+            serde_json::json!("summary"),
+        ];
+        lines.extend((0..40).map(|n| serde_json::json!(format!("line {n}"))));
+        let document = serde_json::json!({
+            "header": false,
+            "actions": [{"label": "Approve", "send": "yes"}],
+            "lines": lines,
+        })
+        .to_string();
+        let dir = PanelDir::create().expect("create the directory");
+        publish(&dir, &document);
+        let mut state = PanelState::default();
+        state.refresh(dir.path());
+        let place = Rect::from_min_size(a_wide_strip().min, eframe::egui::vec2(400.0, 10.0 * cell));
+        super::tests::paint_integrated(&mut state, place, SystemTime::now());
+        let shapes = super::tests::paint_integrated(&mut state, place, SystemTime::now());
+        assert_eq!(
+            state.buttons_drawn().count(),
+            1,
+            "the button was pushed into the clip"
+        );
+        let texts = texts_at(&shapes);
+        let at = |name: &str| {
+            texts
+                .iter()
+                .position(|t| t.1.trim() == name)
+                .unwrap_or_else(|| panic!("«{name}» is not painted: {texts:?}"))
+        };
+        assert!(
+            at("summary") < at("Approve") && at("Approve") < at("line 0"),
+            "{texts:?}"
+        );
+    }
+
+    /// The integrated layout's rows for `document` at a panel of `width` points, painted twice.
+    fn integrated_rows(
+        document: &str,
+        width: f32,
+        height: f32,
+    ) -> (PanelState, Vec<eframe::egui::Shape>) {
+        let dir = PanelDir::create().expect("create the directory");
+        publish(&dir, document);
+        let mut state = PanelState::default();
+        state.refresh(dir.path());
+        let place = Rect::from_min_size(a_wide_strip().min, eframe::egui::vec2(width, height));
+        super::tests::paint_integrated(&mut state, place, SystemTime::now());
+        let shapes = super::tests::paint_integrated(&mut state, place, SystemTime::now());
+        (state, shapes)
+    }
+
+    /// The tops of the painted texts whose words start with `prefix`, in queue order.
+    fn tops(shapes: &[eframe::egui::Shape], prefix: &str) -> Vec<f32> {
+        texts_at(shapes)
+            .into_iter()
+            .filter(|t| t.1.trim_start().starts_with(prefix))
+            .map(|t| t.2.top())
+            .collect()
+    }
+
+    /// **Without buttons the body is painted exactly as the producer ordered it** — a title and a
+    /// list of marked steps get no blank row between them — and **with buttons a list is never
+    /// split**: a marked line is a step, not the summary, so the buttons go under the title alone and
+    /// the steps stay one row apart.
+    #[test]
+    fn a_marked_list_under_a_title_is_never_split() {
+        let (_, cell) = super::tests::cell();
+        let steps = r#"{"text":"step 1","mark":"done"},{"text":"step 2","mark":"done"},
+            {"text":"step 3","mark":"current"},{"text":"step 4","mark":"pending"},
+            {"text":"step 5","mark":"pending"}"#;
+        let plain = format!(
+            r#"{{"header":false,"lines":[{{"text":"main @ 9f3c2ab","style":"title"}},{steps}]}}"#
+        );
+        let (_, shapes) = integrated_rows(&plain, 400.0, 600.0);
+        let title = tops(&shapes, "main @");
+        let rows = tops(&shapes, "step");
+        assert_eq!(rows.len(), 5);
+        assert!(
+            (rows[0] - title[0] - cell).abs() < 0.01,
+            "a blank row under the title: {title:?} {rows:?}"
+        );
+        assert!(
+            rows.windows(2).all(|w| (w[1] - w[0] - cell).abs() < 0.01),
+            "{rows:?}"
+        );
+
+        let with_buttons = format!(
+            r#"{{"header":false,"actions":[{{"label":"Approve","send":"yes"}}],
+                "lines":[{{"text":"main @ 9f3c2ab","style":"title"}},{steps}]}}"#
+        );
+        let (_, shapes) = integrated_rows(&with_buttons, 400.0, 600.0);
+        let title = tops(&shapes, "main @")[0];
+        let label = tops(&shapes, "Approve")[0];
+        let rows = tops(&shapes, "step");
+        assert!(title < label && label < rows[0], "{title} {label} {rows:?}");
+        assert!(
+            rows.windows(2).all(|w| (w[1] - w[0] - cell).abs() < 0.01),
+            "the list was split: {rows:?}"
+        );
+    }
+
+    /// **The lead is one row per line**: a summary long enough to wrap many times is cut to one row
+    /// with «…», so the first label starts at most four rows below the panel's top — title,
+    /// summary, the producer's gap, the blank row its frame reaches into — and stays reachable on a
+    /// short panel.
+    #[test]
+    fn a_long_summary_is_cut_to_one_row_and_the_buttons_stay_close() {
+        let (_, cell) = super::tests::cell();
+        let summary = "word ".repeat(100);
+        let document = serde_json::json!({
+            "header": false,
+            "actions": [{"label": "Approve", "send": "yes"}],
+            "lines": [{"text":"Title","style":"title"}, summary.trim(), "", "body"],
+        })
+        .to_string();
+        let (state, shapes) = integrated_rows(&document, 200.0, 9.0 * cell);
+        assert_eq!(
+            state.buttons_drawn().count(),
+            1,
+            "the button was pushed into the clip"
+        );
+        let cut: Vec<_> = texts_at(&shapes)
+            .into_iter()
+            .filter(|t| t.1.trim_start().starts_with("word"))
+            .collect();
+        assert_eq!(cut.len(), 1, "the summary took more than one row: {cut:?}");
+        assert!(cut[0].1.ends_with('…'), "{cut:?}");
+        let label = tops(&shapes, "Approve")[0];
+        assert!(
+            label - a_wide_strip().top() <= 4.0 * cell + 0.01,
+            "the label starts {} rows down",
+            (label - a_wide_strip().top()) / cell
+        );
+    }
+
+    /// **A command needs room after its prompt**: at a text width of ten cells the integrated
+    /// command, which starts three cells in, would wrap below its floor and be laid out past the
+    /// strip, so no button is laid out at all; the historical one, one cell in, still fits.
+    #[test]
+    fn an_integrated_command_without_room_after_its_prompt_lays_out_no_button() {
+        let (cell, _) = super::tests::cell();
+        let document = r#"{"header":false,"actions":[{"label":"Run","send":"a-long-command-here"}],"lines":["b"]}"#;
+        let width = 12.5 * cell;
+        let (state, _) = integrated_rows(document, width, 600.0);
+        let rows = &state.layout.as_ref().expect("a layout").rows;
+        assert!(
+            !rows.iter().any(|row| row.role != RowRole::Text),
+            "a button was laid out with no room for its command"
+        );
+        let historical = painted(
+            document,
+            Rect::from_min_size(a_wide_strip().min, eframe::egui::vec2(width, 600.0)),
+        );
+        assert_eq!(
+            historical.buttons_drawn().count(),
+            1,
+            "the case needs the historical button"
+        );
     }
 }

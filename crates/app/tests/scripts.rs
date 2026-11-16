@@ -592,6 +592,22 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/panel/cache.rs"),
     ),
     (
+        "app/src/panel/claim_strip.rs",
+        include_str!("../src/panel/claim_strip.rs"),
+    ),
+    (
+        "app/src/panel/identity.rs",
+        include_str!("../src/panel/identity.rs"),
+    ),
+    (
+        "app/src/panel/marks.rs",
+        include_str!("../src/panel/marks.rs"),
+    ),
+    (
+        "app/src/panel/head.rs",
+        include_str!("../src/panel/head.rs"),
+    ),
+    (
         "app/src/settings/editor/runtime.rs",
         include_str!("../src/settings/editor/runtime.rs"),
     ),

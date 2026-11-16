@@ -103,11 +103,12 @@ impl Body {
                     id: key.clone(),
                     folded: reader.folds.get(&key).copied().unwrap_or(line.collapsed),
                     summary: super::sanitize(line.summary.as_deref().unwrap_or("")),
+                    kit: None,
                 });
                 rows.push(row);
                 continue;
             }
-            let mut laid = super::lay_out_line(line, column, width, theme);
+            let mut laid = super::lay_out_line(line, column, width, theme, None);
             let text_color = match line.style {
                 Some(Style::Dim) => theme.foreground().gamma_multiply(0.5),
                 Some(style) => theme.panel_color(None, Some(style)),
@@ -421,8 +422,51 @@ pub(super) fn paint_row(
     discoverer: &mut Discoverer,
     glyphs: &mut Vec<ColorGlyph>,
 ) -> Rect {
-    fold::paint_header(painter, at, row, metrics, width, discoverer, glyphs)
-        .unwrap_or_else(|| color::paint_text(painter, at, row, metrics, discoverer, glyphs))
+    if let Some(inked) =
+        super::identity::paint(painter, at, row, metrics, width, discoverer, glyphs)
+    {
+        return inked;
+    }
+    let inked = if row.ui_face {
+        // A button's label in the interface face, through the same color path as every other row.
+        // It is laid out by character count for the cell grid but drawn in a proportional face, so
+        // each row is fitted to the text area by what the face measures, with «…» where it had to be
+        // cut: a wide label never inks past its frame and silently takes its button away.
+        let face = eframe::egui::FontId::new(
+            metrics.font().size,
+            crate::fonts::ui_weight(painter.ctx(), 500),
+        );
+        let right = at.x + (width as f32 - row.column as f32) * metrics.width();
+        let measure = |text: &str| {
+            painter
+                .layout_no_wrap(text.to_owned(), face.clone(), row.color)
+                .size()
+                .x
+        };
+        let shown = fold::fit_marked(row.text.trim_start(), (right - at.x).max(0.0), &measure);
+        let mut label = [Row::text(0, shown, row.color)];
+        color::flag(&mut label);
+        color::paint_text_in(painter, at, &label[0], metrics, face, discoverer, glyphs)
+    } else {
+        fold::paint_header(painter, at, row, metrics, width, discoverer, glyphs)
+            .unwrap_or_else(|| color::paint_text(painter, at, row, metrics, discoverer, glyphs))
+    };
+    match row.glyph {
+        Some((cell, symbol, ink)) => {
+            // The sign sits at its own cell, wherever the row's own text starts.
+            let first_cell =
+                at - eframe::egui::vec2((row.column as f32 - cell as f32) * metrics.width(), 0.0);
+            discoverer.note(symbol);
+            inked.union(painter.text(
+                first_cell,
+                eframe::egui::Align2::LEFT_TOP,
+                symbol,
+                metrics.font(),
+                ink,
+            ))
+        }
+        None => inked,
+    }
 }
 
 #[cfg(test)]

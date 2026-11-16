@@ -1,9 +1,10 @@
 //! Reader-owned block folds; the producer supplies only the initial choice.
 use std::collections::HashMap;
 
-use super::{Line, Panel, PanelState, Row, RowRole, Style, Theme, blocks, lay_out_line, sanitize};
+use super::{Line, PanelState, Row, RowRole, Style, Theme, blocks, lay_out_line, sanitize};
 use crate::painter::CellMetrics;
-use eframe::egui::{Painter, Pos2, Rect};
+use crate::theme::Roles;
+use eframe::egui::{Color32, Painter, Pos2, Rect, Stroke, vec2};
 use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -17,12 +18,24 @@ pub(super) struct Header {
     pub(super) id: HeaderId,
     pub(super) folded: bool,
     pub(super) summary: String,
+    /// The kit's inks for the integrated chrome, or nothing for the historical panel's text header
+    /// (D97). The Board's rows carry nothing here too, and paint a header of their own.
+    pub(super) kit: Option<HeaderInks>,
+}
+
+/// The inks of an integrated section header beyond its title's.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct HeaderInks {
+    /// The summary's ink, muted beside the title.
+    pub(super) muted: Color32,
+    /// The rule's ink between the title and the summary.
+    pub(super) rule: Color32,
 }
 pub(super) type Folds = HashMap<HeaderId, bool>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct PaintedHeader {
-    area: Rect,
+    pub(super) area: Rect,
     pub(super) id: HeaderId,
     pub(super) folded: bool,
 }
@@ -50,14 +63,17 @@ pub(super) fn is_gap(line: &Line) -> bool {
         && line.mark.is_none()
 }
 
+/// Adds the body's blocks. `roles` are the integrated chrome's; without them the lines and headers
+/// are laid out the historical way (D97).
 pub(super) fn append_blocks(
     rows: &mut Vec<Row>,
-    panel: &Panel,
+    lines: &[Line],
     folds: &Folds,
     width: usize,
     theme: &Theme,
+    roles: Option<&Roles>,
 ) {
-    for block in blocks(&panel.lines) {
+    for block in blocks(lines) {
         let column = block
             .iter()
             .filter(|line| line.style != Some(Style::Section))
@@ -74,25 +90,32 @@ pub(super) fn append_blocks(
                     None => HeaderId::Text(line.text.clone()),
                 };
                 hidden = folds.get(&id).copied().unwrap_or(line.collapsed);
-                let mut row = Row::text(
-                    0,
-                    sanitize(&line.text),
-                    theme.panel_color(None, Some(Style::Section)),
-                );
+                let title = roles.map_or(theme.panel_color(None, Some(Style::Section)), |r| r.tx);
+                let mut row = Row::text(0, sanitize(&line.text), title);
                 row.role = RowRole::Fold(rows.len());
                 row.header = Some(Header {
                     id,
                     folded: hidden,
                     summary: sanitize(line.summary.as_deref().unwrap_or("")),
+                    kit: roles.map(|r| HeaderInks {
+                        muted: r.tx3,
+                        rule: r.line,
+                    }),
                 });
                 rows.push(row);
             } else if !hidden || is_gap(line) {
-                rows.extend(lay_out_line(line, column, width, theme));
+                rows.extend(lay_out_line(line, column, width, theme, roles));
             }
         }
     }
 }
 
+/// Paints a section header. In the integrated chrome: the chevron that says it folds — down when
+/// open, right when folded — the title, a one-point rule across the middle, and the summary held to
+/// the right edge (D97); otherwise the historical text header.
+///
+/// **It returns everything it inked**, chevron included, because whether a header can be clicked
+/// depends on its ink staying inside the strip.
 pub(super) fn paint_header(
     painter: &Painter,
     origin: Pos2,
@@ -103,6 +126,85 @@ pub(super) fn paint_header(
     glyphs: &mut Vec<crate::painter::ColorGlyph>,
 ) -> Option<Rect> {
     let header = row.header.as_ref()?;
+    let Some(kit) = header.kit else {
+        return Some(paint_text_header(
+            painter, origin, row, metrics, width, discoverer, glyphs,
+        ));
+    };
+    let measure = |text: &str| {
+        painter
+            .layout_no_wrap(text.to_owned(), metrics.font(), row.color)
+            .size()
+            .x
+    };
+    let cell = metrics.width();
+    let width = width as f32 * cell;
+    // The chevron keeps the two cells the old text prefix had, so the title does not move.
+    let chevron = Rect::from_min_size(origin, vec2(cell.min(width), metrics.height()));
+    let lead = (2.0 * cell).min(width);
+    let summary = fit(&header.summary, (width - lead).max(0.0), &measure);
+    let summary_left = origin.x + width - measure(summary);
+    let title = fit(
+        &row.text,
+        (summary_left - origin.x - lead - cell).max(0.0),
+        &measure,
+    );
+    super::body::paint_chevron(painter, chevron, !header.folded, row.color);
+    let mut pieces = [
+        Row::text(0, title.to_owned(), row.color),
+        Row::text(0, summary.to_owned(), kit.muted),
+    ];
+    super::color::flag(&mut pieces);
+    let mut inked = chevron;
+    let mut title_right = origin.x + lead;
+    for (index, (piece, x)) in pieces
+        .iter()
+        .zip([origin.x + lead, summary_left])
+        .enumerate()
+    {
+        if piece.text.is_empty() {
+            continue;
+        }
+        discoverer.note_text(&piece.text);
+        let ink = super::color::paint_text(
+            painter,
+            Pos2::new(x, origin.y),
+            piece,
+            metrics,
+            discoverer,
+            glyphs,
+        );
+        if index == 0 {
+            title_right = ink.right();
+        }
+        inked = inked.union(ink);
+    }
+    let (from, to) = (title_right + cell / 2.0, summary_left - cell / 2.0);
+    if to > from {
+        let y = (origin.y + metrics.height() / 2.0).round() + 0.5;
+        painter.line_segment(
+            [Pos2::new(from, y), Pos2::new(to, y)],
+            Stroke::new(1.0, kit.rule),
+        );
+    }
+    Some(inked)
+}
+
+/// The historical panel's header, all of it text: `▸`/`▾`, the title, a run of `─` and the summary.
+fn paint_text_header(
+    painter: &Painter,
+    origin: Pos2,
+    row: &Row,
+    metrics: &CellMetrics,
+    width: usize,
+    discoverer: &mut crate::fonts::Discoverer,
+    glyphs: &mut Vec<crate::painter::ColorGlyph>,
+) -> Rect {
+    let folded = row.header.as_ref().is_some_and(|header| header.folded);
+    let summary = row
+        .header
+        .as_ref()
+        .map_or("", |header| header.summary.as_str());
     let measure = |text: &str| {
         painter
             .layout_no_wrap(text.to_owned(), metrics.font(), row.color)
@@ -110,13 +212,9 @@ pub(super) fn paint_header(
             .x
     };
     let width = width as f32 * metrics.width();
-    let prefix = if header.folded { "▸ " } else { "▾ " };
+    let prefix = if folded { "▸ " } else { "▾ " };
     let prefix = fit(prefix, width, &measure);
-    let summary = fit(
-        &header.summary,
-        (width - measure(prefix)).max(0.0),
-        &measure,
-    );
+    let summary = fit(summary, (width - measure(prefix)).max(0.0), &measure);
     let left_width = (width - measure(summary)).max(0.0);
     let title_room = (left_width - measure(prefix) - measure(" ─ ")).max(0.0);
     let title = fit(&row.text, title_room, &measure);
@@ -145,7 +243,21 @@ pub(super) fn paint_header(
             glyphs,
         ));
     }
-    Some(inked)
+    inked
+}
+
+/// The same as [`fit`], but what is cut ends in «…», so a shortened text never reads as a whole one;
+/// and when not even one grapheme fits beside the «…», nothing is shown at all.
+pub(super) fn fit_marked(text: &str, width: f32, measure: &impl Fn(&str) -> f32) -> String {
+    if measure(text) <= width {
+        return text.to_owned();
+    }
+    let cut = fit(text, (width - measure("…")).max(0.0), measure).trim_end();
+    if cut.is_empty() {
+        String::new()
+    } else {
+        format!("{cut}…")
+    }
 }
 
 pub(super) fn fit<'a>(text: &'a str, width: f32, measure: &impl Fn(&str) -> f32) -> &'a str {
@@ -193,7 +305,7 @@ pub(super) fn record_header(
 
 #[cfg(test)]
 pub(super) fn lay_out(
-    panel: Option<&Panel>,
+    panel: Option<&super::Panel>,
     id: &str,
     width: usize,
     theme: &Theme,
@@ -201,9 +313,16 @@ pub(super) fn lay_out(
     attention: Option<super::AttentionState>,
     held_by: Option<&str>,
 ) -> Vec<Row> {
-    let mut rows = super::lay_out_head(panel, id, width, theme, warning, attention, held_by);
+    let mut rows = super::head::lay_out_head(panel, id, width, theme, warning, attention, held_by);
     if let Some(panel) = panel {
-        append_blocks(&mut rows, panel, &Folds::default(), width, theme);
+        append_blocks(
+            &mut rows,
+            &panel.lines,
+            &Folds::default(),
+            width,
+            theme,
+            None,
+        );
     }
     rows
 }
@@ -212,7 +331,7 @@ pub(super) fn lay_out(
 mod tests {
     use super::*;
     use crate::panel::tests::paint_the_state;
-    use eframe::egui::{Shape, vec2};
+    use eframe::egui::{Color32, Shape, vec2};
     use std::time::SystemTime;
 
     fn state(lines: serde_json::Value) -> PanelState {
@@ -546,6 +665,31 @@ mod tests {
         assert_eq!(fit(text, 2.0, &measured), "a\u{301}");
     }
 
+    /// Each chevron's points, each rule's ink and each text with its ink, as painted.
+    type Painted = (Vec<Vec<Pos2>>, Vec<Color32>, Vec<(String, Color32)>);
+
+    /// The chevron's points, the rule's ink and every text with its ink, as painted.
+    fn header_shapes(state: &mut PanelState) -> Painted {
+        let mut chevrons = Vec::new();
+        let mut rules = Vec::new();
+        let mut texts = Vec::new();
+        for shape in crate::panel::tests::paint_integrated(
+            state,
+            Rect::from_min_size(Pos2::ZERO, vec2(420.0, 600.0)),
+            SystemTime::now(),
+        ) {
+            match shape {
+                Shape::Path(path) if path.closed => chevrons.push(path.points),
+                Shape::LineSegment { stroke, .. } => rules.push(stroke.color),
+                Shape::Text(text) => {
+                    texts.push((text.galley.text().to_owned(), text.fallback_color))
+                }
+                _ => {}
+            }
+        }
+        (chevrons, rules, texts)
+    }
+
     #[test]
     fn fold_glyphs_fit_one_cell_in_the_builtin_font() {
         let ctx = eframe::egui::Context::default();
@@ -560,5 +704,74 @@ mod tests {
             });
         });
         output.drop_without_applying_deltas();
+    }
+
+    /// Where the integrated header's summary and title were inked.
+    fn summary_and_title(state: &mut PanelState) -> (Rect, Rect) {
+        let mut summary = Rect::NOTHING;
+        let mut title = Rect::NOTHING;
+        for shape in crate::panel::tests::paint_integrated(
+            state,
+            Rect::from_min_size(Pos2::ZERO, vec2(420.0, 600.0)),
+            SystemTime::now(),
+        ) {
+            if let Shape::Text(text) = shape {
+                let ink = text.galley.rect.translate(text.pos.to_vec2());
+                match text.galley.text() {
+                    "2/4 merged" => summary = ink,
+                    "MRs" => title = ink,
+                    _ => {}
+                }
+            }
+        }
+        (summary, title)
+    }
+
+    /// **In the integrated chrome a header shows that it folds** (D97): a chevron that points down while open and right while
+    /// folded, the title in the text colour, a one-point rule in the separator colour and the
+    /// summary muted at the right — Ivy Night's literal values.
+    #[test]
+    fn the_chevron_turns_with_the_fold_and_the_rule_and_summary_take_the_kits_inks() {
+        let rgb = |hex: u32| Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+        let mut state = state(serde_json::json!([header(), "#1"]));
+        let (chevrons, rules, texts) = header_shapes(&mut state);
+        assert_eq!(chevrons.len(), 1, "{chevrons:?}");
+        let folded = &chevrons[0];
+        // Folded: the base is vertical and the tip lies to its right.
+        let tip = folded.iter().max_by(|a, b| a.x.total_cmp(&b.x)).unwrap();
+        let base: Vec<&Pos2> = folded.iter().filter(|p| *p != tip).collect();
+        assert!(
+            base[0].x == base[1].x && tip.x > base[0].x,
+            "folded points right: {folded:?}"
+        );
+        assert_eq!(rules, [rgb(0x252e33)], "one rule, in the separator ink");
+        assert!(
+            texts.contains(&("MRs".to_owned(), rgb(0xe4e8e2))),
+            "{texts:?}"
+        );
+        assert!(
+            texts.contains(&("2/4 merged".to_owned(), rgb(0x8e9390))),
+            "{texts:?}"
+        );
+        // The summary is held to the right edge of the text area, past the title.
+        let (summary, title) = summary_and_title(&mut state);
+        let (cell, _) = crate::panel::tests::cell();
+        let edge = cell * (1 + ((420.0 / cell) as usize).saturating_sub(2)) as f32;
+        assert!(
+            (summary.right() - edge).abs() < 0.1,
+            "{summary:?} vs {edge}"
+        );
+        assert!(summary.left() > title.right(), "{summary:?} {title:?}");
+
+        click(&mut state);
+        let (chevrons, _, _) = header_shapes(&mut state);
+        let open = &chevrons[0];
+        // Open: the base is horizontal and the tip lies below it.
+        let tip = open.iter().max_by(|a, b| a.y.total_cmp(&b.y)).unwrap();
+        let base: Vec<&Pos2> = open.iter().filter(|p| *p != tip).collect();
+        assert!(
+            base[0].y == base[1].y && tip.y > base[0].y,
+            "open points down: {open:?}"
+        );
     }
 }

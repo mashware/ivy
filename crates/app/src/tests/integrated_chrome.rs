@@ -1478,11 +1478,15 @@ mod tests {
                 _ => None,
             })
             .expect("narrow tab number painted");
-        // Ivy Night's wait slot, filling the whole 18-point pill inside the card.
+        // Ivy Night's wait slot, filling the whole 18-point pill inside the card. The console's own
+        // panel paints the same pill in its claim strip, below the title bar.
         let pill = shapes
             .iter()
             .find_map(|s| match &s.shape {
-                egui::Shape::Rect(r) if r.fill == egui::Color32::from_rgb(0xf2, 0xb8, 0x4b) => {
+                egui::Shape::Rect(r)
+                    if r.fill == egui::Color32::from_rgb(0xf2, 0xb8, 0x4b)
+                        && r.rect.top() < 40.0 =>
+                {
                     Some(r.rect)
                 }
                 _ => None,
@@ -2749,5 +2753,50 @@ mod tests {
             }
             _ => None,
         })
+    }
+
+    /// **The window hands its integrated chrome to the panel** (D97): a console whose producer
+    /// declares `wait` paints, through the real application pass, a band in the wait tint across
+    /// its panel's whole width with the claim's words on it — not the historical row of text.
+    #[test]
+    fn an_integrated_window_paints_the_panels_claim_as_a_strip() {
+        let ctx = egui::Context::default();
+        chrome::prepare(&ctx);
+        let mut window = window_with("sleep 30", "sleep 30");
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        with_the_panel_in_place(
+            &mut window,
+            0,
+            r#"{"attention":"wait","lines":["Waiting"]}"#,
+        );
+        let area = area_of(1400.0);
+        frame(&mut window, &ctx, area, vec![]);
+        let shapes = frame(&mut window, &ctx, area, vec![]);
+        let tint = egui::Color32::from_rgba_unmultiplied(0xf2, 0xb8, 0x4b, 38);
+        let band = shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Rect(r) if r.fill == tint && r.rect.height() == 32.0 => Some(r.rect),
+                _ => None,
+            })
+            .expect("the panel's claim strip is painted");
+        let words = shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == "it is waiting for you" => Some(t.pos),
+                _ => None,
+            })
+            .expect("the claim's words are painted");
+        assert!(band.contains(words), "{words:?} is not on {band:?}");
+        assert!(
+            !has_text(&shapes, "? it is waiting for you"),
+            "the historical claim row is painted too"
+        );
+        let m = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
+        assert!(
+            band.width() >= 20.0 * m.width(),
+            "the band spans the panel, not a pill: {band:?}"
+        );
     }
 }
