@@ -43,7 +43,8 @@ impl PanelLayout {
         );
         super::provenance::append_row(&mut rows, state, width, theme);
         if let Some(panel) = state.last_good.as_deref() {
-            fold::append_blocks(&mut rows, panel, &state.folds, width, theme);
+            let kit = integrated.then_some(&roles);
+            fold::append_blocks(&mut rows, panel, &state.folds, width, theme, kit);
         }
         color::flag(&mut rows);
         Self { key, roles, rows }

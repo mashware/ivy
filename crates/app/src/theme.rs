@@ -314,6 +314,9 @@ impl Theme {
     ///
     /// Without either of the two, the color of the console's normal text: a line without adjectives is not
     /// a muted line.
+    ///
+    /// The integrated chrome gives a marked line with no style two inks instead, its glyph's and its
+    /// words' (`panel::marks`, D97); this table is the historical regime's and the Board's.
     pub fn panel_color(&self, mark: Option<Mark>, style: Option<Style>) -> Color32 {
         match (style, mark) {
             (Some(style), _) => self.by_style(style),

@@ -935,7 +935,7 @@ const SOURCES: &[(&str, &str, usize)] = &[
 /// a real file nobody declared. It never supplies the text being judged, so a path cannot disappear
 /// from the guard merely because the directory walk did not return it.
 // Re-measured with the claim pill, the title bar's partition and the tab strip in the list.
-const COMMENT_LINES_AT_LEAST: usize = 20_189;
+const COMMENT_LINES_AT_LEAST: usize = 20_449;
 
 /// How many **different** listed words a line needs before it is called Spanish.
 ///

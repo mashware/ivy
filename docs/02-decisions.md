@@ -9929,8 +9929,9 @@ as one block); a frame for every laid-out button (one the clip cut would look pr
 the design's `›` before the command (what is painted must be what is sent); new font glyphs for the
 marks such as `✓` (D9 measured them out, and a glyph outside the bundled faces triggers discovery).
 
-**Measurement.** Only the integrated regime's claim and identity change geometry. The historical
-regime keeps the claim as a row of text and the identity as «id · phase · driver», so no published
-series changes its layout (D13). Button frames, header chevrons and the separate mark glyph are
-painted in both regimes: a handful of shapes per panel inside the panel's own span, with no new kind
-of work.
+**Measurement.** Only the integrated regime changes. The historical regime — the one the measured
+runs paint — keeps the claim as a row of text, the identity as «id · phase · driver», the mark inside
+its line's text in one colour, the text header with `▸`/`▾` and a run of `─`, and buttons without a
+frame whose reach spans the strip's width, so no published series changes its layout or its painting
+(D13). The bench's panels carry marks, sections and actions, which is why all five are gated and not
+only the two that move rows.

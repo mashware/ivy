@@ -363,8 +363,8 @@ struct Drawn {
 /// A button as it was drawn: which action it is, and the rectangle it occupied.
 ///
 /// The rectangle spans the button's rows — its label and the wrapped command under it — so a press
-/// anywhere on the command reaches the same button as a press on the label, and it is the frame
-/// that is painted around them (D97).
+/// anywhere on the command reaches the same button as a press on the label. In the integrated chrome
+/// it is also the frame painted around them (D97).
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct PaintedButton {
     action: usize,
@@ -704,8 +704,8 @@ fn action_symbol() -> char {
 ///
 /// The three phrases are **the contract's, word for word**, including the «for you» of the first —
 /// which is exactly what separates it from the second, «something that is **not** you». Shortening
-/// them to fit is losing the opposition that tells them apart; what does not fit is wrapped, like
-/// everything else in the panel.
+/// them to fit is losing the opposition that tells them apart. The historical row wraps what does
+/// not fit; the integrated strip is one band and cuts it instead (D97).
 fn attention_text(class: Attention) -> &'static str {
     match class {
         Attention::Wait => "it is waiting for you",
@@ -837,7 +837,8 @@ fn lay_out_head(
     // **The claim goes in the application's row and not in the identity one**, and that frontier is the
     // reason this milestone exists: `header: false` hides the pane's identity, and the answer to «do I
     // have to go there?» cannot be turned off by the producer with a flag of its own. It is the same
-    // frontier that the warning below already fulfills.
+    // frontier that the warning below already fulfills. Only the historical regime lays it out as a
+    // row; the integrated one hands no claim here and paints it as a strip (D97).
     if let Some(attention) = attention {
         wrap(
             &mut rows,
@@ -938,14 +939,15 @@ fn blocks(lines: &[Line]) -> Vec<Vec<&Line>> {
 
 /// Lays out a line: its symbol, its aligned reference, its indent and its wrapped text.
 ///
-/// The symbol rides on the first row as its own glyph rather than inside the text, so it can take
-/// a different ink from the words it marks (D97).
+/// With the integrated chrome's `roles` the symbol rides on the first row as its own glyph rather
+/// than inside the text, so it can take a different ink from the words it marks; without them it is
+/// the first character of the text, in the line's one colour, as the measured runs keep it (D97).
 fn lay_out_line(
     line: &Line,
     column: usize,
     width: usize,
     theme: &Theme,
-    roles: &crate::theme::Roles,
+    roles: Option<&crate::theme::Roles>,
 ) -> Vec<Row> {
     let (glyph, color) = marks::inks(line.mark, line.style, theme, roles);
     let reference = line.reference.as_deref().map(sanitize).unwrap_or_default();
@@ -966,9 +968,14 @@ fn lay_out_line(
     // column, the reference would push the text of its own line and break the block's alignment.
     let reference: String = reference.chars().take(column).collect();
 
-    // The symbol's slot is reserved with or without a mark: it is what keeps the text of all the
-    // lines in the same column, which is what aligning is about.
-    let mut head = String::from("  ");
+    let mut head = String::new();
+    match line.mark {
+        Some(mark) if roles.is_none() => head.push(symbol(mark)),
+        // The symbol's slot is reserved even without a mark: it is what keeps the text of all the lines in
+        // the same column, which is what aligning is about.
+        _ => head.push(' '),
+    }
+    head.push(' ');
     if column > 0 {
         head.push_str(&format!("{reference:column$} "));
     }
@@ -999,7 +1006,10 @@ fn lay_out_line(
         }
         None => rows.push(Row::text(0, head, color)),
     }
-    rows[0].glyph = line.mark.map(|mark| (symbol(mark), glyph));
+    rows[0].glyph = line
+        .mark
+        .filter(|_| roles.is_some())
+        .map(|mark| (symbol(mark), glyph));
     if let Some(target) = line.link.as_deref() {
         links::attach(&mut rows, target, indent, width, color);
     }
@@ -1057,9 +1067,10 @@ fn wrap(rows: &mut Vec<Row>, indent: usize, text: &str, color: Color32, width: u
 /// —laying out outside and passing the rows— would force whoever paints to keep track of when the layout
 /// expired, and that account belongs here.
 ///
-/// The identifier is the pane's, and it is the only thing the application contributes of its own: the
-/// identity line. **It is composed only with what the app already knows and with what the file itself
-/// brings**, never by reading a neighboring `meta.json` — that would be deducing another's state.
+/// The identifier is the pane's: the historical identity line carries it, and it also names the pane
+/// for the link disclosure. **The identity line is composed only with what the app already knows and
+/// with what the file itself brings**, never by reading a neighboring `meta.json` — that would be
+/// deducing another's state.
 ///
 /// The framing comes from the painter itself and not from a separate argument: with the two ways, nothing
 /// would prevent them from ceasing to coincide one day.
@@ -1124,13 +1135,14 @@ pub fn paint(
     // split by subtraction: a path that is not declared is published as the interface framework's,
     // which is the figure **D3** judges egui by.
     let walking = std::time::Instant::now();
-    let mut drawn = buttons_drawn(rows, whole, rect, metrics);
+    let mut drawn = buttons_drawn(rows, whole, rect, metrics, integrated);
     let walked = walking.elapsed();
     // **A frame's place is reserved under the text now and filled at the end**, once the ink has
     // said which buttons stayed reachable: only those get a frame, so nothing looks pressable that
     // a press would not reach.
     let frames: Vec<_> = drawn
         .iter()
+        .filter(|_| integrated)
         .map(|_| painter.add(eframe::egui::Shape::Noop))
         .collect();
 
@@ -2117,22 +2129,11 @@ mod tests {
                     theme.panel_color(None, Some(panel_contract::Style::Error))
                 ),
                 (
-                    "  blocked".to_owned(),
+                    "× blocked".to_owned(),
                     theme.panel_color(Some(panel_contract::Mark::Block), None)
                 ),
                 (
-                    "×".to_owned(),
-                    theme.panel_color(Some(panel_contract::Mark::Block), None)
-                ),
-                (
-                    "  and its color is the data".to_owned(),
-                    theme.panel_color(
-                        Some(panel_contract::Mark::Info),
-                        Some(panel_contract::Style::Ok)
-                    )
-                ),
-                (
-                    "›".to_owned(),
+                    "› and its color is the data".to_owned(),
                     theme.panel_color(
                         Some(panel_contract::Mark::Info),
                         Some(panel_contract::Style::Ok)
@@ -2928,8 +2929,7 @@ mod tests {
             - "words".chars().count();
         let under_the_text = first.0.x + head as f32 * cell_width;
 
-        // The mark's glyph is a shape of its own, painted in the first cell; it is not a row.
-        for (where_at, text) in rest.iter().filter(|(_, text)| text != "●") {
+        for (where_at, text) in rest {
             assert!(
                 (where_at.x - under_the_text).abs() < 0.01,
                 "«{text}» started at {} and the text of the first starts at {under_the_text}",
@@ -3805,6 +3805,10 @@ mod tests {
         );
         let mut state = PanelState::default();
         state.refresh(dir.path());
+        // The historical regime first, on the same state and width: its layout carries the claim
+        // as a row, so a layout reused across regimes would paint the claim twice below.
+        let historical = texts_and_colors(paint_the_state(&mut state, PLACE, SystemTime::now()));
+        assert_eq!(historical[0].0, claim_row(Attention::Wait));
 
         let painted: Vec<(String, Color32, Pos2)> =
             tests_shapes::texts(paint_integrated(&mut state, PLACE, SystemTime::now()));
@@ -3861,7 +3865,7 @@ mod tests {
         );
 
         let texts: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
-        assert_eq!(texts, ["  I waited for approval on Tuesday", "×"]);
+        assert_eq!(texts, ["× I waited for approval on Tuesday"]);
     }
 
     /// **A claim nobody holds dims, and does not go out.** The language of this panel is to confess and
@@ -4829,8 +4833,21 @@ mod pressing {
         publish(&dir, RUN);
         let mut state = PanelState::default();
         state.refresh(dir.path());
-        paint_the_state(&mut state, a_wide_strip(), SystemTime::now());
-        let found = rects(paint_the_state(
+        // The historical regime the measured runs paint has no frame, and its reach keeps the
+        // strip's whole width (D13).
+        let historical = rects(paint_the_state(
+            &mut state,
+            a_wide_strip(),
+            SystemTime::now(),
+        ));
+        assert!(!historical.iter().any(|r| r.fill == rgb(0x202427)));
+        let old_reach = state.buttons_drawn().next().expect("a button was drawn");
+        assert_eq!(
+            (old_reach.left(), old_reach.right()),
+            (a_wide_strip().left(), a_wide_strip().right())
+        );
+        super::tests::paint_integrated(&mut state, a_wide_strip(), SystemTime::now());
+        let found = rects(super::tests::paint_integrated(
             &mut state,
             a_wide_strip(),
             SystemTime::now(),
@@ -4873,8 +4890,17 @@ mod pressing {
             "the reach is the frame, not the strip's whole width"
         );
 
-        let short = Rect::from_min_size(a_wide_strip().min, eframe::egui::vec2(400.0, cell * 3.0));
-        let clipped = rects(paint_the_state(&mut state, short, SystemTime::now()));
+        let short = Rect::from_min_size(a_wide_strip().min, eframe::egui::vec2(400.0, cell * 2.0));
+        let clipped = rects(super::tests::paint_integrated(
+            &mut state,
+            short,
+            SystemTime::now(),
+        ));
+        assert_eq!(
+            state.buttons_drawn().count(),
+            0,
+            "the case needs the command cut"
+        );
         assert!(
             !clipped.iter().any(|r| r.fill == rgb(0x202427)),
             "a half-drawn button got a frame"
@@ -4891,10 +4917,82 @@ mod pressing {
             0,
             "the case needs the overflow"
         );
-        let overflowed = rects(paint_the_state(&mut state, narrow, SystemTime::now()));
+        let overflowed = rects(super::tests::paint_integrated(
+            &mut state,
+            narrow,
+            SystemTime::now(),
+        ));
         assert!(
             !overflowed.iter().any(|r| r.fill == rgb(0x202427)),
             "a button inked past the strip got a frame"
+        );
+    }
+
+    /// **Under a claim strip, every reach is measured from what the band leaves** (D97): the
+    /// button's frame and the section header's area both start below the band, the frame is still
+    /// the reach, and where the band pushes the command out of the panel nothing is reachable and
+    /// nothing is framed.
+    #[test]
+    fn under_a_claim_strip_the_frames_and_headers_start_below_the_band() {
+        let rgb = |hex: u32| Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+        let document = r#"{"attention":"wait",
+            "actions":[{"label":"Run tests","send":"npm test"}],
+            "lines":[{"text":"MRs","style":"section","summary":"2/4"},"the body"]}"#;
+        let dir = PanelDir::create().expect("create the directory");
+        publish(&dir, document);
+        let mut state = PanelState::default();
+        state.refresh(dir.path());
+        let place = a_wide_strip();
+        let below = place.top() + claim_strip::HEIGHT;
+        let (_, cell) = super::tests::cell();
+        super::tests::paint_integrated(&mut state, place, SystemTime::now());
+        let found = rects(super::tests::paint_integrated(
+            &mut state,
+            place,
+            SystemTime::now(),
+        ));
+
+        let reach = state.buttons_drawn().next().expect("a button was drawn");
+        assert!(reach.top() >= below, "{reach:?} reaches into the band");
+        assert!(
+            reach.top() < below + cell,
+            "the button is the first row under the band"
+        );
+        let face = found
+            .iter()
+            .find(|r| r.fill == rgb(0x202427))
+            .expect("the frame is painted");
+        assert_eq!(face.rect, reach);
+        let header = state.drawn.as_ref().expect("drawn").headers[0].area;
+        let rows_down = (header.top() - below) / cell;
+        assert!(
+            rows_down >= 1.0 && (rows_down - rows_down.round()).abs() < 1e-3,
+            "the header sits on the grid under the band: {header:?}"
+        );
+        assert!(
+            state.button_at(reach.center()).is_some()
+                && fold::toggle_header_at(&mut state, header.center()),
+            "both are reachable where they are painted"
+        );
+
+        let short = Rect::from_min_size(
+            place.min,
+            eframe::egui::vec2(400.0, claim_strip::HEIGHT + 2.0 * cell),
+        );
+        super::tests::paint_integrated(&mut state, short, SystemTime::now());
+        let cut = rects(super::tests::paint_integrated(
+            &mut state,
+            short,
+            SystemTime::now(),
+        ));
+        assert_eq!(
+            state.buttons_drawn().count(),
+            0,
+            "the band pushed the command out"
+        );
+        assert!(
+            !cut.iter().any(|r| r.fill == rgb(0x202427)),
+            "a cut button got a frame"
         );
     }
 }

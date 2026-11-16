@@ -21835,7 +21835,7 @@ mod tests {
         );
         let header = first
             .iter()
-            .find(|(text, _)| text == "MRs")
+            .find(|(text, _)| text.starts_with('▸'))
             .expect("the collapsed header was painted");
         let header_click = header.1 + egui::vec2(metrics.width() * 0.25, metrics.height() * 0.5);
 

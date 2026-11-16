@@ -13,17 +13,18 @@ use crate::theme::{Roles, Theme};
 use eframe::egui::Color32;
 use panel_contract::{Mark, Style};
 
-/// The glyph's ink and the words' ink for a line, in that order.
+/// The glyph's ink and the words' ink for a line, in that order. Without the integrated chrome's
+/// `roles` both are the line's one historical colour.
 pub(super) fn inks(
     mark: Option<Mark>,
     style: Option<Style>,
     theme: &Theme,
-    roles: &Roles,
+    roles: Option<&Roles>,
 ) -> (Color32, Color32) {
-    if style.is_some() || mark.is_none() {
+    let Some(roles) = roles.filter(|_| style.is_none() && mark.is_some()) else {
         let ink = theme.panel_color(mark, style);
         return (ink, ink);
-    }
+    };
     match mark {
         // Finished and quiet: both muted, so what is left to do stands out.
         Some(Mark::Done) => (roles.tx3, roles.tx3),
@@ -40,7 +41,7 @@ pub(super) fn inks(
 
 #[cfg(test)]
 mod tests {
-    use crate::panel::tests::paint_the_state;
+    use crate::panel::tests::paint_integrated;
     use crate::panel::{PanelState, Rect};
     use eframe::egui::{Color32, Pos2, Shape, vec2};
     use std::time::SystemTime;
@@ -49,7 +50,7 @@ mod tests {
         Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
     }
 
-    /// **Each mark as painted, with Ivy Night's literal inks**: the glyph and the words are two
+    /// **Each mark as the integrated chrome paints it, with Ivy Night's literal inks**: the glyph and the words are two
     /// shapes, and each carries its own colour. A style keeps both in its own colour.
     #[test]
     fn each_mark_paints_its_glyph_and_its_words_in_the_kits_inks() {
@@ -63,11 +64,12 @@ mod tests {
                 {"text":"run it again","mark":"pending"},
                 {"text":"approve the plan","mark":"wait"},
                 {"text":"the pipeline","mark":"block"},
+                {"text":"a note","mark":"info"},
                 {"text":"the data","mark":"done","style":"ok"}
             ]}"#,
         );
         state.refresh(dir.path());
-        let texts: Vec<(String, Color32)> = paint_the_state(
+        let texts: Vec<(String, Color32)> = paint_integrated(
             &mut state,
             Rect::from_min_size(Pos2::ZERO, vec2(400.0, 400.0)),
             SystemTime::now(),
@@ -91,6 +93,8 @@ mod tests {
             ("…", rgb(0xf2b84b)),
             ("  the pipeline", rgb(0xf27a66)),
             ("×", rgb(0xf27a66)),
+            ("  a note", tx),
+            ("›", tx),
             ("  the data", ok),
             ("●", ok),
         ];

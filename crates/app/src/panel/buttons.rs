@@ -26,11 +26,15 @@ use eframe::egui::{CornerRadius, Pos2, Rect, Shape, Stroke, StrokeKind};
 /// `whole` is how many rows survived the clip. A button whose last row is past it is absent from the
 /// list, and absent from the list is absent from the frame's reach — there is no branch anywhere
 /// that has to remember to refuse it.
+///
+/// `framed` is the integrated chrome, whose buttons are painted inside a frame: there the reach is
+/// that frame. The measured runs paint no frame and keep the rows' whole width (D97).
 pub(super) fn buttons_drawn(
     rows: &[Row],
     whole: usize,
     rect: Rect,
     metrics: &CellMetrics,
+    framed: bool,
 ) -> Vec<PaintedButton> {
     let mut drawn: Vec<PaintedButton> = Vec::new();
     let mut open: Option<Run> = None;
@@ -61,11 +65,11 @@ pub(super) fn buttons_drawn(
             }
         };
         if let Some(run) = closes {
-            keep_if_whole(&mut drawn, run, whole, rect, metrics);
+            keep_if_whole(&mut drawn, run, whole, (rect, framed), metrics);
         }
     }
     if let Some(run) = open {
-        keep_if_whole(&mut drawn, run, whole, rect, metrics);
+        keep_if_whole(&mut drawn, run, whole, (rect, framed), metrics);
     }
     drawn
 }
@@ -84,27 +88,31 @@ fn keep_if_whole(
     drawn: &mut Vec<PaintedButton>,
     run: Run,
     whole: usize,
-    rect: Rect,
+    (rect, framed): (Rect, bool),
     metrics: &CellMetrics,
 ) {
     if run.last < whole {
-        drawn.push(painted(run, rect, metrics));
+        drawn.push(painted(run, rect, metrics, framed));
     }
 }
 
 /// The rectangle a button occupies, which is **both what a press reaches and the frame that is
 /// painted** — one function for the two, so the edge a person sees is the edge a click obeys.
 ///
-/// Half a cell in from each side of the strip, where the text's margin leaves room, and a point in
-/// from its first and last row, so two buttons in a row read as two.
-fn painted(run: Run, rect: Rect, metrics: &CellMetrics) -> PaintedButton {
+/// Framed, it sits half a cell in from each side of the strip, where the text's margin leaves room,
+/// and a point in from its first and last row, so two buttons in a row read as two.
+fn painted(run: Run, rect: Rect, metrics: &CellMetrics, framed: bool) -> PaintedButton {
     let row_top = |row: usize| rect.top() + row as f32 * metrics.height();
-    let inset = MARGIN * metrics.width() / 2.0;
+    let (inset, gap) = if framed {
+        (MARGIN * metrics.width() / 2.0, GAP)
+    } else {
+        (0.0, 0.0)
+    };
     PaintedButton {
         action: run.action,
         area: Rect::from_min_max(
-            Pos2::new(rect.left() + inset, row_top(run.first) + GAP),
-            Pos2::new(rect.right() - inset, row_top(run.last + 1) - GAP),
+            Pos2::new(rect.left() + inset, row_top(run.first) + gap),
+            Pos2::new(rect.right() - inset, row_top(run.last + 1) - gap),
         ),
         command: row_top(run.body.unwrap_or(run.last + 1)),
     }

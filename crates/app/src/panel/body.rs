@@ -92,7 +92,6 @@ impl Body {
             .min(width.saturating_sub(super::MINIMUM_SLOT + 3));
         let mut rows = Vec::new();
         let mut prefixes = HashMap::new();
-        let roles = crate::theme::Roles::of(theme);
         for line in &document.lines {
             if line.style == Some(Style::Section) {
                 let key = line.key.as_ref().map_or_else(
@@ -104,13 +103,12 @@ impl Body {
                     id: key.clone(),
                     folded: reader.folds.get(&key).copied().unwrap_or(line.collapsed),
                     summary: super::sanitize(line.summary.as_deref().unwrap_or("")),
-                    muted: theme.foreground().gamma_multiply(0.5),
-                    rule: theme.divider(),
+                    kit: None,
                 });
                 rows.push(row);
                 continue;
             }
-            let mut laid = super::lay_out_line(line, column, width, theme, &roles);
+            let mut laid = super::lay_out_line(line, column, width, theme, None);
             let text_color = match line.style {
                 Some(Style::Dim) => theme.foreground().gamma_multiply(0.5),
                 Some(style) => theme.panel_color(None, Some(style)),

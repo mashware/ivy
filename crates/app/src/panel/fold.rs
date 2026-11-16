@@ -18,6 +18,14 @@ pub(super) struct Header {
     pub(super) id: HeaderId,
     pub(super) folded: bool,
     pub(super) summary: String,
+    /// The kit's inks for the integrated chrome, or nothing for the historical text header that
+    /// the measured runs keep (D97).
+    pub(super) kit: Option<HeaderInks>,
+}
+
+/// The inks of an integrated section header beyond its title's.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct HeaderInks {
     /// The summary's ink, muted beside the title.
     pub(super) muted: Color32,
     /// The rule's ink between the title and the summary.
@@ -27,7 +35,7 @@ pub(super) type Folds = HashMap<HeaderId, bool>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct PaintedHeader {
-    area: Rect,
+    pub(super) area: Rect,
     pub(super) id: HeaderId,
     pub(super) folded: bool,
 }
@@ -55,14 +63,16 @@ pub(super) fn is_gap(line: &Line) -> bool {
         && line.mark.is_none()
 }
 
+/// Adds the body's blocks. `roles` are the integrated chrome's; without them the lines and headers
+/// are laid out the historical way the measured runs keep (D97).
 pub(super) fn append_blocks(
     rows: &mut Vec<Row>,
     panel: &Panel,
     folds: &Folds,
     width: usize,
     theme: &Theme,
+    roles: Option<&Roles>,
 ) {
-    let roles = Roles::of(theme);
     for block in blocks(&panel.lines) {
         let column = block
             .iter()
@@ -80,18 +90,21 @@ pub(super) fn append_blocks(
                     None => HeaderId::Text(line.text.clone()),
                 };
                 hidden = folds.get(&id).copied().unwrap_or(line.collapsed);
-                let mut row = Row::text(0, sanitize(&line.text), roles.tx);
+                let title = roles.map_or(theme.panel_color(None, Some(Style::Section)), |r| r.tx);
+                let mut row = Row::text(0, sanitize(&line.text), title);
                 row.role = RowRole::Fold(rows.len());
                 row.header = Some(Header {
                     id,
                     folded: hidden,
                     summary: sanitize(line.summary.as_deref().unwrap_or("")),
-                    muted: roles.tx3,
-                    rule: roles.line,
+                    kit: roles.map(|r| HeaderInks {
+                        muted: r.tx3,
+                        rule: r.line,
+                    }),
                 });
                 rows.push(row);
             } else if !hidden || is_gap(line) {
-                rows.extend(lay_out_line(line, column, width, theme, &roles));
+                rows.extend(lay_out_line(line, column, width, theme, roles));
             }
         }
     }
@@ -112,6 +125,11 @@ pub(super) fn paint_header(
     glyphs: &mut Vec<crate::painter::ColorGlyph>,
 ) -> Option<Rect> {
     let header = row.header.as_ref()?;
+    let Some(kit) = header.kit else {
+        return Some(paint_text_header(
+            painter, origin, row, metrics, width, discoverer, glyphs,
+        ));
+    };
     let measure = |text: &str| {
         painter
             .layout_no_wrap(text.to_owned(), metrics.font(), row.color)
@@ -133,7 +151,7 @@ pub(super) fn paint_header(
     super::body::paint_chevron(painter, chevron, !header.folded, row.color);
     let mut pieces = [
         Row::text(0, title.to_owned(), row.color),
-        Row::text(0, summary.to_owned(), header.muted),
+        Row::text(0, summary.to_owned(), kit.muted),
     ];
     super::color::flag(&mut pieces);
     let mut inked = chevron;
@@ -165,10 +183,66 @@ pub(super) fn paint_header(
         let y = (origin.y + metrics.height() / 2.0).round() + 0.5;
         painter.line_segment(
             [Pos2::new(from, y), Pos2::new(to, y)],
-            Stroke::new(1.0, header.rule),
+            Stroke::new(1.0, kit.rule),
         );
     }
     Some(inked)
+}
+
+/// The historical header, all of it text: `▸`/`▾`, the title, a run of `─` and the summary.
+fn paint_text_header(
+    painter: &Painter,
+    origin: Pos2,
+    row: &Row,
+    metrics: &CellMetrics,
+    width: usize,
+    discoverer: &mut crate::fonts::Discoverer,
+    glyphs: &mut Vec<crate::painter::ColorGlyph>,
+) -> Rect {
+    let folded = row.header.as_ref().is_some_and(|header| header.folded);
+    let summary = row
+        .header
+        .as_ref()
+        .map_or("", |header| header.summary.as_str());
+    let measure = |text: &str| {
+        painter
+            .layout_no_wrap(text.to_owned(), metrics.font(), row.color)
+            .size()
+            .x
+    };
+    let width = width as f32 * metrics.width();
+    let prefix = if folded { "▸ " } else { "▾ " };
+    let prefix = fit(prefix, width, &measure);
+    let summary = fit(summary, (width - measure(prefix)).max(0.0), &measure);
+    let left_width = (width - measure(summary)).max(0.0);
+    let title_room = (left_width - measure(prefix) - measure(" ─ ")).max(0.0);
+    let title = fit(&row.text, title_room, &measure);
+    let mut head = format!("{prefix}{title}");
+    let rule_width = (left_width - measure(&head) - measure("  ")).max(0.0);
+    let rule = "─".repeat((rule_width / measure("─")) as usize);
+    head.push_str(&format!(" {rule}"));
+    let head = fit(&head, left_width, &measure).to_owned();
+    let mut pieces = [
+        Row::text(0, head, row.color),
+        Row::text(0, summary.to_owned(), row.color),
+    ];
+    super::color::flag(&mut pieces);
+    let mut inked = Rect::NOTHING;
+    for (piece, x) in pieces
+        .iter()
+        .zip([origin.x, origin.x + width - measure(summary)])
+    {
+        discoverer.note_text(&piece.text);
+        inked = inked.union(super::color::paint_text(
+            painter,
+            Pos2::new(x, origin.y),
+            piece,
+            metrics,
+            discoverer,
+            glyphs,
+        ));
+    }
+    inked
 }
 
 pub(super) fn fit<'a>(text: &'a str, width: f32, measure: &impl Fn(&str) -> f32) -> &'a str {
@@ -226,7 +300,7 @@ pub(super) fn lay_out(
 ) -> Vec<Row> {
     let mut rows = super::lay_out_head(panel, Some(id), width, theme, warning, attention, held_by);
     if let Some(panel) = panel {
-        append_blocks(&mut rows, panel, &Folds::default(), width, theme);
+        append_blocks(&mut rows, panel, &Folds::default(), width, theme, None);
     }
     rows
 }
@@ -530,14 +604,14 @@ mod tests {
             .iter()
             .find(|(text, _)| text == "日本語")
             .expect("whole summary painted");
-        let title = texts
+        let title_and_rule = texts
             .iter()
-            .find(|(text, _)| text != "日本語" && text.starts_with('日'))
-            .expect("header title painted");
+            .find(|(text, _)| text.starts_with('▸') || text.starts_with('▾'))
+            .expect("header title and rule painted");
         assert!(
-            title.1.right() <= summary.1.left() + 0.1,
+            title_and_rule.1.right() <= summary.1.left() + 0.1,
             "header ink {:?} overlaps summary ink {:?}",
-            title.1,
+            title_and_rule.1,
             summary.1
         );
         let ctx = eframe::egui::Context::default();
@@ -577,7 +651,7 @@ mod tests {
         let mut chevrons = Vec::new();
         let mut rules = Vec::new();
         let mut texts = Vec::new();
-        for shape in paint_the_state(
+        for shape in crate::panel::tests::paint_integrated(
             state,
             Rect::from_min_size(Pos2::ZERO, vec2(420.0, 600.0)),
             SystemTime::now(),
@@ -594,7 +668,23 @@ mod tests {
         (chevrons, rules, texts)
     }
 
-    /// **A header shows that it folds**: a chevron that points down while open and right while
+    #[test]
+    fn fold_glyphs_fit_one_cell_in_the_builtin_font() {
+        let ctx = eframe::egui::Context::default();
+        let output = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+            let font = eframe::egui::FontId::monospace(crate::DEFAULT_FONT_SIZE);
+            ui.ctx().fonts_mut(|fonts| {
+                let cell = fonts.glyph_width(&font, 'M');
+                for glyph in ['▸', '▾', '─'] {
+                    let width = fonts.glyph_width(&font, glyph);
+                    assert!(width > 0.0 && width <= cell, "{glyph}: {width} > {cell}");
+                }
+            });
+        });
+        output.drop_without_applying_deltas();
+    }
+
+    /// **In the integrated chrome a header shows that it folds** (D97): a chevron that points down while open and right while
     /// folded, the title in the text colour, a one-point rule in the separator colour and the
     /// summary muted at the right — Ivy Night's literal values.
     #[test]
