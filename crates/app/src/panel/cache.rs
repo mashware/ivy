@@ -74,9 +74,9 @@ impl PanelLayout {
                 }
                 lay_out_notices(&mut rows, None, key.warning.as_deref(), width, theme);
                 super::provenance::append_row(&mut rows, state, width, theme);
-                // The design reads identity, title, summary, buttons, sections: a leading block
-                // that opens with a title goes above the buttons, and nothing else does, so a
-                // long body never pushes the buttons into the clip (D97).
+                // The design reads identity, title, summary, buttons, sections: a leading title and
+                // at most one line under it go above the buttons, and nothing else does, so no body
+                // can push the buttons more than two rows down (D97).
                 let lead = leading_title_block(lines);
                 fold::append_blocks(
                     &mut rows,
@@ -106,9 +106,9 @@ impl PanelLayout {
     }
 }
 
-/// How many lines open the panel as its title block: from a first line styled `title` up to and
-/// including the first gap, stopping before a section. Nothing when the panel does not open with
-/// a title.
+/// How many lines open the panel as its title block: a first line styled `title`, at most one line
+/// under it that is neither a gap nor a section — the design's summary — and the gap that closes
+/// them, if one does. Nothing when the panel does not open with a title.
 fn leading_title_block(lines: &[Line]) -> usize {
     if lines
         .first()
@@ -116,10 +116,11 @@ fn leading_title_block(lines: &[Line]) -> usize {
     {
         return 0;
     }
-    lines
-        .iter()
-        .position(|line| line.style == Some(Style::Section) || fold::is_gap(line))
-        .map_or(lines.len(), |at| {
-            if fold::is_gap(&lines[at]) { at + 1 } else { at }
-        })
+    let ordinary = |at: usize| {
+        lines
+            .get(at)
+            .is_some_and(|line| line.style != Some(Style::Section) && !fold::is_gap(line))
+    };
+    let lead = if ordinary(1) { 2 } else { 1 };
+    lead + usize::from(lines.get(lead).is_some_and(fold::is_gap))
 }

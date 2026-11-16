@@ -5320,4 +5320,41 @@ mod pressing {
             "one row taller, the case is whole"
         );
     }
+
+    /// **A long titled body does not push the buttons off a short panel**: only the title and one
+    /// summary line go above them, so with forty lines under the title and room for ten rows the
+    /// button is still painted and reachable, right under the summary.
+    #[test]
+    fn a_long_titled_body_keeps_the_buttons_on_a_short_panel() {
+        let (_, cell) = super::tests::cell();
+        let mut lines = vec![
+            serde_json::json!({"text":"Title","style":"title"}),
+            serde_json::json!("summary"),
+        ];
+        lines.extend((0..40).map(|n| serde_json::json!(format!("line {n}"))));
+        let document = serde_json::json!({
+            "header": false,
+            "actions": [{"label": "Approve", "send": "yes"}],
+            "lines": lines,
+        })
+        .to_string();
+        let dir = PanelDir::create().expect("create the directory");
+        publish(&dir, &document);
+        let mut state = PanelState::default();
+        state.refresh(dir.path());
+        let place = Rect::from_min_size(a_wide_strip().min, eframe::egui::vec2(400.0, 10.0 * cell));
+        super::tests::paint_integrated(&mut state, place, SystemTime::now());
+        let shapes = super::tests::paint_integrated(&mut state, place, SystemTime::now());
+        assert_eq!(
+            state.buttons_drawn().count(),
+            1,
+            "the button was pushed into the clip"
+        );
+        let texts = texts_at(&shapes);
+        let at = |name: &str| texts.iter().position(|t| t.1.trim() == name);
+        assert!(
+            at("summary") < at("Approve") && at("Approve") < at("line 0"),
+            "{texts:?}"
+        );
+    }
 }
