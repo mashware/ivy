@@ -225,9 +225,54 @@ mod tests {
             ["  the body"]
         );
         assert!(
+            rows[0].2.top() < 1.0,
+            "the body starts at the panel's top: {rows:?}"
+        );
+        assert!(
             !shapes
                 .iter()
                 .any(|s| matches!(s, Shape::Rect(r) if r.fill == rgb(0x262b2d)))
         );
+    }
+
+    /// **A driver alone is no chip**, and a driver too long for the row is cut with «…» rather than
+    /// to a fragment that reads as a whole name.
+    #[test]
+    fn a_driver_alone_paints_no_chip_and_a_long_one_is_cut_with_an_ellipsis() {
+        let shapes = painted("claude", r#"{"lines":["the body"]}"#);
+        assert!(texts(&shapes).iter().any(|r| r.0 == "claude"));
+        assert!(
+            !shapes
+                .iter()
+                .any(|s| matches!(s, Shape::Rect(r) if r.fill == rgb(0x262b2d))),
+            "an empty chip is painted"
+        );
+
+        let long = "a-driver-whose-name-runs-far-past-the-panel-edge";
+        let mut state = PanelState::default();
+        state
+            .deliver(
+                7,
+                long,
+                panel_contract::parse_document(r#"{"phase":"build","lines":["the body"]}"#)
+                    .expect("a panel"),
+                SystemTime::now(),
+            )
+            .expect("nobody holds it");
+        let place = Rect::from_min_size(Pos2::ZERO, vec2(200.0, 400.0));
+        let shapes = paint_integrated(&mut state, place, SystemTime::now());
+        let driver = texts(&shapes)
+            .into_iter()
+            .find(|r| r.0.starts_with("a-driver"))
+            .expect("the driver is painted");
+        let kept = driver
+            .0
+            .strip_suffix('…')
+            .expect("a cut driver ends in «…»");
+        assert!(
+            long.starts_with(kept) && kept.len() < long.len(),
+            "{driver:?}"
+        );
+        assert!(driver.2.right() <= place.right(), "{driver:?}");
     }
 }

@@ -705,6 +705,27 @@ mod tests {
         output.drop_without_applying_deltas();
     }
 
+    /// Where the integrated header's summary and title were inked.
+    fn summary_and_title(state: &mut PanelState) -> (Rect, Rect) {
+        let mut summary = Rect::NOTHING;
+        let mut title = Rect::NOTHING;
+        for shape in crate::panel::tests::paint_integrated(
+            state,
+            Rect::from_min_size(Pos2::ZERO, vec2(420.0, 600.0)),
+            SystemTime::now(),
+        ) {
+            if let Shape::Text(text) = shape {
+                let ink = text.galley.rect.translate(text.pos.to_vec2());
+                match text.galley.text() {
+                    "2/4 merged" => summary = ink,
+                    "MRs" => title = ink,
+                    _ => {}
+                }
+            }
+        }
+        (summary, title)
+    }
+
     /// **In the integrated chrome a header shows that it folds** (D97): a chevron that points down while open and right while
     /// folded, the title in the text colour, a one-point rule in the separator colour and the
     /// summary muted at the right — Ivy Night's literal values.
@@ -731,6 +752,15 @@ mod tests {
             texts.contains(&("2/4 merged".to_owned(), rgb(0x8e9390))),
             "{texts:?}"
         );
+        // The summary is held to the right edge of the text area, past the title.
+        let (summary, title) = summary_and_title(&mut state);
+        let (cell, _) = crate::panel::tests::cell();
+        let edge = cell * (1 + ((420.0 / cell) as usize).saturating_sub(2)) as f32;
+        assert!(
+            (summary.right() - edge).abs() < 0.1,
+            "{summary:?} vs {edge}"
+        );
+        assert!(summary.left() > title.right(), "{summary:?} {title:?}");
 
         click(&mut state);
         let (chevrons, _, _) = header_shapes(&mut state);
