@@ -222,6 +222,14 @@ mod tests {
             );
             assert_eq!(band_fill(&shapes), None, "{class:?}");
             assert_eq!(pill(&shapes), None, "{class:?}: the pill is an outline");
+            assert!(
+                shapes
+                    .iter()
+                    .filter(|s| matches!(s, Shape::LineSegment { stroke, .. } if stroke.color == rgb(0x8e9390)))
+                    .count()
+                    >= 8,
+                "{class:?}: the dashed outline is painted"
+            );
             let painted = words(&shapes);
             assert_eq!(
                 painted[0].1,

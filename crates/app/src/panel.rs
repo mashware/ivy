@@ -4977,6 +4977,11 @@ mod pressing {
             !overflowed.iter().any(|r| r.fill == rgb(0x202427)),
             "a button inked past the strip got a frame"
         );
+        assert_eq!(
+            state.buttons_drawn().count(),
+            0,
+            "the integrated painting left it reachable"
+        );
     }
 
     /// **Under a claim strip, every reach is measured from what the band leaves** (D97): the
