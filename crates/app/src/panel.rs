@@ -770,9 +770,10 @@ struct Row {
     header: Option<fold::Header>,
     /// The integrated identity row's phase chip, when this row is that row.
     chip: Option<identity::Chip>,
-    /// A sign painted in the row's first cell in its own ink, integrated chrome only: a line's mark,
-    /// or the prompt beside a command. The historical panel keeps a mark inside the text.
-    glyph: Option<(char, Color32)>,
+    /// A sign painted at a cell of its own — counted from the text's left margin, not from the
+    /// row's column — in its own ink, integrated chrome only: a line's mark in the first cell, or
+    /// the prompt before a command at the button's inset. The historical panel keeps a mark inside the text.
+    glyph: Option<(usize, char, Color32)>,
     /// Whether the row is painted in the interface face rather than the cell grid's: a button's
     /// label in the integrated chrome. Its ink, not its character count, decides whether it fits.
     ui_face: bool,
@@ -908,7 +909,7 @@ fn lay_out_line(
     rows[0].glyph = line
         .mark
         .filter(|_| roles.is_some())
-        .map(|mark| (symbol(mark), glyph));
+        .map(|mark| (0, symbol(mark), glyph));
     if let Some(target) = line.link.as_deref() {
         links::attach(&mut rows, target, indent, width, color);
     }
@@ -5069,8 +5070,9 @@ mod pressing {
     }
 
     /// **Integrated buttons read as the design's** (D97): two in a row stand six points apart, the
-    /// label carries no `>` and starts where the command does, a `›` prompt sits in the cell before
-    /// the command without being part of it, and each frame is queued under its label's text.
+    /// label carries no `>`, a `›` prompt sits at the label's inset with a space before the command
+    /// without being part of it, the frame leaves room above the label and below the command, and
+    /// each frame is queued under its label's text.
     #[test]
     fn integrated_buttons_stand_apart_with_label_and_command_at_one_inset() {
         let rgb = |hex: u32| Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
@@ -5101,13 +5103,20 @@ mod pressing {
         let command = find("yes");
         let prompt = find("›");
         assert!(texts.iter().all(|t| !t.1.contains('>')), "{texts:?}");
+        let (cell, _) = super::tests::cell();
         assert!(
-            (label.2.left() - command.2.left()).abs() < 0.5,
-            "{label:?} {command:?}"
+            (prompt.2.left() - label.2.left()).abs() < 1.0,
+            "the prompt sits at the label's inset: {prompt:?} {label:?}"
         );
         assert!(
-            prompt.2.right() <= command.2.left() + 0.01,
-            "the prompt sits before the command"
+            (command.2.left() - (prompt.2.left() + 2.0 * cell)).abs() < 1.0,
+            "a space separates the prompt from the command: {prompt:?} {command:?}"
+        );
+        assert!(
+            reaches[0].top() <= label.2.top() - 4.0
+                && reaches[0].bottom() >= command.2.bottom() + 4.0,
+            "the frame leaves room around its text: {:?} {label:?} {command:?}",
+            reaches[0]
         );
         assert!(
             prompt.2.top() >= label.2.bottom() - 0.5,

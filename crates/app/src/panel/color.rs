@@ -10,7 +10,7 @@
 use std::ops::Range;
 
 use eframe::egui::text::{LayoutJob, TextFormat};
-use eframe::egui::{Align2, Color32, Galley, Painter, Pos2, Rect, vec2};
+use eframe::egui::{Align2, Color32, FontId, Galley, Painter, Pos2, Rect, vec2};
 
 use super::Row;
 use crate::fonts::{ColorEmoji, Presentation, presentation_of};
@@ -34,18 +34,34 @@ pub(super) fn paint_text(
     discoverer: &mut crate::fonts::Discoverer,
     glyphs: &mut Vec<ColorGlyph>,
 ) -> Rect {
+    paint_text_in(
+        painter,
+        origin,
+        row,
+        metrics,
+        metrics.font(),
+        discoverer,
+        glyphs,
+    )
+}
+
+/// The same in another `font` — a button's label in the interface face — with the color glyphs
+/// still one cell tall, the height the atlas keeps them at.
+pub(super) fn paint_text_in(
+    painter: &Painter,
+    origin: Pos2,
+    row: &Row,
+    metrics: &CellMetrics,
+    font: FontId,
+    discoverer: &mut crate::fonts::Discoverer,
+    glyphs: &mut Vec<ColorGlyph>,
+) -> Rect {
     if row.color_spans.is_empty() {
-        return painter.text(
-            origin,
-            Align2::LEFT_TOP,
-            &row.text,
-            metrics.font(),
-            row.color,
-        );
+        return painter.text(origin, Align2::LEFT_TOP, &row.text, font, row.color);
     }
     let chars: Vec<char> = row.text.chars().collect();
     let mut shown = row.color_spans.clone();
-    let galley = painter.layout_job(job(&chars, &shown, row.color, metrics));
+    let galley = painter.layout_job(job(&chars, &shown, row.color, &font));
     // **A character with no color glyph is shown, never left invisible.** Whether one exists is only
     // known once the row is laid out, because where it has to go comes from that layout — so the rare
     // row where one is missing, with no color font or the atlas full, is laid out a second time with
@@ -69,7 +85,7 @@ pub(super) fn paint_text(
     let galley = if shown.len() == before {
         galley
     } else {
-        painter.layout_job(job(&chars, &shown, row.color, metrics))
+        painter.layout_job(job(&chars, &shown, row.color, &font))
     };
     let inked = galley.rect.translate(origin.to_vec2());
     painter.galley(origin, galley, row.color);
@@ -116,7 +132,7 @@ fn is_attached(c: char) -> bool {
 
 /// The row as a layout job: every character in `ink`, except the ones inside `hidden`, which are
 /// transparent.
-fn job(chars: &[char], hidden: &[Range<usize>], ink: Color32, metrics: &CellMetrics) -> LayoutJob {
+fn job(chars: &[char], hidden: &[Range<usize>], ink: Color32, font: &FontId) -> LayoutJob {
     let mut job = LayoutJob::default();
     let mut run = String::new();
     let mut run_ink = ink;
@@ -127,14 +143,14 @@ fn job(chars: &[char], hidden: &[Range<usize>], ink: Color32, metrics: &CellMetr
             ink
         };
         if this_ink != run_ink && !run.is_empty() {
-            job.append(&run, 0.0, TextFormat::simple(metrics.font(), run_ink));
+            job.append(&run, 0.0, TextFormat::simple(font.clone(), run_ink));
             run.clear();
         }
         run_ink = this_ink;
         run.push(c);
     }
     if !run.is_empty() {
-        job.append(&run, 0.0, TextFormat::simple(metrics.font(), run_ink));
+        job.append(&run, 0.0, TextFormat::simple(font.clone(), run_ink));
     }
     job
 }
@@ -518,9 +534,12 @@ mod tests {
                 CellMetrics::measure(ui.ctx(), FontId::monospace(crate::DEFAULT_FONT_SIZE));
             let chars: Vec<char> = text.chars().collect();
             let spans = super::color_spans(text);
-            let galley =
-                ui.painter()
-                    .layout_job(super::job(&chars, &spans, Color32::WHITE, &metrics));
+            let galley = ui.painter().layout_job(super::job(
+                &chars,
+                &spans,
+                Color32::WHITE,
+                &metrics.font(),
+            ));
             let mut galley = (*galley).clone();
             doctor(&mut std::sync::Arc::make_mut(&mut galley.rows[0].row).glyphs);
             slot = super::slot(&galley, &chars, &spans[0], Pos2::ZERO, &metrics);

@@ -1,5 +1,6 @@
-//! The panel's head: the rows the application owns above the producer's body — identity, the
-//! claim's row, the warning and the buttons.
+//! The panel's head: the rows the application owns — identity, the claim's row, the warning and
+//! the buttons. The historical panel puts all of them above the producer's body; the integrated one
+//! puts the buttons below the body's leading title and summary (D97).
 //!
 //! It came out of its parent under **D28** when D97's two orders for the head (historical and
 //! integrated) took that file past its ceiling.
@@ -97,9 +98,10 @@ pub(super) fn separate(rows: &mut Vec<Row>) {
 
 /// Adds the producer's buttons: each one's label, then the literal command it sends.
 ///
-/// With the integrated chrome's `kit`, a blank row separates them from what is above, the label
-/// sits at the command's inset in the interface face, and the command's first row carries a `›`
-/// prompt drawn beside it — never inside the text that is sent (D97).
+/// With the integrated chrome's `kit`, every button stands between blank rows its frame reaches
+/// into — the room above its label and below its command — the label sits at the button's inset in
+/// the interface face, and the command starts two cells further in, after a `›` prompt drawn at the
+/// label's inset — never inside the text that is sent (D97).
 pub(super) fn lay_out_buttons(
     rows: &mut Vec<Row>,
     panel: Option<&Panel>,
@@ -107,8 +109,9 @@ pub(super) fn lay_out_buttons(
     theme: &Theme,
     kit: Option<&crate::theme::Roles>,
 ) {
-    // **The buttons go above the body and below the warning, inside the block the application owns.**
-    // Below is where the clip eats what does not fit, and a button whose command row got eaten would be
+    // **The buttons go above the body — in the integrated chrome above all of it but its leading
+    // title and summary — and below the warning, inside the block the application owns.** Below is
+    // where the clip eats what does not fit, and a button whose command row got eaten would be
     // a label you can press over a command you cannot read — the one state the rule about seeing a
     // command before it runs forbids.
     // **A panel too narrow to show a command at all declares no buttons.** The wrapping has a floor
@@ -123,8 +126,8 @@ pub(super) fn lay_out_buttons(
         .filter(|_| shows_a_command)
         .enumerate()
     {
-        if kit.is_some() && nth == 0 {
-            separate(rows);
+        if kit.is_some() {
+            pad(rows);
         }
         let first = rows.len();
         let label = match kit {
@@ -146,7 +149,12 @@ pub(super) fn lay_out_buttons(
         // has to read before pressing anything must not be styled as de-emphasis.
         wrap_verbatim(
             rows,
-            MARGIN as usize,
+            inset
+                + if kit.is_some() {
+                    PROMPT
+                } else {
+                    MARGIN as usize
+                },
             action.send(),
             theme.panel_color(None, None),
             width,
@@ -156,10 +164,27 @@ pub(super) fn lay_out_buttons(
             row.ui_face = kit.is_some();
         }
         if let Some(roles) = kit {
-            rows[body].glyph = Some(('›', roles.tx3));
+            rows[body].glyph = Some((inset, '›', roles.tx3));
         }
         for row in &mut rows[body..] {
             row.role = RowRole::ButtonBody(nth);
         }
+    }
+    if kit.is_some() && rows.last().is_some_and(|row| row.role != RowRole::Text) {
+        pad(rows);
+    }
+}
+
+/// The cells the `›` prompt and the space after it take before a command.
+const PROMPT: usize = 2;
+
+/// Pushes a blank row unless the rows already end in one — even at the very top, where the frame
+/// above a first button needs a row to reach into.
+fn pad(rows: &mut Vec<Row>) {
+    if rows
+        .last()
+        .is_none_or(|row| !row.text.is_empty() || row.header.is_some())
+    {
+        rows.push(Row::text(0, String::new(), Color32::TRANSPARENT));
     }
 }

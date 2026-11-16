@@ -91,7 +91,8 @@ fn keep_if_whole(
     (rect, framed): (Rect, bool),
     metrics: &CellMetrics,
 ) {
-    if run.last < whole {
+    // A frame reaches into the blank row under its command, so that row has to have survived too.
+    if run.last + usize::from(framed) < whole {
         drawn.push(painted(run, rect, metrics, framed));
     }
 }
@@ -100,10 +101,16 @@ fn keep_if_whole(
 /// painted** — one function for the two, so the edge a person sees is the edge a click obeys.
 ///
 /// Framed, it sits half a cell in from each side of the strip, where the text's margin leaves room,
-/// and [`GAP`] in from its first and last row, so two buttons in a row read as two.
+/// and reaches out of its first and last row into the blank rows around it, leaving [`GAP`] of the
+/// blank row between two buttons: the label and the command get room inside the frame, and two
+/// buttons in a row still read as two.
 fn painted(run: Run, rect: Rect, metrics: &CellMetrics, framed: bool) -> PaintedButton {
     let row_top = |row: usize| rect.top() + row as f32 * metrics.height();
-    let gap = if framed { GAP } else { 0.0 };
+    let gap = if framed {
+        -((metrics.height() - GAP) / 2.0).max(0.0)
+    } else {
+        0.0
+    };
     PaintedButton {
         action: run.action,
         area: Rect::from_min_max(
@@ -135,9 +142,8 @@ pub(super) fn right_edge(rect: Rect, metrics: &CellMetrics, framed: bool) -> f32
     rect.right() - inset(metrics, framed)
 }
 
-/// What separates a framed button from the rows above and below it: two buttons in a row stand
-/// twice this apart, the design's six points.
-const GAP: f32 = 3.0;
+/// What separates two framed buttons in a row, the design's six points.
+const GAP: f32 = 6.0;
 
 /// The frame's border. The kit's control border, `line2`, all but vanishes against the panel on a dark
 /// theme, so the frame takes the muted text at half strength, which reads on both kinds of theme.
