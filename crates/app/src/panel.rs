@@ -5046,4 +5046,195 @@ mod pressing {
             "a cut button got a frame"
         );
     }
+
+    /// Every text queued, with where it starts and the index it was queued at.
+    fn texts_at(shapes: &[eframe::egui::Shape]) -> Vec<(usize, String, Rect)> {
+        shapes
+            .iter()
+            .enumerate()
+            .filter_map(|(at, shape)| match shape {
+                eframe::egui::Shape::Text(t) => Some((
+                    at,
+                    t.galley.text().to_owned(),
+                    t.galley.rect.translate(t.pos.to_vec2()),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// **Integrated buttons read as the design's** (D97): two in a row stand six points apart, the
+    /// label carries no `>` and starts where the command does, a `›` prompt sits in the cell before
+    /// the command without being part of it, and each frame is queued under its label's text.
+    #[test]
+    fn integrated_buttons_stand_apart_with_label_and_command_at_one_inset() {
+        let rgb = |hex: u32| Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+        let dir = PanelDir::create().expect("create the directory");
+        publish(
+            &dir,
+            r#"{"actions":[{"label":"Approve","send":"yes"},{"label":"Show","send":"show it"}],
+                "lines":["the body"]}"#,
+        );
+        let mut state = PanelState::default();
+        state.refresh(dir.path());
+        super::tests::paint_integrated(&mut state, a_wide_strip(), SystemTime::now());
+        let shapes = super::tests::paint_integrated(&mut state, a_wide_strip(), SystemTime::now());
+        let reaches: Vec<Rect> = state.buttons_drawn().collect();
+        assert_eq!(reaches.len(), 2);
+        assert!(
+            (reaches[1].top() - reaches[0].bottom() - 6.0).abs() < 0.01,
+            "consecutive buttons stand six points apart: {reaches:?}"
+        );
+        let texts = texts_at(&shapes);
+        let find = |name: &str| {
+            texts
+                .iter()
+                .find(|t| t.1 == name)
+                .unwrap_or_else(|| panic!("{name}: {texts:?}"))
+        };
+        let label = find("Approve");
+        let command = find("yes");
+        let prompt = find("›");
+        assert!(texts.iter().all(|t| !t.1.contains('>')), "{texts:?}");
+        assert!(
+            (label.2.left() - command.2.left()).abs() < 0.5,
+            "{label:?} {command:?}"
+        );
+        assert!(
+            prompt.2.right() <= command.2.left() + 0.01,
+            "the prompt sits before the command"
+        );
+        assert!(
+            prompt.2.top() >= label.2.bottom() - 0.5,
+            "the prompt is on the command's row"
+        );
+        let face = shapes
+            .iter()
+            .position(|shape| match shape {
+                eframe::egui::Shape::Vec(parts) => parts.iter().any(
+                    |part| matches!(part, eframe::egui::Shape::Rect(r) if r.fill == rgb(0x202427)),
+                ),
+                _ => false,
+            })
+            .expect("a frame is queued");
+        assert!(
+            face < label.0,
+            "the frame is queued after the label and would cover it"
+        );
+    }
+
+    /// **A framed button's edge is its frame** (D97): a command whose ink ends between the frame's
+    /// right edge and the strip's — read outside the button it belongs to — is neither reachable
+    /// nor framed. The panel width is searched for that band, because where wide glyphs end depends
+    /// on the font; the search itself must find it, or the test proves nothing.
+    #[test]
+    fn a_command_inked_past_its_frame_but_inside_the_strip_is_not_pressable() {
+        let rgb = |hex: u32| Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+        let (cell, _) = super::tests::cell();
+        let mut found = false;
+        'search: for count in 8..16 {
+            let wide = "☀".repeat(count);
+            let document = format!(
+                r#"{{"actions": [{{"label": "Wide", "send": "{wide}"}}], "lines": ["b"]}}"#
+            );
+            let dir = PanelDir::create().expect("create the directory");
+            publish(&dir, &document);
+            let mut state = PanelState::default();
+            state.refresh(dir.path());
+            for step in 0..400 {
+                let width = 90.0 + step as f32 * 0.5;
+                let place =
+                    Rect::from_min_size(a_wide_strip().min, eframe::egui::vec2(width, 600.0));
+                super::tests::paint_integrated(&mut state, place, SystemTime::now());
+                let shapes = super::tests::paint_integrated(&mut state, place, SystemTime::now());
+                let Some(ink) = texts_at(&shapes)
+                    .into_iter()
+                    .find(|t| t.1 == wide)
+                    .map(|t| t.2)
+                else {
+                    continue;
+                };
+                if ink.right() > place.right() - cell / 2.0 + 0.01 && ink.right() <= place.right() {
+                    assert_eq!(
+                        state.buttons_drawn().count(),
+                        0,
+                        "pressable past its frame at {width}"
+                    );
+                    assert!(
+                        !rects(shapes).iter().any(|r| r.fill == rgb(0x202427)),
+                        "framed past its frame at {width}"
+                    );
+                    found = true;
+                    break 'search;
+                }
+            }
+        }
+        assert!(
+            found,
+            "no width put the command's ink between the frame and the strip"
+        );
+    }
+
+    /// **The title block reads above the buttons in the integrated panel** (D97), as the design
+    /// does: identity, title, summary, buttons, sections — while the historical panel keeps its
+    /// buttons above the whole body.
+    #[test]
+    fn the_title_block_sits_above_the_buttons_only_in_the_integrated_panel() {
+        let document = r#"{"phase":"review","actions":[{"label":"Approve","send":"yes"}],
+            "lines":[{"text":"Partial refunds","style":"title"},"Plan ready","",
+                     {"text":"Plan","style":"section","summary":"2/4"},"step"]}"#;
+        let dir = PanelDir::create().expect("create the directory");
+        publish(&dir, document);
+        let mut state = PanelState::default();
+        state.refresh(dir.path());
+        let order = |shapes: Vec<eframe::egui::Shape>| {
+            let mut texts = texts_at(&shapes);
+            texts.sort_by(|a, b| a.2.top().total_cmp(&b.2.top()));
+            texts
+                .into_iter()
+                .map(|t| t.1)
+                .filter(|t| {
+                    [
+                        "review",
+                        "  Partial refunds",
+                        "  Plan ready",
+                        "Approve",
+                        "> Approve",
+                        "Plan",
+                        "▾ Plan",
+                    ]
+                    .iter()
+                    .any(|n| t.starts_with(n))
+                })
+                .collect::<Vec<_>>()
+        };
+        let integrated = order(super::tests::paint_integrated(
+            &mut state,
+            a_wide_strip(),
+            SystemTime::now(),
+        ));
+        assert_eq!(
+            integrated,
+            [
+                "review",
+                "  Partial refunds",
+                "  Plan ready",
+                "Approve",
+                "Plan"
+            ],
+            "{integrated:?}"
+        );
+        let historical = order(paint_the_state(
+            &mut state,
+            a_wide_strip(),
+            SystemTime::now(),
+        ));
+        assert!(
+            historical.iter().position(|t| t.starts_with("> Approve"))
+                < historical
+                    .iter()
+                    .position(|t| t.starts_with("  Partial refunds")),
+            "{historical:?}"
+        );
+    }
 }
