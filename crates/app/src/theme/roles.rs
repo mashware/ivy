@@ -228,17 +228,24 @@ fn stands_apart(colour: Color32, over: &[Color32]) -> bool {
 }
 
 /// `role`, unless it vanishes into one of the fills it is painted over: then the nearest step of
-/// `from` toward `tx`, from `amount` up in 1 % steps, that stands apart from all of them. It stays
-/// a fill — the search stops short of the text — and where no step stands apart it is the first
-/// step, the one the design asked for.
+/// `from` toward `tx` — from `amount` up, a point at a time — that stands apart from all of them.
+/// Steps that keep the text readable on them are preferred; where none of those stands apart, the
+/// nearest step that does, short of the text itself. Only where fills cover every step (no real
+/// palette) is it the first step, unmoved.
 fn apart(role: Color32, over: &[Color32], from: Color32, tx: Color32, amount: f32) -> Color32 {
     if stands_apart(role, over) {
         return role;
     }
-    let first = (amount * 100.0).round() as u32;
-    (first..=90)
-        .map(|percent| mix(from, tx, percent as f32 / 100.0))
+    let steps = || {
+        (0..)
+            .map(move |n| amount + n as f32 / 100.0)
+            .take_while(|step| *step < 0.95)
+            .map(|step| mix(from, tx, step))
+    };
+    steps()
+        .take_while(|c| project_ink_contrast(tx, *c) >= TEXT_CONTRAST)
         .find(|c| stands_apart(*c, over))
+        .or_else(|| steps().find(|c| stands_apart(*c, over)))
         .unwrap_or_else(|| mix(from, tx, amount))
 }
 
@@ -386,6 +393,11 @@ mod collapse_tests {
         let moved = apart(bg, &[bg, first], bg, tx, 0.2);
         assert!(stands_apart(moved, &[bg, first]));
         assert!(moved.r() > first.r() && moved.r() < tx.r(), "{moved:?}");
+        // The nearest: a few levels past the blocked step, not far toward the text.
+        assert!(
+            moved.r() - first.r() <= 8,
+            "{moved:?} is not the nearest step"
+        );
         // Nothing stands apart (the fills cover every step): the first step, not the text.
         let all: Vec<Color32> = (0..=255).map(grey).collect();
         assert_eq!(apart(bg, &all, bg, tx, 0.2), first);

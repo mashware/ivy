@@ -12,9 +12,9 @@ pub(super) struct Palette {
     pub accent: Color32,
     pub selected_ink: Color32,
     pub error: Color32,
-    /// The caret, also a pressed control's border and the picker's check: the accent, moved only
-    /// where a collapsed palette made it vanish. (A control's border and the hover fill are
-    /// written into `roles` as `line2` and `hover`.)
+    /// The text cursor and a pressed control's border: the accent, or the ink where the accent
+    /// would vanish. (A control's border and the hover fill are written into `roles` as `line2`
+    /// and `hover`.)
     pub caret: Color32,
     /// The theme's roles with those corrections written back, so every field egui derives from
     /// them — the dialog's outline, a field's border, the selection — inherits the correction.
@@ -65,11 +65,12 @@ impl Palette {
         fixed.line2 = fixed.apart(roles.line2, &[surface], surface, 0.40);
         // The caret is the accent, or the ink itself where the accent would vanish: it is a line
         // drawn over fields and the selection, not a surface text sits on.
-        let caret = if Roles::stands_apart(roles.accent, &[roles.base, surface, fixed.sel]) {
-            roles.accent
-        } else {
-            ink
-        };
+        let caret =
+            if Roles::stands_apart(roles.accent, &[roles.base, surface, fixed.sel, fixed.hover]) {
+                roles.accent
+            } else {
+                ink
+            };
         Self {
             surface,
             nav,
@@ -182,6 +183,8 @@ mod tests {
                 "{id}"
             );
             assert_eq!(p.frame().fill, rgb(raised));
+            // A normal theme's caret is its accent, not the ink.
+            assert_eq!(p.caret, rgb(accent), "{id}");
             assert_eq!(p.frame().stroke.color, rgb(line2));
         }
         // A `panel` its text cannot be read on leaves the navigation on the dialog's surface.
