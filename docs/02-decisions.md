@@ -8729,7 +8729,8 @@ The dock-open grid intentionally differs from its closed control, so no painting
 
 ### Explorer interaction refinement — 15 November 2026, #88
 
-(Its rail icon and inline search field were replaced in #93; see the last section.)
+(Its rail icon and inline search field were replaced in #93, and search results no longer stand in
+for the tree: they are a floating list whose choice is revealed in it; see the last section.)
 
 The owner rejected the explorer's extra close/pin/navigation controls and filled triangles,
 then supplied native feedback rejecting the source/cwd-change rows, large chevrons, console
@@ -8814,9 +8815,8 @@ improvement is claimed; host, viewer and explorer work retain their named spans.
 ### Files on the left, Git and Markdown in a drawer below — 17 November 2026, #93
 
 The design kit (`Files.dc.html`, `Git.dc.html`, `DockB.dc.html`) and the owner's answers at the
-build gate replace the right sidebar. The owner chose to remove the rail «as in the mock-up», to
-keep nothing floating («no hay lo que es una ventana flotante suelta») and to put Markdown in the
-drawer as a tab.
+build gate replace the right sidebar. The owner chose to remove the rail as the mock-up does, to
+keep no loose floating window, and to put Markdown in the drawer as a tab.
 
 - **Files** opens on the left edge of the content area, 264 points by default, at least 200, with
   a 6 point divider that resizes it. It is independent of the other tools: opening Git, Markdown or
@@ -8824,7 +8824,8 @@ drawer as a tab.
   all, the root, and that it follows the focused console. Its rows take the theme's roles.
 - **Search** is a floating list over the window, anchored under Files' header: the existing worker
   finds names beneath the displayed root, Enter reveals the chosen match in the tree (its folders
-  expanded, selected, scrolled into view) and Ctrl+Enter opens it. A press on the list never reaches
+  expanded, selected, scrolled into view) and Ctrl+Enter opens a Markdown match in the drawer,
+  revealing anything else. A press on the list never reaches
   the console beneath it. Escape closes the list first, then Files.
 - **The drawer** takes the bottom of what Files leaves, 370 points by default, at least 160, inset 6
   points from the window's edges, with a divider above it. Its strip carries the source, a Changes
@@ -8845,7 +8846,7 @@ drawer as a tab.
   console's review control.
 
 Discarded: keeping the right rail (the kit draws none, and it cost every console 36 points for
-three buttons); a floating, detachable Git window (the owner asked for a drawer that grows, shrinks,
+a column of tool buttons); a floating, detachable Git window (the owner asked for a drawer that grows, shrinks,
 maximizes and restores, not a loose window); maximizing by re-tiling the consoles into the space
 left (it would resize every program on each toggle, which the Board already avoids); a Markdown
 reader of its own beside Files (two document surfaces to keep in step, where one drawer with tabs

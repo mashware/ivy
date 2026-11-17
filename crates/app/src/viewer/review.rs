@@ -309,13 +309,12 @@ fn file_row(review: &mut Review, ui: &mut egui::Ui, doc: &Document, index: usize
         .filter(|p| !p.is_empty());
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), egui::Sense::click());
-    let visuals = ui.visuals();
-    let (weak, strong) = (visuals.weak_text_color(), visuals.strong_text_color());
+    let roles = crate::ui::style::roles(ui.ctx(), &review.theme);
+    let (weak, strong) = (roles.tx3, roles.tx);
     if index == review.file {
-        ui.painter().rect_filled(rect, 5, visuals.selection.bg_fill);
+        ui.painter().rect_filled(rect, 5, roles.sel);
     } else if response.hovered() {
-        ui.painter()
-            .rect_filled(rect, 5, visuals.widgets.hovered.weak_bg_fill);
+        ui.painter().rect_filled(rect, 5, roles.hover);
     }
     let painter = ui.painter_at(rect);
     let font = egui::FontId::proportional(12.5);
@@ -804,6 +803,96 @@ mod tests {
             vec![egui::Event::PointerMoved(pos), button(true)],
         );
         frame(review, ctx, doc, vec![button(false)]).1
+    }
+
+    /// Every text the pass painted, with the rectangle it covers.
+    fn painted(
+        review: &mut Review,
+        ctx: &egui::Context,
+        doc: &Document,
+        width: f32,
+        events: Vec<egui::Event>,
+    ) -> Vec<(String, egui::Rect)> {
+        fn collect(shape: &Shape, out: &mut Vec<(String, egui::Rect)>) {
+            match shape {
+                Shape::Text(text) => out.push((
+                    text.galley.job.text.clone(),
+                    text.galley.rect.translate(text.pos.to_vec2()),
+                )),
+                Shape::Vec(shapes) => shapes.iter().for_each(|shape| collect(shape, out)),
+                _ => {}
+            }
+        }
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(width, 700.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                review.show(ui, doc, "console", Path::new("/repo"), true);
+            },
+        );
+        let mut out = Vec::new();
+        for shape in &output.shapes {
+            collect(&shape.shape, &mut out);
+        }
+        output.drop_without_applying_deltas();
+        out
+    }
+
+    #[test]
+    fn a_changed_file_is_one_row_name_first_and_a_click_on_it_shows_it() {
+        let doc = Document::parse(concat!(
+            "diff --git a/src/view/first.rs b/src/view/first.rs\n--- a/src/view/first.rs\n",
+            "+++ b/src/view/first.rs\n@@ -1 +1 @@\n-old\n+new\n",
+            "diff --git a/lib/second.rs b/lib/second.rs\n--- a/lib/second.rs\n",
+            "+++ b/lib/second.rs\n@@ -1 +1,3 @@\n kept\n+one\n+two\n",
+        ))
+        .unwrap();
+        // Wide, the list is a column beside the changes; narrow, a strip above them.
+        for width in [1100.0, 500.0] {
+            let mut review = Review::default();
+            let ctx = egui::Context::default();
+            let shapes = painted(&mut review, &ctx, &doc, width, vec![]);
+            let row = shapes
+                .iter()
+                .find(|(text, _)| text == "second.rslib")
+                .unwrap_or_else(|| panic!("{width}: no name-then-folder row in {shapes:?}"))
+                .1;
+            for count in ["+2", "−0"] {
+                let at = shapes
+                    .iter()
+                    .filter(|(text, _)| text == count)
+                    .map(|(_, rect)| *rect)
+                    .find(|rect| rect.left() > row.left())
+                    .unwrap_or_else(|| panic!("{width}: no {count} in {shapes:?}"));
+                assert!(
+                    (at.center().y - row.center().y).abs() < 2.0,
+                    "{width}: {count} at {at:?}, row at {row:?}"
+                );
+            }
+            assert_eq!(review.file, 0);
+            let button = |pressed| egui::Event::PointerButton {
+                pos: row.left_center() + egui::vec2(4.0, 0.0),
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            let pos = row.left_center() + egui::vec2(4.0, 0.0);
+            painted(
+                &mut review,
+                &ctx,
+                &doc,
+                width,
+                vec![egui::Event::PointerMoved(pos), button(true)],
+            );
+            painted(&mut review, &ctx, &doc, width, vec![button(false)]);
+            assert_eq!(review.file, 1, "{width}");
+        }
     }
 
     #[test]

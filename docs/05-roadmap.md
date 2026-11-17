@@ -138,15 +138,16 @@ without changing anything else.
 
 ## Document views — «Read beside the consoles»
 
-**What you see:** a shared, transient right sidebar beside the consoles, with Files, Markdown, Git
-and the global Board selected from one navigation rail. Its width is reserved from console space.
+**What you see:** Files on the left of the consoles and a drawer below them with Markdown and Git
+as tabs, both transient, plus the global Board over the whole content area, opened from the title
+bar. Their space is reserved from the consoles'.
 
 **What you can do:** browse files, read a Markdown file with formatting while an agent works beside
 it and see its saved changes without reopening, inspect Git changes, or open the global Board.
 Markdown and Git sources are chosen explicitly and both views are read-only. Switching tools retains
-their state. Resize or close the dock without restarting any console; at narrow widths its body is
-suppressed until the window grows enough to fit both the dock and console floor. The rail remains
-available and the sidebar returns closed with its default width after restart.
+their state. Resize, maximize or close the drawer, and resize or close Files, without restarting any console;
+a surface that would leave a console under its floor is suppressed until the window grows, and its
+title-bar button says so. Both return closed with their default sizes after restart.
 
 This is a standalone addition requested after the terminal's core workflow; it does not change
 what completing any of the five phases means. Installable plugins are outside this addition.
@@ -562,7 +563,7 @@ console.
   Markdown refreshes on save. Git presents files and hunks in unified or split form, with local and
   base comparisons. Review comments are previewed before insertion into the pinned origin console.
   Files uses #72's pane-keyed explorer; Board remains global. D72 records input isolation, bounded
-  loading, responsive suppression, reserved rail and measurement contracts. Native desktop
+  loading, responsive suppression and measurement contracts (the rail was removed in #93). Native desktop
   validation remains distinct from headless proofs.
 
 ## Updates and release notes — Standalone addition
