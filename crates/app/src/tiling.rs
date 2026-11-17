@@ -94,7 +94,7 @@ pub(crate) const INITIAL_FRACTION: f32 = 0.5;
 /// It is the brother of [`panel::MINIMUM_CONSOLE`] —the twenty columns of width— for the other
 /// axis, and the same number does not do: twenty rows are a whole window and twenty columns are
 /// half a word. What they share is the rule, not the figure.
-const MINIMUM_ROWS: f32 = 3.0;
+pub(crate) const MINIMUM_ROWS: f32 = 3.0;
 
 /// Which way an area is cut when it is tiled.
 ///

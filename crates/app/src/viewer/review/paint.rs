@@ -22,18 +22,16 @@ pub(super) fn paint_line(
         Change::Removed => Some(review.theme.color(term_core::TermColor::Indexed(1))),
         Change::Context => None,
     };
-    if let Some(ink) = ink {
-        let bg = review.theme.background();
-        let mix = |a: u8, b: u8| ((a as u16 * 4 + b as u16) / 5) as u8;
-        ui.painter().rect_filled(
-            rect,
-            0.0,
-            Color32::from_rgb(
-                mix(bg.r(), ink.r()),
-                mix(bg.g(), ink.g()),
-                mix(bg.b(), ink.b()),
-            ),
-        );
+    let tint = {
+        let roles = crate::ui::style::roles(ui.ctx(), &review.theme);
+        match line.kind {
+            Change::Added => Some(roles.add),
+            Change::Removed => Some(roles.del),
+            Change::Context => None,
+        }
+    };
+    if let Some(tint) = tint {
+        ui.painter().rect_filled(rect, 0.0, tint);
     }
     let number_text = |n: Option<u32>| n.map_or_else(String::new, |n| n.to_string());
     let gutter = if side == "old" || side == "new" {
@@ -47,11 +45,26 @@ pub(super) fn paint_line(
         gutter
     };
     let font = egui::TextStyle::Monospace.resolve(ui.style());
-    ui.painter().with_clip_rect(rect).text(
-        rect.left_center() + egui::vec2(6.0, 0.0),
-        egui::Align2::LEFT_CENTER,
-        format!("{gutter}  {}", line.text),
-        font,
+    let roles = crate::ui::style::roles(ui.ctx(), &review.theme);
+    let (marker, marker_ink) = match line.kind {
+        Change::Added => ('+', ink.unwrap_or(roles.tx3)),
+        Change::Removed => ('−', ink.unwrap_or(roles.tx3)),
+        Change::Context => (' ', roles.tx3),
+    };
+    // The numbers dim, the marker in its change's ink, the code in the console's text.
+    let mut job = egui::text::LayoutJob::default();
+    let format = |color| egui::TextFormat::simple(font.clone(), color);
+    job.append(&format!("{gutter} "), 0.0, format(roles.tx3));
+    job.append(&marker.to_string(), 0.0, format(marker_ink));
+    job.append(
+        &format!("  {}", line.text),
+        0.0,
+        format(review.theme.foreground()),
+    );
+    let galley = ui.painter().layout_job(job);
+    ui.painter().with_clip_rect(rect).galley(
+        egui::pos2(rect.left() + 6.0, rect.center().y - galley.size().y / 2.0),
+        galley,
         review.theme.foreground(),
     );
     let plus = egui::Rect::from_min_size(

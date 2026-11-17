@@ -7,42 +7,107 @@ struct Row {
     message: Option<String>,
 }
 
-fn refresh_button(ui: &mut egui::Ui, available: bool, theme: crate::theme::Theme) -> bool {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Icon {
+    Search,
+    Refresh,
+    Collapse,
+}
+
+impl Icon {
+    fn hint(self) -> &'static str {
+        match self {
+            Self::Search => "Search files and folders",
+            Self::Refresh => "Refresh",
+            Self::Collapse => "Collapse all",
+        }
+    }
+}
+
+/// One of the header's icon buttons, on the roles: hover on `hover`, ink on `tx2`, a dimmed ink
+/// while no local directory backs it.
+fn icon_button(
+    ui: &mut egui::Ui,
+    icon: Icon,
+    (available, on): (bool, bool),
+    roles: &crate::theme::Roles,
+) -> bool {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::click());
     let response = response
-        .on_hover_text("Refresh")
+        .on_hover_text(icon.hint())
         .on_hover_cursor(if available {
             egui::CursorIcon::PointingHand
         } else {
             egui::CursorIcon::NotAllowed
         });
-    if available && (response.hovered() || response.is_pointer_button_down_on()) {
-        ui.painter().rect_filled(rect, 3.0, theme.divider());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, available, icon.hint())
+    });
+    // The search button stays lit while its list is open, as the kit draws it.
+    if on {
+        ui.painter().rect_filled(rect, 5.0, roles.accent_soft);
+    } else if available && (response.hovered() || response.is_pointer_button_down_on()) {
+        ui.painter().rect_filled(rect, 5.0, roles.hover);
     }
-    let color = if available {
-        theme.foreground()
+    let color = if on {
+        roles.accent
+    } else if available {
+        roles.tx2
     } else {
-        theme.foreground().gamma_multiply(0.4)
+        roles.tx3
     };
     let stroke = egui::Stroke::new(1.4, color);
     let center = rect.center();
-    let points = (0..=20)
-        .map(|i| {
-            let angle = (45.0 + i as f32 * 14.0).to_radians();
-            center + egui::vec2(angle.cos(), angle.sin()) * 6.5
-        })
-        .collect();
-    ui.painter().add(egui::Shape::line(points, stroke));
-    let tip = center + egui::vec2(6.5, -3.5);
-    ui.painter().add(egui::Shape::line(
-        vec![
-            tip + egui::vec2(-4.0, 0.0),
-            tip,
-            tip + egui::vec2(0.0, -4.0),
-        ],
-        stroke,
-    ));
+    let painter = ui.painter();
+    match icon {
+        Icon::Search => {
+            crate::ui::icons::paint(painter, center, crate::ui::icons::Icon::Search, 13.0, color);
+        }
+        Icon::Refresh => {
+            crate::ui::icons::paint(
+                painter,
+                center,
+                crate::ui::icons::Icon::Refresh,
+                13.0,
+                color,
+            );
+        }
+        Icon::Collapse => {
+            for (top, sign) in [(-6.0, 1.0), (6.0, -1.0)] {
+                let tip = center + egui::vec2(0.0, top + sign * 4.0);
+                painter.add(egui::Shape::line(
+                    vec![
+                        tip + egui::vec2(-3.5, -sign * 3.0),
+                        tip,
+                        tip + egui::vec2(3.5, -sign * 3.0),
+                    ],
+                    stroke,
+                ));
+            }
+        }
+    }
+    #[cfg(test)]
+    ui.ctx().data_mut(|data| {
+        data.get_temp_mut_or_default::<Vec<(Icon, egui::Rect)>>(egui::Id::new("explorer-icons"))
+            .retain(|(which, _)| *which != icon);
+        data.get_temp_mut_or_default::<Vec<(Icon, egui::Rect)>>(egui::Id::new("explorer-icons"))
+            .push((icon, rect));
+    });
     available && response.clicked()
+}
+
+/// Where the header painted `icon` on its last pass, for tests that click it as a person would.
+#[cfg(test)]
+pub(super) fn icon_at(ctx: &egui::Context, icon: Icon) -> Option<egui::Pos2> {
+    ctx.data(|data| {
+        data.get_temp::<Vec<(Icon, egui::Rect)>>(egui::Id::new("explorer-icons"))
+            .and_then(|icons| {
+                icons
+                    .iter()
+                    .find(|(which, _)| *which == icon)
+                    .map(|(_, r)| r.center())
+            })
+    })
 }
 
 fn rows(state: &mut Explorer, pane: usize) -> (Vec<Row>, Option<Request>, bool) {
@@ -52,74 +117,19 @@ fn rows(state: &mut Explorer, pane: usize) -> (Vec<Row>, Option<Request>, bool) 
     let Some(root) = nav.root.clone().filter(|_| nav.source.is_some()) else {
         return (Vec::new(), None, false);
     };
-    let searching = !nav.query.trim().is_empty();
     let row_limit = nav.row_limit;
     enum Visit {
         Directory(PathBuf, usize),
         Entry(Entry, usize),
     }
-    let mut stack = if searching {
-        let request = state.request(pane, root.clone());
-        state.clock = state.clock.wrapping_add(1);
-        let Some(cached) = state.cache.get_mut(&request) else {
-            return (
-                vec![Row {
-                    entry: Entry {
-                        path: root,
-                        kind: EntryKind::Other,
-                    },
-                    depth: 0,
-                    message: Some("Searching…".into()),
-                }],
-                Some(request),
-                false,
-            );
-        };
-        cached.used = state.clock;
-        match &cached.result {
-            Ok(listing) if !listing.entries.is_empty() => listing
-                .entries
-                .iter()
-                .rev()
-                .cloned()
-                .map(|entry| Visit::Entry(entry, 0))
-                .collect(),
-            result => {
-                let message = match result {
-                    Ok(_) => "No matching files or folders.".into(),
-                    Err(error) => error.clone(),
-                };
-                return (
-                    vec![Row {
-                        entry: Entry {
-                            path: root,
-                            kind: EntryKind::Other,
-                        },
-                        depth: 0,
-                        message: Some(message),
-                    }],
-                    None,
-                    false,
-                );
-            }
-        }
-    } else {
-        vec![Visit::Directory(root, 0)]
-    };
+    // The name search lists its matches in a floating list of its own; the tree stays the tree.
+    let mut stack = vec![Visit::Directory(root, 0)];
     let mut rows = Vec::new();
-    let mut seen = std::collections::HashSet::new();
     let mut pending = None;
     let mut truncated = false;
     let visible_start = (state.navigation[&pane].scroll / state.row_stride) as usize;
     let visible_end = visible_start.saturating_add(state.viewport_rows);
     while let Some(visit) = stack.pop() {
-        // An expanded matching folder can contain another top-level search match.
-        if searching
-            && let Visit::Entry(entry, _) = &visit
-            && !seen.insert(entry.path.clone())
-        {
-            continue;
-        }
         if rows.len() >= row_limit {
             truncated = true;
             break;
@@ -142,8 +152,14 @@ fn rows(state: &mut Explorer, pane: usize) -> (Vec<Row>, Option<Request>, bool) 
                 key.query.clear();
                 state.clock = state.clock.wrapping_add(1);
                 let root = state.navigation[&pane].root.as_ref() == Some(&path);
-                let near_view =
-                    rows.len() >= visible_start.saturating_sub(1) && rows.len() <= visible_end;
+                // A revealed match loads the folders on its way, wherever they fall.
+                let revealing = state.navigation[&pane].reveal_selected
+                    && state.navigation[&pane]
+                        .selected
+                        .as_ref()
+                        .is_some_and(|selected| selected.starts_with(&path));
+                let near_view = revealing
+                    || (rows.len() >= visible_start.saturating_sub(1) && rows.len() <= visible_end);
                 let Some(cached) = state.cache.get_mut(&key) else {
                     if pending.is_none() && (root || near_view) {
                         pending = Some(key);
@@ -182,7 +198,11 @@ fn rows(state: &mut Explorer, pane: usize) -> (Vec<Row>, Option<Request>, bool) 
     (rows, pending, truncated)
 }
 
-fn activate(state: &mut Explorer, pane: usize, entry: &Entry) -> Option<(usize, PathBuf)> {
+pub(super) fn activate(
+    state: &mut Explorer,
+    pane: usize,
+    entry: &Entry,
+) -> Option<(usize, PathBuf)> {
     match entry.kind {
         EntryKind::Directory => {
             let expanded = &mut state.navigation.get_mut(&pane).unwrap().expanded;
@@ -249,7 +269,6 @@ pub(super) fn show(
     target: Option<usize>,
     theme: crate::theme::Theme,
 ) -> Option<(usize, PathBuf)> {
-    let roles = crate::ui::style::roles(parent.ctx(), &theme);
     let rect = state.rect(area);
     let mut open = None;
     egui::Area::new(egui::Id::new("file-explorer"))
@@ -260,13 +279,16 @@ pub(super) fn show(
             ui.set_min_size(rect.size());
             ui.set_max_size(rect.size());
             ui.set_clip_rect(rect);
-            ui.painter()
-                .rect_filled(rect, 0.0, theme.panel_background());
+            // Files is a side list: `panel`, or the content's `base` where a `panel` set apart
+            // from the text would leave the names unreadable (D98).
+            let roles = crate::ui::style::roles(ui.ctx(), &theme);
+            let surface = roles.panel_or(roles.tx, roles.base);
+            ui.painter().rect_filled(rect, 0.0, surface);
             ui.painter().line_segment(
                 [rect.right_top(), rect.right_bottom()],
-                egui::Stroke::new(1.0, theme.divider()),
+                egui::Stroke::new(1.0, roles.line),
             );
-            ui.style_mut().visuals.override_text_color = Some(theme.foreground());
+            ui.style_mut().visuals.override_text_color = Some(roles.tx);
             let inner = rect.shrink2(egui::vec2(10.0, 7.0));
             let mut body = ui.new_child(
                 egui::UiBuilder::new()
@@ -274,18 +296,30 @@ pub(super) fn show(
                     .layout(egui::Layout::top_down(egui::Align::Min)),
             );
             body.set_clip_rect(inner);
+            let available = target.is_some_and(|pane| {
+                state
+                    .navigation
+                    .get(&pane)
+                    .is_some_and(|nav| nav.source.is_some())
+            });
             body.horizontal(|ui| {
                 ui.strong("Files");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let available = target.is_some_and(|pane| {
-                        state
-                            .navigation
-                            .get(&pane)
-                            .is_some_and(|nav| nav.source.is_some())
-                    });
-                    if refresh_button(ui, available, theme) {
+                    if icon_button(ui, Icon::Collapse, (available, false), &roles) {
+                        let nav = state.navigation.get_mut(&target.unwrap()).unwrap();
+                        nav.expanded.clear();
+                        nav.scroll = 0.0;
+                    }
+                    if icon_button(ui, Icon::Refresh, (available, false), &roles) {
                         state.navigation.get_mut(&target.unwrap()).unwrap().reload();
                         state.message.clear();
+                    }
+                    if icon_button(ui, Icon::Search, (available, state.searching), &roles) {
+                        if state.searching {
+                            state.close_search(target);
+                        } else {
+                            state.open_search(target);
+                        }
                     }
                 });
             });
@@ -296,7 +330,6 @@ pub(super) fn show(
             let Some(nav) = state.navigation.get_mut(&pane) else {
                 return;
             };
-            let available = nav.source.is_some();
             let root = nav.root.clone();
             if let Some(root) = &root {
                 body.horizontal(|ui| {
@@ -306,7 +339,7 @@ pub(super) fn show(
                         ui.painter(),
                         icon,
                         true,
-                        egui::Stroke::new(1.0, theme.focus()),
+                        egui::Stroke::new(1.0, roles.accent),
                     );
                     let name = root
                         .file_name()
@@ -315,25 +348,13 @@ pub(super) fn show(
                     ui.add(egui::Label::new(name).truncate())
                         .on_hover_text(display(root));
                 });
+                body.label(
+                    egui::RichText::new("Follows the focused console")
+                        .size(11.0)
+                        .color(roles.tx3),
+                );
             }
             crate::settings::editor::view::style(&mut body, theme);
-            let mut query = nav.query.clone();
-            if body
-                .add(
-                    egui::TextEdit::singleline(&mut query)
-                        .id(egui::Id::new(("explorer-name-search", pane)))
-                        .hint_text("Search files and folders")
-                        .char_limit(256)
-                        .desired_width(f32::INFINITY),
-                )
-                .changed()
-            {
-                nav.query = query;
-                nav.scroll = 0.0;
-                nav.selected = None;
-                nav.refresh();
-                state.message.clear();
-            }
             if !available {
                 body.label("Local directory unavailable or unsupported.");
                 return;
@@ -341,20 +362,7 @@ pub(super) fn show(
             if !state.message.is_empty() {
                 body.label(&state.message);
             }
-            let mut scroll = nav.scroll;
-            if !state.navigation[&pane].query.trim().is_empty()
-                && let Some(root) = state.navigation[&pane].root.clone()
-            {
-                let request = state.request(pane, root);
-                if let Some(notice) = state
-                    .cache
-                    .get(&request)
-                    .and_then(|cached| cached.result.as_ref().ok())
-                    .and_then(|listing| listing.notice.as_deref())
-                {
-                    body.label(notice);
-                }
-            }
+            let mut scroll = state.navigation[&pane].scroll;
             state.row_stride = 22.0 + body.spacing().item_spacing.y;
             state.viewport_rows =
                 ((body.available_height() - 32.0).max(22.0) / state.row_stride).ceil() as usize + 1;
@@ -367,6 +375,10 @@ pub(super) fn show(
             {
                 scroll = (index as f32 * state.row_stride - body.available_height() * 0.5).max(0.0);
                 nav.scroll = scroll;
+                nav.reveal_selected = false;
+            } else if nav.reveal_selected && pending.is_none() {
+                // Every folder on the way has answered and the row is not there (a folder over
+                // its limit, or the file gone): stop waiting for it.
                 nav.reveal_selected = false;
             }
             let activate_key = std::mem::take(&mut state.activate);
@@ -410,9 +422,9 @@ pub(super) fn show(
                         let chosen =
                             state.navigation[&pane].selected.as_ref() == Some(&row.entry.path);
                         if chosen {
-                            ui.painter().rect_filled(row_rect, 2.0, roles.list_sel);
+                            ui.painter().rect_filled(row_rect, 5.0, roles.list_sel);
                         } else if response.hovered() {
-                            ui.painter().rect_filled(row_rect, 2.0, roles.list_hover);
+                            ui.painter().rect_filled(row_rect, 5.0, roles.list_hover);
                         }
                         let indent = row.depth as f32 * 12.0;
                         let center_y = row_rect.center().y;
@@ -433,10 +445,8 @@ pub(super) fn show(
                                     center + egui::vec2(-1.5, 3.0),
                                 ]
                             };
-                            ui.painter().add(egui::Shape::line(
-                                points,
-                                egui::Stroke::new(1.2, theme.foreground().gamma_multiply(0.7)),
-                            ));
+                            ui.painter()
+                                .add(egui::Shape::line(points, egui::Stroke::new(1.2, roles.tx3)));
                             let toggle_rect = egui::Rect::from_min_size(
                                 egui::pos2(row_rect.left() + indent, row_rect.top()),
                                 egui::vec2(18.0, row_rect.height()),
@@ -457,9 +467,9 @@ pub(super) fn show(
                             egui::vec2(16.0, 16.0),
                         );
                         let icon_color = if row.entry.kind == EntryKind::Directory {
-                            theme.focus()
+                            roles.accent
                         } else {
-                            theme.foreground().gamma_multiply(0.78)
+                            roles.tx2
                         };
                         paint_file_icon(
                             ui.painter(),
@@ -467,18 +477,8 @@ pub(super) fn show(
                             row.entry.kind == EntryKind::Directory,
                             egui::Stroke::new(1.0, icon_color),
                         );
-                        let name = if state.navigation[&pane].query.trim().is_empty()
-                            || row.depth > 0
-                        {
-                            display(Path::new(row.entry.path.file_name().unwrap_or_default()))
-                        } else {
-                            display(
-                                row.entry
-                                    .path
-                                    .strip_prefix(state.navigation[&pane].root.as_ref().unwrap())
-                                    .unwrap_or(&row.entry.path),
-                            )
-                        };
+                        let name =
+                            display(Path::new(row.entry.path.file_name().unwrap_or_default()));
                         let suffix = if row.entry.kind == EntryKind::Link {
                             " ↗"
                         } else {
@@ -489,11 +489,7 @@ pub(super) fn show(
                             egui::Align2::LEFT_CENTER,
                             format!("{name}{suffix}"),
                             egui::TextStyle::Body.resolve(ui.style()),
-                            if chosen {
-                                theme.foreground()
-                            } else {
-                                theme.foreground().gamma_multiply(0.9)
-                            },
+                            roles.tx,
                         );
                         response.clone().on_hover_text(display(&row.entry.path));
                         if response.clicked() {
@@ -573,7 +569,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn refresh_icon_and_hover_use_the_effective_light_and_dark_theme() {
+    fn header_icons_and_their_hover_use_the_effective_themes_roles() {
         use egui::epaint::{ColorMode, Shape};
         for named in [
             crate::theme::NamedTheme::GithubLightDefault,
@@ -599,7 +595,8 @@ mod tests {
                     },
                     |ui| {
                         center = ui.cursor().min + egui::vec2(12.0, 12.0);
-                        refresh_button(ui, true, theme);
+                        let roles = crate::ui::style::roles(ui.ctx(), &theme);
+                        icon_button(ui, Icon::Refresh, (true, false), &roles);
                     },
                 );
                 let strokes: Vec<_> = output
@@ -610,11 +607,12 @@ mod tests {
                         _ => None,
                     })
                     .collect();
-                let hover_fill = output.shapes.iter().any(|shape| matches!(&shape.shape, Shape::Rect(rect) if rect.rect.size() == egui::vec2(24.0, 24.0) && rect.fill == theme.divider()));
+                let roles = crate::theme::Roles::of(&theme);
+                let hover_fill = output.shapes.iter().any(|shape| matches!(&shape.shape, Shape::Rect(rect) if rect.rect.size() == egui::vec2(24.0, 24.0) && rect.fill == roles.hover));
                 output.drop_without_applying_deltas();
                 assert_eq!(
                     strokes,
-                    vec![ColorMode::Solid(theme.foreground()); 2],
+                    vec![ColorMode::Solid(roles.tx2); 2],
                     "{named:?}, hover={hover}"
                 );
                 if hover {

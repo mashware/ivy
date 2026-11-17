@@ -667,6 +667,7 @@ fn launch(
         name,
         label: None,
         project: None,
+        program: None,
         restoration,
         pty,
         pty_output,

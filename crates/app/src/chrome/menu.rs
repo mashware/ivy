@@ -21,6 +21,24 @@ pub(super) fn show(
         ("What's new", Action::Updates(false), None, false),
         ("Preferences", Action::Preferences, None, true),
         ("Keyboard shortcuts", Action::Shortcuts, None, false),
+        (
+            "Files",
+            Action::Tool(crate::sidebar::Tool::Files),
+            None,
+            true,
+        ),
+        (
+            "Markdown",
+            Action::Tool(crate::sidebar::Tool::Markdown),
+            None,
+            false,
+        ),
+        (
+            "Board",
+            Action::Tool(crate::sidebar::Tool::Board),
+            Some(crate::keyboard::Action::Board),
+            false,
+        ),
         ("Connect agents", Action::Connect, None, true),
         (
             "Search console",
@@ -34,7 +52,12 @@ pub(super) fn show(
     ]
     .into_iter()
     .filter(|entry| {
-        compact || !matches!(entry.1, Action::Minimize | Action::Maximize | Action::Close)
+        // A compact bar has no room for the tools' and the window's own buttons; its menu does.
+        compact
+            || !matches!(
+                entry.1,
+                Action::Tool(_) | Action::Minimize | Action::Maximize | Action::Close
+            )
     })
     .collect();
     let menu_height = 12.0

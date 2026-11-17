@@ -35,6 +35,9 @@ pub(super) struct Review {
     scroll_to: Option<usize>,
     preview: bool,
     theme: crate::theme::Theme,
+    /// Where Side by side divides its two columns, as a share of the visible width; the person
+    /// drags it (asked for on 17 November 2026).
+    split: f32,
 }
 
 impl Default for Review {
@@ -48,6 +51,7 @@ impl Default for Review {
             scroll_to: None,
             preview: false,
             theme: crate::theme::Theme::default(),
+            split: 0.5,
         }
     }
 }
@@ -56,43 +60,22 @@ impl Review {
     pub(super) fn set_theme(&mut self, theme: crate::theme::Theme) {
         self.theme = theme;
     }
+    pub(super) fn side_by_side(&self) -> bool {
+        self.mode == Mode::SideBySide
+    }
+    /// The drawer's strip chooses the layout; the review only draws it.
+    pub(super) fn set_side_by_side(&mut self, side_by_side: bool) {
+        self.mode = if side_by_side {
+            Mode::SideBySide
+        } else {
+            Mode::Unified
+        };
+    }
     pub(super) fn has_comments(&self) -> bool {
         !self.comments.is_empty() || self.draft.as_ref().is_some_and(|d| !d.text.is_empty())
     }
     pub(super) fn clear(&mut self) {
         *self = Self::default();
-    }
-
-    pub(super) fn toolbar(&mut self, ui: &mut egui::Ui, doc: &Document) {
-        if doc.files.is_empty() {
-            return;
-        }
-        self.file = self.file.min(doc.files.len() - 1);
-        let count = doc.files[self.file].hunks.len();
-        if ui
-            .add(egui::Button::new("Unified").selected(self.mode == Mode::Unified))
-            .clicked()
-        {
-            self.mode = Mode::Unified;
-        }
-        if ui
-            .add(egui::Button::new("Side by side").selected(self.mode == Mode::SideBySide))
-            .clicked()
-        {
-            self.mode = Mode::SideBySide;
-        }
-        if ui
-            .small_button("‹")
-            .on_hover_text("Previous hunk")
-            .clicked()
-        {
-            self.hunk = self.hunk.saturating_sub(1);
-            self.scroll_to = Some(self.hunk);
-        }
-        if ui.small_button("›").on_hover_text("Next hunk").clicked() && count > 0 {
-            self.hunk = (self.hunk + 1).min(count - 1);
-            self.scroll_to = Some(self.hunk);
-        }
     }
 
     pub(super) fn show(
@@ -116,38 +99,9 @@ impl Review {
                 .max_height(55.0)
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        for (index, file) in doc.files.iter().enumerate() {
-                            ui.vertical(|ui| {
-                                if ui
-                                    .selectable_label(index == self.file, &file.display)
-                                    .clicked()
-                                {
-                                    self.file = index;
-                                    self.hunk = 0;
-                                    self.scroll_to = Some(0);
-                                }
-                                let added = file
-                                    .hunks
-                                    .iter()
-                                    .flat_map(|h| &h.lines)
-                                    .filter(|line| line.kind == Change::Added)
-                                    .count();
-                                let removed = file
-                                    .hunks
-                                    .iter()
-                                    .flat_map(|h| &h.lines)
-                                    .filter(|line| line.kind == Change::Removed)
-                                    .count();
-                                ui.horizontal(|ui| {
-                                    ui.colored_label(
-                                        self.theme.color(term_core::TermColor::Indexed(2)),
-                                        format!("+{added}"),
-                                    );
-                                    ui.colored_label(
-                                        self.theme.color(term_core::TermColor::Indexed(1)),
-                                        format!("−{removed}"),
-                                    );
-                                });
+                        for index in 0..doc.files.len() {
+                            ui.allocate_ui(egui::vec2(220.0, 26.0), |ui| {
+                                file_row(self, ui, doc, index);
                             });
                         }
                     });
@@ -309,58 +263,83 @@ fn file_list(review: &mut Review, ui: &mut egui::Ui, doc: &Document, height: f32
         .id_salt("review-files")
         .max_height(height)
         .show(ui, |ui| {
-            ui.add_space(8.0);
-            ui.indent("file-list-padding", |ui| {
-                for (index, file) in doc.files.iter().enumerate() {
-                    let added = file
-                        .hunks
-                        .iter()
-                        .flat_map(|h| &h.lines)
-                        .filter(|l| l.kind == Change::Added)
-                        .count();
-                    let removed = file
-                        .hunks
-                        .iter()
-                        .flat_map(|h| &h.lines)
-                        .filter(|l| l.kind == Change::Removed)
-                        .count();
-                    if ui
-                        .selectable_label(index == review.file, &file.display)
-                        .clicked()
-                    {
-                        review.file = index;
-                        review.hunk = 0;
-                        review.scroll_to = Some(0);
-                    }
-                    ui.horizontal(|ui| {
-                        ui.colored_label(
-                            review.theme.color(term_core::TermColor::Indexed(2)),
-                            format!("+{added}"),
-                        );
-                        ui.colored_label(
-                            review.theme.color(term_core::TermColor::Indexed(1)),
-                            format!("−{removed}"),
-                        );
-                    });
-                    ui.add_space(5.0);
-                }
-            });
+            ui.add_space(4.0);
+            for index in 0..doc.files.len() {
+                file_row(review, ui, doc, index);
+            }
         });
+}
+
+/// One changed file: its name first, then its folder dimmed, and its added and removed counts on
+/// the same row, as `Git.dc.html` draws them.
+fn file_row(review: &mut Review, ui: &mut egui::Ui, doc: &Document, index: usize) {
+    let file = &doc.files[index];
+    let count = |kind| {
+        file.hunks
+            .iter()
+            .flat_map(|h| &h.lines)
+            .filter(|l| l.kind == kind)
+            .count()
+    };
+    let (added, removed) = (count(Change::Added), count(Change::Removed));
+    let path = Path::new(&file.display);
+    let name = path.file_name().map_or_else(
+        || file.display.clone(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    let folder = path
+        .parent()
+        .map(|p| p.to_string_lossy().into_owned())
+        .filter(|p| !p.is_empty());
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), egui::Sense::click());
+    let roles = crate::ui::style::roles(ui.ctx(), &review.theme);
+    let (weak, strong) = (roles.tx3, roles.tx);
+    if index == review.file {
+        ui.painter().rect_filled(rect, 5, roles.sel);
+    } else if response.hovered() {
+        ui.painter().rect_filled(rect, 5, roles.hover);
+    }
+    let painter = ui.painter_at(rect);
+    let font = egui::FontId::proportional(12.5);
+    let small = egui::FontId::proportional(11.0);
+    let green = review.theme.color(term_core::TermColor::Indexed(2));
+    let red = review.theme.color(term_core::TermColor::Indexed(1));
+    let mut right = rect.right() - 8.0;
+    for (text, color) in [(format!("−{removed}"), red), (format!("+{added}"), green)] {
+        let at = painter.text(
+            egui::pos2(right, rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            text,
+            small.clone(),
+            color,
+        );
+        right = at.left() - 6.0;
+    }
+    let mut job = egui::text::LayoutJob::default();
+    job.append(&name, 0.0, egui::TextFormat::simple(font, strong));
+    if let Some(folder) = &folder {
+        job.append(folder, 8.0, egui::TextFormat::simple(small, weak));
+    }
+    job.wrap = egui::text::TextWrapping::truncate_at_width((right - rect.left() - 14.0).max(0.0));
+    let galley = painter.layout_job(job);
+    painter.galley(
+        egui::pos2(rect.left() + 8.0, rect.center().y - galley.size().y / 2.0),
+        galley,
+        strong,
+    );
+    if response.on_hover_text(&file.display).clicked() {
+        review.file = index;
+        review.hunk = 0;
+        review.scroll_to = Some(0);
+    }
 }
 
 fn changes(review: &mut Review, ui: &mut egui::Ui, doc: &Document, height: f32) {
     let file = &doc.files[review.file];
     ui.label(RichText::new(&file.display).color(ui.visuals().weak_text_color()));
-    if review.mode == Mode::SideBySide {
-        ui.horizontal(|ui| {
-            let width = (ui.available_width() / 2.0).max(1.0);
-            ui.allocate_ui(egui::vec2(width, 18.0), |ui| {
-                ui.set_min_width(width);
-                ui.weak("Before");
-            });
-            ui.weak("After");
-        });
-    }
+    let header = (review.mode == Mode::SideBySide).then(|| split_header(review, ui));
+    let before_width = header.map(|(left, _)| left);
     if let Some(notice) = &file.notice {
         ui.label(notice);
     }
@@ -374,7 +353,9 @@ fn changes(review: &mut Review, ui: &mut egui::Ui, doc: &Document, height: f32) 
             Mode::SideBySide => rows.extend((0..hunk.pairs.len()).map(|pair| Row::Pair(h, pair))),
         }
     }
-    let row_height = ui.text_style_height(&egui::TextStyle::Monospace).max(23.0);
+    // Rows touch, as in `GitDiff.dc.html`: a run of added lines reads as one band.
+    let row_height = (ui.text_style_height(&egui::TextStyle::Monospace) + 6.0).max(20.0);
+    ui.spacing_mut().item_spacing.y = 0.0;
     let font = egui::TextStyle::Monospace.resolve(ui.style());
     let glyph_width = ui
         .painter()
@@ -404,7 +385,7 @@ fn changes(review: &mut Review, ui: &mut egui::Ui, doc: &Document, height: f32) 
         area =
             area.vertical_scroll_offset(starts.get(hunk).copied().unwrap_or(0) as f32 * row_height);
     }
-    area.show_rows(ui, row_height, rows.len(), |ui, range| {
+    let shown = area.show_rows(ui, row_height, rows.len(), |ui, range| {
         ui.set_min_width(content_width);
         for row in &rows[range] {
             match *row {
@@ -434,7 +415,8 @@ fn changes(review: &mut Review, ui: &mut egui::Ui, doc: &Document, height: f32) 
                     let hunk = &file.hunks[h];
                     let pair = &hunk.pairs[pair];
                     ui.horizontal(|ui| {
-                        let width = (ui.available_width() / 2.0 - 2.0).max(1.0);
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        let left = before_width.unwrap_or(ui.available_width() / 2.0).max(1.0);
                         if let Some(i) = pair.old {
                             paint::paint_line(
                                 review,
@@ -442,12 +424,13 @@ fn changes(review: &mut Review, ui: &mut egui::Ui, doc: &Document, height: f32) 
                                 &file.path,
                                 &hunk.lines[i],
                                 Some("old"),
-                                width,
+                                left,
                                 row_height,
                             );
                         } else {
-                            ui.allocate_space(egui::vec2(width, row_height));
+                            ui.allocate_space(egui::vec2(left, row_height));
                         }
+                        let right = ui.available_width().max(1.0);
                         if let Some(i) = pair.new {
                             paint::paint_line(
                                 review,
@@ -455,17 +438,94 @@ fn changes(review: &mut Review, ui: &mut egui::Ui, doc: &Document, height: f32) 
                                 &file.path,
                                 &hunk.lines[i],
                                 Some("new"),
-                                width,
+                                right,
                                 row_height,
                             );
                         } else {
-                            ui.allocate_space(egui::vec2(width, row_height));
+                            ui.allocate_space(egui::vec2(right, row_height));
                         }
                     });
                 }
             }
         }
     });
+    if let Some((left, rect)) = header {
+        split_handle(review, ui, rect, left, shown.inner_rect.bottom());
+    }
+}
+
+/// The Before / After header with the handle that moves the column split; returns the Before
+/// column's width.
+/// The Before / After header; returns the Before column's width and the header's rectangle.
+fn split_header(review: &Review, ui: &mut egui::Ui) -> (f32, egui::Rect) {
+    let width = ui.available_width().max(1.0);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 20.0), egui::Sense::hover());
+    let left =
+        (width * review.split).clamp(80.0_f32.min(width / 2.0), (width - 80.0).max(width / 2.0));
+    let weak = ui.visuals().weak_text_color();
+    let font = egui::FontId::proportional(12.0);
+    ui.painter().text(
+        rect.left_center() + egui::vec2(6.0, 0.0),
+        egui::Align2::LEFT_CENTER,
+        "Before",
+        font.clone(),
+        weak,
+    );
+    ui.painter().text(
+        egui::pos2(rect.left() + left + 10.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        "After",
+        font,
+        weak,
+    );
+    (left, rect)
+}
+
+/// The divider between Before and After, the whole height of the diff: grabbed anywhere along it,
+/// with a grip in its middle, the resize cursor, and the accent while it is hovered or dragged.
+fn split_handle(review: &mut Review, ui: &egui::Ui, header: egui::Rect, left: f32, bottom: f32) {
+    let x = header.left() + left;
+    let strip = egui::Rect::from_min_max(
+        egui::pos2(x - 5.0, header.top()),
+        egui::pos2(x + 5.0, bottom),
+    );
+    let response = ui
+        .interact(strip, ui.id().with("review-split"), egui::Sense::drag())
+        .on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
+        .on_hover_text("Drag to resize the two sides");
+    if response.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+        if let Some(pointer) = response.interact_pointer_pos() {
+            review.split = ((pointer.x - header.left()) / header.width()).clamp(0.15, 0.85);
+        }
+    }
+    let roles = crate::ui::style::roles(ui.ctx(), &review.theme);
+    let active = response.hovered() || response.dragged();
+    let ink = if active { roles.accent } else { roles.line2 };
+    let painter = ui.painter();
+    painter.vline(
+        x,
+        strip.y_range(),
+        egui::Stroke::new(if active { 2.0 } else { 1.0 }, ink),
+    );
+    let grip = egui::Rect::from_center_size(
+        egui::pos2(x, strip.center().y.min(header.bottom() + 120.0)),
+        egui::vec2(10.0, 28.0),
+    );
+    painter.rect(
+        grip,
+        5,
+        roles.raised,
+        egui::Stroke::new(1.0, ink),
+        egui::StrokeKind::Inside,
+    );
+    for dy in [-5.0, 0.0, 5.0] {
+        painter.hline(
+            grip.center().x - 2.5..=grip.center().x + 2.5,
+            grip.center().y + dy,
+            egui::Stroke::new(1.0, if active { roles.accent } else { roles.tx3 }),
+        );
+    }
 }
 
 enum Row {
@@ -539,7 +599,9 @@ mod tests {
     fn docked_window_insert_is_live_only_and_other_git_requests_reveal_retained_review() {
         let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
         let ctx = egui::Context::default();
-        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 1400.0));
+        // Tall enough for the preview's Insert without scrolling the review's column.
+        window.sidebar.set_height(900.0);
         crate::tests::one_frame_in(&mut window, &ctx, area, vec![]);
         crate::viewer::select_state(&mut window, false);
         let ids: Vec<_> = window.all_panes().map(|pane| pane.name).collect();
@@ -574,10 +636,11 @@ mod tests {
         // The actual Window -> dock -> viewer -> Review path enables Insert for the live origin.
         window.viewer.message.clear();
         window_frame(&mut window, &ctx, area, vec![]);
-        let insert = window_frame(&mut window, &ctx, area, vec![])
-            .into_iter()
+        let painted = window_frame(&mut window, &ctx, area, vec![]);
+        let insert = painted
+            .iter()
             .find(|(text, _)| text == "Insert into console")
-            .expect("live Git dock paints its Insert control")
+            .unwrap_or_else(|| panic!("live Git dock paints its Insert control: {painted:?}"))
             .1;
         let button = |pressed| egui::Event::PointerButton {
             pos: insert,
@@ -760,7 +823,6 @@ mod tests {
                 ..Default::default()
             },
             |ui| {
-                ui.horizontal_wrapped(|ui| review.toolbar(ui, doc));
                 sent = review.show(ui, doc, source_label, Path::new("/repo"), can_send);
             },
         );
@@ -799,6 +861,187 @@ mod tests {
         frame(review, ctx, doc, vec![button(false)]).1
     }
 
+    /// Every text the pass painted, with the rectangle it covers.
+    fn painted(
+        review: &mut Review,
+        ctx: &egui::Context,
+        doc: &Document,
+        width: f32,
+        events: Vec<egui::Event>,
+    ) -> Vec<(String, egui::Rect)> {
+        fn collect(shape: &Shape, out: &mut Vec<(String, egui::Rect)>) {
+            match shape {
+                Shape::Text(text) => out.push((
+                    text.galley.job.text.clone(),
+                    text.galley.rect.translate(text.pos.to_vec2()),
+                )),
+                Shape::Vec(shapes) => shapes.iter().for_each(|shape| collect(shape, out)),
+                _ => {}
+            }
+        }
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(width, 700.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                review.show(ui, doc, "console", Path::new("/repo"), true);
+            },
+        );
+        let mut out = Vec::new();
+        for shape in &output.shapes {
+            collect(&shape.shape, &mut out);
+        }
+        output.drop_without_applying_deltas();
+        out
+    }
+
+    #[test]
+    fn a_changed_file_is_one_row_name_first_and_a_click_on_it_shows_it() {
+        let doc = Document::parse(concat!(
+            "diff --git a/src/view/first.rs b/src/view/first.rs\n--- a/src/view/first.rs\n",
+            "+++ b/src/view/first.rs\n@@ -1 +1 @@\n-old\n+new\n",
+            "diff --git a/lib/second.rs b/lib/second.rs\n--- a/lib/second.rs\n",
+            "+++ b/lib/second.rs\n@@ -1 +1,3 @@\n kept\n+one\n+two\n",
+        ))
+        .unwrap();
+        // Wide, the list is a column beside the changes; narrow, a strip above them.
+        for width in [1100.0, 500.0] {
+            let mut review = Review::default();
+            let ctx = egui::Context::default();
+            let shapes = painted(&mut review, &ctx, &doc, width, vec![]);
+            let row = shapes
+                .iter()
+                .find(|(text, _)| text == "second.rslib")
+                .unwrap_or_else(|| panic!("{width}: no name-then-folder row in {shapes:?}"))
+                .1;
+            for count in ["+2", "−0"] {
+                let at = shapes
+                    .iter()
+                    .filter(|(text, _)| text == count)
+                    .map(|(_, rect)| *rect)
+                    .find(|rect| rect.left() > row.left())
+                    .unwrap_or_else(|| panic!("{width}: no {count} in {shapes:?}"));
+                assert!(
+                    (at.center().y - row.center().y).abs() < 2.0,
+                    "{width}: {count} at {at:?}, row at {row:?}"
+                );
+            }
+            assert_eq!(review.file, 0);
+            let button = |pressed| egui::Event::PointerButton {
+                pos: row.left_center() + egui::vec2(4.0, 0.0),
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            let pos = row.left_center() + egui::vec2(4.0, 0.0);
+            painted(
+                &mut review,
+                &ctx,
+                &doc,
+                width,
+                vec![egui::Event::PointerMoved(pos), button(true)],
+            );
+            painted(&mut review, &ctx, &doc, width, vec![button(false)]);
+            assert_eq!(review.file, 1, "{width}");
+        }
+    }
+
+    #[test]
+    fn side_by_side_columns_are_resized_by_dragging_their_divider() {
+        let doc = Document::parse(
+            "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n",
+        )
+        .unwrap();
+        let mut review = Review::default();
+        review.set_side_by_side(true);
+        let ctx = egui::Context::default();
+        let shapes = painted(&mut review, &ctx, &doc, 1100.0, vec![]);
+        let after = |shapes: &[(String, egui::Rect)]| {
+            shapes
+                .iter()
+                .find(|(text, _)| text == "After")
+                .expect("the After column is labelled")
+                .1
+                .left()
+        };
+        let before = after(&shapes);
+        let grip = egui::pos2(
+            before - 6.0,
+            shapes
+                .iter()
+                .find(|(t, _)| t == "After")
+                .unwrap()
+                .1
+                .center()
+                .y,
+        );
+        let button = |pressed| egui::Event::PointerButton {
+            pos: grip,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        painted(
+            &mut review,
+            &ctx,
+            &doc,
+            1100.0,
+            vec![egui::Event::PointerMoved(grip), button(true)],
+        );
+        for step in 1..=4 {
+            let to = grip + egui::vec2(-40.0 * step as f32, 0.0);
+            painted(
+                &mut review,
+                &ctx,
+                &doc,
+                1100.0,
+                vec![egui::Event::PointerMoved(to)],
+            );
+        }
+        painted(&mut review, &ctx, &doc, 1100.0, vec![button(false)]);
+        let moved = after(&painted(&mut review, &ctx, &doc, 1100.0, vec![]));
+        assert!(
+            moved < before - 100.0,
+            "the split did not follow the drag: {before} -> {moved}"
+        );
+        // The divider is grabbed anywhere down the diff, not only in the header.
+        let low = egui::pos2(moved - 10.0, grip.y + 150.0);
+        let press = |pressed| egui::Event::PointerButton {
+            pos: low,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        painted(
+            &mut review,
+            &ctx,
+            &doc,
+            1100.0,
+            vec![egui::Event::PointerMoved(low), press(true)],
+        );
+        for step in 1..=4 {
+            let to = low + egui::vec2(50.0 * step as f32, 0.0);
+            painted(
+                &mut review,
+                &ctx,
+                &doc,
+                1100.0,
+                vec![egui::Event::PointerMoved(to)],
+            );
+        }
+        painted(&mut review, &ctx, &doc, 1100.0, vec![press(false)]);
+        let back = after(&painted(&mut review, &ctx, &doc, 1100.0, vec![]));
+        assert!(
+            back > moved + 150.0,
+            "the divider is not grabbed along the diff: {moved} -> {back}"
+        );
+    }
+
     #[test]
     fn preview_escapes_metadata_and_rejects_controls() {
         let mut review = Review::default();
@@ -831,7 +1074,7 @@ mod tests {
         // TextEdit owns the typed text after its real click.
         review.draft.as_mut().unwrap().text = "Please revise".into();
         click(&mut review, &ctx, &doc, "Add comment");
-        click(&mut review, &ctx, &doc, "Side by side");
+        review.set_side_by_side(true);
         assert!(review.mode == Mode::SideBySide);
         click(&mut review, &ctx, &doc, "Preview comments");
         let sent = click(&mut review, &ctx, &doc, "Insert into console").unwrap();

@@ -107,6 +107,7 @@ mod branding;
 mod connection;
 mod menu;
 pub(crate) mod strip;
+mod tools;
 mod traffic_lights;
 pub(crate) mod typography;
 mod updates;
@@ -115,6 +116,7 @@ pub(crate) use connection::{begin_pass, prepare};
 
 #[derive(Clone, Copy)]
 enum Action {
+    Tool(crate::sidebar::Tool),
     SplitRight,
     SplitDown,
     Search,
@@ -129,8 +131,22 @@ enum Action {
 }
 
 fn button(ui: &egui::Ui, rect: Rect, label: &str, hint: &str, bg: Color32, fg: Color32) -> bool {
+    button_of(ui, rect, label, hint, bg, fg, false).0
+}
+
+/// A title-bar button; `on` keeps the hover fill while the tool it opens is shown. Returns
+/// whether it was clicked and its response, for the tool buttons' hover text.
+fn button_of(
+    ui: &egui::Ui,
+    rect: Rect,
+    label: &str,
+    hint: &str,
+    bg: Color32,
+    fg: Color32,
+    on: bool,
+) -> (bool, Option<egui::Response>) {
     if !rect.is_positive() {
-        return false;
+        return (false, None);
     }
     // The viewport state may change in the same event batch as a click. Keep its identity
     // stable when the tooltip changes from maximizing to restoring the window.
@@ -146,11 +162,11 @@ fn button(ui: &egui::Ui, rect: Rect, label: &str, hint: &str, bg: Color32, fg: C
             Sense::CLICK,
         )
         .on_hover_text(hint);
-    if response.hovered() {
+    if response.hovered() || on {
         ui.painter().rect_filled(rect.shrink(2.0), 4.0, bg);
     }
     paint_button_icon(&ui.painter_at(rect), rect, label, hint, fg);
-    response.clicked()
+    (response.clicked(), Some(response))
 }
 
 pub(crate) fn paint_button_icon(
@@ -160,64 +176,30 @@ pub(crate) fn paint_button_icon(
     hint: &str,
     fg: Color32,
 ) {
+    use crate::ui::icons::Icon;
     let c = rect.center();
-    // Use the approved prototype's 24-unit SVG paths inside its 17-point icon box.
-    let scale = 17.0 / 24.0;
-    let at = |x, y| c + egui::vec2(x, y) * scale;
-    let stroke = Stroke::new(1.6 * scale, fg);
-    let line = |a: (f32, f32), b: (f32, f32)| p.line_segment([at(a.0, a.1), at(b.0, b.1)], stroke);
-    let outline = |a: (f32, f32), b: (f32, f32), radius| {
-        p.rect_stroke(
-            Rect::from_min_max(at(a.0, a.1), at(b.0, b.1)),
-            radius * scale,
-            stroke,
-            egui::StrokeKind::Middle,
-        )
-    };
-    match hint {
-        "Split right" | "Split down" => {
-            outline((-9.0, -8.0), (9.0, 8.0), 2.0);
-            if hint == "Split right" {
-                line((0.0, -8.0), (0.0, 8.0));
-                line((4.5, -3.0), (4.5, 3.0));
-                line((2.0, 0.0), (7.0, 0.0));
-            } else {
-                line((-9.0, 0.0), (9.0, 0.0));
-                line((0.0, 2.0), (0.0, 6.0));
-                line((-2.0, 4.0), (2.0, 4.0));
-            }
+    let (icon, size) = match hint {
+        "Split right" => (Icon::SplitRight, 15.0),
+        "Split down" => (Icon::SplitDown, 15.0),
+        "Search console" => (Icon::Search, 15.0),
+        "Menu" => (Icon::Menu, 15.0),
+        "Connect agents" => {
+            connection::paint_icon(p, rect, fg);
+            return;
         }
-        "Search console" => {
-            p.circle_stroke(at(-1.5, -1.5), 6.5 * scale, stroke);
-            line((4.0, 4.0), (9.0, 9.0));
+        _ if let Some(tool) = tools::tool_of(hint) => {
+            crate::sidebar::paint_icon(
+                p,
+                Rect::from_center_size(c, egui::vec2(15.0, 15.0)),
+                tool,
+                fg,
+            );
+            return;
         }
-        "Menu" => {
-            for y in [-6.0, 0.0, 6.0] {
-                line((-7.0, y), (7.0, y));
-            }
-        }
-        "Connect agents" => connection::paint_icon(p, rect, fg, false),
-        "Close window" => {
-            line((-6.0, -6.0), (6.0, 6.0));
-            line((6.0, -6.0), (-6.0, 6.0));
-        }
-        "Minimize window" => {
-            line((-7.0, 0.0), (7.0, 0.0));
-        }
-        "Maximize window" => {
-            outline((-7.0, -7.0), (7.0, 7.0), 1.0);
-        }
-        "Restore window" => {
-            for (a, b) in [
-                ((-3.0, -7.0), (-3.0, -9.0)),
-                ((-3.0, -9.0), (9.0, -9.0)),
-                ((9.0, -9.0), (9.0, 3.0)),
-                ((9.0, 3.0), (7.0, 3.0)),
-            ] {
-                line(a, b);
-            }
-            outline((-9.0, -3.0), (3.0, 9.0), 1.0);
-        }
+        "Close window" => (Icon::Close, 12.0),
+        "Minimize window" => (Icon::Minimize, 12.0),
+        "Maximize window" => (Icon::Maximize, 12.0),
+        "Restore window" => (Icon::Restore, 12.0),
         _ => {
             p.text(
                 c,
@@ -226,8 +208,15 @@ pub(crate) fn paint_button_icon(
                 FontId::proportional(12.0),
                 fg,
             );
+            return;
         }
-    }
+    };
+    crate::ui::icons::paint(p, c, icon, size, fg);
+}
+
+/// Whether the title bar holds a modal surface — its menu or a dialog — that dims the consoles.
+pub(crate) fn is_modal(window: &Window, ctx: &egui::Context) -> bool {
+    window.chrome.menu || window.chrome.guide_blocked(ctx)
 }
 
 /// Paint and claim the titlebar before settings and terminal input dispatch.
@@ -253,60 +242,40 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         Stroke::new(1.0, roles.line),
     );
     let mut action = None;
-    let left_offset = strip::left_offset();
-    let width = strip::BUTTON;
     let compact = geometry.compact();
-    let left = [
-        ("⊞", "Split right", Action::SplitRight),
-        ("⊟", "Split down", Action::SplitDown),
-    ];
-    for (i, (label, hint, cmd)) in left.into_iter().enumerate() {
-        let x = row.left() + left_offset + i as f32 * width;
-        let rect = Rect::from_min_size(
-            egui::pos2(x, row.top() + 7.0),
-            Vec2::new(width, (row.height() - 14.0).max(0.0)),
-        );
-        if !compact && rect.right() <= row.right() && button(ui, rect, label, hint, hover, fg) {
-            action = Some(cmd);
-        }
-    }
     if let Some(logo) = geometry.logo {
         branding::paint_logo(ui, logo);
     }
     let maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
-    let right = [
-        ("×", "Close window", Action::Close),
-        (
-            "□",
-            if maximized {
-                "Restore window"
-            } else {
-                "Maximize window"
-            },
-            Action::Maximize,
-        ),
-        ("−", "Minimize window", Action::Minimize),
-        ("☰", "Menu", Action::Menu),
-        ("⌕", "Search console", Action::Search),
-        ("", "Connect agents", Action::Connect),
-    ];
-    let skip = right.len() - strip::right_buttons();
-    for (i, (label, hint, cmd)) in right.into_iter().skip(skip).enumerate() {
-        let x = row.right() - 6.0 - (i + 1) as f32 * width;
-        let rect = Rect::from_min_size(
-            egui::pos2(x, row.top() + 7.0),
-            Vec2::new(width, (row.height() - 14.0).max(0.0)),
-        );
-        if !compact && rect.left() >= geometry.left_end && button(ui, rect, label, hint, hover, fg)
-        {
-            action = Some(cmd);
-        }
-    }
     if !compact {
-        for x in [
-            row.left() + left_offset + 2.0 * width + 6.0,
-            row.right() - 6.0 - 3.0 * width,
-        ] {
+        let slots = strip::slots(row);
+        let mut buttons = vec![
+            (slots.split_right, "Split right", Action::SplitRight),
+            (slots.split_down, "Split down", Action::SplitDown),
+            (slots.search, "Search console", Action::Search),
+            (slots.connect, "Connect agents", Action::Connect),
+            (slots.menu, "Menu", Action::Menu),
+        ];
+        if let Some([minimize, maximize, close]) = slots.window {
+            buttons.push((minimize, "Minimize window", Action::Minimize));
+            buttons.push((
+                maximize,
+                if maximized {
+                    "Restore window"
+                } else {
+                    "Maximize window"
+                },
+                Action::Maximize,
+            ));
+            buttons.push((close, "Close window", Action::Close));
+        }
+        for (rect, hint, cmd) in buttons {
+            if rect.left() >= geometry.left_end && button(ui, rect, "", hint, hover, fg) {
+                action = Some(cmd);
+            }
+        }
+        action = tools::show(window, ui, &geometry, hover, fg).or(action);
+        for x in slots.separators.into_iter().filter(|x| x.is_finite()) {
             ui.painter().line_segment(
                 [
                     egui::pos2(x, row.center().y - 8.0),
@@ -463,6 +432,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         )
     );
     match action {
+        Some(Action::Tool(tool)) => crate::sidebar::toggle(window, tool, &ctx),
         Some(Action::SplitRight) => window.apply(
             WindowRequest::Split(Orientation::Columns),
             &ctx,
@@ -545,12 +515,13 @@ fn resize_direction(area: Rect, p: egui::Pos2) -> Option<egui::ResizeDirection> 
 }
 
 pub(crate) fn after_panels(window: &mut Window, ui: &mut egui::Ui, area: Rect) {
-    if let Some(document) = window.sidebar.last_document.or(window.sidebar.last_dock) {
-        crate::viewer::paint(window, ui, document);
-    }
     if let Some(dock) = window.sidebar.last_dock {
-        crate::explorer::show(window, ui, dock);
+        crate::viewer::paint(window, ui, dock);
     }
+    if let Some(files) = window.sidebar.last_files {
+        crate::explorer::show(window, ui, files);
+    }
+    crate::sidebar::paint_dividers(window, ui);
     connection::after_panels(window, ui, area);
 }
 

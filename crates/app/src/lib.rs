@@ -568,6 +568,9 @@ struct Pane {
     /// Explicit display label; never used as process input or identity.
     label: Option<String>,
     project: Option<project_view::Badge>,
+    /// The foreground program and its folder's name, sampled with the directory: what a header
+    /// says when no agent titles the console and nobody named it.
+    program: Option<(String, String)>,
     restoration: restoration::PaneState,
     /// The pseudoterminal and its queue go together on purpose. The bridge's thread lives as long
     /// as the pseudoterminal lives, not as long as the bridge does: separating them would leave a
@@ -1391,7 +1394,7 @@ impl eframe::App for Window {
         // from frame accounting; outbound latency still includes this earlier application work.
         let chrome_owned = chrome::before_keys(self, ui, &metrics);
         self.timed_separately += self.chrome.take_cost();
-        let sidebar_owned = !chrome_owned && sidebar::before_keys(self, ui, &metrics);
+        let sidebar_owned = sidebar::before_keys(self, ui, &metrics, chrome_owned);
         let mut board_owned = sidebar_owned || board::before_keys(self, ui, &metrics, chrome_owned);
         let pane_owned = !board_owned && pane_view::before_keys(self, ui, &metrics);
         if pane_owned {
@@ -1435,10 +1438,9 @@ impl eframe::App for Window {
             ui,
             &metrics,
             header_owns_pointer,
-            // Neither the Board's claim nor the sidebar's: both flip from frame to frame with the
-            // pointer (a move over the Board, a wheel delta over the rail), and dimming on them made
-            // the title bar blink under the mouse.
-            viewer_owned || pane_owned || chrome_owned,
+            // Only what is modal dims the consoles: the drawer and a title-bar press are not, and
+            // dimming on them made the window blink on every button and shade beside the drawer.
+            pane_owned || chrome::is_modal(self, ui.ctx()),
         );
 
         // **Walking the tree is timed, and it is not zeal: it is the instrument's rule.** The
@@ -6783,6 +6785,7 @@ mod tests {
             name,
             label: None,
             project: None,
+            program: None,
             restoration: restoration::PaneState::default(),
             signals: Default::default(),
             pty,
@@ -21717,8 +21720,8 @@ mod tests {
         // test, because the drag was tested without painting and the painting without dragging.
         let area = area_of(800.0 + DIVIDER_THICKNESS);
         let mut window = window_with("sleep 30", "sleep 30");
-        // The divider's center with the initial fraction: half of what is shareable after the
-        // rail, where the floor per console does not get to bite.
+        // The divider's center with the initial fraction: half of what is shareable after
+        // whatever the sidebar reserves, where the floor per console does not get to bite.
         let consoles = console_area(&window, area);
         let shareable = consoles.width() - DIVIDER_THICKNESS;
         let grip = egui::pos2(
@@ -22755,13 +22758,13 @@ mod tests {
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
         let cell = with_metrics(CellMetrics::width);
         // Each pane keeps the console's floor plus a hair: the panel has two points to spare.
-        // Include the rail width reserved by the shared geometry so that each console, rather than
+        // Include whatever width the sidebar geometry reserves so that each console, rather than
         // the whole window, receives this carefully chosen width.
         let console_floor = panel::MINIMUM_CONSOLE * cell + 16.0 + 1.0;
         let base_width = 2.0 * console_floor + DIVIDER_THICKNESS;
         let base_area = area_of(base_width);
-        let rail = base_area.width() - console_area(&window, base_area).width();
-        let area = area_of(base_width + rail);
+        let reserved = base_area.width() - console_area(&window, base_area).width();
+        let area = area_of(base_width + reserved);
         with_the_panel_in_place(&mut window, 0, r#"{"lines":["working"]}"#);
         one_frame_in(&mut window, &ctx, area, Vec::new());
 

@@ -1052,10 +1052,14 @@ mod tests {
         let ctx = egui::Context::default();
         frame(&mut window, &ctx, vec![]);
         frame(&mut window, &ctx, vec![]);
-        let metrics =
-            painter::CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
-        let rail = tab_bar::geometry(&window, area(), &metrics).rail;
-        let at = egui::pos2(rail.left() + 16.0, rail.top() + 112.0);
+        let at = window
+            .sidebar
+            .buttons
+            .iter()
+            .find(|(tool, _)| *tool == crate::sidebar::Tool::Board)
+            .expect("the title bar paints the Board's button")
+            .1
+            .center();
         frame(&mut window, &ctx, click_at(at));
         assert!(
             window.board.is_open(),
@@ -1485,7 +1489,13 @@ mod tests {
         let board_left = shapes
             .iter()
             .find_map(|s| match &s.shape {
-                egui::Shape::Text(t) if t.galley.text() == "Board" => Some(t.pos.x - 16.0),
+                // The Board's own bar, not the title bar's labelled button.
+                egui::Shape::Text(t)
+                    if t.galley.text() == "Board"
+                        && t.pos.y > crate::theme::metrics::TITLE_BAR_HEIGHT =>
+                {
+                    Some(t.pos.x - 16.0)
+                }
                 _ => None,
             })
             .expect("the bar's title is painted");
@@ -1552,7 +1562,7 @@ mod tests {
             "a click on the field edits it"
         );
         // Switching the sidebar away and back takes the field's focus with the Board's.
-        crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Markdown);
         crate::sidebar::select(&mut window, crate::sidebar::Tool::Board);
         assert_eq!(
             window.board.filter_state(),
@@ -1603,7 +1613,7 @@ mod tests {
             !window.board.is_open(),
             "the second Escape closes the Board"
         );
-        // Reopened through the rail's door: the chord's key is still held from the first opening.
+        // Reopened through the title bar's door: the chord's key is still held from the first opening.
         crate::sidebar::select(&mut window, crate::sidebar::Tool::Board);
         frame(&mut window, &ctx, vec![]);
         let shapes = frame(&mut window, &ctx, vec![]);
@@ -1800,7 +1810,7 @@ mod tests {
         // Once the file can be written, reopening the Board writes the choice and clears the note.
         let fixed = arrangement_file("fixed");
         window.board.remember_in = Some(fixed.clone());
-        crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Markdown);
         crate::sidebar::select(&mut window, crate::sidebar::Tool::Board);
         let shapes = frame(&mut window, &ctx, vec![]);
         let written = std::fs::read_to_string(&fixed).unwrap_or_default();

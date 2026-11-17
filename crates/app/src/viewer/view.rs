@@ -1,6 +1,6 @@
-//! Docked document and review content.
+//! The drawer's document and review content.
 use super::{Kind, State};
-use eframe::egui::{self, Color32, FontId, RichText};
+use eframe::egui::{self, FontId};
 use std::path::Path;
 
 pub(super) fn show(
@@ -10,6 +10,7 @@ pub(super) fn show(
     theme: crate::theme::Theme,
     unavailable: bool,
     maximized: bool,
+    (tabs, title): (&super::drawer::Tabs, &super::drawer::Title),
 ) {
     let namespace = if state.kind == Kind::Markdown {
         "markdown-viewer"
@@ -36,20 +37,24 @@ pub(super) fn show(
                 ui.set_clip_rect(rect);
                 ui.set_min_size(rect.size());
                 ui.set_max_size(rect.size());
-                // Header and footer on the side-list surface, the document on the console's own
-                // background: the kit's floating viewer.
+                // The strip on the side-list surface, the document on the console's own
+                // background: the kit's drawer (`DockB.dc.html`).
                 let roles = crate::ui::style::roles(parent.ctx(), &theme);
                 // `panel` is a colour of its own the person may set; where the text cannot be read on
-                // it the chrome stays on the document's background instead. The rules are the
-                // person's `divider`, drawn toward the text where it would vanish into the chrome.
+                // it the chrome stays on the document's background instead. The border is drawn
+                // toward the text where it would vanish into either surface.
                 let surface = roles.panel_or(roles.tx, roles.base);
-                // The frame's sides also border the document, which is on `base`.
-                let line = roles.apart(roles.line, &[surface, roles.base], surface, 0.16);
+                let line = roles.apart(roles.line2, &[surface, roles.base], surface, 0.16);
                 let frame = egui::Frame::new()
                     .fill(surface)
-                    .corner_radius(0)
+                    .corner_radius(crate::theme::metrics::RADIUS_CARD)
                     .stroke(egui::Stroke::new(1.0, line));
                 ui.painter().add(frame.paint(rect));
+                let grip = egui::Rect::from_center_size(
+                    egui::pos2(rect.center().x, rect.top() + 4.5),
+                    egui::vec2(36.0, 3.0),
+                );
+                ui.painter().rect_filled(grip, 2, line);
                 let inner = rect.shrink(1.0);
                 let mut content = ui.new_child(
                     egui::UiBuilder::new()
@@ -58,22 +63,55 @@ pub(super) fn show(
                 );
                 content.set_clip_rect(inner);
                 style(&mut content, &theme);
-                let (head, rest) =
-                    inner.split_top_bottom_at_y((inner.top() + 62.0).min(inner.bottom()));
-                header(state, &mut content, head, line, maximized);
+                let strip = super::drawer::Strip::framed(rect, tabs);
+                let source = title.text();
+                super::drawer::paint(&content, &strip, tabs, &roles, title, maximized);
+                if let Some(rect) = strip.controls
+                    && state.kind != Kind::Markdown
+                {
+                    strip_controls(state, &mut content, rect, &theme);
+                }
+                for (action, place) in &strip.places {
+                    let hint = super::drawer::hint(*action, maximized);
+                    // A strip too narrow for all of itself says so where it can still be read.
+                    let said = if strip.crowded && *action == super::drawer::StripAction::Maximize {
+                        format!("{hint}: too narrow to show \"{source}\" and every tab")
+                    } else {
+                        hint.to_owned()
+                    };
+                    let response = content
+                        .interact(
+                            *place,
+                            egui::Id::new(("drawer", hint)),
+                            egui::Sense::hover(),
+                        )
+                        .on_hover_text(said);
+                    response.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, hint)
+                    });
+                }
                 if !state.open {
                     return;
                 }
-                let (body, foot) =
-                    rest.split_top_bottom_at_y((rest.bottom() - 38.0).max(rest.top()));
-                footer(state, &mut content, foot, line, unavailable);
+                let body = egui::Rect::from_min_max(
+                    egui::pos2(inner.left(), strip.rect.bottom()),
+                    inner.max,
+                );
                 let mut body_ui = content.new_child(
                     egui::UiBuilder::new()
                         .max_rect(body)
                         .layout(egui::Layout::top_down(egui::Align::Min)),
                 );
                 body_ui.set_clip_rect(body);
-                body_ui.painter().rect_filled(body, 0.0, roles.base);
+                body_ui.painter().rect_filled(
+                    body,
+                    egui::CornerRadius {
+                        sw: crate::theme::metrics::RADIUS_CARD - 1,
+                        se: crate::theme::metrics::RADIUS_CARD - 1,
+                        ..Default::default()
+                    },
+                    roles.base,
+                );
                 body_content(state, &mut body_ui, theme, unavailable);
             });
         });
@@ -85,135 +123,6 @@ fn style(ui: &mut egui::Ui, theme: &crate::theme::Theme) {
     style.override_font_id = Some(FontId::proportional(13.0));
     style.spacing.item_spacing = egui::vec2(6.0, 6.0);
     style.spacing.button_padding = egui::vec2(8.0, 5.0);
-}
-
-/// Secondary text in the viewer's chrome: the path, the source console, the save note.
-fn muted(ui: &egui::Ui) -> Color32 {
-    ui.visuals().weak_text_color()
-}
-
-fn header(state: &mut State, ui: &mut egui::Ui, rect: egui::Rect, line: Color32, maximized: bool) {
-    ui.painter().line_segment(
-        [rect.left_bottom(), rect.right_bottom()],
-        egui::Stroke::new(1.0, line),
-    );
-    let markdown = state.kind == Kind::Markdown;
-    let title = if markdown {
-        state
-            .requested
-            .as_ref()
-            .and_then(|(p, _)| p.file_name())
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "Markdown viewer".into())
-    } else {
-        "Review changes".into()
-    };
-    let path = state
-        .requested
-        .as_ref()
-        .map(|(p, _)| p.display().to_string())
-        .unwrap_or_else(|| {
-            if markdown {
-                String::new()
-            } else {
-                "Current console".into()
-            }
-        });
-    let title_y = rect.center().y - if path.is_empty() { 0.0 } else { 9.0 };
-    let icon_rect = egui::Rect::from_center_size(
-        egui::pos2(rect.left() + 23.0, title_y),
-        egui::vec2(16.0, 16.0),
-    );
-    crate::sidebar::icon(
-        ui,
-        icon_rect,
-        if markdown {
-            crate::sidebar::Tool::Markdown
-        } else {
-            crate::sidebar::Tool::Git
-        },
-        ui.visuals().widgets.inactive.fg_stroke.color,
-    );
-    if markdown {
-        let target = crate::sidebar::maximize_rect(rect.expand(1.0));
-        let label = if maximized { "Restore" } else { "Maximize" };
-        let response = ui
-            .interact(
-                target,
-                egui::Id::new("markdown-maximize"),
-                egui::Sense::click(),
-            )
-            .on_hover_text(label);
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
-        if response.hovered() || response.is_pointer_button_down_on() {
-            ui.painter().rect_filled(
-                target,
-                4,
-                if response.is_pointer_button_down_on() {
-                    ui.visuals().widgets.active.bg_fill
-                } else {
-                    ui.visuals().widgets.hovered.bg_fill
-                },
-            );
-        }
-        crate::header::integrated::paint_icon(
-            ui.painter(),
-            target.center(),
-            crate::header::integrated::Target::Zoom,
-            maximized,
-            ui.visuals().widgets.inactive.fg_stroke.color,
-            24.0,
-        );
-    }
-    let right = (rect.right() - 54.0).max(rect.left() + 42.0);
-    let title_rect = egui::Rect::from_min_max(
-        egui::pos2(rect.left() + 42.0, title_y - 10.0),
-        egui::pos2(right, title_y + 10.0),
-    );
-    let mut text_ui = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(title_rect)
-            .layout(egui::Layout::left_to_right(egui::Align::Center)),
-    );
-    text_ui.set_min_height(20.0);
-    text_ui.add(egui::Label::new(RichText::new(title).size(14.0)).truncate());
-    if !path.is_empty() {
-        let path_rect = egui::Rect::from_min_max(
-            egui::pos2(title_rect.left(), title_y + 12.0),
-            egui::pos2(right, rect.bottom() - 5.0),
-        );
-        let mut path_ui = ui.new_child(egui::UiBuilder::new().max_rect(path_rect));
-        path_ui
-            .add(egui::Label::new(RichText::new(&path).size(11.0).color(muted(ui))).truncate())
-            .on_hover_text(path);
-    }
-}
-
-fn footer(state: &State, ui: &mut egui::Ui, rect: egui::Rect, line: Color32, unavailable: bool) {
-    ui.painter().line_segment(
-        [rect.left_top(), rect.right_top()],
-        egui::Stroke::new(1.0, line),
-    );
-    let mut child = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(rect.shrink2(egui::vec2(13.0, 8.0)))
-            .layout(egui::Layout::left_to_right(egui::Align::Center)),
-    );
-    let source = state
-        .origin
-        .as_ref()
-        .map_or("No source console", |s| s.label.as_str());
-    let source = if unavailable {
-        format!("{source} - unavailable")
-    } else {
-        source.to_owned()
-    };
-    child.add(egui::Label::new(RichText::new(&source).size(11.0).color(muted(ui))).truncate());
-    if state.kind == Kind::Markdown {
-        child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(RichText::new("Updates on save").size(11.0).color(muted(ui)));
-        });
-    }
 }
 
 fn body_content(
@@ -228,7 +137,9 @@ fn body_content(
             ui.label("Choose a Markdown file in Files.");
         });
     }
-    if !markdown {
+    // The comparison and refresh live on the strip; only a base to type or comments to clear
+    // need a row of their own.
+    if !markdown && (state.kind == Kind::AgainstBase || state.review.has_comments()) {
         egui::Frame::new()
             .inner_margin(egui::Margin::symmetric(10, 8))
             .show(ui, |ui| controls(state, ui));
@@ -279,49 +190,85 @@ fn comparison(kind: Kind, base: &str) -> String {
     }
 }
 
+/// The Git tab's comparison picker and refresh button, on the strip (`GitDiff.dc.html` has no row
+/// for them; the owner kept both, compacted, on 17 November 2026).
+fn strip_controls(
+    state: &mut State,
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    theme: &crate::theme::Theme,
+) {
+    let editable = !state.review.has_comments();
+    let mut load = false;
+    let picker =
+        egui::Rect::from_min_size(rect.min, egui::vec2(super::drawer::PICKER, rect.height()));
+    let mut row = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(picker)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    row.spacing_mut().interact_size.y = rect.height();
+    row.spacing_mut().button_padding = egui::vec2(8.0, 2.0);
+    let popup_style = egui::style::StyleModifier::from(row.style().as_ref().clone());
+    egui::ComboBox::from_id_salt("viewer-comparison")
+        .popup_style(popup_style)
+        .width(super::drawer::PICKER - 16.0)
+        .selected_text(comparison(state.kind, &state.base))
+        .show_ui(&mut row, |ui| {
+            ui.add_enabled_ui(editable, |ui| {
+                for (kind, label) in [
+                    (Kind::Local, "Local changes"),
+                    (Kind::Unstaged, "Unstaged changes"),
+                    (Kind::Staged, "Staged changes"),
+                    (Kind::AgainstBase, "Against base"),
+                ] {
+                    load |= ui.selectable_value(&mut state.kind, kind, label).changed()
+                        && !state.path.is_empty();
+                }
+            });
+        });
+    let refresh = egui::Rect::from_min_size(
+        egui::pos2(rect.right() - rect.height(), rect.top()),
+        egui::vec2(rect.height(), rect.height()),
+    );
+    let enabled = editable && state.requested.is_some() && state.job.is_none();
+    let response = ui
+        .interact(
+            refresh,
+            egui::Id::new("drawer-refresh"),
+            if enabled {
+                egui::Sense::click()
+            } else {
+                egui::Sense::hover()
+            },
+        )
+        .on_hover_text("Refresh the changes");
+    let roles = crate::ui::style::roles(ui.ctx(), theme);
+    if response.hovered() && enabled {
+        ui.painter().rect_filled(refresh, 5, roles.hover);
+    }
+    crate::ui::icons::paint(
+        ui.painter(),
+        refresh.center(),
+        crate::ui::icons::Icon::Refresh,
+        13.0,
+        if enabled { roles.tx2 } else { roles.tx3 },
+    );
+    if response.clicked() {
+        state.refresh_at = Some(std::time::Instant::now());
+    }
+    if load && editable {
+        state.editing_path = false;
+        state.start(ui.ctx());
+    }
+}
+
+/// The row a comparison against a typed base, or unsent comments, still need.
 fn controls(state: &mut State, ui: &mut egui::Ui) {
     let editable = !state.review.has_comments();
     let mut load = false;
-    ui.horizontal_wrapped(|ui| {
-        let popup_style = egui::style::StyleModifier::from(ui.style().as_ref().clone());
-        egui::ComboBox::from_id_salt("viewer-comparison")
-            .popup_style(popup_style)
-            .selected_text(comparison(state.kind, &state.base))
-            .show_ui(ui, |ui| {
-                ui.add_enabled_ui(editable, |ui| {
-                    for (kind, label) in [
-                        (Kind::Local, "Local changes"),
-                        (Kind::Unstaged, "Unstaged changes"),
-                        (Kind::Staged, "Staged changes"),
-                        (Kind::AgainstBase, "Against base"),
-                    ] {
-                        load |= ui.selectable_value(&mut state.kind, kind, label).changed()
-                            && !state.path.is_empty();
-                    }
-                });
-            });
-        if let Some(document) = state
-            .loaded
-            .as_ref()
-            .and_then(|loaded| loaded.diff.as_ref())
-        {
-            state.review.toolbar(ui, document);
-        }
-        if ui
-            .add_enabled(
-                editable && state.requested.is_some() && state.job.is_none(),
-                egui::Button::new("Refresh"),
-            )
-            .clicked()
-        {
-            state.refresh_at = Some(std::time::Instant::now());
-        }
-        if !editable && ui.button("Clear comments").clicked() {
-            state.review.clear();
-        }
-    });
-    if state.kind == Kind::AgainstBase {
-        ui.horizontal(|ui| {
+    ui.horizontal(|ui| {
+        if state.kind == Kind::AgainstBase {
             ui.label("Base");
             ui.add_enabled(
                 editable,
@@ -330,8 +277,11 @@ fn controls(state: &mut State, ui: &mut egui::Ui) {
             load |= ui
                 .add_enabled(editable, egui::Button::new("Compare"))
                 .clicked();
-        });
-    }
+        }
+        if !editable && ui.button("Clear comments").clicked() {
+            state.review.clear();
+        }
+    });
     if load && editable {
         state.editing_path = false;
         state.start(ui.ctx());
@@ -341,58 +291,116 @@ fn controls(state: &mut State, ui: &mut egui::Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use eframe::egui::Color32;
 
-    #[test]
-    fn markdown_header_centers_title_on_its_icon_and_draws_a_readable_zoom_control() {
-        fn inspect(
-            shape: &egui::Shape,
-            title: &mut Option<f32>,
-            icon: &mut Option<f32>,
-            zoom: &mut Option<(f32, f32)>,
-        ) {
-            match shape {
-                egui::Shape::Text(text) if text.galley.text() == "Markdown viewer" => {
-                    *title = Some(text.pos.y + text.galley.rect.center().y)
-                }
-                egui::Shape::Rect(rect)
-                    if rect.rect.center().x < 100.0 && (rect.rect.width() - 16.0).abs() < 0.1 =>
-                {
-                    *icon = Some(rect.rect.center().y)
-                }
-                egui::Shape::Rect(rect) if rect.rect.center().x > 400.0 => {
-                    *zoom = Some((rect.rect.width(), rect.rect.center().y))
-                }
-                egui::Shape::Vec(shapes) => {
-                    for shape in shapes {
-                        inspect(shape, title, icon, zoom);
-                    }
-                }
-                _ => {}
-            }
+    fn tabs(markdown: bool) -> super::super::drawer::Tabs {
+        super::super::drawer::Tabs {
+            changes: Some(Some(3)),
+            document: Some("PLAN.md".into()),
+            markdown,
+            side_by_side: false,
         }
+    }
+
+    fn title() -> super::super::drawer::Title {
+        super::super::drawer::Title {
+            project: Some(("billing-api".into(), Color32::from_rgb(0x43, 0xC0, 0x71))),
+            folder: "billing".into(),
+            unavailable: false,
+        }
+    }
+
+    fn texts(shape: &egui::Shape, found: &mut Vec<(String, egui::Rect)>) {
+        match shape {
+            egui::Shape::Text(text) => found.push((
+                text.galley.text().to_owned(),
+                text.galley.rect.translate(text.pos.to_vec2()),
+            )),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| texts(s, found)),
+            _ => {}
+        }
+    }
+
+    /// The strip reads as the artboard: source, then the tabs with the count, the layout toggle
+    /// for a diff, and maximize and close at the right, all on one row.
+    #[test]
+    fn the_drawer_strip_lays_its_tabs_and_controls_on_one_row() {
+        use super::super::drawer::{HEIGHT, Strip, StripAction};
+        let drawer = egui::Rect::from_min_size(egui::pos2(270.0, 400.0), egui::vec2(1000.0, 360.0));
+        let strip = Strip::of(drawer, &tabs(false));
+        let order: Vec<_> = strip.places.iter().map(|(action, _)| *action).collect();
+        for action in [
+            StripAction::Changes,
+            StripAction::Document,
+            StripAction::Unified,
+            StripAction::SideBySide,
+            StripAction::Maximize,
+            StripAction::Close,
+        ] {
+            assert!(order.contains(&action), "{action:?} missing: {order:?}");
+        }
+        let place = |action| strip.places.iter().find(|(a, _)| *a == action).unwrap().1;
+        assert!(place(StripAction::Changes).right() <= place(StripAction::Document).left());
+        assert!(place(StripAction::SideBySide).right() < place(StripAction::Maximize).left());
+        assert!(place(StripAction::Maximize).right() < place(StripAction::Close).left());
+        assert!(place(StripAction::Close).right() <= drawer.right());
+        for (_, rect) in &strip.places {
+            assert!((rect.center().y - (drawer.top() + HEIGHT / 2.0)).abs() < 0.5);
+        }
+        let markdown = Strip::of(drawer, &tabs(true));
+        assert!(
+            !markdown
+                .places
+                .iter()
+                .any(|(a, _)| matches!(a, StripAction::Unified | StripAction::SideBySide)),
+            "a document has no diff layout to choose"
+        );
+        let narrow = Strip::of(
+            egui::Rect::from_min_size(drawer.min, egui::vec2(300.0, 360.0)),
+            &tabs(false),
+        );
+        let kept: Vec<_> = narrow.places.iter().map(|(a, _)| *a).collect();
+        assert!(kept.contains(&StripAction::Maximize) && kept.contains(&StripAction::Close));
+        let maximize = narrow
+            .places
+            .iter()
+            .find(|(a, _)| *a == StripAction::Maximize)
+            .unwrap()
+            .1;
+        assert!(
+            narrow.places.iter().all(|(a, r)| matches!(
+                a,
+                StripAction::Maximize | StripAction::Close
+            ) || r.right() <= maximize.left()),
+            "a tab runs under the drawer's own buttons"
+        );
         let ctx = egui::Context::default();
-        let area = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(480.0, 62.0));
-        let mut state = State::default();
         let output = ctx.run_ui(Default::default(), |ui| {
-            header(&mut state, ui, area, Color32::GRAY, false)
+            let roles = crate::ui::style::roles(ui.ctx(), &crate::theme::Theme::default());
+            super::super::drawer::paint(ui, &strip, &tabs(false), &roles, &title(), false);
         });
-        let (mut title, mut icon, mut zoom) = (None, None, None);
+        let mut found = Vec::new();
         for shape in &output.shapes {
-            inspect(&shape.shape, &mut title, &mut icon, &mut zoom);
+            texts(&shape.shape, &mut found);
         }
         output.drop_without_applying_deltas();
-        assert!(
-            (title.expect("title painted") - icon.expect("document icon painted")).abs() < 1.0,
-            "title and icon are on different rows"
-        );
-        assert!(
-            (title.unwrap() - zoom.expect("zoom outline painted").1).abs() < 1.0,
-            "zoom control is not centered on the header row"
-        );
-        assert!(
-            zoom.expect("zoom outline painted").0 >= 14.0,
-            "zoom glyph is too small for the document header"
-        );
+        for (label, action) in [
+            ("Changes", StripAction::Changes),
+            ("3", StripAction::Changes),
+            ("PLAN.md", StripAction::Document),
+            ("Unified", StripAction::Unified),
+            ("Side by side", StripAction::SideBySide),
+        ] {
+            let (_, rect) = found
+                .iter()
+                .find(|(text, _)| text == label)
+                .unwrap_or_else(|| panic!("{label} is not painted: {found:?}"));
+            assert!(
+                place(action).contains(rect.center()),
+                "{label} outside its place"
+            );
+        }
+        assert!(found.iter().any(|(text, _)| text == "billing-api"));
     }
 
     #[test]
@@ -426,6 +434,7 @@ mod tests {
                         crate::theme::Theme::default(),
                         false,
                         false,
+                        (&tabs(true), &title()),
                     )
                 },
             );
@@ -446,7 +455,7 @@ mod tests {
         }
     }
 
-    /// The viewer's chrome sits on `panel` and the document on `base`; a `panel` the text cannot be
+    /// The drawer's chrome sits on `panel` and the document on `base`; a `panel` the text cannot be
     /// read on leaves the chrome on `base` instead (D98).
     #[test]
     fn the_viewer_frames_the_document_with_the_theme_roles() {
@@ -485,7 +494,17 @@ mod tests {
                         screen_rect: Some(screen),
                         ..Default::default()
                     },
-                    |ui| show(&mut state, ui, area, theme, true, false),
+                    |ui| {
+                        show(
+                            &mut state,
+                            ui,
+                            area,
+                            theme,
+                            true,
+                            false,
+                            (&tabs(false), &title()),
+                        )
+                    },
                 );
                 shapes = output.shapes.clone();
                 output.drop_without_applying_deltas();
@@ -525,17 +544,33 @@ mod tests {
     #[test]
     fn dock_content_stays_within_the_supplied_rectangle() {
         let ctx = egui::Context::default();
-        let area = egui::Rect::from_min_size(egui::Pos2::new(620.0, 0.0), egui::vec2(360.0, 480.0));
+        let area =
+            egui::Rect::from_min_size(egui::Pos2::new(300.0, 0.0), egui::vec2(1080.0, 480.0));
         let mut state = State::default();
         state.open_diff();
-        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 600.0));
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 600.0));
+        let gone = super::super::drawer::Title {
+            project: None,
+            folder: "No source console".into(),
+            unavailable: true,
+        };
         let frame = |state: &mut State| {
             ctx.run_ui(
                 egui::RawInput {
                     screen_rect: Some(screen),
                     ..Default::default()
                 },
-                |ui| show(state, ui, area, crate::theme::Theme::default(), true, false),
+                |ui| {
+                    show(
+                        state,
+                        ui,
+                        area,
+                        crate::theme::Theme::default(),
+                        true,
+                        false,
+                        (&tabs(false), &gone),
+                    )
+                },
             )
         };
         frame(&mut state).drop_without_applying_deltas();
@@ -567,7 +602,7 @@ mod tests {
         }
         output.drop_without_applying_deltas();
         for expected in [
-            "Review changes",
+            "Changes",
             "Local changes",
             "No source console - unavailable",
         ] {

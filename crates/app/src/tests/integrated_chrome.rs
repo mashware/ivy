@@ -139,11 +139,11 @@ mod tests {
         }
     }
 
-    /// Same-project headers both carry the project's stripe; focus moves the panel surface and the
-    /// accent outline between them; a console without a project has no stripe. Ivy Night's panel,
-    /// chrome and accent are written out.
+    /// Same-project headers carry no stripe (the owner removed it, 17 November 2026); focus moves
+    /// the panel surface between them, and the focused console is outlined in its project's ink —
+    /// the accent once it has none. Ivy Night's panel, chrome and accent are written out.
     #[test]
-    fn project_stripes_stay_put_while_focus_moves_the_surface_and_outline() {
+    fn focus_moves_the_surface_and_an_outline_in_the_projects_ink() {
         let ctx = egui::Context::default();
         chrome::prepare(&ctx);
         let mut window = window_with("sleep 30", "sleep 30");
@@ -164,84 +164,70 @@ mod tests {
         let panel = egui::Color32::from_rgb(0x3b, 0x37, 0x2e);
         let chrome = egui::Color32::from_rgb(0x2c, 0x29, 0x21);
         let accent = egui::Color32::from_rgb(0x3c, 0xc3, 0x84);
-        let stripes = |shapes: &[egui::epaint::ClippedShape]| -> Vec<egui::Rect> {
+        let line = egui::Color32::from_rgb(0x25, 0x2e, 0x33);
+        let stripes = |shapes: &[egui::epaint::ClippedShape]| {
             shapes
                 .iter()
-                .filter_map(|s| match &s.shape {
-                    egui::Shape::Rect(r) if r.rect.width() == 3.0 && r.fill == ink => Some(r.rect),
-                    _ => None,
-                })
-                .collect()
+                .filter(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect.width() == 3.0 && r.fill == ink))
+                .count()
         };
-        let header_on = |shapes: &[egui::epaint::ClippedShape], stripe: egui::Rect| {
+        let header = |shapes: &[egui::epaint::ClippedShape], fill: egui::Color32| {
             shapes.iter().find_map(|s| match &s.shape {
                 egui::Shape::Rect(r)
-                    if r.rect.min == stripe.min
-                        && r.rect.height() == stripe.height()
-                        && r.rect.width() > 100.0 =>
+                    if r.fill == fill && r.rect.width() > 100.0 && r.rect.height() <= 40.0 =>
                 {
-                    Some(r.fill)
+                    Some(r.rect)
                 }
                 _ => None,
             })
         };
-        let outlined_rects =
-            |shapes: &[egui::epaint::ClippedShape]| -> Vec<(egui::Color32, egui::Rect)> {
-                shapes
-                    .iter()
-                    .filter_map(|s| match &s.shape {
-                        egui::Shape::Rect(r)
-                            if r.fill == egui::Color32::TRANSPARENT
-                                && r.stroke.width == 1.0
-                                && r.rect.height() > 100.0 =>
-                        {
-                            Some((r.stroke.color, r.rect))
-                        }
-                        _ => None,
-                    })
-                    .collect()
-            };
-        let outlined = |shapes: &[egui::epaint::ClippedShape]| -> Vec<egui::Color32> {
-            outlined_rects(shapes).into_iter().map(|(c, _)| c).collect()
-        };
-        // The accent outline goes round the focused console: the one whose stripe it contains.
-        let accent_around = |shapes: &[egui::epaint::ClippedShape], stripe: egui::Rect| {
-            outlined_rects(shapes)
-                .into_iter()
-                .any(|(c, rect)| c == accent && rect.contains_rect(stripe))
+        let outline_around = |shapes: &[egui::epaint::ClippedShape], inside: egui::Rect| {
+            shapes.iter().find_map(|s| match &s.shape {
+                egui::Shape::Rect(r)
+                    if r.fill == egui::Color32::TRANSPARENT
+                        && r.stroke.width == 1.0
+                        && r.rect.height() > 100.0
+                        && r.rect.contains(inside.center()) =>
+                {
+                    Some(r.stroke.color)
+                }
+                _ => None,
+            })
         };
         let baseline = frame(&mut window, &ctx, area, vec![]);
-        let rects = stripes(&baseline);
-        assert_eq!(rects.len(), 2, "both project headers carry the stripe");
-        assert_eq!(header_on(&baseline, rects[0]), Some(panel));
-        assert_eq!(header_on(&baseline, rects[1]), Some(chrome));
-        let line = egui::Color32::from_rgb(0x25, 0x2e, 0x33);
-        let outlines = outlined(&baseline);
         assert_eq!(
-            outlines.iter().filter(|c| **c == accent).count(),
-            1,
-            "{outlines:?}"
+            stripes(&baseline),
+            0,
+            "a project header still paints a stripe"
         );
-        assert_eq!(
-            outlines.iter().filter(|c| **c == line).count(),
-            1,
-            "{outlines:?}"
+        let focused = header(&baseline, panel).expect("the focused header is on the panel");
+        let other = header(&baseline, chrome).expect("the other header is on the chrome");
+        assert!(
+            focused.left() < other.left(),
+            "focus starts on the first console"
         );
-        assert!(accent_around(&baseline, rects[0]));
-        assert!(!accent_around(&baseline, rects[1]));
+        assert_eq!(outline_around(&baseline, focused), Some(ink));
+        assert_eq!(outline_around(&baseline, other), Some(line));
         window.active_mut().focus = 1;
         let moved = frame(&mut window, &ctx, area, vec![]);
-        assert_eq!(stripes(&moved), rects);
+        let focused = header(&moved, panel).unwrap();
         assert!(
-            accent_around(&moved, rects[1]),
+            focused.left() > other.left() - 1.0,
+            "the surface did not follow the focus"
+        );
+        assert_eq!(
+            outline_around(&moved, focused),
+            Some(ink),
             "the outline did not follow the focus"
         );
-        assert!(!accent_around(&moved, rects[0]));
-        assert_eq!(header_on(&moved, rects[0]), Some(chrome));
-        assert_eq!(header_on(&moved, rects[1]), Some(panel));
+        window.active_mut().focus = 0;
         window.active_mut().panes_mut()[0].project = None;
         let neutral = frame(&mut window, &ctx, area, vec![]);
-        assert_eq!(stripes(&neutral), vec![rects[1]]);
+        let first = window.active().panes()[0].name;
+        assert_eq!(window.active().focus, first);
+        let plain = header(&neutral, egui::Color32::from_rgb(0x17, 0x1d, 0x21))
+            .expect("a console without a project keeps the plain panel");
+        assert_eq!(outline_around(&neutral, plain), Some(accent));
     }
 
     fn has_text(shapes: &[egui::epaint::ClippedShape], needle: &str) -> bool {
@@ -315,20 +301,39 @@ mod tests {
         }
     }
 
-    fn connection_button(area: egui::Rect) -> egui::Pos2 {
-        let from_right = if chrome::strip::is_compact(area.width()) {
-            57.0
-        } else if cfg!(target_os = "macos") {
-            91.0
-        } else {
-            193.0
-        };
-        egui::pos2(area.right() - from_right, area.top() + 20.0)
+    /// The full bar's buttons over `area`, laid out as the title bar lays them.
+    fn slots(area: egui::Rect) -> chrome::strip::Slots {
+        chrome::strip::slots(egui::Rect::from_min_size(
+            area.min,
+            egui::vec2(area.width(), crate::theme::metrics::TITLE_BAR_HEIGHT),
+        ))
     }
 
+    fn connection_button(area: egui::Rect) -> egui::Pos2 {
+        if chrome::strip::is_compact(area.width()) {
+            // Left of the compact bar's 40-point menu, one 28-point button wide.
+            egui::pos2(area.right() - 54.0, area.top() + 20.0)
+        } else {
+            slots(area).connect.center()
+        }
+    }
+
+    /// The connect icon drawn in the call-for-attention yellow, with no dot beside it.
     fn connection_highlight(shapes: &[egui::epaint::ClippedShape], area: egui::Rect) -> bool {
-        let dot = connection_button(area) + egui::vec2(8.0, -8.0);
-        shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Circle(c) if c.center.distance(dot) < 0.1 && c.radius == 3.0))
+        let yellow = crate::theme::Theme::default().color(term_core::TermColor::Indexed(3));
+        let button = egui::Rect::from_center_size(connection_button(area), egui::vec2(28.0, 28.0));
+        assert!(
+            !shapes
+                .iter()
+                .any(|s| matches!(&s.shape, egui::Shape::Circle(c)
+                if button.expand(4.0).contains(c.center) && c.radius == 3.0)),
+            "the connect button still carries a dot"
+        );
+        shapes.iter().any(|s| {
+            matches!(&s.shape, egui::Shape::Path(path)
+            if button.contains(path.points[0])
+                && path.stroke.color == egui::epaint::ColorMode::Solid(yellow))
+        })
     }
 
     fn open_connection_guide(
@@ -357,8 +362,8 @@ mod tests {
             let shapes = open_connection_guide(&mut window, &ctx, area);
             assert!(has_text(&shapes, "Connect agents"));
             assert!(
-                !has_text(&shapes, "Markdown viewer"),
-                "viewer overlaps the modal"
+                !has_text(&shapes, "Choose a Markdown file in Files."),
+                "the drawer overlaps the modal"
             );
             assert!(has_text(&shapes, "No panels published yet"));
             let heading = text_center(&shapes, "Connect agents");
@@ -380,17 +385,10 @@ mod tests {
             frame(&mut window, &ctx, area, click_at(close));
             let shapes = frame(&mut window, &ctx, area, vec![]);
             assert!(!has_text(&shapes, "No panels published yet"));
-            if width >= 700.0 {
-                assert!(
-                    has_text(&shapes, "Markdown viewer"),
-                    "viewer did not resume after closure"
-                );
-            } else {
-                assert!(
-                    !has_text(&shapes, "Markdown viewer"),
-                    "the dock body was not suppressed below its minimum width"
-                );
-            }
+            assert!(
+                has_text(&shapes, "Choose a Markdown file in Files."),
+                "the drawer did not resume after closure at {width}"
+            );
         }
     }
 
@@ -782,7 +780,7 @@ mod tests {
     }
 
     #[test]
-    fn ivy_logo_sits_after_the_split_buttons_and_before_the_tabs() {
+    fn ivy_logo_opens_the_bar_before_files_and_the_tabs() {
         let ctx = egui::Context::default();
         chrome::prepare(&ctx);
         let texture = ctx.data(|data| {
@@ -795,7 +793,7 @@ mod tests {
         window.headers = window.headers.integrated(true);
         for (width, visible) in [
             (1400.0, true),
-            (480.0, true),
+            (600.0, true),
             (240.0, false),
             (100.0, false),
         ] {
@@ -817,7 +815,9 @@ mod tests {
                 let left = if cfg!(target_os = "macos") { 78.0 } else { 6.0 };
                 assert!(bounds.top() >= area.top());
                 assert!(bounds.bottom() <= area.top() + crate::theme::metrics::TITLE_BAR_HEIGHT);
-                assert!(bounds.left() >= area.left() + left + 2.0 * 34.0 + 14.0);
+                // The logo opens the bar; Files stands a little apart after it, then the tabs.
+                assert!(bounds.left() >= area.left() + left);
+                assert!(bounds.right() + 8.0 <= slots(area).files.left());
                 assert!(bounds.right() <= tabs.left());
             }
         }
@@ -1121,11 +1121,11 @@ mod tests {
         window.headers = window.headers.integrated(true);
         let area = area_of(1400.0);
         frame(&mut window, &ctx, area, vec![]);
-        let search = egui::pos2(area.right() - 159.0, area.top() + 24.0);
+        let search = slots(area).search.center();
         frame(&mut window, &ctx, area, click_at(search));
         assert!(window.active().panes()[0].search.is_open());
         assert!(!window.active().panes()[1].search.is_open());
-        let menu = egui::pos2(area.right() - 125.0, area.top() + 24.0);
+        let menu = slots(area).menu.center();
         frame(&mut window, &ctx, area, click_at(menu));
         let shapes = frame(&mut window, &ctx, area, vec![]);
         assert!(
@@ -1269,7 +1269,7 @@ mod tests {
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 3]);
         window.chrome.enable();
         window.headers = window.headers.integrated(true);
-        let area = area_of(900.0);
+        let area = area_of(1016.0);
         frame(&mut window, &ctx, area, vec![]);
         let at = tab_target(&window, &ctx, area, 1, "body");
         let button = |pressed| egui::Event::PointerButton {
@@ -1783,7 +1783,7 @@ mod tests {
         *window.active_mut().panes_mut()[0] = pane_with_panel(r#"{"lines":["Visible document"]}"#);
         let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 800.0));
         frame(&mut window, &ctx, area, vec![]);
-        let menu = egui::pos2(area.right() - 125.0, area.top() + 24.0);
+        let menu = slots(area).menu.center();
         frame(&mut window, &ctx, area, click_at(menu));
         let shapes = frame(&mut window, &ctx, area, vec![]);
         for label in [
@@ -1805,7 +1805,13 @@ mod tests {
             "Git diff viewer",
             "Board",
         ] {
-            assert!(!has_text(&shapes, label), "menu retained {label}");
+            // The title bar's own labelled Board button is not the menu.
+            let in_menu = shapes.iter().any(|shape| {
+                matches!(&shape.shape, egui::Shape::Text(text)
+                    if text.galley.text() == label
+                        && text.pos.y > crate::theme::metrics::TITLE_BAR_HEIGHT)
+            });
+            assert!(!in_menu, "menu retained {label}");
         }
         let notes = text_center(&shapes, "What's new").y;
         let check = text_center(&shapes, "Check for updates").y;
@@ -1906,14 +1912,11 @@ mod tests {
         ctx: &egui::Context,
         area: egui::Rect,
     ) -> Vec<egui::epaint::ClippedShape> {
-        let offset = if chrome::strip::is_compact(area.width()) {
-            20.0
-        } else if cfg!(target_os = "macos") {
-            23.0
+        let at = if chrome::strip::is_compact(area.width()) {
+            egui::pos2(area.right() - 20.0, area.top() + 20.0)
         } else {
-            125.0
+            slots(area).menu.center()
         };
-        let at = egui::pos2(area.right() - offset, area.top() + 20.0);
         frame(window, ctx, area, vec![]);
         frame(window, ctx, area, click_at(at));
         frame(window, ctx, area, vec![])
@@ -2269,6 +2272,9 @@ mod tests {
                             _ => None,
                         })
                         .unwrap();
+                    let in_menu = |label: &str| {
+                        shapes.iter().any(|shape| shape.clip_rect == menu_clip && matches!(&shape.shape, egui::Shape::Text(t) if t.galley.text() == label))
+                    };
                     for removed in [
                         "New tab",
                         "Split right",
@@ -2276,9 +2282,12 @@ mod tests {
                         "Toggle information panel",
                         "Markdown viewer",
                         "Git diff viewer",
-                        "Board",
                     ] {
-                        assert!(!shapes.iter().any(|shape| shape.clip_rect == menu_clip && matches!(&shape.shape, egui::Shape::Text(t) if t.galley.text() == removed)), "menu retained {removed}");
+                        assert!(!in_menu(removed), "menu retained {removed}");
+                    }
+                    // A compact bar has no room for the tools' buttons, so its menu carries them.
+                    for tool in ["Files", "Markdown", "Board"] {
+                        assert_eq!(in_menu(tool), width < 500.0, "{tool} at {width}");
                     }
                     let at = text_center(&shapes, label);
                     separate_click(&mut window, &ctx, area, at);
@@ -2678,7 +2687,7 @@ mod tests {
     /// shows its number and the named one its name cut with «…», both inside the label's room.
     #[test]
     fn tab_labels_fit_their_room_whole_cut_or_as_a_number() {
-        for width in [616.0, 650.0, 690.0, 716.0, 1400.0] {
+        for width in [760.0, 794.0, 834.0, 860.0, 1400.0] {
             let ctx = egui::Context::default();
             let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
             window.chrome.enable();
@@ -2843,14 +2852,14 @@ mod tests {
         };
         // The control: no such row before the search opens.
         assert!(!search_row(&frame(&mut window, &ctx, area, vec![])));
-        let search = egui::pos2(area.right() - 159.0, area.top() + 24.0);
+        let search = slots(area).search.center();
         frame(&mut window, &ctx, area, click_at(search));
         // Read before the menu opens: an open menu dims the consoles beneath it.
         assert!(
             search_row(&frame(&mut window, &ctx, area, vec![])),
             "the search row is not on raised"
         );
-        let menu = egui::pos2(area.right() - 125.0, area.top() + 24.0);
+        let menu = slots(area).menu.center();
         frame(&mut window, &ctx, area, click_at(menu));
         let shapes = frame(&mut window, &ctx, area, vec![]);
         let mut all = Vec::new();

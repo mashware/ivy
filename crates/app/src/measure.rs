@@ -2017,7 +2017,7 @@ mod tests {
         // These synthetic values exercise the script's extraction patterns; they are not runtime
         // measurements or evidence for a performance claim.
         window_spans.extend_from_slice(
-            b"sidebar application: frames=1, total=1ms\nsidebar witnesses: selected=Board, preferred_width=520, effective_width=520, console_grid=0=49x39;1=49x21, pane_identities=2, switches=2, resize_delta=40\n",
+            b"sidebar application: frames=1, total=1ms\nsidebar witnesses: selected=Board, drawer_height=370, effective_width=520, console_grid=0=49x39;1=49x21, pane_identities=2, switches=2, resize_delta=40\n",
         );
         // Use the real producer so the script's chrome witnesses are tied to its output.
         let mut chrome = crate::chrome::Chrome::default();
@@ -2743,14 +2743,14 @@ mod tests {
         let root = std::env::temp_dir().join(format!("ivy-sidebar-guard-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let report = root.join("report.txt");
-        let witnesses = "sidebar witnesses: selected=none, preferred_width=480, effective_width=0, console_grid=0=49x39, pane_identities=1, switches=0, resize_delta=0\n";
+        let witnesses = "sidebar witnesses: selected=none, drawer_height=370, effective_width=0, console_grid=0=49x39, pane_identities=1, switches=0, resize_delta=0\n";
         for (dock, frames, witness, expected) in [
             ("closed", 1, witnesses, true),
             ("closed", 0, witnesses, false),
             (
                 "closed",
                 1,
-                "sidebar witnesses: selected=none, preferred_width=480, effective_width=0, console_grid=0=49x39, pane_identities=10, switches=0, resize_delta=0\n",
+                "sidebar witnesses: selected=none, drawer_height=370, effective_width=0, console_grid=0=49x39, pane_identities=10, switches=0, resize_delta=0\n",
                 false,
             ),
         ] {
@@ -2772,7 +2772,7 @@ mod tests {
                 "dock={dock}, frames={frames}, witness={witness}"
             );
         }
-        let open_witnesses = "sidebar witnesses: selected=Board, preferred_width=480, effective_width=480, console_grid=0=49x39, pane_identities=1, switches=2, resize_delta=40\n";
+        let open_witnesses = "sidebar witnesses: selected=Board, drawer_height=370, effective_width=480, console_grid=0=49x39, pane_identities=1, switches=2, resize_delta=40\n";
         for (frames, expected) in [(1, true), (0, false)] {
             std::fs::write(
                 &report,

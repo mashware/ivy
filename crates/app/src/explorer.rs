@@ -1,6 +1,7 @@
 //! A window-owned file surface with navigation owned by runtime console identity.
 mod load;
 mod model;
+mod search;
 mod view;
 
 use crate::{Window, painter::CellMetrics};
@@ -41,6 +42,16 @@ pub(crate) struct Explorer {
     events: Option<Vec<egui::Event>>,
     viewport_rows: usize,
     row_stride: f32,
+    /// The floating name search is open.
+    searching: bool,
+    search_index: usize,
+    search_rect: Option<egui::Rect>,
+    /// The console whose query the open search shows: the search closes when focus leaves it.
+    search_pane: Option<usize>,
+    /// The arrows moved the choice; the list scrolls it into view once.
+    search_scroll: bool,
+    focus_search: bool,
+    pick: Option<search::Pick>,
 }
 
 impl Default for Explorer {
@@ -64,6 +75,13 @@ impl Default for Explorer {
             events: None,
             viewport_rows: 24,
             row_stride: 27.0,
+            searching: false,
+            search_index: 0,
+            search_rect: None,
+            search_pane: None,
+            search_scroll: false,
+            focus_search: false,
+            pick: None,
         }
     }
 }
@@ -208,10 +226,34 @@ impl Explorer {
         area
     }
 
+    pub(crate) fn visible(&self) -> bool {
+        self.visible
+    }
+
     fn hide(&mut self) {
         self.visible = false;
         self.keyboard = false;
         self.resizing = false;
+        self.searching = false;
+        self.search_rect = None;
+    }
+
+    /// Open the floating name search with its field focused.
+    fn open_search(&mut self, pane: Option<usize>) {
+        self.searching = true;
+        self.search_pane = pane;
+        self.focus_search = true;
+        self.keyboard = true;
+        self.search_index = 0;
+    }
+
+    fn close_search(&mut self, pane: Option<usize>) {
+        if let Some(nav) = pane.and_then(|pane| self.navigation.get_mut(&pane)) {
+            nav.query.clear();
+        }
+        self.searching = false;
+        self.search_rect = None;
+        self.search_pane = None;
     }
 }
 
@@ -226,6 +268,18 @@ pub(crate) fn suspend(window: &mut Window) {
     window.explorer.hide();
     window.explorer.held = false;
     window.explorer.queued_open = false;
+}
+
+/// Leave the keys to another surface that has just opened; Files stays shown.
+pub(crate) fn blur(window: &mut Window) {
+    window.explorer.keyboard = false;
+}
+
+/// Where the floating search list lies, painted over the dividers and the drawer: what is under
+/// it does not take a press.
+pub(crate) fn list_rect(window: &Window) -> Option<egui::Rect> {
+    let state = &window.explorer;
+    state.search_rect.filter(|_| state.searching)
 }
 
 pub(crate) fn reveal(window: &mut Window) {
@@ -278,15 +332,25 @@ pub(crate) fn before_keys(
         if !state.visible && !state.held && state.blocked_frame != Some(frame) {
             return (false, false);
         }
-        let Some(area) = crate::tab_bar::geometry(window, ui.max_rect(), metrics).dock else {
+        let Some(area) = crate::tab_bar::geometry(window, ui.max_rect(), metrics).files else {
             window.explorer.keyboard = false;
             window.explorer.held = false;
             return (false, false);
         };
         let state = &mut window.explorer;
+        if state.searching && state.search_pane != target {
+            let left = state.search_pane;
+            state.close_search(left);
+        }
         let rect = state.rect(area);
+        // The floating search overhangs the consoles; a press on it is Files', not theirs.
+        let list = state.search_rect.filter(|_| state.searching);
         let over = state.visible
-            && ctx.input(|i| i.pointer.interact_pos().is_some_and(|p| rect.contains(p)));
+            && ctx.input(|i| {
+                i.pointer
+                    .interact_pos()
+                    .is_some_and(|p| rect.contains(p) || list.is_some_and(|r| r.contains(p)))
+            });
         if ctx.input(|i| i.pointer.any_pressed()) && !state.held {
             state.keyboard = over;
             state.held = over;
@@ -303,21 +367,17 @@ pub(crate) fn before_keys(
             state.keyboard || gesture || (over && pointer) || state.blocked_frame == Some(frame);
         if state.visible && state.keyboard {
             if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-                if let Some(nav) = target
-                    .and_then(|pane| state.navigation.get_mut(&pane))
-                    .filter(|nav| !nav.query.is_empty())
-                {
-                    nav.query.clear();
-                    nav.scroll = 0.0;
-                    nav.refresh();
+                // Escape leaves the search before it closes Files.
+                if state.searching {
+                    state.close_search(target);
                 } else {
                     state.hide();
                 }
-            } else if let Some(pane) = target
-                && !ctx.memory(|memory| {
-                    memory.has_focus(egui::Id::new(("explorer-name-search", pane)))
-                })
-            {
+            } else if state.searching {
+                if let Some(pane) = target {
+                    state.pick = search::keys(state, pane, ctx).or(state.pick.take());
+                }
+            } else if let Some(pane) = target {
                 view::keys(state, pane, ctx);
             }
         }
@@ -337,17 +397,6 @@ pub(crate) fn before_keys(
             }
             crate::sidebar::consume_input(window, ctx);
         }
-        if !window.explorer.visible
-            && window.sidebar.markdown_maximized
-            && crate::sidebar::files_visible(window)
-        {
-            crate::sidebar::select(window, crate::sidebar::Tool::Files);
-        }
-        if !window.explorer.visible
-            && crate::sidebar::active(window) == Some(crate::sidebar::Tool::Files)
-        {
-            crate::sidebar::close(window, ctx);
-        }
         (owned, pointer_owned)
     })();
     window.sidebar.record(started.elapsed());
@@ -360,7 +409,6 @@ pub(crate) fn show(window: &mut Window, ui: &mut egui::Ui, area: egui::Rect) {
         || window.board.is_open()
         || window.pane_view.is_modal()
         || window.chrome.guide_blocked(ui.ctx())
-        || (crate::viewer::is_open(window) && !window.sidebar.markdown_maximized)
     {
         return;
     }
@@ -375,20 +423,29 @@ pub(crate) fn show(window: &mut Window, ui: &mut egui::Ui, area: egui::Rect) {
         if let Some(events) = window.explorer.events.take() {
             ui.ctx().input_mut(|input| input.events = events);
         }
-        let open = view::show(&mut window.explorer, ui, area, target, window.theme);
-        ui.ctx().input_mut(|input| input.events = filtered);
-        if !window.explorer.visible {
-            if window.sidebar.markdown_maximized {
-                crate::sidebar::select(window, crate::sidebar::Tool::Files);
-            } else {
-                crate::sidebar::close(window, ui.ctx());
+        let mut open = view::show(&mut window.explorer, ui, area, target, window.theme);
+        let state = &mut window.explorer;
+        if let Some(pane) = target.filter(|_| state.searching && state.visible) {
+            let clicked = search::show(state, ui.ctx(), pane, area, &window.theme);
+            match clicked.or(state.pick.take()) {
+                Some(search::Pick::Reveal(path)) => search::reveal(state, pane, &path),
+                Some(search::Pick::Open(entry)) => {
+                    search::reveal(state, pane, &entry.path);
+                    let opened = view::activate(state, pane, &entry);
+                    if opened.is_none() && entry.kind != EntryKind::Directory {
+                        state.message = "Only Markdown files open in the drawer.".into();
+                    }
+                    open = open.or(opened);
+                }
+                None => {}
             }
+        } else {
+            state.search_rect = None;
+            state.pick = None;
         }
+        ui.ctx().input_mut(|input| input.events = filtered);
         if let Some((pane, path)) = open {
             if crate::viewer::open_markdown_target(window, pane, path, None) {
-                if !window.sidebar.markdown_maximized {
-                    window.explorer.hide();
-                }
                 ui.ctx().request_repaint();
             } else {
                 window.explorer.message =

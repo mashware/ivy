@@ -80,6 +80,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/sidebar/probe.rs"),
     ),
     (
+        "app/src/sidebar/layout.rs",
+        include_str!("../src/sidebar/layout.rs"),
+    ),
+    (
         "app/src/sidebar/tests.rs",
         include_str!("../src/sidebar/tests.rs"),
     ),
@@ -413,6 +417,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/viewer/diff.rs"),
     ),
     (
+        "app/src/viewer/drawer.rs",
+        include_str!("../src/viewer/drawer.rs"),
+    ),
+    (
         "app/src/viewer/review.rs",
         include_str!("../src/viewer/review.rs"),
     ),
@@ -654,6 +662,15 @@ const MODULES: &[(&str, &str)] = &[
         "app/src/chrome/strip.rs",
         include_str!("../src/chrome/strip.rs"),
     ),
+    (
+        "app/src/chrome/tools.rs",
+        include_str!("../src/chrome/tools.rs"),
+    ),
+    (
+        "app/src/explorer/search.rs",
+        include_str!("../src/explorer/search.rs"),
+    ),
+    ("app/src/ui/icons.rs", include_str!("../src/ui/icons.rs")),
     (
         "app/src/tab_bar/title.rs",
         include_str!("../src/tab_bar/title.rs"),

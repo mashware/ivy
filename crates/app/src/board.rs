@@ -409,7 +409,7 @@ mod tests {
             .board
             .card_rect(selected)
             .expect("selected card visible");
-        crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Markdown);
         crate::sidebar::select(&mut window, crate::sidebar::Tool::Board);
         frame(&mut window, vec![]);
         assert_eq!(window.board.selected(), Some(selected));

@@ -18,6 +18,32 @@ pub(crate) struct Strip {
     pub(crate) focused: bool,
 }
 
+/// What a console's header calls it: the name somebody gave it; the title an agent set; otherwise
+/// its foreground program — after its folder when no project names the place — rather than the
+/// shell's `user@host:path` title, which the owner found said nothing (17 November 2026).
+fn header_label(pane: &crate::Pane) -> std::borrow::Cow<'_, str> {
+    let named = pane
+        .label
+        .as_deref()
+        .is_some_and(|label| !label.trim().is_empty());
+    let agent = pane.signals.view(std::time::Instant::now()).is_some();
+    match &pane.program {
+        Some((folder, program)) if !named && !agent => {
+            let mut letters = program.chars();
+            let program: String = letters
+                .next()
+                .map(|first| first.to_uppercase().chain(letters).collect())
+                .unwrap_or_default();
+            if pane.project.is_some() || folder.is_empty() {
+                program.into()
+            } else {
+                format!("{folder} / {program}").into()
+            }
+        }
+        _ => crate::pane_view::display_label(pane),
+    }
+}
+
 /// Paint and time exactly one strip, preserving the existing accounting boundary.
 pub(crate) fn paint_strip(
     ui: &egui::Ui,
@@ -28,7 +54,7 @@ pub(crate) fn paint_strip(
 ) -> std::time::Duration {
     let started = std::time::Instant::now();
     if strip.integrated {
-        let label = crate::pane_view::display_label(pane);
+        let label = header_label(pane);
         paint(
             ui,
             strip.header,
@@ -144,9 +170,6 @@ struct Appearance<'a> {
     project: Option<&'a crate::project_view::Badge>,
 }
 
-/// The stripe a project paints down the header's left edge.
-const STRIPE: f32 = 3.0;
-
 /// `ink` brought toward `toward` a tenth at a time until it reads at `contrast` on `surface`, and
 /// black or white, whichever reads better, when even `toward` does not. The roles' text is chosen
 /// against the plain panel and chrome, and a header is tinted with its project's ink.
@@ -232,11 +255,6 @@ fn paint(
     );
     let ink = colors.name;
     if let Some(project) = project {
-        painter.rect_filled(
-            egui::Rect::from_min_max(strip.min, egui::pos2(strip.left() + STRIPE, strip.bottom())),
-            0.0,
-            project.ink,
-        );
         project
             .painted
             .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -290,11 +308,12 @@ fn paint(
                 _ if hovered => roles.tx,
                 _ => roles.tx2,
             };
-            paint_icon(&painter, rect.center(), target, zoomed, icon, 13.0);
+            let size = if target == Target::Review { 13.0 } else { 12.0 };
+            paint_icon(&painter, rect.center(), target, zoomed, icon, size);
             continue;
         }
         let clipped = painter.with_clip_rect(rect.intersect(painter.clip_rect()));
-        let mut left = egui::pos2(rect.left() + STRIPE + 8.0, rect.center().y);
+        let mut left = egui::pos2(rect.left() + 8.0, rect.center().y);
         if let Some(agent) = agent {
             let logo =
                 egui::Rect::from_center_size(left + egui::vec2(8.0, 0.0), egui::Vec2::splat(16.0))
@@ -349,7 +368,8 @@ fn paint(
     }
 }
 
-/// The prototype's 24-unit SVG paths, scaled to the caller's icon box.
+/// The kit's 16-unit icons (`Window.dc.html`) in a `size`-point box: the branch for the review,
+/// diagonal arrows to maximize and back, and the cross.
 pub(crate) fn paint_icon(
     painter: &egui::Painter,
     center: egui::Pos2,
@@ -358,58 +378,46 @@ pub(crate) fn paint_icon(
     color: egui::Color32,
     size: f32,
 ) {
-    let scale = size / 24.0;
-    let at = |x, y| center + egui::vec2(x, y) * scale;
-    let stroke = egui::Stroke::new(1.6 * scale, color);
-    let line = |a, b| {
-        painter.line_segment([a, b], stroke);
-    };
-    let outline = |a, b| {
-        painter.rect_stroke(
-            egui::Rect::from_min_max(a, b),
-            scale,
-            stroke,
-            egui::StrokeKind::Middle,
-        );
-    };
-    match target {
-        Target::Review => {
-            line(at(-5.0, -5.0), at(-5.0, 5.0));
-            line(at(5.0, -5.0), at(5.0, -1.0));
-            line(at(5.0, -1.0), at(-5.0, 3.0));
-            for p in [at(-5.0, -6.0), at(-5.0, 6.0), at(5.0, -6.0)] {
-                painter.circle_filled(p, 2.0 * scale, color);
-            }
-        }
-        Target::Panel => {
-            outline(at(-9.0, -8.0), at(9.0, 8.0));
-            line(at(3.0, -8.0), at(3.0, 8.0));
-        }
-        Target::Zoom if zoomed => {
-            for (a, b) in [
-                ((-3.0, -7.0), (-3.0, -9.0)),
-                ((-3.0, -9.0), (9.0, -9.0)),
-                ((9.0, -9.0), (9.0, 3.0)),
-                ((9.0, 3.0), (7.0, 3.0)),
-            ] {
-                line(at(a.0, a.1), at(b.0, b.1));
-            }
-            outline(at(-9.0, -3.0), at(3.0, 9.0));
-        }
-        Target::Zoom => {
-            outline(at(-7.0, -7.0), at(7.0, 7.0));
-        }
-        Target::Close => {
-            line(at(-6.0, -6.0), at(6.0, 6.0));
-            line(at(6.0, -6.0), at(-6.0, 6.0));
-        }
+    use crate::ui::icons::{Icon, paint};
+    let icon = match target {
+        Target::Review => Icon::Branch,
+        Target::Panel => Icon::Panel,
+        Target::Zoom if zoomed => Icon::Collapse,
+        Target::Zoom => Icon::Expand,
+        Target::Close => Icon::Close,
         Target::Label => unreachable!(),
-    }
+    };
+    paint(painter, center, icon, size, color);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_console_without_an_agent_is_named_by_its_folder_and_program() {
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        let pane = &mut *window.active_mut().panes_mut()[0];
+        pane.program = Some(("tax-platform".into(), "bash".into()));
+        assert_eq!(header_label(pane), "tax-platform / Bash");
+        pane.project = Some(crate::project_view::Badge {
+            key: crate::project::Key::Repository("/work/tax".into()),
+            name: "TaxPlatform".into(),
+            details: "/work/tax".into(),
+            ink: Color32::WHITE,
+            painted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        });
+        assert_eq!(
+            header_label(pane),
+            "Bash",
+            "the project already names the place"
+        );
+        pane.label = Some("deploy".into());
+        assert_eq!(header_label(pane), "deploy", "a name somebody gave wins");
+        pane.label = None;
+        pane.program = None;
+        assert_eq!(header_label(pane), crate::pane_view::display_label(pane));
+    }
 
     #[test]
     fn pane_icons_match_the_prototype_paths_and_have_no_overflow_control() {
@@ -439,18 +447,19 @@ mod tests {
                 ]
             );
         });
+        // The kit's cross: two strokes 8 of its 16 units across, 1.5 units wide.
         let lines: Vec<_> = out
             .shapes
             .iter()
             .filter_map(|s| match &s.shape {
-                egui::Shape::LineSegment { points, stroke } => Some((points, stroke)),
+                egui::Shape::Path(path) => Some(path),
                 _ => None,
             })
             .collect();
         assert_eq!(lines.len(), 2);
-        for (points, stroke) in lines {
-            assert!(((points[1].x - points[0].x).abs() - 6.5).abs() < 0.001);
-            assert!((stroke.width - 13.0 * 1.6 / 24.0).abs() < 0.001);
+        for path in lines {
+            assert!(((path.points[1].x - path.points[0].x).abs() - 6.5).abs() < 0.001);
+            assert!((path.stroke.width - 13.0 * 1.5 / 16.0).abs() < 0.001);
         }
         out.drop_without_applying_deltas();
     }
@@ -626,13 +635,13 @@ mod tests {
                     if r.rect == strip && r.fill == surface)),
                 "focused={focused}: the header is not on its surface"
             );
-            let stripe = egui::Rect::from_min_size(strip.min, egui::vec2(3.0, 28.0));
+            // The owner removed the stripe on 17 November 2026: the tint and the ink name stay.
             assert!(
-                out.shapes
+                !out.shapes
                     .iter()
                     .any(|s| matches!(&s.shape, egui::Shape::Rect(r)
-                    if r.rect == stripe && r.fill == ink)),
-                "the project stripe is missing"
+                    if r.rect.width() == 3.0 && r.fill == ink)),
+                "the project stripe is back"
             );
             assert!(
                 !out.shapes
@@ -795,8 +804,11 @@ mod tests {
                 .shapes
                 .iter()
                 .filter_map(|s| match &s.shape {
-                    egui::Shape::LineSegment { points, stroke } if close.contains(points[0]) => {
-                        Some(stroke.color)
+                    egui::Shape::Path(path) if close.contains(path.points[0]) => {
+                        match path.stroke.color {
+                            egui::epaint::ColorMode::Solid(color) => Some(color),
+                            _ => None,
+                        }
                     }
                     _ => None,
                 })
@@ -821,8 +833,11 @@ mod tests {
                 out.shapes
                     .iter()
                     .filter_map(|s| match &s.shape {
-                        egui::Shape::LineSegment { points, stroke } if rect.contains(points[0]) => {
-                            Some(stroke.color)
+                        egui::Shape::Path(path) if rect.contains(path.points[0]) => {
+                            match path.stroke.color {
+                                egui::epaint::ColorMode::Solid(color) => Some(color),
+                                _ => None,
+                            }
                         }
                         _ => None,
                     })

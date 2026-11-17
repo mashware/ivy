@@ -1,12 +1,14 @@
 //! Read-only document views, independent of console and producer identity.
 mod delivery;
 mod diff;
+mod drawer;
 mod load;
 pub(crate) mod markdown;
 mod origin;
 mod review;
 mod view;
 
+pub(crate) use drawer::StripAction;
 use eframe::egui;
 use load::{Job, Kind, Loaded};
 use std::{
@@ -264,6 +266,100 @@ pub(crate) fn activate(window: &mut crate::Window, markdown: bool) {
     }
 }
 
+/// The drawer place under `pos`, as the strip is laid out over `dock` this frame.
+pub(crate) fn strip_action(
+    window: &crate::Window,
+    dock: egui::Rect,
+    pos: egui::Pos2,
+) -> Option<StripAction> {
+    drawer::Strip::framed(dock, &drawer::tabs(window)).at(pos)
+}
+
+/// Where the strip paints `action` over `dock`, for tests that click it as a person would.
+#[cfg(test)]
+pub(crate) fn strip_place(
+    window: &crate::Window,
+    dock: egui::Rect,
+    action: StripAction,
+) -> Option<egui::Pos2> {
+    drawer::Strip::framed(dock, &drawer::tabs(window))
+        .places
+        .iter()
+        .find(|(which, _)| *which == action)
+        .map(|(_, place)| place.center())
+}
+
+pub(crate) fn apply_strip_action(
+    window: &mut crate::Window,
+    action: StripAction,
+    ctx: &egui::Context,
+) {
+    match action {
+        StripAction::Changes => activate(window, false),
+        StripAction::Document => activate(window, true),
+        StripAction::Unified | StripAction::SideBySide => {
+            for state in [&mut window.viewer, &mut window.viewer_other] {
+                if state.tool_markdown == Some(false) {
+                    state
+                        .review
+                        .set_side_by_side(action == StripAction::SideBySide);
+                }
+            }
+        }
+        StripAction::CloseChanges => close_tab(window, false, ctx),
+        StripAction::CloseDocument => close_tab(window, true, ctx),
+        StripAction::Maximize => crate::sidebar::toggle_maximize(window),
+        StripAction::Close => crate::sidebar::close(window, ctx),
+    }
+    ctx.request_repaint();
+}
+
+/// Close one tab of the drawer: its view forgets what it showed, the other tab takes the drawer,
+/// and with no other tab the drawer closes. A review with unsent comments is kept and says why.
+fn close_tab(window: &mut crate::Window, markdown: bool, ctx: &egui::Context) {
+    let other_shown = {
+        let tabs = drawer::tabs(window);
+        if markdown {
+            tabs.changes.is_some()
+        } else {
+            tabs.document.is_some()
+        }
+    };
+    let state = if window.viewer.tool_markdown.unwrap_or(true) == markdown {
+        &mut window.viewer
+    } else {
+        &mut window.viewer_other
+    };
+    if state.review.has_comments() {
+        state.message = "Send or clear the review comments before closing the review.".into();
+        return;
+    }
+    let kept = State {
+        context: state.context.take(),
+        tool_markdown: state.tool_markdown,
+        ..State::default()
+    };
+    *state = kept;
+    let active = crate::sidebar::active(window);
+    let closed = if markdown {
+        crate::sidebar::Tool::Markdown
+    } else {
+        crate::sidebar::Tool::Git
+    };
+    if active == Some(closed) {
+        if other_shown {
+            activate(window, !markdown);
+        } else {
+            crate::sidebar::close(window, ctx);
+        }
+    }
+}
+
+/// Leave the keys to Files, which has just opened beside the drawer.
+pub(crate) fn blur(window: &mut crate::Window) {
+    window.viewer.keyboard = false;
+}
+
 pub(crate) fn release_gesture(window: &mut crate::Window) {
     window.viewer.held = false;
 }
@@ -318,7 +414,7 @@ pub(crate) fn before_keys(
         };
         select_state(window, markdown);
         let geometry = crate::tab_bar::geometry(window, ui.max_rect(), metrics);
-        let Some(rect) = geometry.document.or(geometry.dock) else {
+        let Some(rect) = geometry.dock else {
             window.viewer.keyboard = false;
             window.viewer.held = false;
             window.viewer.refresh_at = None;
@@ -342,7 +438,7 @@ pub(crate) fn before_keys(
         let pointer_activity =
             ctx.input(|i| i.pointer.any_pressed() || i.smooth_scroll_delta != egui::Vec2::ZERO);
         let was_open = window.viewer.open;
-        let reading_keys = window.sidebar.markdown_maximized
+        let reading_keys = window.sidebar.maximized
             && ctx.input(|i| {
                 i.events.iter().any(|event| {
                     matches!(
@@ -431,17 +527,47 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
     if let Some(events) = window.viewer.events.take() {
         ctx.input_mut(|input| input.events = events);
     }
+    let tabs = drawer::tabs(window);
+    let title = title(window, unavailable);
     view::show(
         &mut window.viewer,
         ui,
         dock,
         window.theme,
         unavailable,
-        window.sidebar.markdown_maximized,
+        window.sidebar.maximized,
+        (&tabs, &title),
     );
     ctx.input_mut(|input| input.events = filtered);
     window.viewer.record(started.elapsed());
     window.timed_separately += window.viewer.take_cost();
+}
+
+/// The strip's name for what the drawer shows: the source console's project, or the folder it
+/// reads; the terminal's own title says nothing a person needs here.
+fn title(window: &crate::Window, unavailable: bool) -> drawer::Title {
+    let origin = window.viewer.origin.as_ref();
+    let project = origin
+        .and_then(|origin| window.all_panes().find(|pane| pane.name == origin.pane))
+        .and_then(|pane| pane.project.as_ref())
+        .map(|badge| (badge.name.clone(), badge.ink));
+    let folder = window
+        .viewer
+        .requested
+        .as_ref()
+        .filter(|(_, kind)| *kind != Kind::Markdown)
+        .map(|(path, _)| path.clone())
+        .or_else(|| origin.and_then(|origin| origin.cwd.clone()))
+        .and_then(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| "No source console".to_owned());
+    drawer::Title {
+        project,
+        folder,
+        unavailable,
+    }
 }
 
 pub(crate) use origin::{open_diff_for_pane, open_markdown_target};
@@ -456,6 +582,7 @@ mod tests;
 pub(crate) fn hide(window: &mut crate::Window) {
     suspend(window);
 }
+#[cfg(test)]
 pub(crate) fn is_open(window: &crate::Window) -> bool {
     window.viewer.open
 }
