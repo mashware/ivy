@@ -63,12 +63,13 @@ impl Palette {
             0.20,
         );
         fixed.line2 = fixed.apart(roles.line2, &[surface], surface, 0.40);
-        let caret = fixed.apart(
-            roles.accent,
-            &[roles.base, surface, fixed.sel],
-            surface,
-            1.0,
-        );
+        // The caret is the accent, or the ink itself where the accent would vanish: it is a line
+        // drawn over fields and the selection, not a surface text sits on.
+        let caret = if Roles::stands_apart(roles.accent, &[roles.base, surface, fixed.sel]) {
+            roles.accent
+        } else {
+            ink
+        };
         Self {
             surface,
             nav,
