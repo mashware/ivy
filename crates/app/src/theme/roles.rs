@@ -12,8 +12,9 @@
 use super::{Theme, mix, project_ink_contrast};
 use eframe::egui::{Color32, epaint::Shadow};
 
-/// The contrast text roles are brought to over the surfaces text is set on. A theme's own
-/// foreground is kept as written even where its hover takes it under this (D94).
+/// The contrast the derived text roles are brought to over the console, panel, raised, hover and
+/// chrome surfaces. A theme's own foreground is kept as written even where a surface takes it
+/// under this (D94).
 const TEXT_CONTRAST: f32 = 4.5;
 
 /// Below this contrast two colours read as one. The kit's own quietest step — Ivy Night's `hover`
@@ -101,7 +102,7 @@ impl Roles {
     }
 
     /// `role`, unless it vanishes into one of the fills it is painted over: then `from` stepped
-    /// toward the text until it stands apart from all of them.
+    /// toward the text (see the free `apart`).
     pub(crate) fn apart(
         &self,
         role: Color32,
@@ -222,8 +223,8 @@ fn stands_apart(colour: Color32, over: &[Color32]) -> bool {
 }
 
 /// `role`, unless it vanishes into one of the fills it is painted over: then `from` stepped toward
-/// `tx`, first by `amount` and then in two even steps toward it, until it stands apart from all
-/// of them. With no step enough, the first step: a fill that is visible somewhere beats the ink.
+/// `tx` — by `amount`, then in even steps, and at last all the way — taking the first that stands
+/// apart from all of them. The text itself stands apart from any surface it is readable on.
 fn apart(role: Color32, over: &[Color32], from: Color32, tx: Color32, amount: f32) -> Color32 {
     if stands_apart(role, over) {
         return role;
@@ -237,7 +238,7 @@ fn apart(role: Color32, over: &[Color32], from: Color32, tx: Color32, amount: f3
         .into_iter()
         .map(|step| mix(from, tx, step))
         .find(|c| stands_apart(*c, over))
-        .unwrap_or_else(|| mix(from, tx, amount))
+        .unwrap_or(tx)
 }
 
 /// The selection: `tinted` when it stands apart from the fills it sits among, else an 18 % step of
@@ -253,8 +254,8 @@ fn selection(
     if stands_apart(tinted, among) {
         return tinted;
     }
-    // An 18 % step stands apart from the background and from the 6 % and 9 % surfaces by
-    // construction, which is why there is no further fallback.
+    // The step, not a search: the selection is chosen to read as a step of the background, and
+    // a further fallback toward the text is what once returned the text colour itself.
     text_surface(bg, tx, 0.18, corrected)
 }
 
@@ -367,6 +368,22 @@ mod collapse_tests {
         assert_eq!(r.tx, rgb(0x839496));
         assert_eq!(r.raised, rgb(0x08313c));
         assert_eq!(r.hover, rgb(0x0c343f));
+    }
+
+    /// `apart` keeps a role that stands out, takes the first step toward the text that does, and
+    /// ends at the text itself when no step does.
+    #[test]
+    fn apart_steps_toward_the_text_and_ends_at_it() {
+        let rgb = |hex: u32| Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+        let (bg, tx) = (rgb(0x202020), rgb(0xe0e0e0));
+        assert_eq!(apart(rgb(0x606060), &[bg], bg, tx, 0.2), rgb(0x606060));
+        // The first step lands on a fill; the second does not.
+        let first = mix(bg, tx, 0.2);
+        let second = mix(bg, tx, 0.2 + 0.8 / 3.0);
+        assert_eq!(apart(bg, &[bg, first], bg, tx, 0.2), second);
+        // Every step lands on a fill: the text.
+        let third = mix(bg, tx, 0.2 + 1.6 / 3.0);
+        assert_eq!(apart(bg, &[bg, first, second, third], bg, tx, 0.2), tx);
     }
 
     /// A narrow foreground with the focus on the background: the selection moves off the
