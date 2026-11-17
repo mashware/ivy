@@ -10053,8 +10053,9 @@ ink and the ink on every control keep 4.5:1 over the fill they sit on; its navig
 `base`). Where a collapsed palette makes a fill, a control's border, the selection, the primary
 button or the caret indistinguishable from what lies under it (under 1.03:1, below the kit's own
 quietest step), that one colour is moved toward the ink — to the nearest step that stands apart, stopping short
-of the ink, since a fill painted in it would hide the text on it; the caret, a line and not a
-fill, becomes the ink itself — so the control can still be found; Settings
+of the ink itself; text on a moved fill is re-inked to what reads on it, which is what keeps it
+legible; the caret, a line and not a fill, becomes the ink itself — so the control can still be
+found; Settings
 paints from the roles with those corrections written back, so its outline and every field egui
 derives from them carry them too. Nothing else is
 corrected: an explicit focus is the person's colour verbatim (D94) wherever it can be seen, and the

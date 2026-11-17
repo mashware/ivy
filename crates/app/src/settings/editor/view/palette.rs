@@ -53,17 +53,10 @@ impl Palette {
         // The navigation sits on the person's own `panel` colour; where that leaves its text
         // unreadable it falls back to the dialog's surface rather than hide the way back.
         let nav = roles.panel_or(ink, surface);
-        // Hover is painted on the dialog and, as the chosen segment, on a field's track (`base`).
-        fixed.hover = fixed.apart(roles.hover, &[surface, roles.base], surface, 0.10);
-        // The selection is painted over a field (`base`), the dialog, the navigation and a hovered
-        // row alike, so it has to stand apart from every one of them.
-        fixed.sel = fixed.apart(
-            roles.sel,
-            &[fixed.hover, roles.base, surface, nav],
-            surface,
-            0.20,
-        );
-        fixed.line2 = fixed.apart(roles.line2, &[surface], surface, 0.40);
+        // Hover, the selection and the control border need no floor of their own here: the roles
+        // already keep them apart on a collapsed palette (D98). The selection is the one fill that
+        // also sits on the navigation, which is Settings' own surface.
+        fixed.sel = fixed.apart(roles.sel, &[nav], surface, 0.20);
         // The caret — the text cursor and a pressed control's border — is drawn over fields, the
         // dialog, the selection, a pressed control's hover fill and the navigation: the accent where
         // it stands apart from all of them, else the ink.

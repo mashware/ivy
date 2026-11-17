@@ -360,7 +360,10 @@ fn segmented(ui: &mut egui::Ui, value: &mut usize, labels: &[&str]) {
             egui::Align2::CENTER_CENTER,
             *label,
             egui::FontId::new(12.0, crate::fonts::ui_weight(ui.ctx(), 500)),
-            if selected || response.hovered() {
+            // The chosen segment sits on the hover fill, so it takes the ink made for that fill.
+            if selected {
+                v.widgets.hovered.fg_stroke.color
+            } else if response.hovered() {
                 v.widgets.inactive.fg_stroke.color
             } else {
                 v.weak_text_color()

@@ -409,8 +409,9 @@ mod collapse_tests {
             stands_apart(step, &[fill]) && stands_apart(step, &[text]),
             "{step:?}"
         );
-        // Near black, with the fills (and the text) crowding every step up to 0x10: nothing
-        // stands apart, so the first step rather than a shade of the text.
+        // Near black, with fills at 0x00–0x06 and the text 0x10 listed: every step between lies
+        // under 1.03:1 from 0x06 or from 0x10 (0x0b and 0x0c by a hair), so nothing stands apart
+        // and the first step comes back.
         let (dark, dark_text) = (grey(0x00), grey(0x10));
         let mut crowd: Vec<Color32> = (0x00..=0x06).map(grey).collect();
         crowd.push(dark_text);
@@ -418,6 +419,10 @@ mod collapse_tests {
             apart(dark, &crowd, dark, dark_text, 0.2),
             mix(dark, dark_text, 0.2)
         );
+        // The search stops short of the text: with every grey but the text listed, the only colour
+        // left that stands apart is the text itself, and the answer is the first step instead.
+        let all_but_text: Vec<Color32> = (0..=255u8).filter(|v| *v != 0xe0).map(grey).collect();
+        assert_eq!(apart(bg, &all_but_text, bg, tx, 0.2), first);
         // Nothing stands apart (the fills cover every step): the first step, not the text.
         let all: Vec<Color32> = (0..=255).map(grey).collect();
         assert_eq!(apart(bg, &all, bg, tx, 0.2), first);
