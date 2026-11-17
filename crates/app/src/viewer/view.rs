@@ -36,8 +36,10 @@ pub(super) fn show(
                 ui.set_clip_rect(rect);
                 ui.set_min_size(rect.size());
                 ui.set_max_size(rect.size());
-                let surface = mix(theme.background(), theme.foreground(), 0.045);
-                let line = mix(surface, theme.foreground(), 0.16);
+                // Header and footer on the side-list surface, the document on the console's own
+                // background: the kit's floating viewer.
+                let roles = crate::ui::style::roles(parent.ctx(), &theme);
+                let (surface, line) = (roles.panel, roles.line);
                 let frame = egui::Frame::new()
                     .fill(surface)
                     .corner_radius(0)
@@ -50,68 +52,45 @@ pub(super) fn show(
                         .layout(egui::Layout::top_down(egui::Align::Min)),
                 );
                 content.set_clip_rect(inner);
-                style(&mut content, theme, surface, line);
+                style(&mut content, &theme);
                 let (head, rest) =
                     inner.split_top_bottom_at_y((inner.top() + 62.0).min(inner.bottom()));
-                header(state, &mut content, head, theme, line, maximized);
+                header(state, &mut content, head, line, maximized);
                 if !state.open {
                     return;
                 }
                 let (body, foot) =
                     rest.split_top_bottom_at_y((rest.bottom() - 38.0).max(rest.top()));
-                footer(state, &mut content, foot, theme, line, unavailable);
+                footer(state, &mut content, foot, line, unavailable);
                 let mut body_ui = content.new_child(
                     egui::UiBuilder::new()
                         .max_rect(body)
                         .layout(egui::Layout::top_down(egui::Align::Min)),
                 );
                 body_ui.set_clip_rect(body);
+                body_ui.painter().rect_filled(body, 0.0, roles.base);
                 body_content(state, &mut body_ui, theme, unavailable);
             });
         });
 }
 
-fn mix(a: Color32, b: Color32, fraction: f32) -> Color32 {
-    let channel =
-        |a: u8, b: u8| (f32::from(a) * (1.0 - fraction) + f32::from(b) * fraction).round() as u8;
-    Color32::from_rgb(
-        channel(a.r(), b.r()),
-        channel(a.g(), b.g()),
-        channel(a.b(), b.b()),
-    )
-}
-
-fn style(ui: &mut egui::Ui, theme: crate::theme::Theme, surface: Color32, line: Color32) {
+fn style(ui: &mut egui::Ui, theme: &crate::theme::Theme) {
+    crate::ui::floating::style(ui, theme);
     let style = ui.style_mut();
-    let bg = theme.background();
-    style.visuals = if u16::from(bg.r()) + u16::from(bg.g()) + u16::from(bg.b()) < 384 {
-        egui::Visuals::dark()
-    } else {
-        egui::Visuals::light()
-    };
     style.override_font_id = Some(FontId::proportional(13.0));
     style.spacing.item_spacing = egui::vec2(6.0, 6.0);
     style.spacing.button_padding = egui::vec2(8.0, 5.0);
-    style.visuals.override_text_color = Some(theme.foreground());
-    style.visuals.panel_fill = surface;
-    style.visuals.window_fill = surface;
-    style.visuals.window_stroke = egui::Stroke::new(1.0, line);
-    style.visuals.extreme_bg_color = theme.background();
-    style.visuals.widgets.inactive.bg_fill = surface;
-    style.visuals.widgets.inactive.weak_bg_fill = surface;
-    style.visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, line);
-    style.visuals.widgets.inactive.corner_radius = 5.into();
-    style.visuals.widgets.hovered.bg_fill = mix(surface, theme.foreground(), 0.08);
-    style.visuals.widgets.hovered.weak_bg_fill = mix(surface, theme.foreground(), 0.08);
-    style.visuals.selection.bg_fill = mix(surface, theme.foreground(), 0.09);
-    style.visuals.selection.stroke = egui::Stroke::new(1.0, theme.foreground());
+}
+
+/// Secondary text in the viewer's chrome: the path, the source console, the save note.
+fn muted(ui: &egui::Ui) -> Color32 {
+    ui.visuals().weak_text_color()
 }
 
 fn header(
     state: &mut State,
     ui: &mut egui::Ui,
     rect: egui::Rect,
-    theme: crate::theme::Theme,
     line: Color32,
     maximized: bool,
 ) {
@@ -154,7 +133,7 @@ fn header(
         } else {
             crate::sidebar::Tool::Git
         },
-        theme.foreground(),
+        ui.visuals().widgets.inactive.fg_stroke.color,
     );
     if markdown {
         let target = crate::sidebar::maximize_rect(rect.expand(1.0));
@@ -183,7 +162,7 @@ fn header(
             target.center(),
             crate::header::integrated::Target::Zoom,
             maximized,
-            theme.foreground(),
+            ui.visuals().widgets.inactive.fg_stroke.color,
             24.0,
         );
     }
@@ -207,11 +186,7 @@ fn header(
         let mut path_ui = ui.new_child(egui::UiBuilder::new().max_rect(path_rect));
         path_ui
             .add(
-                egui::Label::new(RichText::new(&path).size(11.0).color(mix(
-                    theme.background(),
-                    theme.foreground(),
-                    0.6,
-                )))
+                egui::Label::new(RichText::new(&path).size(11.0).color(muted(ui)))
                 .truncate(),
             )
             .on_hover_text(path);
@@ -222,7 +197,6 @@ fn footer(
     state: &State,
     ui: &mut egui::Ui,
     rect: egui::Rect,
-    theme: crate::theme::Theme,
     line: Color32,
     unavailable: bool,
 ) {
@@ -245,20 +219,12 @@ fn footer(
         source.to_owned()
     };
     child.add(
-        egui::Label::new(RichText::new(&source).size(11.0).color(mix(
-            theme.background(),
-            theme.foreground(),
-            0.6,
-        )))
+        egui::Label::new(RichText::new(&source).size(11.0).color(muted(ui)))
         .truncate(),
     );
     if state.kind == Kind::Markdown {
         child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(RichText::new("Updates on save").size(11.0).color(mix(
-                theme.background(),
-                theme.foreground(),
-                0.6,
-            )));
+            ui.label(RichText::new("Updates on save").size(11.0).color(muted(ui)));
         });
     }
 }
@@ -425,7 +391,6 @@ mod tests {
                 &mut state,
                 ui,
                 area,
-                crate::theme::Theme::default(),
                 Color32::GRAY,
                 false,
             )

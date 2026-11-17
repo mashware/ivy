@@ -66,10 +66,10 @@ fn override_badge_is_compact_instead_of_taking_control_height() {
         visit(&clipped.shape, &mut |shape| {
             if let egui::epaint::Shape::Rect(rect) = shape
                 && rect.stroke.color
-                    == palette::Palette::new(appearance::effective_theme(
+                    == crate::theme::Roles::of(&appearance::effective_theme(
                         editor.draft.as_ref().unwrap(),
                     ))
-                    .border
+                    .line2
                 && rect.rect.contains(label.center())
             {
                 badge = Some(rect.rect);

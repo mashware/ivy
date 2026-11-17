@@ -68,7 +68,7 @@ pub(super) fn show(
                 &field.value
             };
             let width = (ui.available_width() - 190.0).max(120.0);
-            let response = selector(ui, title, width);
+            let response = selector(ui, title, width, 0.0);
             editor.font_rect = Some(response.rect);
             if response.clicked() {
                 editor.font_requests += 1;

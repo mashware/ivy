@@ -339,3 +339,55 @@ fn color_popup_accepts_exact_hex_edit_without_dismissing() {
         "#123456"
     );
 }
+
+/// Each theme in the picker carries its four-colour sample beside its name, and the segmented
+/// filter narrows the list to the light themes.
+#[test]
+fn the_theme_picker_samples_each_theme_and_filters_by_darkness() {
+    let mut editor = Editor {
+        draft: Some(crate::settings::document::Document::new("theme=ivy-night\n".into())),
+        ..Default::default()
+    };
+    let ctx = egui::Context::default();
+    let size = egui::vec2(1100.0, 850.0);
+    click_label(&mut editor, &ctx, "Change");
+    let (text, shapes) = scene(&mut editor, &ctx, size, vec![]);
+    let mut rects = Vec::new();
+    for clipped in &shapes {
+        fills(&clipped.shape, &mut rects);
+    }
+    // The menu's rows sit under its search field; the button above them names the theme too.
+    let rows_below = |text: &[(String, egui::Rect)]| {
+        let search = text.iter().find(|(s, _)| s == "Search themes...").expect("picker open").1;
+        text.iter()
+            .filter(|(_, r)| r.top() > search.bottom())
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let rows = rows_below(&text);
+    let rgb = |hex: u32| egui::Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+    for (name, colors) in [
+        ("Ivy Night (default)", [0x13181b, 0x3cc384, 0xf2b84b, 0x72b7f2]),
+        ("Ivy Day", [0xfafbf8, 0x0b7a4b, 0x9a5b00, 0x1d63b0]),
+    ] {
+        let row = rows
+            .iter()
+            .find(|(s, _)| s == name)
+            .unwrap_or_else(|| panic!("{name} row: {text:?}"))
+            .1;
+        let strips: Vec<_> = rects
+            .iter()
+            .filter(|(r, _)| r.size() == egui::vec2(8.0, 14.0) && (r.center().y - row.center().y).abs() < 1.0 && r.right() <= row.left())
+            .map(|(_, c)| *c)
+            .collect();
+        assert_eq!(strips, colors.map(rgb), "{name}");
+    }
+    click_label(&mut editor, &ctx, "Light");
+    let (text, _) = scene(&mut editor, &ctx, size, vec![]);
+    let rows = rows_below(&text);
+    assert!(rows.iter().any(|(s, _)| s == "Ivy Day"), "{rows:?}");
+    assert!(
+        !rows.iter().any(|(s, _)| s.starts_with("Ivy Night") || s == "Tokyo Night"),
+        "{rows:?}"
+    );
+}

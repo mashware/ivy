@@ -9,7 +9,6 @@ pub(super) struct Palette {
     pub surface: Color32,
     pub nav: Color32,
     pub ink: Color32,
-    pub border: Color32,
     pub accent: Color32,
     pub selected_ink: Color32,
     pub hover: Color32,
@@ -44,7 +43,6 @@ impl Palette {
             surface,
             nav: roles.panel,
             ink: readable(roles.tx, surface, 4.5),
-            border: roles.line2,
             accent: roles.accent,
             selected_ink: roles.on_accent,
             hover: distinct(roles.hover, surface, roles.tx, 0.10),
@@ -139,7 +137,7 @@ mod tests {
             )));
             let p = Palette::new(theme);
             assert_eq!(
-                [p.surface, p.nav, p.border, p.accent, p.selected_ink],
+                [p.surface, p.nav, p.roles.line2, p.accent, p.selected_ink],
                 [raised, panel, line2, accent, on_accent].map(rgb),
                 "{id}"
             );

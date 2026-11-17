@@ -132,9 +132,9 @@ fn form(
         ui.painter().rect_filled(
             side,
             egui::CornerRadius {
-                nw: 14,
+                nw: crate::theme::metrics::RADIUS_DIALOG,
                 ne: 0,
-                sw: 14,
+                sw: crate::theme::metrics::RADIUS_DIALOG,
                 se: 0,
             },
             ui.visuals().panel_fill,
@@ -142,7 +142,7 @@ fn form(
         ui.painter().vline(
             side.right(),
             side.y_range(),
-            egui::Stroke::new(1.0, ui.visuals().window_stroke.color),
+            egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
         );
         ui.painter().text(
             side.min + egui::vec2(28.0, 30.0),
@@ -290,7 +290,7 @@ fn main_column(
     ui.painter().hline(
         main.x_range(),
         footer_top,
-        egui::Stroke::new(1.0, ui.visuals().window_stroke.color),
+        egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
     );
     let mut foot_ui = ui.new_child(
         egui::UiBuilder::new()

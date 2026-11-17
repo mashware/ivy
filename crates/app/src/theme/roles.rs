@@ -80,9 +80,6 @@ pub(crate) mod metrics {
     /// A tab inside the title bar, sitting on its bottom edge.
     pub const TAB_HEIGHT: f32 = 34.0;
     pub const CONSOLE_HEADER_HEIGHT: f32 = 28.0;
-    /// A floating viewer's header and its toolbar: the design's two 40-point strips.
-    pub const FLOATING_HEADER_HEIGHT: f32 = 40.0;
-    pub const FLOATING_FOOTER_HEIGHT: f32 = 26.0;
     /// A row of a floating menu or list.
     pub const MENU_ROW_HEIGHT: f32 = 30.0;
 }

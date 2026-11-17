@@ -194,11 +194,7 @@ fn menu_item(ui: &mut egui::Ui, label: &str, enabled: bool) -> bool {
     ui.add_enabled(enabled, button).clicked()
 }
 
-fn split_buttons(
-    ui: &mut egui::Ui,
-    theme: crate::theme::Theme,
-    enabled: [bool; 2],
-) -> Option<usize> {
+fn split_buttons(ui: &mut egui::Ui, enabled: [bool; 2]) -> Option<usize> {
     let width = (ui.available_width() - 2.0).max(0.0) / 2.0;
     let mut chosen = None;
     ui.horizontal(|ui| {
@@ -292,7 +288,7 @@ pub(crate) fn before_keys(
                                 let roles = crate::ui::style::roles(ui.ctx(), &theme);
                                 ui.visuals_mut().widgets.hovered.weak_bg_fill = roles.hover;
                                 ui.visuals_mut().widgets.active.weak_bg_fill = roles.sel;
-                                if let Some(index) = split_buttons(ui, theme, enabled) {
+                                if let Some(index) = split_buttons(ui, enabled) {
                                     action = Some(5 + index);
                                 }
                                 ui.separator();
