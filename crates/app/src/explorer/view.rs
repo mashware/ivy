@@ -26,7 +26,12 @@ impl Icon {
 
 /// One of the header's icon buttons, on the roles: hover on `hover`, ink on `tx2`, a dimmed ink
 /// while no local directory backs it.
-fn icon_button(ui: &mut egui::Ui, icon: Icon, available: bool, roles: &crate::theme::Roles) -> bool {
+fn icon_button(
+    ui: &mut egui::Ui,
+    icon: Icon,
+    available: bool,
+    roles: &crate::theme::Roles,
+) -> bool {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::click());
     let response = response
         .on_hover_text(icon.hint())
@@ -35,7 +40,9 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, available: bool, roles: &crate::th
         } else {
             egui::CursorIcon::NotAllowed
         });
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, available, icon.hint()));
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, available, icon.hint())
+    });
     if available && (response.hovered() || response.is_pointer_button_down_on()) {
         ui.painter().rect_filled(rect, 5.0, roles.hover);
     }
@@ -46,7 +53,10 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, available: bool, roles: &crate::th
     match icon {
         Icon::Search => {
             painter.circle_stroke(center + egui::vec2(-1.5, -1.5), 5.0, stroke);
-            painter.line_segment([center + egui::vec2(2.0, 2.0), center + egui::vec2(6.0, 6.0)], stroke);
+            painter.line_segment(
+                [center + egui::vec2(2.0, 2.0), center + egui::vec2(6.0, 6.0)],
+                stroke,
+            );
         }
         Icon::Refresh => {
             let points = (0..=20)
@@ -58,7 +68,11 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, available: bool, roles: &crate::th
             painter.add(egui::Shape::line(points, stroke));
             let tip = center + egui::vec2(6.5, -3.5);
             painter.add(egui::Shape::line(
-                vec![tip + egui::vec2(-4.0, 0.0), tip, tip + egui::vec2(0.0, -4.0)],
+                vec![
+                    tip + egui::vec2(-4.0, 0.0),
+                    tip,
+                    tip + egui::vec2(0.0, -4.0),
+                ],
                 stroke,
             ));
         }
@@ -91,7 +105,12 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, available: bool, roles: &crate::th
 pub(super) fn icon_at(ctx: &egui::Context, icon: Icon) -> Option<egui::Pos2> {
     ctx.data(|data| {
         data.get_temp::<Vec<(Icon, egui::Rect)>>(egui::Id::new("explorer-icons"))
-            .and_then(|icons| icons.iter().find(|(which, _)| *which == icon).map(|(_, r)| r.center()))
+            .and_then(|icons| {
+                icons
+                    .iter()
+                    .find(|(which, _)| *which == icon)
+                    .map(|(_, r)| r.center())
+            })
     })
 }
 
@@ -314,7 +333,12 @@ pub(super) fn show(
                 body.horizontal(|ui| {
                     let (icon, _) =
                         ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
-                    paint_file_icon(ui.painter(), icon, true, egui::Stroke::new(1.0, roles.accent));
+                    paint_file_icon(
+                        ui.painter(),
+                        icon,
+                        true,
+                        egui::Stroke::new(1.0, roles.accent),
+                    );
                     let name = root
                         .file_name()
                         .map(|name| display(Path::new(name)))
@@ -415,10 +439,8 @@ pub(super) fn show(
                                     center + egui::vec2(-1.5, 3.0),
                                 ]
                             };
-                            ui.painter().add(egui::Shape::line(
-                                points,
-                                egui::Stroke::new(1.2, roles.tx3),
-                            ));
+                            ui.painter()
+                                .add(egui::Shape::line(points, egui::Stroke::new(1.2, roles.tx3)));
                             let toggle_rect = egui::Rect::from_min_size(
                                 egui::pos2(row_rect.left() + indent, row_rect.top()),
                                 egui::vec2(18.0, row_rect.height()),

@@ -1436,7 +1436,7 @@ impl eframe::App for Window {
             &metrics,
             header_owns_pointer,
             // Neither the Board's claim nor the sidebar's: both flip from frame to frame with the
-            // pointer (a move over the Board, a wheel delta over the rail), and dimming on them made
+            // pointer (a move over the Board, a wheel delta over Files), and dimming on them made
             // the title bar blink under the mouse.
             viewer_owned || pane_owned || chrome_owned,
         );
@@ -21717,8 +21717,8 @@ mod tests {
         // test, because the drag was tested without painting and the painting without dragging.
         let area = area_of(800.0 + DIVIDER_THICKNESS);
         let mut window = window_with("sleep 30", "sleep 30");
-        // The divider's center with the initial fraction: half of what is shareable after the
-        // rail, where the floor per console does not get to bite.
+        // The divider's center with the initial fraction: half of what is shareable after
+        // whatever the sidebar reserves, where the floor per console does not get to bite.
         let consoles = console_area(&window, area);
         let shareable = consoles.width() - DIVIDER_THICKNESS;
         let grip = egui::pos2(
@@ -22755,13 +22755,13 @@ mod tests {
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
         let cell = with_metrics(CellMetrics::width);
         // Each pane keeps the console's floor plus a hair: the panel has two points to spare.
-        // Include the rail width reserved by the shared geometry so that each console, rather than
+        // Include whatever width the sidebar geometry reserves so that each console, rather than
         // the whole window, receives this carefully chosen width.
         let console_floor = panel::MINIMUM_CONSOLE * cell + 16.0 + 1.0;
         let base_width = 2.0 * console_floor + DIVIDER_THICKNESS;
         let base_area = area_of(base_width);
-        let rail = base_area.width() - console_area(&window, base_area).width();
-        let area = area_of(base_width + rail);
+        let reserved = base_area.width() - console_area(&window, base_area).width();
+        let area = area_of(base_width + reserved);
         with_the_panel_in_place(&mut window, 0, r#"{"lines":["working"]}"#);
         one_frame_in(&mut window, &ctx, area, Vec::new());
 

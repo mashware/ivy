@@ -708,6 +708,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         0,
     ),
     (
+        "src/explorer/search.rs",
+        include_str!("../src/explorer/search.rs"),
+        0,
+    ),
+    (
         "src/tab_bar/title.rs",
         include_str!("../src/tab_bar/title.rs"),
         20,

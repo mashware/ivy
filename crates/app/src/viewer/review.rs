@@ -115,38 +115,9 @@ impl Review {
                 .max_height(55.0)
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        for (index, file) in doc.files.iter().enumerate() {
-                            ui.vertical(|ui| {
-                                if ui
-                                    .selectable_label(index == self.file, &file.display)
-                                    .clicked()
-                                {
-                                    self.file = index;
-                                    self.hunk = 0;
-                                    self.scroll_to = Some(0);
-                                }
-                                let added = file
-                                    .hunks
-                                    .iter()
-                                    .flat_map(|h| &h.lines)
-                                    .filter(|line| line.kind == Change::Added)
-                                    .count();
-                                let removed = file
-                                    .hunks
-                                    .iter()
-                                    .flat_map(|h| &h.lines)
-                                    .filter(|line| line.kind == Change::Removed)
-                                    .count();
-                                ui.horizontal(|ui| {
-                                    ui.colored_label(
-                                        self.theme.color(term_core::TermColor::Indexed(2)),
-                                        format!("+{added}"),
-                                    );
-                                    ui.colored_label(
-                                        self.theme.color(term_core::TermColor::Indexed(1)),
-                                        format!("−{removed}"),
-                                    );
-                                });
+                        for index in 0..doc.files.len() {
+                            ui.allocate_ui(egui::vec2(220.0, 26.0), |ui| {
+                                file_row(self, ui, doc, index);
                             });
                         }
                     });
@@ -308,43 +279,77 @@ fn file_list(review: &mut Review, ui: &mut egui::Ui, doc: &Document, height: f32
         .id_salt("review-files")
         .max_height(height)
         .show(ui, |ui| {
-            ui.add_space(8.0);
-            ui.indent("file-list-padding", |ui| {
-                for (index, file) in doc.files.iter().enumerate() {
-                    let added = file
-                        .hunks
-                        .iter()
-                        .flat_map(|h| &h.lines)
-                        .filter(|l| l.kind == Change::Added)
-                        .count();
-                    let removed = file
-                        .hunks
-                        .iter()
-                        .flat_map(|h| &h.lines)
-                        .filter(|l| l.kind == Change::Removed)
-                        .count();
-                    if ui
-                        .selectable_label(index == review.file, &file.display)
-                        .clicked()
-                    {
-                        review.file = index;
-                        review.hunk = 0;
-                        review.scroll_to = Some(0);
-                    }
-                    ui.horizontal(|ui| {
-                        ui.colored_label(
-                            review.theme.color(term_core::TermColor::Indexed(2)),
-                            format!("+{added}"),
-                        );
-                        ui.colored_label(
-                            review.theme.color(term_core::TermColor::Indexed(1)),
-                            format!("−{removed}"),
-                        );
-                    });
-                    ui.add_space(5.0);
-                }
-            });
+            ui.add_space(4.0);
+            for index in 0..doc.files.len() {
+                file_row(review, ui, doc, index);
+            }
         });
+}
+
+/// One changed file: its name first, then its folder dimmed, and its added and removed counts on
+/// the same row, as `Git.dc.html` draws them.
+fn file_row(review: &mut Review, ui: &mut egui::Ui, doc: &Document, index: usize) {
+    let file = &doc.files[index];
+    let count = |kind| {
+        file.hunks
+            .iter()
+            .flat_map(|h| &h.lines)
+            .filter(|l| l.kind == kind)
+            .count()
+    };
+    let (added, removed) = (count(Change::Added), count(Change::Removed));
+    let path = Path::new(&file.display);
+    let name = path.file_name().map_or_else(
+        || file.display.clone(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    let folder = path
+        .parent()
+        .map(|p| p.to_string_lossy().into_owned())
+        .filter(|p| !p.is_empty());
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), egui::Sense::click());
+    let visuals = ui.visuals();
+    let (weak, strong) = (visuals.weak_text_color(), visuals.strong_text_color());
+    if index == review.file {
+        ui.painter().rect_filled(rect, 5, visuals.selection.bg_fill);
+    } else if response.hovered() {
+        ui.painter()
+            .rect_filled(rect, 5, visuals.widgets.hovered.weak_bg_fill);
+    }
+    let painter = ui.painter_at(rect);
+    let font = egui::FontId::proportional(12.5);
+    let small = egui::FontId::proportional(11.0);
+    let green = review.theme.color(term_core::TermColor::Indexed(2));
+    let red = review.theme.color(term_core::TermColor::Indexed(1));
+    let mut right = rect.right() - 8.0;
+    for (text, color) in [(format!("−{removed}"), red), (format!("+{added}"), green)] {
+        let at = painter.text(
+            egui::pos2(right, rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            text,
+            small.clone(),
+            color,
+        );
+        right = at.left() - 6.0;
+    }
+    let mut job = egui::text::LayoutJob::default();
+    job.append(&name, 0.0, egui::TextFormat::simple(font, strong));
+    if let Some(folder) = &folder {
+        job.append(folder, 8.0, egui::TextFormat::simple(small, weak));
+    }
+    job.wrap = egui::text::TextWrapping::truncate_at_width((right - rect.left() - 14.0).max(0.0));
+    let galley = painter.layout_job(job);
+    painter.galley(
+        egui::pos2(rect.left() + 8.0, rect.center().y - galley.size().y / 2.0),
+        galley,
+        strong,
+    );
+    if response.on_hover_text(&file.display).clicked() {
+        review.file = index;
+        review.hunk = 0;
+        review.scroll_to = Some(0);
+    }
 }
 
 fn changes(review: &mut Review, ui: &mut egui::Ui, doc: &Document, height: f32) {

@@ -184,12 +184,7 @@ fn click_at(window: &mut crate::Window, ctx: &egui::Context, area: egui::Rect, p
     frame(window, ctx, area, vec![button(false)]);
 }
 
-fn click_icon(
-    window: &mut crate::Window,
-    ctx: &egui::Context,
-    area: egui::Rect,
-    icon: view::Icon,
-) {
+fn click_icon(window: &mut crate::Window, ctx: &egui::Context, area: egui::Rect, icon: view::Icon) {
     frame(window, ctx, area, vec![]);
     let at = view::icon_at(ctx, icon).unwrap_or_else(|| panic!("{icon:?} is not painted"));
     assert!(window.sidebar.last_files.unwrap().contains(at));
@@ -252,8 +247,8 @@ fn wait_for_text(
                     window.explorer.search_rect,
                 ]
                 .into_iter()
-                    .flatten()
-                    .any(|body| body.contains(*pos))
+                .flatten()
+                .any(|body| body.contains(*pos))
         }) {
             return;
         }
@@ -843,23 +838,39 @@ fn typed_name_search_finds_files_and_folders_below_collapsed_directories() {
         "the list overhangs the consoles"
     );
     let found = frame(&mut window, &ctx, area, vec![]);
-    let listed = |name: &str| found.iter().any(|(text, pos)| text == name && list.contains(*pos));
+    let listed = |name: &str| {
+        found
+            .iter()
+            .any(|(text, pos)| text == name && list.contains(*pos))
+    };
     assert!(listed("NeedleFolder"));
     assert!(listed("NeedleChild.txt"));
-    assert!(listed("src/nested/"), "a match shows its folder beside its name");
+    assert!(
+        listed("src/nested/"),
+        "a match shows its folder beside its name"
+    );
     // The tree under the list still shows it once; a match would show it a second time.
     assert_eq!(
-        found.iter().filter(|(text, _)| text == "unrelated.rs").count(),
+        found
+            .iter()
+            .filter(|(text, _)| text == "unrelated.rs")
+            .count(),
         1,
         "the search reads names, not contents"
     );
     assert_eq!(window.pane_called(pane).unwrap().keystrokes, before);
     // A click reveals the match in the tree, its folders expanded, the root where it was.
     click_text(&mut window, &ctx, area, "NeedleFolder");
-    assert!(window.explorer.search_rect.is_none(), "revealing closes the list");
+    assert!(
+        window.explorer.search_rect.is_none(),
+        "revealing closes the list"
+    );
     let nav = &window.explorer.navigation[&pane];
     assert_eq!(nav.root, Some(directory.0.clone()));
-    assert_eq!(nav.selected, Some(directory.0.join("src/nested/NeedleFolder")));
+    assert_eq!(
+        nav.selected,
+        Some(directory.0.join("src/nested/NeedleFolder"))
+    );
     assert!(nav.expanded.contains(&directory.0.join("src")));
     assert!(nav.expanded.contains(&directory.0.join("src/nested")));
     assert!(nav.query.is_empty());
@@ -892,7 +903,11 @@ fn enter_reveals_a_match_and_ctrl_enter_opens_markdown_in_the_drawer() {
     let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));
     let directory = Directory::new("search-keys");
     fs::create_dir_all(directory.0.join("docs")).unwrap();
-    fs::write(directory.0.join("docs/plan.md"), "# The plan\n\nRead in the drawer.").unwrap();
+    fs::write(
+        directory.0.join("docs/plan.md"),
+        "# The plan\n\nRead in the drawer.",
+    )
+    .unwrap();
     let command = format!("cd '{}' && exec sleep 30", directory.0.display());
     let mut window = window_of_tabs([[command.as_str(), "sleep 30"]]);
     crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
@@ -1406,9 +1421,13 @@ fn a_press_on_the_floating_list_over_a_console_never_reaches_its_program() {
             .iter()
             .filter(|(text, pos)| text == "covered-match.txt" && list.contains(*pos))
             .map(|(_, pos)| *pos)
-            .last();
+            .next_back();
         // The tree's row sits under the list too: wait for the second, the list's own.
-        if painted.iter().filter(|(text, _)| text == "covered-match.txt").count() == 2
+        if painted
+            .iter()
+            .filter(|(text, _)| text == "covered-match.txt")
+            .count()
+            == 2
             && let Some(row) = listed
         {
             break (list, row);

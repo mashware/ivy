@@ -119,8 +119,8 @@ pub(crate) fn inject(window: &mut crate::Window, raw: &mut egui::RawInput, ctx: 
         window.spent_injecting += started.elapsed();
         return;
     }
-    // The first valid geometry is a sizing pass: egui may have laid out the rail before its
-    // buttons are interactive. Let two complete geometry frames settle before injecting a click.
+    // The first valid geometry is a sizing pass: egui may have laid out the title bar before
+    // its buttons are interactive. Let two complete geometry frames settle before injecting a click.
     probe.valid_frames += 1;
     if probe.valid_frames < 2 {
         window.spent_injecting += started.elapsed();

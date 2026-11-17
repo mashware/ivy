@@ -475,6 +475,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/chrome/tools.rs"),
     ),
     (
+        "src/explorer/search.rs",
+        include_str!("../src/explorer/search.rs"),
+    ),
+    (
         "src/tab_bar/title.rs",
         include_str!("../src/tab_bar/title.rs"),
     ),

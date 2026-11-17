@@ -8674,8 +8674,10 @@ viewport icon alone proves.
 
 ## D72 — Document viewers share a transient sidebar and never become consoles
 
-**8 November 2026 — #337; amended for #73 on 15 November 2026.** Markdown and Git changes open in a
-transient shared right sidebar beside the consoles, together with Files and the global Board. The
+**8 November 2026 — #337; amended for #73 on 15 November 2026 and for #93 on 17 November 2026.**
+Markdown and Git changes open in a transient surface beside the consoles, together with Files and
+the global Board; since #93 that surface is Files on the left and a drawer below (see the last
+section). The
 console tree and its running programs retain their identity; the dock reserves their width while
 open. The sidebar is closed on restart and its width and tool state are not persisted.
 The user chooses the source explicitly: a local Markdown path, or the review control of a console.
@@ -8689,12 +8691,12 @@ its dismissal consumes the input that closed it. Tool state remains retained whi
 shown. Viewer, Board and sidebar host frame work are separately named and discounted once from the
 framework remainder; the host span excludes viewer and Board spans.
 
-The sidebar reserves a 36 point navigation rail, a 6 point divider and a preferred 480 point body.
-The body needs at least 320 points, while the console tree keeps its metric-derived floor (at least
-320 points). Below the combined floors the body and divider are temporarily suppressed, the selected
-tool remains available from the rail, and its tooltip explains that the window must be widened.
-Closing returns the body and divider width to consoles; the navigation rail remains reserved.
-Neither suppression nor resizing changes pane identities, PTYs or tree weights.
+Until #93 the sidebar reserved a 36 point navigation rail, a 6 point divider and a preferred 480
+point body of at least 320 points. The rail is gone and the geometry is the one the last section
+states. What stays: the console tree keeps its metric-derived floor (at least 320 points wide),
+a surface that cannot fit beside it is temporarily suppressed with its selection kept and a tooltip
+saying how to bring it back, and neither suppression nor resizing changes pane identities, PTYs or
+tree weights.
 
 Markdown renders headings, lists, tables and code as native widgets and refreshes when its selected
 file changes. HTML and embedded assets are inert. Loading is bounded and runs off the window thread;
@@ -8726,6 +8728,8 @@ publish the selected tool, effective width, per-pane grid and pane identity coun
 The dock-open grid intentionally differs from its closed control, so no painting speedup is inferred.
 
 ### Explorer interaction refinement — 15 November 2026, #88
+
+(Its rail icon and inline search field were replaced in #93; see the last section.)
 
 The owner rejected the explorer's extra close/pin/navigation controls and filled triangles,
 then supplied native feedback rejecting the source/cwd-change rows, large chevrons, console
@@ -8774,6 +8778,9 @@ a general text renderer, and treating a displayed path as executable code.
 
 ### Markdown reading mode (owner amendment, 15 November 2026, #89)
 
+(Replaced in #93 by the drawer's maximize, which serves Markdown and Git alike; see the last
+section. The Files companion, the rail and the document header described here are gone.)
+
 The owner requested consistent representative icons, removal of the redundant Markdown path
 picker, and maximize/restore for Markdown alone. In maximized mode the document occupies the
 content below the global chrome and tabs, while the tool rail stays reachable. Files can open as
@@ -8803,6 +8810,49 @@ already supplies explicit document selection; Unicode icon mixtures or another i
 because the existing vector style can represent these actions deterministically. No frame-cost
 improvement is claimed; host, viewer and explorer work retain their named spans.
 
+
+### Files on the left, Git and Markdown in a drawer below — 17 November 2026, #93
+
+The design kit (`Files.dc.html`, `Git.dc.html`, `DockB.dc.html`) and the owner's answers at the
+build gate replace the right sidebar. The owner chose to remove the rail «as in the mock-up», to
+keep nothing floating («no hay lo que es una ventana flotante suelta») and to put Markdown in the
+drawer as a tab.
+
+- **Files** opens on the left edge of the content area, 264 points by default, at least 200, with
+  a 6 point divider that resizes it. It is independent of the other tools: opening Git, Markdown or
+  a Markdown file leaves it where it is. Its header shows the title, Search, Refresh and Collapse
+  all, the root, and that it follows the focused console. Its rows take the theme's roles.
+- **Search** is a floating list over the window, anchored under Files' header: the existing worker
+  finds names beneath the displayed root, Enter reveals the chosen match in the tree (its folders
+  expanded, selected, scrolled into view) and Ctrl+Enter opens it. A press on the list never reaches
+  the console beneath it. Escape closes the list first, then Files.
+- **The drawer** takes the bottom of what Files leaves, 370 points by default, at least 160, inset 6
+  points from the window's edges, with a divider above it. Its strip carries the source, a Changes
+  tab (with the file count) and one document tab — the last Markdown file opened replaces it —
+  Unified / Side by side for the diff, maximize/restore and close. Every place on that strip has a
+  fixed width, so a click is resolved before the frame's tiling against the rectangles the painting
+  uses. Review rows show the file's name first, its folder dimmed and its added and removed counts
+  on the same row.
+- **Maximized**, the drawer covers the consoles at the size they already had beside it, so toggling
+  it resizes no program; Files stays beside it, and restore returns the previous height. The Board
+  covers the whole content area, Files included.
+- **Stepping aside.** Files steps aside only when it is what leaves a console under its width floor,
+  and the drawer only when it is what leaves one under its height floor — never because the tree
+  does not fit the window anyway. The tool keeps its selection and its title-bar button explains
+  how to bring it back.
+- **The doors** are title-bar buttons: Files at the left end, Board and Markdown left of the
+  right-hand group (D96 amended); a compact bar lists them in its menu. Git still opens from a
+  console's review control.
+
+Discarded: keeping the right rail (the kit draws none, and it cost every console 36 points for
+three buttons); a floating, detachable Git window (the owner asked for a drawer that grows, shrinks,
+maximizes and restores, not a loose window); maximizing by re-tiling the consoles into the space
+left (it would resize every program on each toggle, which the Board already avoids); a Markdown
+reader of its own beside Files (two document surfaces to keep in step, where one drawer with tabs
+serves both); hiding a surface because the console tree does not fit the window regardless (it
+punished the tool for a squeeze it did not cause). No frame-cost figure is claimed: the host,
+viewer and explorer work keep their named spans, and `scripts/measure-frame.sh` has not been re-run
+on this geometry.
 
 ## D73 — Connection help is global and reports observed publication
 
@@ -9725,7 +9775,7 @@ must be named and subtracted once. Native visual and interaction parity needs a 
 headless tests alone cannot establish it. No new performance figure is claimed by this decision.
 
 **Presentation correction, 15 November 2026.** At the owner's request, Board fills the content
-surface below the tabs, beside the tool rail, at every window width. There is no reduced or
+surface below the tabs (beside the tool rail until #93 removed it; since then over Files too), at every window width. There is no reduced or
 resizable Board dock. The covered consoles retain their geometry and pump budget. The duplicate
 top-toolbar shortcut is removed; the rail and keyboard binding remain available.
 Discarded: opening Board in the shared narrow dock, which hides it in narrow windows and makes
@@ -9920,6 +9970,15 @@ design draws it after the tabs, and at full width it would sit far from them); s
 the Board's resolver while the Board is closed (stale values with nobody refreshing them); keeping the
 compact threshold at 300 points (below about 380 points the full bar left the tabs a band of zero, and
 up to about 456 one too narrow for a pill, so cards, pills and the add button vanished or were cut).
+
+**Amended 17 November 2026 — #93, sixth PR.** With the right rail gone (D72), the title bar carries
+the doors to the tools: a Files button at the left end, before the split buttons, and Board and
+Markdown left of the right-hand group, behind a separator. This reverses the earlier choice not to
+put a Board button in the title bar — the rail that held it no longer exists. The extra buttons move
+the compact boundary from about 456 to **572 points on Linux and Windows and 542 on macOS**; a
+compact bar lists Files, Markdown and Board in its menu, before «Connect agents», so a short menu
+never pushes that entry out. A tool that is on but suppressed says on its button's hover how to
+bring it back.
 
 **Roles.** Hand-painted surfaces read `Roles` through `ui::style::roles`, which memoizes the last
 theme it was asked about and its roles in egui's memory. It answers any theme correctly, so it is not

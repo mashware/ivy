@@ -69,7 +69,10 @@ pub(super) fn place(files: egui::Rect, screen: egui::Rect, rows: usize) -> egui:
     let height = 4.0 * 2.0 + 30.0 + 6.0 + rows.min(ROWS) as f32 * MENU_ROW_HEIGHT + 28.0;
     egui::Rect::from_min_size(
         egui::pos2(files.left() + 8.0, files.top() + 34.0),
-        egui::vec2(width, height.min((screen.bottom() - files.top() - 40.0).max(0.0))),
+        egui::vec2(
+            width,
+            height.min((screen.bottom() - files.top() - 40.0).max(0.0)),
+        ),
     )
 }
 
@@ -239,7 +242,10 @@ fn row(
         .unwrap_or_default();
     let font = egui::FontId::proportional(12.5);
     let name_galley = ui.painter().layout_no_wrap(name, font.clone(), roles.tx);
-    let at = egui::pos2(icon.right() + 8.0, rect.center().y - name_galley.size().y / 2.0);
+    let at = egui::pos2(
+        icon.right() + 8.0,
+        rect.center().y - name_galley.size().y / 2.0,
+    );
     let name_right = at.x + name_galley.size().x;
     ui.painter().galley(at, name_galley, roles.tx);
     ui.painter().text(
