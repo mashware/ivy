@@ -454,7 +454,12 @@ fn every_theme_sample_shows_its_base_accent_wait_and_done_roles() {
         let theme = named.theme();
         let roles = crate::theme::Roles::of(&theme);
         let output = ctx.run_ui(Default::default(), |ui| {
-            appearance::swatch(ui.painter(), egui::pos2(10.0, 10.0), &theme, egui::Color32::RED);
+            appearance::swatch(
+                ui.painter(),
+                egui::pos2(10.0, 10.0),
+                &theme,
+                egui::Color32::RED,
+            );
         });
         let mut rects = Vec::new();
         for clipped in &output.shapes {
@@ -466,6 +471,10 @@ fn every_theme_sample_shows_its_base_accent_wait_and_done_roles() {
             .filter(|(r, _)| r.size() == egui::vec2(8.0, 14.0))
             .map(|(_, c)| *c)
             .collect();
-        assert_eq!(strips, [roles.base, roles.accent, roles.wait, roles.done], "{named:?}");
+        assert_eq!(
+            strips,
+            [roles.base, roles.accent, roles.wait, roles.done],
+            "{named:?}"
+        );
     }
 }

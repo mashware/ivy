@@ -11,12 +11,11 @@ pub(super) struct Palette {
     pub ink: Color32,
     pub accent: Color32,
     pub selected_ink: Color32,
-    pub hover: Color32,
     pub active: Color32,
     pub error: Color32,
-    /// A control's border, and the caret (also a pressed control's border and the picker's check):
-    /// the kit's roles, moved only where a collapsed palette made them vanish.
-    pub edge: Color32,
+    /// The caret, also a pressed control's border and the picker's check: the accent, moved only
+    /// where a collapsed palette made it vanish. (A control's border and the hover fill are
+    /// written into `roles` as `line2` and `hover`.)
     pub caret: Color32,
     /// The theme's roles with those corrections written back, so every field egui derives from
     /// them — the dialog's outline, a field's border, the selection — inherits the correction.
@@ -105,9 +104,7 @@ impl Palette {
             ink,
             accent: roles.accent,
             selected_ink: roles.on_accent,
-            hover,
             active,
-            edge,
             caret,
             error: readable(roles.block, surface, 4.5),
             roles: fixed,
@@ -249,16 +246,22 @@ mod tests {
                 let apart = |a: Color32, over: &[Color32]| {
                     over.iter().all(|b| project_ink_contrast(a, *b) >= 1.03)
                 };
-                assert!(apart(p.hover, &[p.surface]), "{name:?} hover");
-                assert!(apart(p.edge, &[p.surface]), "{name:?} edge");
-                assert!(apart(p.active, &[p.hover, base, p.surface, p.nav]), "{name:?} sel");
-                assert!(apart(p.caret, &[base, p.surface, p.active]), "{name:?} caret");
-                assert_eq!(p.frame().stroke.color, p.edge, "{name:?} outline");
+                assert!(apart(p.roles.hover, &[p.surface]), "{name:?} hover");
+                assert!(apart(p.roles.line2, &[p.surface]), "{name:?} edge");
+                assert!(
+                    apart(p.active, &[p.roles.hover, base, p.surface, p.nav]),
+                    "{name:?} sel"
+                );
+                assert!(
+                    apart(p.caret, &[base, p.surface, p.active]),
+                    "{name:?} caret"
+                );
+                assert_eq!(p.frame().stroke.color, p.roles.line2, "{name:?} outline");
                 egui::Context::default()
                     .run_ui(Default::default(), |ui| {
                         p.apply(ui);
-                        assert_eq!(ui.visuals().widgets.inactive.bg_stroke.color, p.edge);
-                        assert_eq!(ui.visuals().window_stroke.color, p.edge);
+                        assert_eq!(ui.visuals().widgets.inactive.bg_stroke.color, p.roles.line2);
+                        assert_eq!(ui.visuals().window_stroke.color, p.roles.line2);
                         assert_eq!(ui.visuals().selection.bg_fill, p.active);
                         assert_eq!(ui.visuals().text_cursor.stroke.color, p.caret);
                         primary_style(ui, &p);
