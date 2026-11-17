@@ -12,7 +12,8 @@
 use super::{Theme, mix, project_ink_contrast};
 use eframe::egui::{Color32, epaint::Shadow};
 
-/// The minimum contrast every text role keeps over every role surface text is set on.
+/// The contrast text roles are brought to over the surfaces text is set on. A theme's own
+/// foreground is kept as written even where its hover takes it under this (D94).
 const TEXT_CONTRAST: f32 = 4.5;
 
 /// Below this contrast two colours read as one. The kit's own quietest step — Ivy Night's `hover`
@@ -124,8 +125,7 @@ impl Roles {
         let panel = theme.panel_background;
         // The surfaces step toward the readable text, not the raw foreground: for any theme whose
         // text reads they are the same colour, and a configuration that collapsed the foreground
-        // onto the background still gets a hover, a raised menu and a border that show. A step
-        // that would take a text surface under the text's own contrast goes the other way.
+        // onto the background still gets a hover, a raised menu and a border that show (D98).
         // Only a foreground that had to be replaced changes anything here: for a theme whose
         // text reads, `tx` is the foreground and every surface is the design's mix — including
         // a narrow theme whose text sits under 4.5:1 on its own hover, as it did before.
