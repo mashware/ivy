@@ -1652,7 +1652,8 @@ mod tests {
                 ),
                 (
                     "theme=gruvbox-dark\npanel=#e2d4c6\nforeground=#241c14",
-                    egui::Color32::from_rgb(0x28, 0x27, 0x27),
+                    // Raised steps toward the readable (white) text, not the unreadable foreground.
+                    egui::Color32::from_rgb(0x35, 0x35, 0x35),
                     egui::Color32::WHITE,
                 ),
             ] {

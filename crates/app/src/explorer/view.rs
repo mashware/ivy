@@ -265,7 +265,9 @@ pub(super) fn show(
                 [rect.right_top(), rect.right_bottom()],
                 egui::Stroke::new(1.0, theme.divider()),
             );
-            ui.style_mut().visuals.override_text_color = Some(theme.foreground());
+            // The roles' readable text, the same ink the kit's controls below it are drawn in.
+            ui.style_mut().visuals.override_text_color =
+                Some(crate::ui::style::roles(ui.ctx(), &theme).tx);
             let inner = rect.shrink2(egui::vec2(10.0, 7.0));
             let mut body = ui.new_child(
                 egui::UiBuilder::new()

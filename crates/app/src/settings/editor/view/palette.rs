@@ -11,7 +11,6 @@ pub(super) struct Palette {
     pub ink: Color32,
     pub accent: Color32,
     pub selected_ink: Color32,
-    pub active: Color32,
     pub error: Color32,
     /// The caret, also a pressed control's border and the picker's check: the accent, moved only
     /// where a collapsed palette made it vanish. (A control's border and the hover fill are
@@ -34,29 +33,6 @@ fn readable(candidate: Color32, surface: Color32, minimum: f32) -> Color32 {
     }
 }
 
-/// Below this contrast two colours read as one. The kit's own quietest step — Ivy Night's `hover`
-/// over `raised`, about 1.09:1 — sits above it on purpose, so only a collapsed palette is moved.
-const INVISIBLE: f32 = 1.03;
-
-/// `role`, unless a collapsed palette left it indistinguishable from the surface it must stand out
-/// from: then moved toward the ink, so a hovered control, a field's edge or the caret still shows.
-fn distinct(role: Color32, from: Color32, ink: Color32, amount: f32) -> Color32 {
-    apart(role, &[from], from, ink, amount)
-}
-
-/// `role`, unless it vanishes into any of the fills it is painted over: then `base` moved toward
-/// the ink, which a collapsed palette leaves apart from all of them.
-fn apart(role: Color32, over: &[Color32], base: Color32, ink: Color32, amount: f32) -> Color32 {
-    if over
-        .iter()
-        .any(|fill| project_ink_contrast(role, *fill) < INVISIBLE)
-    {
-        mix(base, ink, amount)
-    } else {
-        role
-    }
-}
-
 impl Palette {
     #[cfg(test)]
     pub fn new(theme: Theme) -> Self {
@@ -71,40 +47,34 @@ impl Palette {
     fn from_roles(roles: Roles) -> Self {
         let surface = roles.raised;
         let ink = readable(roles.tx, surface, 4.5);
-        let hover = distinct(roles.hover, surface, ink, 0.10);
-        // The navigation sits on the person's own `panel` colour; where that leaves its text
-        // unreadable it falls back to the dialog's surface rather than hide the way back.
-        let nav = roles.panel_or(ink, surface);
-        // The selection is painted over a field (`base`), the dialog, the navigation and a hovered
-        // row alike, so it has to stand apart from every one of them.
-        let active = apart(
-            roles.sel,
-            &[hover, roles.base, surface, nav],
-            surface,
-            ink,
-            0.20,
-        );
-        let edge = distinct(roles.line2, surface, ink, 0.40);
-        let caret = apart(
-            roles.accent,
-            &[roles.base, surface, active],
-            surface,
-            ink,
-            1.0,
-        );
         let mut fixed = roles;
         fixed.tx = ink;
         fixed.tx3 = readable(roles.tx3, surface, 4.5);
-        fixed.hover = hover;
-        fixed.sel = active;
-        fixed.line2 = edge;
+        // The navigation sits on the person's own `panel` colour; where that leaves its text
+        // unreadable it falls back to the dialog's surface rather than hide the way back.
+        let nav = roles.panel_or(ink, surface);
+        fixed.hover = fixed.apart(roles.hover, &[surface], surface, 0.10);
+        // The selection is painted over a field (`base`), the dialog, the navigation and a hovered
+        // row alike, so it has to stand apart from every one of them.
+        fixed.sel = fixed.apart(
+            roles.sel,
+            &[fixed.hover, roles.base, surface, nav],
+            surface,
+            0.20,
+        );
+        fixed.line2 = fixed.apart(roles.line2, &[surface], surface, 0.40);
+        let caret = fixed.apart(
+            roles.accent,
+            &[roles.base, surface, fixed.sel],
+            surface,
+            1.0,
+        );
         Self {
             surface,
             nav,
             ink,
             accent: roles.accent,
             selected_ink: roles.on_accent,
-            active,
             caret,
             error: readable(roles.block, surface, 4.5),
             roles: fixed,
@@ -125,7 +95,7 @@ impl Palette {
         v.error_fg_color = self.error;
         v.warn_fg_color = self.error;
         // Selected text, and egui's focus ring around a field, are drawn in this ink.
-        v.selection.stroke.color = readable(self.ink, self.active, 4.5);
+        v.selection.stroke.color = readable(self.ink, self.roles.sel, 4.5);
         v.widgets.active.bg_stroke.color = self.caret;
         v.text_cursor.stroke.color = self.caret;
         for widget in [
@@ -167,8 +137,12 @@ pub(super) fn primary_style(ui: &mut egui::Ui, palette: &Palette) {
         widget.weak_bg_fill = fill;
         // Its edge is its own fill, moved toward the ink only where it vanishes into the surface,
         // so a collapsed accent still leaves the button findable.
-        widget.bg_stroke =
-            egui::Stroke::new(1.0, distinct(fill, palette.surface, palette.ink, 0.40));
+        widget.bg_stroke = egui::Stroke::new(
+            1.0,
+            palette
+                .roles
+                .apart(fill, &[palette.surface], palette.surface, 0.40),
+        );
         widget.fg_stroke.color = readable(ink, fill, 4.5);
     }
 }
@@ -249,11 +223,11 @@ mod tests {
                 assert!(apart(p.roles.hover, &[p.surface]), "{name:?} hover");
                 assert!(apart(p.roles.line2, &[p.surface]), "{name:?} edge");
                 assert!(
-                    apart(p.active, &[p.roles.hover, base, p.surface, p.nav]),
+                    apart(p.roles.sel, &[p.roles.hover, base, p.surface, p.nav]),
                     "{name:?} sel"
                 );
                 assert!(
-                    apart(p.caret, &[base, p.surface, p.active]),
+                    apart(p.caret, &[base, p.surface, p.roles.sel]),
                     "{name:?} caret"
                 );
                 assert_eq!(p.frame().stroke.color, p.roles.line2, "{name:?} outline");
@@ -262,7 +236,7 @@ mod tests {
                         p.apply(ui);
                         assert_eq!(ui.visuals().widgets.inactive.bg_stroke.color, p.roles.line2);
                         assert_eq!(ui.visuals().window_stroke.color, p.roles.line2);
-                        assert_eq!(ui.visuals().selection.bg_fill, p.active);
+                        assert_eq!(ui.visuals().selection.bg_fill, p.roles.sel);
                         assert_eq!(ui.visuals().text_cursor.stroke.color, p.caret);
                         primary_style(ui, &p);
                         let primary = ui.visuals().widgets.inactive.bg_stroke.color;

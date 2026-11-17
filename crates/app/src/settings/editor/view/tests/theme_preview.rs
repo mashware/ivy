@@ -435,6 +435,25 @@ fn the_theme_picker_samples_each_theme_and_filters_by_darkness() {
     // The chosen segment is filled with `hover`; the others show the sunk track (`base`).
     assert_eq!(fill_under("Light"), Some(rgb(0x262b2d)));
     assert_eq!(fill_under("All"), Some(rgb(0x13181b)));
+    // Pointing at another segment does not fill it: only the choice is filled.
+    let dark = text.iter().find(|(s, _)| s == "Dark").unwrap().1.center();
+    scene(
+        &mut editor,
+        &ctx,
+        size,
+        vec![egui::Event::PointerMoved(dark)],
+    );
+    let (_, pointed) = scene(&mut editor, &ctx, size, vec![]);
+    let mut pointed_rects = Vec::new();
+    for clipped in &pointed {
+        fills(&clipped.shape, &mut pointed_rects);
+    }
+    let under_dark = pointed_rects
+        .iter()
+        .filter(|(r, c)| r.contains(dark) && *c != egui::Color32::TRANSPARENT)
+        .min_by(|(a, _), (b, _)| a.area().total_cmp(&b.area()))
+        .map(|(_, c)| *c);
+    assert_eq!(under_dark, Some(rgb(0x13181b)));
     let rows = rows_below(&text);
     assert!(rows.iter().any(|(s, _)| s == "Ivy Day"), "{rows:?}");
     assert!(

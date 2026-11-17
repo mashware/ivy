@@ -346,23 +346,21 @@ fn segmented(ui: &mut egui::Ui, value: &mut usize, labels: &[&str]) {
             *value = index;
         }
         let selected = *value == index;
-        // The chosen segment is filled with `hover`; one only pointed at, with the raised fill, so
+        // Only the chosen segment is filled; one merely pointed at shows by its label's ink, so
         // the choice never looks like two.
-        if selected || response.hovered() {
-            let fill = if selected {
-                v.widgets.hovered.bg_fill
-            } else {
-                v.widgets.inactive.bg_fill
-            };
-            ui.painter()
-                .rect_filled(rect, crate::theme::metrics::RADIUS_CHIP, fill);
+        if selected {
+            ui.painter().rect_filled(
+                rect,
+                crate::theme::metrics::RADIUS_CHIP,
+                v.widgets.hovered.bg_fill,
+            );
         }
         ui.painter().text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
             *label,
             egui::FontId::new(12.0, crate::fonts::ui_weight(ui.ctx(), 500)),
-            if selected {
+            if selected || response.hovered() {
                 v.widgets.inactive.fg_stroke.color
             } else {
                 v.weak_text_color()

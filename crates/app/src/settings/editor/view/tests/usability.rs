@@ -373,3 +373,45 @@ fn title_sizes_use_the_point_size_box() {
         assert_eq!(boxes, expected, "{hint}: {text:?}");
     }
 }
+
+/// A point-size box carries the focus ring while it has the keyboard, like a framed field.
+#[test]
+fn a_point_size_box_shows_when_it_has_the_keyboard() {
+    let mut editor = Editor {
+        draft: Some(Document::new("theme=ivy-night\n".into())),
+        ..Default::default()
+    };
+    let ctx = egui::Context::default();
+    ctx.all_styles_mut(|style| style.animation_time = 0.0);
+    let size = egui::vec2(1100.0, 1200.0);
+    let boxes = |shapes: &[egui::epaint::ClippedShape]| {
+        let mut found = Vec::new();
+        for clipped in shapes {
+            match &clipped.shape {
+                egui::epaint::Shape::Rect(r) if r.rect.size() == egui::vec2(113.0, 40.0) => {
+                    found.push((r.rect, r.stroke.color))
+                }
+                _ => {}
+            }
+        }
+        found
+    };
+    paint(&mut editor, &ctx, size, vec![]);
+    let (_, still) = scene(&mut editor, &ctx, size, vec![]);
+    let at_rest = boxes(&still);
+    // The font size's box: the title-size boxes share `point_field` but sit below the dialog's
+    // visible height at this size.
+    let (target, rest_edge) = *at_rest
+        .iter()
+        .find(|(_, c)| *c != egui::Color32::TRANSPARENT)
+        .expect("a point-size box");
+    paint(&mut editor, &ctx, size, click(target.center()));
+    let (_, focused) = scene(&mut editor, &ctx, size, vec![]);
+    let edge = boxes(&focused)
+        .into_iter()
+        .filter(|(r, c)| *r == target && *c != egui::Color32::TRANSPARENT)
+        .map(|(_, c)| c)
+        .last()
+        .expect("the box is still painted");
+    assert_ne!(edge, rest_edge, "the focused box looks like the others");
+}

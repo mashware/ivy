@@ -43,11 +43,8 @@ pub(super) fn show(
                 // it the chrome stays on the document's background instead. The rules are the
                 // person's `divider`, drawn toward the text where it would vanish into the chrome.
                 let surface = roles.panel_or(roles.tx, roles.base);
-                let line = if crate::theme::project_ink_contrast(roles.line, surface) < 1.03 {
-                    crate::theme::mix(surface, roles.tx, 0.16)
-                } else {
-                    roles.line
-                };
+                // The frame's sides run between the console and the document, both on `base`.
+                let line = roles.apart(roles.line, &[surface, roles.base], surface, 0.16);
                 let frame = egui::Frame::new()
                     .fill(surface)
                     .corner_radius(0)
@@ -467,9 +464,23 @@ mod tests {
             let (settings, _) = crate::settings::interpret("panel=#e4e8e2").unwrap();
             crate::theme::Theme::default().with_colors(&settings.colors)
         };
+        // A divider set to the console background would hide the frame's sides against the
+        // document and the console; it is drawn toward the text instead.
+        let hidden_divider = {
+            let (settings, _) = crate::settings::interpret("divider=#13181b").unwrap();
+            crate::theme::Theme::default().with_colors(&settings.colors)
+        };
+        let roles = crate::theme::Roles::of(&hidden_divider);
+        assert!(
+            crate::theme::project_ink_contrast(
+                roles.apart(roles.line, &[roles.panel, roles.base], roles.panel, 0.16),
+                roles.base
+            ) >= 1.03
+        );
         for (theme, chrome) in [
             (crate::theme::Theme::default(), rgb(0x171d21)),
             (unreadable, rgb(0x13181b)),
+            (hidden_divider, rgb(0x171d21)),
         ] {
             let ctx = egui::Context::default();
             let mut state = State::default();
@@ -495,6 +506,19 @@ mod tests {
                     .iter()
                     .any(|(r, c)| r.contains_rect(area) && *c == chrome),
                 "chrome {chrome:?}: {rects:?}"
+            );
+            let stroke = shapes
+                .iter()
+                .find_map(|s| match &s.shape {
+                    egui::Shape::Rect(r) if r.rect.contains_rect(area) && r.fill == chrome => {
+                        Some(r.stroke.color)
+                    }
+                    _ => None,
+                })
+                .expect("the frame is painted");
+            assert!(
+                crate::theme::project_ink_contrast(stroke, rgb(0x13181b)) >= 1.03,
+                "the frame's sides vanish into the document"
             );
             assert!(
                 rects.iter().any(|(r, c)| *c == rgb(0x13181b)

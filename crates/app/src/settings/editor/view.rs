@@ -58,10 +58,7 @@ pub(super) fn show(
 /// The console's menu and rename dialog, the Board and the Explorer: the roles of `theme`, at these
 /// measures.
 pub(crate) fn style(ui: &mut egui::Ui, theme: crate::theme::Theme) {
-    // A surface that set its own text colour (the Explorer) keeps it for what follows.
-    let text = ui.visuals().override_text_color;
     crate::ui::floating::style(ui, &theme);
-    ui.visuals_mut().override_text_color = text;
     let style = ui.style_mut();
     style.spacing.item_spacing = egui::vec2(10.0, 9.0);
     style.spacing.button_padding = egui::vec2(10.0, 7.0);

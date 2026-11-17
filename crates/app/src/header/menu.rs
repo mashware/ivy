@@ -103,14 +103,12 @@ impl Menu {
         for (index, action) in Action::ALL.into_iter().enumerate() {
             let row = self.row(index);
             if self.enabled[index] && index == self.selected {
-                // A focus colour set equal to the background leaves `sel` on `raised`; the chosen
-                // row then takes a step toward the text instead of vanishing.
-                let chosen = if crate::theme::project_ink_contrast(roles.sel, roles.raised) < 1.03 {
-                    crate::theme::mix(roles.raised, roles.tx, 0.20)
-                } else {
-                    roles.sel
-                };
-                painter.rect_filled(row.shrink(1.0), 0.0, chosen);
+                // Inset and rounded like the kit's menu rows, inside the menu's rounded corners.
+                painter.rect_filled(
+                    row.shrink2(egui::vec2(4.0, 1.0)),
+                    crate::theme::metrics::RADIUS_CONTROL,
+                    roles.sel,
+                );
             }
             let text = if self.enabled[index] {
                 action.label(self.folded).to_owned()

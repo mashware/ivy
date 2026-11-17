@@ -15,6 +15,10 @@ use eframe::egui::{Color32, epaint::Shadow};
 /// The minimum contrast every text role keeps over every role surface text is set on.
 const TEXT_CONTRAST: f32 = 4.5;
 
+/// Below this contrast two colours read as one. The kit's own quietest step — Ivy Night's `hover`
+/// over `raised`, about 1.09:1 — sits above it on purpose, so only a collapsed palette is moved.
+pub(crate) const INVISIBLE: f32 = 1.03;
+
 /// The interface's colors, derived from a theme.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Roles {
@@ -95,6 +99,29 @@ impl Roles {
         }
     }
 
+    /// `role`, unless it vanishes into one of the fills it is painted over: then `from` stepped
+    /// toward the text until it stands apart from all of them.
+    pub(crate) fn apart(
+        &self,
+        role: Color32,
+        over: &[Color32],
+        from: Color32,
+        amount: f32,
+    ) -> Color32 {
+        let stands = |c: Color32| {
+            over.iter()
+                .all(|f| project_ink_contrast(c, *f) >= INVISIBLE)
+        };
+        if stands(role) {
+            return role;
+        }
+        [amount, amount * 2.0, 0.6]
+            .into_iter()
+            .map(|step| mix(from, self.tx, step))
+            .find(|c| stands(*c))
+            .unwrap_or(self.tx)
+    }
+
     pub(crate) fn of(theme: &Theme) -> Self {
         let bg = theme.background;
         let fg = theme.foreground;
@@ -106,12 +133,22 @@ impl Roles {
         let block = theme.palette[1];
         let done = theme.palette[4];
         let panel = theme.panel_background;
+        // The surfaces step toward the readable text, not the raw foreground: for any theme whose
+        // text reads they are the same colour, and a configuration that collapsed the foreground
+        // onto the background still gets a hover, a raised menu and a border that show. A step
+        // that would take a text surface under the text's own contrast goes the other way.
         let raised = if dark {
-            mix(bg, fg, 0.06)
+            text_surface(bg, tx, 0.06)
         } else {
             Color32::WHITE
         };
-        let hover = mix(bg, fg, 0.09);
+        let hover = text_surface(bg, tx, 0.09);
+        // A focus colour set equal to the background would leave the selection on it.
+        let selection_tint = if project_ink_contrast(accent, bg) < INVISIBLE {
+            tx
+        } else {
+            accent
+        };
         let chrome = if dark {
             mix(bg, Color32::BLACK, 0.22)
         } else {
@@ -128,9 +165,9 @@ impl Roles {
             panel,
             raised,
             hover,
-            sel: mix(bg, accent, 0.18),
+            sel: mix(bg, selection_tint, 0.18),
             line: theme.divider,
-            line2: mix(bg, fg, 0.17),
+            line2: mix(bg, tx, 0.17),
             tx,
             tx2: faded(tx, bg, 30, &surfaces),
             tx3: faded(tx, bg, 46, &surfaces),
@@ -163,6 +200,22 @@ impl Roles {
             _derived: (),
         }
     }
+}
+
+/// `bg` stepped toward the text by `step`, or away from it where that would leave the text
+/// unreadable on the result (a mid-grey background whose text was moved to black).
+fn text_surface(bg: Color32, tx: Color32, step: f32) -> Color32 {
+    let toward = mix(bg, tx, step);
+    if project_ink_contrast(tx, toward) >= TEXT_CONTRAST {
+        return toward;
+    }
+    let away =
+        if project_ink_contrast(tx, Color32::WHITE) < project_ink_contrast(tx, Color32::BLACK) {
+            Color32::BLACK
+        } else {
+            Color32::WHITE
+        };
+    mix(bg, away, step)
 }
 
 /// The color with the given opacity, keeping its hue.
@@ -210,6 +263,44 @@ fn faded(tx: Color32, bg: Color32, percent: u8, surfaces: &[Color32]) -> Color32
         .map(|p| mix(tx, bg, f32::from(p) / 100.0))
         .find(|candidate| reads(*candidate))
         .unwrap_or(tx)
+}
+
+#[cfg(test)]
+mod collapse_tests {
+    use super::*;
+
+    /// A foreground (and focus) collapsed onto the background still gives surfaces that show:
+    /// hover, raised, the selection and the control border stand apart from the background and
+    /// from each other.
+    #[test]
+    fn a_collapsed_foreground_still_leaves_surfaces_apart() {
+        for hex in [0x777777u32, 0x000000, 0xffffff, 0x202020] {
+            let c = Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+            let mut theme = Theme::default();
+            theme.background = c;
+            theme.foreground = c;
+            theme.focus = c;
+            let r = Roles::of(&theme);
+            for (name, a, b) in [
+                ("hover/base", r.hover, r.base),
+                ("sel/base", r.sel, r.base),
+                ("line2/base", r.line2, r.base),
+                ("sel/hover", r.sel, r.hover),
+            ] {
+                assert!(project_ink_contrast(a, b) >= 1.03, "{hex:06x} {name}");
+            }
+            if r.dark {
+                assert!(
+                    project_ink_contrast(r.raised, r.base) >= 1.03,
+                    "{hex:06x} raised"
+                );
+                assert!(
+                    project_ink_contrast(r.hover, r.raised) >= 1.03,
+                    "{hex:06x} hover/raised"
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]
