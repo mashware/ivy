@@ -16,6 +16,8 @@ pub(super) enum Command {
     Body(usize, body::Action),
     Expand(usize),
     Compact(usize),
+    /// A press on the Board's top bar, which belongs to no card.
+    Bar(super::bar::Action),
 }
 #[derive(Default)]
 pub(super) struct Reader {
@@ -37,6 +39,7 @@ impl Reader {
             Command::Body(_, action) => self.body.apply(action),
             Command::Expand(_) => self.full = !self.full,
             Command::Compact(_) => self.opened = !self.opened,
+            Command::Bar(_) => return,
         }
         self.cache = None;
     }

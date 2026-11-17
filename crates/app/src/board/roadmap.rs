@@ -160,6 +160,7 @@ pub(super) fn enrich(window: &crate::Window, sections: &mut Vec<Section>, now: S
             },
             entries: Vec::new(),
             roadmap: None,
+            ink: None,
         });
     }
     sections.sort_by_key(|s| matches!(s.kind, super::model::Kind::Other));
@@ -381,6 +382,7 @@ mod tests {
                 source: "fixture".into(),
                 error: None,
             }),
+            ink: None,
         }
     }
     fn press(pos: egui::Pos2, down: bool) -> Vec<egui::Event> {
@@ -635,6 +637,7 @@ mod tests {
                 },
             }],
             roadmap: None,
+            ink: None,
         };
         let headings = fallback(&section);
         assert_eq!(headings.len(), 1);

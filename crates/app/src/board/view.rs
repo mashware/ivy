@@ -32,6 +32,7 @@ impl ViewState {
             cards::Command::Body(pane, _)
             | cards::Command::Expand(pane)
             | cards::Command::Compact(pane) => *pane,
+            cards::Command::Bar(_) => return,
         };
         if !self.cards.contains_key(&pane) {
             return;
@@ -49,6 +50,7 @@ impl ViewState {
                 timing.expanded();
             }
             cards::Command::Compact(_) => self.cards.get_mut(&pane).unwrap().apply(command),
+            cards::Command::Bar(_) => {}
         }
     }
 }
@@ -92,6 +94,7 @@ pub(super) fn paint(
     sections: &[Section],
     signals: &HashMap<usize, View>,
     now: SystemTime,
+    totals: super::bar::Totals,
 ) {
     // ScrollArea resolves wheel ownership through registered Areas, not painted layer IDs.
     // Keep the Board's foreground layer in that registry as well as in the paint list.
@@ -102,7 +105,7 @@ pub(super) fn paint(
         .constrain(false)
         .show(parent.ctx(), |registered| {
             registered.allocate_rect(area, egui::Sense::hover());
-            paint_contents(window, registered, area, sections, signals, now);
+            paint_contents(window, registered, area, sections, signals, now, totals);
         });
 }
 
@@ -113,8 +116,10 @@ fn paint_contents(
     sections: &[Section],
     signals: &HashMap<usize, View>,
     now: SystemTime,
+    totals: super::bar::Totals,
 ) {
     let theme = super::style::theme(window.theme);
+    let roles = crate::ui::style::roles(parent.ctx(), &window.theme);
     let mut ui = egui::Ui::new(
         parent.ctx().clone(),
         egui::Id::new("board-screen"),
@@ -128,18 +133,17 @@ fn paint_contents(
     ui.set_clip_rect(area);
     super::style::apply(&mut ui, &theme);
     ui.painter().rect_filled(area, 0.0, theme.background());
+    window.board.surface.child_hits.clear();
+    super::bar::paint(
+        &mut ui,
+        area.width(),
+        totals,
+        window.board.arrangement,
+        &window.board.filter,
+        &roles,
+        &mut window.board.surface.child_hits,
+    );
     let total = sections.iter().map(|s| s.entries.len()).sum::<usize>();
-    if sections.is_empty() {
-        egui::Frame::new()
-            .fill(theme.divider())
-            .inner_margin(egui::Margin::symmetric(12, 8))
-            .show(&mut ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.heading("Board");
-                    ui.weak("0 consoles · 0 projects");
-                });
-            });
-    }
     if sections
         .iter()
         .flat_map(|s| &s.entries)
@@ -148,7 +152,6 @@ fn paint_contents(
         ui.weak("No task state has been published yet");
     }
     window.board.surface.painted.clear();
-    window.board.surface.child_hits.clear();
     window.board.order.clear();
     let reveal = std::mem::take(&mut window.board.scroll_selected);
     let scroll_id = ui.make_persistent_id("board-list");

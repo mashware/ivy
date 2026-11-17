@@ -163,7 +163,21 @@ pub(crate) fn before_keys(
     let events = ui.input(|i| i.events.clone());
     let mut owns_events = false;
     for event in &events {
+        if window.board.keyboard_focus && super::filter::edit(&mut window.board.filter, event) {
+            owns_events = true;
+            continue;
+        }
         match event {
+            // The first Escape leaves the filter field; the next one closes the Board.
+            egui::Event::Key {
+                key: egui::Key::Escape,
+                pressed: true,
+                repeat: false,
+                ..
+            } if window.board.keyboard_focus && window.board.filter.editing => {
+                window.board.filter.editing = false;
+                owns_events = true;
+            }
             egui::Event::Key {
                 key: egui::Key::Escape,
                 pressed: true,
@@ -243,6 +257,10 @@ pub(crate) fn before_keys(
             _ => {}
         }
     }
+    if std::mem::take(&mut window.board.close_requested) {
+        dismiss(window, ui.ctx());
+        owns_events = true;
+    }
     if owns_events {
         window.board.blocked_frame = Some(frame);
         window.header_input.block_for_settings(frame);
@@ -280,6 +298,8 @@ fn navigate(state: &mut State, key: egui::Key) {
 
 fn pointer(state: &mut State, pos: egui::Pos2, pressed: bool) {
     if pressed {
+        // Any press elsewhere leaves the filter field; a press on the field takes it back on release.
+        state.filter.editing = false;
         state.surface.child_pressed = state
             .surface
             .child_hits
@@ -305,7 +325,12 @@ fn pointer(state: &mut State, pos: egui::Pos2, pressed: bool) {
                 .unwrap_or(state.ordinal);
         }
     } else if let Some((rect, command)) = state.surface.child_pressed.take() {
-        if rect.contains(pos) {
+        if let super::cards::Command::Bar(action) = command {
+            if rect.contains(pos) {
+                state.close_requested |=
+                    super::bar::apply(&mut state.arrangement, &mut state.filter, action);
+            }
+        } else if rect.contains(pos) {
             state
                 .surface
                 .apply_card_command(&command, &mut state.timing);

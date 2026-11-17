@@ -22,6 +22,9 @@ pub(super) struct Section {
     pub(super) kind: Kind,
     pub(super) entries: Vec<Entry>,
     pub(super) roadmap: Option<super::roadmap::Resolved>,
+    /// The project's header ink (D96), so the Board names a project in the colour its consoles
+    /// already wear; `None` for a project known only by its roadmap file and for other consoles.
+    pub(super) ink: Option<eframe::egui::Color32>,
 }
 
 impl Section {
@@ -37,6 +40,7 @@ impl Section {
 pub(super) struct Membership {
     pub(super) key: Key,
     pub(super) name: String,
+    pub(super) ink: Option<eframe::egui::Color32>,
 }
 
 pub(super) fn sections(window: &Window, now: SystemTime) -> Vec<Section> {
@@ -52,6 +56,7 @@ pub(super) fn sections(window: &Window, now: SystemTime) -> Vec<Section> {
                 .map(|badge| Membership {
                     key: badge.key.clone(),
                     name: badge.name.clone(),
+                    ink: Some(badge.ink),
                 });
             consoles.push((
                 membership,
@@ -86,6 +91,7 @@ pub(super) fn group(consoles: Vec<(Option<Membership>, Entry)>) -> Vec<Section> 
                             }),
                         entries: Vec::new(),
                         roadmap: None,
+                        ink: membership.as_ref().and_then(|m| m.ink),
                     },
                 ));
                 sections.len() - 1
@@ -155,6 +161,7 @@ mod tests {
         Some(Membership {
             key: Key::Repository(format!("/work/{name}/.git").into()),
             name: name.to_owned(),
+            ink: None,
         })
     }
     fn shape(sections: &[Section]) -> Vec<(String, Vec<usize>)> {

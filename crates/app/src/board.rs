@@ -1,9 +1,11 @@
 //! Read-only live board of every console, grouped by project. Its state never owns a console or
 //! producer authority.
+mod bar;
 mod branches;
 mod cards;
 #[path = "roadmap_file.rs"]
 mod files;
+mod filter;
 mod input;
 mod layout;
 mod model;
@@ -43,6 +45,9 @@ pub(crate) struct State {
     awaiting_release: bool,
     pointer_owned: bool,
     keyboard_focus: bool,
+    close_requested: bool,
+    arrangement: filter::Arrangement,
+    filter: filter::Filter,
     pub(crate) timing: crate::measure::Board,
 }
 
@@ -73,6 +78,9 @@ impl Default for State {
             awaiting_release: false,
             pointer_owned: false,
             keyboard_focus: false,
+            close_requested: false,
+            arrangement: Default::default(),
+            filter: Default::default(),
             timing: crate::measure::Board::default(),
         }
     }
@@ -200,6 +208,26 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, area: egui::R
             format!("{:?}", section.key),
         )
     });
+    let claiming = sections
+        .iter()
+        .flat_map(|s| &s.entries)
+        .filter(|entry| {
+            let signal = signals.get(&entry.pane).copied();
+            filter::claims(observation::classify(entry.snapshot.document.as_deref(), signal, wall))
+        })
+        .count();
+    let totals = bar::Totals {
+        consoles: sections.iter().map(|s| s.entries.len()).sum(),
+        projects: sections
+            .iter()
+            .filter(|s| matches!(s.kind, model::Kind::Repository { .. }))
+            .count(),
+        claiming,
+    };
+    filter::apply(&mut sections, &window.board.filter, |entry| {
+        let signal = signals.get(&entry.pane).copied();
+        observation::classify(entry.snapshot.document.as_deref(), signal, wall)
+    });
     let panes: Vec<usize> = sections
         .iter()
         .flat_map(|s| &s.entries)
@@ -218,7 +246,7 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, area: egui::R
         .iter()
         .position(|pane| Some(*pane) == window.board.selected)
         .unwrap_or(0);
-    view::paint(window, ui, area, &sections, &signals, wall);
+    view::paint(window, ui, area, &sections, &signals, wall, totals);
     if let Some(target) = window.board.activate.take() {
         activate(window, ui.ctx(), target);
     }
