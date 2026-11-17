@@ -657,6 +657,24 @@ mod tests {
         assert!(dashes(&shapes, roles.line2) >= 8, "four dashed sides");
         let (shapes, _) = painted(Some(DOC), None, false);
         assert_eq!(dashes(&shapes, roles.line2), 0);
+        // And no solid outline under the dashes, which would read as a published card.
+        let (shapes, card) = painted(None, None, false);
+        assert!(
+            !shapes
+                .iter()
+                .any(|s| matches!(&s.shape, egui::Shape::Rect(r)
+            if r.rect.contains_rect(card.shrink(1.0)) && r.stroke.width > 0.0
+                && r.stroke.color == roles.line))
+        );
+        // And no solid outline under the dashes, which would read as a published card.
+        let (shapes, card) = painted(None, None, false);
+        assert!(
+            !shapes
+                .iter()
+                .any(|s| matches!(&s.shape, egui::Shape::Rect(r)
+            if r.rect.contains_rect(card.shrink(1.0)) && r.stroke.width > 0.0
+                && r.stroke.color == roles.line))
+        );
     }
 
     #[test]

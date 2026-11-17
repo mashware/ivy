@@ -199,6 +199,9 @@ pub(super) fn paint_plan(
                     |ui| {
                         ui.set_width(width);
                         let mut row = rows_used;
+                        // The grid column on screen, not the milestone's index: ↑/↓ move between
+                        // wrapped rows by it.
+                        let column = index - first;
                         if let Some(milestone) = plan.milestones.get(index) {
                             let title = match &milestone.id {
                                 Some(id) => format!("{id} · {}", milestone.title),
@@ -219,12 +222,12 @@ pub(super) fn paint_plan(
                             {
                                 deliverable(ui, width, &item.text, item.mark, roles);
                                 for entry in consoles {
-                                    paint_card(ui, entry, row, index - first, width);
+                                    paint_card(ui, entry, row, column, width);
                                     row += 1;
                                 }
                             }
                             for entry in &placed.milestones[index].loose {
-                                paint_card(ui, entry, row, index - first, width);
+                                paint_card(ui, entry, row, column, width);
                                 row += 1;
                             }
                         } else {
@@ -234,9 +237,7 @@ pub(super) fn paint_plan(
                                 ui.weak("—");
                             }
                             for entry in &placed.off {
-                                // The grid column on screen, not the milestone's index: ↑/↓ move
-                                // between wrapped rows by it.
-                                paint_card(ui, entry, row, index - first, width);
+                                paint_card(ui, entry, row, column, width);
                                 row += 1;
                             }
                         }

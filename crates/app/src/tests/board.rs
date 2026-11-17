@@ -1581,6 +1581,18 @@ mod tests {
             ("", true),
             "a click on the field edits it"
         );
+        // Switching the sidebar away and back takes the field's focus with the Board's.
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Board);
+        assert_eq!(
+            window.board.filter_state(),
+            ("", false),
+            "the field's focus left with the Board"
+        );
+        frame(&mut window, &ctx, vec![]);
+        let shapes = frame(&mut window, &ctx, vec![]);
+        let field = text_point(&shapes, "Filter consoles").expect("the filter field is painted");
+        frame(&mut window, &ctx, click_at(field));
         frame(
             &mut window,
             &ctx,
