@@ -197,7 +197,11 @@ fn menu_item(ui: &mut egui::Ui, label: &str, enabled: bool) -> bool {
         // would still lose a point each side at rest and get it back on hover — pushing the rows
         // below. Every state here has none: the kit marks a hovered row by its fill alone.
         let widgets = &mut ui.visuals_mut().widgets;
-        for state in [&mut widgets.inactive, &mut widgets.hovered, &mut widgets.active] {
+        for state in [
+            &mut widgets.inactive,
+            &mut widgets.hovered,
+            &mut widgets.active,
+        ] {
             state.bg_stroke = egui::Stroke::NONE;
         }
         ui.add_enabled(enabled, button).clicked()
