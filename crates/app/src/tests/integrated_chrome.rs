@@ -2895,18 +2895,28 @@ mod tests {
             frame(&mut window, &ctx, area, click_at(menu));
             let shapes = frame(&mut window, &ctx, area, vec![]);
             let at = text_center(&shapes, "Preferences");
-            for events in [
-                vec![egui::Event::PointerMoved(at)],
-                vec![egui::Event::Key {
-                    key: egui::Key::ArrowDown,
-                    physical_key: None,
-                    pressed: true,
-                    repeat: false,
-                    modifiers: egui::Modifiers::NONE,
-                }],
+            let keyboard_target = text_center(&shapes, "Keyboard shortcuts");
+            for (events, target) in [
+                (vec![egui::Event::PointerMoved(at)], at),
+                (
+                    vec![
+                        egui::Event::PointerMoved(egui::pos2(
+                            area.left() + 2.0,
+                            area.bottom() - 2.0,
+                        )),
+                        egui::Event::Key {
+                            key: egui::Key::ArrowDown,
+                            physical_key: None,
+                            pressed: true,
+                            repeat: false,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                    keyboard_target,
+                ),
             ] {
                 let shapes = frame(&mut window, &ctx, area, events);
-                assert!(shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == roles.hover && r.rect.width() > 100.0 && r.rect.height() <= 30.0)), "{source}");
+                assert!(shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == roles.hover && r.rect.contains(target) && r.rect.width() > 100.0 && r.rect.height() <= 30.0)), "{source}");
                 assert!(theme::project_ink_contrast(roles.hover, roles.raised) >= 1.03);
             }
         }
