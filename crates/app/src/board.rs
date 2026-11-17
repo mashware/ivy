@@ -46,6 +46,11 @@ pub(crate) struct State {
     pointer_owned: bool,
     keyboard_focus: bool,
     close_requested: bool,
+    /// The `board.arrangement` the file held when last applied, so a re-apply changes the Board
+    /// only when the file changed.
+    file_arrangement: Option<Option<crate::settings::BoardArrangement>>,
+    /// Why the last choice could not be remembered, shown at the Board's foot.
+    remember_error: Option<String>,
     /// The configuration file the chosen arrangement is written to; `None` writes nothing.
     pub(crate) remember_in: Option<std::path::PathBuf>,
     arrangement: filter::Arrangement,
@@ -80,6 +85,8 @@ impl Default for State {
             pointer_owned: false,
             keyboard_focus: false,
             close_requested: false,
+            file_arrangement: None,
+            remember_error: None,
             remember_in: None,
             arrangement: Default::default(),
             filter: Default::default(),
@@ -238,9 +245,10 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, area: egui::R
         .count();
     let totals = bar::Totals {
         consoles: sections.iter().map(|s| s.entries.len()).sum(),
+        // Projects with a console: a roadmap-only project is a row in «By milestone» alone.
         projects: sections
             .iter()
-            .filter(|s| matches!(s.kind, model::Kind::Repository { .. }))
+            .filter(|s| matches!(s.kind, model::Kind::Repository { .. }) && !s.entries.is_empty())
             .count(),
         claiming,
     };
@@ -303,11 +311,11 @@ pub(crate) fn configure(window: &mut crate::Window, settings: &crate::settings::
         window.board.file_config = settings.roadmaps.clone();
         window.board.file_reload = true;
     }
-    if let Some(chosen) = settings.board_arrangement {
-        window.board.arrangement = match chosen {
-            crate::settings::BoardArrangement::State => filter::Arrangement::ByState,
-            crate::settings::BoardArrangement::Milestone => filter::Arrangement::ByMilestone,
-        };
+    // Only a change in the file moves the Board: re-applying an unrelated Settings save must not
+    // undo a choice made since, and removing the line returns the default.
+    if window.board.file_arrangement != Some(settings.board_arrangement) {
+        window.board.file_arrangement = Some(settings.board_arrangement);
+        window.board.arrangement = settings.board_arrangement.into();
     }
 }
 

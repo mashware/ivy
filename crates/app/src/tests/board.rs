@@ -79,10 +79,7 @@ mod tests {
 
     /// Switches the Board to «By milestone», where a project's roadmap is laid out.
     fn arrange_by_milestone(window: &mut Window, ctx: &egui::Context) {
-        frame(window, ctx, vec![]);
-        let shapes = frame(window, ctx, vec![]);
-        let at = text_point(&shapes, "By milestone").expect("the arrangement toggle is painted");
-        frame(window, ctx, click_at(at));
+        arrange(window, ctx, "By milestone");
     }
 
     #[test]
@@ -1358,8 +1355,6 @@ mod tests {
             panel_control::Answer::Text(_)
         ));
         frame(&mut window, &ctx, chord_with(egui::Key::O));
-        let shapes = frame(&mut window, &ctx, vec![]);
-        assert!(!the_text_queued_up(&shapes, "unconfigured stored task"));
 
         settings::interpret(&format!("roadmap.configured={}", roadmap.display()))
             .unwrap()
@@ -1376,9 +1371,9 @@ mod tests {
                 let at = text_point(&shapes, "By state").expect("the arrangement toggle");
                 frame(&mut window, &ctx, click_at(at));
                 let shapes = frame(&mut window, &ctx, vec![]);
-                let named = shapes.iter().any(|s| {
-                    matches!(&s.shape, egui::Shape::Text(t) if t.galley.text() == "configured")
-                });
+                let named = shapes.iter().any(
+                    |s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.text() == "configured"),
+                );
                 assert!(!named, "a project without consoles got a By-state row");
                 break;
             }
@@ -1678,21 +1673,39 @@ mod tests {
         );
     }
 
+    /// A file path of its own for each test that writes the arrangement.
+    fn arrangement_file(label: &str) -> std::path::PathBuf {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        std::env::temp_dir().join(format!("ivy-board-{label}-{}-{n}", std::process::id()))
+    }
+
+    fn arrange(window: &mut Window, ctx: &egui::Context, label: &str) {
+        frame(window, ctx, vec![]);
+        let shapes = frame(window, ctx, vec![]);
+        let at = text_point(&shapes, label).expect("the arrangement toggle is painted");
+        frame(window, ctx, click_at(at));
+    }
+
     #[test]
     fn the_chosen_arrangement_is_written_to_the_file_and_opens_the_next_board() {
-        let file = std::env::temp_dir().join(format!(
-            "ivy-board-arrangement-{}-{}",
-            std::process::id(),
-            std::time::Instant::now().elapsed().as_nanos()
-        ));
+        let file = arrangement_file("arrangement");
         std::fs::write(&file, "theme = ivy-day\n").unwrap();
         let mut window = window_with("sleep 30", "sleep 30");
         integrated(&mut window);
         window.board.remember_in = Some(file.clone());
         let ctx = egui::Context::default();
         frame(&mut window, &ctx, chord_with(egui::Key::O));
-        arrange_by_milestone(&mut window, &ctx);
+        arrange(&mut window, &ctx, "By milestone");
+        arrange(&mut window, &ctx, "By state");
+        arrange(&mut window, &ctx, "By milestone");
         let written = std::fs::read_to_string(&file).unwrap();
+        let _ = std::fs::remove_file(&file);
+        assert_eq!(
+            written.matches("board.arrangement").count(),
+            1,
+            "a second choice replaces the line: {written}"
+        );
         assert!(
             written.contains("board.arrangement = milestone"),
             "{written}"
@@ -1714,6 +1727,62 @@ mod tests {
             !the_text_queued_up(&shapes, "WAITING FOR YOU"),
             "the remembered arrangement is By milestone, which has no state columns"
         );
+        // Re-applying the same file (an unrelated Settings save) leaves a later choice alone;
+        // removing the line returns the default.
+        arrange(&mut next, &ctx, "By state");
+        settings::interpret(&written).unwrap().0.apply_to(&mut next);
+        let shapes = frame(&mut next, &ctx, vec![]);
+        assert!(
+            the_text_queued_up(&shapes, "WAITING FOR YOU"),
+            "the re-apply undid a choice"
+        );
+        arrange(&mut next, &ctx, "By milestone");
+        settings::interpret("theme = ivy-day")
+            .unwrap()
+            .0
+            .apply_to(&mut next);
+        let shapes = frame(&mut next, &ctx, vec![]);
+        assert!(
+            the_text_queued_up(&shapes, "WAITING FOR YOU"),
+            "no line opens By state"
+        );
+    }
+
+    #[test]
+    fn a_first_choice_creates_the_file_and_a_refused_one_is_said_on_the_board() {
+        let file = arrangement_file("first");
+        let mut window = window_with("sleep 30", "sleep 30");
+        integrated(&mut window);
+        window.board.remember_in = Some(file.clone());
+        let ctx = egui::Context::default();
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
+        arrange(&mut window, &ctx, "By milestone");
+        let written = std::fs::read_to_string(&file).unwrap_or_default();
         let _ = std::fs::remove_file(&file);
+        assert!(
+            written.contains("board.arrangement = milestone"),
+            "{written:?}"
+        );
+
+        // A symlinked file is never written: the choice stays on screen and the foot says why.
+        let target = arrangement_file("target");
+        let link = arrangement_file("link");
+        std::fs::write(&target, "theme = ivy-day\n").unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        window.board.remember_in = Some(link.clone());
+        arrange(&mut window, &ctx, "By state");
+        let shapes = frame(&mut window, &ctx, vec![]);
+        let untouched = std::fs::read_to_string(&target).unwrap();
+        let _ = std::fs::remove_file(&link);
+        let _ = std::fs::remove_file(&target);
+        assert_eq!(untouched, "theme = ivy-day\n");
+        assert!(
+            the_text_queued_up(&shapes, "WAITING FOR YOU"),
+            "the choice stays on screen"
+        );
+        assert!(
+            the_text_queued_up(&shapes, "This arrangement will not be remembered"),
+            "the refusal is said on the Board"
+        );
     }
 }

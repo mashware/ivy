@@ -222,7 +222,7 @@ fn paint_contents(
                     row_base += egui::Frame::new()
                         .inner_margin(egui::Margin::symmetric(super::bar::GUTTER, 4))
                         .show(ui, |ui| {
-                            super::milestones::project_header(ui, section, claims, &roles);
+                            super::milestones::project_header(ui, section, claims, true, &roles);
                             match &plan {
                                 Some(plan) => super::milestones::paint_plan(
                                     ui,
@@ -250,13 +250,12 @@ fn paint_contents(
                     continue;
                 }
                 let context_top = ui.next_widget_position().y;
-                let started = Instant::now();
+                // No plan is painted here, so nothing goes under the plan's paint span (D13).
                 egui::Frame::new()
                     .inner_margin(egui::Margin::symmetric(super::bar::GUTTER, 4))
                     .show(ui, |ui| {
-                        super::milestones::project_header(ui, section, claims, &roles);
+                        super::milestones::project_header(ui, section, claims, false, &roles);
                     });
-                window.board.timing.plan_paint(started.elapsed());
                 if stacked {
                     for c in COLUMNS {
                         let mut entries: Vec<_> = section
@@ -351,7 +350,7 @@ fn paint_contents(
                 ui.separator();
             }
         });
-    paint_hint(&mut ui, &roles);
+    paint_hint(&mut ui, window.board.remember_error.as_deref(), &roles);
     geometry.viewport = output.inner_rect;
     geometry.offset = offset;
     geometry.next_offset = output.state.offset;
@@ -367,7 +366,7 @@ const HINT_HEIGHT: f32 = 26.0;
 pub(crate) const HINT: &str = "Enter go to console  ·  Arrows move between cards  ·  Esc close";
 
 /// The keys, named once at the foot of the Board instead of in every card.
-fn paint_hint(ui: &mut egui::Ui, roles: &crate::theme::Roles) {
+fn paint_hint(ui: &mut egui::Ui, refused: Option<&str>, roles: &crate::theme::Roles) {
     let (rect, _) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), HINT_HEIGHT),
         egui::Sense::hover(),
@@ -384,6 +383,18 @@ fn paint_hint(ui: &mut egui::Ui, roles: &crate::theme::Roles) {
         egui::FontId::proportional(11.5),
         roles.tx3,
     );
+    if let Some(reason) = refused {
+        ui.painter().text(
+            egui::pos2(rect.right() - 16.0, rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            format!(
+                "This arrangement will not be remembered: {}",
+                super::cards::clean(reason)
+            ),
+            egui::FontId::proportional(11.5),
+            roles.wait,
+        );
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

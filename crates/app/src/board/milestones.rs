@@ -151,6 +151,20 @@ fn column_header(
     }
 }
 
+/// One muted line under a milestone's header, cut at the column's edge.
+fn note(ui: &mut egui::Ui, width: f32, text: &str, roles: &Roles) {
+    let (row, _) = ui.allocate_exact_size(vec2(width, 18.0), egui::Sense::hover());
+    ui.painter()
+        .with_clip_rect(row.intersect(ui.clip_rect()))
+        .text(
+            pos2(row.left() + 4.0, row.center().y),
+            Align2::LEFT_CENTER,
+            super::cards::clean(text),
+            FontId::proportional(11.5),
+            roles.tx3,
+        );
+}
+
 fn deliverable(ui: &mut egui::Ui, width: f32, text: &str, mark: Option<Mark>, roles: &Roles) {
     let (row, _) = ui.allocate_exact_size(vec2(width, 22.0), egui::Sense::hover());
     let (mark, ink, text_ink) = match mark {
@@ -217,6 +231,9 @@ pub(super) fn paint_plan(
                                 after.as_deref(),
                                 roles,
                             );
+                            if let Some(criterion) = &milestone.done_when {
+                                note(ui, width, &format!("Done when: {criterion}"), roles);
+                            }
                             for (item, consoles) in
                                 milestone.items.iter().zip(&placed.milestones[index].items)
                             {
@@ -233,7 +250,12 @@ pub(super) fn paint_plan(
                         } else {
                             let count = placed.off.len();
                             column_header(ui, width, "Off the plan", None, count, None, roles);
-                            if placed.off.is_empty() {
+                            // The plan's own work outside its milestones (a contract, a review) is
+                            // the plan's, not a console's: listed here, above the consoles.
+                            for item in &plan.outside {
+                                deliverable(ui, width, &item.text, item.mark, roles);
+                            }
+                            if placed.off.is_empty() && plan.outside.is_empty() {
                                 ui.weak("—");
                             }
                             for entry in &placed.off {
@@ -299,7 +321,13 @@ pub(super) struct Claims {
 /// A project's name in its header ink, its consoles, how many sit in each claiming column, and
 /// where its roadmap came from — or why it could not be read. The source is named, not linked: it
 /// is a file path or a publication, and the Board opens only web addresses (`links::WebTarget`).
-pub(super) fn project_header(ui: &mut egui::Ui, section: &Section, claims: Claims, roles: &Roles) {
+pub(super) fn project_header(
+    ui: &mut egui::Ui,
+    section: &Section,
+    claims: Claims,
+    with_roadmap: bool,
+    roles: &Roles,
+) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), egui::Sense::hover());
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
     let y = rect.center().y;
@@ -322,8 +350,16 @@ pub(super) fn project_header(ui: &mut egui::Ui, section: &Section, claims: Claim
         "{consoles} {}",
         if consoles == 1 { "console" } else { "consoles" }
     );
-    let error = section.roadmap.as_ref().and_then(|r| r.error.as_deref());
-    if section.roadmap.as_ref().is_none_or(|r| r.plan.is_none()) && error.is_none() {
+    // «By state» shows no roadmap, so it says nothing about one; «Other consoles» can never have one.
+    let with_roadmap =
+        with_roadmap && matches!(section.kind, super::model::Kind::Repository { .. });
+    let error = section
+        .roadmap
+        .as_ref()
+        .and_then(|r| r.error.as_deref())
+        .filter(|_| with_roadmap);
+    if with_roadmap && section.roadmap.as_ref().is_none_or(|r| r.plan.is_none()) && error.is_none()
+    {
         detail.push_str(" · no roadmap");
     }
     x += painter
@@ -367,7 +403,7 @@ pub(super) fn project_header(ui: &mut egui::Ui, section: &Section, claims: Claim
             .width()
             + 10.0;
     }
-    // An unreadable roadmap says why, as «By state» does, instead of passing for no roadmap.
+    // An unreadable roadmap says why instead of passing for no roadmap.
     if let Some(error) = error {
         painter.text(
             pos2(rect.right() - 4.0, y),
@@ -376,7 +412,11 @@ pub(super) fn project_header(ui: &mut egui::Ui, section: &Section, claims: Claim
             FontId::proportional(11.5),
             roles.block,
         );
-    } else if let Some(source) = section.roadmap.as_ref().filter(|r| r.plan.is_some()) {
+    } else if let Some(source) = section
+        .roadmap
+        .as_ref()
+        .filter(|r| with_roadmap && r.plan.is_some())
+    {
         painter.text(
             pos2(rect.right() - 4.0, y),
             Align2::RIGHT_CENTER,
@@ -560,6 +600,7 @@ mod tests {
                     block: 0,
                     done: 1,
                 },
+                true,
                 &roles,
             );
         });
@@ -591,6 +632,72 @@ mod tests {
         assert!(
             !texts.iter().any(|t| t.contains("no roadmap")),
             "an error is not an absence"
+        );
+    }
+
+    #[test]
+    fn a_milestones_criterion_and_the_plans_outside_work_are_painted() {
+        let plan = panel_contract::plan::parse_document_noting(
+            r#"{"milestones":[{"id":"Q4","title":"Refunds","done_when":"refunds settle in one day","items":[{"text":"Webhooks"}]}],"outside":[{"text":"Sign the Stripe contract","mark":"pending"}]}"#,
+        )
+        .unwrap()
+        .0;
+        let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
+        let roles = Roles::of(&crate::theme::Theme::default());
+        let section = section(vec![], None, None);
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.set_width(1200.0);
+            paint_plan(ui, &section, &plan, &roles, &mut |_, _, _, _, _| {});
+        });
+        let texts: Vec<String> = output
+            .shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Text(t) => Some(t.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect();
+        output.drop_without_applying_deltas();
+        for expected in [
+            "Done when: refunds settle in one day",
+            "Sign the Stripe contract",
+        ] {
+            assert!(
+                texts.iter().any(|t| t == expected),
+                "missing {expected} in {texts:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn by_state_headers_and_other_consoles_say_nothing_about_a_roadmap() {
+        let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
+        let roles = Roles::of(&crate::theme::Theme::default());
+        let painted = |section: &Section, with_roadmap: bool| {
+            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                project_header(ui, section, Claims::default(), with_roadmap, &roles);
+            });
+            let texts: Vec<String> = output
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Text(t) => Some(t.galley.text().to_owned()),
+                    _ => None,
+                })
+                .collect();
+            output.drop_without_applying_deltas();
+            texts
+        };
+        let with_plan = section(vec![entry(1, None, None)], Some(plan()), None);
+        assert!(!painted(&with_plan, false).iter().any(|t| t == "ROADMAP.md"));
+        let mut other = section(vec![entry(1, None, None)], None, None);
+        other.kind = crate::board::model::Kind::Other;
+        assert!(
+            !painted(&other, true)
+                .iter()
+                .any(|t| t.contains("no roadmap"))
         );
     }
 }

@@ -261,15 +261,15 @@ pub(crate) fn before_keys(
         }
     }
     if window.board.arrangement != arrangement_before {
-        // Remembered in the configuration file; a refusal (Settings open, measuring) keeps the
-        // choice on screen for this session and says why on the console that launched Ivy.
-        let chosen = match window.board.arrangement {
-            super::filter::Arrangement::ByState => crate::settings::BoardArrangement::State,
-            super::filter::Arrangement::ByMilestone => crate::settings::BoardArrangement::Milestone,
-        };
-        if let Err(error) = crate::settings::editor::runtime::save_board_arrangement(window, chosen)
-        {
-            eprintln!("the Board arrangement was not remembered: {error}");
+        // Remembered in the configuration file. A refusal (a symlinked or unreadable file, a
+        // Settings save still applying) keeps the choice on screen for this session and is said at
+        // the Board's foot, where somebody who launched Ivy from the desktop can see it.
+        let chosen = window.board.arrangement.into();
+        window.board.remember_error =
+            crate::settings::editor::runtime::save_board_arrangement(window, chosen).err();
+        // What the file now holds, when there is a file and it took the line.
+        if window.board.remember_error.is_none() && window.board.remember_in.is_some() {
+            window.board.file_arrangement = Some(Some(chosen));
         }
     }
     if std::mem::take(&mut window.board.close_requested) {

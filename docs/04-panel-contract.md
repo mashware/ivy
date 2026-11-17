@@ -271,8 +271,9 @@ plan_get {"repo": <optional path>} -> <committed document> | no plan published f
 plan_retire {"repo": <optional path>} -> retired for <Project> | no plan published for <Project>
 ```
 
-The settings keys remain `roadmap.<name> = <path>` and `roadmap.window = <done> <next>` (default
-`2 3`). The file is used only when that project has no published plan.
+The settings key remains `roadmap.<name> = <path>`; `roadmap.window` was retired with the
+roadmap «By state» used to fold open (D93, 17 November 2026). The file is used only when that
+project has no published plan.
 
 ## Rules of the document
 

@@ -64,8 +64,8 @@ pub(crate) fn save_agent_preferences(
 
 /// Remember the Board arrangement in the configuration file, preserving every other line.
 ///
-/// Nothing is re-applied: the arrangement is already the one on screen. It goes through the file,
-/// not the saved layout, so a person can also choose it by hand (D93).
+/// Nothing is re-applied: the arrangement is already the one on screen. Why the file and not the
+/// saved layout is D93's.
 pub(crate) fn save_board_arrangement(
     window: &mut Window,
     arrangement: crate::settings::BoardArrangement,
@@ -73,24 +73,19 @@ pub(crate) fn save_board_arrangement(
     let Some(path) = window.board.remember_in.clone() else {
         return Ok(());
     };
-    let editor = &window.settings_editor;
-    if editor.measuring {
-        return Err("Measurement: configuration I/O is disabled.".into());
-    }
-    if editor.is_open() || editor.application.pending.is_some() {
-        return Err("Settings is open or applying; the Board arrangement was not saved.".into());
+    // Settings cannot be open while the Board takes input; a save of its own can still be applying.
+    if window.settings_editor.application.pending.is_some() {
+        return Err("Settings is still applying a save".into());
     }
     let (mut store, text) = super::super::store::Store::open(path)?;
     let mut draft = super::super::document::Document::new(text);
-    draft
+    let field = draft
         .fields
         .iter_mut()
         .find(|f| f.key == "board.arrangement")
-        .expect("board arrangement field")
-        .value = arrangement.as_written().to_owned();
-    let text = draft.text();
-    super::super::interpret(&text).map_err(|e| e.to_string())?;
-    store.save(&text)
+        .ok_or("the settings document has no board.arrangement field")?;
+    field.value = arrangement.as_written().to_owned();
+    store.save(&draft.text())
 }
 
 impl Editor {

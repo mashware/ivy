@@ -9348,7 +9348,7 @@ one owner:
   no published plan or it is retired. There is no merge. The published plan is kept in Ivy's state
   per project and restored after restart. Otherwise, Markdown task items from the configured file
   form the plan; the first unchecked item is in progress. The board shows a window around it
-  (`roadmap.window`, two done and three next by default). File changes repaint the board. A project
+  (`roadmap.window`, two done and three next by default; retired by D93 on 17 November 2026). File changes repaint the board. A project
   named in settings has a section even with no console open; a stored plan alone does not create a
   section.
 - **A console's card starts from its existing panel document**, so every console with a panel is on
@@ -9740,8 +9740,19 @@ the person launched: a measured run and every test window have no file to write 
 laid out in «By milestone», **«By state» no longer carries the roadmap**: its project rows show the
 project, its consoles and its claims, a project known only by its roadmap appears only in «By
 milestone», and `roadmap.window` — which sized the roadmap those rows folded open — is retired and
-reported as unknown rather than read as a roadmap file called «window». The rest of this
-decision's roadmap behaviour above (the fold, the window, the chips) is superseded by that. Placement reads only the panel's declared
+reported as unknown rather than read as a roadmap file called «window». Superseded above by that:
+the roadmap folds and the configured detail window, the inspect-all controls, and the
+summary-roadmap-columns order of a project row with its plan-only rows; «By milestone» keeps the
+milestone cards, every item, each milestone's **done when** and the plan's outside work, which it
+lists at the top of «Off the plan». Dropped with the strip, deliberately: the plan's title (the
+project header names its source instead) and the fallback that listed producers' section headings
+for a project without a plan — the cards already carry those headings. **The arrangement lives in
+the configuration file, not in the saved layout**, because it is a preference a person may write by
+hand and keep across layouts; the saved layout (D16) is the window's shape. The Board applies the
+file's value only when the file changed since it last applied it, so an unrelated Settings save
+never undoes a choice made since, and removing the line returns «By state». A file that cannot be
+written — a symbolic link, which the store refuses — keeps the choice for the session and says so
+at the Board's foot, not only on the console that launched Ivy. Placement reads only the panel's declared
 `milestone` / `deliverable` (D6): a console that declares neither lands in «Off the plan», which on
 today's producers is most of them. Both arrangements share a kit top bar — totals (which leave the
 first project's summary row), a «Claiming you» narrowing, a filter over console, tab and task
@@ -9759,8 +9770,9 @@ frame, so a press on the Board also pressed the header button beneath it — the
 the Board for the diff viewer, and the close button closed a console nobody could see. An unpublished console is a dashed card and
 an old state nobody refreshes is veiled. The roadmap's source is **named, not linked**: it is a
 file path or a publication, and the Board opens only web addresses; an unreadable roadmap says why
-in «By milestone» as it does in «By state». Discarded: a per-project choice of arrangement
-(doubles the trial's surface for no signal); inferring a milestone from the branch or the tab name
+in the project's header. Discarded: a per-project choice of arrangement
+(doubles the surface for no signal); remembering the arrangement in the saved layout (it is a
+preference, not the window's shape, and could not be written by hand); inferring a milestone from the branch or the tab name
 (D6); painting the declared `attention` on the card while the columns follow the effective state
 (a card read «waiting» in the Working column).
 

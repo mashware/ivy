@@ -76,7 +76,7 @@ pub fn run() -> eframe::Result {
     let project_probe = project_view::probe_at_startup(measuring);
     // The Board remembers its arrangement in the person's file; a measured run and every test
     // window leave it `None`, so neither can write there.
-    let arrangement_file = (!measuring).then(settings::path).flatten();
+    let arrangement_file = arrangement_file(measuring);
     if let Some(size) = requested {
         options.viewport = options.viewport.with_inner_size(size);
     }
@@ -142,4 +142,18 @@ pub fn run() -> eframe::Result {
             Ok(Box::new(window))
         }),
     )
+}
+
+/// Where the Board remembers its arrangement: the person's file, never under measurement.
+fn arrangement_file(measuring: bool) -> Option<std::path::PathBuf> {
+    (!measuring).then(settings::path).flatten()
+}
+
+#[cfg(test)]
+mod arrangement_tests {
+    #[test]
+    fn a_measured_run_and_a_fresh_board_have_no_file_to_write_the_arrangement_to() {
+        assert_eq!(super::arrangement_file(true), None);
+        assert_eq!(crate::board::State::default().remember_in, None);
+    }
 }

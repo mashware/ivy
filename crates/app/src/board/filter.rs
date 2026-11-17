@@ -4,12 +4,31 @@ use super::{
     observation::Column,
 };
 
-/// The two Board arrangements kept side by side while the owner picks one (D93, amended by #93).
+/// The Board's two arrangements: both stay, and the last one chosen is remembered as
+/// `board.arrangement` (D93).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum Arrangement {
     #[default]
     ByState,
     ByMilestone,
+}
+
+impl From<Option<crate::settings::BoardArrangement>> for Arrangement {
+    fn from(written: Option<crate::settings::BoardArrangement>) -> Self {
+        match written {
+            None | Some(crate::settings::BoardArrangement::State) => Self::ByState,
+            Some(crate::settings::BoardArrangement::Milestone) => Self::ByMilestone,
+        }
+    }
+}
+
+impl From<Arrangement> for crate::settings::BoardArrangement {
+    fn from(arrangement: Arrangement) -> Self {
+        match arrangement {
+            Arrangement::ByState => Self::State,
+            Arrangement::ByMilestone => Self::Milestone,
+        }
+    }
 }
 
 #[derive(Default)]

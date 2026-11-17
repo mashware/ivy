@@ -636,19 +636,6 @@ mod tests {
         pane.panel = Some(PanelDir::create().unwrap());
         publish_at(pane, &serde_json::json!({"attention":"wait","lines":(0..33).map(|n|format!("Waiting line {n}: {}", "long content ".repeat(6))).collect::<Vec<_>>()} ).to_string());
         pane.to_reread.raise();
-        let root = std::env::temp_dir().join(format!("ivy-71-first-open-{}", std::process::id()));
-        let mut configured = String::new();
-        for name in ["demo", "empty"] {
-            let directory = root.join(name);
-            std::fs::create_dir_all(&directory).unwrap();
-            let path = directory.join("roadmap.md");
-            std::fs::write(&path, "# Roadmap\n- [ ] Pending item\n").unwrap();
-            configured.push_str(&format!("roadmap.{name}={}\n", path.display()));
-        }
-        settings::interpret(&configured)
-            .unwrap()
-            .0
-            .apply_to(&mut window);
         let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(2048.0, 1224.0));
         let pass = |window: &mut Window, events| {
             ui_pass(
@@ -689,7 +676,6 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         drop(window);
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
