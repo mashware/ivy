@@ -66,18 +66,25 @@ pub(crate) struct Roles {
     _derived: (),
 }
 
-/// The kit's measures, in points. The ones not listed here (the dialog radius, control and row
-/// heights) arrive with the surfaces that use them.
+/// The kit's measures, in points. The ones not listed here (control heights) arrive with the
+/// surfaces that use them.
 pub(crate) mod metrics {
     pub const RADIUS_CHIP: u8 = 4;
     pub const RADIUS_CONTROL: u8 = 6;
     pub const RADIUS_CARD: u8 = 8;
     pub const RADIUS_FLOATING: u8 = 10;
+    /// A modal dialog (Settings), one step rounder than a menu.
+    pub const RADIUS_DIALOG: u8 = 12;
     /// The title bar, which holds the tabs: the design's single 40-point strip.
     pub const TITLE_BAR_HEIGHT: f32 = 40.0;
     /// A tab inside the title bar, sitting on its bottom edge.
     pub const TAB_HEIGHT: f32 = 34.0;
     pub const CONSOLE_HEADER_HEIGHT: f32 = 28.0;
+    /// A floating viewer's header and its toolbar: the design's two 40-point strips.
+    pub const FLOATING_HEADER_HEIGHT: f32 = 40.0;
+    pub const FLOATING_FOOTER_HEIGHT: f32 = 26.0;
+    /// A row of a floating menu or list.
+    pub const MENU_ROW_HEIGHT: f32 = 30.0;
 }
 
 impl Roles {
