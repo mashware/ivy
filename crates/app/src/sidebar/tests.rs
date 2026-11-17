@@ -777,22 +777,23 @@ fn painted(
     output.shapes
 }
 
-/// The colours of the text the consoles' headers paint, left of `x`.
+/// The colours the consoles paint inside `consoles`: their fills and their text, each with the
+/// opacity the pass painted it at — what a dimmed pass changes.
 fn header_inks(shapes: &[egui::epaint::ClippedShape], consoles: egui::Rect) -> Vec<egui::Color32> {
-    let band = egui::Rect::from_min_size(consoles.min, egui::vec2(consoles.width(), 34.0));
     let mut inks: Vec<_> = shapes
         .iter()
         .filter_map(|s| match &s.shape {
-            // A dimmed pass multiplies its opacity into the text it paints.
-            egui::Shape::Text(text) if band.contains(text.pos) => Some(
+            egui::Shape::Text(text) if consoles.contains(text.pos) => Some(
                 text.override_text_color
                     .unwrap_or(text.galley.job.sections[0].format.color)
                     .gamma_multiply(text.opacity_factor),
             ),
+            egui::Shape::Rect(rect) if consoles.contains_rect(rect.rect) => Some(rect.fill),
             _ => None,
         })
         .collect();
     inks.sort_by_key(|c| c.to_array());
+    inks.dedup();
     inks
 }
 
