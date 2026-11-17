@@ -161,6 +161,14 @@ pub(crate) fn refresh(window: &mut Window, ctx: &egui::Context) {
                 .or_insert((started - Duration::from_secs(1), None));
             if started.duration_since(cached.0) >= Duration::from_secs(1) {
                 *cached = (started, pane.pty.working_directory());
+                pane.program = pane.pty.foreground_program().map(|program| {
+                    let folder = cached
+                        .1
+                        .as_deref()
+                        .and_then(std::path::Path::file_name)
+                        .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+                    (folder, program)
+                });
                 state.observed += 1;
             }
             cached.1.clone().or(published)

@@ -35,6 +35,9 @@ pub(super) struct Review {
     scroll_to: Option<usize>,
     preview: bool,
     theme: crate::theme::Theme,
+    /// Where Side by side divides its two columns, as a share of the visible width; the person
+    /// drags it (asked for on 17 November 2026).
+    split: f32,
 }
 
 impl Default for Review {
@@ -48,6 +51,7 @@ impl Default for Review {
             scroll_to: None,
             preview: false,
             theme: crate::theme::Theme::default(),
+            split: 0.5,
         }
     }
 }
@@ -334,16 +338,11 @@ fn file_row(review: &mut Review, ui: &mut egui::Ui, doc: &Document, index: usize
 fn changes(review: &mut Review, ui: &mut egui::Ui, doc: &Document, height: f32) {
     let file = &doc.files[review.file];
     ui.label(RichText::new(&file.display).color(ui.visuals().weak_text_color()));
-    if review.mode == Mode::SideBySide {
-        ui.horizontal(|ui| {
-            let width = (ui.available_width() / 2.0).max(1.0);
-            ui.allocate_ui(egui::vec2(width, 18.0), |ui| {
-                ui.set_min_width(width);
-                ui.weak("Before");
-            });
-            ui.weak("After");
-        });
-    }
+    let before_width = if review.mode == Mode::SideBySide {
+        Some(split_header(review, ui))
+    } else {
+        None
+    };
     if let Some(notice) = &file.notice {
         ui.label(notice);
     }
@@ -419,7 +418,8 @@ fn changes(review: &mut Review, ui: &mut egui::Ui, doc: &Document, height: f32) 
                     let hunk = &file.hunks[h];
                     let pair = &hunk.pairs[pair];
                     ui.horizontal(|ui| {
-                        let width = (ui.available_width() / 2.0 - 2.0).max(1.0);
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        let left = before_width.unwrap_or(ui.available_width() / 2.0).max(1.0);
                         if let Some(i) = pair.old {
                             paint::paint_line(
                                 review,
@@ -427,12 +427,14 @@ fn changes(review: &mut Review, ui: &mut egui::Ui, doc: &Document, height: f32) 
                                 &file.path,
                                 &hunk.lines[i],
                                 Some("old"),
-                                width,
+                                left,
                                 row_height,
                             );
                         } else {
-                            ui.allocate_space(egui::vec2(width, row_height));
+                            ui.allocate_space(egui::vec2(left, row_height));
                         }
+                        let right = ui.available_width().max(1.0);
+                        let divider = ui.cursor().left();
                         if let Some(i) = pair.new {
                             paint::paint_line(
                                 review,
@@ -440,17 +442,73 @@ fn changes(review: &mut Review, ui: &mut egui::Ui, doc: &Document, height: f32) 
                                 &file.path,
                                 &hunk.lines[i],
                                 Some("new"),
-                                width,
+                                right,
                                 row_height,
                             );
                         } else {
-                            ui.allocate_space(egui::vec2(width, row_height));
+                            ui.allocate_space(egui::vec2(right, row_height));
                         }
+                        let roles = crate::ui::style::roles(ui.ctx(), &review.theme);
+                        ui.painter().vline(
+                            divider,
+                            ui.min_rect().y_range(),
+                            egui::Stroke::new(1.0, roles.line),
+                        );
                     });
                 }
             }
         }
     });
+}
+
+/// The Before / After header with the handle that moves the column split; returns the Before
+/// column's width.
+fn split_header(review: &mut Review, ui: &mut egui::Ui) -> f32 {
+    let width = ui.available_width().max(1.0);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 20.0), egui::Sense::hover());
+    let left =
+        (width * review.split).clamp(80.0_f32.min(width / 2.0), (width - 80.0).max(width / 2.0));
+    let handle = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + left, rect.center().y),
+        egui::vec2(8.0, rect.height()),
+    );
+    let response = ui
+        .interact(handle, ui.id().with("review-split"), egui::Sense::drag())
+        .on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
+        .on_hover_text("Drag to resize the two sides");
+    if response.dragged()
+        && let Some(pointer) = response.interact_pointer_pos()
+    {
+        review.split = ((pointer.x - rect.left()) / width).clamp(0.15, 0.85);
+    }
+    let roles = crate::ui::style::roles(ui.ctx(), &review.theme);
+    let weak = ui.visuals().weak_text_color();
+    let font = egui::FontId::proportional(12.0);
+    ui.painter().text(
+        rect.left_center() + egui::vec2(6.0, 0.0),
+        egui::Align2::LEFT_CENTER,
+        "Before",
+        font.clone(),
+        weak,
+    );
+    ui.painter().text(
+        egui::pos2(rect.left() + left + 6.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        "After",
+        font,
+        weak,
+    );
+    let grip = if response.hovered() || response.dragged() {
+        roles.accent
+    } else {
+        roles.line2
+    };
+    ui.painter().vline(
+        rect.left() + left,
+        rect.y_range(),
+        egui::Stroke::new(2.0, grip),
+    );
+    left
 }
 
 enum Row {

@@ -755,3 +755,104 @@ fn no_console_drops_below_twenty_columns_beside_files_and_the_drawer() {
     }
     assert!(shown, "Files and the drawer never opened together");
 }
+
+/// One real application pass, returning what it painted.
+fn painted(
+    window: &mut Window,
+    ctx: &egui::Context,
+    area: egui::Rect,
+    events: Vec<egui::Event>,
+) -> Vec<egui::epaint::ClippedShape> {
+    let mut frame = eframe::Frame::_new_kittest();
+    eframe::App::logic(window, ctx, &mut frame);
+    let mut output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(area),
+            events,
+            ..Default::default()
+        },
+        |ui| eframe::App::ui(window, ui, &mut frame),
+    );
+    output.textures_delta.clear();
+    output.shapes
+}
+
+/// The colours of the text the consoles' headers paint, left of `x`.
+fn header_inks(shapes: &[egui::epaint::ClippedShape], consoles: egui::Rect) -> Vec<egui::Color32> {
+    let band = egui::Rect::from_min_size(consoles.min, egui::vec2(consoles.width(), 34.0));
+    let mut inks: Vec<_> = shapes
+        .iter()
+        .filter_map(|s| match &s.shape {
+            egui::Shape::Text(text) if band.contains(text.pos) => Some(
+                text.override_text_color
+                    .unwrap_or(text.galley.job.sections[0].format.color),
+            ),
+            _ => None,
+        })
+        .collect();
+    inks.sort_by_key(|c| c.to_array());
+    inks
+}
+
+/// The drawer and a press on the title bar are not modal: the consoles beside them keep their
+/// colours. Dimming on them shaded the window beside the drawer and made every title-bar button
+/// blink (owner, 17 November 2026).
+#[test]
+fn neither_the_drawer_nor_a_title_bar_press_dims_the_consoles() {
+    let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+    window.chrome.enable();
+    window.headers = window.headers.integrated(true);
+    let ctx = egui::Context::default();
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0));
+    for _ in 0..2 {
+        painted(&mut window, &ctx, area, vec![]);
+    }
+    let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
+    let consoles = crate::tab_bar::geometry(&window, area, &metrics).consoles;
+    let plain = header_inks(&painted(&mut window, &ctx, area, vec![]), consoles);
+    assert!(!plain.is_empty(), "no header text was found");
+    // Hold a press on the title bar's Markdown button.
+    let markdown = button_of(&window, Tool::Markdown);
+    let held = painted(
+        &mut window,
+        &ctx,
+        area,
+        vec![
+            egui::Event::PointerMoved(markdown),
+            egui::Event::PointerButton {
+                pos: markdown,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ],
+    );
+    assert_eq!(
+        header_inks(&held, consoles),
+        plain,
+        "a held title-bar press dimmed the consoles"
+    );
+    painted(
+        &mut window,
+        &ctx,
+        area,
+        vec![egui::Event::PointerButton {
+            pos: markdown,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    assert_eq!(active(&window), Some(Tool::Markdown));
+    let open = painted(&mut window, &ctx, area, vec![]);
+    let beside = window.sidebar.last_consoles;
+    assert_eq!(
+        header_inks(&open, beside),
+        header_inks(&painted(&mut window, &ctx, area, vec![]), beside),
+    );
+    assert_eq!(
+        header_inks(&open, beside),
+        plain,
+        "the open drawer shaded the consoles beside it"
+    );
+}

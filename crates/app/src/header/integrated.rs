@@ -18,6 +18,32 @@ pub(crate) struct Strip {
     pub(crate) focused: bool,
 }
 
+/// What a console's header calls it: the name somebody gave it; the title an agent set; otherwise
+/// its foreground program — after its folder when no project names the place — rather than the
+/// shell's `user@host:path` title, which the owner found said nothing (17 November 2026).
+fn header_label(pane: &crate::Pane) -> std::borrow::Cow<'_, str> {
+    let named = pane
+        .label
+        .as_deref()
+        .is_some_and(|label| !label.trim().is_empty());
+    let agent = pane.signals.view(std::time::Instant::now()).is_some();
+    match &pane.program {
+        Some((folder, program)) if !named && !agent => {
+            let mut letters = program.chars();
+            let program: String = letters
+                .next()
+                .map(|first| first.to_uppercase().chain(letters).collect())
+                .unwrap_or_default();
+            if pane.project.is_some() || folder.is_empty() {
+                program.into()
+            } else {
+                format!("{folder} / {program}").into()
+            }
+        }
+        _ => crate::pane_view::display_label(pane),
+    }
+}
+
 /// Paint and time exactly one strip, preserving the existing accounting boundary.
 pub(crate) fn paint_strip(
     ui: &egui::Ui,
@@ -28,7 +54,7 @@ pub(crate) fn paint_strip(
 ) -> std::time::Duration {
     let started = std::time::Instant::now();
     if strip.integrated {
-        let label = crate::pane_view::display_label(pane);
+        let label = header_label(pane);
         paint(
             ui,
             strip.header,

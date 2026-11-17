@@ -702,6 +702,35 @@ impl Pty {
         }
     }
 
+    /// The foreground program's name on Linux (`/proc/<pid>/comm`), while the owned child is alive:
+    /// what a console header names when no agent has titled it. A name, not a state: nothing here
+    /// infers what the program is doing (D6).
+    pub fn foreground_program(&mut self) -> Option<String> {
+        #[cfg(target_os = "linux")]
+        {
+            let child = self.child.as_mut()?;
+            if !matches!(child.try_wait(), Ok(None)) {
+                return None;
+            }
+            let pid = self
+                .master
+                .process_group_leader()
+                .filter(|pid| *pid > 0)
+                .or_else(|| {
+                    child
+                        .process_id()
+                        .and_then(|pid| libc::pid_t::try_from(pid).ok())
+                        .filter(|pid| *pid > 0)
+                })?;
+            let name = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
+            Some(name.trim().to_owned()).filter(|name| !name.is_empty())
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            None
+        }
+    }
+
     /// Tells the program that the terminal has changed size.
     ///
     /// It is the half that makes the program inside find out and repaint. The other half —reflowing

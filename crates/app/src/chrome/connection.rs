@@ -127,12 +127,16 @@ pub(super) fn compact_button(window: &mut Window, ui: &egui::Ui, row: Rect) {
     }
 }
 
-pub(super) fn paint_icon(painter: &egui::Painter, rect: Rect, fg: Color32, highlighted: bool) {
-    let center = rect.center();
-    crate::ui::icons::paint(painter, center, crate::ui::icons::Icon::Connect, 15.0, fg);
-    if highlighted {
-        painter.circle_filled(center + egui::vec2(8.0, -8.0), 3.0, fg);
-    }
+/// The link icon; a call for attention colours it and adds nothing beside it (the owner removed
+/// the dot on 17 November 2026).
+pub(super) fn paint_icon(painter: &egui::Painter, rect: Rect, fg: Color32) {
+    crate::ui::icons::paint(
+        painter,
+        rect.center(),
+        crate::ui::icons::Icon::Connect,
+        15.0,
+        fg,
+    );
 }
 
 pub(super) fn open(window: &mut Window, ctx: &egui::Context, board_handoff: bool) {
@@ -272,7 +276,7 @@ pub(crate) fn after_panels(window: &mut Window, ui: &mut egui::Ui, _area: Rect) 
         } else {
             roles.tx2
         };
-        paint_icon(&painter, rect, fg, highlighted);
+        paint_icon(&painter, rect, fg);
     }
     window.chrome.record_work(started.elapsed());
     window.timed_separately += window.chrome.take_cost();

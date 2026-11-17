@@ -280,21 +280,14 @@ fn field(
 }
 
 fn footer(ui: &mut egui::Ui, count: &str, roles: &crate::theme::Roles) {
-    let (rect, _) =
+    let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 22.0), egui::Sense::hover());
     ui.painter().line_segment(
         [rect.left_top(), rect.right_top()],
         egui::Stroke::new(1.0, roles.line),
     );
     let font = egui::FontId::proportional(11.0);
-    ui.painter().text(
-        egui::pos2(rect.left() + 8.0, rect.center().y + 1.0),
-        egui::Align2::LEFT_CENTER,
-        count,
-        font.clone(),
-        roles.tx3,
-    );
-    ui.painter().text(
+    let hint = ui.painter().text(
         egui::pos2(rect.right() - 8.0, rect.center().y + 1.0),
         egui::Align2::RIGHT_CENTER,
         if cfg!(target_os = "macos") {
@@ -302,9 +295,28 @@ fn footer(ui: &mut egui::Ui, count: &str, roles: &crate::theme::Roles) {
         } else {
             "Enter reveals · Ctrl+Enter opens"
         },
-        font,
+        font.clone(),
         roles.tx3,
     );
+    // The count, and a notice such as a stopped search, give way to the keys: cut with «…» and
+    // whole on hover.
+    let mut job = egui::text::LayoutJob::simple_singleline(count.to_owned(), font, roles.tx3);
+    job.wrap = egui::text::TextWrapping::truncate_at_width(
+        (hint.left() - 12.0 - rect.left() - 8.0).max(0.0),
+    );
+    let galley = ui.painter().layout_job(job);
+    let cut = galley.elided;
+    ui.painter().galley(
+        egui::pos2(
+            rect.left() + 8.0,
+            rect.center().y + 1.0 - galley.size().y / 2.0,
+        ),
+        galley,
+        roles.tx3,
+    );
+    if cut {
+        response.on_hover_text(count);
+    }
 }
 
 fn count(n: usize) -> String {
@@ -376,14 +388,15 @@ fn row(
         }
         None => job.append(&name, 0.0, plain),
     }
+    // A long name is cut with «…» before the Enter mark; the folder takes what is left.
+    let enter = if chosen { 40.0 } else { 0.0 };
+    let left = icon.x + 7.0 + 8.0;
+    job.wrap =
+        egui::text::TextWrapping::truncate_at_width((rect.right() - 8.0 - enter - left).max(0.0));
     let name_galley = ui.painter().layout_job(job);
-    let at = egui::pos2(
-        icon.x + 7.0 + 8.0,
-        rect.center().y - name_galley.size().y / 2.0,
-    );
+    let at = egui::pos2(left, rect.center().y - name_galley.size().y / 2.0);
     let name_right = at.x + name_galley.size().x;
     ui.painter().galley(at, name_galley, roles.tx);
-    let enter = if chosen { 22.0 } else { 0.0 };
     let mut folder_job =
         egui::text::LayoutJob::simple_singleline(folder, egui::FontId::monospace(11.0), roles.tx3);
     folder_job.wrap = egui::text::TextWrapping::truncate_at_width(

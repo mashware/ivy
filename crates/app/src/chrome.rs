@@ -184,7 +184,7 @@ pub(crate) fn paint_button_icon(
         "Search console" => (Icon::Search, 15.0),
         "Menu" => (Icon::Menu, 15.0),
         "Connect agents" => {
-            connection::paint_icon(p, rect, fg, false);
+            connection::paint_icon(p, rect, fg);
             return;
         }
         _ if let Some(tool) = tools::tool_of(hint) => {
@@ -212,6 +212,11 @@ pub(crate) fn paint_button_icon(
         }
     };
     crate::ui::icons::paint(p, c, icon, size, fg);
+}
+
+/// Whether the title bar holds a modal surface — its menu or a dialog — that dims the consoles.
+pub(crate) fn is_modal(window: &Window, ctx: &egui::Context) -> bool {
+    window.chrome.menu || window.chrome.guide_blocked(ctx)
 }
 
 /// Paint and claim the titlebar before settings and terminal input dispatch.

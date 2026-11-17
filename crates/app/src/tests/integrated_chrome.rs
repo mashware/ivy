@@ -318,9 +318,22 @@ mod tests {
         }
     }
 
+    /// The connect icon drawn in the call-for-attention yellow, with no dot beside it.
     fn connection_highlight(shapes: &[egui::epaint::ClippedShape], area: egui::Rect) -> bool {
-        let dot = connection_button(area) + egui::vec2(8.0, -8.0);
-        shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Circle(c) if c.center.distance(dot) < 0.1 && c.radius == 3.0))
+        let yellow = crate::theme::Theme::default().color(term_core::TermColor::Indexed(3));
+        let button = egui::Rect::from_center_size(connection_button(area), egui::vec2(28.0, 28.0));
+        assert!(
+            !shapes
+                .iter()
+                .any(|s| matches!(&s.shape, egui::Shape::Circle(c)
+                if button.expand(4.0).contains(c.center) && c.radius == 3.0)),
+            "the connect button still carries a dot"
+        );
+        shapes.iter().any(|s| {
+            matches!(&s.shape, egui::Shape::Path(path)
+            if button.contains(path.points[0])
+                && path.stroke.color == egui::epaint::ColorMode::Solid(yellow))
+        })
     }
 
     fn open_connection_guide(

@@ -568,6 +568,9 @@ struct Pane {
     /// Explicit display label; never used as process input or identity.
     label: Option<String>,
     project: Option<project_view::Badge>,
+    /// The foreground program and its folder's name, sampled with the directory: what a header
+    /// says when no agent titles the console and nobody named it.
+    program: Option<(String, String)>,
     restoration: restoration::PaneState,
     /// The pseudoterminal and its queue go together on purpose. The bridge's thread lives as long
     /// as the pseudoterminal lives, not as long as the bridge does: separating them would leave a
@@ -1435,10 +1438,9 @@ impl eframe::App for Window {
             ui,
             &metrics,
             header_owns_pointer,
-            // Neither the Board's claim nor the sidebar's: both flip from frame to frame with the
-            // pointer (a move over the Board, a wheel delta over Files), and dimming on them made
-            // the title bar blink under the mouse.
-            viewer_owned || pane_owned || chrome_owned,
+            // Only what is modal dims the consoles: the drawer and a title-bar press are not, and
+            // dimming on them made the window blink on every button and shade beside the drawer.
+            pane_owned || chrome::is_modal(self, ui.ctx()),
         );
 
         // **Walking the tree is timed, and it is not zeal: it is the instrument's rule.** The
@@ -6783,6 +6785,7 @@ mod tests {
             name,
             label: None,
             project: None,
+            program: None,
             restoration: restoration::PaneState::default(),
             signals: Default::default(),
             pty,
