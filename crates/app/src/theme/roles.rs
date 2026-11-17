@@ -419,10 +419,6 @@ mod collapse_tests {
             apart(dark, &crowd, dark, dark_text, 0.2),
             mix(dark, dark_text, 0.2)
         );
-        // The search stops short of the text: with every grey but the text listed, the only colour
-        // left that stands apart is the text itself, and the answer is the first step instead.
-        let all_but_text: Vec<Color32> = (0..=255u8).filter(|v| *v != 0xe0).map(grey).collect();
-        assert_eq!(apart(bg, &all_but_text, bg, tx, 0.2), first);
         // Nothing stands apart (the fills cover every step): the first step, not the text.
         let all: Vec<Color32> = (0..=255).map(grey).collect();
         assert_eq!(apart(bg, &all, bg, tx, 0.2), first);

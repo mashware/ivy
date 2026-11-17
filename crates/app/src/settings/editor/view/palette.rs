@@ -54,9 +54,7 @@ impl Palette {
         // unreadable it falls back to the dialog's surface rather than hide the way back.
         let nav = roles.panel_or(ink, surface);
         // Hover, the selection and the control border need no floor of their own here: the roles
-        // already keep them apart on a collapsed palette (D98). The selection is the one fill that
-        // also sits on the navigation, which is Settings' own surface.
-        fixed.sel = fixed.apart(roles.sel, &[nav], surface, 0.20);
+        // already keep them apart on a collapsed palette (D98).
         // The caret — the text cursor and a pressed control's border — is drawn over fields, the
         // dialog, the selection, a pressed control's hover fill and the navigation: the accent where
         // it stands apart from all of them, else the ink.
