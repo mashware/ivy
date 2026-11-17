@@ -168,6 +168,41 @@ mod tests {
             .center()
     }
 
+    /// Hovering a row of the console menu fills it and moves nothing: the rows below stay put.
+    #[test]
+    fn hovering_a_menu_row_does_not_push_the_rows_below() {
+        fn text_at(shapes: &[egui::epaint::ClippedShape], label: &str) -> egui::Pos2 {
+            shapes
+                .iter()
+                .find_map(|s| match &s.shape {
+                    egui::Shape::Text(t) if t.galley.text() == label => Some(t.pos),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{label} not painted"))
+        }
+        let (mut window, ctx) = warmed();
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 900.0));
+        one_frame_in(&mut window, &ctx, area, vec![]);
+        let at = header_point(&window, &ctx, area, 1);
+        one_frame_in(
+            &mut window,
+            &ctx,
+            area,
+            mouse(at, egui::PointerButton::Secondary, egui::Modifiers::NONE),
+        );
+        one_frame_in(&mut window, &ctx, area, vec![]);
+        let still = ui_pass(&mut window, &ctx, area, egui::RawInput::default());
+        let rename = text_at(&still, "Rename") + egui::vec2(4.0, 4.0);
+        let below = text_at(&still, "Close console");
+        let hover = || egui::RawInput {
+            events: vec![egui::Event::PointerMoved(rename)],
+            ..Default::default()
+        };
+        ui_pass(&mut window, &ctx, area, hover());
+        let hovered = ui_pass(&mut window, &ctx, area, hover());
+        assert_eq!(text_at(&hovered, "Close console"), below);
+    }
+
     #[test]
     fn menu_opens_at_pointer_and_stays_inside_viewport() {
         let (mut window, ctx) = warmed();

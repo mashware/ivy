@@ -191,7 +191,16 @@ fn menu_item(ui: &mut egui::Ui, label: &str, enabled: bool) -> bool {
     let button = egui::Button::new((label, egui::Atom::grow()))
         .frame_when_inactive(false)
         .min_size(egui::vec2(ui.available_width(), 28.0));
-    ui.add_enabled(enabled, button).clicked()
+    ui.scope(|ui| {
+        // A frameless button gains its frame's stroke on hover, and egui counts that stroke in
+        // the button's size: the row would grow a point each side and push the rows below it.
+        // The kit marks a hovered row by its fill alone.
+        let widgets = &mut ui.visuals_mut().widgets;
+        widgets.hovered.bg_stroke = egui::Stroke::NONE;
+        widgets.active.bg_stroke = egui::Stroke::NONE;
+        ui.add_enabled(enabled, button).clicked()
+    })
+    .inner
 }
 
 /// How far a menu's measured height may exceed the room it was given before it counts as not
