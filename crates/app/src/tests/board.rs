@@ -1539,9 +1539,16 @@ mod tests {
                 _ => None,
             })
             .expect("the bar's title is painted");
+        let first_column = shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == "H2 · Design" => Some(t.pos.x),
+                _ => None,
+            })
+            .expect("the first milestone's header is painted");
         assert!(
-            on_plan.left() >= board_left + 15.5,
-            "the first milestone column touches the edge: {on_plan:?}"
+            first_column >= board_left + 16.0,
+            "the first milestone column touches the edge: {first_column} from {board_left}"
         );
         // Reading order runs across the columns: right from the declared card reaches the off-plan one.
         crate::board::select_for_test(&mut window, origins[0]);
