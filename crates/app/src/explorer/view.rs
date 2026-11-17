@@ -259,16 +259,13 @@ pub(super) fn show(
             ui.set_min_size(rect.size());
             ui.set_max_size(rect.size());
             ui.set_clip_rect(rect);
-            // Text in the roles' readable ink, on the person's `panel` where it reads there and
-            // on the console's background where it does not (D98).
-            let roles = crate::ui::style::roles(ui.ctx(), &theme);
-            let fill = roles.panel_or(roles.tx, roles.base);
-            ui.painter().rect_filled(rect, 0.0, fill);
+            ui.painter()
+                .rect_filled(rect, 0.0, theme.panel_background());
             ui.painter().line_segment(
                 [rect.right_top(), rect.right_bottom()],
-                egui::Stroke::new(1.0, roles.apart(roles.line, &[fill], fill, 0.16)),
+                egui::Stroke::new(1.0, theme.divider()),
             );
-            ui.style_mut().visuals.override_text_color = Some(roles.tx);
+            ui.style_mut().visuals.override_text_color = Some(theme.foreground());
             let inner = rect.shrink2(egui::vec2(10.0, 7.0));
             let mut body = ui.new_child(
                 egui::UiBuilder::new()

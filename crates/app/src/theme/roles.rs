@@ -127,7 +127,8 @@ impl Roles {
         // onto the background still gets a hover, a raised menu and a border that show. A step
         // that would take a text surface under the text's own contrast goes the other way.
         // Only a foreground that had to be replaced changes anything here: for a theme whose
-        // text reads, `tx` is the foreground and every surface is the design's mix.
+        // text reads, `tx` is the foreground and every surface is the design's mix — including
+        // a narrow theme whose text sits under 4.5:1 on its own hover, as it did before.
         let corrected = tx != fg;
         let raised = if dark {
             text_surface(bg, tx, 0.06, corrected)
@@ -142,13 +143,13 @@ impl Roles {
         };
         // The selection is a row text sits on, among the console, a menu and a hovered row; a
         // focus colour that lands it on any of them (the background itself, or a shade of the
-        // menu) leaves it a step of the text instead.
-        let sel = apart(
+        // menu) leaves it a step of the text instead — never the text itself.
+        let sel = selection(
             mix(bg, accent, 0.18),
             &[bg, raised, hover],
-            text_surface(bg, tx, 0.18, true),
+            bg,
             tx,
-            0.0,
+            corrected,
         );
         // Secondary and muted text must read on the worst of the surfaces the roles themselves
         // name. A surface painted from them — a console header tinted with its project — brings
@@ -215,26 +216,49 @@ fn text_surface(bg: Color32, tx: Color32, step: f32, may_turn: bool) -> Color32 
     mix(bg, away, step)
 }
 
+fn stands_apart(colour: Color32, over: &[Color32]) -> bool {
+    over.iter()
+        .all(|fill| project_ink_contrast(colour, *fill) >= INVISIBLE)
+}
+
 /// `role`, unless it vanishes into one of the fills it is painted over: then `from` stepped toward
-/// `tx` — further each time, never past it — until it stands apart from all of them.
+/// `tx`, first by `amount` and then in two even steps toward it, until it stands apart from all
+/// of them. With no step enough, the first step: a fill that is visible somewhere beats the ink.
 fn apart(role: Color32, over: &[Color32], from: Color32, tx: Color32, amount: f32) -> Color32 {
-    let stands = |c: Color32| {
-        over.iter()
-            .all(|f| project_ink_contrast(c, *f) >= INVISIBLE)
-    };
-    if stands(role) {
+    if stands_apart(role, over) {
         return role;
     }
-    [
+    let steps = [
         amount,
-        (amount * 2.0).min(1.0),
-        (amount * 3.0).min(1.0),
-        1.0,
-    ]
-    .into_iter()
-    .map(|step| mix(from, tx, step))
-    .find(|c| stands(*c))
-    .unwrap_or(tx)
+        amount + (1.0 - amount) / 3.0,
+        amount + 2.0 * (1.0 - amount) / 3.0,
+    ];
+    steps
+        .into_iter()
+        .map(|step| mix(from, tx, step))
+        .find(|c| stands_apart(*c, over))
+        .unwrap_or_else(|| mix(from, tx, amount))
+}
+
+/// The selection: `tinted` when it stands apart from the fills it sits among, else an 18 % step of
+/// the background toward the text (away from it only where the text was replaced and would not
+/// read). It is a surface text is drawn on, so it is never the text colour itself.
+fn selection(
+    tinted: Color32,
+    among: &[Color32],
+    bg: Color32,
+    tx: Color32,
+    corrected: bool,
+) -> Color32 {
+    if stands_apart(tinted, among) {
+        return tinted;
+    }
+    let step = text_surface(bg, tx, 0.18, corrected);
+    if stands_apart(step, among) {
+        step
+    } else {
+        mix(bg, tx, 0.18)
+    }
 }
 
 /// The color with the given opacity, keeping its hue.
@@ -348,6 +372,34 @@ mod collapse_tests {
         assert_eq!(r.hover, rgb(0x0c343f));
     }
 
+    /// A narrow foreground with the focus on the background: the selection moves off the
+    /// background but stays a surface, never the text colour drawn on it.
+    #[test]
+    fn a_moved_selection_is_never_the_text() {
+        let rgb = |hex: u32| Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+        for (bg, fg) in [
+            (0x000000, 0x777777),
+            (0xfafafa, 0x707070),
+            (0x050505, 0x7d7d7d),
+        ] {
+            let theme = Theme {
+                background: rgb(bg),
+                foreground: rgb(fg),
+                focus: rgb(bg),
+                ..Theme::default()
+            };
+            let r = Roles::of(&theme);
+            assert!(
+                project_ink_contrast(r.sel, r.base) >= 1.03,
+                "{bg:06x} sel on base"
+            );
+            assert!(
+                project_ink_contrast(r.tx, r.sel) >= 3.0,
+                "{bg:06x} text on sel"
+            );
+        }
+    }
+
     /// A focus colour that lands the selection on a menu's own surface moves the selection, so
     /// the chosen row still shows.
     #[test]
@@ -363,6 +415,7 @@ mod collapse_tests {
         for (name, fill) in [("base", r.base), ("raised", r.raised), ("hover", r.hover)] {
             assert!(project_ink_contrast(r.sel, fill) >= 1.03, "sel on {name}");
         }
+        assert!(project_ink_contrast(r.tx, r.sel) >= 4.5, "text on sel");
     }
 }
 
