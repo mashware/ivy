@@ -513,9 +513,10 @@ mod tests {
         };
         let asking = window.tabs[0].panes()[0].name;
         let card = window.board.card_rect(asking).unwrap();
-        let wait_ink = window.theme.color(term_core::TermColor::Indexed(3));
-        let dim_wait_ink = wait_ink.gamma_multiply(0.45);
-        assert!(shapes.iter().any(|s|matches!(&s.shape, egui::Shape::Rect(r) if (r.rect.intersect(s.clip_rect).width()-card.width()).abs()<2.0 && card.contains(r.rect.center()) && (r.stroke.color == wait_ink || r.stroke.color == dim_wait_ink))), "waiting state border is absent");
+        // Since the kit (#93) the claim is the card's pill, not its border: a solid wait pill
+        // inside this console's own card.
+        let wait = crate::theme::Roles::of(&window.theme).wait;
+        assert!(shapes.iter().any(|s|matches!(&s.shape, egui::Shape::Rect(r) if card.contains_rect(r.rect) && r.fill == wait && r.rect.width() == crate::ui::claim_pill::SIZE)), "waiting state pill is absent");
         assert!(
             !on_card(asking, "it is waiting for you"),
             "removed duplicate attention prose returned"

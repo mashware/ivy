@@ -91,6 +91,7 @@ pub(super) fn paint(
     reader: &mut Reader,
     discoverer: &mut crate::fonts::Discoverer,
     theme: &Theme,
+    roles: &crate::theme::Roles,
     timing: &mut crate::measure::Board,
     child_hits: &mut Vec<(Rect, Command)>,
 ) -> Rect {
@@ -98,20 +99,34 @@ pub(super) fn paint(
     let age = since.map(|at| Instant::now().saturating_duration_since(at));
     let warmth = age.map(heat).unwrap_or(Heat::Normal);
     let background = match warmth {
-        Heat::Normal => theme.panel_background(),
-        Heat::Warm => theme.background().lerp_to_gamma(ink, 20.0 / 255.0),
-        Heat::Hot => theme.background().lerp_to_gamma(ink, 41.0 / 255.0),
+        Heat::Normal => roles.panel,
+        Heat::Warm => roles.panel.lerp_to_gamma(ink, 20.0 / 255.0),
+        Heat::Hot => roles.panel.lerp_to_gamma(ink, 41.0 / 255.0),
     };
-    let stroke = egui::Stroke::new(1.0, if selected { theme.focus() } else { ink });
+    let doc = entry.snapshot.document.as_deref();
+    // No published state is a dashed outline, painted after the frame: egui cannot dash a rounded
+    // stroke, and the frame's own solid one would read as a published card. Its stroke stays one
+    // point wide and transparent, because a frame grows by its stroke and selecting the card would
+    // otherwise move every card below it.
+    let stroke = egui::Stroke::new(
+        1.0,
+        match (selected, doc) {
+            (true, _) => roles.accent,
+            (false, Some(_)) => roles.line,
+            (false, None) => Color32::TRANSPARENT,
+        },
+    );
     let frame = egui::Frame::new()
         .fill(background)
         .stroke(stroke)
-        .corner_radius(8)
+        .corner_radius(crate::theme::metrics::RADIUS_CARD)
         .inner_margin(10);
     let response = frame.show(ui, |ui| {
         ui.style_mut().interaction.selectable_labels = false;
         ui.set_width(ui.available_width());
-        let doc = entry.snapshot.document.as_deref();
+        if let Some(claim) = entry.snapshot.attention {
+            claim_row(ui, claim, age, roles);
+        }
         ui.horizontal(|ui| {
             let phase = doc.and_then(|d| d.phase.as_deref());
             let available = ui.available_width();
@@ -294,22 +309,89 @@ pub(super) fn paint(
         ));
     }
     let hovered = ui.rect_contains_pointer(rect);
+    if doc.is_none() && !selected {
+        dashed(ui.painter(), rect, roles.line2);
+    }
+    // An old state nobody refreshes is veiled rather than recoloured, so its claim still reads.
+    if doc.is_some_and(|d| d.is_stale_at(std::time::SystemTime::now())) && !selected {
+        ui.painter().rect_filled(
+            rect,
+            crate::theme::metrics::RADIUS_CARD,
+            roles.base.gamma_multiply(0.45),
+        );
+    }
     if selected || warmth == Heat::Hot || hovered {
         ui.painter().rect_stroke(
             rect,
-            8.0,
+            crate::theme::metrics::RADIUS_CARD,
             egui::Stroke::new(
                 if selected || warmth == Heat::Hot {
                     2.0
                 } else {
                     1.0
                 },
-                if selected { theme.focus() } else { ink },
+                if selected {
+                    roles.accent
+                } else if hovered && warmth != Heat::Hot {
+                    roles.line2
+                } else {
+                    ink
+                },
             ),
             egui::StrokeKind::Inside,
         );
     }
     rect
+}
+
+/// The claim the producer declared, as the kit's pill, its words and the observed age (D18, D93).
+fn claim_row(
+    ui: &mut egui::Ui,
+    claim: crate::panel::AttentionState,
+    age: Option<Duration>,
+    roles: &crate::theme::Roles,
+) {
+    use panel_contract::Attention;
+    let (words, ink) = match claim.class {
+        Attention::Wait => ("Waiting for you", roles.wait),
+        Attention::Block => ("Stuck", roles.block),
+        Attention::Done => ("Finished · unread", roles.done),
+    };
+    let ink = if claim.backed { ink } else { roles.tx3 };
+    let (row, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 20.0), egui::Sense::hover());
+    let pill = Rect::from_min_size(row.min, egui::vec2(crate::ui::claim_pill::SIZE, row.height()));
+    crate::ui::claim_pill::paint(ui.painter(), pill, claim, roles);
+    let font = egui::FontId::new(12.0, crate::fonts::ui_weight(ui.ctx(), 500));
+    ui.painter().text(
+        egui::pos2(pill.right() + 6.0, row.center().y),
+        egui::Align2::LEFT_CENTER,
+        words,
+        font,
+        ink,
+    );
+    if let Some(age) = age {
+        ui.painter().text(
+            egui::pos2(row.right(), row.center().y),
+            egui::Align2::RIGHT_CENTER,
+            format!("{} min ago", age.as_secs() / 60),
+            egui::FontId::proportional(11.5),
+            roles.tx3,
+        );
+    }
+}
+
+fn dashed(painter: &egui::Painter, rect: Rect, color: Color32) {
+    let r = rect.shrink(0.5);
+    let inset = f32::from(crate::theme::metrics::RADIUS_CARD);
+    let stroke = egui::Stroke::new(1.0, color);
+    for (from, to) in [
+        (egui::pos2(r.left() + inset, r.top()), egui::pos2(r.right() - inset, r.top())),
+        (egui::pos2(r.left() + inset, r.bottom()), egui::pos2(r.right() - inset, r.bottom())),
+        (egui::pos2(r.left(), r.top() + inset), egui::pos2(r.left(), r.bottom() - inset)),
+        (egui::pos2(r.right(), r.top() + inset), egui::pos2(r.right(), r.bottom() - inset)),
+    ] {
+        painter.extend(egui::Shape::dashed_line(&[from, to], stroke, 5.0, 4.0));
+    }
 }
 
 pub(super) fn age_refresh(since: Option<Instant>, now: Instant) -> Option<Duration> {
@@ -367,6 +449,7 @@ mod tests {
                     &mut Reader::default(),
                     &mut crate::fonts::Discoverer::default(),
                     &Theme::default(),
+                    &crate::theme::Roles::of(&Theme::default()),
                     &mut crate::measure::Board::default(),
                     &mut Vec::new(),
                 );
@@ -452,6 +535,7 @@ mod tests {
                     &mut Reader::default(),
                     &mut crate::fonts::Discoverer::default(),
                     &Theme::default(),
+                    &crate::theme::Roles::of(&Theme::default()),
                     &mut crate::measure::Board::default(),
                     &mut Vec::new(),
                 );
@@ -464,4 +548,85 @@ mod tests {
             .drop_without_applying_deltas();
         }
     }
+    fn painted(doc: Option<&str>, claim: Option<panel_contract::Attention>, selected: bool) -> (Vec<egui::epaint::ClippedShape>, Rect) {
+        let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
+        let entry = Entry {
+            pane: 1,
+            console_label: "Console".into(),
+            tab_label: "Tab".into(),
+            snapshot: crate::panel::summary::Snapshot {
+                document: doc.map(|d| std::sync::Arc::new(panel_contract::parse_document(d).unwrap())),
+                warning: None,
+                attention: claim.map(|class| crate::panel::AttentionState { class, backed: true }),
+                outside: false,
+            },
+        };
+        let mut card = Rect::NOTHING;
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.set_width(320.0);
+            card = paint(
+                ui,
+                &entry,
+                Column::Wait,
+                true,
+                None,
+                None,
+                selected,
+                &mut Reader::default(),
+                &mut crate::fonts::Discoverer::default(),
+                &Theme::default(),
+                &crate::theme::Roles::of(&Theme::default()),
+                &mut crate::measure::Board::default(),
+                &mut Vec::new(),
+            );
+        });
+        let shapes = output.shapes.clone();
+        output.drop_without_applying_deltas();
+        (shapes, card)
+    }
+    fn dashes(shapes: &[egui::epaint::ClippedShape], color: Color32) -> usize {
+        shapes
+            .iter()
+            .filter(|s| matches!(&s.shape, egui::Shape::LineSegment { stroke, .. } if stroke.color == color))
+            .count()
+    }
+    const DOC: &str = r#"{"attention":"wait","lines":[{"text":"Refund webhooks","style":"title"}]}"#;
+
+    #[test]
+    fn a_console_with_no_published_state_is_dashed_and_a_published_one_is_not() {
+        let roles = crate::theme::Roles::of(&Theme::default());
+        let (shapes, _) = painted(None, None, false);
+        assert!(dashes(&shapes, roles.line2) >= 8, "four dashed sides");
+        let (shapes, _) = painted(Some(DOC), None, false);
+        assert_eq!(dashes(&shapes, roles.line2), 0);
+    }
+
+    #[test]
+    fn the_selected_card_carries_the_accent_border_at_two_points() {
+        let roles = crate::theme::Roles::of(&Theme::default());
+        let accent = |shapes: &[egui::epaint::ClippedShape], card: Rect| {
+            shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r)
+                if r.rect == card && r.stroke.color == roles.accent && r.stroke.width == 2.0))
+        };
+        let (shapes, card) = painted(Some(DOC), None, true);
+        assert!(accent(&shapes, card));
+        let (shapes, card) = painted(Some(DOC), None, false);
+        assert!(!accent(&shapes, card));
+    }
+
+    #[test]
+    fn a_declared_wait_reads_as_its_pill_and_words_in_the_wait_role() {
+        let roles = crate::theme::Roles::of(&Theme::default());
+        let (shapes, card) = painted(Some(DOC), Some(panel_contract::Attention::Wait), false);
+        let words = shapes.iter().find_map(|s| match &s.shape {
+            egui::Shape::Text(t) if t.galley.text() == "Waiting for you" => Some(t),
+            _ => None,
+        }).expect("claim words painted");
+        assert_eq!(words.fallback_color, roles.wait);
+        assert!(card.contains(words.pos));
+        assert!(shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r)
+            if r.fill == roles.wait && r.rect.width() == crate::ui::claim_pill::SIZE)));
+    }
+
 }

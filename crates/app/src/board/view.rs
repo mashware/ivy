@@ -344,6 +344,7 @@ fn paint_entries(
         };
         let since = window.board.observations.since(entry.pane);
         let branch = window.board.branches.get(entry.pane).map(str::to_owned);
+        let roles = crate::ui::style::roles(ui.ctx(), &window.theme);
         let selected = window.board.selected == Some(entry.pane);
         let show_selection = selected && window.board.original != Some(entry.pane);
         let board = &mut window.board;
@@ -359,6 +360,7 @@ fn paint_entries(
             reader,
             &mut window.discoverer,
             theme,
+            &roles,
             &mut board.timing,
             &mut board.surface.child_hits,
         );
