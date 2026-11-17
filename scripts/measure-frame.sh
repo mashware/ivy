@@ -195,9 +195,11 @@
 # neither changes historical batches.
 # Frozen Board overlay-era records: board-rich-*, board-4-* and board-16-* remain historical
 # labels only. Their old reports are preserved; the current dock has different console geometry.
-# Dock variants (dock-v1-4-closed/open) are a new, versioned regime. They keep the same workload
-# and geometry but exercise the shared sidebar. Open reports must witness the selected tool, its
-# effective body width, every console grid and pane identity count; these runs are not comparable
+# Dock variants (dock-v2-4-closed/open) are a versioned regime. They keep the same workload and
+# exercise Files, the drawer below the consoles and the Board (D72, #93); the drag resizes the
+# drawer's height. dock-v1-* measured the right sidebar with its rail, a different console grid
+# and gesture, and is refused rather than relabelled. Open reports must witness the selected tool,
+# its effective width, every console grid and pane identity count; these runs are not comparable
 # as painting-only deltas because docking changes the console grid.
 # Open variants must navigate to a different live focus; deadlines are reported but
 # not required because the dumping load does not isolate an idle deadline wake. Every
@@ -461,7 +463,7 @@ validate_project_records() {
                 if (accents != 1 || timings != 1) exit 1
                 if (batch == "projects") {
                     if (a[1] != "true" || a[2] != "true" || a[3]+0 < 4 || a[4]+0 < 4 || a[5]+0 < 4 || frames < 1) exit 1
-                } else if (batch ~ /^board-/ || batch ~ /^dock-v1-/) {
+                } else if (batch ~ /^board-/ || batch ~ /^dock-v2-/) {
                     # The board covers the headers while open, so no painted floor: resolved identities
                     # are what the grouping needs, one per console.
                     if (consoles+0 < 1 || a[1] != "true" || a[2] != "true" || a[4]+0 < consoles || frames < 1) exit 1
@@ -647,10 +649,14 @@ if [ "${MEASURE_AS_CONSOLE:-}" = "1" ]; then
 fi
 
 # ── Batch mode ──────────────────────────────────────────────────────────────────
-BATCH=${1:?the batch is missing: A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z or dock-v1-4-closed/open}
+BATCH=${1:?the batch is missing: A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z or dock-v2-4-closed/open}
 case "$BATCH" in
     board-rich-*|board-4-*|board-16-*)
-        echo "$BATCH is a frozen overlay-era Board regime; use dock-v1-4-closed/open for current dock measurements" >&2
+        echo "$BATCH is a frozen overlay-era Board regime; use dock-v2-4-closed/open for current dock measurements" >&2
+        exit 2
+        ;;
+    dock-v1-*)
+        echo "$BATCH is the frozen rail-era sidebar regime; use dock-v2-4-closed/open for current dock measurements" >&2
         exit 2
         ;;
 esac
@@ -688,7 +694,7 @@ RESTORES=0
 LIGATURES= ACTIONS= CONTROL= HEADER= READS= PATCHES= LINKS= SEARCH= LARGE= CJK= EMOJI= PANEL_EMOJI= SETTINGS= INTEGRATED_CHROME= BOARD= BOARD_RICH= DOCK=
 case "$BATCH" in
     ligatures-on|ligatures-off) TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; LIGATURES=${BATCH#ligatures-} ;;
-    dock-v1-4-closed|dock-v1-4-open) TABS=2; PANES=2x1; DUMPING=4; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=1; BOARD=${BATCH##*-}; DOCK=${BATCH##*-} ;;
+    dock-v2-4-closed|dock-v2-4-open) TABS=2; PANES=2x1; DUMPING=4; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=1; BOARD=${BATCH##*-}; DOCK=${BATCH##*-} ;;
     projects) TABS=1; PANES=2x2; DUMPING=4; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=1; CHROME_EXPECTED_VISIBLE=4 ;;
     chrome|chrome-zoom) TABS=2; PANES=2x1; DUMPING=4; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=${BATCH#chrome}; INTEGRATED_CHROME=${INTEGRATED_CHROME#-}; INTEGRATED_CHROME=${INTEGRATED_CHROME:-1} ;;
     settings-apply) TABS=2; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; SETTINGS=apply ;;
@@ -806,7 +812,7 @@ CONFIG="$OUTPUT/.config"
 rm -rf "$CONFIG"
 mkdir -p "$CONFIG"
 
-case "$BATCH" in projects|dock-v1-*|board-*) MEASURES_PROJECTS=1 ;; *) MEASURES_PROJECTS= ;; esac
+case "$BATCH" in projects|dock-v2-*|board-*) MEASURES_PROJECTS=1 ;; *) MEASURES_PROJECTS= ;; esac
 if [ -n "$MEASURES_PROJECTS" ]; then
     # Real repositories, with synthetic directory sources supplied to the measurement probe. The
     # board batches take it too, so the board they measure has two sections, as it has in use.
@@ -1197,7 +1203,7 @@ seed() {
 case "$BATCH" in
     A) : ;;                       # no panel: nobody publishes anything
     B) seed quiet & ;;
-    projects|ligatures-on|ligatures-off|dock-v1-4-closed|dock-v1-4-open|board-rich-closed|board-rich-open|board-4-closed|board-4-open|board-16-closed|board-16-open|chrome|chrome-zoom|settings-apply|settings-closed|settings-open|settings-fonts|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
+    projects|ligatures-on|ligatures-off|dock-v2-4-closed|dock-v2-4-open|board-rich-closed|board-rich-open|board-4-closed|board-4-open|board-16-closed|board-16-open|chrome|chrome-zoom|settings-apply|settings-closed|settings-open|settings-fonts|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
 esac
 
 echo "batch $BATCH · $TABS tab(s) of $PANES · $DUMPING of $DIRECTORIES consoles dumping $MIB MiB · window $WINDOW_SIZE · do not touch the machine until it closes" >&2

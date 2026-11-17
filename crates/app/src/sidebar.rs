@@ -116,9 +116,11 @@ impl Sidebar {
         )
     }
     fn block(&mut self) {
-        let ctx = self.context.clone().unwrap_or_default();
-        self.blocked_frame = Some(ctx.cumulative_frame_nr());
-        ctx.request_repaint();
+        // Before the first frame there is no input to hold back and no window to repaint.
+        if let Some(ctx) = &self.context {
+            self.blocked_frame = Some(ctx.cumulative_frame_nr());
+            ctx.request_repaint();
+        }
     }
 }
 
@@ -201,6 +203,11 @@ pub(crate) fn close_files(window: &mut Window) {
 
 pub(crate) fn toggle(window: &mut Window, tool: Tool, ctx: &egui::Context) {
     match tool {
+        // Files lies under the Board: its button leaves the Board for Files.
+        Tool::Files if active(window) == Some(Tool::Board) => {
+            close(window, ctx);
+            select(window, Tool::Files);
+        }
         Tool::Files if files_visible(window) => close_files(window),
         _ if active(window) == Some(tool) => close(window, ctx),
         Tool::Markdown => crate::viewer::activate(window, true),
@@ -234,8 +241,10 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     let drawer = matches!(active(window), Some(Tool::Markdown | Tool::Git))
         .then_some(geometry.dock)
         .flatten();
+    let list = crate::explorer::list_rect(window);
     let target = |window: &Window| {
         ctx.input(|i| i.pointer.interact_pos())
+            .filter(|p| !list.is_some_and(|r| r.contains(*p)))
             .zip(drawer)
             .and_then(|(p, dock)| crate::viewer::strip_action(window, dock, p))
     };
@@ -249,14 +258,19 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     {
         crate::viewer::apply_strip_action(window, pressed, &ctx);
     }
+    let on_list = |p: egui::Pos2| list.is_some_and(|r| r.contains(p));
     let over_divider = |p: egui::Pos2| {
-        geometry.files_divider.is_some_and(|r| r.contains(p))
-            || geometry.divider.is_some_and(|r| r.contains(p))
+        !on_list(p)
+            && (geometry.files_divider.is_some_and(|r| r.contains(p))
+                || geometry.divider.is_some_and(|r| r.contains(p)))
     };
     let over = ctx.input(|i| i.pointer.interact_pos().is_some_and(over_divider));
     if ctx.input(|i| i.pointer.any_pressed()) && !window.sidebar.held {
         window.sidebar.held = over;
-        window.sidebar.resizing = ctx.input(|i| i.pointer.interact_pos()).and_then(|p| {
+        let pos = ctx
+            .input(|i| i.pointer.interact_pos())
+            .filter(|p| over_divider(*p));
+        window.sidebar.resizing = pos.and_then(|p| {
             if geometry.files_divider.is_some_and(|r| r.contains(p)) {
                 Some(Edge::Files)
             } else if geometry.divider.is_some_and(|r| r.contains(p)) {
@@ -300,7 +314,11 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         (geometry.divider, egui::CursorIcon::ResizeVertical),
     ] {
         if let Some(divider) = divider
-            && ctx.input(|i| i.pointer.hover_pos().is_some_and(|p| divider.contains(p)))
+            && ctx.input(|i| {
+                i.pointer
+                    .hover_pos()
+                    .is_some_and(|p| divider.contains(p) && !on_list(p))
+            })
         {
             ctx.set_cursor_icon(cursor);
         }

@@ -63,7 +63,7 @@ pub(super) fn show(
                 );
                 content.set_clip_rect(inner);
                 style(&mut content, &theme);
-                let strip = super::drawer::Strip::of(inner, tabs);
+                let strip = super::drawer::Strip::framed(rect, tabs);
                 let source = state
                     .origin
                     .as_ref()
@@ -76,13 +76,19 @@ pub(super) fn show(
                 super::drawer::paint(&content, &strip, tabs, &roles, &source, maximized);
                 for (action, place) in &strip.places {
                     let hint = super::drawer::hint(*action, maximized);
+                    // A strip too narrow for all of itself says so where it can still be read.
+                    let said = if strip.crowded && *action == super::drawer::StripAction::Maximize {
+                        format!("{hint} — too narrow to show «{source}» and every tab")
+                    } else {
+                        hint.to_owned()
+                    };
                     let response = content
                         .interact(
                             *place,
                             egui::Id::new(("drawer", hint)),
                             egui::Sense::hover(),
                         )
-                        .on_hover_text(hint);
+                        .on_hover_text(said);
                     response.widget_info(|| {
                         egui::WidgetInfo::labeled(egui::WidgetType::Button, true, hint)
                     });
@@ -251,7 +257,7 @@ mod tests {
 
     fn tabs(markdown: bool) -> super::super::drawer::Tabs {
         super::super::drawer::Tabs {
-            changes: Some(3),
+            changes: Some(Some(3)),
             document: Some("PLAN.md".into()),
             markdown,
             side_by_side: false,

@@ -24,7 +24,8 @@ pub(crate) enum StripAction {
 
 /// What the strip shows, read from the two viewer states.
 pub(super) struct Tabs {
-    pub(super) changes: Option<usize>,
+    /// The Changes tab, with its file count once a diff has loaded.
+    pub(super) changes: Option<Option<usize>>,
     pub(super) document: Option<String>,
     pub(super) markdown: bool,
     pub(super) side_by_side: bool,
@@ -34,9 +35,17 @@ pub(super) struct Strip {
     pub(super) rect: Rect,
     pub(super) source: Rect,
     pub(super) places: Vec<(StripAction, Rect)>,
+    /// Something was left out for lack of room: the source's label, a tab or the diff toggle.
+    pub(super) crowded: bool,
 }
 
 impl Strip {
+    /// The strip inside the drawer's one-point frame: the host's hit test and the painting both
+    /// lay it out from here.
+    pub(super) fn framed(drawer: Rect, tabs: &Tabs) -> Self {
+        Self::of(drawer.shrink(1.0), tabs)
+    }
+
     pub(super) fn of(drawer: Rect, tabs: &Tabs) -> Self {
         let rect = Rect::from_min_size(
             drawer.min,
@@ -53,12 +62,19 @@ impl Strip {
         // The tabs come before the source's label: a narrow drawer shortens the label first.
         let tabs_width = tabs.changes.map_or(0.0, |_| CHANGES)
             + tabs.document.as_ref().map_or(0.0, |_| DOCUMENT);
-        let room = maximize.left() - 8.0 - rect.left() - 8.0 - 4.0 - tabs_width;
+        // The diff's layout toggle has no other home, so it is kept before the source's label.
+        let segments = if tabs.markdown {
+            0.0
+        } else {
+            2.0 * SEGMENT + 16.0
+        };
+        let room = maximize.left() - 8.0 - rect.left() - 8.0 - 4.0 - tabs_width - segments;
         let source = tab(
             rect.left() + 8.0,
             if room >= 60.0 { room.min(SOURCE) } else { 0.0 },
         );
         let mut places = Vec::new();
+        let mut crowded = source.width() == 0.0;
         let mut x = source.right() + 4.0;
         if tabs.changes.is_some() {
             places.push((StripAction::Changes, tab(x, CHANGES)));
@@ -82,18 +98,23 @@ impl Strip {
             if unified.left() > x {
                 places.push((StripAction::Unified, unified));
                 places.push((StripAction::SideBySide, side));
+            } else {
+                crowded = true;
             }
         }
         // A narrow drawer keeps maximize and close; a tab that would run under them is dropped.
         let reserved = maximize.left();
+        let before = places.len();
         places.retain(|(action, place)| {
             matches!(action, StripAction::Maximize | StripAction::Close)
                 || place.right() <= reserved
         });
+        crowded |= places.len() < before;
         Self {
             rect,
             source,
             places,
+            crowded,
         }
     }
 
@@ -116,7 +137,7 @@ pub(super) fn tabs(window: &crate::Window) -> Tabs {
             s.loaded
                 .as_ref()
                 .and_then(|loaded| loaded.diff.as_ref())
-                .map_or(0, |diff| diff.files.len())
+                .map(|diff| diff.files.len())
         }),
         document: document
             .and_then(|s| s.requested.as_ref().map(|(path, _)| path))
@@ -272,7 +293,10 @@ fn tab(
     hovered: bool,
 ) {
     let (label, count) = match action {
-        StripAction::Changes => ("Changes".to_owned(), tabs.changes.map(|n| n.to_string())),
+        StripAction::Changes => (
+            "Changes".to_owned(),
+            tabs.changes.flatten().map(|n| n.to_string()),
+        ),
         _ => (tabs.document.clone().unwrap_or_default(), None),
     };
     let room = place.width() - 20.0 - count.as_ref().map_or(0.0, |_| 26.0);

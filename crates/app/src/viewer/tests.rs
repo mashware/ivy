@@ -350,3 +350,97 @@ fn repeated_request_invalidates_the_running_generation() {
     }
     assert_eq!(state.job_generation, state.generation);
 }
+
+/// Click `pos` with the primary button over two frames, as a person would.
+fn click_at(window: &mut crate::Window, ctx: &egui::Context, area: egui::Rect, pos: egui::Pos2) {
+    for pressed in [true, false] {
+        crate::tests::one_frame_in(
+            window,
+            ctx,
+            area,
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+    }
+}
+
+#[test]
+fn the_strip_switches_tabs_and_the_diff_layout_where_it_paints_them() {
+    let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+    let ctx = egui::Context::default();
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 800.0));
+    activate(&mut window, false);
+    activate(&mut window, true);
+    for _ in 0..2 {
+        crate::tests::one_frame_in(&mut window, &ctx, area, vec![]);
+    }
+    let place = |window: &crate::Window, action| {
+        strip_place(window, window.sidebar.last_dock.unwrap(), action)
+            .unwrap_or_else(|| panic!("the strip paints no {action:?}"))
+    };
+    assert_eq!(
+        crate::sidebar::active(&window),
+        Some(crate::sidebar::Tool::Markdown)
+    );
+    let changes = place(&window, StripAction::Changes);
+    click_at(&mut window, &ctx, area, changes);
+    assert_eq!(
+        crate::sidebar::active(&window),
+        Some(crate::sidebar::Tool::Git),
+        "the Changes tab did not bring the review back"
+    );
+    assert!(!drawer::tabs(&window).side_by_side);
+    let side = place(&window, StripAction::SideBySide);
+    click_at(&mut window, &ctx, area, side);
+    assert!(
+        drawer::tabs(&window).side_by_side,
+        "Side by side did not take"
+    );
+    let unified = place(&window, StripAction::Unified);
+    click_at(&mut window, &ctx, area, unified);
+    assert!(!drawer::tabs(&window).side_by_side, "Unified did not take");
+    assert!(window.presses_for_the_program.is_empty());
+}
+
+#[test]
+fn a_narrow_strip_shortens_the_source_before_it_drops_the_diff_layout_and_says_so() {
+    let tabs = drawer::Tabs {
+        changes: Some(Some(3)),
+        document: Some("plan.md".into()),
+        markdown: false,
+        side_by_side: false,
+    };
+    let has = |strip: &drawer::Strip, action| strip.places.iter().any(|(a, _)| *a == action);
+    // A 1000-point window with Files open leaves the drawer about this wide.
+    let drawer = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(718.0, 370.0));
+    let strip = drawer::Strip::framed(drawer, &tabs);
+    for action in [
+        StripAction::Changes,
+        StripAction::Document,
+        StripAction::Unified,
+        StripAction::SideBySide,
+    ] {
+        assert!(has(&strip, action), "{action:?} left out at 718 points");
+    }
+    let wide = drawer::Strip::framed(
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 370.0)),
+        &tabs,
+    );
+    assert!(!wide.crowded);
+    let narrow = drawer::Strip::framed(
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 370.0)),
+        &tabs,
+    );
+    assert!(!has(&narrow, StripAction::Unified));
+    assert!(
+        narrow.crowded,
+        "a strip that leaves controls out must say so"
+    );
+}

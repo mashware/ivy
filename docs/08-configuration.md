@@ -687,22 +687,22 @@ remote OSC 7 directory does not fall back to an unrelated local directory. On ot
 console must publish a usable local OSC 7 directory. If its directory cannot be read, the review
 shows that fact instead of choosing another console's repository.
 
-Choose **Markdown** or **Git** from the right tool bar to open its retained view in the shared
-sidebar. On first use, Git uses the focused console; changing focus alone never retargets an open
-view. Choose a Markdown document in **Files**. Ctrl-click a local console path to reveal its
-location in Files before opening the document. Drag the sidebar's left divider to resize,
-or dismiss it with the active tool button, **Close**, or Escape while it owns keyboard focus.
-Consoles resize alongside it and keep their identities. Clicking a console returns typing there.
-A narrow window temporarily hides the sidebar body until both it and the consoles fit. Tool
-selection, navigation and width are retained during the session and reset on application restart.
+**Files** opens on the left of the consoles from its title-bar button; **Markdown** and **Git**
+share a drawer below them, as two tabs. Open Files and Markdown from the title bar (from its menu
+when the bar is narrow), and Git from a console's review control. On first use, Git uses the focused console;
+changing focus alone never retargets an open view. Choose a Markdown document in **Files**.
+Ctrl-click a local console path to reveal its location in Files before opening the document. Drag
+the divider beside Files or above the drawer to resize them, or dismiss either with its button,
+the drawer's **Close**, or Escape while it owns keyboard focus. Consoles resize alongside them and
+keep their identities. Clicking a console returns typing there. A window too small for a surface
+beside the consoles temporarily hides it, and its title-bar button says how to bring it back.
+Selection, navigation and sizes are retained during the session and reset on application restart.
 
-Markdown's **Maximize** control fills the content area with the document; **Restore** returns it
-to the previous sidebar width. The global chrome, tabs and tool bar remain available. While
-maximized, **Files** opens as a lateral panel beside the document; choosing another Markdown file
-keeps both visible. Resizing that Files panel does not change the width Restore returns to. If the
-window cannot fit both surfaces, Files is temporarily hidden and returns when the window widens.
-Covered consoles keep running with valid terminal grids and their full output budgets. Git and
-Board retain their own presentation behavior. Maximized reading is not saved across restarts.
+The drawer's **Maximize** control gives it the consoles' space without resizing them; **Restore**
+returns it to its previous height. The global chrome and tabs remain available, and Files stays
+beside the drawer, so choosing another Markdown file keeps both visible. Covered consoles keep
+running with valid terminal grids and their full output budgets. The Board covers the whole
+content area, Files included. Maximized reading is not saved across restarts.
 
 Markdown displays headings, lists, tables, code and inline formatting. It refreshes every second
 while open, including atomic file replacement; background refresh keeps the document in place.

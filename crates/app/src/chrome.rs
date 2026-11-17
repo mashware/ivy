@@ -330,12 +330,18 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         action = tools::show(window, ui, &geometry, hover, fg).or(action);
     }
     if !compact {
+        // Where the platform draws its own window buttons, the line before them would sit on the
+        // tools' separator: only one is drawn there.
+        let window_buttons = (strip::right_buttons() > 3).then(|| row.right() - 6.0 - 3.0 * width);
         for x in [
-            row.left() + left_offset + width + strip::TOOLS_GAP / 2.0,
-            row.left() + left_offset + strip::TOOLS + 2.0 * width + 6.0,
-            row.right() - 6.0 - 3.0 * width,
-            tools::separator(row),
-        ] {
+            Some(row.left() + left_offset + width + strip::TOOLS_GAP / 2.0),
+            Some(row.left() + left_offset + strip::TOOLS + 2.0 * width + 6.0),
+            window_buttons,
+            Some(tools::separator(row)),
+        ]
+        .into_iter()
+        .flatten()
+        {
             ui.painter().line_segment(
                 [
                     egui::pos2(x, row.center().y - 8.0),

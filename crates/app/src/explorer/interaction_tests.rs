@@ -1472,3 +1472,158 @@ fn a_press_on_the_floating_list_over_a_console_never_reaches_its_program() {
         "only the marker reached the program"
     );
 }
+
+#[test]
+fn typing_a_search_keeps_the_tree_loaded_and_the_keys_in_files() {
+    let ctx = egui::Context::default();
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));
+    let directory = Directory::new("search-typing");
+    fs::create_dir_all(directory.0.join("docs")).unwrap();
+    fs::write(directory.0.join("docs/plan.md"), "# Plan").unwrap();
+    fs::write(directory.0.join("docs/notes.txt"), "notes").unwrap();
+    let command = format!("cd '{}' && exec sleep 30", directory.0.display());
+    let mut window = window_of_tabs([[command.as_str(), "sleep 30"]]);
+    crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
+    frame(&mut window, &ctx, area, vec![]);
+    let pane = window.active().panes()[0].name;
+    wait_for_source(&mut window, &ctx, area, pane, &directory.0);
+    crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+    wait_for_text(&mut window, &ctx, area, "docs");
+    let tree = {
+        let state = &window.explorer;
+        let mut key = state.request(pane, directory.0.clone());
+        key.query.clear();
+        key
+    };
+    assert!(window.explorer.cache.contains_key(&tree));
+    let before = window.pane_called(pane).unwrap().keystrokes.clone();
+    click_icon(&mut window, &ctx, area, view::Icon::Search);
+    type_text(&mut window, &ctx, area, "zzz");
+    wait_for_text(&mut window, &ctx, area, "No matching files or folders.");
+    assert!(
+        window.explorer.cache.contains_key(&tree),
+        "typing a query dropped the tree's listing"
+    );
+    // Enter with nothing to choose keeps the field: what is typed next still reaches it.
+    let enter = egui::Event::Key {
+        key: egui::Key::Enter,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    frame(&mut window, &ctx, area, vec![enter]);
+    frame(&mut window, &ctx, area, vec![]);
+    type_text(&mut window, &ctx, area, "q");
+    assert_eq!(window.explorer.navigation[&pane].query, "zzzq");
+    assert_eq!(window.pane_called(pane).unwrap().keystrokes, before);
+    // Ctrl+Enter on a file that is not Markdown reveals it and says why it did not open.
+    for _ in 0..4 {
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::Key {
+                key: egui::Key::Backspace,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+    }
+    type_text(&mut window, &ctx, area, "notes");
+    wait_for_text(&mut window, &ctx, area, "notes.txt");
+    let open = egui::Event::Key {
+        key: egui::Key::Enter,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::COMMAND,
+    };
+    frame(&mut window, &ctx, area, vec![open]);
+    wait_for_text(
+        &mut window,
+        &ctx,
+        area,
+        "Only Markdown files open in the drawer.",
+    );
+    assert_eq!(crate::sidebar::active(&window), None);
+    assert_eq!(
+        window.explorer.navigation[&pane].selected,
+        Some(directory.0.join("docs/notes.txt"))
+    );
+}
+
+#[test]
+fn the_search_closes_when_focus_moves_to_another_console() {
+    let ctx = egui::Context::default();
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));
+    let directory = Directory::new("search-focus");
+    fs::write(directory.0.join("findme.txt"), "x").unwrap();
+    let command = format!("cd '{}' && exec sleep 30", directory.0.display());
+    let mut window = window_of_tabs([[command.as_str(), "sleep 30"]]);
+    crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
+    frame(&mut window, &ctx, area, vec![]);
+    let pane = window.active().panes()[0].name;
+    wait_for_source(&mut window, &ctx, area, pane, &directory.0);
+    crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+    wait_for_text(&mut window, &ctx, area, "findme.txt");
+    click_icon(&mut window, &ctx, area, view::Icon::Search);
+    type_text(&mut window, &ctx, area, "find");
+    frame(&mut window, &ctx, area, vec![]);
+    assert!(window.explorer.search_rect.is_some());
+    window.active_mut().focus = window.active().panes()[1].name;
+    frame(&mut window, &ctx, area, vec![]);
+    frame(&mut window, &ctx, area, vec![]);
+    assert!(
+        window.explorer.search_rect.is_none(),
+        "the list stayed open over another console's Files"
+    );
+    assert!(window.explorer.navigation[&pane].query.is_empty());
+}
+
+#[test]
+fn a_press_on_the_list_over_the_files_divider_picks_the_row_and_resizes_nothing() {
+    let ctx = egui::Context::default();
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));
+    let directory = Directory::new("search-divider");
+    fs::write(directory.0.join("wanted.txt"), "x").unwrap();
+    let command = format!("cd '{}' && exec sleep 30", directory.0.display());
+    let mut window = window_of_tabs([[command.as_str(), "sleep 30"]]);
+    crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
+    frame(&mut window, &ctx, area, vec![]);
+    let pane = window.active().panes()[0].name;
+    wait_for_source(&mut window, &ctx, area, pane, &directory.0);
+    crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+    wait_for_text(&mut window, &ctx, area, "wanted.txt");
+    click_icon(&mut window, &ctx, area, view::Icon::Search);
+    type_text(&mut window, &ctx, area, "wanted");
+    wait_for_text(&mut window, &ctx, area, "1 match");
+    let list = window.explorer.search_rect.unwrap();
+    let files = window.sidebar.last_files.unwrap();
+    let painted = frame(&mut window, &ctx, area, vec![]);
+    let row = painted
+        .iter()
+        .find(|(text, pos)| text == "wanted.txt" && list.contains(*pos))
+        .unwrap()
+        .1;
+    // On the divider's column, on the row.
+    let at = egui::pos2(files.right() + crate::sidebar::DIVIDER / 2.0, row.y);
+    assert!(list.contains(at));
+    click_at(&mut window, &ctx, area, at);
+    frame(&mut window, &ctx, area, vec![]);
+    assert_eq!(
+        window.sidebar.last_files.unwrap().width(),
+        files.width(),
+        "the press under the list resized Files"
+    );
+    assert!(
+        window.explorer.search_rect.is_none(),
+        "the row was not picked"
+    );
+    assert_eq!(
+        window.explorer.navigation[&pane].selected,
+        Some(directory.0.join("wanted.txt"))
+    );
+}

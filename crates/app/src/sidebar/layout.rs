@@ -81,10 +81,11 @@ pub(crate) fn layout(
         ));
     }
     // Maximized, the drawer covers the consoles where they stand: toggling it resizes no
-    // program, as the Board does not.
-    if maximized && rest.width() > 2.0 * DRAWER_MARGIN && rest.height() > 2.0 * DRAWER_MARGIN {
+    // program, as the Board does not. It covers them edge to edge, so no band of a console it
+    // hides is left to take a press.
+    if maximized && rest.width() > 0.0 && rest.height() > 0.0 {
         result.divider = None;
-        result.dock = Some(rest.shrink(DRAWER_MARGIN));
+        result.dock = Some(rest);
     }
     result
 }
@@ -122,12 +123,6 @@ pub(crate) fn partition(window: &Window, area: egui::Rect, metrics: &CellMetrics
     if !state.enabled {
         return Layout::bare(area);
     }
-    if state.active == Some(Tool::Board) {
-        // Cover the console surface without changing the programs' terminal dimensions.
-        let mut result = Layout::bare(area);
-        result.dock = Some(area);
-        return result;
-    }
     let inset = 2.0 * crate::painter::CONSOLE_PADDING + 2.0 * window.headers.pane_inset();
     let leaf = egui::vec2(
         crate::panel::MINIMUM_CONSOLE * metrics.width() + inset,
@@ -142,9 +137,10 @@ pub(crate) fn partition(window: &Window, area: egui::Rect, metrics: &CellMetrics
     };
     let files = window.explorer.visible().then_some(state.files_width);
     let drawer = matches!(state.active, Some(Tool::Markdown | Tool::Git)).then_some(state.height);
-    // Tiling clamps degenerate weights: verify the real allocations. A surface steps aside only
-    // when it is what leaves a console under its floor — Files along the width, the drawer along
-    // the height — never because the tree does not fit the window anyway.
+    // A surface needs its minimum beside the consoles' floor (`layout`); past that, tiling clamps
+    // degenerate weights, so the real allocations decide: Files steps aside when it is what
+    // leaves a console under its width floor, the drawer when it is what leaves one under its
+    // height floor.
     let parts = |result: &Layout| root.place(result.consoles, metrics.width()).parts;
     let wide = |result: &Layout| parts(result).iter().all(|r| r.width() + 0.01 >= leaf.x);
     let tall = |result: &Layout| parts(result).iter().all(|r| r.height() + 0.01 >= leaf.y);
@@ -153,6 +149,15 @@ pub(crate) fn partition(window: &Window, area: egui::Rect, metrics: &CellMetrics
     let mut files = files;
     if files.is_some() && !wide(&probe(files, None)) && wide(&probe(None, None)) {
         files = None;
+    }
+    if state.active == Some(Tool::Board) {
+        // The Board covers the content, Files included, and the consoles keep the size they
+        // have beside Files: opening or closing it resizes no program.
+        let mut result = probe(files, None);
+        result.files = None;
+        result.files_divider = None;
+        result.dock = Some(area);
+        return result;
     }
     let mut result = probe(files, drawer);
     if drawer.is_some() && !maximized && !tall(&result) && tall(&probe(files, None)) {

@@ -13,7 +13,8 @@ const ROWS: usize = 8;
 pub(super) enum Pick {
     /// Show the match in the tree, its folders expanded, without opening it.
     Reveal(PathBuf),
-    /// Open it: a Markdown file in the drawer; anything else is revealed.
+    /// Open it: a Markdown file opens in the drawer and a folder opens or closes in the tree;
+    /// any other file is revealed, and Files says why it did not open.
     Open(Entry),
 }
 
@@ -78,14 +79,19 @@ pub(super) fn place(files: egui::Rect, screen: egui::Rect, rows: usize) -> egui:
 
 /// The keys the open list answers before the text field sees them.
 pub(super) fn keys(state: &mut Explorer, pane: usize, ctx: &egui::Context) -> Option<Pick> {
-    let found = matches(state, pane).entries;
     let pressed = |key| ctx.input(|i| i.key_pressed(key));
-    if pressed(egui::Key::ArrowDown) {
+    let (down, up) = (pressed(egui::Key::ArrowDown), pressed(egui::Key::ArrowUp));
+    if !down && !up && !pressed(egui::Key::Enter) {
+        return None;
+    }
+    let found = matches(state, pane).entries;
+    if down {
         state.search_index = (state.search_index + 1).min(found.len().saturating_sub(1));
     }
-    if pressed(egui::Key::ArrowUp) {
+    if up {
         state.search_index = state.search_index.saturating_sub(1);
     }
+    state.search_scroll |= down || up;
     let enter = ctx.input(|i| {
         i.events.iter().find_map(|event| match event {
             egui::Event::Key {
@@ -123,19 +129,23 @@ pub(super) fn show(
     state.search_index = state
         .search_index
         .min(found.entries.len().saturating_sub(1));
-    let rect = place(files, ctx.content_rect(), found.entries.len().max(1));
-    state.search_rect = Some(rect);
+    let screen = ctx.content_rect();
+    let rect = place(files, screen, found.entries.len().max(1));
     let roles = crate::ui::style::roles(ctx, theme);
     let root = state.navigation[&pane].root.clone().unwrap_or_default();
     let mut pick = None;
-    egui::Area::new(egui::Id::new(("explorer-search", pane)))
+    let scroll = std::mem::take(&mut state.search_scroll);
+    let shown = egui::Area::new(egui::Id::new(("explorer-search", pane)))
         .order(egui::Order::Tooltip)
         .fixed_pos(rect.min)
         .movable(false)
         .constrain(false)
         .show(ctx, |ui| {
             crate::ui::floating::style(ui, theme);
-            ui.set_clip_rect(rect.expand(12.0));
+            ui.set_clip_rect(
+                egui::Rect::from_min_max(rect.min, egui::pos2(rect.right(), screen.bottom()))
+                    .expand(12.0),
+            );
             crate::ui::floating::menu_frame(&roles).show(ui, |ui| {
                 let inner = rect.width() - 2.0 * 4.0 - 2.0;
                 ui.set_width(inner);
@@ -151,22 +161,41 @@ pub(super) fn show(
                 if std::mem::take(&mut state.focus_search) {
                     field.request_focus();
                 }
+                // A singleline field gives the keys up on Enter; the list keeps them while open,
+                // or what is typed next would go nowhere.
+                if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    field.request_focus();
+                }
                 if field.changed() {
+                    // The query is part of each search's request, so the tree's listings stay
+                    // cached; only a search still running for the old query is let go.
                     nav.query = query;
-                    nav.refresh();
+                    if state
+                        .loading
+                        .as_ref()
+                        .is_some_and(|r| r.pane == pane && !r.query.is_empty())
+                    {
+                        state.loader.cancel();
+                        state.loading = None;
+                    }
                     state.search_index = 0;
                     state.message.clear();
                 }
                 let rows = found.entries.len().min(ROWS);
+                let stride = MENU_ROW_HEIGHT + ui.spacing().item_spacing.y;
                 egui::ScrollArea::vertical()
                     .id_salt(("explorer-search-results", pane))
-                    .max_height(rows as f32 * MENU_ROW_HEIGHT)
+                    .max_height(rows as f32 * stride)
                     .auto_shrink([false, true])
                     .show_rows(ui, MENU_ROW_HEIGHT, found.entries.len(), |ui, range| {
                         for index in range {
                             let entry = &found.entries[index];
                             let chosen = index == state.search_index;
-                            if let Some(choice) = row(ui, entry, &root, chosen, &roles) {
+                            let (choice, response) = row(ui, entry, &root, chosen, &roles);
+                            if chosen && scroll {
+                                response.scroll_to_me(None);
+                            }
+                            if let Some(choice) = choice {
                                 state.search_index = index;
                                 pick = Some(choice);
                             }
@@ -181,14 +210,20 @@ pub(super) fn show(
                     ui.label(egui::RichText::new(count).size(11.0).color(roles.tx3));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
-                            egui::RichText::new("Enter reveals · Ctrl+Enter opens")
-                                .size(11.0)
-                                .color(roles.tx3),
+                            egui::RichText::new(if cfg!(target_os = "macos") {
+                                "Enter reveals · Cmd+Enter opens"
+                            } else {
+                                "Enter reveals · Ctrl+Enter opens"
+                            })
+                            .size(11.0)
+                            .color(roles.tx3),
                         );
                     });
                 });
             });
         });
+    // What a press claims is the list as laid out, not an estimate of it.
+    state.search_rect = Some(shown.response.rect);
     pick
 }
 
@@ -205,7 +240,7 @@ fn row(
     root: &Path,
     chosen: bool,
     roles: &crate::theme::Roles,
-) -> Option<Pick> {
+) -> (Option<Pick>, egui::Response) {
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), MENU_ROW_HEIGHT),
         egui::Sense::click(),
@@ -263,13 +298,14 @@ fn row(
                 matches!(event, egui::Event::PointerButton { modifiers, .. } if modifiers.command)
             })
     });
-    response.clicked().then(|| {
+    let pick = response.clicked().then(|| {
         if command {
             Pick::Open(entry.clone())
         } else {
             Pick::Reveal(entry.path.clone())
         }
-    })
+    });
+    (pick, response)
 }
 
 /// Show `path` in the tree: every folder between the root and it expanded, it selected and
@@ -289,7 +325,6 @@ pub(super) fn reveal(state: &mut Explorer, pane: usize, path: &Path) {
     nav.selected = Some(path.to_path_buf());
     nav.reveal_selected = true;
     nav.query.clear();
-    nav.refresh();
     state.searching = false;
     state.search_rect = None;
 }

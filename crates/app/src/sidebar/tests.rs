@@ -37,7 +37,8 @@ fn files_and_the_drawer_keep_their_minimums_or_step_aside_for_the_consoles() {
         width: 320.0,
         height: 120.0,
     };
-    for height in [0.0, 20.0, 291.0, 292.0, 600.0, 900.0] {
+    // 286 is the drawer's boundary here: its minimum, the divider and the consoles' floor.
+    for height in [0.0, 20.0, 285.0, 286.0, 600.0, 900.0] {
         for width in [0.0, 12.0, 300.0, 525.0, 526.0, 1000.0, 1400.0] {
             let area = egui::Rect::from_min_size(egui::pos2(7.0, 11.0), egui::vec2(width, height));
             let result = layout(area, Some(264.0), Some(370.0), false, floors);
@@ -81,8 +82,24 @@ fn files_and_the_drawer_keep_their_minimums_or_step_aside_for_the_consoles() {
         maximized.consoles, open.consoles,
         "maximizing the drawer resizes no console"
     );
-    assert_eq!(maximized.dock, Some(closed.consoles.shrink(DRAWER_MARGIN)));
+    assert_eq!(
+        maximized.dock,
+        Some(closed.consoles),
+        "a maximized drawer covers the consoles edge to edge"
+    );
     assert!(maximized.divider.is_none());
+    // Too short for the drawer beside the consoles, it still maximizes over them.
+    let short = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 200.0));
+    assert!(
+        layout(short, None, Some(370.0), false, floors)
+            .dock
+            .is_none()
+    );
+    assert_eq!(
+        layout(short, None, Some(370.0), true, floors).dock,
+        Some(short)
+    );
+    assert!(layout(short, None, None, true, floors).dock.is_none());
 }
 
 #[cfg(unix)]
@@ -589,28 +606,107 @@ fn a_press_on_the_maximized_drawer_never_reaches_the_console_header_it_covers() 
     let strip = crate::header::set_the_header_aside(rect, &metrics, window.headers)
         .0
         .expect("the console carries a header strip");
-    crate::viewer::activate(&mut window, false);
+    crate::viewer::activate(&mut window, true);
     toggle_maximize(&mut window);
     for _ in 0..2 {
         one_frame_in(&mut window, &ctx, area, vec![]);
     }
     let panes = window.all_panes().count();
     assert!(window.sidebar.last_dock.unwrap().contains(strip.center()));
-    for offset in (6..=150).step_by(12) {
-        let at = egui::pos2(strip.right() - offset as f32, strip.center().y);
-        if crate::viewer::strip_action(&window, window.sidebar.last_dock.unwrap(), at).is_some() {
-            continue;
+    // The header's top edge too: a band the drawer leaves uncovered would hand it the press.
+    for y in [strip.top() + 1.0, strip.center().y] {
+        for offset in (2..=150).step_by(12) {
+            let at = egui::pos2(strip.right() - offset as f32, y);
+            if crate::viewer::strip_action(&window, window.sidebar.last_dock.unwrap(), at).is_some()
+            {
+                continue;
+            }
+            click(&mut window, &ctx, area, at);
+            assert_eq!(
+                window.all_panes().count(),
+                panes,
+                "a header close button took the press at {at:?}"
+            );
+            assert_eq!(
+                active(&window),
+                Some(Tool::Markdown),
+                "a header button under the drawer took the press at {at:?}"
+            );
         }
-        click(&mut window, &ctx, area, at);
-        assert_eq!(
-            window.all_panes().count(),
-            panes,
-            "a header close button took the press at {at:?}"
-        );
-        assert_eq!(
-            active(&window),
-            Some(Tool::Git),
-            "a header button under the drawer took the press at {at:?}"
-        );
     }
+}
+
+#[test]
+fn the_board_covers_files_without_resizing_a_console_and_the_files_button_leaves_it() {
+    let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+    window.chrome.enable();
+    let ctx = egui::Context::default();
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 800.0));
+    select(&mut window, Tool::Files);
+    for _ in 0..2 {
+        one_frame_in(&mut window, &ctx, area, vec![]);
+    }
+    assert!(window.sidebar.last_files.is_some());
+    let beside_files: Vec<_> = window.all_panes().map(|p| p.measured).collect();
+    select(&mut window, Tool::Board);
+    one_frame_in(&mut window, &ctx, area, vec![]);
+    assert!(
+        window.sidebar.last_files.is_none(),
+        "the Board covers Files"
+    );
+    assert_eq!(
+        window.all_panes().map(|p| p.measured).collect::<Vec<_>>(),
+        beside_files,
+        "opening the Board over Files resized a console"
+    );
+    let files = button_of(&window, Tool::Files);
+    click(&mut window, &ctx, area, files);
+    assert_eq!(
+        active(&window),
+        None,
+        "the Files button left the Board open"
+    );
+    assert!(files_visible(&window));
+    assert!(window.sidebar.last_files.is_some(), "Files is shown again");
+}
+
+#[test]
+fn the_drawer_steps_aside_for_stacked_consoles_in_a_short_window() {
+    let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+    let ctx = egui::Context::default();
+    let large = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 1400.0));
+    one_frame_in(&mut window, &ctx, large, vec![]);
+    let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
+    for _ in 0..2 {
+        window.split_the_focused(crate::tiling::Orientation::Rows, &ctx, large, &metrics);
+    }
+    assert_eq!(
+        window.all_panes().count(),
+        4,
+        "three rows beside one column"
+    );
+    crate::viewer::activate(&mut window, false);
+    let floor = crate::tiling::MINIMUM_ROWS as u16;
+    let mut stepped_aside = false;
+    for height in (200..=1400).step_by(8) {
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, height as f32));
+        for _ in 0..2 {
+            one_frame_in(&mut window, &ctx, area, vec![]);
+        }
+        let rows: Vec<_> = window.all_panes().map(|p| p.screen.size().rows).collect();
+        let fits = rows.iter().all(|r| *r >= floor);
+        if window.sidebar.last_dock.is_some() {
+            assert!(fits, "{height}: the drawer squeezed a console to {rows:?}");
+        } else if fits {
+            stepped_aside = true;
+        }
+    }
+    assert!(
+        stepped_aside,
+        "no height where the rows fit alone and the drawer stepped aside for them"
+    );
+    assert!(
+        window.sidebar.last_dock.is_some(),
+        "a tall window keeps the drawer"
+    );
 }

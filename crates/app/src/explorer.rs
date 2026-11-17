@@ -46,6 +46,10 @@ pub(crate) struct Explorer {
     searching: bool,
     search_index: usize,
     search_rect: Option<egui::Rect>,
+    /// The console whose query the open search shows: the search closes when focus leaves it.
+    search_pane: Option<usize>,
+    /// The arrows moved the choice; the list scrolls it into view once.
+    search_scroll: bool,
     focus_search: bool,
     pick: Option<search::Pick>,
 }
@@ -74,6 +78,8 @@ impl Default for Explorer {
             searching: false,
             search_index: 0,
             search_rect: None,
+            search_pane: None,
+            search_scroll: false,
             focus_search: false,
             pick: None,
         }
@@ -233,8 +239,9 @@ impl Explorer {
     }
 
     /// Open the floating name search with its field focused.
-    fn open_search(&mut self) {
+    fn open_search(&mut self, pane: Option<usize>) {
         self.searching = true;
+        self.search_pane = pane;
         self.focus_search = true;
         self.keyboard = true;
         self.search_index = 0;
@@ -243,10 +250,10 @@ impl Explorer {
     fn close_search(&mut self, pane: Option<usize>) {
         if let Some(nav) = pane.and_then(|pane| self.navigation.get_mut(&pane)) {
             nav.query.clear();
-            nav.refresh();
         }
         self.searching = false;
         self.search_rect = None;
+        self.search_pane = None;
     }
 }
 
@@ -266,6 +273,13 @@ pub(crate) fn suspend(window: &mut Window) {
 /// Leave the keys to another surface that has just opened; Files stays shown.
 pub(crate) fn blur(window: &mut Window) {
     window.explorer.keyboard = false;
+}
+
+/// Where the floating search list lies, painted over the dividers and the drawer: what is under
+/// it does not take a press.
+pub(crate) fn list_rect(window: &Window) -> Option<egui::Rect> {
+    let state = &window.explorer;
+    state.search_rect.filter(|_| state.searching)
 }
 
 pub(crate) fn reveal(window: &mut Window) {
@@ -324,6 +338,10 @@ pub(crate) fn before_keys(
             return (false, false);
         };
         let state = &mut window.explorer;
+        if state.searching && state.search_pane != target {
+            let left = state.search_pane;
+            state.close_search(left);
+        }
         let rect = state.rect(area);
         // The floating search overhangs the consoles; a press on it is Files', not theirs.
         let list = state.search_rect.filter(|_| state.searching);
@@ -413,7 +431,11 @@ pub(crate) fn show(window: &mut Window, ui: &mut egui::Ui, area: egui::Rect) {
                 Some(search::Pick::Reveal(path)) => search::reveal(state, pane, &path),
                 Some(search::Pick::Open(entry)) => {
                     search::reveal(state, pane, &entry.path);
-                    open = open.or(view::activate(state, pane, &entry));
+                    let opened = view::activate(state, pane, &entry);
+                    if opened.is_none() && entry.kind != EntryKind::Directory {
+                        state.message = "Only Markdown files open in the drawer.".into();
+                    }
+                    open = open.or(opened);
                 }
                 None => {}
             }

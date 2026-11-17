@@ -559,7 +559,8 @@ console.
 
 - [ ] **V1 — Shared Files, Markdown, Git and Board sidebar** ([#73](https://github.com/mashware/ivy-history-private/issues/73),
   with Markdown and Git review viewers from [#337](https://github.com/mashware/ivy-history-private/issues/337)).
-  A transient right dock opens explicit paths, including local Markdown paths clicked in a console.
+  Files on the left and a transient drawer below open explicit paths, including local Markdown paths
+  clicked in a console.
   Markdown refreshes on save. Git presents files and hunks in unified or split form, with local and
   base comparisons. Review comments are previewed before insertion into the pinned origin console.
   Files uses #72's pane-keyed explorer; Board remains global. D72 records input isolation, bounded

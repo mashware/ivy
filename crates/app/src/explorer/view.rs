@@ -156,8 +156,14 @@ fn rows(state: &mut Explorer, pane: usize) -> (Vec<Row>, Option<Request>, bool) 
                 key.query.clear();
                 state.clock = state.clock.wrapping_add(1);
                 let root = state.navigation[&pane].root.as_ref() == Some(&path);
-                let near_view =
-                    rows.len() >= visible_start.saturating_sub(1) && rows.len() <= visible_end;
+                // A revealed match loads the folders on its way, wherever they fall.
+                let revealing = state.navigation[&pane].reveal_selected
+                    && state.navigation[&pane]
+                        .selected
+                        .as_ref()
+                        .is_some_and(|selected| selected.starts_with(&path));
+                let near_view = revealing
+                    || (rows.len() >= visible_start.saturating_sub(1) && rows.len() <= visible_end);
                 let Some(cached) = state.cache.get_mut(&key) else {
                     if pending.is_none() && (root || near_view) {
                         pending = Some(key);
@@ -316,7 +322,7 @@ pub(super) fn show(
                         if state.searching {
                             state.close_search(target);
                         } else {
-                            state.open_search();
+                            state.open_search(target);
                         }
                     }
                 });
@@ -373,6 +379,10 @@ pub(super) fn show(
             {
                 scroll = (index as f32 * state.row_stride - body.available_height() * 0.5).max(0.0);
                 nav.scroll = scroll;
+                nav.reveal_selected = false;
+            } else if nav.reveal_selected && pending.is_none() {
+                // Every folder on the way has answered and the row is not there (a folder over
+                // its limit, or the file gone): stop waiting for it.
                 nav.reveal_selected = false;
             }
             let activate_key = std::mem::take(&mut state.activate);
