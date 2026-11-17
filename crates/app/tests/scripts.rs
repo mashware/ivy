@@ -670,6 +670,7 @@ const MODULES: &[(&str, &str)] = &[
         "app/src/explorer/search.rs",
         include_str!("../src/explorer/search.rs"),
     ),
+    ("app/src/ui/icons.rs", include_str!("../src/ui/icons.rs")),
     (
         "app/src/tab_bar/title.rs",
         include_str!("../src/tab_bar/title.rs"),

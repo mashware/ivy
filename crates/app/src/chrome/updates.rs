@@ -59,12 +59,14 @@ pub(super) fn indicator(window: &Window, ui: &egui::Ui, row: Rect) {
     }
     use super::strip;
     // Over the menu button's top-right corner, wherever this platform and width put the menu.
-    let from_right = if strip::is_compact(row.width()) {
-        strip::COMPACT_MENU / 2.0
+    let point = if strip::is_compact(row.width()) {
+        egui::pos2(
+            row.right() - strip::COMPACT_MENU / 2.0 + 9.0,
+            row.top() + 15.0,
+        )
     } else {
-        strip::RIGHT_MARGIN + (strip::right_buttons() - 3) as f32 * strip::BUTTON + 17.0
+        strip::slots(row).menu.center() + egui::vec2(8.0, -5.0)
     };
-    let point = egui::pos2(row.right() - from_right + 9.0, row.top() + 15.0);
     ui.painter_at(row).circle_filled(
         point,
         3.5,

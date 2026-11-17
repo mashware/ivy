@@ -1391,7 +1391,7 @@ impl eframe::App for Window {
         // from frame accounting; outbound latency still includes this earlier application work.
         let chrome_owned = chrome::before_keys(self, ui, &metrics);
         self.timed_separately += self.chrome.take_cost();
-        let sidebar_owned = !chrome_owned && sidebar::before_keys(self, ui, &metrics);
+        let sidebar_owned = sidebar::before_keys(self, ui, &metrics, chrome_owned);
         let mut board_owned = sidebar_owned || board::before_keys(self, ui, &metrics, chrome_owned);
         let pane_owned = !board_owned && pane_view::before_keys(self, ui, &metrics);
         if pane_owned {

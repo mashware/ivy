@@ -1489,7 +1489,13 @@ mod tests {
         let board_left = shapes
             .iter()
             .find_map(|s| match &s.shape {
-                egui::Shape::Text(t) if t.galley.text() == "Board" => Some(t.pos.x - 16.0),
+                // The Board's own bar, not the title bar's labelled button.
+                egui::Shape::Text(t)
+                    if t.galley.text() == "Board"
+                        && t.pos.y > crate::theme::metrics::TITLE_BAR_HEIGHT =>
+                {
+                    Some(t.pos.x - 16.0)
+                }
                 _ => None,
             })
             .expect("the bar's title is painted");

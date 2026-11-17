@@ -10,7 +10,7 @@ pub(super) fn show(
     theme: crate::theme::Theme,
     unavailable: bool,
     maximized: bool,
-    tabs: &super::drawer::Tabs,
+    (tabs, title): (&super::drawer::Tabs, &super::drawer::Title),
 ) {
     let namespace = if state.kind == Kind::Markdown {
         "markdown-viewer"
@@ -64,16 +64,13 @@ pub(super) fn show(
                 content.set_clip_rect(inner);
                 style(&mut content, &theme);
                 let strip = super::drawer::Strip::framed(rect, tabs);
-                let source = state
-                    .origin
-                    .as_ref()
-                    .map_or("No source console", |s| s.label.as_str());
-                let source = if unavailable {
-                    format!("{source} - unavailable")
-                } else {
-                    source.to_owned()
-                };
-                super::drawer::paint(&content, &strip, tabs, &roles, &source, maximized);
+                let source = title.text();
+                super::drawer::paint(&content, &strip, tabs, &roles, title, maximized);
+                if let Some(rect) = strip.controls
+                    && state.kind != Kind::Markdown
+                {
+                    strip_controls(state, &mut content, rect, &theme);
+                }
                 for (action, place) in &strip.places {
                     let hint = super::drawer::hint(*action, maximized);
                     // A strip too narrow for all of itself says so where it can still be read.
@@ -140,7 +137,9 @@ fn body_content(
             ui.label("Choose a Markdown file in Files.");
         });
     }
-    if !markdown {
+    // The comparison and refresh live on the strip; only a base to type or comments to clear
+    // need a row of their own.
+    if !markdown && (state.kind == Kind::AgainstBase || state.review.has_comments()) {
         egui::Frame::new()
             .inner_margin(egui::Margin::symmetric(10, 8))
             .show(ui, |ui| controls(state, ui));
@@ -191,49 +190,85 @@ fn comparison(kind: Kind, base: &str) -> String {
     }
 }
 
+/// The Git tab's comparison picker and refresh button, on the strip (`GitDiff.dc.html` has no row
+/// for them; the owner kept both, compacted, on 17 November 2026).
+fn strip_controls(
+    state: &mut State,
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    theme: &crate::theme::Theme,
+) {
+    let editable = !state.review.has_comments();
+    let mut load = false;
+    let picker =
+        egui::Rect::from_min_size(rect.min, egui::vec2(super::drawer::PICKER, rect.height()));
+    let mut row = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(picker)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    row.spacing_mut().interact_size.y = rect.height();
+    row.spacing_mut().button_padding = egui::vec2(8.0, 2.0);
+    let popup_style = egui::style::StyleModifier::from(row.style().as_ref().clone());
+    egui::ComboBox::from_id_salt("viewer-comparison")
+        .popup_style(popup_style)
+        .width(super::drawer::PICKER - 16.0)
+        .selected_text(comparison(state.kind, &state.base))
+        .show_ui(&mut row, |ui| {
+            ui.add_enabled_ui(editable, |ui| {
+                for (kind, label) in [
+                    (Kind::Local, "Local changes"),
+                    (Kind::Unstaged, "Unstaged changes"),
+                    (Kind::Staged, "Staged changes"),
+                    (Kind::AgainstBase, "Against base"),
+                ] {
+                    load |= ui.selectable_value(&mut state.kind, kind, label).changed()
+                        && !state.path.is_empty();
+                }
+            });
+        });
+    let refresh = egui::Rect::from_min_size(
+        egui::pos2(rect.right() - rect.height(), rect.top()),
+        egui::vec2(rect.height(), rect.height()),
+    );
+    let enabled = editable && state.requested.is_some() && state.job.is_none();
+    let response = ui
+        .interact(
+            refresh,
+            egui::Id::new("drawer-refresh"),
+            if enabled {
+                egui::Sense::click()
+            } else {
+                egui::Sense::hover()
+            },
+        )
+        .on_hover_text("Refresh the changes");
+    let roles = crate::ui::style::roles(ui.ctx(), theme);
+    if response.hovered() && enabled {
+        ui.painter().rect_filled(refresh, 5, roles.hover);
+    }
+    crate::ui::icons::paint(
+        ui.painter(),
+        refresh.center(),
+        crate::ui::icons::Icon::Refresh,
+        13.0,
+        if enabled { roles.tx2 } else { roles.tx3 },
+    );
+    if response.clicked() {
+        state.refresh_at = Some(std::time::Instant::now());
+    }
+    if load && editable {
+        state.editing_path = false;
+        state.start(ui.ctx());
+    }
+}
+
+/// The row a comparison against a typed base, or unsent comments, still need.
 fn controls(state: &mut State, ui: &mut egui::Ui) {
     let editable = !state.review.has_comments();
     let mut load = false;
-    ui.horizontal_wrapped(|ui| {
-        let popup_style = egui::style::StyleModifier::from(ui.style().as_ref().clone());
-        egui::ComboBox::from_id_salt("viewer-comparison")
-            .popup_style(popup_style)
-            .selected_text(comparison(state.kind, &state.base))
-            .show_ui(ui, |ui| {
-                ui.add_enabled_ui(editable, |ui| {
-                    for (kind, label) in [
-                        (Kind::Local, "Local changes"),
-                        (Kind::Unstaged, "Unstaged changes"),
-                        (Kind::Staged, "Staged changes"),
-                        (Kind::AgainstBase, "Against base"),
-                    ] {
-                        load |= ui.selectable_value(&mut state.kind, kind, label).changed()
-                            && !state.path.is_empty();
-                    }
-                });
-            });
-        if let Some(document) = state
-            .loaded
-            .as_ref()
-            .and_then(|loaded| loaded.diff.as_ref())
-        {
-            state.review.toolbar(ui, document);
-        }
-        if ui
-            .add_enabled(
-                editable && state.requested.is_some() && state.job.is_none(),
-                egui::Button::new("Refresh"),
-            )
-            .clicked()
-        {
-            state.refresh_at = Some(std::time::Instant::now());
-        }
-        if !editable && ui.button("Clear comments").clicked() {
-            state.review.clear();
-        }
-    });
-    if state.kind == Kind::AgainstBase {
-        ui.horizontal(|ui| {
+    ui.horizontal(|ui| {
+        if state.kind == Kind::AgainstBase {
             ui.label("Base");
             ui.add_enabled(
                 editable,
@@ -242,8 +277,11 @@ fn controls(state: &mut State, ui: &mut egui::Ui) {
             load |= ui
                 .add_enabled(editable, egui::Button::new("Compare"))
                 .clicked();
-        });
-    }
+        }
+        if !editable && ui.button("Clear comments").clicked() {
+            state.review.clear();
+        }
+    });
     if load && editable {
         state.editing_path = false;
         state.start(ui.ctx());
@@ -261,6 +299,14 @@ mod tests {
             document: Some("PLAN.md".into()),
             markdown,
             side_by_side: false,
+        }
+    }
+
+    fn title() -> super::super::drawer::Title {
+        super::super::drawer::Title {
+            project: Some(("billing-api".into(), Color32::from_rgb(0x43, 0xC0, 0x71))),
+            folder: "billing".into(),
+            unavailable: false,
         }
     }
 
@@ -331,14 +377,7 @@ mod tests {
         let ctx = egui::Context::default();
         let output = ctx.run_ui(Default::default(), |ui| {
             let roles = crate::ui::style::roles(ui.ctx(), &crate::theme::Theme::default());
-            super::super::drawer::paint(
-                ui,
-                &strip,
-                &tabs(false),
-                &roles,
-                "billing-api / Refunds",
-                false,
-            );
+            super::super::drawer::paint(ui, &strip, &tabs(false), &roles, &title(), false);
         });
         let mut found = Vec::new();
         for shape in &output.shapes {
@@ -361,11 +400,7 @@ mod tests {
                 "{label} outside its place"
             );
         }
-        assert!(
-            found
-                .iter()
-                .any(|(text, _)| text == "billing-api / Refunds")
-        );
+        assert!(found.iter().any(|(text, _)| text == "billing-api"));
     }
 
     #[test]
@@ -399,7 +434,7 @@ mod tests {
                         crate::theme::Theme::default(),
                         false,
                         false,
-                        &tabs(true),
+                        (&tabs(true), &title()),
                     )
                 },
             );
@@ -459,7 +494,17 @@ mod tests {
                         screen_rect: Some(screen),
                         ..Default::default()
                     },
-                    |ui| show(&mut state, ui, area, theme, true, false, &tabs(false)),
+                    |ui| {
+                        show(
+                            &mut state,
+                            ui,
+                            area,
+                            theme,
+                            true,
+                            false,
+                            (&tabs(false), &title()),
+                        )
+                    },
                 );
                 shapes = output.shapes.clone();
                 output.drop_without_applying_deltas();
@@ -499,10 +544,16 @@ mod tests {
     #[test]
     fn dock_content_stays_within_the_supplied_rectangle() {
         let ctx = egui::Context::default();
-        let area = egui::Rect::from_min_size(egui::Pos2::new(300.0, 0.0), egui::vec2(680.0, 480.0));
+        let area =
+            egui::Rect::from_min_size(egui::Pos2::new(300.0, 0.0), egui::vec2(1080.0, 480.0));
         let mut state = State::default();
         state.open_diff();
-        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 600.0));
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 600.0));
+        let gone = super::super::drawer::Title {
+            project: None,
+            folder: "No source console".into(),
+            unavailable: true,
+        };
         let frame = |state: &mut State| {
             ctx.run_ui(
                 egui::RawInput {
@@ -517,7 +568,7 @@ mod tests {
                         crate::theme::Theme::default(),
                         true,
                         false,
-                        &tabs(false),
+                        (&tabs(false), &gone),
                     )
                 },
             )

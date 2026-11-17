@@ -165,9 +165,16 @@ pub(crate) fn paint_borders(window: &mut crate::Window, ui: &egui::Ui, rects: &[
         if rect == egui::Rect::NOTHING || (!integrated && focused != Some(index)) {
             continue;
         }
+        // A console with a project outlines its focus in that project's ink, the colour its header
+        // already carries; the owner asked for it on 17 November 2026 (D96 amended).
         let color = match roles {
             None => window.theme.focus(),
-            Some(roles) if focused == Some(index) => roles.accent,
+            Some(roles) if focused == Some(index) => window
+                .active()
+                .panes()
+                .get(index)
+                .and_then(|pane| pane.project.as_ref())
+                .map_or(roles.accent, |project| project.ink),
             Some(roles) => roles.line,
         };
         ui.painter().rect_stroke(

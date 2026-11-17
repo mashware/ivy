@@ -562,11 +562,14 @@ fn exhausted_palette_keeps_distinct_project_names_in_actual_headers() {
                     .iter()
                     .filter(|shape| matches!(
                         &shape.shape,
-                        egui::Shape::Rect(r) if r.rect.width() == 3.0 && r.fill == Color32::WHITE
+                        egui::Shape::Rect(r) if r.fill == Color32::TRANSPARENT
+                            && r.stroke.width == 1.0
+                            && r.stroke.color == Color32::WHITE
+                            && r.rect.height() > 100.0
                     ))
                     .count(),
-                2,
-                "both headers' stripes must use the resulting project color"
+                1,
+                "the focused console's outline must use the resulting project color"
             );
         }
         output.drop_without_applying_deltas();

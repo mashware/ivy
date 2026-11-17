@@ -216,7 +216,16 @@ pub(crate) fn toggle(window: &mut Window, tool: Tool, ctx: &egui::Context) {
     }
 }
 
-pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &CellMetrics) -> bool {
+/// Place Files and the drawer for this frame, then take the gestures that are theirs. A press the
+/// title bar took (`chrome_owned`) still places them: a title-bar button that opens or closes Files
+/// changes the partition in this same frame, and painting Files from the last frame's place left
+/// one frame where the consoles had moved and Files had not.
+pub(crate) fn before_keys(
+    window: &mut Window,
+    ui: &mut egui::Ui,
+    metrics: &CellMetrics,
+    chrome_owned: bool,
+) -> bool {
     if !window.sidebar.enabled {
         return false;
     }
@@ -227,7 +236,8 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     window.sidebar.last_dock = geometry.dock;
     window.sidebar.last_files = geometry.files;
     window.sidebar.last_consoles = geometry.consoles;
-    if window.settings_editor.is_open()
+    if chrome_owned
+        || window.settings_editor.is_open()
         || window.pane_view.is_modal()
         || window.chrome.guide_blocked(&ctx)
     {
@@ -410,63 +420,20 @@ pub(crate) fn paint_icon(
     tool: Tool,
     color: egui::Color32,
 ) {
-    let stroke = egui::Stroke::new(1.4, color);
-    match tool {
-        Tool::Files => paint_file_icon(painter, rect, true, stroke),
-        Tool::Markdown => {
-            painter.rect_stroke(rect, 2, stroke, egui::StrokeKind::Inside);
-            let at = |x, y| rect.min + egui::vec2(x, y);
-            painter.add(egui::Shape::line(
-                vec![
-                    at(3.0, 11.0),
-                    at(3.0, 5.0),
-                    at(6.0, 8.0),
-                    at(9.0, 5.0),
-                    at(9.0, 11.0),
-                ],
-                stroke,
-            ));
-            painter.line_segment([at(12.0, 5.0), at(12.0, 11.0)], stroke);
-            painter.add(egui::Shape::line(
-                vec![at(10.0, 9.0), at(12.0, 11.0), at(14.0, 9.0)],
-                stroke,
-            ));
-        }
-        Tool::Git => {
-            let x = rect.left() + 4.0;
-            painter.line_segment(
-                [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
-                stroke,
-            );
-            painter.line_segment([egui::pos2(x, rect.center().y), rect.right_top()], stroke);
-            for p in [
-                egui::pos2(x, rect.top()),
-                egui::pos2(x, rect.bottom()),
-                rect.right_top(),
-            ] {
-                painter.circle_filled(p, 2.0, color);
-            }
-        }
-        Tool::Board => {
-            for x in [0.0, 6.0, 12.0] {
-                painter.rect_stroke(
-                    egui::Rect::from_min_size(rect.min + egui::vec2(x, 0.0), egui::vec2(4.0, 16.0)),
-                    0,
-                    stroke,
-                    egui::StrokeKind::Inside,
-                );
-                for y in [3.0, 8.0] {
-                    painter.line_segment(
-                        [
-                            rect.min + egui::vec2(x + 1.0, y),
-                            rect.min + egui::vec2(x + 3.0, y),
-                        ],
-                        stroke,
-                    );
-                }
-            }
-        }
-    }
+    use crate::ui::icons::Icon;
+    let icon = match tool {
+        Tool::Files => Icon::Files,
+        Tool::Markdown => Icon::Markdown,
+        Tool::Git => Icon::Branch,
+        Tool::Board => Icon::Board,
+    };
+    crate::ui::icons::paint(
+        painter,
+        rect.center(),
+        icon,
+        rect.width().min(rect.height()),
+        color,
+    );
 }
 
 #[cfg(test)]

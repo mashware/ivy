@@ -1,7 +1,7 @@
 //! In-app setup help reports published panels, never inferred client installation (D73).
 mod recovery;
 use crate::{Window, panel};
-use eframe::egui::{self, Color32, Rect, Stroke};
+use eframe::egui::{self, Color32, Rect};
 use std::{path::PathBuf, time::Instant};
 
 const APPLYING_PREFERENCES: &str = "Saved. Applying settings...";
@@ -93,13 +93,12 @@ fn published(window: &Window) -> Published {
 fn indicator_rect(row: Rect) -> Option<Rect> {
     use super::strip;
     let compact = strip::is_compact(row.width());
-    // The last of the right-hand buttons, or the slot left of a compact bar's menu.
-    let right = row.right()
-        - if compact {
-            strip::COMPACT_MENU
-        } else {
-            strip::RIGHT_MARGIN + (strip::right_buttons() - 1) as f32 * strip::BUTTON
-        };
+    // Its own slot on a full bar, or the slot left of a compact bar's menu.
+    let right = if compact {
+        row.right() - strip::COMPACT_MENU
+    } else {
+        strip::slots(row).connect.right()
+    };
     let left = right - strip::BUTTON;
     let limit = row.left() + strip::left_offset() + if compact { 4.0 } else { strip::LEFT_GROUP };
     (left >= limit && row.height() > 14.0).then(|| {
@@ -130,15 +129,7 @@ pub(super) fn compact_button(window: &mut Window, ui: &egui::Ui, row: Rect) {
 
 pub(super) fn paint_icon(painter: &egui::Painter, rect: Rect, fg: Color32, highlighted: bool) {
     let center = rect.center();
-    painter.circle_stroke(center, 8.0, Stroke::new(1.4, fg));
-    painter.line_segment(
-        [
-            center + egui::vec2(0.0, -4.0),
-            center + egui::vec2(0.0, 1.0),
-        ],
-        Stroke::new(1.8, fg),
-    );
-    painter.circle_filled(center + egui::vec2(0.0, 4.0), 1.0, fg);
+    crate::ui::icons::paint(painter, center, crate::ui::icons::Icon::Connect, 15.0, fg);
     if highlighted {
         painter.circle_filled(center + egui::vec2(8.0, -8.0), 3.0, fg);
     }

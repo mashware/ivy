@@ -176,72 +176,30 @@ pub(crate) fn paint_button_icon(
     hint: &str,
     fg: Color32,
 ) {
+    use crate::ui::icons::Icon;
     let c = rect.center();
-    // Use the approved prototype's 24-unit SVG paths inside its 17-point icon box.
-    let scale = 17.0 / 24.0;
-    let at = |x, y| c + egui::vec2(x, y) * scale;
-    let stroke = Stroke::new(1.6 * scale, fg);
-    let line = |a: (f32, f32), b: (f32, f32)| p.line_segment([at(a.0, a.1), at(b.0, b.1)], stroke);
-    let outline = |a: (f32, f32), b: (f32, f32), radius| {
-        p.rect_stroke(
-            Rect::from_min_max(at(a.0, a.1), at(b.0, b.1)),
-            radius * scale,
-            stroke,
-            egui::StrokeKind::Middle,
-        )
-    };
-    match hint {
-        "Split right" | "Split down" => {
-            outline((-9.0, -8.0), (9.0, 8.0), 2.0);
-            if hint == "Split right" {
-                line((0.0, -8.0), (0.0, 8.0));
-                line((4.5, -3.0), (4.5, 3.0));
-                line((2.0, 0.0), (7.0, 0.0));
-            } else {
-                line((-9.0, 0.0), (9.0, 0.0));
-                line((0.0, 2.0), (0.0, 6.0));
-                line((-2.0, 4.0), (2.0, 4.0));
-            }
+    let (icon, size) = match hint {
+        "Split right" => (Icon::SplitRight, 15.0),
+        "Split down" => (Icon::SplitDown, 15.0),
+        "Search console" => (Icon::Search, 15.0),
+        "Menu" => (Icon::Menu, 15.0),
+        "Connect agents" => {
+            connection::paint_icon(p, rect, fg, false);
+            return;
         }
-        "Search console" => {
-            p.circle_stroke(at(-1.5, -1.5), 6.5 * scale, stroke);
-            line((4.0, 4.0), (9.0, 9.0));
-        }
-        "Menu" => {
-            for y in [-6.0, 0.0, 6.0] {
-                line((-7.0, y), (7.0, y));
-            }
-        }
-        "Connect agents" => connection::paint_icon(p, rect, fg, false),
         _ if let Some(tool) = tools::tool_of(hint) => {
             crate::sidebar::paint_icon(
                 p,
-                Rect::from_center_size(c, egui::vec2(16.0, 16.0)),
+                Rect::from_center_size(c, egui::vec2(15.0, 15.0)),
                 tool,
                 fg,
             );
+            return;
         }
-        "Close window" => {
-            line((-6.0, -6.0), (6.0, 6.0));
-            line((6.0, -6.0), (-6.0, 6.0));
-        }
-        "Minimize window" => {
-            line((-7.0, 0.0), (7.0, 0.0));
-        }
-        "Maximize window" => {
-            outline((-7.0, -7.0), (7.0, 7.0), 1.0);
-        }
-        "Restore window" => {
-            for (a, b) in [
-                ((-3.0, -7.0), (-3.0, -9.0)),
-                ((-3.0, -9.0), (9.0, -9.0)),
-                ((9.0, -9.0), (9.0, 3.0)),
-                ((9.0, 3.0), (7.0, 3.0)),
-            ] {
-                line(a, b);
-            }
-            outline((-9.0, -3.0), (3.0, 9.0), 1.0);
-        }
+        "Close window" => (Icon::Close, 12.0),
+        "Minimize window" => (Icon::Minimize, 12.0),
+        "Maximize window" => (Icon::Maximize, 12.0),
+        "Restore window" => (Icon::Restore, 12.0),
         _ => {
             p.text(
                 c,
@@ -250,8 +208,10 @@ pub(crate) fn paint_button_icon(
                 FontId::proportional(12.0),
                 fg,
             );
+            return;
         }
-    }
+    };
+    crate::ui::icons::paint(p, c, icon, size, fg);
 }
 
 /// Paint and claim the titlebar before settings and terminal input dispatch.
@@ -277,71 +237,40 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         Stroke::new(1.0, roles.line),
     );
     let mut action = None;
-    let left_offset = strip::left_offset();
-    let width = strip::BUTTON;
     let compact = geometry.compact();
-    let left = [
-        ("⊞", "Split right", Action::SplitRight),
-        ("⊟", "Split down", Action::SplitDown),
-    ];
-    for (i, (label, hint, cmd)) in left.into_iter().enumerate() {
-        let x = row.left() + left_offset + strip::TOOLS + i as f32 * width;
-        let rect = Rect::from_min_size(
-            egui::pos2(x, row.top() + 7.0),
-            Vec2::new(width, (row.height() - 14.0).max(0.0)),
-        );
-        if !compact && rect.right() <= row.right() && button(ui, rect, label, hint, hover, fg) {
-            action = Some(cmd);
-        }
-    }
     if let Some(logo) = geometry.logo {
         branding::paint_logo(ui, logo);
     }
     let maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
-    let right = [
-        ("×", "Close window", Action::Close),
-        (
-            "□",
-            if maximized {
-                "Restore window"
-            } else {
-                "Maximize window"
-            },
-            Action::Maximize,
-        ),
-        ("−", "Minimize window", Action::Minimize),
-        ("☰", "Menu", Action::Menu),
-        ("⌕", "Search console", Action::Search),
-        ("", "Connect agents", Action::Connect),
-    ];
-    let skip = right.len() - strip::right_buttons();
-    for (i, (label, hint, cmd)) in right.into_iter().skip(skip).enumerate() {
-        let x = row.right() - 6.0 - (i + 1) as f32 * width;
-        let rect = Rect::from_min_size(
-            egui::pos2(x, row.top() + 7.0),
-            Vec2::new(width, (row.height() - 14.0).max(0.0)),
-        );
-        if !compact && rect.left() >= geometry.left_end && button(ui, rect, label, hint, hover, fg)
-        {
-            action = Some(cmd);
+    if !compact {
+        let slots = strip::slots(row);
+        let mut buttons = vec![
+            (slots.split_right, "Split right", Action::SplitRight),
+            (slots.split_down, "Split down", Action::SplitDown),
+            (slots.search, "Search console", Action::Search),
+            (slots.connect, "Connect agents", Action::Connect),
+            (slots.menu, "Menu", Action::Menu),
+        ];
+        if let Some([minimize, maximize, close]) = slots.window {
+            buttons.push((minimize, "Minimize window", Action::Minimize));
+            buttons.push((
+                maximize,
+                if maximized {
+                    "Restore window"
+                } else {
+                    "Maximize window"
+                },
+                Action::Maximize,
+            ));
+            buttons.push((close, "Close window", Action::Close));
         }
-    }
-    if !compact {
+        for (rect, hint, cmd) in buttons {
+            if rect.left() >= geometry.left_end && button(ui, rect, "", hint, hover, fg) {
+                action = Some(cmd);
+            }
+        }
         action = tools::show(window, ui, &geometry, hover, fg).or(action);
-    }
-    if !compact {
-        // Where the platform draws its own window buttons, the line before them would sit on the
-        // tools' separator: only one is drawn there.
-        let window_buttons = (strip::right_buttons() > 3).then(|| row.right() - 6.0 - 3.0 * width);
-        for x in [
-            Some(row.left() + left_offset + width + strip::TOOLS_GAP / 2.0),
-            Some(row.left() + left_offset + strip::TOOLS + 2.0 * width + 6.0),
-            window_buttons,
-            Some(tools::separator(row)),
-        ]
-        .into_iter()
-        .flatten()
-        {
+        for x in slots.separators.into_iter().filter(|x| x.is_finite()) {
             ui.painter().line_segment(
                 [
                     egui::pos2(x, row.center().y - 8.0),

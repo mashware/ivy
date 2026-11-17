@@ -74,26 +74,6 @@ impl Review {
         *self = Self::default();
     }
 
-    pub(super) fn toolbar(&mut self, ui: &mut egui::Ui, doc: &Document) {
-        if doc.files.is_empty() {
-            return;
-        }
-        self.file = self.file.min(doc.files.len() - 1);
-        let count = doc.files[self.file].hunks.len();
-        if ui
-            .small_button("‹")
-            .on_hover_text("Previous hunk")
-            .clicked()
-        {
-            self.hunk = self.hunk.saturating_sub(1);
-            self.scroll_to = Some(self.hunk);
-        }
-        if ui.small_button("›").on_hover_text("Next hunk").clicked() && count > 0 {
-            self.hunk = (self.hunk + 1).min(count - 1);
-            self.scroll_to = Some(self.hunk);
-        }
-    }
-
     pub(super) fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -377,7 +357,9 @@ fn changes(review: &mut Review, ui: &mut egui::Ui, doc: &Document, height: f32) 
             Mode::SideBySide => rows.extend((0..hunk.pairs.len()).map(|pair| Row::Pair(h, pair))),
         }
     }
-    let row_height = ui.text_style_height(&egui::TextStyle::Monospace).max(23.0);
+    // Rows touch, as in `GitDiff.dc.html`: a run of added lines reads as one band.
+    let row_height = (ui.text_style_height(&egui::TextStyle::Monospace) + 6.0).max(20.0);
+    ui.spacing_mut().item_spacing.y = 0.0;
     let font = egui::TextStyle::Monospace.resolve(ui.style());
     let glyph_width = ui
         .painter()
@@ -766,7 +748,6 @@ mod tests {
                 ..Default::default()
             },
             |ui| {
-                ui.horizontal_wrapped(|ui| review.toolbar(ui, doc));
                 sent = review.show(ui, doc, source_label, Path::new("/repo"), can_send);
             },
         );

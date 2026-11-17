@@ -3,4 +3,5 @@
 
 pub(crate) mod claim_pill;
 pub(crate) mod floating;
+pub(crate) mod icons;
 pub(crate) mod style;

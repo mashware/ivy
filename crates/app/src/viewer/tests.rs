@@ -76,12 +76,19 @@ fn background_refresh_does_not_move_or_hide_the_markdown() {
                     crate::theme::Theme::default(),
                     false,
                     false,
-                    &super::drawer::Tabs {
-                        changes: None,
-                        document: Some("document.md".into()),
-                        markdown: true,
-                        side_by_side: false,
-                    },
+                    (
+                        &super::drawer::Tabs {
+                            changes: None,
+                            document: Some("document.md".into()),
+                            markdown: true,
+                            side_by_side: false,
+                        },
+                        &super::drawer::Title {
+                            project: None,
+                            folder: "docs".into(),
+                            unavailable: false,
+                        },
+                    ),
                 );
             },
         );

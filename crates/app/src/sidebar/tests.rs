@@ -268,10 +268,19 @@ fn title_bar_buttons_open_and_close_each_tool_without_forwarding_the_gesture() {
     }
     let files = button_of(&window, Tool::Files);
     assert!(files.y < 40.0, "the Files button sits in the title bar");
-    assert!(files.x < 60.0, "the Files button opens the bar on the left");
+    assert!(
+        files.x < 90.0,
+        "the Files button sits at the bar's left end, after the logo"
+    );
     for expected in [true, false] {
         click(&mut window, &ctx, area, files);
         assert_eq!(files_visible(&window), expected);
+        // Placed in the very frame of the click: painting it a frame late made the window flicker.
+        assert_eq!(
+            window.sidebar.last_files.is_some(),
+            expected,
+            "Files was placed a frame after its button"
+        );
         assert!(window.presses_for_the_program.is_empty());
     }
     for tool in [Tool::Markdown, Tool::Board] {

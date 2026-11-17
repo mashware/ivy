@@ -7,15 +7,21 @@ use eframe::egui::{self, Color32, FontId, Rect, pos2, vec2};
 
 pub(crate) const HEIGHT: f32 = 36.0;
 const SOURCE: f32 = 220.0;
-const CHANGES: f32 = 112.0;
-const DOCUMENT: f32 = 168.0;
+const CHANGES: f32 = 124.0;
+const DOCUMENT: f32 = 180.0;
 const SEGMENT: f32 = 92.0;
 const BUTTON: f32 = 24.0;
+/// The comparison picker and the refresh button a Git tab keeps on the strip.
+pub(super) const PICKER: f32 = 136.0;
+const CONTROLS: f32 = PICKER + 4.0 + BUTTON;
+const TAB_CLOSE: f32 = 16.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StripAction {
     Changes,
     Document,
+    CloseChanges,
+    CloseDocument,
     Unified,
     SideBySide,
     Maximize,
@@ -35,7 +41,10 @@ pub(super) struct Strip {
     pub(super) rect: Rect,
     pub(super) source: Rect,
     pub(super) places: Vec<(StripAction, Rect)>,
-    /// Something was left out for lack of room: the source's label, a tab or the diff toggle.
+    /// Where the Git tab's comparison picker and refresh button sit, when they fit.
+    pub(super) controls: Option<Rect>,
+    /// Something was left out for lack of room: the source's label, the Git controls, a tab or
+    /// the diff toggle.
     pub(super) crowded: bool,
 }
 
@@ -59,53 +68,58 @@ impl Strip {
         };
         let close = middle(BUTTON, rect.right() - 8.0 - BUTTON);
         let maximize = middle(BUTTON, close.left() - 2.0 - BUTTON);
-        // The tabs come before the source's label: a narrow drawer shortens the label first.
         let tabs_width = tabs.changes.map_or(0.0, |_| CHANGES)
             + tabs.document.as_ref().map_or(0.0, |_| DOCUMENT);
-        // The diff's layout toggle has no other home, so it is kept before the source's label.
-        let segments = if tabs.markdown {
-            0.0
+        // What gives way first in a narrow drawer: the source's label, then the Git controls, then
+        // the diff's layout toggle, which has no other home; the tabs and maximize and close last.
+        let available = maximize.left() - 8.0 - rect.left() - 8.0 - 4.0 - tabs_width;
+        let git = !tabs.markdown;
+        let toggle = git && available >= 2.0 * SEGMENT + 2.0 + 8.0;
+        let controls = toggle && available >= 2.0 * SEGMENT + 2.0 + 8.0 + CONTROLS + 8.0;
+        let right_items = if toggle {
+            2.0 * SEGMENT + 2.0 + 8.0
         } else {
-            2.0 * SEGMENT + 16.0
-        };
-        let room = maximize.left() - 8.0 - rect.left() - 8.0 - 4.0 - tabs_width - segments;
+            0.0
+        } + if controls { CONTROLS + 8.0 } else { 0.0 };
+        let room = available - right_items;
         let source = tab(
             rect.left() + 8.0,
             if room >= 60.0 { room.min(SOURCE) } else { 0.0 },
         );
         let mut places = Vec::new();
-        let mut crowded = source.width() == 0.0;
+        let crowded = source.width() == 0.0 || (git && !controls);
         let mut x = source.right() + 4.0;
+        let closer = |tab: Rect| middle(TAB_CLOSE, tab.right() - 6.0 - TAB_CLOSE);
         if tabs.changes.is_some() {
-            places.push((StripAction::Changes, tab(x, CHANGES)));
+            let place = tab(x, CHANGES);
+            places.push((StripAction::CloseChanges, closer(place)));
+            places.push((StripAction::Changes, place));
             x += CHANGES;
         }
         if tabs.document.is_some() {
-            places.push((StripAction::Document, tab(x, DOCUMENT)));
-            x += DOCUMENT;
+            let place = tab(x, DOCUMENT);
+            places.push((StripAction::CloseDocument, closer(place)));
+            places.push((StripAction::Document, place));
         }
         places.push((StripAction::Maximize, maximize));
         places.push((StripAction::Close, close));
-        if !tabs.markdown {
-            let right = maximize.left() - 8.0;
-            let height = 20.0;
-            let top = rect.center().y - height / 2.0;
-            let side = Rect::from_min_size(pos2(right - 2.0 - SEGMENT, top), vec2(SEGMENT, height));
+        let height = 22.0;
+        let top = rect.center().y - height / 2.0;
+        let mut right = maximize.left() - 8.0;
+        if toggle {
+            let side = Rect::from_min_size(pos2(right - SEGMENT, top), vec2(SEGMENT, height));
             let unified = Rect::from_min_size(
                 pos2(side.left() - 2.0 - SEGMENT, top),
                 vec2(SEGMENT, height),
             );
-            if unified.left() > x {
-                places.push((StripAction::Unified, unified));
-                places.push((StripAction::SideBySide, side));
-            } else {
-                crowded = true;
-            }
+            places.push((StripAction::Unified, unified));
+            places.push((StripAction::SideBySide, side));
+            right = unified.left() - 8.0;
         }
+        let controls = controls
+            .then(|| Rect::from_min_size(pos2(right - CONTROLS, top), vec2(CONTROLS, height)));
         // A narrow drawer keeps maximize and close; a tab that would run under them is dropped.
         let reserved = maximize.left();
-        // A tab only runs under maximize once the source's label is already gone, which is
-        // already counted as crowded.
         places.retain(|(action, place)| {
             matches!(action, StripAction::Maximize | StripAction::Close)
                 || place.right() <= reserved
@@ -114,6 +128,7 @@ impl Strip {
             rect,
             source,
             places,
+            controls,
             crowded,
         }
     }
@@ -156,7 +171,28 @@ fn selected(action: StripAction, tabs: &Tabs, maximized: bool) -> bool {
         StripAction::Unified => !tabs.side_by_side,
         StripAction::SideBySide => tabs.side_by_side,
         StripAction::Maximize => maximized,
-        StripAction::Close => false,
+        StripAction::Close | StripAction::CloseChanges | StripAction::CloseDocument => false,
+    }
+}
+
+/// What the strip names its source with: the console's project in its ink, or the folder.
+pub(super) struct Title {
+    pub(super) project: Option<(String, Color32)>,
+    pub(super) folder: String,
+    pub(super) unavailable: bool,
+}
+
+impl Title {
+    pub(super) fn text(&self) -> String {
+        let name = self
+            .project
+            .as_ref()
+            .map_or(self.folder.as_str(), |(name, _)| name.as_str());
+        if self.unavailable {
+            format!("{name} - unavailable")
+        } else {
+            name.to_owned()
+        }
     }
 }
 
@@ -166,14 +202,11 @@ fn text(
     at: egui::Pos2,
     align: egui::Align2,
     label: &str,
+    font: FontId,
     color: Color32,
     width: f32,
 ) -> Rect {
-    let mut job = egui::text::LayoutJob::simple_singleline(
-        label.to_owned(),
-        FontId::proportional(12.5),
-        color,
-    );
+    let mut job = egui::text::LayoutJob::simple_singleline(label.to_owned(), font, color);
     job.wrap = egui::text::TextWrapping::truncate_at_width(width.max(0.0));
     let galley = painter.layout_job(job);
     let rect = align.anchor_size(at, galley.size());
@@ -186,9 +219,10 @@ pub(super) fn paint(
     strip: &Strip,
     tabs: &Tabs,
     roles: &Roles,
-    source: &str,
+    title: &Title,
     maximized: bool,
 ) {
+    use crate::ui::icons::{Icon, paint as icon};
     let painter = ui.painter();
     let hover = ui.ctx().input(|i| i.pointer.hover_pos());
     painter.line_segment(
@@ -196,18 +230,25 @@ pub(super) fn paint(
         egui::Stroke::new(1.0, roles.line),
     );
     if strip.source.width() > 0.0 {
+        let ink = title.project.as_ref().map_or(roles.accent, |(_, ink)| *ink);
         let stripe = Rect::from_center_size(
-            pos2(strip.source.left() + 2.0, strip.source.center().y),
+            pos2(strip.source.left() + 1.5, strip.source.center().y),
             vec2(3.0, 14.0),
         );
-        painter.rect_filled(stripe, 2, roles.accent);
+        painter.rect_filled(stripe, 2, ink);
+        let font = FontId::new(12.5, crate::fonts::ui_weight(ui.ctx(), 600));
         text(
             painter,
-            pos2(stripe.right() + 6.0, strip.source.center().y),
+            pos2(stripe.right() + 7.0, strip.source.center().y),
             egui::Align2::LEFT_CENTER,
-            source,
-            roles.tx2,
-            strip.source.right() - stripe.right() - 14.0,
+            &title.text(),
+            font,
+            if title.project.is_some() {
+                ink
+            } else {
+                roles.tx2
+            },
+            strip.source.right() - stripe.right() - 16.0,
         );
         painter.line_segment(
             [
@@ -231,10 +272,39 @@ pub(super) fn paint(
         let hovered = hover.is_some_and(|p| place.contains(p));
         match action {
             StripAction::Changes | StripAction::Document => {
-                tab(painter, *action, *place, tabs, roles, chosen, hovered)
+                let closing = strip.places.iter().any(|(close, at)| {
+                    matches!(
+                        close,
+                        StripAction::CloseChanges | StripAction::CloseDocument
+                    ) && place.contains(at.center())
+                        && hover.is_some_and(|p| at.contains(p))
+                });
+                tab(
+                    painter,
+                    *action,
+                    *place,
+                    tabs,
+                    roles,
+                    chosen,
+                    hovered && !closing,
+                )
+            }
+            StripAction::CloseChanges | StripAction::CloseDocument => {
+                if hovered {
+                    painter.rect_filled(*place, 4, roles.hover);
+                }
+                icon(
+                    painter,
+                    place.center(),
+                    Icon::Close,
+                    10.0,
+                    if hovered { roles.tx } else { roles.tx3 },
+                );
             }
             StripAction::Unified | StripAction::SideBySide => {
-                if chosen || hovered {
+                if chosen {
+                    painter.rect_filled(*place, 4, roles.raised);
+                } else if hovered {
                     painter.rect_filled(*place, 4, roles.hover);
                 }
                 painter.text(
@@ -253,18 +323,17 @@ pub(super) fn paint(
                 if hovered {
                     painter.rect_filled(*place, 5, roles.hover);
                 }
-                let target = if *action == StripAction::Maximize {
-                    crate::header::integrated::Target::Zoom
-                } else {
-                    crate::header::integrated::Target::Close
+                let shape = match action {
+                    StripAction::Maximize if maximized => Icon::Collapse,
+                    StripAction::Maximize => Icon::Expand,
+                    _ => Icon::Close,
                 };
-                crate::header::integrated::paint_icon(
+                icon(
                     painter,
                     place.center(),
-                    target,
-                    maximized,
-                    roles.tx2,
-                    20.0,
+                    shape,
+                    12.0,
+                    if hovered { roles.tx } else { roles.tx2 },
                 );
             }
         }
@@ -299,12 +368,13 @@ fn tab(
         ),
         _ => (tabs.document.clone().unwrap_or_default(), None),
     };
-    let room = place.width() - 20.0 - count.as_ref().map_or(0.0, |_| 26.0);
+    let room = place.width() - 20.0 - TAB_CLOSE - 6.0 - count.as_ref().map_or(0.0, |_| 26.0);
     let written = text(
         painter,
         pos2(place.left() + 10.0, place.center().y),
         egui::Align2::LEFT_CENTER,
         &label,
+        FontId::proportional(12.5),
         if chosen || hovered {
             roles.tx
         } else {
@@ -340,6 +410,8 @@ pub(super) fn hint(action: StripAction, maximized: bool) -> &'static str {
     match action {
         StripAction::Changes => "Review changes",
         StripAction::Document => "Markdown document",
+        StripAction::CloseChanges => "Close the review",
+        StripAction::CloseDocument => "Close the document",
         StripAction::Unified => "Unified diff",
         StripAction::SideBySide => "Side-by-side diff",
         StripAction::Maximize if maximized => "Restore drawer",

@@ -29,7 +29,7 @@ impl Icon {
 fn icon_button(
     ui: &mut egui::Ui,
     icon: Icon,
-    available: bool,
+    (available, on): (bool, bool),
     roles: &crate::theme::Roles,
 ) -> bool {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::click());
@@ -43,38 +43,34 @@ fn icon_button(
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, available, icon.hint())
     });
-    if available && (response.hovered() || response.is_pointer_button_down_on()) {
+    // The search button stays lit while its list is open, as the kit draws it.
+    if on {
+        ui.painter().rect_filled(rect, 5.0, roles.accent_soft);
+    } else if available && (response.hovered() || response.is_pointer_button_down_on()) {
         ui.painter().rect_filled(rect, 5.0, roles.hover);
     }
-    let color = if available { roles.tx2 } else { roles.tx3 };
+    let color = if on {
+        roles.accent
+    } else if available {
+        roles.tx2
+    } else {
+        roles.tx3
+    };
     let stroke = egui::Stroke::new(1.4, color);
     let center = rect.center();
     let painter = ui.painter();
     match icon {
         Icon::Search => {
-            painter.circle_stroke(center + egui::vec2(-1.5, -1.5), 5.0, stroke);
-            painter.line_segment(
-                [center + egui::vec2(2.0, 2.0), center + egui::vec2(6.0, 6.0)],
-                stroke,
-            );
+            crate::ui::icons::paint(painter, center, crate::ui::icons::Icon::Search, 13.0, color);
         }
         Icon::Refresh => {
-            let points = (0..=20)
-                .map(|i| {
-                    let angle = (45.0 + i as f32 * 14.0).to_radians();
-                    center + egui::vec2(angle.cos(), angle.sin()) * 6.5
-                })
-                .collect();
-            painter.add(egui::Shape::line(points, stroke));
-            let tip = center + egui::vec2(6.5, -3.5);
-            painter.add(egui::Shape::line(
-                vec![
-                    tip + egui::vec2(-4.0, 0.0),
-                    tip,
-                    tip + egui::vec2(0.0, -4.0),
-                ],
-                stroke,
-            ));
+            crate::ui::icons::paint(
+                painter,
+                center,
+                crate::ui::icons::Icon::Refresh,
+                13.0,
+                color,
+            );
         }
         Icon::Collapse => {
             for (top, sign) in [(-6.0, 1.0), (6.0, -1.0)] {
@@ -309,16 +305,16 @@ pub(super) fn show(
             body.horizontal(|ui| {
                 ui.strong("Files");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if icon_button(ui, Icon::Collapse, available, &roles) {
+                    if icon_button(ui, Icon::Collapse, (available, false), &roles) {
                         let nav = state.navigation.get_mut(&target.unwrap()).unwrap();
                         nav.expanded.clear();
                         nav.scroll = 0.0;
                     }
-                    if icon_button(ui, Icon::Refresh, available, &roles) {
+                    if icon_button(ui, Icon::Refresh, (available, false), &roles) {
                         state.navigation.get_mut(&target.unwrap()).unwrap().reload();
                         state.message.clear();
                     }
-                    if icon_button(ui, Icon::Search, available, &roles) {
+                    if icon_button(ui, Icon::Search, (available, state.searching), &roles) {
                         if state.searching {
                             state.close_search(target);
                         } else {
@@ -600,7 +596,7 @@ mod tests {
                     |ui| {
                         center = ui.cursor().min + egui::vec2(12.0, 12.0);
                         let roles = crate::ui::style::roles(ui.ctx(), &theme);
-                        icon_button(ui, Icon::Refresh, true, &roles);
+                        icon_button(ui, Icon::Refresh, (true, false), &roles);
                     },
                 );
                 let strokes: Vec<_> = output

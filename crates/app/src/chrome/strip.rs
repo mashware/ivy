@@ -6,14 +6,21 @@
 
 use eframe::egui::{self, Rect};
 
-/// The width of one title-bar button.
-pub(super) const BUTTON: f32 = 34.0;
-/// The gap that separates the Files button from the split buttons.
-pub(super) const TOOLS_GAP: f32 = 8.0;
-/// What the Files button and its gap take at the left end.
-pub(super) const TOOLS: f32 = BUTTON + TOOLS_GAP;
-/// The left group: Files, two split buttons, the separators' gaps and the logo's slot.
-pub(super) const LEFT_GROUP: f32 = TOOLS + 3.0 * BUTTON + 14.0;
+/// The width of one title-bar button (`Window.dc.html`).
+pub(super) const BUTTON: f32 = 28.0;
+/// The space between two buttons of a group.
+pub(super) const GAP: f32 = 2.0;
+/// The width of one of the window's own buttons.
+pub(super) const WINDOW_BUTTON: f32 = 32.0;
+/// A separator line with its margins.
+pub(super) const SEPARATOR: f32 = 13.0;
+/// The Board's labelled button.
+pub(super) const BOARD: f32 = 78.0;
+/// The logo's slot at the bar's left end, and the gap that sets Files a little apart from it.
+const LOGO: f32 = 24.0;
+const LOGO_GAP: f32 = 10.0;
+/// The left group: a margin, the logo, its gap, Files, and the space before the tabs.
+pub(super) const LEFT_GROUP: f32 = 6.0 + LOGO + LOGO_GAP + BUTTON + 14.0;
 /// The margin between the right-hand buttons and the window's edge.
 pub(super) const RIGHT_MARGIN: f32 = 6.0;
 /// The menu button a compact bar keeps at its right edge.
@@ -29,17 +36,89 @@ pub(super) fn left_offset() -> f32 {
     if cfg!(target_os = "macos") { 78.0 } else { 6.0 }
 }
 
-/// How many of the right-hand buttons this platform paints: macOS draws its own three.
-pub(super) fn right_buttons() -> usize {
-    if cfg!(target_os = "macos") { 3 } else { 6 }
+/// Whether this bar draws the window's own buttons: macOS draws its three itself.
+pub(super) fn window_buttons() -> bool {
+    !cfg!(target_os = "macos")
 }
 
-/// The Markdown and Board buttons, left of the right-hand group with a separator's gap.
-pub(super) const RIGHT_TOOLS: f32 = 2.0 * BUTTON + 6.0;
-
-/// What the right-hand buttons, the tools and the margin take from a full bar.
+/// What the right-hand groups and the margin take from a full bar: the Board, the two splits,
+/// Markdown, search, connect and the menu, then the window's buttons.
 fn right_reserve() -> f32 {
-    RIGHT_MARGIN + right_buttons() as f32 * BUTTON + RIGHT_TOOLS
+    RIGHT_MARGIN
+        + if window_buttons() {
+            3.0 * WINDOW_BUTTON + SEPARATOR
+        } else {
+            0.0
+        }
+        + 4.0 * BUTTON
+        + 3.0 * GAP
+        + SEPARATOR
+        + 2.0 * BUTTON
+        + GAP
+        + 6.0
+        + BOARD
+}
+
+/// Every button of a full bar, in the kit's order.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Slots {
+    pub(crate) logo: Rect,
+    pub(crate) files: Rect,
+    pub(crate) board: Rect,
+    pub(crate) split_right: Rect,
+    pub(crate) split_down: Rect,
+    pub(crate) markdown: Rect,
+    pub(crate) search: Rect,
+    pub(crate) connect: Rect,
+    pub(crate) menu: Rect,
+    /// Minimize, maximize and close, where this bar draws them.
+    pub(crate) window: Option<[Rect; 3]>,
+    /// The x of each separator line.
+    pub(crate) separators: [f32; 2],
+}
+
+/// The full bar's buttons over `row`.
+pub(crate) fn slots(row: Rect) -> Slots {
+    let top = row.top() + ((row.height() - BUTTON) / 2.0).max(0.0);
+    let height = BUTTON.min(row.height());
+    let at =
+        |x: f32, width: f32| Rect::from_min_size(egui::pos2(x, top), egui::vec2(width, height));
+    let left = row.left() + left_offset() + 6.0;
+    let logo = at(left, LOGO);
+    let files = at(logo.right() + LOGO_GAP, BUTTON);
+    let mut x = row.right() - RIGHT_MARGIN;
+    let window = window_buttons().then(|| {
+        let close = at(x - WINDOW_BUTTON, WINDOW_BUTTON);
+        let maximize = at(close.left() - WINDOW_BUTTON, WINDOW_BUTTON);
+        let minimize = at(maximize.left() - WINDOW_BUTTON, WINDOW_BUTTON);
+        x = minimize.left() - SEPARATOR;
+        [minimize, maximize, close]
+    });
+    let late = x + SEPARATOR / 2.0;
+    let menu = at(x - BUTTON, BUTTON);
+    let connect = at(menu.left() - GAP - BUTTON, BUTTON);
+    let search = at(connect.left() - GAP - BUTTON, BUTTON);
+    let markdown = at(search.left() - GAP - BUTTON, BUTTON);
+    let early = markdown.left() - SEPARATOR / 2.0;
+    let split_down = at(markdown.left() - SEPARATOR - BUTTON, BUTTON);
+    let split_right = at(split_down.left() - GAP - BUTTON, BUTTON);
+    let board = Rect::from_min_size(
+        egui::pos2(split_right.left() - 6.0 - BOARD, top + 1.0),
+        egui::vec2(BOARD, (height - 2.0).max(0.0)),
+    );
+    Slots {
+        logo,
+        files,
+        board,
+        split_right,
+        split_down,
+        markdown,
+        search,
+        connect,
+        menu,
+        window,
+        separators: [early, if window.is_some() { late } else { f32::NAN }],
+    }
 }
 
 /// Whether a bar `width` points wide is compact: a full bar there would leave its tab band without
@@ -54,7 +133,7 @@ pub(crate) struct Strip {
     pub(crate) row: Rect,
     /// Where the left group ends.
     pub(crate) left_end: f32,
-    /// The logo's slot, after the split buttons; absent when the bar is compact.
+    /// The logo's slot at the bar's left end; absent when the bar is compact.
     pub(crate) logo: Option<Rect>,
     /// The band the tabs and the add button sit in, on the bar's bottom edge.
     pub(crate) tabs: Rect,
@@ -89,12 +168,7 @@ pub(crate) fn within(
         } else {
             right_reserve()
         };
-    let logo = (!compact).then(|| {
-        Rect::from_min_size(
-            egui::pos2(left_end - BUTTON, row.top()),
-            egui::vec2(BUTTON, row.height()),
-        )
-    });
+    let logo = (!compact).then(|| slots(row).logo);
     let top = (row.bottom() - tab_height).max(row.top());
     let drag = if compact { COMPACT_DRAG_MIN } else { DRAG_MIN };
     let right = (right_start - drag).max(left_end);
@@ -124,7 +198,7 @@ mod tests {
         assert_eq!(strip.tabs.bottom(), 40.0);
         let logo = strip.logo.expect("a wide bar has its logo");
         assert!(logo.right() <= strip.tabs.left());
-        assert_eq!(logo.left(), left_offset() + TOOLS + 2.0 * BUTTON + 14.0);
+        assert_eq!(logo.left(), left_offset() + 6.0, "the logo opens the bar");
         assert_eq!(strip.right_start - strip.tabs.right(), DRAG_MIN);
         for width in [240.0, 120.0, 30.0, 0.0] {
             let area = Rect::from_min_size(egui::pos2(5.0, 7.0), egui::vec2(width, 800.0));
@@ -135,9 +209,50 @@ mod tests {
         }
     }
 
+    /// The kit's order, with the owner's change of 17 November 2026: the logo first, Files a
+    /// little apart from it; then, right of the tabs, the Board, the two splits, Markdown, search,
+    /// connect and the menu, and the window's own buttons.
+    #[test]
+    fn the_bar_lays_its_buttons_out_in_the_kits_order() {
+        let row = Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1400.0, 40.0));
+        let s = slots(row);
+        assert!(
+            s.files.left() - s.logo.right() >= 8.0,
+            "Files stands apart from the logo"
+        );
+        let strip = within(
+            Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 800.0)),
+            40.0,
+            34.0,
+            |_| 40.0,
+        );
+        assert!(s.files.right() <= strip.tabs.left());
+        assert!(strip.right_start <= s.board.left());
+        let order = [
+            s.board,
+            s.split_right,
+            s.split_down,
+            s.markdown,
+            s.search,
+            s.connect,
+            s.menu,
+        ];
+        for pair in order.windows(2) {
+            assert!(pair[0].right() <= pair[1].left(), "{pair:?}");
+        }
+        assert!(s.separators[0] > s.split_down.right() && s.separators[0] < s.markdown.left());
+        if let Some([minimize, maximize, close]) = s.window {
+            assert!(s.menu.right() < s.separators[1] && s.separators[1] < minimize.left());
+            assert!(minimize.right() <= maximize.left() && maximize.right() <= close.left());
+            assert_eq!(close.right(), row.right() - RIGHT_MARGIN);
+        } else {
+            assert_eq!(s.menu.right(), row.right() - RIGHT_MARGIN);
+        }
+    }
+
     /// Above the old 300-point threshold the full bar used to leave the tabs a band of zero below
-    /// about 380 points, and one too narrow for a pill up to about 456 — 572 since the bar also
-    /// carries Files, Markdown and the Board (D72). At every width one tab keeps
+    /// about 380 points, and one too narrow for a pill up to about 456 — 600 since the bar carries
+    /// the kit's full set, Files, Markdown and a labelled Board included (D72, D96). At every width one tab keeps
     /// its pill whole, some label and an add target, and a full bar's right-hand buttons all fit
     /// after the left group, so the band starts where the drawn buttons leave it.
     #[test]
@@ -163,17 +278,17 @@ mod tests {
                 let leftmost = width - right_reserve();
                 assert!(leftmost >= strip.left_end, "{width}");
                 assert_eq!(strip.right_start, leftmost);
+                assert!(slots(strip.row).board.left() >= strip.left_end, "{width}");
             }
         }
         // Both sides of the boundary are reached by the sweep, and the boundary is the one D96
-        // publishes, as D72 moved it: 572 points where the window draws its own buttons, 542 on
-        // macOS.
+        // publishes: 600 points where the window draws its own buttons, 563 on macOS.
         assert!(is_compact(300.0));
         assert!(!is_compact(640.0));
         let boundary = if cfg!(target_os = "macos") {
-            542.0
+            563.0
         } else {
-            572.0
+            600.0
         };
         assert!(is_compact(boundary - 1.0), "{boundary}");
         assert!(!is_compact(boundary), "{boundary}");

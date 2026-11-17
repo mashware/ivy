@@ -8829,16 +8829,25 @@ keep no loose floating window, and to put Markdown in the drawer as a tab.
   says it opens Markdown alone. Typing changes the query without dropping the tree's listings. A
   press on the list, as it is laid out, never reaches the console or the divider beneath it. The
   search belongs to the focused console's Files and closes when focus moves to another console.
-  Escape closes the list first, then Files.
+  Escape closes the list first, then Files. It is drawn to `Files.dc.html`: a field outlined in the
+  accent with the search icon and an Esc key cap, 30-point rows with file and folder icons and the
+  matched part of the name marked, and a footer; the header's search button stays lit while it is
+  open.
 - **The drawer** takes the bottom of what Files leaves, 370 points by default, at least 160, with a
-  divider above it and 6 points kept free on its left, right and bottom. Its strip carries the
-  source, a Changes tab (with the file count once the diff has loaded) and one document tab — the
-  last Markdown file opened replaces it — Unified / Side by side for the diff, maximize/restore and
-  close. The diff toggle has no other home, so a narrow strip shortens the source's label before it
-  drops the toggle, and a strip that leaves something out says so on its maximize button. Every
-  place on that strip has a fixed width, so a click is resolved before the frame's tiling against
-  the rectangles the painting uses. Review rows show the file's name first, its folder dimmed and its added and removed counts
-  on the same row.
+  divider above it and 6 points kept free on its left, right and bottom. Its strip names the source
+  console's project in its ink (or, with no project, the folder it reads: the terminal's own title
+  said nothing useful there), then a Changes tab (with the file count once the diff has loaded) and
+  one document tab — the last Markdown file opened replaces it — each with a cross that closes it;
+  closing the shown tab hands the drawer to the other, and closing the last closes the drawer. A
+  review with unsent comments is not closed and says why. On the Git tab the strip also carries the
+  comparison picker and a refresh button (the owner kept both, compacted, rather than lose the
+  comparison with another branch), then Unified / Side by side, maximize/restore and close; a row
+  under the strip appears only to type a base or clear comments, and the hunk arrows are gone. A
+  narrow strip gives way in this order: the source's label, the Git controls, the diff toggle; one
+  that leaves something out says so on its maximize button. Every place the host resolves has a
+  fixed width, so a click is resolved before the frame's tiling against the rectangles the painting
+  uses. Review rows show the file's name first, its folder dimmed and its counts on the same row;
+  diff rows touch, with dim line numbers and the change's mark in its colour.
 - **Maximized**, the drawer covers the consoles edge to edge at the size they already had beside
   it, so toggling it resizes no program and no strip of a hidden console is left to take a press;
   Files stays beside it, and restore returns the previous height. The Board covers the whole content
@@ -9982,17 +9991,27 @@ the Board's resolver while the Board is closed (stale values with nobody refresh
 compact threshold at 300 points (below about 380 points the full bar left the tabs a band of zero, and
 up to about 456 one too narrow for a pill, so cards, pills and the add button vanished or were cut).
 
-**Amended 17 November 2026 — #93, sixth PR.** With the right rail gone (D72), the title bar carries
-the doors to the tools: a Files button at the left end, before the split buttons, and Board and
-Markdown left of the right-hand group, behind a separator. This reverses the earlier choice not to
-put a Board button in the title bar — the rail that held it no longer exists. The extra buttons move
-the compact boundary from about 456 to **572 points on Linux and Windows and 542 on macOS**; a
-compact bar lists Files, Markdown and Board in its menu, before «Connect agents», so a short menu
-never pushes that entry out. A tool that is on but suppressed says on its button's hover how to
-bring it back. **Measurement:** every integrated-chrome batch (`chrome`, `chrome-zoom`, `projects`,
-`dock-v2-*`) now paints these three buttons, and a full bar's tab band is 116 points narrower
-(`RIGHT_TOOLS` plus the Files button and its gap); their reports from before this amendment are not
-averaged with later ones.
+**Amended 17 November 2026 — #93, sixth PR.** With the right rail gone (D72), the title bar takes
+the kit's buttons in the kit's order (`Window.dc.html`), with one change the owner asked for at the
+desktop check: the logo opens the bar and Files stands a little apart after it. Right of the tabs
+come the Board as a framed button with its name, split right and split down, a separator, Markdown,
+search, connect and the menu, a separator, and the window's own buttons. Buttons are the kit's
+28 points (32 for the window's), drawn from its 16-unit line icons in one module (`ui::icons`) that
+the console headers and the drawer use too. This reverses the earlier choice not to put a Board
+button in the title bar, and moves the splits from the left group to the right — the rail that held
+the tools no longer exists. The compact boundary moves from about 456 to **600 points on Linux and
+Windows and 563 on macOS**; a compact bar lists Files, Markdown and Board in its menu, before
+«Connect agents», so a short menu never pushes that entry out. A tool that is on but suppressed says
+on its button's hover how to bring it back.
+
+At the same check the owner removed the 3-point project stripe from the console header (the tint
+and the ink name stay), asked that the focused console be outlined in its project's ink rather than
+the accent (the accent stays for a console with no project), and asked for the kit's diagonal arrows
+to maximize a console, in the header and in the drawer alike.
+
+**Measurement:** every integrated-chrome batch (`chrome`, `chrome-zoom`, `projects`, `dock-v2-*`)
+now paints this bar, and a full bar's tab band is 144 points narrower than before this amendment;
+their reports from before it are not averaged with later ones.
 
 **Roles.** Hand-painted surfaces read `Roles` through `ui::style::roles`, which memoizes the last
 theme it was asked about and its roles in egui's memory. It answers any theme correctly, so it is not
