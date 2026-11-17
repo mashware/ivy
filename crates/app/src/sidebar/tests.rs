@@ -686,17 +686,20 @@ fn the_drawer_steps_aside_for_stacked_consoles_in_a_short_window() {
         "three rows beside one column"
     );
     crate::viewer::activate(&mut window, false);
-    let floor = crate::tiling::MINIMUM_ROWS as u16;
+    // The grid never reports fewer rows than its floor, so the rectangles tiling hands out are
+    // what show a squeeze.
+    let floor = crate::tiling::MINIMUM_ROWS * metrics.height();
     let mut stepped_aside = false;
     for height in (200..=1400).step_by(8) {
         let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, height as f32));
         for _ in 0..2 {
             one_frame_in(&mut window, &ctx, area, vec![]);
         }
-        let rows: Vec<_> = window.all_panes().map(|p| p.screen.size().rows).collect();
-        let fits = rows.iter().all(|r| *r >= floor);
+        let consoles = crate::tab_bar::geometry(&window, area, &metrics).consoles;
+        let parts = window.active().root.place(consoles, metrics.width()).parts;
+        let fits = parts.iter().all(|r| r.height() >= floor);
         if window.sidebar.last_dock.is_some() {
-            assert!(fits, "{height}: the drawer squeezed a console to {rows:?}");
+            assert!(fits, "{height}: the drawer squeezed a console to {parts:?}");
         } else if fits {
             stepped_aside = true;
         }

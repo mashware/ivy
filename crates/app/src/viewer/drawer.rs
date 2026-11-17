@@ -104,12 +104,12 @@ impl Strip {
         }
         // A narrow drawer keeps maximize and close; a tab that would run under them is dropped.
         let reserved = maximize.left();
-        let before = places.len();
+        // A tab only runs under maximize once the source's label is already gone, which is
+        // already counted as crowded.
         places.retain(|(action, place)| {
             matches!(action, StripAction::Maximize | StripAction::Close)
                 || place.right() <= reserved
         });
-        crowded |= places.len() < before;
         Self {
             rect,
             source,

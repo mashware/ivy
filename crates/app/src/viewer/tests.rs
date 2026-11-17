@@ -443,4 +443,14 @@ fn a_narrow_strip_shortens_the_source_before_it_drops_the_diff_layout_and_says_s
         narrow.crowded,
         "a strip that leaves controls out must say so"
     );
+    let reading = drawer::Tabs {
+        markdown: true,
+        ..tabs
+    };
+    let hidden_source = drawer::Strip::framed(
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 370.0)),
+        &reading,
+    );
+    assert_eq!(hidden_source.source.width(), 0.0);
+    assert!(hidden_source.crowded, "a hidden source label must be said");
 }
