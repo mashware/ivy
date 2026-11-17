@@ -760,4 +760,65 @@ mod tests {
             PathBuf::from("/root/b.md")
         );
     }
+
+    #[test]
+    fn colliding_explorer_rows_paint_the_composited_shared_roles() {
+        for source in ["focus=#171d21\n", "foreground=#171d21\n", "panel=#1a372e\n"] {
+            let (settings, _) = crate::settings::interpret(source).unwrap();
+            let theme = crate::theme::Theme::default().with_colors(&settings.colors);
+            let roles = crate::theme::Roles::of(&theme);
+            let ctx = egui::Context::default();
+            ctx.global_style_mut(|s| s.animation_time = 0.0);
+            let mut state = Explorer::default();
+            state.reconcile(&[(1, Some("/root".into()))]);
+            listing(
+                &mut state,
+                "/root",
+                vec![entry("/root/a.md", EntryKind::File)],
+            );
+            let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 600.0));
+            let mut at = egui::Pos2::ZERO;
+            for step in 0..4 {
+                state.navigation.get_mut(&1).unwrap().selected =
+                    (step == 3).then(|| PathBuf::from("/root/a.md"));
+                let output = ctx.run_ui(
+                    egui::RawInput {
+                        time: Some(step as f64),
+                        screen_rect: Some(area),
+                        events: if step > 0 {
+                            vec![egui::Event::PointerMoved(at)]
+                        } else {
+                            vec![]
+                        },
+                        ..Default::default()
+                    },
+                    |ui| {
+                        show(&mut state, ui, area, Some(1), theme);
+                    },
+                );
+                for s in &output.shapes {
+                    if let egui::Shape::Text(t) = &s.shape
+                        && t.galley.text() == "a.md"
+                    {
+                        at = t.pos + t.galley.size() / 2.0;
+                    }
+                }
+                if step >= 2 {
+                    let expected = if step == 3 {
+                        roles.list_sel
+                    } else {
+                        roles.list_hover
+                    };
+                    assert!(output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == expected && r.rect.height() == 22.0)), "{source} step {step}");
+                    assert!(
+                        crate::theme::project_ink_contrast(
+                            roles.panel.blend(expected),
+                            roles.panel
+                        ) >= 1.03
+                    );
+                }
+                output.drop_without_applying_deltas();
+            }
+        }
+    }
 }

@@ -2870,4 +2870,45 @@ mod tests {
             "the menu has no control border"
         );
     }
+
+    #[test]
+    fn colliding_menu_hover_paints_for_pointer_and_keyboard() {
+        for source in [
+            "theme=ivy-night\npanel=#262b2d\n",
+            "background=#000000\nforeground=#757575\n",
+        ] {
+            let (settings, _) = settings::interpret(source).unwrap();
+            let theme = settings
+                .theme
+                .map(theme::NamedTheme::theme)
+                .unwrap_or_default()
+                .with_colors(&settings.colors);
+            let roles = theme::Roles::of(&theme);
+            let ctx = egui::Context::default();
+            let mut window = window_with("sleep 30", "sleep 30");
+            window.theme = theme;
+            window.chrome.enable();
+            window.headers = window.headers.integrated(true);
+            let area = area_of(1400.0);
+            frame(&mut window, &ctx, area, vec![]);
+            let menu = egui::pos2(area.right() - 125.0, area.top() + 24.0);
+            frame(&mut window, &ctx, area, click_at(menu));
+            let shapes = frame(&mut window, &ctx, area, vec![]);
+            let at = text_center(&shapes, "Preferences");
+            for events in [
+                vec![egui::Event::PointerMoved(at)],
+                vec![egui::Event::Key {
+                    key: egui::Key::ArrowDown,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            ] {
+                let shapes = frame(&mut window, &ctx, area, events);
+                assert!(shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == roles.hover && r.rect.width() > 100.0 && r.rect.height() <= 30.0)), "{source}");
+                assert!(theme::project_ink_contrast(roles.hover, roles.raised) >= 1.03);
+            }
+        }
+    }
 }

@@ -121,3 +121,52 @@ pub(super) fn console_navigation(ui: &mut egui::Ui, width: f32, theme: &Theme) {
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .on_hover_text("Go to console");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn colliding_board_controls_paint_final_fills_in_both_channels() {
+        for source in [
+            "panel=#262b2d\n",
+            "background=#000000\nforeground=#757575\n",
+        ] {
+            let (settings, _) = crate::settings::interpret(source).unwrap();
+            let board = theme(Theme::default().with_colors(&settings.colors));
+            let roles = crate::theme::Roles::of(&board);
+            let ctx = egui::Context::default();
+            let mut at = egui::Pos2::ZERO;
+            for step in 0..3 {
+                let output = ctx.run_ui(
+                    egui::RawInput {
+                        events: if step > 0 {
+                            vec![egui::Event::PointerMoved(at)]
+                        } else {
+                            vec![]
+                        },
+                        ..Default::default()
+                    },
+                    |ui| {
+                        apply(ui, &board);
+                        ui.style_mut().animation_time = 0.0;
+                        assert_eq!(ui.visuals().widgets.hovered.bg_fill, roles.hover);
+                        assert_eq!(ui.visuals().widgets.hovered.weak_bg_fill, roles.hover);
+                        assert_eq!(ui.visuals().selection.bg_fill, roles.sel);
+                        at = ui.button("Board action").rect.center();
+                        let _ = ui.selectable_label(true, "Chosen row");
+                    },
+                );
+                if step == 2 {
+                    assert!(output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == roles.hover && r.rect.contains(at))));
+                    assert!(
+                        output.shapes.iter().any(
+                            |s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == roles.sel)
+                        )
+                    );
+                }
+                output.drop_without_applying_deltas();
+            }
+        }
+    }
+}
