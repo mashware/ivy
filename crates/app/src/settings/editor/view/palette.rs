@@ -65,12 +65,14 @@ impl Palette {
         fixed.line2 = fixed.apart(roles.line2, &[surface], surface, 0.40);
         // The caret is the accent, or the ink itself where the accent would vanish: it is a line
         // drawn over fields and the selection, not a surface text sits on.
-        let caret =
-            if Roles::stands_apart(roles.accent, &[roles.base, surface, fixed.sel, fixed.hover]) {
-                roles.accent
-            } else {
-                ink
-            };
+        let caret = if Roles::stands_apart(
+            roles.accent,
+            &[roles.base, surface, fixed.sel, fixed.hover, nav],
+        ) {
+            roles.accent
+        } else {
+            ink
+        };
         Self {
             surface,
             nav,
@@ -231,7 +233,10 @@ mod tests {
                     "{name:?} sel"
                 );
                 assert!(
-                    apart(p.caret, &[base, p.surface, p.roles.sel]),
+                    apart(
+                        p.caret,
+                        &[base, p.surface, p.roles.sel, p.roles.hover, p.nav]
+                    ),
                     "{name:?} caret"
                 );
                 assert_eq!(p.frame().stroke.color, p.roles.line2, "{name:?} outline");

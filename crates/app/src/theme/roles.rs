@@ -228,24 +228,18 @@ fn stands_apart(colour: Color32, over: &[Color32]) -> bool {
 }
 
 /// `role`, unless it vanishes into one of the fills it is painted over: then the nearest step of
-/// `from` toward `tx` — from `amount` up, a point at a time — that stands apart from all of them.
-/// Steps that keep the text readable on them are preferred; where none of those stands apart, the
-/// nearest step that does, short of the text itself. Only where fills cover every step (no real
-/// palette) is it the first step, unmoved.
+/// `from` toward `tx` — from `amount` up, a point at a time — that stands apart from all of them
+/// and is not the text colour itself. Only where fills cover every step (no real palette) is it
+/// the first step, unmoved.
 fn apart(role: Color32, over: &[Color32], from: Color32, tx: Color32, amount: f32) -> Color32 {
     if stands_apart(role, over) {
         return role;
     }
-    let steps = || {
-        (0..)
-            .map(move |n| amount + n as f32 / 100.0)
-            .take_while(|step| *step < 0.95)
-            .map(|step| mix(from, tx, step))
-    };
-    steps()
-        .take_while(|c| project_ink_contrast(tx, *c) >= TEXT_CONTRAST)
-        .find(|c| stands_apart(*c, over))
-        .or_else(|| steps().find(|c| stands_apart(*c, over)))
+    (0..)
+        .map(|n| amount + n as f32 / 100.0)
+        .take_while(|step| *step < 0.95)
+        .map(|step| mix(from, tx, step))
+        .find(|c| *c != tx && stands_apart(*c, over))
         .unwrap_or_else(|| mix(from, tx, amount))
 }
 
@@ -397,6 +391,12 @@ mod collapse_tests {
         assert!(
             moved.r() - first.r() <= 8,
             "{moved:?} is not the nearest step"
+        );
+        // A narrow pair whose late steps round to the text: never the text itself.
+        let near = grey(0x7a);
+        assert_ne!(
+            apart(grey(0x77), &[grey(0x77)], grey(0x77), near, 0.2),
+            near
         );
         // Nothing stands apart (the fills cover every step): the first step, not the text.
         let all: Vec<Color32> = (0..=255).map(grey).collect();
