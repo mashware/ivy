@@ -63,15 +63,32 @@ impl Palette {
             0.20,
         );
         fixed.line2 = fixed.apart(roles.line2, &[surface], surface, 0.40);
-        // The caret is the accent, or the ink itself where the accent would vanish: it is a line
-        // drawn over fields and the selection, not a surface text sits on.
-        let caret = if Roles::stands_apart(
-            roles.accent,
-            &[roles.base, surface, fixed.sel, fixed.hover, nav],
-        ) {
+        // The caret — the text cursor and a pressed control's border — is drawn over fields, the
+        // dialog, the selection, a pressed control's hover fill, the navigation and `panel`-backed
+        // fields: the accent where it stands apart from all of them, else whichever of the accent
+        // and the ink stands furthest from the nearest of them.
+        let under = [
+            roles.base,
+            surface,
+            fixed.sel,
+            fixed.hover,
+            nav,
+            roles.panel,
+        ];
+        let caret = if Roles::stands_apart(roles.accent, &under) {
             roles.accent
         } else {
-            ink
+            let nearest = |c: Color32| {
+                under
+                    .iter()
+                    .map(|fill| project_ink_contrast(c, *fill))
+                    .fold(f32::INFINITY, f32::min)
+            };
+            if nearest(ink) >= nearest(roles.accent) {
+                ink
+            } else {
+                roles.accent
+            }
         };
         Self {
             surface,
@@ -196,6 +213,12 @@ mod tests {
                 )));
                 let q = Palette::new(theme);
                 assert_eq!(q.caret, q.ink, "{id}: caret over {name}");
+                for under in [q.roles.sel, q.roles.hover, q.nav] {
+                    assert!(
+                        project_ink_contrast(q.caret, under) >= 1.03,
+                        "{id}: the ink caret over {name} vanishes"
+                    );
+                }
             }
             assert_eq!(p.frame().stroke.color, rgb(line2));
         }

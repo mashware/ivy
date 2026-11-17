@@ -229,17 +229,18 @@ fn stands_apart(colour: Color32, over: &[Color32]) -> bool {
 
 /// `role`, unless it vanishes into one of the fills it is painted over: then the nearest step of
 /// `from` toward `tx` — from `amount` up, a point at a time — that stands apart from all of them
-/// and is not the text colour itself. Only where fills cover every step (no real palette) is it
-/// the first step, unmoved.
+/// and from the text itself. Each step toward the text reads less well under it, so the nearest
+/// is also the most readable. Where nothing between `from` and the text stands apart (the text
+/// itself barely does), the first step.
 fn apart(role: Color32, over: &[Color32], from: Color32, tx: Color32, amount: f32) -> Color32 {
-    if stands_apart(role, over) {
+    if stands_apart(role, over) && stands_apart(role, &[tx]) {
         return role;
     }
     (0..)
         .map(|n| amount + n as f32 / 100.0)
         .take_while(|step| *step < 0.95)
         .map(|step| mix(from, tx, step))
-        .find(|c| *c != tx && stands_apart(*c, over))
+        .find(|c| stands_apart(*c, over) && stands_apart(*c, &[tx]))
         .unwrap_or_else(|| mix(from, tx, amount))
 }
 
@@ -392,8 +393,20 @@ mod collapse_tests {
             moved.r() - first.r() <= 8,
             "{moved:?} is not the nearest step"
         );
-        // A narrow pair whose late steps round to the text: never the text itself.
+        // A text one level off the fill leaves no colour between them that stands apart: the
+        // first step, never the text or a shade of it.
         let near = grey(0x7a);
+        assert_eq!(
+            apart(grey(0x77), &[grey(0x77)], grey(0x77), near, 0.2),
+            grey(0x78)
+        );
+        // A wider pair: the step stands apart from the fill and from the text both.
+        let (fill, text) = (grey(0x60), grey(0x90));
+        let step = apart(fill, &[fill], fill, text, 0.2);
+        assert!(
+            stands_apart(step, &[fill]) && stands_apart(step, &[text]),
+            "{step:?}"
+        );
         assert_ne!(
             apart(grey(0x77), &[grey(0x77)], grey(0x77), near, 0.2),
             near
