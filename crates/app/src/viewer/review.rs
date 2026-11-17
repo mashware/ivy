@@ -338,11 +338,8 @@ fn file_row(review: &mut Review, ui: &mut egui::Ui, doc: &Document, index: usize
 fn changes(review: &mut Review, ui: &mut egui::Ui, doc: &Document, height: f32) {
     let file = &doc.files[review.file];
     ui.label(RichText::new(&file.display).color(ui.visuals().weak_text_color()));
-    let before_width = if review.mode == Mode::SideBySide {
-        Some(split_header(review, ui))
-    } else {
-        None
-    };
+    let header = (review.mode == Mode::SideBySide).then(|| split_header(review, ui));
+    let before_width = header.map(|(left, _)| left);
     if let Some(notice) = &file.notice {
         ui.label(notice);
     }
@@ -388,7 +385,7 @@ fn changes(review: &mut Review, ui: &mut egui::Ui, doc: &Document, height: f32) 
         area =
             area.vertical_scroll_offset(starts.get(hunk).copied().unwrap_or(0) as f32 * row_height);
     }
-    area.show_rows(ui, row_height, rows.len(), |ui, range| {
+    let shown = area.show_rows(ui, row_height, rows.len(), |ui, range| {
         ui.set_min_width(content_width);
         for row in &rows[range] {
             match *row {
@@ -434,7 +431,6 @@ fn changes(review: &mut Review, ui: &mut egui::Ui, doc: &Document, height: f32) 
                             ui.allocate_space(egui::vec2(left, row_height));
                         }
                         let right = ui.available_width().max(1.0);
-                        let divider = ui.cursor().left();
                         if let Some(i) = pair.new {
                             paint::paint_line(
                                 review,
@@ -448,40 +444,24 @@ fn changes(review: &mut Review, ui: &mut egui::Ui, doc: &Document, height: f32) 
                         } else {
                             ui.allocate_space(egui::vec2(right, row_height));
                         }
-                        let roles = crate::ui::style::roles(ui.ctx(), &review.theme);
-                        ui.painter().vline(
-                            divider,
-                            ui.min_rect().y_range(),
-                            egui::Stroke::new(1.0, roles.line),
-                        );
                     });
                 }
             }
         }
     });
+    if let Some((left, rect)) = header {
+        split_handle(review, ui, rect, left, shown.inner_rect.bottom());
+    }
 }
 
 /// The Before / After header with the handle that moves the column split; returns the Before
 /// column's width.
-fn split_header(review: &mut Review, ui: &mut egui::Ui) -> f32 {
+/// The Before / After header; returns the Before column's width and the header's rectangle.
+fn split_header(review: &Review, ui: &mut egui::Ui) -> (f32, egui::Rect) {
     let width = ui.available_width().max(1.0);
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 20.0), egui::Sense::hover());
     let left =
         (width * review.split).clamp(80.0_f32.min(width / 2.0), (width - 80.0).max(width / 2.0));
-    let handle = egui::Rect::from_center_size(
-        egui::pos2(rect.left() + left, rect.center().y),
-        egui::vec2(8.0, rect.height()),
-    );
-    let response = ui
-        .interact(handle, ui.id().with("review-split"), egui::Sense::drag())
-        .on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
-        .on_hover_text("Drag to resize the two sides");
-    if response.dragged()
-        && let Some(pointer) = response.interact_pointer_pos()
-    {
-        review.split = ((pointer.x - rect.left()) / width).clamp(0.15, 0.85);
-    }
-    let roles = crate::ui::style::roles(ui.ctx(), &review.theme);
     let weak = ui.visuals().weak_text_color();
     let font = egui::FontId::proportional(12.0);
     ui.painter().text(
@@ -492,23 +472,60 @@ fn split_header(review: &mut Review, ui: &mut egui::Ui) -> f32 {
         weak,
     );
     ui.painter().text(
-        egui::pos2(rect.left() + left + 6.0, rect.center().y),
+        egui::pos2(rect.left() + left + 10.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         "After",
         font,
         weak,
     );
-    let grip = if response.hovered() || response.dragged() {
-        roles.accent
-    } else {
-        roles.line2
-    };
-    ui.painter().vline(
-        rect.left() + left,
-        rect.y_range(),
-        egui::Stroke::new(2.0, grip),
+    (left, rect)
+}
+
+/// The divider between Before and After, the whole height of the diff: grabbed anywhere along it,
+/// with a grip in its middle, the resize cursor, and the accent while it is hovered or dragged.
+fn split_handle(review: &mut Review, ui: &egui::Ui, header: egui::Rect, left: f32, bottom: f32) {
+    let x = header.left() + left;
+    let strip = egui::Rect::from_min_max(
+        egui::pos2(x - 5.0, header.top()),
+        egui::pos2(x + 5.0, bottom),
     );
-    left
+    let response = ui
+        .interact(strip, ui.id().with("review-split"), egui::Sense::drag())
+        .on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
+        .on_hover_text("Drag to resize the two sides");
+    if response.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+        if let Some(pointer) = response.interact_pointer_pos() {
+            review.split = ((pointer.x - header.left()) / header.width()).clamp(0.15, 0.85);
+        }
+    }
+    let roles = crate::ui::style::roles(ui.ctx(), &review.theme);
+    let active = response.hovered() || response.dragged();
+    let ink = if active { roles.accent } else { roles.line2 };
+    let painter = ui.painter();
+    painter.vline(
+        x,
+        strip.y_range(),
+        egui::Stroke::new(if active { 2.0 } else { 1.0 }, ink),
+    );
+    let grip = egui::Rect::from_center_size(
+        egui::pos2(x, strip.center().y.min(header.bottom() + 120.0)),
+        egui::vec2(10.0, 28.0),
+    );
+    painter.rect(
+        grip,
+        5,
+        roles.raised,
+        egui::Stroke::new(1.0, ink),
+        egui::StrokeKind::Inside,
+    );
+    for dy in [-5.0, 0.0, 5.0] {
+        painter.hline(
+            grip.center().x - 2.5..=grip.center().x + 2.5,
+            grip.center().y + dy,
+            egui::Stroke::new(1.0, if active { roles.accent } else { roles.tx3 }),
+        );
+    }
 }
 
 enum Row {
@@ -991,6 +1008,37 @@ mod tests {
         assert!(
             moved < before - 100.0,
             "the split did not follow the drag: {before} -> {moved}"
+        );
+        // The divider is grabbed anywhere down the diff, not only in the header.
+        let low = egui::pos2(moved - 10.0, grip.y + 150.0);
+        let press = |pressed| egui::Event::PointerButton {
+            pos: low,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        painted(
+            &mut review,
+            &ctx,
+            &doc,
+            1100.0,
+            vec![egui::Event::PointerMoved(low), press(true)],
+        );
+        for step in 1..=4 {
+            let to = low + egui::vec2(50.0 * step as f32, 0.0);
+            painted(
+                &mut review,
+                &ctx,
+                &doc,
+                1100.0,
+                vec![egui::Event::PointerMoved(to)],
+            );
+        }
+        painted(&mut review, &ctx, &doc, 1100.0, vec![press(false)]);
+        let back = after(&painted(&mut review, &ctx, &doc, 1100.0, vec![]));
+        assert!(
+            back > moved + 150.0,
+            "the divider is not grabbed along the diff: {moved} -> {back}"
         );
     }
 
