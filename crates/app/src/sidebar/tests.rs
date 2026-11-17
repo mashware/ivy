@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use super::*;
 use crate::tests::{one_frame_in, window_of_tabs};
 use crate::tree::Node;

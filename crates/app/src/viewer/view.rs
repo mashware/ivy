@@ -78,7 +78,7 @@ pub(super) fn show(
                     let hint = super::drawer::hint(*action, maximized);
                     // A strip too narrow for all of itself says so where it can still be read.
                     let said = if strip.crowded && *action == super::drawer::StripAction::Maximize {
-                        format!("{hint} — too narrow to show «{source}» and every tab")
+                        format!("{hint}: too narrow to show \"{source}\" and every tab")
                     } else {
                         hint.to_owned()
                     };
