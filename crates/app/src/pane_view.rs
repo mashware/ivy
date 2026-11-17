@@ -192,12 +192,14 @@ fn menu_item(ui: &mut egui::Ui, label: &str, enabled: bool) -> bool {
         .frame_when_inactive(false)
         .min_size(egui::vec2(ui.available_width(), 28.0));
     ui.scope(|ui| {
-        // A frameless button gains its frame's stroke on hover, and egui counts that stroke in
-        // the button's size: the row would grow a point each side and push the rows below it.
-        // The kit marks a hovered row by its fill alone.
+        // egui takes a button's border width out of its inner margin, state by state. The kit
+        // gives a resting control a 1-point border, so a row whose resting border is never drawn
+        // would still lose a point each side at rest and get it back on hover — pushing the rows
+        // below. Every state here has none: the kit marks a hovered row by its fill alone.
         let widgets = &mut ui.visuals_mut().widgets;
-        widgets.hovered.bg_stroke = egui::Stroke::NONE;
-        widgets.active.bg_stroke = egui::Stroke::NONE;
+        for state in [&mut widgets.inactive, &mut widgets.hovered, &mut widgets.active] {
+            state.bg_stroke = egui::Stroke::NONE;
+        }
         ui.add_enabled(enabled, button).clicked()
     })
     .inner

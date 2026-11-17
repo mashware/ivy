@@ -181,6 +181,10 @@ mod tests {
                 .unwrap_or_else(|| panic!("{label} not painted"))
         }
         let (mut window, ctx) = warmed();
+        // With egui's own font the row's height is the minimum and hides the stroke; Geist at a
+        // desktop's 1.25 scale is where the hovered row grew two points.
+        crate::fonts::install_bundled(&ctx);
+        ctx.set_zoom_factor(1.25);
         let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 900.0));
         one_frame_in(&mut window, &ctx, area, vec![]);
         let at = header_point(&window, &ctx, area, 1);
