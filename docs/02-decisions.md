@@ -8847,7 +8847,12 @@ keep no loose floating window, and to put Markdown in the drawer as a tab.
   that leaves something out says so on its maximize button. Every place the host resolves has a
   fixed width, so a click is resolved before the frame's tiling against the rectangles the painting
   uses. Review rows show the file's name first, its folder dimmed and its counts on the same row;
-  diff rows touch, with dim line numbers and the change's mark in its colour.
+  diff rows touch, with dim line numbers and the change's mark in its colour. Side by side divides
+  its two columns where the person drags the handle between Before and After.
+- **Not modal.** Neither the drawer, Files nor a press on the title bar dims the consoles: only a
+  modal surface does (a console's rename or menu, the title bar's menu, a dialog). Dimming on the
+  drawer shaded the window beside it, and dimming on a title-bar press painted every console at half
+  opacity for the frames the button was held — the blink the owner reported on every button.
 - **Maximized**, the drawer covers the consoles edge to edge at the size they already had beside
   it, so toggling it resizes no program and no strip of a hidden console is left to take a press;
   Files stays beside it, and restore returns the previous height. The Board covers the whole content
@@ -8878,7 +8883,8 @@ console grid and a width drag, and the script refuses it rather than relabel it.
 **Selected by the project owner.** A **Connect agents** icon in the integrated title bar opens an
 in-application setup guide. It is highlighted while no console has an accepted, non-retired panel,
 and remains available without highlighting once any console publishes. File and control-channel
-producers count equally. The menu provides the same entry, including compact windows.
+producers count equally. The menu provides the same entry, including compact windows. Since #93 the
+icon is the kit's link and the highlight is its colour alone: the owner removed the dot beside it.
 
 The primary action copies a setup prompt for the user's AI client inside Ivy. It asks that client
 to find the bridge, preserve existing settings, register local stdio if necessary, and verify by
@@ -10007,7 +10013,12 @@ on its button's hover how to bring it back.
 At the same check the owner removed the 3-point project stripe from the console header (the tint
 and the ink name stay), asked that the focused console be outlined in its project's ink rather than
 the accent (the accent stays for a console with no project), and asked for the kit's diagonal arrows
-to maximize a console, in the header and in the drawer alike.
+to maximize a console, in the header and in the drawer alike. A header no longer shows the shell's
+`user@host:path` title: with no name given and no agent titling the console, it shows the foreground
+program, after its folder when no project names the place («TaxPlatform / Bash», «tax-platform /
+Bash»). The program's name is read from the operating system (`/proc/<pid>/comm` on Linux) in the
+same once-a-second sample as the directory, off no extra thread; elsewhere the title stays. It is a
+name, not a state: nothing infers what the program is doing (D6).
 
 **Measurement:** every integrated-chrome batch (`chrome`, `chrome-zoom`, `projects`, `dock-v2-*`)
 now paints this bar, and a full bar's tab band is 144 points narrower than before this amendment;

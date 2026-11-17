@@ -395,6 +395,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_console_without_an_agent_is_named_by_its_folder_and_program() {
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        let pane = &mut *window.active_mut().panes_mut()[0];
+        pane.program = Some(("tax-platform".into(), "bash".into()));
+        assert_eq!(header_label(pane), "tax-platform / Bash");
+        pane.project = Some(crate::project_view::Badge {
+            key: crate::project::Key::Repository("/work/tax".into()),
+            name: "TaxPlatform".into(),
+            details: "/work/tax".into(),
+            ink: Color32::WHITE,
+            painted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        });
+        assert_eq!(
+            header_label(pane),
+            "Bash",
+            "the project already names the place"
+        );
+        pane.label = Some("deploy".into());
+        assert_eq!(header_label(pane), "deploy", "a name somebody gave wins");
+        pane.label = None;
+        pane.program = None;
+        assert_eq!(header_label(pane), crate::pane_view::display_label(pane));
+    }
+
+    #[test]
     fn pane_icons_match_the_prototype_paths_and_have_no_overflow_control() {
         let ctx = egui::Context::default();
         let out = ctx.run_ui(Default::default(), |ui| {

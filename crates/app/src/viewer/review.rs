@@ -935,6 +935,66 @@ mod tests {
     }
 
     #[test]
+    fn side_by_side_columns_are_resized_by_dragging_their_divider() {
+        let doc = Document::parse(
+            "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n",
+        )
+        .unwrap();
+        let mut review = Review::default();
+        review.set_side_by_side(true);
+        let ctx = egui::Context::default();
+        let shapes = painted(&mut review, &ctx, &doc, 1100.0, vec![]);
+        let after = |shapes: &[(String, egui::Rect)]| {
+            shapes
+                .iter()
+                .find(|(text, _)| text == "After")
+                .expect("the After column is labelled")
+                .1
+                .left()
+        };
+        let before = after(&shapes);
+        let grip = egui::pos2(
+            before - 6.0,
+            shapes
+                .iter()
+                .find(|(t, _)| t == "After")
+                .unwrap()
+                .1
+                .center()
+                .y,
+        );
+        let button = |pressed| egui::Event::PointerButton {
+            pos: grip,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        painted(
+            &mut review,
+            &ctx,
+            &doc,
+            1100.0,
+            vec![egui::Event::PointerMoved(grip), button(true)],
+        );
+        for step in 1..=4 {
+            let to = grip + egui::vec2(-40.0 * step as f32, 0.0);
+            painted(
+                &mut review,
+                &ctx,
+                &doc,
+                1100.0,
+                vec![egui::Event::PointerMoved(to)],
+            );
+        }
+        painted(&mut review, &ctx, &doc, 1100.0, vec![button(false)]);
+        let moved = after(&painted(&mut review, &ctx, &doc, 1100.0, vec![]));
+        assert!(
+            moved < before - 100.0,
+            "the split did not follow the drag: {before} -> {moved}"
+        );
+    }
+
+    #[test]
     fn preview_escapes_metadata_and_rejects_controls() {
         let mut review = Review::default();
         review.comments.push(Comment {
