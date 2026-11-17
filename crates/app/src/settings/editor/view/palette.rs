@@ -53,13 +53,13 @@ impl Palette {
         // The navigation sits on the person's own `panel` colour; where that leaves its text
         // unreadable it falls back to the dialog's surface rather than hide the way back.
         let nav = roles.panel_or(ink, surface);
-        // Hover and the selection carry text, so they must not become a shade of the ink either.
-        fixed.hover = fixed.apart(roles.hover, &[surface, ink], surface, 0.10);
+        // Hover is painted on the dialog and, as the chosen segment, on a field's track (`base`).
+        fixed.hover = fixed.apart(roles.hover, &[surface, roles.base], surface, 0.10);
         // The selection is painted over a field (`base`), the dialog, the navigation and a hovered
         // row alike, so it has to stand apart from every one of them.
         fixed.sel = fixed.apart(
             roles.sel,
-            &[fixed.hover, roles.base, surface, nav, ink],
+            &[fixed.hover, roles.base, surface, nav],
             surface,
             0.20,
         );
@@ -242,7 +242,7 @@ mod tests {
                 let apart = |a: Color32, over: &[Color32]| {
                     over.iter().all(|b| project_ink_contrast(a, *b) >= 1.03)
                 };
-                assert!(apart(p.roles.hover, &[p.surface]), "{name:?} hover");
+                assert!(apart(p.roles.hover, &[p.surface, base]), "{name:?} hover");
                 assert!(apart(p.roles.line2, &[p.surface]), "{name:?} edge");
                 assert!(
                     apart(p.roles.sel, &[p.roles.hover, base, p.surface, p.nav]),
