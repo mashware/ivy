@@ -242,7 +242,7 @@ fn apart(role: Color32, over: &[Color32], from: Color32, tx: Color32, amount: f3
 
 /// The selection: `tinted` when it stands apart from the fills it sits among, else an 18 % step of
 /// the background toward the text (away from it only where the text was replaced and would not
-/// read). It is a surface text is drawn on, so it is never the text colour itself.
+/// read) — a surface text is drawn on, never the text colour itself.
 fn selection(
     tinted: Color32,
     among: &[Color32],
@@ -253,12 +253,9 @@ fn selection(
     if stands_apart(tinted, among) {
         return tinted;
     }
-    let step = text_surface(bg, tx, 0.18, corrected);
-    if stands_apart(step, among) {
-        step
-    } else {
-        mix(bg, tx, 0.18)
-    }
+    // An 18 % step stands apart from the background and from the 6 % and 9 % surfaces by
+    // construction, which is why there is no further fallback.
+    text_surface(bg, tx, 0.18, corrected)
 }
 
 /// The color with the given opacity, keeping its hue.
@@ -398,6 +395,22 @@ mod collapse_tests {
                 "{bg:06x} text on sel"
             );
         }
+    }
+
+    /// A theme's own narrow foreground is not second-guessed for the selection either: with the
+    /// focus on the background, Solarized Dark's selection steps lighter like its menus, not into a
+    /// hole darker than the console.
+    #[test]
+    fn a_moved_selection_steps_toward_a_readable_themes_text() {
+        let rgb = |hex: u32| Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+        let theme = Theme {
+            background: rgb(0x002b36),
+            foreground: rgb(0x839496),
+            focus: rgb(0x002b36),
+            ..Theme::default()
+        };
+        let r = Roles::of(&theme);
+        assert_eq!(r.sel, mix(rgb(0x002b36), rgb(0x839496), 0.18));
     }
 
     /// A focus colour that lands the selection on a menu's own surface moves the selection, so
