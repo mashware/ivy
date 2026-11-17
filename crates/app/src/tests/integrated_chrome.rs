@@ -2809,4 +2809,60 @@ mod tests {
             "the band spans the panel, not a pill: {band:?}"
         );
     }
+
+    /// The application menu floats on the theme's `raised` role with a control border, and the
+    /// console's search row is laid on the same surface (D96).
+    #[test]
+    fn the_application_menu_and_the_search_row_float_on_raised() {
+        fn rects(shape: &egui::Shape, out: &mut Vec<egui::epaint::RectShape>) {
+            match shape {
+                egui::Shape::Rect(r) => out.push(r.clone()),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| rects(s, out)),
+                _ => {}
+            }
+        }
+        let (raised, line2) = (
+            egui::Color32::from_rgb(0x20, 0x24, 0x27),
+            egui::Color32::from_rgb(0x37, 0x3b, 0x3d),
+        );
+        let ctx = egui::Context::default();
+        ctx.global_style_mut(|style| style.animation_time = 0.0);
+        let mut window = window_with("sleep 30", "sleep 30");
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        let area = area_of(1400.0);
+        frame(&mut window, &ctx, area, vec![]);
+        let search = egui::pos2(area.right() - 159.0, area.top() + 24.0);
+        frame(&mut window, &ctx, area, click_at(search));
+        // Read before the menu opens: an open menu dims the consoles beneath it.
+        let mut row = Vec::new();
+        for clipped in &frame(&mut window, &ctx, area, vec![]) {
+            rects(&clipped.shape, &mut row);
+        }
+        assert!(
+            row.iter()
+                .any(|r| r.fill == raised && r.rect.height() < 40.0 && r.rect.width() > 200.0),
+            "the search row is not on raised"
+        );
+        let menu = egui::pos2(area.right() - 125.0, area.top() + 24.0);
+        frame(&mut window, &ctx, area, click_at(menu));
+        let shapes = frame(&mut window, &ctx, area, vec![]);
+        let mut all = Vec::new();
+        for clipped in &shapes {
+            rects(&clipped.shape, &mut all);
+        }
+        let item = text_center(&shapes, "Preferences");
+        let body = all
+            .iter()
+            .filter(|r| r.rect.contains(item) && r.fill == raised)
+            .min_by(|a, b| a.rect.area().total_cmp(&b.rect.area()))
+            .expect("the menu is filled with raised");
+        assert_eq!(body.corner_radius, egui::CornerRadius::same(10));
+        assert!(
+            all.iter()
+                .any(|r| r.rect == body.rect && r.stroke == egui::Stroke::new(1.0, line2)),
+            "the menu has no control border"
+        );
+
+    }
 }

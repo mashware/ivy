@@ -371,9 +371,11 @@ pub(crate) fn paint_the_row(
 ) {
     let row = the_row_over(mode, view, metrics, area);
     let clipped = painter.with_clip_rect(row.intersect(painter.clip_rect()));
-    clipped.rect_filled(row, 0.0, theme.panel_background());
-    let text = clipped.layout_no_wrap(the_row(mode), metrics.font(), theme.foreground());
-    clipped.galley(row.left_top(), text, theme.foreground());
+    // The kit's floating surface, so the row reads as laid over the console and not part of it.
+    let roles = crate::ui::style::roles(painter.ctx(), theme);
+    clipped.rect_filled(row, 0.0, roles.raised);
+    let text = clipped.layout_no_wrap(the_row(mode), metrics.font(), roles.tx);
+    clipped.galley(row.left_top(), text, roles.tx);
 }
 
 #[cfg(test)]
