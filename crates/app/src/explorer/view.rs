@@ -7,8 +7,8 @@ struct Row {
     message: Option<String>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Icon {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Icon {
     Search,
     Refresh,
     Collapse,
@@ -76,7 +76,23 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, available: bool, roles: &crate::th
             }
         }
     }
+    #[cfg(test)]
+    ui.ctx().data_mut(|data| {
+        data.get_temp_mut_or_default::<Vec<(Icon, egui::Rect)>>(egui::Id::new("explorer-icons"))
+            .retain(|(which, _)| *which != icon);
+        data.get_temp_mut_or_default::<Vec<(Icon, egui::Rect)>>(egui::Id::new("explorer-icons"))
+            .push((icon, rect));
+    });
     available && response.clicked()
+}
+
+/// Where the header painted `icon` on its last pass, for tests that click it as a person would.
+#[cfg(test)]
+pub(super) fn icon_at(ctx: &egui::Context, icon: Icon) -> Option<egui::Pos2> {
+    ctx.data(|data| {
+        data.get_temp::<Vec<(Icon, egui::Rect)>>(egui::Id::new("explorer-icons"))
+            .and_then(|icons| icons.iter().find(|(which, _)| *which == icon).map(|(_, r)| r.center()))
+    })
 }
 
 fn rows(state: &mut Explorer, pane: usize) -> (Vec<Row>, Option<Request>, bool) {
@@ -525,7 +541,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn refresh_icon_and_hover_use_the_effective_light_and_dark_theme() {
+    fn header_icons_and_their_hover_use_the_effective_themes_roles() {
         use egui::epaint::{ColorMode, Shape};
         for named in [
             crate::theme::NamedTheme::GithubLightDefault,
@@ -551,7 +567,8 @@ mod tests {
                     },
                     |ui| {
                         center = ui.cursor().min + egui::vec2(12.0, 12.0);
-                        refresh_button(ui, true, theme);
+                        let roles = crate::ui::style::roles(ui.ctx(), &theme);
+                        icon_button(ui, Icon::Refresh, true, &roles);
                     },
                 );
                 let strokes: Vec<_> = output
@@ -562,11 +579,12 @@ mod tests {
                         _ => None,
                     })
                     .collect();
-                let hover_fill = output.shapes.iter().any(|shape| matches!(&shape.shape, Shape::Rect(rect) if rect.rect.size() == egui::vec2(24.0, 24.0) && rect.fill == theme.divider()));
+                let roles = crate::theme::Roles::of(&theme);
+                let hover_fill = output.shapes.iter().any(|shape| matches!(&shape.shape, Shape::Rect(rect) if rect.rect.size() == egui::vec2(24.0, 24.0) && rect.fill == roles.hover));
                 output.drop_without_applying_deltas();
                 assert_eq!(
                     strokes,
-                    vec![ColorMode::Solid(theme.foreground()); 2],
+                    vec![ColorMode::Solid(roles.tx2); 2],
                     "{named:?}, hover={hover}"
                 );
                 if hover {

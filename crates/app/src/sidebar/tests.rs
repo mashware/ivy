@@ -572,3 +572,45 @@ fn the_drawer_maximizes_over_the_consoles_restores_its_height_and_keeps_files_be
     assert_eq!(active(&window), None, "close shuts the drawer");
     assert!(files_visible(&window), "closing the drawer keeps Files");
 }
+
+/// The maximized drawer covers the consoles' headers; a press on it must never reach the Git,
+/// maximize or close buttons under it (the Board's lesson, D72).
+#[test]
+fn a_press_on_the_maximized_drawer_never_reaches_the_console_header_it_covers() {
+    let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+    window.chrome.enable();
+    window.headers = window.headers.integrated(true);
+    let ctx = egui::Context::default();
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 800.0));
+    one_frame_in(&mut window, &ctx, area, vec![]);
+    let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
+    let work = crate::tab_bar::geometry(&window, area, &metrics).consoles;
+    let rect = window.active().root.place(work, metrics.width()).parts[0];
+    let strip = crate::header::set_the_header_aside(rect, &metrics, window.headers)
+        .0
+        .expect("the console carries a header strip");
+    crate::viewer::activate(&mut window, false);
+    toggle_maximize(&mut window);
+    for _ in 0..2 {
+        one_frame_in(&mut window, &ctx, area, vec![]);
+    }
+    let panes = window.all_panes().count();
+    assert!(window.sidebar.last_dock.unwrap().contains(strip.center()));
+    for offset in (6..=150).step_by(12) {
+        let at = egui::pos2(strip.right() - offset as f32, strip.center().y);
+        if crate::viewer::strip_action(&window, window.sidebar.last_dock.unwrap(), at).is_some() {
+            continue;
+        }
+        click(&mut window, &ctx, area, at);
+        assert_eq!(
+            window.all_panes().count(),
+            panes,
+            "a header close button took the press at {at:?}"
+        );
+        assert_eq!(
+            active(&window),
+            Some(Tool::Git),
+            "a header button under the drawer took the press at {at:?}"
+        );
+    }
+}

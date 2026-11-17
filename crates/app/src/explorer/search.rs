@@ -83,11 +83,19 @@ pub(super) fn keys(state: &mut Explorer, pane: usize, ctx: &egui::Context) -> Op
     if pressed(egui::Key::ArrowUp) {
         state.search_index = state.search_index.saturating_sub(1);
     }
-    if !pressed(egui::Key::Enter) {
-        return None;
-    }
+    let enter = ctx.input(|i| {
+        i.events.iter().find_map(|event| match event {
+            egui::Event::Key {
+                key: egui::Key::Enter,
+                pressed: true,
+                modifiers,
+                ..
+            } => Some(modifiers.command || i.modifiers.command),
+            _ => None,
+        })
+    })?;
     let entry = found.get(state.search_index)?.clone();
-    if ctx.input(|i| i.modifiers.command) {
+    if enter {
         Some(Pick::Open(entry))
     } else {
         Some(Pick::Reveal(entry.path))
@@ -242,8 +250,15 @@ fn row(
         roles.tx3,
     );
     let response = response.on_hover_text(display(&entry.path));
+    // The click's own modifiers, as the desktop sent them with the press.
+    let command = ui.input(|i| {
+        i.modifiers.command
+            || i.events.iter().any(|event| {
+                matches!(event, egui::Event::PointerButton { modifiers, .. } if modifiers.command)
+            })
+    });
     response.clicked().then(|| {
-        if ui.input(|i| i.modifiers.command) {
+        if command {
             Pick::Open(entry.clone())
         } else {
             Pick::Reveal(entry.path.clone())

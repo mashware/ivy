@@ -184,23 +184,29 @@ fn click_at(window: &mut crate::Window, ctx: &egui::Context, area: egui::Rect, p
     frame(window, ctx, area, vec![button(false)]);
 }
 
-fn click_refresh(window: &mut crate::Window, ctx: &egui::Context, area: egui::Rect) {
+fn click_icon(
+    window: &mut crate::Window,
+    ctx: &egui::Context,
+    area: egui::Rect,
+    icon: view::Icon,
+) {
     frame(window, ctx, area, vec![]);
-    let dock = window.sidebar.last_files.unwrap();
-    click_at(
-        window,
-        ctx,
-        area,
-        egui::pos2(dock.right() - 22.0, dock.top() + 19.0),
-    );
+    let at = view::icon_at(ctx, icon).unwrap_or_else(|| panic!("{icon:?} is not painted"));
+    assert!(window.sidebar.last_files.unwrap().contains(at));
+    click_at(window, ctx, area, at);
+}
+
+fn click_refresh(window: &mut crate::Window, ctx: &egui::Context, area: egui::Rect) {
+    click_icon(window, ctx, area, view::Icon::Refresh);
 }
 
 fn click_text(window: &mut crate::Window, ctx: &egui::Context, area: egui::Rect, text: &str) {
     let painted = frame(window, ctx, area, vec![]);
-    let dock = window.sidebar.last_files.expect("Files dock is visible");
+    let dock = window.sidebar.last_files.expect("Files is visible");
+    let list = window.explorer.search_rect.unwrap_or(egui::Rect::NOTHING);
     let pos = painted
         .iter()
-        .find(|(label, pos)| label == text && dock.contains(*pos))
+        .find(|(label, pos)| label == text && (list.contains(*pos) || dock.contains(*pos)))
         .unwrap_or_else(|| panic!("{text:?} not painted; visible text: {painted:?}"))
         .1;
     click_at(window, ctx, area, pos);
@@ -240,8 +246,12 @@ fn wait_for_text(
         let visible = frame(window, ctx, area, vec![]);
         if visible.iter().any(|(text, pos)| {
             text.contains(expected)
-                && [window.sidebar.last_files, window.sidebar.last_dock]
-                    .into_iter()
+                && [
+                    window.sidebar.last_files,
+                    window.sidebar.last_dock,
+                    window.explorer.search_rect,
+                ]
+                .into_iter()
                     .flatten()
                     .any(|body| body.contains(*pos))
         }) {
@@ -822,54 +832,103 @@ fn typed_name_search_finds_files_and_folders_below_collapsed_directories() {
     wait_for_source(&mut window, &ctx, area, pane, &directory.0);
     crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
     wait_for_text(&mut window, &ctx, area, "src");
-    click_text(&mut window, &ctx, area, "Search files and folders");
+    click_icon(&mut window, &ctx, area, view::Icon::Search);
     let before = window.pane_called(pane).unwrap().keystrokes.clone();
     type_text(&mut window, &ctx, area, "needle");
-    wait_for_text(&mut window, &ctx, area, "src/nested/NeedleFile.rs");
-    let found = frame(&mut window, &ctx, area, vec![]);
+    wait_for_text(&mut window, &ctx, area, "NeedleFile.rs");
+    let list = window.explorer.search_rect.expect("the list floats");
+    let files = window.sidebar.last_files.unwrap();
     assert!(
-        found
-            .iter()
-            .any(|(text, _)| text == "src/nested/NeedleFolder")
+        list.right() > files.right(),
+        "the list overhangs the consoles"
     );
-    assert!(!found.iter().any(|(text, _)| text == "unrelated.rs"));
+    let found = frame(&mut window, &ctx, area, vec![]);
+    let listed = |name: &str| found.iter().any(|(text, pos)| text == name && list.contains(*pos));
+    assert!(listed("NeedleFolder"));
+    assert!(listed("NeedleChild.txt"));
+    assert!(listed("src/nested/"), "a match shows its folder beside its name");
+    // The tree under the list still shows it once; a match would show it a second time.
+    assert_eq!(
+        found.iter().filter(|(text, _)| text == "unrelated.rs").count(),
+        1,
+        "the search reads names, not contents"
+    );
     assert_eq!(window.pane_called(pane).unwrap().keystrokes, before);
-    for _ in 0..70 {
-        frame(&mut window, &ctx, area, vec![]);
-    }
-    click_text(&mut window, &ctx, area, "src/nested/NeedleFolder");
-    click_text(&mut window, &ctx, area, "src/nested/NeedleFolder");
-    wait_for_text(&mut window, &ctx, area, "inside.txt");
-    assert_eq!(
-        window.explorer.navigation[&pane].root,
-        Some(directory.0.clone())
-    );
-    assert_eq!(window.explorer.navigation[&pane].query, "needle");
-    assert_eq!(
-        frame(&mut window, &ctx, area, vec![])
-            .iter()
-            .filter(|(text, _)| text.ends_with("NeedleChild.txt"))
-            .count(),
-        1
-    );
-    frame(
-        &mut window,
-        &ctx,
-        area,
-        vec![egui::Event::Key {
-            key: egui::Key::Escape,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: egui::Modifiers::NONE,
-        }],
-    );
+    // A click reveals the match in the tree, its folders expanded, the root where it was.
+    click_text(&mut window, &ctx, area, "NeedleFolder");
+    assert!(window.explorer.search_rect.is_none(), "revealing closes the list");
+    let nav = &window.explorer.navigation[&pane];
+    assert_eq!(nav.root, Some(directory.0.clone()));
+    assert_eq!(nav.selected, Some(directory.0.join("src/nested/NeedleFolder")));
+    assert!(nav.expanded.contains(&directory.0.join("src")));
+    assert!(nav.expanded.contains(&directory.0.join("src/nested")));
+    assert!(nav.query.is_empty());
+    wait_for_text(&mut window, &ctx, area, "NeedleFolder");
     wait_for_text(&mut window, &ctx, area, "unrelated.rs");
-    assert_eq!(
-        window.explorer.navigation[&pane].root,
-        Some(directory.0.clone())
-    );
+    // Escape leaves the search first, then closes Files.
+    let escape = egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    click_icon(&mut window, &ctx, area, view::Icon::Search);
+    type_text(&mut window, &ctx, area, "needle");
+    wait_for_text(&mut window, &ctx, area, "NeedleFile.rs");
+    frame(&mut window, &ctx, area, vec![escape.clone()]);
+    frame(&mut window, &ctx, area, vec![]);
+    assert!(window.explorer.search_rect.is_none());
     assert!(window.explorer.visible);
+    assert!(window.explorer.navigation[&pane].query.is_empty());
+    frame(&mut window, &ctx, area, vec![escape]);
+    assert!(!window.explorer.visible);
+    assert_eq!(window.pane_called(pane).unwrap().keystrokes, before);
+}
+
+#[test]
+fn enter_reveals_a_match_and_ctrl_enter_opens_markdown_in_the_drawer() {
+    let ctx = egui::Context::default();
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));
+    let directory = Directory::new("search-keys");
+    fs::create_dir_all(directory.0.join("docs")).unwrap();
+    fs::write(directory.0.join("docs/plan.md"), "# The plan\n\nRead in the drawer.").unwrap();
+    let command = format!("cd '{}' && exec sleep 30", directory.0.display());
+    let mut window = window_of_tabs([[command.as_str(), "sleep 30"]]);
+    crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
+    frame(&mut window, &ctx, area, vec![]);
+    let pane = window.active().panes()[0].name;
+    wait_for_source(&mut window, &ctx, area, pane, &directory.0);
+    crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+    wait_for_text(&mut window, &ctx, area, "docs");
+    let enter = |command| egui::Event::Key {
+        key: egui::Key::Enter,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: if command {
+            egui::Modifiers::COMMAND
+        } else {
+            egui::Modifiers::NONE
+        },
+    };
+    for command in [false, true] {
+        click_icon(&mut window, &ctx, area, view::Icon::Search);
+        type_text(&mut window, &ctx, area, "plan");
+        wait_for_text(&mut window, &ctx, area, "plan.md");
+        frame(&mut window, &ctx, area, vec![enter(command)]);
+        frame(&mut window, &ctx, area, vec![]);
+        let nav = &window.explorer.navigation[&pane];
+        assert_eq!(nav.selected, Some(directory.0.join("docs/plan.md")));
+        assert!(nav.expanded.contains(&directory.0.join("docs")));
+        assert_eq!(
+            crate::sidebar::active(&window) == Some(crate::sidebar::Tool::Markdown),
+            command,
+            "Enter only reveals; Ctrl+Enter opens"
+        );
+    }
+    wait_for_text(&mut window, &ctx, area, "Read in the drawer.");
+    assert!(window.explorer.visible, "Files stays beside the drawer");
 }
 
 #[test]
@@ -1086,7 +1145,7 @@ fn partial_name_search_notice_is_visible_even_when_the_folder_exceeds_listing_li
     wait_for_source(&mut window, &ctx, area, pane, &directory.0);
     crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
     wait_for_text(&mut window, &ctx, area, "Directory exceeds explorer limit");
-    click_text(&mut window, &ctx, area, "Search files and folders");
+    click_icon(&mut window, &ctx, area, view::Icon::Search);
     type_text(&mut window, &ctx, area, "match");
     wait_for_text(&mut window, &ctx, area, "Search result limit reached");
     wait_for_text(&mut window, &ctx, area, "match-");
@@ -1311,4 +1370,86 @@ fn maximized_files_input_and_document_handoff_never_reach_covered_programs() {
             "Files input reached covered console {index}"
         );
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_press_on_the_floating_list_over_a_console_never_reaches_its_program() {
+    use std::time::Duration;
+    let ctx = egui::Context::default();
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
+    let directory = Directory::new("search-over-console");
+    fs::write(directory.0.join("covered-match.txt"), "entry").unwrap();
+    let received = term_core::received::Received::new("search-over-console");
+    let script = received.script(&format!("cd '{}' && stty raw -echo", directory.0.display()));
+    let mut window = window_of_tabs([[script.as_str(), "sleep 30"]]);
+    received.wait_until_ready(Duration::from_secs(5));
+    crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
+    frame(&mut window, &ctx, area, vec![]);
+    let pane = window.active().panes()[0].name;
+    wait_for_source(&mut window, &ctx, area, pane, &directory.0);
+    // The covered program asks for the mouse, so a leaked press is observable as bytes.
+    window
+        .pane_called(pane)
+        .unwrap()
+        .screen
+        .advance(b"\x1b[?1000h\x1b[?1006h");
+    crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+    wait_for_text(&mut window, &ctx, area, "covered-match.txt");
+    click_icon(&mut window, &ctx, area, view::Icon::Search);
+    type_text(&mut window, &ctx, area, "covered");
+    let deadline = Instant::now() + std::time::Duration::from_secs(5);
+    let (list, row) = loop {
+        let painted = frame(&mut window, &ctx, area, vec![]);
+        let list = window.explorer.search_rect.expect("the list floats");
+        let listed = painted
+            .iter()
+            .filter(|(text, pos)| text == "covered-match.txt" && list.contains(*pos))
+            .map(|(_, pos)| *pos)
+            .last();
+        // The tree's row sits under the list too: wait for the second, the list's own.
+        if painted.iter().filter(|(text, _)| text == "covered-match.txt").count() == 2
+            && let Some(row) = listed
+        {
+            break (list, row);
+        }
+        assert!(Instant::now() < deadline, "the match was never listed");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    let files = window.sidebar.last_files.unwrap();
+    let over = egui::pos2(files.right() + 40.0, row.y);
+    assert!(list.contains(over));
+    assert!(
+        window.all_panes().any(|p| p
+            .painted_console
+            .as_ref()
+            .is_some_and(|c| c.area.contains(over))),
+        "the point must sit over a console's cells"
+    );
+    click_at(&mut window, &ctx, area, over);
+    assert_eq!(
+        window.explorer.navigation[&pane].selected,
+        Some(directory.0.join("covered-match.txt")),
+        "the press chose the row under it"
+    );
+    assert!(window.presses_for_the_program.is_empty());
+    window
+        .pane_called(pane)
+        .unwrap()
+        .screen
+        .advance(b"\x1b[?1000l\x1b[?1006l");
+    let console = window
+        .pane_called(pane)
+        .unwrap()
+        .painted_console
+        .as_ref()
+        .unwrap()
+        .area;
+    click_at(&mut window, &ctx, area, console.center());
+    frame(&mut window, &ctx, area, vec![egui::Event::Text("Z".into())]);
+    assert_eq!(
+        received.wait_for(1, Duration::from_secs(5)),
+        b"Z",
+        "only the marker reached the program"
+    );
 }
