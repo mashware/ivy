@@ -108,18 +108,7 @@ impl Roles {
         from: Color32,
         amount: f32,
     ) -> Color32 {
-        let stands = |c: Color32| {
-            over.iter()
-                .all(|f| project_ink_contrast(c, *f) >= INVISIBLE)
-        };
-        if stands(role) {
-            return role;
-        }
-        [amount, amount * 2.0, 0.6]
-            .into_iter()
-            .map(|step| mix(from, self.tx, step))
-            .find(|c| stands(*c))
-            .unwrap_or(self.tx)
+        apart(role, over, from, self.tx, amount)
     }
 
     pub(crate) fn of(theme: &Theme) -> Self {
@@ -137,23 +126,30 @@ impl Roles {
         // text reads they are the same colour, and a configuration that collapsed the foreground
         // onto the background still gets a hover, a raised menu and a border that show. A step
         // that would take a text surface under the text's own contrast goes the other way.
+        // Only a foreground that had to be replaced changes anything here: for a theme whose
+        // text reads, `tx` is the foreground and every surface is the design's mix.
+        let corrected = tx != fg;
         let raised = if dark {
-            text_surface(bg, tx, 0.06)
+            text_surface(bg, tx, 0.06, corrected)
         } else {
             Color32::WHITE
         };
-        let hover = text_surface(bg, tx, 0.09);
-        // A focus colour set equal to the background would leave the selection on it.
-        let selection_tint = if project_ink_contrast(accent, bg) < INVISIBLE {
-            tx
-        } else {
-            accent
-        };
+        let hover = text_surface(bg, tx, 0.09, corrected);
         let chrome = if dark {
             mix(bg, Color32::BLACK, 0.22)
         } else {
-            mix(bg, fg, 0.06)
+            text_surface(bg, tx, 0.06, corrected)
         };
+        // The selection is a row text sits on, among the console, a menu and a hovered row; a
+        // focus colour that lands it on any of them (the background itself, or a shade of the
+        // menu) leaves it a step of the text instead.
+        let sel = apart(
+            mix(bg, accent, 0.18),
+            &[bg, raised, hover],
+            text_surface(bg, tx, 0.18, true),
+            tx,
+            0.0,
+        );
         // Secondary and muted text must read on the worst of the surfaces the roles themselves
         // name. A surface painted from them — a console header tinted with its project — brings
         // its text back on its own (D96).
@@ -165,7 +161,7 @@ impl Roles {
             panel,
             raised,
             hover,
-            sel: mix(bg, selection_tint, 0.18),
+            sel,
             line: theme.divider,
             line2: mix(bg, tx, 0.17),
             tx,
@@ -202,11 +198,12 @@ impl Roles {
     }
 }
 
-/// `bg` stepped toward the text by `step`, or away from it where that would leave the text
-/// unreadable on the result (a mid-grey background whose text was moved to black).
-fn text_surface(bg: Color32, tx: Color32, step: f32) -> Color32 {
+/// `bg` stepped toward the text by `step`. Where the text had to be replaced (`may_turn`) and
+/// that step would leave it unreadable on the result — a mid-grey background whose text became
+/// black — the step goes the other way. A theme's own foreground is never second-guessed.
+fn text_surface(bg: Color32, tx: Color32, step: f32, may_turn: bool) -> Color32 {
     let toward = mix(bg, tx, step);
-    if project_ink_contrast(tx, toward) >= TEXT_CONTRAST {
+    if !may_turn || project_ink_contrast(tx, toward) >= TEXT_CONTRAST {
         return toward;
     }
     let away =
@@ -216,6 +213,28 @@ fn text_surface(bg: Color32, tx: Color32, step: f32) -> Color32 {
             Color32::WHITE
         };
     mix(bg, away, step)
+}
+
+/// `role`, unless it vanishes into one of the fills it is painted over: then `from` stepped toward
+/// `tx` — further each time, never past it — until it stands apart from all of them.
+fn apart(role: Color32, over: &[Color32], from: Color32, tx: Color32, amount: f32) -> Color32 {
+    let stands = |c: Color32| {
+        over.iter()
+            .all(|f| project_ink_contrast(c, *f) >= INVISIBLE)
+    };
+    if stands(role) {
+        return role;
+    }
+    [
+        amount,
+        (amount * 2.0).min(1.0),
+        (amount * 3.0).min(1.0),
+        1.0,
+    ]
+    .into_iter()
+    .map(|step| mix(from, tx, step))
+    .find(|c| stands(*c))
+    .unwrap_or(tx)
 }
 
 /// The color with the given opacity, keeping its hue.
@@ -300,7 +319,49 @@ mod collapse_tests {
                     project_ink_contrast(r.hover, r.raised) >= 1.03,
                     "{hex:06x} hover/raised"
                 );
+            } else {
+                assert!(
+                    project_ink_contrast(r.chrome, r.base) >= 1.03,
+                    "{hex:06x} chrome"
+                );
             }
+            assert!(
+                project_ink_contrast(r.tx, r.sel) >= 4.5,
+                "{hex:06x} text on sel"
+            );
+        }
+    }
+
+    /// A theme whose own foreground reads, however narrowly, keeps the design's mixes: its menus
+    /// stay a step lighter than the console, never darker.
+    #[test]
+    fn a_readable_foreground_keeps_the_design_mixes() {
+        let rgb = |hex: u32| Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+        let theme = Theme {
+            background: rgb(0x002b36),
+            foreground: rgb(0x839496),
+            ..Theme::default()
+        };
+        let r = Roles::of(&theme);
+        assert_eq!(r.tx, rgb(0x839496));
+        assert_eq!(r.raised, rgb(0x08313c));
+        assert_eq!(r.hover, rgb(0x0c343f));
+    }
+
+    /// A focus colour that lands the selection on a menu's own surface moves the selection, so
+    /// the chosen row still shows.
+    #[test]
+    fn a_selection_that_lands_on_the_menu_is_moved() {
+        let ivy = Roles::of(&Theme::default());
+        // The accent whose 18 % tint is `raised`: a third of the way from the background to the
+        // text.
+        let theme = Theme {
+            focus: mix(ivy.base, ivy.tx, 0.06 / 0.18),
+            ..Theme::default()
+        };
+        let r = Roles::of(&theme);
+        for (name, fill) in [("base", r.base), ("raised", r.raised), ("hover", r.hover)] {
+            assert!(project_ink_contrast(r.sel, fill) >= 1.03, "sel on {name}");
         }
     }
 }

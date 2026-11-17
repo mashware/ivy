@@ -43,7 +43,7 @@ pub(super) fn show(
                 // it the chrome stays on the document's background instead. The rules are the
                 // person's `divider`, drawn toward the text where it would vanish into the chrome.
                 let surface = roles.panel_or(roles.tx, roles.base);
-                // The frame's sides run between the console and the document, both on `base`.
+                // The frame's sides also border the document, which is on `base`.
                 let line = roles.apart(roles.line, &[surface, roles.base], surface, 0.16);
                 let frame = egui::Frame::new()
                     .fill(surface)
@@ -470,13 +470,6 @@ mod tests {
             let (settings, _) = crate::settings::interpret("divider=#13181b").unwrap();
             crate::theme::Theme::default().with_colors(&settings.colors)
         };
-        let roles = crate::theme::Roles::of(&hidden_divider);
-        assert!(
-            crate::theme::project_ink_contrast(
-                roles.apart(roles.line, &[roles.panel, roles.base], roles.panel, 0.16),
-                roles.base
-            ) >= 1.03
-        );
         for (theme, chrome) in [
             (crate::theme::Theme::default(), rgb(0x171d21)),
             (unreadable, rgb(0x13181b)),

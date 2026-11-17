@@ -103,7 +103,7 @@ impl Menu {
         for (index, action) in Action::ALL.into_iter().enumerate() {
             let row = self.row(index);
             if self.enabled[index] && index == self.selected {
-                // Inset and rounded like the kit's menu rows, inside the menu's rounded corners.
+                // Inset and rounded so it stays inside the menu's rounded corners.
                 painter.rect_filled(
                     row.shrink2(egui::vec2(4.0, 1.0)),
                     crate::theme::metrics::RADIUS_CONTROL,
@@ -118,7 +118,7 @@ impl Menu {
                 format!("{} (not enough room)", action.label(self.folded))
             };
             painter.text(
-                row.left_center() + egui::vec2(6.0, 0.0),
+                row.left_center() + egui::vec2(12.0, 0.0),
                 egui::Align2::LEFT_CENTER,
                 text,
                 egui::FontId::monospace(metrics.height() * 0.75),
