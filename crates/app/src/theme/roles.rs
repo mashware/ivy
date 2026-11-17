@@ -37,6 +37,10 @@ pub(crate) struct Roles {
     pub hover: Color32,
     /// A selected row.
     pub sel: Color32,
+    /// A hovered row painted over `panel`, retaining the theme's translucent mix when visible.
+    pub list_hover: Color32,
+    /// A chosen row painted over `panel`.
+    pub list_sel: Color32,
     /// Separators.
     pub line: Color32,
     /// Control borders.
@@ -140,7 +144,14 @@ impl Roles {
         } else {
             Color32::WHITE
         };
-        let hover = text_surface(bg, tx, 0.09, corrected);
+        let hover = interaction(
+            text_surface(bg, tx, 0.09, corrected),
+            &[bg, raised, panel],
+            bg,
+            tx,
+            corrected,
+            0.09,
+        );
         let chrome = if dark {
             mix(bg, Color32::BLACK, 0.22)
         } else {
@@ -151,10 +162,25 @@ impl Roles {
         // menu) leaves it a step of the text instead — never the text itself.
         let sel = selection(
             mix(bg, accent, 0.18),
-            &[bg, raised, hover],
+            &[bg, raised, panel, hover],
             bg,
             tx,
             corrected,
+        );
+        // Alpha fills are judged on their actual backing, not their premultiplied RGB.
+        let list_fill = |candidate, fallback, among: &[Color32], amount| {
+            if stands_apart(panel.blend(candidate), among) {
+                candidate
+            } else {
+                interaction(fallback, among, bg, tx, corrected, amount)
+            }
+        };
+        let list_hover = list_fill(fg.gamma_multiply(0.07), hover, &[panel], 0.09);
+        let list_sel = list_fill(
+            accent.gamma_multiply(0.22),
+            sel,
+            &[panel, panel.blend(list_hover)],
+            0.18,
         );
         // Secondary and muted text must read on the worst of the surfaces the roles themselves
         // name. A surface painted from them — a console header tinted with its project — brings
@@ -168,6 +194,8 @@ impl Roles {
             raised,
             hover,
             sel,
+            list_hover,
+            list_sel,
             line: theme.divider,
             line2: mix(bg, tx, 0.17),
             tx,
@@ -253,12 +281,32 @@ fn selection(
     tx: Color32,
     corrected: bool,
 ) -> Color32 {
-    if stands_apart(tinted, among) {
-        return tinted;
+    interaction(tinted, among, bg, tx, corrected, 0.18)
+}
+
+/// Keep an already distinct fill; otherwise search the nearest surface step, preserving the
+/// corrected foreground's readability even when `text_surface` has to turn away from the ink.
+fn interaction(
+    candidate: Color32,
+    among: &[Color32],
+    bg: Color32,
+    tx: Color32,
+    corrected: bool,
+    amount: f32,
+) -> Color32 {
+    if stands_apart(candidate, among) {
+        return candidate;
     }
-    // The step, not a search: the selection is chosen to read as a step of the background, and
-    // a further fallback toward the text is what once returned the text colour itself.
-    text_surface(bg, tx, 0.18, corrected)
+    (0..)
+        .map(|n| amount + n as f32 / 100.0)
+        .take_while(|step| *step < 0.95)
+        .map(|step| text_surface(bg, tx, step, corrected))
+        .find(|c| {
+            *c != tx
+                && stands_apart(*c, among)
+                && (!corrected || project_ink_contrast(tx, *c) >= TEXT_CONTRAST)
+        })
+        .unwrap_or_else(|| text_surface(bg, tx, amount, corrected))
 }
 
 /// The color with the given opacity, keeping its hue.
@@ -640,6 +688,102 @@ mod tests {
                 ..Default::default()
             });
             assert_eq!(Roles::of(&theme).accent, rgb(0xff00ff), "{named:?}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod collision_tests {
+    use super::*;
+    use crate::theme::NamedTheme;
+
+    fn configured(source: &str) -> Theme {
+        let (settings, warnings) = crate::settings::interpret(source).unwrap();
+        assert_eq!(warnings.total(), 0);
+        settings
+            .theme
+            .map(NamedTheme::theme)
+            .unwrap_or_default()
+            .with_colors(&settings.colors)
+    }
+
+    #[test]
+    fn parsed_collisions_leave_shared_states_visible_on_every_backing() {
+        for source in [
+            "theme=ivy-night\npanel=#1a372e\n",
+            "theme=ivy-night\npanel=#262b2d\n",
+            "background=#000000\nforeground=#757575\n",
+        ] {
+            let theme = configured(source);
+            let r = Roles::of(&theme);
+            for backing in [r.base, r.raised, r.panel] {
+                assert!(
+                    project_ink_contrast(r.hover, backing) >= 1.03,
+                    "{source}: hover {backing:?}"
+                );
+                assert!(
+                    project_ink_contrast(r.sel, backing) >= 1.03,
+                    "{source}: selection {backing:?}"
+                );
+            }
+            assert!(project_ink_contrast(r.sel, r.hover) >= 1.03, "{source}");
+            assert_eq!(r.base, theme.background);
+            assert_eq!(r.panel, theme.panel_background);
+            assert_eq!(r.accent, theme.focus);
+        }
+    }
+
+    #[test]
+    fn panel_rows_compare_composited_colors_and_preserve_visible_alpha() {
+        let ivy = Roles::of(&Theme::default());
+        assert_eq!(ivy.list_hover.to_array(), [16, 16, 16, 18]);
+        assert_eq!(ivy.list_sel.to_array(), [13, 43, 29, 56]);
+        for theme in NamedTheme::ALL.iter().map(|n| n.theme()).chain([
+            configured("theme=ivy-night\nfocus=#171d21\n"),
+            configured("theme=ivy-night\nforeground=#171d21\n"),
+            configured("theme=ivy-night\npanel=#1a372e\n"),
+            configured("theme=ivy-night\npanel=#262b2d\n"),
+        ]) {
+            let r = Roles::of(&theme);
+            let hover = r.panel.blend(r.list_hover);
+            let sel = r.panel.blend(r.list_sel);
+            assert!(
+                project_ink_contrast(hover, r.panel) >= 1.03,
+                "{theme:?} hover"
+            );
+            assert!(stands_apart(sel, &[r.panel, hover]), "{theme:?} selection");
+            let original_hover = theme.foreground.gamma_multiply(0.07);
+            if stands_apart(r.panel.blend(original_hover), &[r.panel]) {
+                assert_eq!(r.list_hover, original_hover);
+            }
+            let original_sel = theme.focus.gamma_multiply(0.22);
+            if stands_apart(r.panel.blend(original_sel), &[r.panel, hover]) {
+                assert_eq!(r.list_sel, original_sel);
+            }
+        }
+        // A panel-only row may coincide with an unrelated backing and must still be preserved.
+        let theme = Theme {
+            background: ivy.panel.blend(ivy.list_hover),
+            ..Theme::default()
+        };
+        assert_eq!(Roles::of(&theme).list_hover, ivy.list_hover);
+    }
+
+    #[test]
+    fn visible_catalog_and_custom_candidates_keep_their_exact_mixes() {
+        for theme in NamedTheme::ALL.iter().map(|n| n.theme()).chain([
+            configured("background=#002b36\nforeground=#839496\n"),
+            configured("background=#111111\nforeground=#dddddd\npanel=#191919\nfocus=#4488cc\n"),
+        ]) {
+            let r = Roles::of(&theme);
+            let hover = mix(theme.background, theme.foreground, 0.09);
+            if stands_apart(hover, &[r.base, r.raised, r.panel]) {
+                assert_eq!(r.hover, hover);
+            }
+            let sel = mix(theme.background, theme.focus, 0.18);
+            if stands_apart(sel, &[r.base, r.raised, r.panel, r.hover]) {
+                assert_eq!(r.sel, sel);
+            }
         }
     }
 }

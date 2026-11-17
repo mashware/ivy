@@ -53,17 +53,6 @@ impl Palette {
         // The navigation sits on the person's own `panel` colour; where that leaves its text
         // unreadable it falls back to the dialog's surface rather than hide the way back.
         let nav = roles.panel_or(ink, surface);
-        // The roles floor a collapsed foreground; Settings also meets a theme's own narrow mixes
-        // (black and #757575: hover 1.02:1 over raised) and a `panel` set to the hover or the
-        // selection's tint, and it is where a broken configuration is undone, so it floors its
-        // hover and selection here too. (The border, a 17 % step, stands apart wherever text reads.)
-        fixed.hover = fixed.apart(roles.hover, &[surface, roles.base, nav], surface, 0.10);
-        fixed.sel = fixed.apart(
-            roles.sel,
-            &[fixed.hover, roles.base, surface, nav],
-            surface,
-            0.20,
-        );
         // The caret — the text cursor and a pressed control's border — is drawn over fields, the
         // dialog, the selection, a pressed control's hover fill and the navigation: the accent where
         // it stands apart from all of them, else the ink.
@@ -214,7 +203,7 @@ mod tests {
         assert!(project_ink_contrast(p.ink, p.nav) >= 4.5);
     }
 
-    /// Two configurations a person can write, where the roles alone would hide a Settings fill:
+    /// Reachable configurations whose shared roles must also keep Settings fills visible:
     /// a narrow dark theme (hover a hair off the dialog) and a `panel` set to the selection's tint.
     #[test]
     fn narrow_themes_and_a_panel_on_the_selection_keep_settings_fills_apart() {
@@ -225,6 +214,8 @@ mod tests {
         ] {
             let theme = super::super::appearance::effective_theme(&Document::new(config.into()));
             let p = Palette::new(theme);
+            assert_eq!(p.roles.hover, Roles::of(&theme).hover);
+            assert_eq!(p.roles.sel, Roles::of(&theme).sel);
             let apart = |a: Color32, b: Color32| project_ink_contrast(a, b) >= 1.03;
             assert!(
                 apart(p.roles.hover, p.surface),

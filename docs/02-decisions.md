@@ -10160,9 +10160,9 @@ of the ink itself; text on a moved fill is re-inked to what reads on it, which i
 legible; the caret, a line and not a fill, becomes the ink itself — so the control can still be
 found; Settings
 paints from the roles with those corrections written back, so its outline and every field egui
-derives from them carry them too. Settings, where a broken configuration is undone, also keeps
-its hover and selection apart from its own surfaces when a theme's narrow mixes or a `panel` set to
-one of them would merge them. Nothing else is corrected: an explicit focus is the person's colour verbatim (D94) wherever it can be seen, and the
+derives from them carry them too. The shared roles keep hover and selection apart from `base`, `raised`, `panel` and one another,
+including a theme's own narrow mixes and a `panel` set to one of them. Settings inherits that floor;
+its local ink, navigation and caret safeguards remain. Nothing else is corrected: an explicit focus is the person's colour verbatim (D94) wherever it can be seen, and the
 old Settings palette's 3:1 floor on every border and on the accent is dropped with it.
 
 **The surfaces step toward the readable text.** `raised`, `hover`, `line2` and a light theme's
@@ -10187,3 +10187,14 @@ taken: the first would cut the path line, the second is a feature no section ask
 | Keep D67's neutral Settings palette | The one window that did not look like Ivy, and the stock dark start under it followed the desktop. |
 | Install the style once and let every surface inherit it | Settings previews a draft theme and the Board a derived one; the installed style is the live theme's. |
 | Correct accent and borders to 3:1 as the old palette did | Rewrites an explicit focus colour wherever it is visible; D94 keeps it verbatim and corrects only text. |
+
+**Shared collision floor, 17 November 2026 — #99.** A configured `panel` could equal selection
+(`#1a372e` on Ivy Night) or hover (`#262b2d`), while black with foreground `#757575` left menu hover
+at about 1.02:1. The floor belongs to `Roles::of`, so every consumer receives the same final fills.
+An already distinct candidate is retained exactly. A collision searches the nearest background step
+in increments of 0.01 below 0.95; corrected foregrounds keep their 4.5:1 text constraint and direction
+handling. The bounded search retains its first-step fallback when no candidate can satisfy it.
+Explorer's panel-only row roles retain the original translucent mixes when their actual panel
+composites clear 1.03:1; otherwise they use corrected shared fills, selection also apart from the
+final displayed hover. Configured background, panel and focus remain verbatim. Settings no longer
+floors these fills locally, and still re-inks controls and selected text and protects the caret.

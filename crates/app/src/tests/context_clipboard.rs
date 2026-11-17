@@ -957,4 +957,23 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn colliding_console_menu_paints_a_distinct_hover() {
+        let (mut window, ctx) = warmed();
+        let (settings, _) =
+            settings::interpret("background=#000000\nforeground=#757575\n").unwrap();
+        window.theme = theme::Theme::default().with_colors(&settings.colors);
+        let roles = theme::Roles::of(&window.theme);
+        let area = area_of(1400.0);
+        ui_pass(&mut window, &ctx, area, egui::RawInput::default());
+        let shapes = menu_at_console(&mut window, &ctx, area, 0);
+        let at = text_center(&shapes, "Paste");
+        for _ in 0..2 {
+            one_frame_in(&mut window, &ctx, area, vec![egui::Event::PointerMoved(at)]);
+        }
+        let shapes = ui_pass(&mut window, &ctx, area, egui::RawInput::default());
+        assert!(shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == roles.hover && r.rect.contains(at))));
+        assert!(theme::project_ink_contrast(roles.hover, roles.raised) >= 1.03);
+    }
 }

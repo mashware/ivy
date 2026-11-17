@@ -297,4 +297,34 @@ mod tests {
         assert_eq!(menu.selected(), Some((7, Action::SplitDown)));
         assert_eq!(menu.action_at(boundary), Some((7, Action::SplitDown)));
     }
+
+    #[test]
+    fn colliding_pane_menu_paints_chosen_fill_for_pointer_and_keyboard() {
+        let (settings, _) = crate::settings::interpret("theme=ivy-night\npanel=#1a372e\n").unwrap();
+        let theme = Theme::default().with_colors(&settings.colors);
+        let roles = crate::theme::Roles::of(&theme);
+        let ctx = egui::Context::default();
+        let metrics = CellMetrics::of(8.0, 16.0);
+        let mut menu = Menu::new(
+            1,
+            egui::pos2(20.0, 20.0),
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 400.0)),
+            &metrics,
+            [true; 3],
+            false,
+        );
+        for keyboard in [false, true] {
+            if keyboard {
+                menu.step(1);
+            } else {
+                menu.hover(menu.row(0).center());
+            }
+            let output = ctx.run_ui(Default::default(), |ui| {
+                menu.paint(ui.ctx(), &metrics, &theme)
+            });
+            assert!(output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == roles.sel && r.rect == menu.row(menu.selected).shrink2(egui::vec2(4.0, 1.0)))));
+            assert!(crate::theme::project_ink_contrast(roles.sel, roles.panel) >= 1.03);
+            output.drop_without_applying_deltas();
+        }
+    }
 }
