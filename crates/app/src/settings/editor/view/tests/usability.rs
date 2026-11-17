@@ -265,3 +265,111 @@ fn draft_size_changes_the_rendered_specimen_instead_of_a_fixed_sample() {
     }
     assert!(specimen, "the actual specimen must be painted");
 }
+
+fn rect_fills(shape: &egui::epaint::Shape, out: &mut Vec<(egui::Rect, egui::Color32)>) {
+    match shape {
+        egui::epaint::Shape::Rect(rect) => out.push((rect.rect, rect.fill)),
+        egui::epaint::Shape::Vec(shapes) => shapes.iter().for_each(|s| rect_fills(s, out)),
+        _ => {}
+    }
+}
+
+/// Settings is painted with the roles of the theme it previews, written out — the navigation on
+/// `panel`, the primary action on `accent` with its `on_accent` ink — and the desktop's light or
+/// dark preference changes none of it (D98).
+#[test]
+fn settings_paints_the_previewed_roles_whatever_the_desktop_prefers() {
+    let rgb = |hex: u32| egui::Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+    for preference in [egui::ThemePreference::Dark, egui::ThemePreference::Light] {
+        let file = File::new();
+        let mut editor = Editor::resolved(crate::settings::Entry::Normal, None);
+        editor.open(Some(file.0.clone()));
+        // The fixture file names Gruvbox; preview Ivy Night, whose roles are written out below.
+        editor
+            .draft
+            .as_mut()
+            .unwrap()
+            .fields
+            .iter_mut()
+            .find(|f| f.key == "theme")
+            .unwrap()
+            .value = "ivy-night".into();
+        let ctx = egui::Context::default();
+        ctx.set_theme(preference);
+        // Final colours, without the modal's time-dependent fade.
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        let size = egui::vec2(1100.0, 850.0);
+        paint(&mut editor, &ctx, size, vec![]);
+        let (text, shapes) = scene(&mut editor, &ctx, size, vec![]);
+        let mut rects = Vec::new();
+        for clipped in &shapes {
+            rect_fills(&clipped.shape, &mut rects);
+        }
+        let fill_under = |label: &str| {
+            let at = text
+                .iter()
+                .find(|(s, _)| s == label)
+                .unwrap_or_else(|| panic!("{label}: {text:?}"))
+                .1
+                .center();
+            rects
+                .iter()
+                // A frameless button paints an empty rect over its row; only real fills count.
+                .filter(|(rect, fill)| rect.contains(at) && *fill != egui::Color32::TRANSPARENT)
+                .min_by(|(a, _), (b, _)| a.area().total_cmp(&b.area()))
+                .map(|(_, fill)| *fill)
+        };
+        // "Cursor" is a navigation row that is not selected: the navigation's own fill shows.
+        assert_eq!(fill_under("Cursor"), Some(rgb(0x171d21)), "{preference:?}");
+        assert_eq!(
+            fill_under("Save and close"),
+            Some(rgb(0x3cc384)),
+            "{preference:?}"
+        );
+        let ink = shapes.iter().find_map(|s| match &s.shape {
+            egui::Shape::Text(t) if t.galley.text() == "Save and close" => {
+                let color = t.galley.job.sections[0].format.color;
+                Some(if color == egui::Color32::PLACEHOLDER {
+                    t.fallback_color
+                } else {
+                    color
+                })
+            }
+            _ => None,
+        });
+        assert_eq!(ink, Some(egui::Color32::BLACK), "{preference:?}");
+    }
+}
+
+/// The console-title and tab-label sizes use the same 40-point point-size box as the font's size,
+/// not a bare 55-point text field.
+#[test]
+fn title_sizes_use_the_point_size_box() {
+    let mut editor = Editor {
+        draft: Some(Document::new("theme=ivy-night\n".into())),
+        ..Default::default()
+    };
+    let ctx = egui::Context::default();
+    ctx.all_styles_mut(|style| style.animation_time = 0.0);
+    let size = egui::vec2(1100.0, 1200.0);
+    paint(&mut editor, &ctx, size, vec![]);
+    let (text, shapes) = scene(&mut editor, &ctx, size, vec![]);
+    let mut rects = Vec::new();
+    for clipped in &shapes {
+        rect_fills(&clipped.shape, &mut rects);
+    }
+    let base = egui::Color32::from_rgb(0x13, 0x18, 0x1b);
+    for hint in ["14", "12"] {
+        let boxes = text
+            .iter()
+            .filter(|(s, _)| s == hint)
+            .filter(|(_, at)| {
+                rects.iter().any(|(r, fill)| {
+                    *fill == base && r.size() == egui::vec2(113.0, 40.0) && r.contains(at.center())
+                })
+            })
+            .count();
+        let expected = if hint == "12" { 2 } else { 1 };
+        assert_eq!(boxes, expected, "{hint}: {text:?}");
+    }
+}
