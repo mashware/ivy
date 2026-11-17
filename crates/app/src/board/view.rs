@@ -360,8 +360,10 @@ pub(crate) const HINT: &str = "Enter go to console  ·  Arrows move between card
 
 /// The keys, named once at the foot of the Board instead of in every card.
 fn paint_hint(ui: &mut egui::Ui, roles: &crate::theme::Roles) {
-    let (rect, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), HINT_HEIGHT), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), HINT_HEIGHT),
+        egui::Sense::hover(),
+    );
     ui.painter().rect_filled(rect, 0.0, roles.chrome);
     ui.painter().line_segment(
         [rect.left_top(), rect.right_top()],
@@ -494,11 +496,7 @@ fn paint_stacked_header(
         egui::Align2::CENTER_CENTER,
         count.to_string(),
         egui::FontId::monospace(11.0),
-        if count > 0 {
-            ink
-        } else {
-            roles.tx3
-        },
+        if count > 0 { ink } else { roles.tx3 },
     );
     ui.painter().line_segment(
         [header.left_bottom(), header.right_bottom()],
@@ -542,11 +540,7 @@ fn paint_columns(
             egui::Align2::CENTER_CENTER,
             count,
             egui::FontId::monospace(11.0),
-            if counts[index] > 0 {
-                ink
-            } else {
-                roles.tx3
-            },
+            if counts[index] > 0 { ink } else { roles.tx3 },
         );
         left += widths[index] + 8.0;
     }

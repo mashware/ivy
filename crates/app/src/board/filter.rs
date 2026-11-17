@@ -46,7 +46,11 @@ fn matches(entry: &Entry, query: &str) -> bool {
 
 /// Narrows the sections in place. With a narrowing active, a project left without consoles is
 /// dropped — its roadmap included — because what the reader asked for is consoles.
-pub(super) fn apply(sections: &mut Vec<Section>, filter: &Filter, column: impl Fn(&Entry) -> Column) {
+pub(super) fn apply(
+    sections: &mut Vec<Section>,
+    filter: &Filter,
+    column: impl Fn(&Entry) -> Column,
+) {
     if !filter.is_active() {
         return;
     }
@@ -129,10 +133,7 @@ mod tests {
     #[test]
     fn claiming_keeps_waiting_and_stuck_consoles_and_drops_emptied_projects() {
         let mut sections = vec![
-            section(vec![
-                entry(1, "api", "Billing"),
-                entry(3, "web", "Billing"),
-            ]),
+            section(vec![entry(1, "api", "Billing"), entry(3, "web", "Billing")]),
             section(vec![entry(4, "ci", "Ops")]),
             section(vec![entry(2, "tokens", "Dashboard")]),
         ];
@@ -142,7 +143,11 @@ mod tests {
         };
         apply(&mut sections, &filter, |e| column_of(e.pane));
         assert_eq!(panes(&sections), [1, 2]);
-        assert_eq!(sections.len(), 2, "the project with only a finished console is gone");
+        assert_eq!(
+            sections.len(),
+            2,
+            "the project with only a finished console is gone"
+        );
     }
 
     #[test]

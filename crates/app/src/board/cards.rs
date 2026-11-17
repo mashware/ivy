@@ -358,8 +358,12 @@ fn claim_row(
         Attention::Done => ("Finished · unread", roles.done),
     };
     let ink = if claim.backed { ink } else { roles.tx3 };
-    let (row, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 20.0), egui::Sense::hover());
-    let pill = Rect::from_min_size(row.min, egui::vec2(crate::ui::claim_pill::SIZE, row.height()));
+    let (row, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 20.0), egui::Sense::hover());
+    let pill = Rect::from_min_size(
+        row.min,
+        egui::vec2(crate::ui::claim_pill::SIZE, row.height()),
+    );
     crate::ui::claim_pill::paint(ui.painter(), pill, claim, roles);
     let font = egui::FontId::new(12.0, crate::fonts::ui_weight(ui.ctx(), 500));
     ui.painter().text(
@@ -385,10 +389,22 @@ fn dashed(painter: &egui::Painter, rect: Rect, color: Color32) {
     let inset = f32::from(crate::theme::metrics::RADIUS_CARD);
     let stroke = egui::Stroke::new(1.0, color);
     for (from, to) in [
-        (egui::pos2(r.left() + inset, r.top()), egui::pos2(r.right() - inset, r.top())),
-        (egui::pos2(r.left() + inset, r.bottom()), egui::pos2(r.right() - inset, r.bottom())),
-        (egui::pos2(r.left(), r.top() + inset), egui::pos2(r.left(), r.bottom() - inset)),
-        (egui::pos2(r.right(), r.top() + inset), egui::pos2(r.right(), r.bottom() - inset)),
+        (
+            egui::pos2(r.left() + inset, r.top()),
+            egui::pos2(r.right() - inset, r.top()),
+        ),
+        (
+            egui::pos2(r.left() + inset, r.bottom()),
+            egui::pos2(r.right() - inset, r.bottom()),
+        ),
+        (
+            egui::pos2(r.left(), r.top() + inset),
+            egui::pos2(r.left(), r.bottom() - inset),
+        ),
+        (
+            egui::pos2(r.right(), r.top() + inset),
+            egui::pos2(r.right(), r.bottom() - inset),
+        ),
     ] {
         painter.extend(egui::Shape::dashed_line(&[from, to], stroke, 5.0, 4.0));
     }
@@ -548,7 +564,11 @@ mod tests {
             .drop_without_applying_deltas();
         }
     }
-    fn painted(doc: Option<&str>, claim: Option<panel_contract::Attention>, selected: bool) -> (Vec<egui::epaint::ClippedShape>, Rect) {
+    fn painted(
+        doc: Option<&str>,
+        claim: Option<panel_contract::Attention>,
+        selected: bool,
+    ) -> (Vec<egui::epaint::ClippedShape>, Rect) {
         let ctx = egui::Context::default();
         crate::fonts::install_bundled(&ctx);
         let entry = Entry {
@@ -556,9 +576,13 @@ mod tests {
             console_label: "Console".into(),
             tab_label: "Tab".into(),
             snapshot: crate::panel::summary::Snapshot {
-                document: doc.map(|d| std::sync::Arc::new(panel_contract::parse_document(d).unwrap())),
+                document: doc
+                    .map(|d| std::sync::Arc::new(panel_contract::parse_document(d).unwrap())),
                 warning: None,
-                attention: claim.map(|class| crate::panel::AttentionState { class, backed: true }),
+                attention: claim.map(|class| crate::panel::AttentionState {
+                    class,
+                    backed: true,
+                }),
                 outside: false,
             },
         };
@@ -591,7 +615,8 @@ mod tests {
             .filter(|s| matches!(&s.shape, egui::Shape::LineSegment { stroke, .. } if stroke.color == color))
             .count()
     }
-    const DOC: &str = r#"{"attention":"wait","lines":[{"text":"Refund webhooks","style":"title"}]}"#;
+    const DOC: &str =
+        r#"{"attention":"wait","lines":[{"text":"Refund webhooks","style":"title"}]}"#;
 
     #[test]
     fn a_console_with_no_published_state_is_dashed_and_a_published_one_is_not() {
@@ -606,8 +631,10 @@ mod tests {
     fn the_selected_card_carries_the_accent_border_at_two_points() {
         let roles = crate::theme::Roles::of(&Theme::default());
         let accent = |shapes: &[egui::epaint::ClippedShape], card: Rect| {
-            shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r)
-                if r.rect == card && r.stroke.color == roles.accent && r.stroke.width == 2.0))
+            shapes.iter().any(|s| {
+                matches!(&s.shape, egui::Shape::Rect(r)
+                if r.rect == card && r.stroke.color == roles.accent && r.stroke.width == 2.0)
+            })
         };
         let (shapes, card) = painted(Some(DOC), None, true);
         assert!(accent(&shapes, card));
@@ -619,14 +646,20 @@ mod tests {
     fn a_declared_wait_reads_as_its_pill_and_words_in_the_wait_role() {
         let roles = crate::theme::Roles::of(&Theme::default());
         let (shapes, card) = painted(Some(DOC), Some(panel_contract::Attention::Wait), false);
-        let words = shapes.iter().find_map(|s| match &s.shape {
-            egui::Shape::Text(t) if t.galley.text() == "Waiting for you" => Some(t),
-            _ => None,
-        }).expect("claim words painted");
+        let words = shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == "Waiting for you" => Some(t),
+                _ => None,
+            })
+            .expect("claim words painted");
         assert_eq!(words.fallback_color, roles.wait);
         assert!(card.contains(words.pos));
-        assert!(shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r)
-            if r.fill == roles.wait && r.rect.width() == crate::ui::claim_pill::SIZE)));
+        assert!(
+            shapes
+                .iter()
+                .any(|s| matches!(&s.shape, egui::Shape::Rect(r)
+            if r.fill == roles.wait && r.rect.width() == crate::ui::claim_pill::SIZE))
+        );
     }
-
 }

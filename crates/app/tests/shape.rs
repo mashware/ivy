@@ -286,6 +286,15 @@ const MODULES: &[(&str, &str)] = &[
         "src/board/branches.rs",
         include_str!("../src/board/branches.rs"),
     ),
+    ("src/board/bar.rs", include_str!("../src/board/bar.rs")),
+    (
+        "src/board/filter.rs",
+        include_str!("../src/board/filter.rs"),
+    ),
+    (
+        "src/board/milestones.rs",
+        include_str!("../src/board/milestones.rs"),
+    ),
     ("src/board/cards.rs", include_str!("../src/board/cards.rs")),
     ("src/board/style.rs", include_str!("../src/board/style.rs")),
     (

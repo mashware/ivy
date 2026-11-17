@@ -125,9 +125,17 @@ pub(super) fn paint(
     let summary = format!(
         "{} {} · {} {}",
         totals.consoles,
-        if totals.consoles == 1 { "console" } else { "consoles" },
+        if totals.consoles == 1 {
+            "console"
+        } else {
+            "consoles"
+        },
         totals.projects,
-        if totals.projects == 1 { "project" } else { "projects" },
+        if totals.projects == 1 {
+            "project"
+        } else {
+            "projects"
+        },
     );
     x += painter
         .text(
@@ -163,7 +171,11 @@ pub(super) fn paint(
         x,
         y,
         &[
-            ("All".into(), !filter.claiming_only, Action::ClaimingOnly(false)),
+            (
+                "All".into(),
+                !filter.claiming_only,
+                Action::ClaimingOnly(false),
+            ),
             (
                 format!("Claiming you  {}", totals.claiming),
                 filter.claiming_only,
@@ -204,7 +216,13 @@ pub(super) fn paint(
     hits.push((close, Command::Bar(Action::Close)));
     let field_width = (close.left() - GAP - x).min(240.0);
     if field_width >= 80.0 {
-        paint_field(&painter, Rect::from_min_size(pos2(x, y - CONTROL / 2.0), vec2(field_width, CONTROL)), filter, roles, hits);
+        paint_field(
+            &painter,
+            Rect::from_min_size(pos2(x, y - CONTROL / 2.0), vec2(field_width, CONTROL)),
+            filter,
+            roles,
+            hits,
+        );
     }
     bar
 }
@@ -236,7 +254,10 @@ fn paint_field(
         Stroke::new(1.3, roles.tx3),
     );
     let text_at = pos2(field.left() + 26.0, field.center().y);
-    let clip = Rect::from_min_max(pos2(text_at.x, field.top()), pos2(field.right() - 24.0, field.bottom()));
+    let clip = Rect::from_min_max(
+        pos2(text_at.x, field.top()),
+        pos2(field.right() - 24.0, field.bottom()),
+    );
     let clipped = painter.with_clip_rect(clip.intersect(painter.clip_rect()));
     if filter.query.is_empty() {
         clipped.text(
@@ -254,13 +275,25 @@ fn paint_field(
             FontId::proportional(12.5),
             roles.tx,
         );
-        let clear = Rect::from_center_size(pos2(field.right() - 12.0, field.center().y), vec2(16.0, 16.0));
-        painter.text(clear.center(), Align2::CENTER_CENTER, "×", FontId::proportional(13.0), roles.tx2);
+        let clear = Rect::from_center_size(
+            pos2(field.right() - 12.0, field.center().y),
+            vec2(16.0, 16.0),
+        );
+        painter.text(
+            clear.center(),
+            Align2::CENTER_CENTER,
+            "×",
+            FontId::proportional(13.0),
+            roles.tx2,
+        );
         hits.push((clear, Command::Bar(Action::ClearQuery)));
         if filter.editing {
             let caret = shown.right().min(clip.right()) + 1.0;
             painter.line_segment(
-                [pos2(caret, field.center().y - 7.0), pos2(caret, field.center().y + 7.0)],
+                [
+                    pos2(caret, field.center().y - 7.0),
+                    pos2(caret, field.center().y + 7.0),
+                ],
                 Stroke::new(1.0, roles.accent),
             );
         }
@@ -273,7 +306,10 @@ fn paint_field(
 mod tests {
     use super::*;
 
-    fn painted(filter: &Filter, arrangement: Arrangement) -> (Vec<egui::epaint::ClippedShape>, Vec<(Rect, Command)>, Rect) {
+    fn painted(
+        filter: &Filter,
+        arrangement: Arrangement,
+    ) -> (Vec<egui::epaint::ClippedShape>, Vec<(Rect, Command)>, Rect) {
         let ctx = egui::Context::default();
         crate::fonts::install_bundled(&ctx);
         let roles = Roles::of(&crate::theme::Theme::default());
@@ -286,7 +322,11 @@ mod tests {
                 bar = paint(
                     ui,
                     1200.0,
-                    Totals { consoles: 7, projects: 3, claiming: 2 },
+                    Totals {
+                        consoles: 7,
+                        projects: 3,
+                        claiming: 2,
+                    },
                     arrangement,
                     filter,
                     &roles,
@@ -301,7 +341,10 @@ mod tests {
         }
         unreachable!()
     }
-    fn text<'a>(shapes: &'a [egui::epaint::ClippedShape], needle: &str) -> Option<&'a egui::epaint::TextShape> {
+    fn text<'a>(
+        shapes: &'a [egui::epaint::ClippedShape],
+        needle: &str,
+    ) -> Option<&'a egui::epaint::TextShape> {
         shapes.iter().find_map(|s| match &s.shape {
             egui::Shape::Text(t) if t.galley.text() == needle => Some(t),
             _ => None,
@@ -327,17 +370,26 @@ mod tests {
             Action::EditQuery,
             Action::Close,
         ] {
-            assert!(bar.contains_rect(hit(&hits, action)), "{action:?} outside the bar");
+            assert!(
+                bar.contains_rect(hit(&hits, action)),
+                "{action:?} outside the bar"
+            );
         }
         let close = hit(&hits, Action::Close);
-        assert!(close.right() > hit(&hits, Action::EditQuery).right(), "Close is the rightmost control");
+        assert!(
+            close.right() > hit(&hits, Action::EditQuery).right(),
+            "Close is the rightmost control"
+        );
     }
 
     #[test]
     fn the_chosen_segment_is_inked_and_filled_and_the_other_is_not() {
         let roles = Roles::of(&crate::theme::Theme::default());
         let (shapes, hits, _) = painted(&Filter::default(), Arrangement::ByMilestone);
-        assert_eq!(text(&shapes, "By milestone").unwrap().fallback_color, roles.tx);
+        assert_eq!(
+            text(&shapes, "By milestone").unwrap().fallback_color,
+            roles.tx
+        );
         assert_eq!(text(&shapes, "By state").unwrap().fallback_color, roles.tx2);
         let chosen = hit(&hits, Action::Arrange(Arrangement::ByMilestone));
         let other = hit(&hits, Action::Arrange(Arrangement::ByState));
@@ -350,16 +402,35 @@ mod tests {
 
     #[test]
     fn a_query_shows_a_clear_control_ahead_of_the_field_and_presses_change_state() {
-        let filter = Filter { query: "api".into(), editing: true, ..Filter::default() };
+        let filter = Filter {
+            query: "api".into(),
+            editing: true,
+            ..Filter::default()
+        };
         let (_, hits, _) = painted(&filter, Arrangement::ByState);
-        let clear = hits.iter().position(|(_, c)| matches!(c, Command::Bar(Action::ClearQuery)));
-        let field = hits.iter().position(|(_, c)| matches!(c, Command::Bar(Action::EditQuery)));
-        assert!(clear.unwrap() < field.unwrap(), "the clear press must be found before the field's");
+        let clear = hits
+            .iter()
+            .position(|(_, c)| matches!(c, Command::Bar(Action::ClearQuery)));
+        let field = hits
+            .iter()
+            .position(|(_, c)| matches!(c, Command::Bar(Action::EditQuery)));
+        assert!(
+            clear.unwrap() < field.unwrap(),
+            "the clear press must be found before the field's"
+        );
         let mut arrangement = Arrangement::ByState;
         let mut filter = filter;
-        assert!(!apply(&mut arrangement, &mut filter, Action::Arrange(Arrangement::ByMilestone)));
+        assert!(!apply(
+            &mut arrangement,
+            &mut filter,
+            Action::Arrange(Arrangement::ByMilestone)
+        ));
         assert_eq!(arrangement, Arrangement::ByMilestone);
-        assert!(!apply(&mut arrangement, &mut filter, Action::ClaimingOnly(true)));
+        assert!(!apply(
+            &mut arrangement,
+            &mut filter,
+            Action::ClaimingOnly(true)
+        ));
         assert!(filter.claiming_only);
         assert!(!apply(&mut arrangement, &mut filter, Action::ClearQuery));
         assert_eq!((filter.query.as_str(), filter.editing), ("", false));

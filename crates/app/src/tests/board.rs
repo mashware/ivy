@@ -1470,7 +1470,10 @@ mod tests {
         );
         crate::board::plans::refresh_readers(&mut window);
         for (origin, doc) in [
-            (origins[0], r#"{"milestone":"H3","deliverable":"D","attention":"wait","lines":["working"]}"#),
+            (
+                origins[0],
+                r#"{"milestone":"H3","deliverable":"D","attention":"wait","lines":["working"]}"#,
+            ),
             (origins[1], r#"{"lines":["Off-plan witness"]}"#),
         ] {
             window
@@ -1478,24 +1481,43 @@ mod tests {
                 .find(|p| p.name == origin)
                 .unwrap()
                 .panel_state
-                .deliver(1, "flow", panel_contract::parse_document(doc).unwrap(), SystemTime::now())
+                .deliver(
+                    1,
+                    "flow",
+                    panel_contract::parse_document(doc).unwrap(),
+                    SystemTime::now(),
+                )
                 .unwrap();
         }
         frame(&mut window, &ctx, chord_with(egui::Key::O));
         let shapes = frame(&mut window, &ctx, vec![]);
-        let toggle = text_point(&shapes, "By milestone").expect("the arrangement toggle is painted");
+        let toggle =
+            text_point(&shapes, "By milestone").expect("the arrangement toggle is painted");
         frame(&mut window, &ctx, click_at(toggle));
         frame(&mut window, &ctx, vec![]);
         let shapes = frame(&mut window, &ctx, vec![]);
-        for expected in ["H3 · Build", "after H2 · Design", "Feature", "Off the plan", "Waiting for you", crate::board::HINT] {
+        for expected in [
+            "H3 · Build",
+            "after H2 · Design",
+            "Feature",
+            "Off the plan",
+            "Waiting for you",
+            crate::board::HINT,
+        ] {
             assert!(the_text_queued_up(&shapes, expected), "missing {expected}");
         }
         assert!(
             !the_text_queued_up(&shapes, "WAITING FOR YOU"),
             "the state columns are gone in this arrangement"
         );
-        let on_plan = window.board.card_rect(origins[0]).expect("declared card painted");
-        let off_plan = window.board.card_rect(origins[1]).expect("off-plan card painted");
+        let on_plan = window
+            .board
+            .card_rect(origins[0])
+            .expect("declared card painted");
+        let off_plan = window
+            .board
+            .card_rect(origins[1])
+            .expect("off-plan card painted");
         let build = text_point(&shapes, "H3 · Build").unwrap();
         let off = text_point(&shapes, "Off the plan").unwrap();
         let feature = text_point(&shapes, "Feature").unwrap();
@@ -1503,7 +1525,10 @@ mod tests {
             on_plan.x_range().contains(build.x) && on_plan.top() > feature.y,
             "the declared card sits under its deliverable in its milestone's column"
         );
-        assert!(off_plan.x_range().contains(off.x), "the undeclared card sits in Off the plan");
+        assert!(
+            off_plan.x_range().contains(off.x),
+            "the undeclared card sits in Off the plan"
+        );
         assert!(!on_plan.x_range().contains(off.x));
         // Reading order runs across the columns: right from the declared card reaches the off-plan one.
         crate::board::select_for_test(&mut window, origins[0]);

@@ -79,12 +79,14 @@ pub(super) fn progress(milestone: &Milestone) -> (usize, usize) {
 /// How many columns fit side by side, and how wide each one is.
 pub(super) fn grid(width: f32, columns: usize) -> (usize, f32) {
     let fit = (((width + GAP) / (MIN_COLUMN + GAP)).floor() as usize).clamp(1, columns.max(1));
-    (fit, ((width - GAP * (fit - 1) as f32) / fit as f32).max(1.0))
+    (
+        fit,
+        ((width - GAP * (fit - 1) as f32) / fit as f32).max(1.0),
+    )
 }
 
 /// What paints a card: the Board's own painter, handed in so this module never owns navigation.
-pub(super) type CardPainter<'p> =
-    dyn FnMut(&mut egui::Ui, &Entry, usize, usize, f32) + 'p;
+pub(super) type CardPainter<'p> = dyn FnMut(&mut egui::Ui, &Entry, usize, usize, f32) + 'p;
 
 fn column_header(
     ui: &mut egui::Ui,
@@ -101,30 +103,47 @@ fn column_header(
     let counted = format!("{}/{}", count.0, count.1);
     let count_at = pos2(rect.right() - 4.0, rect.top() + 12.0);
     let count_width = painter
-        .text(count_at, Align2::RIGHT_CENTER, counted, FontId::monospace(11.0), roles.tx3)
+        .text(
+            count_at,
+            Align2::RIGHT_CENTER,
+            counted,
+            FontId::monospace(11.0),
+            roles.tx3,
+        )
         .width();
     let clip = Rect::from_min_max(rect.min, pos2(count_at.x - count_width - 8.0, rect.max.y));
-    painter.with_clip_rect(clip.intersect(painter.clip_rect())).text(
-        pos2(rect.left() + 4.0, rect.top() + 12.0),
-        Align2::LEFT_CENTER,
-        title,
-        font,
-        roles.tx,
+    painter
+        .with_clip_rect(clip.intersect(painter.clip_rect()))
+        .text(
+            pos2(rect.left() + 4.0, rect.top() + 12.0),
+            Align2::LEFT_CENTER,
+            title,
+            font,
+            roles.tx,
+        );
+    let track = Rect::from_min_size(
+        pos2(rect.left() + 4.0, rect.top() + 26.0),
+        vec2(width - 8.0, 3.0),
     );
-    let track = Rect::from_min_size(pos2(rect.left() + 4.0, rect.top() + 26.0), vec2(width - 8.0, 3.0));
     painter.rect_filled(track, 1.5, roles.line);
     if count.1 > 0 {
         let filled = track.width() * count.0 as f32 / count.1 as f32;
-        painter.rect_filled(Rect::from_min_size(track.min, vec2(filled, 3.0)), 1.5, roles.accent);
+        painter.rect_filled(
+            Rect::from_min_size(track.min, vec2(filled, 3.0)),
+            1.5,
+            roles.accent,
+        );
     }
     if let Some(after) = after {
-        painter.with_clip_rect(rect.intersect(painter.clip_rect())).text(
-            pos2(rect.left() + 4.0, rect.top() + 42.0),
-            Align2::LEFT_CENTER,
-            after,
-            FontId::proportional(11.5),
-            roles.tx3,
-        );
+        painter
+            .with_clip_rect(rect.intersect(painter.clip_rect()))
+            .text(
+                pos2(rect.left() + 4.0, rect.top() + 42.0),
+                Align2::LEFT_CENTER,
+                after,
+                FontId::proportional(11.5),
+                roles.tx3,
+            );
     }
 }
 
@@ -139,13 +158,15 @@ fn deliverable(ui: &mut egui::Ui, width: f32, text: &str, mark: Option<Mark>, ro
     };
     let glyph = Rect::from_center_size(pos2(row.left() + 10.0, row.center().y), vec2(12.0, 16.0));
     crate::panel::body::paint_mark(ui.painter(), glyph, mark, ink, FontId::monospace(12.0));
-    ui.painter().with_clip_rect(row.intersect(ui.clip_rect())).text(
-        pos2(row.left() + 22.0, row.center().y),
-        Align2::LEFT_CENTER,
-        super::cards::clean(text),
-        FontId::proportional(12.5),
-        text_ink,
-    );
+    ui.painter()
+        .with_clip_rect(row.intersect(ui.clip_rect()))
+        .text(
+            pos2(row.left() + 22.0, row.center().y),
+            Align2::LEFT_CENTER,
+            super::cards::clean(text),
+            FontId::proportional(12.5),
+            text_ink,
+        );
 }
 
 /// A project whose plan is laid out as columns. `paint_card(ui, entry, row, column, width)` paints
@@ -180,8 +201,17 @@ pub(super) fn paint_plan(
                                 None => milestone.title.clone(),
                             };
                             let after = after(milestone, plan);
-                            column_header(ui, width, &super::cards::clean(&title), progress(milestone), after.as_deref(), roles);
-                            for (item, consoles) in milestone.items.iter().zip(&placed.milestones[index].items) {
+                            column_header(
+                                ui,
+                                width,
+                                &super::cards::clean(&title),
+                                progress(milestone),
+                                after.as_deref(),
+                                roles,
+                            );
+                            for (item, consoles) in
+                                milestone.items.iter().zip(&placed.milestones[index].items)
+                            {
                                 deliverable(ui, width, &item.text, item.mark, roles);
                                 for entry in consoles {
                                     paint_card(ui, entry, row, index, width);
@@ -267,28 +297,61 @@ pub(super) fn project_header(
     let mut x = square.right() + 8.0;
     let name = FontId::new(14.0, crate::fonts::ui_weight(ui.ctx(), 600));
     x += painter
-        .text(pos2(x, y), Align2::LEFT_CENTER, super::cards::clean(section.name()), name, roles.tx)
+        .text(
+            pos2(x, y),
+            Align2::LEFT_CENTER,
+            super::cards::clean(section.name()),
+            name,
+            roles.tx,
+        )
         .width()
         + 10.0;
     let consoles = section.entries.len();
-    let mut detail = format!("{consoles} {}", if consoles == 1 { "console" } else { "consoles" });
+    let mut detail = format!(
+        "{consoles} {}",
+        if consoles == 1 { "console" } else { "consoles" }
+    );
     if section.roadmap.as_ref().is_none_or(|r| r.plan.is_none()) {
         detail.push_str(" · no roadmap");
     }
     x += painter
-        .text(pos2(x, y), Align2::LEFT_CENTER, detail, FontId::proportional(12.0), roles.tx3)
+        .text(
+            pos2(x, y),
+            Align2::LEFT_CENTER,
+            detail,
+            FontId::proportional(12.0),
+            roles.tx3,
+        )
         .width()
         + 12.0;
     use panel_contract::Attention;
-    for (count, class) in claims.into_iter().zip([Attention::Wait, Attention::Block, Attention::Done]) {
+    for (count, class) in
+        claims
+            .into_iter()
+            .zip([Attention::Wait, Attention::Block, Attention::Done])
+    {
         if count == 0 {
             continue;
         }
         let pill = Rect::from_min_size(pos2(x, y - 9.0), vec2(crate::ui::claim_pill::SIZE, 18.0));
-        crate::ui::claim_pill::paint(&painter, pill, crate::panel::AttentionState { class, backed: true }, roles);
+        crate::ui::claim_pill::paint(
+            &painter,
+            pill,
+            crate::panel::AttentionState {
+                class,
+                backed: true,
+            },
+            roles,
+        );
         x = pill.right() + 4.0;
         x += painter
-            .text(pos2(x, y), Align2::LEFT_CENTER, count.to_string(), FontId::monospace(11.5), roles.tx2)
+            .text(
+                pos2(x, y),
+                Align2::LEFT_CENTER,
+                count.to_string(),
+                FontId::monospace(11.5),
+                roles.tx2,
+            )
             .width()
             + 10.0;
     }
@@ -356,8 +419,16 @@ mod tests {
         assert_eq!(panes(&columns.milestones[0].items[1]), [1]);
         assert!(columns.milestones[0].items[0].is_empty());
         assert_eq!(panes(&columns.milestones[1].loose), [2]);
-        assert_eq!(panes(&columns.milestones[0].loose), [4], "unknown deliverable stays at milestone level");
-        assert_eq!(panes(&columns.off), [3, 5], "no milestone, or one the plan lacks, is off the plan");
+        assert_eq!(
+            panes(&columns.milestones[0].loose),
+            [4],
+            "unknown deliverable stays at milestone level"
+        );
+        assert_eq!(
+            panes(&columns.off),
+            [3, 5],
+            "no milestone, or one the plan lacks, is off the plan"
+        );
     }
 
     #[test]

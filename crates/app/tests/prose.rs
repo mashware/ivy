@@ -443,6 +443,17 @@ const SOURCES: &[(&str, &str, usize)] = &[
         include_str!("../src/board/branches.rs"),
         3,
     ),
+    ("src/board/bar.rs", include_str!("../src/board/bar.rs"), 13),
+    (
+        "src/board/filter.rs",
+        include_str!("../src/board/filter.rs"),
+        8,
+    ),
+    (
+        "src/board/milestones.rs",
+        include_str!("../src/board/milestones.rs"),
+        17,
+    ),
     (
         "src/board/cards.rs",
         include_str!("../src/board/cards.rs"),

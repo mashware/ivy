@@ -222,7 +222,11 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, area: egui::R
         .flat_map(|s| &s.entries)
         .filter(|entry| {
             let signal = signals.get(&entry.pane).copied();
-            filter::claims(observation::classify(entry.snapshot.document.as_deref(), signal, wall))
+            filter::claims(observation::classify(
+                entry.snapshot.document.as_deref(),
+                signal,
+                wall,
+            ))
         })
         .count();
     let totals = bar::Totals {
