@@ -241,12 +241,13 @@ fn preview(editor: &Editor, ui: &mut egui::Ui) {
     }
 }
 
-pub(super) fn selector(ui: &mut egui::Ui, title: &str, width: f32) -> egui::Response {
+/// A dropdown's button; `lead` is room left before the title for a sample painted over it.
+pub(super) fn selector(ui: &mut egui::Ui, title: &str, width: f32, lead: f32) -> egui::Response {
     let response = ui.add_sized([width, 40.0], egui::Button::new(""));
     let text_clip =
         egui::Rect::from_min_max(response.rect.min, response.rect.max - egui::vec2(28.0, 0.0));
     ui.painter().with_clip_rect(text_clip).text(
-        response.rect.left_center() + egui::vec2(12.0, 0.0),
+        response.rect.left_center() + egui::vec2(12.0 + lead, 0.0),
         egui::Align2::LEFT_CENTER,
         title,
         egui::FontId::proportional(14.0),
@@ -267,6 +268,110 @@ pub(super) fn selector(ui: &mut egui::Ui, title: &str, width: f32) -> egui::Resp
     response
 }
 
+/// A theme's four-colour sample: its background, accent, and the waiting and finished claims —
+/// the colours a person tells themes apart by — outlined in `edge`. Returns where it ends.
+pub(super) fn swatch(
+    painter: &egui::Painter,
+    left_center: egui::Pos2,
+    theme: &crate::theme::Theme,
+    edge: egui::Color32,
+) -> f32 {
+    use term_core::TermColor::Indexed;
+    // The roles these name (`base`, `accent`, `wait`, `done`) are these slots unchanged.
+    let colors = [
+        theme.background(),
+        theme.focus(),
+        theme.color(Indexed(3)),
+        theme.color(Indexed(4)),
+    ];
+    let size = egui::vec2(8.0, 14.0);
+    let top = left_center.y - size.y / 2.0;
+    for (i, color) in colors.into_iter().enumerate() {
+        let min = egui::pos2(left_center.x + i as f32 * size.x, top);
+        painter.rect_filled(egui::Rect::from_min_size(min, size), 0.0, color);
+    }
+    let whole = egui::Rect::from_min_size(
+        egui::pos2(left_center.x, top),
+        egui::vec2(size.x * 4.0, size.y),
+    );
+    painter.rect_stroke(
+        whole,
+        3.0,
+        egui::Stroke::new(1.0, edge),
+        egui::StrokeKind::Outside,
+    );
+    whole.right()
+}
+
+fn check(painter: &egui::Painter, at: egui::Pos2, color: egui::Color32) {
+    painter.add(egui::Shape::line(
+        vec![
+            at + egui::vec2(-5.0, 0.5),
+            at + egui::vec2(-2.0, 3.5),
+            at + egui::vec2(5.0, -3.5),
+        ],
+        egui::Stroke::new(2.0, color),
+    ));
+}
+
+/// The kit's segmented control: a sunk track and the chosen segment filled with `hover`.
+fn segmented(ui: &mut egui::Ui, value: &mut usize, labels: &[&str]) {
+    let (track, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), egui::Sense::hover());
+    let v = ui.visuals().clone();
+    ui.painter().rect(
+        track,
+        crate::theme::metrics::RADIUS_CONTROL,
+        v.extreme_bg_color,
+        egui::Stroke::new(1.0, v.widgets.inactive.bg_stroke.color),
+        egui::StrokeKind::Inside,
+    );
+    let inner = track.shrink(3.0);
+    let width = (inner.width() - 2.0 * (labels.len() as f32 - 1.0)) / labels.len() as f32;
+    for (index, label) in labels.iter().enumerate() {
+        let rect = egui::Rect::from_min_size(
+            inner.min + egui::vec2(index as f32 * (width + 2.0), 0.0),
+            egui::vec2(width, inner.height()),
+        );
+        let response = ui.interact(rect, ui.id().with(("segment", index)), egui::Sense::click());
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::WidgetType::SelectableLabel,
+                true,
+                *value == index,
+                *label,
+            )
+        });
+        if response.clicked() {
+            *value = index;
+        }
+        let selected = *value == index;
+        // Only the chosen segment is filled; one merely pointed at shows by its label's ink, so
+        // the choice never looks like two.
+        if selected {
+            ui.painter().rect_filled(
+                rect,
+                crate::theme::metrics::RADIUS_CHIP,
+                v.widgets.hovered.bg_fill,
+            );
+        }
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            *label,
+            egui::FontId::new(12.0, crate::fonts::ui_weight(ui.ctx(), 500)),
+            // The chosen segment sits on the hover fill, so it takes the ink made for that fill.
+            if selected {
+                v.widgets.hovered.fg_stroke.color
+            } else if response.hovered() {
+                v.widgets.inactive.fg_stroke.color
+            } else {
+                v.weak_text_color()
+            },
+        );
+    }
+}
+
 fn theme_picker(editor: &mut Editor, ui: &mut egui::Ui, count: usize) {
     use crate::theme::NamedTheme;
     ui.weak("Color theme");
@@ -280,8 +385,17 @@ fn theme_picker(editor: &mut Editor, ui: &mut egui::Ui, count: usize) {
         .unwrap()
         .value
         .clone();
-    let title = NamedTheme::from_written(&selected).map_or("Ivy Night (default)", |t| t.title());
-    let response = selector(ui, title, ui.available_width());
+    let named = NamedTheme::from_written(&selected);
+    let title = named.map_or("Ivy Night (default)", |t| t.title());
+    // The sample is four 8-point strips and a 10-point gap before the title.
+    let response = selector(ui, title, ui.available_width(), 42.0);
+    let current = named.map_or_else(crate::theme::Theme::default, |t| t.theme());
+    swatch(
+        ui.painter(),
+        response.rect.left_center() + egui::vec2(12.0, 0.0),
+        &current,
+        ui.visuals().widgets.inactive.bg_stroke.color,
+    );
     let opened = response.clicked();
     let popup_style = ui.style().clone();
     egui::Popup::menu(&response)
@@ -328,11 +442,7 @@ fn theme_picker(editor: &mut Editor, ui: &mut egui::Ui, count: usize) {
             if opened {
                 search.request_focus();
             }
-            ui.horizontal(|ui| {
-                for (index, label) in ["All", "Dark", "Light"].iter().enumerate() {
-                    ui.selectable_value(&mut editor.picker_filter, index, *label);
-                }
-            });
+            segmented(ui, &mut editor.picker_filter, &["All", "Dark", "Light"]);
             let query = editor.picker_query.to_lowercase();
             let mut choices: Vec<(&str, &str)> = Vec::new();
             if editor.picker_filter != 2
@@ -385,7 +495,10 @@ fn theme_picker(editor: &mut Editor, ui: &mut egui::Ui, count: usize) {
                     }
                     for (id, label) in choices {
                         let (rect, response) = ui.allocate_exact_size(
-                            egui::vec2(ui.available_width(), 32.0),
+                            egui::vec2(
+                                ui.available_width(),
+                                crate::theme::metrics::MENU_ROW_HEIGHT,
+                            ),
                             egui::Sense::click(),
                         );
                         response.widget_info(|| {
@@ -398,7 +511,7 @@ fn theme_picker(editor: &mut Editor, ui: &mut egui::Ui, count: usize) {
                         if current == id || response.hovered() {
                             ui.painter().rect_filled(
                                 rect,
-                                5.0,
+                                crate::theme::metrics::RADIUS_CONTROL,
                                 if current == id {
                                     ui.visuals().selection.bg_fill
                                 } else {
@@ -406,8 +519,23 @@ fn theme_picker(editor: &mut Editor, ui: &mut egui::Ui, count: usize) {
                                 },
                             );
                         }
-                        ui.painter().with_clip_rect(rect).text(
+                        let sample = NamedTheme::from_written(id)
+                            .map_or_else(crate::theme::Theme::default, |t| t.theme());
+                        let swatch_end = swatch(
+                            ui.painter(),
                             rect.left_center() + egui::vec2(8.0, 0.0),
+                            &sample,
+                            ui.visuals().widgets.inactive.bg_stroke.color,
+                        );
+                        if current == id {
+                            check(
+                                ui.painter(),
+                                rect.right_center() - egui::vec2(16.0, 0.0),
+                                ui.visuals().widgets.active.bg_stroke.color,
+                            );
+                        }
+                        ui.painter().with_clip_rect(rect).text(
+                            egui::pos2(swatch_end + 10.0, rect.center().y),
                             egui::Align2::LEFT_CENTER,
                             label,
                             egui::FontId::proportional(14.0),
@@ -422,19 +550,6 @@ fn theme_picker(editor: &mut Editor, ui: &mut egui::Ui, count: usize) {
                         }
                         if response.clicked() {
                             current = id.to_owned();
-                        }
-                        let sample = NamedTheme::from_written(id)
-                            .map_or_else(crate::theme::Theme::default, |t| t.theme());
-                        for (i, index) in [1, 2, 4].into_iter().enumerate() {
-                            let dot = egui::Rect::from_center_size(
-                                rect.right_center() - egui::vec2(30.0 - i as f32 * 10.0, 0.0),
-                                egui::vec2(7.0, 7.0),
-                            );
-                            ui.painter().rect_filled(
-                                dot,
-                                2.0,
-                                sample.color(term_core::TermColor::Indexed(index)),
-                            );
                         }
                     }
                 });

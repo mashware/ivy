@@ -191,14 +191,38 @@ fn menu_item(ui: &mut egui::Ui, label: &str, enabled: bool) -> bool {
     let button = egui::Button::new((label, egui::Atom::grow()))
         .frame_when_inactive(false)
         .min_size(egui::vec2(ui.available_width(), 28.0));
-    ui.add_enabled(enabled, button).clicked()
+    ui.scope(|ui| {
+        // egui takes a button's border width out of its inner margin, state by state. The kit
+        // gives a resting control a 1-point border, so a row whose resting border is never drawn
+        // would still lose a point each side at rest and get it back on hover — pushing the rows
+        // below. Every state here has none: the kit marks a hovered row by its fill alone.
+        let widgets = &mut ui.visuals_mut().widgets;
+        for state in [
+            &mut widgets.inactive,
+            &mut widgets.hovered,
+            &mut widgets.active,
+        ] {
+            state.bg_stroke = egui::Stroke::NONE;
+        }
+        ui.add_enabled(enabled, button).clicked()
+    })
+    .inner
 }
 
-fn split_buttons(
-    ui: &mut egui::Ui,
-    theme: crate::theme::Theme,
-    enabled: [bool; 2],
-) -> Option<usize> {
+/// How far a menu's measured height may exceed the room it was given before it counts as not
+/// fitting: rounding on a scaled desktop, never a row.
+const MENU_ROUNDING: f32 = 4.0;
+
+/// The context menu's scroll bar: shown only when the menu, as last measured, cannot fit `room`.
+fn menu_scroll_bar(last: Option<f32>, room: f32) -> egui::scroll_area::ScrollBarVisibility {
+    if last.is_some_and(|height| height > room + MENU_ROUNDING) {
+        egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded
+    } else {
+        egui::scroll_area::ScrollBarVisibility::AlwaysHidden
+    }
+}
+
+fn split_buttons(ui: &mut egui::Ui, enabled: [bool; 2]) -> Option<usize> {
     let width = (ui.available_width() - 2.0).max(0.0) / 2.0;
     let mut chosen = None;
     ui.horizontal(|ui| {
@@ -217,9 +241,14 @@ fn split_buttons(
                 "",
                 label,
                 if enabled[index] {
-                    theme.foreground()
+                    ui.visuals().widgets.inactive.fg_stroke.color
                 } else {
-                    theme.foreground().gamma_multiply(0.35)
+                    ui.visuals()
+                        .widgets
+                        .inactive
+                        .fg_stroke
+                        .color
+                        .gamma_multiply(0.35)
                 },
             );
             if response.clicked() {
@@ -281,20 +310,31 @@ pub(crate) fn before_keys(
             .fixed_pos(at)
             .constrain_to(ui.ctx().viewport_rect())
             .show(ui.ctx(), |ui| {
-                egui::Frame::popup(ui.style())
-                    .fill(theme.panel_background())
-                    .stroke(egui::Stroke::new(1.0, theme.divider()))
-                    .show(ui, |ui| {
-                        egui::ScrollArea::vertical()
-                            .max_height((viewport.height() - 20.0).max(1.0))
+                crate::ui::floating::menu_frame(&crate::ui::style::roles(ui.ctx(), &theme)).show(
+                    ui,
+                    |ui| {
+                        // The scroll bar is for a window too short for the menu. A menu that
+                        // fits can still measure a fraction of a point over its own height on
+                        // a scaled desktop, and egui would then show the bar on hover; the
+                        // last frame's height, with room for that rounding, decides instead.
+                        // It is kept per row count (Maximize shows only beside other consoles),
+                        // so a menu with another set of rows never reads this one's height.
+                        // On the first frame of a menu nobody has measured, the bar waits a
+                        // frame rather than show on a menu that fits.
+                        let room = (viewport.height() - 20.0).max(1.0);
+                        let tall = egui::Id::new(("console-context-menu-height", pane_count > 1));
+                        let last = ui.ctx().data(|d| d.get_temp::<f32>(tall));
+                        let bar = menu_scroll_bar(last, room);
+                        let shown = egui::ScrollArea::vertical()
+                            .max_height(room)
+                            .scroll_bar_visibility(bar)
                             .show(ui, |ui| {
                                 crate::settings::editor::view::style(ui, theme);
                                 ui.set_width(190.0_f32.min((viewport.width() - 20.0).max(1.0)));
                                 ui.spacing_mut().item_spacing = egui::vec2(0.0, 2.0);
-                                ui.visuals_mut().widgets.hovered.weak_bg_fill =
-                                    theme.divider().gamma_multiply(0.55);
-                                ui.visuals_mut().widgets.active.weak_bg_fill = theme.divider();
-                                if let Some(index) = split_buttons(ui, theme, enabled) {
+                                ui.visuals_mut().widgets.active.weak_bg_fill =
+                                    crate::ui::style::roles(ui.ctx(), &theme).sel;
+                                if let Some(index) = split_buttons(ui, enabled) {
                                     action = Some(5 + index);
                                 }
                                 ui.separator();
@@ -324,7 +364,10 @@ pub(crate) fn before_keys(
                                     action = Some(4);
                                 }
                             });
-                    });
+                        ui.ctx()
+                            .data_mut(|d| d.insert_temp(tall, shown.content_size.y));
+                    },
+                );
             });
         if ui.input(|input| {
             input.pointer.any_pressed()
@@ -438,10 +481,8 @@ pub(crate) fn before_keys(
         .movable(false)
         .default_width(380.0)
         .frame(
-            egui::Frame::window(ui.style())
-                .inner_margin(20.0)
-                .fill(theme.panel_background())
-                .stroke(egui::Stroke::new(1.0, theme.divider())),
+            crate::ui::floating::dialog_frame(&crate::ui::style::roles(ui.ctx(), &theme))
+                .inner_margin(20.0),
         )
         .collapsible(false)
         .resizable(false)
@@ -578,5 +619,27 @@ mod tests {
         let old: crate::session::StoredLeaf =
             serde_json::from_str(r#"{"panel_width":36,"folded":false}"#).unwrap();
         assert_eq!(old.label, None);
+    }
+
+    /// A menu a fraction of a point over its room on a scaled desktop shows no bar; one a row too
+    /// tall for a short window keeps it.
+    #[test]
+    fn the_context_menu_scrolls_only_when_it_cannot_fit() {
+        assert_eq!(
+            menu_scroll_bar(None, 270.0),
+            egui::scroll_area::ScrollBarVisibility::AlwaysHidden
+        );
+        assert_eq!(
+            menu_scroll_bar(Some(270.6), 270.0),
+            egui::scroll_area::ScrollBarVisibility::AlwaysHidden
+        );
+        assert_eq!(
+            menu_scroll_bar(Some(270.0), 600.0),
+            egui::scroll_area::ScrollBarVisibility::AlwaysHidden
+        );
+        assert_eq!(
+            menu_scroll_bar(Some(300.0), 270.0),
+            egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded
+        );
     }
 }

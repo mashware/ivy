@@ -8444,6 +8444,9 @@ font-definition snapshot (loses later discoveries), and reloading the font file 
 (unnecessary I/O). The native review also chose readable15-point body text, aligned40-point font/size
 controls, a compact20-point override badge, and padded cursor/shortcut controls.
 
+> **Superseded in part by D98 (November 2026).** The Settings half of the paragraph below no longer
+> holds: Settings is painted with the roles of the theme it previews, like the chrome's dialogs.
+
 **Integration with D66.** The shared chrome dialogs, window controls and pane controls retain their
 effective-Theme-derived style. The separately approved Settings presentation keeps its neutral editor
 palette, including its popups, so selecting a console theme does not silently replace the approved
@@ -10020,3 +10023,64 @@ above them are not measured; the chevron is painted only where a batch's panels 
 a run from before this decision and one after measure different panels, the report does not say which
 panel it painted, and nothing invalidates the older runs on its own — a comparison needs a new pair
 measured after it, the same day.
+
+## D98 — Settings and the floating surfaces are painted with the roles of the theme they show
+
+**New signal, 17 November 2026 — #93.** With D94 every surface reads the theme's roles, and the
+kit draws Settings, the menus and the viewers as one family of floating surfaces. Settings still
+started from a neutral palette of its own (D67) on top of egui's stock dark look; the viewer, the
+chrome's dialogs and the console's menu each started from egui's stock dark or light look and
+painted their own mixes over it. That stock start is what let the desktop's light/dark switch reach
+them, and what made Settings look like another application. This supersedes D67's «Integration with
+D66» paragraph; the rest of D67 — the grouping, the footer, the typography preview — stands.
+
+**Decision.** A floating surface is `raised` with a 1-point `line2` border and the kit's one shadow:
+10 points of radius for a menu, 12 for a dialog. Its controls take the roles through the style
+egui already installs (D94), written into the surface's own `Ui` from **the theme it shows** —
+Settings its draft, the Board its derived theme, every other surface the live theme — so no
+surface depends on what egui was told about the desktop. Settings' navigation sits on `panel`, its
+selected row on `sel`, its primary action on `accent` with `on_accent` ink, its rules on `line`. The
+theme picker is a floating menu: a search field, a segmented All / Dark / Light, and each theme with
+a four-colour sample — background, accent, waiting, finished — and a check on the selected one. The
+docked viewer keeps its header and footer on `panel` and lays the document on `base`. The console's
+search row is laid on `raised`, and the console header's actions menu floats like the others.
+Surfaces that show a theme of their own derive roles for it as well, so one frame may ask about
+several themes; the memo of derived roles keeps the last four.
+
+**Collapsed palettes.** Settings is where a broken configuration is undone, so its text, its error
+ink and the ink on every control keep 4.5:1 over the fill they sit on; its navigation leaves a
+`panel` its text cannot be read on for the dialog's surface (and the viewer's chrome leaves it for
+`base`). Where a collapsed palette makes a fill, a control's border, the selection, the primary
+button or the caret indistinguishable from what lies under it (under 1.03:1, below the kit's own
+quietest step), that one colour is moved toward the ink — to the nearest step that stands apart, stopping short
+of the ink itself; text on a moved fill is re-inked to what reads on it, which is what keeps it
+legible; the caret, a line and not a fill, becomes the ink itself — so the control can still be
+found; Settings
+paints from the roles with those corrections written back, so its outline and every field egui
+derives from them carry them too. Settings, where a broken configuration is undone, also keeps
+its hover and selection apart from its own surfaces when a theme's narrow mixes or a `panel` set to
+one of them would merge them. Nothing else is corrected: an explicit focus is the person's colour verbatim (D94) wherever it can be seen, and the
+old Settings palette's 3:1 floor on every border and on the accent is dropped with it.
+
+**The surfaces step toward the readable text.** `raised`, `hover`, `line2` and a light theme's
+`chrome` are mixed from the background toward `tx` rather than the raw foreground. For every theme
+whose text reads, `tx` is the foreground and nothing changes, however narrow its contrast; a
+configuration that collapsed the foreground now gets surfaces that show on everything built from
+the roles — menus, the Board, the tab bar — not only in Settings. Only where the text had to be
+replaced, and stepping toward it would take a text surface under 4.5:1 (a mid-grey background whose
+text became black), does the step go the other way. The selection, a row text sits on, is moved to
+a step of the text whenever the focus colour lands it on the background, a menu or a hovered row.
+This amends D94's derivation table for those cases only.
+
+**Measures kept.** Settings and the chrome's dialogs (Connect agents, What's new) keep the measures
+Settings already had — the 15-point body and 40-point size fields of D67's native review, 36-point
+controls — and the viewer keeps its two-line header; only colours, radii and the picker change. The
+console title and tab label sizes take the font size's 40-point box. The
+artboard's 40-point header and toolbar for the viewer, and its settings search field, were not
+taken: the first would cut the path line, the second is a feature no section asked for yet.
+
+| Discarded | Why |
+|---|---|
+| Keep D67's neutral Settings palette | The one window that did not look like Ivy, and the stock dark start under it followed the desktop. |
+| Install the style once and let every surface inherit it | Settings previews a draft theme and the Board a derived one; the installed style is the live theme's. |
+| Correct accent and borders to 3:1 as the old palette did | Rewrites an explicit focus colour wherever it is visible; D94 keeps it verbatim and corrects only text. |

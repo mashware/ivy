@@ -11,9 +11,10 @@ pub(super) fn show(
     compact: bool,
 ) -> (Rect, Option<Action>) {
     let ctx = ui.ctx().clone();
-    let bg = window.theme.panel_background();
-    let fg = window.theme.foreground();
-    let hover = window.theme.divider();
+    // A floating menu of the kit: raised, a control border, the hovered row on `hover`.
+    let roles = crate::ui::style::roles(&ctx, &window.theme);
+    let (bg, fg, hover, border, rule) =
+        (roles.raised, roles.tx, roles.hover, roles.line2, roles.line);
     let mut action = None;
     let menu_entries: Vec<_> = [
         ("Check for updates", Action::Updates(true), None, false),
@@ -150,11 +151,15 @@ pub(super) fn show(
         menu_ui.set_clip_rect(menu_rect);
         let ui = &menu_ui;
         let painter = ui.painter();
-        painter.rect_filled(menu_rect, 8.0, bg);
+        let radius = crate::theme::metrics::RADIUS_FLOATING;
+        // The rows' painter is clipped to the menu; the shadow falls outside it.
+        ctx.layer_painter(layer)
+            .add(roles.shadow.as_shape(menu_rect, radius));
+        painter.rect_filled(menu_rect, radius, bg);
         painter.rect_stroke(
             menu_rect,
-            8.0,
-            Stroke::new(1.0, hover),
+            radius,
+            Stroke::new(1.0, border),
             egui::StrokeKind::Inside,
         );
         if scroll_max > 0.0 {
@@ -171,7 +176,7 @@ pub(super) fn show(
                     egui::vec2(track.width(), height),
                 ),
                 2.0,
-                hover,
+                border,
             );
         }
         let mut top = menu_rect.top() + 6.0 - window.chrome.menu_scroll;
@@ -183,7 +188,7 @@ pub(super) fn show(
                         egui::pos2(menu_rect.left() + 6.0, y),
                         egui::pos2(menu_rect.right() - 6.0, y),
                     ],
-                    Stroke::new(1.0, hover),
+                    Stroke::new(1.0, rule),
                 );
                 top += 9.0;
             }
@@ -204,7 +209,11 @@ pub(super) fn show(
                 window.chrome.menu_selected = Some(index);
             }
             if response.hovered() || window.chrome.menu_selected == Some(index) {
-                painter.rect_filled(item, 3.0, hover);
+                painter.rect_filled(
+                    item.shrink2(egui::vec2(4.0, 0.0)),
+                    crate::theme::metrics::RADIUS_CONTROL,
+                    hover,
+                );
             }
             painter.text(
                 item.left_center() + egui::vec2(10.0, 0.0),
@@ -222,7 +231,7 @@ pub(super) fn show(
                     Align2::RIGHT_CENTER,
                     hint,
                     FontId::proportional(10.0),
-                    hover,
+                    roles.tx3,
                 );
             }
             if response.clicked() && menu_rect.contains_rect(item) {

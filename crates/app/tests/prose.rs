@@ -683,6 +683,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         16,
     ),
     (
+        "src/ui/floating.rs",
+        include_str!("../src/ui/floating.rs"),
+        8,
+    ),
+    (
         "src/chrome/strip.rs",
         include_str!("../src/chrome/strip.rs"),
         19,

@@ -9,7 +9,6 @@ mod palette;
 pub(super) mod typography;
 
 const SECTIONS: [&str; 4] = ["Appearance", "Cursor", "Shortcuts", "Startup"];
-const ACCENT: egui::Color32 = egui::Color32::from_rgb(173, 195, 255);
 
 pub(super) fn show(
     editor: &mut Editor,
@@ -18,14 +17,14 @@ pub(super) fn show(
 ) {
     let theme =
         appearance::effective_theme(editor.draft.as_ref().expect("open editor has a draft"));
-    let palette = palette::Palette::new(theme);
+    let palette = palette::Palette::of(ctx, &theme);
     let mut close = false;
     let popup_was_open = egui::Popup::is_any_open(ctx);
     egui::Modal::new(egui::Id::new("terminal-settings"))
         .frame(palette.frame())
         .show(ctx, |ui| {
             palette.apply(ui);
-            form(editor, ui, discoverer, &mut close);
+            form(editor, ui, discoverer, &mut close, &palette);
         });
     if ctx.input(|i| i.key_pressed(egui::Key::Escape))
         && !popup_was_open
@@ -56,30 +55,11 @@ pub(super) fn show(
     }
 }
 
+/// The console's menu and rename dialog, the Board and the Explorer: the roles of `theme`, at these
+/// measures.
 pub(crate) fn style(ui: &mut egui::Ui, theme: crate::theme::Theme) {
+    crate::ui::floating::style(ui, &theme);
     let style = ui.style_mut();
-    style.visuals = egui::Visuals::dark();
-    style.visuals.override_text_color = Some(theme.foreground());
-    style.visuals.extreme_bg_color = theme.background();
-    style.visuals.faint_bg_color = theme.panel_background();
-    style.visuals.window_fill = theme.panel_background();
-    style.visuals.panel_fill = theme.panel_background();
-    style.visuals.selection.bg_fill = theme.focus();
-    style.visuals.selection.stroke.color = theme.background();
-    style.visuals.error_fg_color = theme.color(term_core::TermColor::Indexed(1));
-    for widget in [
-        &mut style.visuals.widgets.noninteractive,
-        &mut style.visuals.widgets.inactive,
-        &mut style.visuals.widgets.hovered,
-        &mut style.visuals.widgets.active,
-        &mut style.visuals.widgets.open,
-    ] {
-        widget.bg_fill = theme.panel_background();
-        widget.weak_bg_fill = theme.background();
-        widget.bg_stroke.color = theme.divider();
-        widget.fg_stroke.color = theme.foreground();
-    }
-    style.visuals.widgets.hovered.bg_fill = theme.divider();
     style.spacing.item_spacing = egui::vec2(10.0, 9.0);
     style.spacing.button_padding = egui::vec2(10.0, 7.0);
     style.spacing.interact_size.y = 30.0;
@@ -106,64 +86,24 @@ mod theme_tests {
         assert_ne!(first.focus(), second.focus());
         ctx.run_ui(Default::default(), |ui| {
             style(ui, first);
-            assert_eq!(ui.visuals().selection.bg_fill, first.focus());
-            assert_eq!(ui.visuals().override_text_color, Some(first.foreground()));
+            assert_eq!(ui.visuals().widgets.active.bg_stroke.color, first.focus());
+            assert_eq!(
+                ui.visuals().widgets.inactive.fg_stroke.color,
+                first.foreground()
+            );
             style(ui, second);
-            assert_eq!(ui.visuals().selection.bg_fill, second.focus());
-            assert_eq!(ui.visuals().override_text_color, Some(second.foreground()));
+            assert_eq!(ui.visuals().widgets.active.bg_stroke.color, second.focus());
+            assert_eq!(
+                ui.visuals().widgets.inactive.fg_stroke.color,
+                second.foreground()
+            );
         })
         .drop_without_applying_deltas();
     }
 }
 
-pub(crate) fn modal_frame() -> egui::Frame {
-    egui::Frame::new()
-        .fill(egui::Color32::from_rgb(25, 29, 38))
-        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(48, 55, 68)))
-        .corner_radius(14)
-        .inner_margin(0)
-}
-
-pub(crate) fn settings_style(ui: &mut egui::Ui) {
-    let style = ui.style_mut();
-    style.visuals = egui::Visuals::dark();
-    style.visuals.override_text_color = Some(egui::Color32::from_rgb(233, 237, 245));
-    style.visuals.extreme_bg_color = egui::Color32::from_rgb(21, 26, 34);
-    style.visuals.selection.bg_fill = egui::Color32::from_rgb(43, 54, 80);
-    style.visuals.selection.stroke.color = ACCENT;
-    style.visuals.panel_fill = egui::Color32::from_rgb(25, 29, 38);
-    style.visuals.window_fill = egui::Color32::from_rgb(35, 41, 54);
-    style.visuals.extreme_bg_color = egui::Color32::from_rgb(32, 37, 49);
-    for (widgets, fill, stroke) in [
-        (
-            &mut style.visuals.widgets.inactive,
-            [32, 37, 49],
-            [54, 62, 80],
-        ),
-        (
-            &mut style.visuals.widgets.hovered,
-            [43, 50, 65],
-            [90, 108, 144],
-        ),
-        (
-            &mut style.visuals.widgets.active,
-            [48, 57, 76],
-            [169, 191, 255],
-        ),
-        (
-            &mut style.visuals.widgets.open,
-            [43, 50, 65],
-            [90, 108, 144],
-        ),
-    ] {
-        widgets.bg_fill = egui::Color32::from_rgb(fill[0], fill[1], fill[2]);
-        widgets.weak_bg_fill = widgets.bg_fill;
-        widgets.bg_stroke = egui::Stroke::new(
-            1.0,
-            egui::Color32::from_rgb(stroke[0], stroke[1], stroke[2]),
-        );
-        widgets.corner_radius = egui::CornerRadius::same(6);
-    }
+/// Settings' measures (D67's native review), apart from its colors so both can change alone.
+pub(crate) fn settings_geometry(style: &mut egui::Style) {
     style.spacing.item_spacing = egui::vec2(10.0, 8.0);
     style.spacing.button_padding = egui::vec2(12.0, 8.0);
     style.spacing.interact_size.y = 36.0;
@@ -183,6 +123,7 @@ fn form(
     ui: &mut egui::Ui,
     discoverer: &mut crate::fonts::Discoverer,
     close: &mut bool,
+    palette: &palette::Palette,
 ) {
     let screen = ui.ctx().content_rect();
     let size = egui::vec2(
@@ -199,9 +140,9 @@ fn form(
         ui.painter().rect_filled(
             side,
             egui::CornerRadius {
-                nw: 14,
+                nw: crate::theme::metrics::RADIUS_DIALOG,
                 ne: 0,
-                sw: 14,
+                sw: crate::theme::metrics::RADIUS_DIALOG,
                 se: 0,
             },
             ui.visuals().panel_fill,
@@ -209,7 +150,7 @@ fn form(
         ui.painter().vline(
             side.right(),
             side.y_range(),
-            egui::Stroke::new(1.0, ui.visuals().window_stroke.color),
+            egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
         );
         ui.painter().text(
             side.min + egui::vec2(28.0, 30.0),
@@ -279,11 +220,31 @@ fn form(
                     + 92.0;
                 let (rect, _) =
                     ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
-                main_column(editor, ui, discoverer, close, rect, padding, &errors);
+                let column = Column {
+                    main: rect,
+                    padding,
+                    errors: &errors,
+                    palette,
+                };
+                main_column(editor, ui, discoverer, close, column);
             });
     } else {
-        main_column(editor, ui, discoverer, close, main, padding, &errors);
+        let column = Column {
+            main,
+            padding,
+            errors: &errors,
+            palette,
+        };
+        main_column(editor, ui, discoverer, close, column);
     }
+}
+
+/// The main column's rectangle, padding, current errors and palette.
+struct Column<'a> {
+    main: egui::Rect,
+    padding: f32,
+    errors: &'a [(String, String)],
+    palette: &'a palette::Palette,
 }
 
 fn main_column(
@@ -291,10 +252,14 @@ fn main_column(
     ui: &mut egui::Ui,
     discoverer: &mut crate::fonts::Discoverer,
     close: &mut bool,
-    main: egui::Rect,
-    padding: f32,
-    errors: &[(String, String)],
+    column: Column<'_>,
 ) {
+    let Column {
+        main,
+        padding,
+        errors,
+        palette,
+    } = column;
     let inner = egui::Rect::from_min_max(
         main.min + egui::vec2(padding, 0.0),
         main.max - egui::vec2(padding, 0.0),
@@ -357,7 +322,7 @@ fn main_column(
     ui.painter().hline(
         main.x_range(),
         footer_top,
-        egui::Stroke::new(1.0, ui.visuals().window_stroke.color),
+        egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
     );
     let mut foot_ui = ui.new_child(
         egui::UiBuilder::new()
@@ -365,7 +330,7 @@ fn main_column(
             .max_rect(footer_rect),
     );
     foot_ui.set_clip_rect(footer_rect.intersect(ui.clip_rect()));
-    footer::show(editor, &mut foot_ui, close, errors, discoverer);
+    footer::show(editor, &mut foot_ui, close, errors, discoverer, palette);
 }
 
 fn navigation(editor: &mut Editor, ui: &mut egui::Ui, vertical: bool) {

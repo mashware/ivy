@@ -89,17 +89,26 @@ impl Menu {
                 egui::Id::new("pane-actions"),
             ))
             .with_clip_rect(ctx.viewport_rect());
-        painter.rect_filled(self.rect, 2.0, theme.panel_background());
+        // A floating menu of the kit (D98): raised, a control border, the chosen row on `sel`.
+        let roles = crate::ui::style::roles(ctx, theme);
+        let radius = crate::theme::metrics::RADIUS_FLOATING;
+        painter.add(roles.shadow.as_shape(self.rect, radius));
+        painter.rect_filled(self.rect, radius, roles.raised);
         painter.rect_stroke(
             self.rect,
-            2.0,
-            egui::Stroke::new(1.0, theme.divider()),
+            radius,
+            egui::Stroke::new(1.0, roles.line2),
             egui::StrokeKind::Inside,
         );
         for (index, action) in Action::ALL.into_iter().enumerate() {
             let row = self.row(index);
             if self.enabled[index] && index == self.selected {
-                painter.rect_filled(row.shrink(1.0), 0.0, theme.focus().gamma_multiply(0.25));
+                // Inset and rounded so it stays inside the menu's rounded corners.
+                painter.rect_filled(
+                    row.shrink2(egui::vec2(4.0, 1.0)),
+                    crate::theme::metrics::RADIUS_CONTROL,
+                    roles.sel,
+                );
             }
             let text = if self.enabled[index] {
                 action.label(self.folded).to_owned()
@@ -109,14 +118,14 @@ impl Menu {
                 format!("{} (not enough room)", action.label(self.folded))
             };
             painter.text(
-                row.left_center() + egui::vec2(6.0, 0.0),
+                row.left_center() + egui::vec2(12.0, 0.0),
                 egui::Align2::LEFT_CENTER,
                 text,
                 egui::FontId::monospace(metrics.height() * 0.75),
                 if self.enabled[index] {
-                    theme.foreground()
+                    roles.tx
                 } else {
-                    theme.divider()
+                    roles.tx3
                 },
             );
         }

@@ -68,7 +68,7 @@ pub(super) fn show(
                 &field.value
             };
             let width = (ui.available_width() - 190.0).max(120.0);
-            let response = selector(ui, title, width);
+            let response = selector(ui, title, width, 0.0);
             editor.font_rect = Some(response.rect);
             if response.clicked() {
                 editor.font_requests += 1;
@@ -146,44 +146,7 @@ pub(super) fn show(
         let size = draft.fields.iter_mut().find(|f| f.key == "size").unwrap();
         ui.vertical(|ui| {
             ui.weak("Size");
-            let (rect, outer) =
-                ui.allocate_exact_size(egui::vec2(113.0, 40.0), egui::Sense::click());
-            ui.painter()
-                .rect_filled(rect, 6.0, ui.visuals().extreme_bg_color);
-            ui.painter().rect_stroke(
-                rect,
-                6.0,
-                egui::Stroke::new(1.0, ui.visuals().window_stroke.color),
-                egui::StrokeKind::Inside,
-            );
-            let font = egui::FontId::proportional(14.0);
-            let line_height = ui.fonts_mut(|fonts| fonts.row_height(&font));
-            let inner = egui::Rect::from_min_size(
-                egui::pos2(rect.left() + 10.0, rect.center().y - line_height / 2.0),
-                egui::vec2(62.0, line_height),
-            );
-            let mut input = ui.new_child(
-                egui::UiBuilder::new()
-                    .id_salt("settings-font-size")
-                    .max_rect(inner),
-            );
-            let response = input.add_sized(
-                inner.size(),
-                egui::TextEdit::singleline(&mut size.value)
-                    .font(font)
-                    .hint_text("14")
-                    .frame(egui::Frame::new()),
-            );
-            if outer.clicked() {
-                response.request_focus();
-            }
-            ui.painter().text(
-                rect.right_center() - egui::vec2(10.0, 0.0),
-                egui::Align2::RIGHT_CENTER,
-                "pt",
-                egui::FontId::proportional(12.0),
-                ui.visuals().weak_text_color(),
-            );
+            point_field(ui, "settings-font-size", &mut size.value, "14");
         });
         if ui
             .vertical(|ui| {
@@ -272,13 +235,15 @@ pub(super) fn show(
             .unwrap();
         ui.horizontal_wrapped(|ui| {
             ui.label(label);
-            ui.add(
-                egui::TextEdit::singleline(&mut field.value)
-                    .hint_text("12")
-                    .desired_width(55.0),
-            );
-            ui.weak("pt (8–32)");
-            if ui.button("Reset").clicked() {
+            point_field(ui, key, &mut field.value, "12");
+            ui.weak("8–32");
+            if ui
+                .add_sized(
+                    [52.0, 40.0],
+                    egui::Button::new(egui::RichText::new("Reset").size(14.0)).frame(false),
+                )
+                .clicked()
+            {
                 field.value.clear();
             }
             let size = field
@@ -291,6 +256,46 @@ pub(super) fn show(
         });
         field_errors(ui, key, errors);
     }
+}
+
+/// A point-size field: a sunk 40-point box with the unit inside it, the kit's field. A press
+/// anywhere on the box puts the caret in it.
+fn point_field(ui: &mut egui::Ui, id_salt: &str, value: &mut String, hint: &str) {
+    let (rect, outer) = ui.allocate_exact_size(egui::vec2(113.0, 40.0), egui::Sense::click());
+    ui.painter()
+        .rect_filled(rect, 6.0, ui.visuals().extreme_bg_color);
+    let font = egui::FontId::proportional(14.0);
+    let line_height = ui.fonts_mut(|fonts| fonts.row_height(&font));
+    let inner = egui::Rect::from_min_size(
+        egui::pos2(rect.left() + 10.0, rect.center().y - line_height / 2.0),
+        egui::vec2(62.0, line_height),
+    );
+    let mut input = ui.new_child(egui::UiBuilder::new().id_salt(id_salt).max_rect(inner));
+    let response = input.add_sized(
+        inner.size(),
+        egui::TextEdit::singleline(value)
+            .font(font)
+            .hint_text(hint)
+            .frame(egui::Frame::new()),
+    );
+    if outer.clicked() {
+        response.request_focus();
+    }
+    // The box is the field, so it carries the ring a framed field shows while it has the keyboard.
+    let edge = if response.has_focus() {
+        ui.visuals().selection.stroke
+    } else {
+        egui::Stroke::new(1.0, ui.visuals().widgets.inactive.bg_stroke.color)
+    };
+    ui.painter()
+        .rect_stroke(rect, 6.0, edge, egui::StrokeKind::Inside);
+    ui.painter().text(
+        rect.right_center() - egui::vec2(10.0, 0.0),
+        egui::Align2::RIGHT_CENTER,
+        "pt",
+        egui::FontId::proportional(12.0),
+        ui.visuals().weak_text_color(),
+    );
 }
 
 #[cfg(test)]

@@ -206,7 +206,7 @@ pub(crate) fn begin_pass(window: &mut Window, ui: &mut egui::Ui, frame: &eframe:
         .guide
         .application_status(window.settings_editor.is_applying());
     if window.chrome.guide.open {
-        show(&mut window.chrome.guide, ctx);
+        show(&mut window.chrome.guide, ctx, &window.theme);
         if std::mem::take(&mut window.chrome.guide.save_preferences) {
             let desired = window.chrome.guide.desired;
             window.chrome.guide.message =
@@ -287,13 +287,18 @@ pub(crate) fn after_panels(window: &mut Window, ui: &mut egui::Ui, _area: Rect) 
     window.timed_separately += window.chrome.take_cost();
 }
 
-fn show(guide: &mut Guide, ctx: &egui::Context) {
+fn show(guide: &mut Guide, ctx: &egui::Context, theme: &crate::theme::Theme) {
     let mut close = false;
     let available = ctx.content_rect().size();
     egui::Modal::new(egui::Id::new("connect-agents"))
-        .frame(crate::settings::editor::view::modal_frame().inner_margin(16))
+        .frame(
+            crate::ui::floating::dialog_frame(&crate::ui::style::roles(ctx, theme))
+                .inner_margin(16),
+        )
         .show(ctx, |ui| {
-            crate::settings::editor::view::settings_style(ui);
+            crate::ui::floating::style(ui, theme);
+            // The chrome's dialogs read at Settings' measures (D67's native review).
+            crate::settings::editor::view::settings_geometry(ui.style_mut());
             ui.set_width((available.x - 64.0).clamp(80.0, 560.0));
             ui.horizontal_top(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {

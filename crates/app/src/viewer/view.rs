@@ -36,8 +36,15 @@ pub(super) fn show(
                 ui.set_clip_rect(rect);
                 ui.set_min_size(rect.size());
                 ui.set_max_size(rect.size());
-                let surface = mix(theme.background(), theme.foreground(), 0.045);
-                let line = mix(surface, theme.foreground(), 0.16);
+                // Header and footer on the side-list surface, the document on the console's own
+                // background: the kit's floating viewer.
+                let roles = crate::ui::style::roles(parent.ctx(), &theme);
+                // `panel` is a colour of its own the person may set; where the text cannot be read on
+                // it the chrome stays on the document's background instead. The rules are the
+                // person's `divider`, drawn toward the text where it would vanish into the chrome.
+                let surface = roles.panel_or(roles.tx, roles.base);
+                // The frame's sides also border the document, which is on `base`.
+                let line = roles.apart(roles.line, &[surface, roles.base], surface, 0.16);
                 let frame = egui::Frame::new()
                     .fill(surface)
                     .corner_radius(0)
@@ -50,71 +57,42 @@ pub(super) fn show(
                         .layout(egui::Layout::top_down(egui::Align::Min)),
                 );
                 content.set_clip_rect(inner);
-                style(&mut content, theme, surface, line);
+                style(&mut content, &theme);
                 let (head, rest) =
                     inner.split_top_bottom_at_y((inner.top() + 62.0).min(inner.bottom()));
-                header(state, &mut content, head, theme, line, maximized);
+                header(state, &mut content, head, line, maximized);
                 if !state.open {
                     return;
                 }
                 let (body, foot) =
                     rest.split_top_bottom_at_y((rest.bottom() - 38.0).max(rest.top()));
-                footer(state, &mut content, foot, theme, line, unavailable);
+                footer(state, &mut content, foot, line, unavailable);
                 let mut body_ui = content.new_child(
                     egui::UiBuilder::new()
                         .max_rect(body)
                         .layout(egui::Layout::top_down(egui::Align::Min)),
                 );
                 body_ui.set_clip_rect(body);
+                body_ui.painter().rect_filled(body, 0.0, roles.base);
                 body_content(state, &mut body_ui, theme, unavailable);
             });
         });
 }
 
-fn mix(a: Color32, b: Color32, fraction: f32) -> Color32 {
-    let channel =
-        |a: u8, b: u8| (f32::from(a) * (1.0 - fraction) + f32::from(b) * fraction).round() as u8;
-    Color32::from_rgb(
-        channel(a.r(), b.r()),
-        channel(a.g(), b.g()),
-        channel(a.b(), b.b()),
-    )
-}
-
-fn style(ui: &mut egui::Ui, theme: crate::theme::Theme, surface: Color32, line: Color32) {
+fn style(ui: &mut egui::Ui, theme: &crate::theme::Theme) {
+    crate::ui::floating::style(ui, theme);
     let style = ui.style_mut();
-    let bg = theme.background();
-    style.visuals = if u16::from(bg.r()) + u16::from(bg.g()) + u16::from(bg.b()) < 384 {
-        egui::Visuals::dark()
-    } else {
-        egui::Visuals::light()
-    };
     style.override_font_id = Some(FontId::proportional(13.0));
     style.spacing.item_spacing = egui::vec2(6.0, 6.0);
     style.spacing.button_padding = egui::vec2(8.0, 5.0);
-    style.visuals.override_text_color = Some(theme.foreground());
-    style.visuals.panel_fill = surface;
-    style.visuals.window_fill = surface;
-    style.visuals.window_stroke = egui::Stroke::new(1.0, line);
-    style.visuals.extreme_bg_color = theme.background();
-    style.visuals.widgets.inactive.bg_fill = surface;
-    style.visuals.widgets.inactive.weak_bg_fill = surface;
-    style.visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, line);
-    style.visuals.widgets.inactive.corner_radius = 5.into();
-    style.visuals.widgets.hovered.bg_fill = mix(surface, theme.foreground(), 0.08);
-    style.visuals.widgets.hovered.weak_bg_fill = mix(surface, theme.foreground(), 0.08);
-    style.visuals.selection.bg_fill = mix(surface, theme.foreground(), 0.09);
-    style.visuals.selection.stroke = egui::Stroke::new(1.0, theme.foreground());
 }
 
-fn header(
-    state: &mut State,
-    ui: &mut egui::Ui,
-    rect: egui::Rect,
-    theme: crate::theme::Theme,
-    line: Color32,
-    maximized: bool,
-) {
+/// Secondary text in the viewer's chrome: the path, the source console, the save note.
+fn muted(ui: &egui::Ui) -> Color32 {
+    ui.visuals().weak_text_color()
+}
+
+fn header(state: &mut State, ui: &mut egui::Ui, rect: egui::Rect, line: Color32, maximized: bool) {
     ui.painter().line_segment(
         [rect.left_bottom(), rect.right_bottom()],
         egui::Stroke::new(1.0, line),
@@ -154,7 +132,7 @@ fn header(
         } else {
             crate::sidebar::Tool::Git
         },
-        theme.foreground(),
+        ui.visuals().widgets.inactive.fg_stroke.color,
     );
     if markdown {
         let target = crate::sidebar::maximize_rect(rect.expand(1.0));
@@ -183,7 +161,7 @@ fn header(
             target.center(),
             crate::header::integrated::Target::Zoom,
             maximized,
-            theme.foreground(),
+            ui.visuals().widgets.inactive.fg_stroke.color,
             24.0,
         );
     }
@@ -206,26 +184,12 @@ fn header(
         );
         let mut path_ui = ui.new_child(egui::UiBuilder::new().max_rect(path_rect));
         path_ui
-            .add(
-                egui::Label::new(RichText::new(&path).size(11.0).color(mix(
-                    theme.background(),
-                    theme.foreground(),
-                    0.6,
-                )))
-                .truncate(),
-            )
+            .add(egui::Label::new(RichText::new(&path).size(11.0).color(muted(ui))).truncate())
             .on_hover_text(path);
     }
 }
 
-fn footer(
-    state: &State,
-    ui: &mut egui::Ui,
-    rect: egui::Rect,
-    theme: crate::theme::Theme,
-    line: Color32,
-    unavailable: bool,
-) {
+fn footer(state: &State, ui: &mut egui::Ui, rect: egui::Rect, line: Color32, unavailable: bool) {
     ui.painter().line_segment(
         [rect.left_top(), rect.right_top()],
         egui::Stroke::new(1.0, line),
@@ -244,21 +208,10 @@ fn footer(
     } else {
         source.to_owned()
     };
-    child.add(
-        egui::Label::new(RichText::new(&source).size(11.0).color(mix(
-            theme.background(),
-            theme.foreground(),
-            0.6,
-        )))
-        .truncate(),
-    );
+    child.add(egui::Label::new(RichText::new(&source).size(11.0).color(muted(ui))).truncate());
     if state.kind == Kind::Markdown {
         child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(RichText::new("Updates on save").size(11.0).color(mix(
-                theme.background(),
-                theme.foreground(),
-                0.6,
-            )));
+            ui.label(RichText::new("Updates on save").size(11.0).color(muted(ui)));
         });
     }
 }
@@ -421,14 +374,7 @@ mod tests {
         let area = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(480.0, 62.0));
         let mut state = State::default();
         let output = ctx.run_ui(Default::default(), |ui| {
-            header(
-                &mut state,
-                ui,
-                area,
-                crate::theme::Theme::default(),
-                Color32::GRAY,
-                false,
-            )
+            header(&mut state, ui, area, Color32::GRAY, false)
         });
         let (mut title, mut icon, mut zoom) = (None, None, None);
         for shape in &output.shapes {
@@ -497,6 +443,82 @@ mod tests {
                 assert!(!found.iter().any(|text| text == "Open"));
                 assert!(!found.iter().any(|text| text == "Markdown file"));
             }
+        }
+    }
+
+    /// The viewer's chrome sits on `panel` and the document on `base`; a `panel` the text cannot be
+    /// read on leaves the chrome on `base` instead (D98).
+    #[test]
+    fn the_viewer_frames_the_document_with_the_theme_roles() {
+        fn fills(shape: &egui::Shape, out: &mut Vec<(egui::Rect, Color32)>) {
+            match shape {
+                egui::Shape::Rect(r) => out.push((r.rect, r.fill)),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| fills(s, out)),
+                _ => {}
+            }
+        }
+        let rgb = |hex: u32| Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+        let area = egui::Rect::from_min_size(egui::pos2(620.0, 0.0), egui::vec2(360.0, 480.0));
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 600.0));
+        let unreadable = {
+            let (settings, _) = crate::settings::interpret("panel=#e4e8e2").unwrap();
+            crate::theme::Theme::default().with_colors(&settings.colors)
+        };
+        // A divider set to the console background would hide the frame's sides against the
+        // document and the console; it is drawn toward the text instead.
+        let hidden_divider = {
+            let (settings, _) = crate::settings::interpret("divider=#13181b").unwrap();
+            crate::theme::Theme::default().with_colors(&settings.colors)
+        };
+        for (theme, chrome) in [
+            (crate::theme::Theme::default(), rgb(0x171d21)),
+            (unreadable, rgb(0x13181b)),
+            (hidden_divider, rgb(0x171d21)),
+        ] {
+            let ctx = egui::Context::default();
+            let mut state = State::default();
+            state.open_diff();
+            let mut shapes = Vec::new();
+            for _ in 0..2 {
+                let output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(screen),
+                        ..Default::default()
+                    },
+                    |ui| show(&mut state, ui, area, theme, true, false),
+                );
+                shapes = output.shapes.clone();
+                output.drop_without_applying_deltas();
+            }
+            let mut rects = Vec::new();
+            for clipped in &shapes {
+                fills(&clipped.shape, &mut rects);
+            }
+            assert!(
+                rects
+                    .iter()
+                    .any(|(r, c)| r.contains_rect(area) && *c == chrome),
+                "chrome {chrome:?}: {rects:?}"
+            );
+            let stroke = shapes
+                .iter()
+                .find_map(|s| match &s.shape {
+                    egui::Shape::Rect(r) if r.rect.contains_rect(area) && r.fill == chrome => {
+                        Some(r.stroke.color)
+                    }
+                    _ => None,
+                })
+                .expect("the frame is painted");
+            assert!(
+                crate::theme::project_ink_contrast(stroke, rgb(0x13181b)) >= 1.03,
+                "the frame's sides vanish into the document"
+            );
+            assert!(
+                rects.iter().any(|(r, c)| *c == rgb(0x13181b)
+                    && r.height() > 300.0
+                    && !r.contains_rect(area)),
+                "the document is not on base"
+            );
         }
     }
 

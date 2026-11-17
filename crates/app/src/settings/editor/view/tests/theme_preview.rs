@@ -339,3 +339,161 @@ fn color_popup_accepts_exact_hex_edit_without_dismissing() {
         "#123456"
     );
 }
+
+/// Each theme in the picker carries its four-colour sample beside its name, and the segmented
+/// filter narrows the list to the light themes.
+#[test]
+fn the_theme_picker_samples_each_theme_and_filters_by_darkness() {
+    let mut editor = Editor {
+        draft: Some(crate::settings::document::Document::new(
+            "theme=ivy-night\n".into(),
+        )),
+        ..Default::default()
+    };
+    let ctx = egui::Context::default();
+    let size = egui::vec2(1100.0, 850.0);
+    click_label(&mut editor, &ctx, "Change");
+    let (text, shapes) = scene(&mut editor, &ctx, size, vec![]);
+    let mut rects = Vec::new();
+    for clipped in &shapes {
+        fills(&clipped.shape, &mut rects);
+    }
+    // The menu's rows sit under its search field; the button above them names the theme too.
+    let rows_below = |text: &[(String, egui::Rect)]| {
+        let search = text
+            .iter()
+            .find(|(s, _)| s == "Search themes...")
+            .expect("picker open")
+            .1;
+        text.iter()
+            .filter(|(_, r)| r.top() > search.bottom())
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let rows = rows_below(&text);
+    let rgb = |hex: u32| egui::Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+    for (name, colors) in [
+        (
+            "Ivy Night (default)",
+            [0x13181b, 0x3cc384, 0xf2b84b, 0x72b7f2],
+        ),
+        ("Ivy Day", [0xfafbf8, 0x0b7a4b, 0x9a5b00, 0x1d63b0]),
+    ] {
+        let row = rows
+            .iter()
+            .find(|(s, _)| s == name)
+            .unwrap_or_else(|| panic!("{name} row: {text:?}"))
+            .1;
+        let strips: Vec<_> = rects
+            .iter()
+            .filter(|(r, _)| {
+                r.size() == egui::vec2(8.0, 14.0)
+                    && (r.center().y - row.center().y).abs() < 1.0
+                    && r.right() <= row.left()
+            })
+            .map(|(_, c)| *c)
+            .collect();
+        assert_eq!(strips, colors.map(rgb), "{name}");
+    }
+    // The selected theme, and only it, carries the accent check at the right of its row.
+    let checks: Vec<_> = shapes
+        .iter()
+        .filter_map(|s| match &s.shape {
+            egui::Shape::Path(path)
+                if path.stroke.color == egui::epaint::ColorMode::Solid(rgb(0x3cc384))
+                    && path.points.len() == 3 =>
+            {
+                Some(path.points[0])
+            }
+            _ => None,
+        })
+        .collect();
+    // `theme=ivy-night` selects the named row, not the «(default)» one that stands for no theme.
+    let selected = rows.iter().find(|(s, _)| s == "Ivy Night").unwrap().1;
+    assert_eq!(checks.len(), 1, "{checks:?}");
+    assert!(
+        (checks[0].y - selected.center().y).abs() < 6.0 && checks[0].x > selected.right(),
+        "{checks:?} {selected:?}"
+    );
+    click_label(&mut editor, &ctx, "Light");
+    // The pointer leaves, so the fill read below is the choice's and not a hover's; egui decides
+    // a hover from the frame before, so the reading is the frame after it left.
+    scene(&mut editor, &ctx, size, vec![egui::Event::PointerGone]);
+    let (text, shapes) = scene(&mut editor, &ctx, size, vec![]);
+    let mut rects = Vec::new();
+    for clipped in &shapes {
+        fills(&clipped.shape, &mut rects);
+    }
+    let fill_under = |label: &str| {
+        let at = text.iter().find(|(s, _)| s == label).unwrap().1.center();
+        rects
+            .iter()
+            .filter(|(r, c)| r.contains(at) && *c != egui::Color32::TRANSPARENT)
+            .min_by(|(a, _), (b, _)| a.area().total_cmp(&b.area()))
+            .map(|(_, c)| *c)
+    };
+    // The chosen segment is filled with `hover`; the others show the sunk track (`base`).
+    assert_eq!(fill_under("Light"), Some(rgb(0x262b2d)));
+    assert_eq!(fill_under("All"), Some(rgb(0x13181b)));
+    // Pointing at another segment does not fill it: only the choice is filled.
+    let dark = text.iter().find(|(s, _)| s == "Dark").unwrap().1.center();
+    scene(
+        &mut editor,
+        &ctx,
+        size,
+        vec![egui::Event::PointerMoved(dark)],
+    );
+    let (_, pointed) = scene(&mut editor, &ctx, size, vec![]);
+    let mut pointed_rects = Vec::new();
+    for clipped in &pointed {
+        fills(&clipped.shape, &mut pointed_rects);
+    }
+    let under_dark = pointed_rects
+        .iter()
+        .filter(|(r, c)| r.contains(dark) && *c != egui::Color32::TRANSPARENT)
+        .min_by(|(a, _), (b, _)| a.area().total_cmp(&b.area()))
+        .map(|(_, c)| *c);
+    assert_eq!(under_dark, Some(rgb(0x13181b)));
+    let rows = rows_below(&text);
+    assert!(rows.iter().any(|(s, _)| s == "Ivy Day"), "{rows:?}");
+    assert!(
+        !rows
+            .iter()
+            .any(|(s, _)| s.starts_with("Ivy Night") || s == "Tokyo Night"),
+        "{rows:?}"
+    );
+}
+
+/// The picker's sample reads the theme's slots directly; for every theme they are the roles they
+/// stand for — background, accent, waiting, finished.
+#[test]
+fn every_theme_sample_shows_its_base_accent_wait_and_done_roles() {
+    let ctx = egui::Context::default();
+    for named in crate::theme::NamedTheme::ALL {
+        let theme = named.theme();
+        let roles = crate::theme::Roles::of(&theme);
+        let output = ctx.run_ui(Default::default(), |ui| {
+            appearance::swatch(
+                ui.painter(),
+                egui::pos2(10.0, 10.0),
+                &theme,
+                egui::Color32::RED,
+            );
+        });
+        let mut rects = Vec::new();
+        for clipped in &output.shapes {
+            fills(&clipped.shape, &mut rects);
+        }
+        output.drop_without_applying_deltas();
+        let strips: Vec<_> = rects
+            .iter()
+            .filter(|(r, _)| r.size() == egui::vec2(8.0, 14.0))
+            .map(|(_, c)| *c)
+            .collect();
+        assert_eq!(
+            strips,
+            [roles.base, roles.accent, roles.wait, roles.done],
+            "{named:?}"
+        );
+    }
+}

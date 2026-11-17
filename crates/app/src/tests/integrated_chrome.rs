@@ -1642,16 +1642,19 @@ mod tests {
                     .open_menu(tab, pane, true, egui::pos2(400.0, 300.0));
                 "Paste"
             };
+            // Floating on the theme's `raised` role (D98), with its `tx` ink — which turns white
+            // when an override leaves the foreground unreadable over the background (D94).
             for (config, surface, ink) in [
                 (
                     "panel=#112233\nforeground=#efcba9",
-                    egui::Color32::from_rgb(0x11, 0x22, 0x33),
+                    egui::Color32::from_rgb(0x20, 0x23, 0x24),
                     egui::Color32::from_rgb(0xef, 0xcb, 0xa9),
                 ),
                 (
                     "theme=gruvbox-dark\npanel=#e2d4c6\nforeground=#241c14",
-                    egui::Color32::from_rgb(0xe2, 0xd4, 0xc6),
-                    egui::Color32::from_rgb(0x24, 0x1c, 0x14),
+                    // Raised steps toward the readable (white) text, not the unreadable foreground.
+                    egui::Color32::from_rgb(0x35, 0x35, 0x35),
+                    egui::Color32::WHITE,
                 ),
             ] {
                 let (settings, warnings) = settings::interpret(config).unwrap();
@@ -1662,10 +1665,18 @@ mod tests {
                 let shapes = frame(&mut window, &ctx, area, vec![]);
                 assert!(
                     shapes.iter().any(|s| dialog_surface(&s.shape, surface)),
-                    "{heading} ignored the configured dialog surface"
+                    "{heading} is not on the theme's raised surface"
                 );
                 assert!(shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Text(t)
-                    if t.galley.text() == heading && t.galley.job.sections.iter().all(|section| section.format.color == ink))),
+                    if t.galley.text() == heading && t.galley.job.sections.iter().all(|section| {
+                        // A label with no colour of its own is painted in the shape's fallback.
+                        let color = if section.format.color == egui::Color32::PLACEHOLDER {
+                            t.fallback_color
+                        } else {
+                            section.format.color
+                        };
+                        color == ink
+                    }))),
                     "{heading} ignored the configured heading foreground");
             }
         }
@@ -2797,6 +2808,66 @@ mod tests {
         assert!(
             band.width() >= 20.0 * m.width(),
             "the band spans the panel, not a pill: {band:?}"
+        );
+    }
+
+    /// The application menu floats on the theme's `raised` role with a control border, and the
+    /// console's search row is laid on the same surface (D98).
+    #[test]
+    fn the_application_menu_and_the_search_row_float_on_raised() {
+        fn rects(shape: &egui::Shape, out: &mut Vec<egui::epaint::RectShape>) {
+            match shape {
+                egui::Shape::Rect(r) => out.push(r.clone()),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| rects(s, out)),
+                _ => {}
+            }
+        }
+        let (raised, line2) = (
+            egui::Color32::from_rgb(0x20, 0x24, 0x27),
+            egui::Color32::from_rgb(0x37, 0x3b, 0x3d),
+        );
+        let ctx = egui::Context::default();
+        ctx.global_style_mut(|style| style.animation_time = 0.0);
+        let mut window = window_with("sleep 30", "sleep 30");
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        let area = area_of(1400.0);
+        let search_row = |shapes: &[egui::epaint::ClippedShape]| {
+            let mut found = Vec::new();
+            for clipped in shapes {
+                rects(&clipped.shape, &mut found);
+            }
+            found
+                .iter()
+                .any(|r| r.fill == raised && r.rect.height() < 40.0 && r.rect.width() > 200.0)
+        };
+        // The control: no such row before the search opens.
+        assert!(!search_row(&frame(&mut window, &ctx, area, vec![])));
+        let search = egui::pos2(area.right() - 159.0, area.top() + 24.0);
+        frame(&mut window, &ctx, area, click_at(search));
+        // Read before the menu opens: an open menu dims the consoles beneath it.
+        assert!(
+            search_row(&frame(&mut window, &ctx, area, vec![])),
+            "the search row is not on raised"
+        );
+        let menu = egui::pos2(area.right() - 125.0, area.top() + 24.0);
+        frame(&mut window, &ctx, area, click_at(menu));
+        let shapes = frame(&mut window, &ctx, area, vec![]);
+        let mut all = Vec::new();
+        for clipped in &shapes {
+            rects(&clipped.shape, &mut all);
+        }
+        let item = text_center(&shapes, "Preferences");
+        let body = all
+            .iter()
+            .filter(|r| r.rect.contains(item) && r.fill == raised)
+            .min_by(|a, b| a.rect.area().total_cmp(&b.rect.area()))
+            .expect("the menu is filled with raised");
+        assert_eq!(body.corner_radius, egui::CornerRadius::same(10));
+        assert!(
+            all.iter()
+                .any(|r| r.rect == body.rect && r.stroke == egui::Stroke::new(1.0, line2)),
+            "the menu has no control border"
         );
     }
 }

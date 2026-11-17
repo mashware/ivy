@@ -71,7 +71,11 @@ mod tests {
                 let area = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
                 ui_pass(&mut window, &ctx, area, egui::RawInput::default());
                 let shapes = ui_pass(&mut window, &ctx, area, egui::RawInput::default());
-                let rect = dialog_rect(&shapes, title, window.theme.panel_background());
+                let rect = dialog_rect(
+                    &shapes,
+                    title,
+                    crate::theme::Roles::of(&window.theme).raised,
+                );
                 assert!(
                     rect.center().distance(area.center()) < 2.0,
                     "{title}: {rect:?}"
@@ -164,6 +168,52 @@ mod tests {
             .center()
     }
 
+    /// Hovering a row of the console menu fills it and moves nothing: the rows below stay put.
+    #[test]
+    fn hovering_a_menu_row_does_not_push_the_rows_below() {
+        fn text_at(shapes: &[egui::epaint::ClippedShape], label: &str) -> egui::Pos2 {
+            shapes
+                .iter()
+                .find_map(|s| match &s.shape {
+                    egui::Shape::Text(t) if t.galley.text() == label => Some(t.pos),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{label} not painted"))
+        }
+        let (mut window, ctx) = warmed();
+        // With egui's own font the row's height is the minimum and hides the stroke; Geist at a
+        // desktop's 1.25 scale is where the hovered row grew two points.
+        crate::fonts::install_bundled(&ctx);
+        ctx.set_zoom_factor(1.25);
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 900.0));
+        one_frame_in(&mut window, &ctx, area, vec![]);
+        let at = header_point(&window, &ctx, area, 1);
+        one_frame_in(
+            &mut window,
+            &ctx,
+            area,
+            mouse(at, egui::PointerButton::Secondary, egui::Modifiers::NONE),
+        );
+        one_frame_in(&mut window, &ctx, area, vec![]);
+        let still = ui_pass(&mut window, &ctx, area, egui::RawInput::default());
+        let rename = text_at(&still, "Rename") + egui::vec2(4.0, 4.0);
+        let below = text_at(&still, "Close console");
+        let hover = || egui::RawInput {
+            events: vec![egui::Event::PointerMoved(rename)],
+            ..Default::default()
+        };
+        ui_pass(&mut window, &ctx, area, hover());
+        let hovered = ui_pass(&mut window, &ctx, area, hover());
+        // The hover landed: the row under the pointer is filled with the theme's `hover`.
+        let hover_fill = crate::theme::Roles::of(&window.theme).hover;
+        assert!(
+            hovered.iter().any(|s| matches!(&s.shape,
+                egui::Shape::Rect(r) if r.fill == hover_fill && r.rect.contains(rename))),
+            "the pointer did not hover Rename"
+        );
+        assert_eq!(text_at(&hovered, "Close console"), below);
+    }
+
     #[test]
     fn menu_opens_at_pointer_and_stays_inside_viewport() {
         let (mut window, ctx) = warmed();
@@ -178,7 +228,11 @@ mod tests {
         );
         one_frame_in(&mut window, &ctx, area, vec![]);
         let shapes = ui_pass(&mut window, &ctx, area, egui::RawInput::default());
-        let rect = dialog_rect(&shapes, "Paste", window.theme.panel_background());
+        let rect = dialog_rect(
+            &shapes,
+            "Paste",
+            crate::theme::Roles::of(&window.theme).raised,
+        );
         assert!(area.contains_rect(rect), "menu escapes viewport: {rect:?}");
         assert!(
             rect.distance_to_pos(at) < 3.0,
@@ -621,7 +675,11 @@ mod tests {
         let area = area_of(1280.0);
         one_frame_in(&mut window, &ctx, area, vec![]);
         let shapes = menu_at_console(&mut window, &ctx, area, 1);
-        let rect = dialog_rect(&shapes, "Paste", window.theme.panel_background());
+        let rect = dialog_rect(
+            &shapes,
+            "Paste",
+            crate::theme::Roles::of(&window.theme).raised,
+        );
         assert!(
             area.contains_rect(rect),
             "menu escapes a short viewport: {rect:?}"
