@@ -11,6 +11,8 @@ use crate::theme::Roles;
 use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Rect, Stroke, pos2, vec2};
 
 pub(super) const HEIGHT: f32 = 48.0;
+/// The Board's side gutter: the bar's controls and the arrangement below it share one edge.
+pub(super) const GUTTER: i8 = 16;
 const CONTROL: f32 = 28.0;
 const GAP: f32 = 8.0;
 

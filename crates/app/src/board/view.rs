@@ -193,7 +193,6 @@ fn paint_contents(
                             Column::Working | Column::Idle => {}
                         }
                     }
-                    super::milestones::project_header(ui, section, claims, &roles);
                     let base = row_base;
                     // Cards are timed by their own spans (`content_layout`, `content_paint`), and
                     // «By state» paints them outside the plan's span: subtract them here too, or
@@ -221,16 +220,25 @@ fn paint_contents(
                             cards += card_started.elapsed();
                         };
                     let plan = section.roadmap.as_ref().and_then(|r| r.plan.clone());
-                    row_base += match &plan {
-                        Some(plan) => super::milestones::paint_plan(
-                            ui,
-                            section,
-                            plan,
-                            &roles,
-                            &mut paint_card,
-                        ),
-                        None => super::milestones::paint_loose(ui, section, &mut paint_card),
-                    };
+                    // The bar's 16-point gutter, so columns and cards never touch the window's edges.
+                    row_base += egui::Frame::new()
+                        .inner_margin(egui::Margin::symmetric(super::bar::GUTTER, 4))
+                        .show(ui, |ui| {
+                            super::milestones::project_header(ui, section, claims, &roles);
+                            match &plan {
+                                Some(plan) => super::milestones::paint_plan(
+                                    ui,
+                                    section,
+                                    plan,
+                                    &roles,
+                                    &mut paint_card,
+                                ),
+                                None => {
+                                    super::milestones::paint_loose(ui, section, &mut paint_card)
+                                }
+                            }
+                        })
+                        .inner;
                     super::milestones::rule(ui, &roles);
                     window
                         .board

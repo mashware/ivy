@@ -1530,6 +1530,19 @@ mod tests {
             "the undeclared card sits in Off the plan"
         );
         assert!(!on_plan.x_range().contains(off.x));
+        // The arrangement keeps the bar's side gutter: nothing touches the Board's left edge.
+        // The bar's title starts one gutter in from the Board's left edge.
+        let board_left = shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == "Board" => Some(t.pos.x - 16.0),
+                _ => None,
+            })
+            .expect("the bar's title is painted");
+        assert!(
+            on_plan.left() >= board_left + 15.5,
+            "the first milestone column touches the edge: {on_plan:?}"
+        );
         // Reading order runs across the columns: right from the declared card reaches the off-plan one.
         crate::board::select_for_test(&mut window, origins[0]);
         frame(&mut window, &ctx, vec![key(egui::Key::ArrowRight)]);
@@ -1669,5 +1682,30 @@ mod tests {
                 "a header button under the Board took the press at {at:?} and replaced the Board"
             );
         }
+    }
+
+    #[test]
+    fn moving_the_pointer_over_the_board_does_not_blink_the_title_bar() {
+        let mut window = window_with("sleep 30", "sleep 30");
+        integrated(&mut window);
+        let ctx = egui::Context::default();
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
+        frame(&mut window, &ctx, vec![]);
+        // What the title bar paints: every shape above the Board's own bar.
+        let title_bar = |shapes: &[egui::epaint::ClippedShape]| -> Vec<String> {
+            shapes
+                .iter()
+                .filter(|s| s.shape.visual_bounding_rect().max.y <= 40.0)
+                .map(|s| format!("{:?}", s.shape))
+                .collect()
+        };
+        let still = title_bar(&frame(&mut window, &ctx, vec![]));
+        let moving = title_bar(&frame(
+            &mut window,
+            &ctx,
+            vec![egui::Event::PointerMoved(egui::pos2(600.0, 400.0))],
+        ));
+        assert!(!still.is_empty(), "the title bar paints something");
+        assert_eq!(still, moving, "a pointer move over the Board repainted the title bar differently");
     }
 }
