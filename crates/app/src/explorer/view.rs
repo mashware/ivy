@@ -249,6 +249,7 @@ pub(super) fn show(
     target: Option<usize>,
     theme: crate::theme::Theme,
 ) -> Option<(usize, PathBuf)> {
+    let roles = crate::ui::style::roles(parent.ctx(), &theme);
     let rect = state.rect(area);
     let mut open = None;
     egui::Area::new(egui::Id::new("file-explorer"))
@@ -409,17 +410,9 @@ pub(super) fn show(
                         let chosen =
                             state.navigation[&pane].selected.as_ref() == Some(&row.entry.path);
                         if chosen {
-                            ui.painter().rect_filled(
-                                row_rect,
-                                2.0,
-                                theme.focus().gamma_multiply(0.22),
-                            );
+                            ui.painter().rect_filled(row_rect, 2.0, roles.list_sel);
                         } else if response.hovered() {
-                            ui.painter().rect_filled(
-                                row_rect,
-                                2.0,
-                                theme.foreground().gamma_multiply(0.07),
-                            );
+                            ui.painter().rect_filled(row_rect, 2.0, roles.list_hover);
                         }
                         let indent = row.depth as f32 * 12.0;
                         let center_y = row_rect.center().y;
