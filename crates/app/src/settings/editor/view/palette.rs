@@ -194,6 +194,13 @@ mod tests {
             assert_eq!(p.frame().fill, rgb(raised));
             assert_eq!(p.frame().stroke.color, rgb(line2));
         }
+        // A `panel` its text cannot be read on leaves the navigation on the dialog's surface.
+        let unreadable = super::super::appearance::effective_theme(&Document::new(
+            "theme=ivy-night\npanel=#e4e8e2\n".into(),
+        ));
+        let p = Palette::new(unreadable);
+        assert_eq!(p.nav, p.surface);
+        assert!(project_ink_contrast(p.ink, p.nav) >= 4.5);
     }
 
     #[test]
