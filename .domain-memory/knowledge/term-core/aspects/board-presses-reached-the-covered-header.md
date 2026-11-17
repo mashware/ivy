@@ -32,12 +32,25 @@ feature_id: feat_term-core_nx0g1r
 
 ## What it does
 
-The Board is a full-window overlay over the consoles. Its input pass (`board::before_keys`) marks a frame it owns through `board::blocked`, but the console header pass (`header::actions::pointer`, reached from `pointer::header::intercept` in the mouse pass that runs every frame) did its own hit test regardless: `header_input.blocked_frame` was only consulted for double clicks and as a return value, never as a gate before acting. So a press on the Board landed on whatever header button sat beneath it — the Git button swapped the Board for the diff viewer, and the close button closed a console nobody could see. It became visible when #93 PR #4 put the Board's top bar exactly over the console header strip.
+The Board is a full-window overlay over the consoles. Its input pass (`board::before_keys`) marks a
+frame it owns through `board::blocked`, but the console header pass (`header::actions::pointer`,
+reached from `pointer::header::intercept` in the mouse pass that runs every frame) did its own hit
+test regardless: `header_input.blocked_frame` was only consulted for double clicks and as a return
+value, never as a gate before acting. So a press on the Board landed on whatever header button sat
+beneath it — the Git button swapped the Board for the diff viewer, and the close button closed a
+console nobody could see. It became visible when #93 PR #4 put the Board's top bar exactly over the
+console header strip.
 
-Fix: return early from the header pass when `board::blocked(window, ctx)` is true. Gating on `header_input.blocked_frame` instead was tried and is wrong: other overlays (the context menu) set it on frames where the console click must still be routed, and `menu_paste_reply_targets_original_console_after_focus_changes` went red.
+Fix: return early from the header pass when `board::blocked(window, ctx)` is true. Gating on
+`header_input.blocked_frame` instead was tried and is wrong: other overlays (the context menu) set
+it on frames where the console click must still be routed, and
+`menu_paste_reply_targets_original_console_after_focus_changes` went red.
 
-Rule for any new overlay over the consoles: gate the header pass on that overlay's own claim, and write a test that presses where the covered controls sit and asserts nothing beneath changed.
+Rule for any new overlay over the consoles: gate the header pass on that overlay's own claim, and
+write a test that presses where the covered controls sit and asserts nothing beneath changed.
 
 ## Where it lives
 
-Evidence: `a_press_on_the_board_never_reaches_the_console_header_it_covers` (crates/app/src/tests/board.rs) fails with the guard removed — 'a header close button took the press'. Guard in crates/app/src/header/actions.rs (`pointer`).
+Evidence: `a_press_on_the_board_never_reaches_the_console_header_it_covers`
+(crates/app/src/tests/board.rs) fails with the guard removed — 'a header close button took the
+press'. Guard in crates/app/src/header/actions.rs (`pointer`).

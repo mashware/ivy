@@ -32,8 +32,19 @@ feature_id: feat_term-core_nx0g1r
 
 ## What it does
 
-`tab_bar::partition`'s `dim_consoles` argument reaches `header::menu::block_pointer`, which disables the UI and, when the flag is set, leaves it at the disabled opacity — dimming the title bar and everything drawn after. The flag used to include `board_owned`, which is true only on frames where the Board consumed an event: a pointer move over the Board claims that frame, the next frame without events does not. Moving the mouse over the Board therefore alternated dimmed and undimmed frames and the tab blinked. The sidebar's claim has the same shape (a wheel delta over the rail claims the frame). Only steady states (a modal viewer, a pane in rename, the chrome's own dialogs) may drive the dimming; a claim that flips with input may gate input but must not change how things look. Reported by the owner from a real desktop run in #93 PR #4; pre-existing on main.
+`tab_bar::partition`'s `dim_consoles` argument reaches `header::menu::block_pointer`, which disables
+the UI and, when the flag is set, leaves it at the disabled opacity — dimming the title bar and
+everything drawn after. The flag used to include `board_owned`, which is true only on frames where
+the Board consumed an event: a pointer move over the Board claims that frame, the next frame without
+events does not. Moving the mouse over the Board therefore alternated dimmed and undimmed frames and
+the tab blinked. The sidebar's claim has the same shape (a wheel delta over the rail claims the
+frame). Only steady states (a modal viewer, a pane in rename, the chrome's own dialogs) may drive
+the dimming; a claim that flips with input may gate input but must not change how things look.
+Reported by the owner from a real desktop run in #93 PR #4; pre-existing on main.
 
 ## Where it lives
 
-crates/app/src/lib.rs (the `tab_bar::partition` call). Evidence: `moving_the_pointer_over_the_board_does_not_blink_the_title_bar` (crates/app/src/tests/board.rs) compares the title bar's shapes on a still frame and a pointer-move frame and fails when `board_owned` is put back into the flag.
+crates/app/src/lib.rs (the `tab_bar::partition` call). Evidence:
+`moving_the_pointer_over_the_board_does_not_blink_the_title_bar` (crates/app/src/tests/board.rs)
+compares the title bar's shapes on a still frame and a pointer-move frame and fails when
+`board_owned` is put back into the flag.
