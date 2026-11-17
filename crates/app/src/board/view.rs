@@ -132,7 +132,7 @@ fn paint_contents(
     );
     ui.set_clip_rect(area);
     super::style::apply(&mut ui, &theme);
-    ui.painter().rect_filled(area, 0.0, theme.background());
+    ui.painter().rect_filled(area, 0.0, roles.base);
     window.board.surface.child_hits.clear();
     super::bar::paint(
         &mut ui,
@@ -216,7 +216,7 @@ fn paint_contents(
                         }
                         let entry_count = entries.len();
                         let context_top = ui.next_widget_position().y;
-                        paint_stacked_header(ui, c, entries.len(), canvas_width, &theme);
+                        paint_stacked_header(ui, c, entries.len(), canvas_width, &theme, &roles);
                         egui::Frame::new().inner_margin(8).show(ui, |ui| {
                             let card_width = ui.available_width().max(1.0);
                             if entries.is_empty() {
@@ -248,7 +248,7 @@ fn paint_contents(
                             .filter(|entry| column(entry, signals, now) == c)
                             .count()
                     });
-                    paint_columns(ui, canvas_width, &widths, counts, &theme);
+                    paint_columns(ui, canvas_width, &widths, counts, &theme, &roles);
                     let mut longest = 0;
                     egui::Frame::new().inner_margin(8).show(ui, |ui| {
                         ui.horizontal_top(|ui| {
@@ -400,6 +400,7 @@ fn paint_stacked_header(
     count: usize,
     width: f32,
     theme: &crate::theme::Theme,
+    roles: &crate::theme::Roles,
 ) {
     let (header, _) = ui.allocate_exact_size(egui::vec2(width, 30.0), egui::Sense::hover());
     let ink = cards::color(column, theme);
@@ -419,7 +420,7 @@ fn paint_stacked_header(
         egui::pos2(header.right() - 18.0, header.center().y),
         egui::vec2(28.0, 18.0),
     );
-    ui.painter().rect_filled(badge, 9.0, theme.divider());
+    ui.painter().rect_filled(badge, 9.0, roles.raised);
     ui.painter().text(
         badge.center(),
         egui::Align2::CENTER_CENTER,
@@ -428,12 +429,12 @@ fn paint_stacked_header(
         if count > 0 {
             ink
         } else {
-            super::style::dim(theme)
+            roles.tx3
         },
     );
     ui.painter().line_segment(
         [header.left_bottom(), header.right_bottom()],
-        egui::Stroke::new(1.0, theme.divider()),
+        egui::Stroke::new(1.0, roles.line),
     );
 }
 
@@ -443,6 +444,7 @@ fn paint_columns(
     widths: &[f32; 5],
     counts: [usize; 5],
     theme: &crate::theme::Theme,
+    roles: &crate::theme::Roles,
 ) {
     let (header, _) = ui.allocate_exact_size(egui::vec2(canvas, 34.0), egui::Sense::hover());
     let mut left = header.left() + 8.0;
@@ -466,7 +468,7 @@ fn paint_columns(
             egui::pos2(left + widths[index] - width / 2.0, header.center().y),
             egui::vec2(width, 18.0),
         );
-        ui.painter().rect_filled(rect, 9.0, theme.divider());
+        ui.painter().rect_filled(rect, 9.0, roles.raised);
         ui.painter().text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
@@ -475,14 +477,14 @@ fn paint_columns(
             if counts[index] > 0 {
                 ink
             } else {
-                super::style::dim(theme)
+                roles.tx3
             },
         );
         left += widths[index] + 8.0;
     }
     ui.painter().line_segment(
         [header.left_bottom(), header.right_bottom()],
-        egui::Stroke::new(1.0, theme.divider()),
+        egui::Stroke::new(1.0, roles.line),
     );
 }
 
@@ -500,6 +502,7 @@ mod tests {
                 &widths,
                 [2, 1, 0, 2, 0],
                 &crate::theme::Theme::default(),
+                &crate::theme::Roles::of(&crate::theme::Theme::default()),
             )
         });
         let mut left = 8.0;
@@ -541,7 +544,8 @@ mod tests {
                     _ => None,
                 })
                 .expect("right aligned local count");
-            assert!(output.shapes.iter().any(|s|matches!(&s.shape,egui::Shape::Rect(r) if r.rect.height()==18.0 && r.rect.contains(count.pos) )));
+            let raised = crate::theme::Roles::of(&crate::theme::Theme::default()).raised;
+            assert!(output.shapes.iter().any(|s|matches!(&s.shape,egui::Shape::Rect(r) if r.rect.height()==18.0 && r.rect.contains(count.pos) && r.fill == raised)), "count badge on the kit's raised surface");
             left += width + 8.0;
         }
         output.drop_without_applying_deltas();
