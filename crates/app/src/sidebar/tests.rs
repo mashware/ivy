@@ -715,3 +715,34 @@ fn the_drawer_steps_aside_for_stacked_consoles_in_a_short_window() {
         "a tall window keeps the drawer"
     );
 }
+
+/// AC16 of #93: Files and the drawer never take a console under its twenty columns.
+#[test]
+fn no_console_drops_below_twenty_columns_beside_files_and_the_drawer() {
+    let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+    let ctx = egui::Context::default();
+    select(&mut window, Tool::Files);
+    crate::viewer::activate(&mut window, false);
+    let mut shown = false;
+    for width in (300..=1600).step_by(20) {
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width as f32, 800.0));
+        for _ in 0..2 {
+            one_frame_in(&mut window, &ctx, area, vec![]);
+        }
+        let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
+        let consoles = crate::tab_bar::geometry(&window, area, &metrics).consoles;
+        let floor = crate::panel::MINIMUM_CONSOLE * metrics.width();
+        let beside = window.sidebar.last_files.is_some();
+        for part in window.active().root.place(consoles, metrics.width()).parts {
+            if beside {
+                assert!(
+                    part.width() >= floor,
+                    "{width}: Files left a console {} points wide, under {floor}",
+                    part.width()
+                );
+            }
+        }
+        shown |= beside && window.sidebar.last_dock.is_some();
+    }
+    assert!(shown, "Files and the drawer never opened together");
+}
