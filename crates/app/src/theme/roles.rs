@@ -276,10 +276,12 @@ mod collapse_tests {
     fn a_collapsed_foreground_still_leaves_surfaces_apart() {
         for hex in [0x777777u32, 0x000000, 0xffffff, 0x202020] {
             let c = Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
-            let mut theme = Theme::default();
-            theme.background = c;
-            theme.foreground = c;
-            theme.focus = c;
+            let theme = Theme {
+                background: c,
+                foreground: c,
+                focus: c,
+                ..Theme::default()
+            };
             let r = Roles::of(&theme);
             for (name, a, b) in [
                 ("hover/base", r.hover, r.base),

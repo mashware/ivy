@@ -10058,6 +10058,14 @@ derives from them carry them too. Nothing else is
 corrected: an explicit focus is the person's colour verbatim (D94) wherever it can be seen, and the
 old Settings palette's 3:1 floor on every border and on the accent is dropped with it.
 
+**The surfaces step toward the readable text.** `raised`, `hover` and `line2` are mixed from the
+background toward `tx` rather than the raw foreground, and the selection toward `tx` when the focus
+colour is the background itself. For every theme whose text reads, `tx` is the foreground and
+nothing changes; a configuration that collapsed the foreground now gets surfaces that show on every
+surface built from the roles — menus, the Board, the tab bar — not only in Settings. Where stepping
+toward black text would take a text surface under 4.5:1 (a mid-grey background), it steps the other
+way. This amends D94's derivation table for collapsed configurations only.
+
 **Measures kept.** Settings and the chrome's dialogs (Connect agents, What's new) keep the measures
 Settings already had — the 15-point body and 40-point size fields of D67's native review, 36-point
 controls — and the viewer keeps its two-line header; only colours, radii and the picker change. The

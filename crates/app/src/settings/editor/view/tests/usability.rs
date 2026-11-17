@@ -411,7 +411,7 @@ fn a_point_size_box_shows_when_it_has_the_keyboard() {
         .into_iter()
         .filter(|(r, c)| *r == target && *c != egui::Color32::TRANSPARENT)
         .map(|(_, c)| c)
-        .last()
+        .next_back()
         .expect("the box is still painted");
     assert_ne!(edge, rest_edge, "the focused box looks like the others");
 }
