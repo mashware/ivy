@@ -1,6 +1,17 @@
-# Ivy 0.1.0-alpha.9
+# Ivy 0.1.0-alpha.10
 
 ## New in this alpha
+
+- Ivy has a new look, Ivy Night (and Ivy Day for light desktops), with the Geist fonts. Settings, menus and dialogs follow the theme you choose, whatever the desktop prefers.
+- The title bar holds the tabs, with each tab's claim shown as a small pill. Files, the Board, Markdown, split, search, Connect agents and the menu sit in the bar, with labelled buttons and the same icons everywhere.
+- Files opens on the left of your consoles and follows the one you are working in. Its search lists matching names in a floating list: Enter shows the match in the tree, Ctrl+Enter opens a Markdown file.
+- Git review and Markdown share a drawer below the consoles, as tabs you can close. Resize the drawer, maximize it over the consoles without resizing them, compare changes unified or side by side, and drag the divider between the two sides.
+- Console headers name the project in its colour. A plain shell shows its folder and program instead of the long terminal title. The focused console is outlined in its project's colour.
+- The status panel shows a waiting, stuck or finished claim as a band across its top, and its actions look like buttons, with the command visible before you press it.
+- The Board can lay each project's roadmap out by milestone as well as by state, and remembers your choice.
+- Hover and selection stay visible even when custom colours collide.
+
+## Previously in 0.1.0-alpha.9
 
 - Files, Markdown, Git review and Board now share a right sidebar, keeping running consoles visible beside the tools you use.
 - Browse files independently in each console, with navigation and file previews tied to that console.
@@ -10,7 +21,7 @@
 - Codex conversations support mobile control while each console keeps its own status-panel route.
 - Selected terminal backgrounds no longer leave gaps, and unsafe inherited panel directories are rejected.
 
-## Previously in 0.1.0-alpha.8
+## Since 0.1.0-alpha.8
 
 - The board now shows persistent project roadmaps, published by agents or read from a configured Markdown file, with console cards grouped under milestones and deliverables.
 - Open and fold individual panel block headers to keep the information you need in view.
@@ -83,12 +94,12 @@
 
 ## Choose a download
 
-- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.9_amd64.deb`.
-- Arch Linux x86_64: `ivy-terminal-0.1.0alpha9-1-x86_64.pkg.tar.zst`.
-- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.9-macos-arm64.dmg`.
-- macOS 15+ Intel: `Ivy-0.1.0-alpha.9-macos-x86_64.dmg`.
-- Windows 11 x64: `Ivy-0.1.0-alpha.9-windows-x86_64-setup.exe`.
+- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.10_amd64.deb`.
+- Arch Linux x86_64: `ivy-terminal-0.1.0alpha10-1-x86_64.pkg.tar.zst`.
+- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.10-macos-arm64.dmg`.
+- macOS 15+ Intel: `Ivy-0.1.0-alpha.10-macos-x86_64.dmg`.
+- Windows 11 x64: `Ivy-0.1.0-alpha.10-windows-x86_64-setup.exe`.
 
 Download `release-manifest.json` and `SHA256SUMS` with the chosen package and verify its SHA-256
-before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.9/docs/10-installation.md)
+before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.10/docs/10-installation.md)
 for verification, installation, upgrade and removal commands. No Rust toolchain is needed.
