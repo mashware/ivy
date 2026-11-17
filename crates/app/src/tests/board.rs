@@ -1372,6 +1372,14 @@ mod tests {
 
             if the_text_queued_up(&shapes, "visible configured task") {
                 assert!(!the_text_queued_up(&shapes, "unconfigured stored task"));
+                // «By state» is about consoles: the console-less project is not a row there.
+                let at = text_point(&shapes, "By state").expect("the arrangement toggle");
+                frame(&mut window, &ctx, click_at(at));
+                let shapes = frame(&mut window, &ctx, vec![]);
+                let named = shapes.iter().any(|s| {
+                    matches!(&s.shape, egui::Shape::Text(t) if t.galley.text() == "configured")
+                });
+                assert!(!named, "a project without consoles got a By-state row");
                 break;
             }
             assert!(
