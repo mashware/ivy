@@ -643,3 +643,53 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod collision_tests {
+    use super::*;
+    use crate::theme::NamedTheme;
+
+    fn configured(source: &str) -> Theme {
+        let (settings, warnings) = crate::settings::interpret(source).unwrap();
+        assert_eq!(warnings.total(), 0);
+        settings.theme.map(NamedTheme::theme).unwrap_or_default().with_colors(&settings.colors)
+    }
+
+    #[test]
+    fn parsed_collisions_leave_shared_states_visible_on_every_backing() {
+        for source in [
+            "theme=ivy-night\npanel=#1a372e\n",
+            "theme=ivy-night\npanel=#262b2d\n",
+            "background=#000000\nforeground=#757575\n",
+        ] {
+            let theme = configured(source);
+            let r = Roles::of(&theme);
+            for backing in [r.base, r.raised, r.panel] {
+                assert!(project_ink_contrast(r.hover, backing) >= 1.03, "{source}: hover {backing:?}");
+                assert!(project_ink_contrast(r.sel, backing) >= 1.03, "{source}: selection {backing:?}");
+            }
+            assert!(project_ink_contrast(r.sel, r.hover) >= 1.03, "{source}");
+            assert_eq!(r.base, theme.background);
+            assert_eq!(r.panel, theme.panel_background);
+            assert_eq!(r.accent, theme.focus);
+        }
+    }
+
+    #[test]
+    fn visible_catalog_and_custom_candidates_keep_their_exact_mixes() {
+        for theme in NamedTheme::ALL.iter().map(|n| n.theme()).chain([
+            configured("background=#002b36\nforeground=#839496\n"),
+            configured("background=#111111\nforeground=#dddddd\npanel=#191919\nfocus=#4488cc\n"),
+        ]) {
+            let r = Roles::of(&theme);
+            let hover = mix(theme.background, theme.foreground, 0.09);
+            if stands_apart(hover, &[r.base, r.raised, r.panel]) {
+                assert_eq!(r.hover, hover);
+            }
+            let sel = mix(theme.background, theme.focus, 0.18);
+            if stands_apart(sel, &[r.base, r.raised, r.panel, r.hover]) {
+                assert_eq!(r.sel, sel);
+            }
+        }
+    }
+}
