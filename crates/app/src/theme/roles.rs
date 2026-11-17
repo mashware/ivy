@@ -227,20 +227,19 @@ fn stands_apart(colour: Color32, over: &[Color32]) -> bool {
         .all(|fill| project_ink_contrast(colour, *fill) >= INVISIBLE)
 }
 
-/// `role`, unless it vanishes into one of the fills it is painted over: then the nearest step of
-/// `from` toward `tx` — from `amount` up, a point at a time — that stands apart from all of them
-/// and from the text itself. Each step toward the text reads less well under it, so the nearest
-/// is also the most readable. Where nothing between `from` and the text stands apart (the text
-/// itself barely does), the first step.
+/// `role`, unless it vanishes into one of the colours in `over`: then the nearest step of `from`
+/// toward `tx` — from `amount` up, a point at a time — that stands apart from all of them. A fill
+/// text sits on passes the text in `over` too, so it never becomes a shade of its own ink; a line
+/// does not. Where nothing stands apart, the first step.
 fn apart(role: Color32, over: &[Color32], from: Color32, tx: Color32, amount: f32) -> Color32 {
-    if stands_apart(role, over) && stands_apart(role, &[tx]) {
+    if stands_apart(role, over) {
         return role;
     }
     (0..)
         .map(|n| amount + n as f32 / 100.0)
         .take_while(|step| *step < 0.95)
         .map(|step| mix(from, tx, step))
-        .find(|c| stands_apart(*c, over) && stands_apart(*c, &[tx]))
+        .find(|c| stands_apart(*c, over))
         .unwrap_or_else(|| mix(from, tx, amount))
 }
 
@@ -381,6 +380,8 @@ mod collapse_tests {
         let (bg, tx) = (grey(0x20), grey(0xe0));
         let keep = grey(0x60);
         assert_eq!(apart(keep, &[bg], bg, tx, 0.2), keep);
+        // A line carries no text: one the colour of the text is kept where it shows.
+        assert_eq!(apart(tx, &[bg], bg, tx, 0.16), tx);
         // The first step stands apart from the background alone: it is the answer.
         assert_eq!(apart(bg, &[bg], bg, tx, 0.2), mix(bg, tx, 0.2));
         // A fill on the first step pushes it further, still a fill and short of the text.
@@ -393,16 +394,16 @@ mod collapse_tests {
             moved.r() - first.r() <= 8,
             "{moved:?} is not the nearest step"
         );
-        // A text one level off the fill leaves no colour between them that stands apart: the
-        // first step, never the text or a shade of it.
+        // A fill that carries text passes the text too. One level off the fill, nothing between
+        // them stands apart from both: the first step, as documented.
         let near = grey(0x7a);
         assert_eq!(
-            apart(grey(0x77), &[grey(0x77)], grey(0x77), near, 0.2),
+            apart(grey(0x77), &[grey(0x77), near], grey(0x77), near, 0.2),
             grey(0x78)
         );
         // A wider pair: the step stands apart from the fill and from the text both.
         let (fill, text) = (grey(0x60), grey(0x90));
-        let step = apart(fill, &[fill], fill, text, 0.2);
+        let step = apart(fill, &[fill, text], fill, text, 0.2);
         assert!(
             stands_apart(step, &[fill]) && stands_apart(step, &[text]),
             "{step:?}"
@@ -411,7 +412,8 @@ mod collapse_tests {
         // 0x06, the only steps left that stand apart from them read as the text 0x10 itself, so
         // the answer is the first step, not a shade of the text.
         let (dark, dark_text) = (grey(0x00), grey(0x10));
-        let crowd: Vec<Color32> = (0x00..=0x06).map(grey).collect();
+        let mut crowd: Vec<Color32> = (0x00..=0x06).map(grey).collect();
+        crowd.push(dark_text);
         assert_eq!(
             apart(dark, &crowd, dark, dark_text, 0.2),
             mix(dark, dark_text, 0.2)

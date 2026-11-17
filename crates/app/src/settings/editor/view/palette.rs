@@ -53,42 +53,25 @@ impl Palette {
         // The navigation sits on the person's own `panel` colour; where that leaves its text
         // unreadable it falls back to the dialog's surface rather than hide the way back.
         let nav = roles.panel_or(ink, surface);
-        fixed.hover = fixed.apart(roles.hover, &[surface], surface, 0.10);
+        // Hover and the selection carry text, so they must not become a shade of the ink either.
+        fixed.hover = fixed.apart(roles.hover, &[surface, ink], surface, 0.10);
         // The selection is painted over a field (`base`), the dialog, the navigation and a hovered
         // row alike, so it has to stand apart from every one of them.
         fixed.sel = fixed.apart(
             roles.sel,
-            &[fixed.hover, roles.base, surface, nav],
+            &[fixed.hover, roles.base, surface, nav, ink],
             surface,
             0.20,
         );
         fixed.line2 = fixed.apart(roles.line2, &[surface], surface, 0.40);
         // The caret — the text cursor and a pressed control's border — is drawn over fields, the
-        // dialog, the selection, a pressed control's hover fill, the navigation and `panel`-backed
-        // fields: the accent where it stands apart from all of them, else whichever of the accent
-        // and the ink stands furthest from the nearest of them.
-        let under = [
-            roles.base,
-            surface,
-            fixed.sel,
-            fixed.hover,
-            nav,
-            roles.panel,
-        ];
+        // dialog, the selection, a pressed control's hover fill and the navigation: the accent where
+        // it stands apart from all of them, else the ink.
+        let under = [roles.base, surface, fixed.sel, fixed.hover, nav];
         let caret = if Roles::stands_apart(roles.accent, &under) {
             roles.accent
         } else {
-            let nearest = |c: Color32| {
-                under
-                    .iter()
-                    .map(|fill| project_ink_contrast(c, *fill))
-                    .fold(f32::INFINITY, f32::min)
-            };
-            if nearest(ink) >= nearest(roles.accent) {
-                ink
-            } else {
-                roles.accent
-            }
+            ink
         };
         Self {
             surface,
