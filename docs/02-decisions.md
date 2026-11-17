@@ -10050,15 +10050,18 @@ several themes; the memo of derived roles keeps the last four.
 **Collapsed palettes.** Settings is where a broken configuration is undone, so its text, its error
 ink and the ink on every control keep 4.5:1 over the fill they sit on; its navigation leaves a
 `panel` its text cannot be read on for the dialog's surface (and the viewer's chrome leaves it for
-`base`). Where a collapsed palette makes a fill, a control's border, the primary button or the
-caret indistinguishable from what lies under it (under 1.03:1, below the kit's own quietest step),
-that one colour is moved toward the ink so the control can still be found. Nothing else is
+`base`). Where a collapsed palette makes a fill, a control's border, the selection, the primary
+button or the caret indistinguishable from what lies under it (under 1.03:1, below the kit's own
+quietest step), that one colour is moved toward the ink so the control can still be found; Settings
+paints from the roles with those corrections written back, so its outline and every field egui
+derives from them carry them too. Nothing else is
 corrected: an explicit focus is the person's colour verbatim (D94) wherever it can be seen, and the
 old Settings palette's 3:1 floor on every border and on the accent is dropped with it.
 
-**Measures kept.** Settings and the chrome's dialogs (Connect agents, What's new) keep the sizes
-D67's native review chose (15-point body, 36-point controls) and the viewer keeps its two-line
-header; only colours, radii and the picker change. The
+**Measures kept.** Settings and the chrome's dialogs (Connect agents, What's new) keep the measures
+Settings already had — the 15-point body and 40-point size fields of D67's native review, 36-point
+controls — and the viewer keeps its two-line header; only colours, radii and the picker change. The
+console title and tab label sizes take the font size's 40-point box. The
 artboard's 40-point header and toolbar for the viewer, and its settings search field, were not
 taken: the first would cut the path line, the second is a feature no section asked for yet.
 

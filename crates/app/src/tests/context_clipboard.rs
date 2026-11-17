@@ -204,6 +204,13 @@ mod tests {
         };
         ui_pass(&mut window, &ctx, area, hover());
         let hovered = ui_pass(&mut window, &ctx, area, hover());
+        // The hover landed: the row under the pointer is filled with the theme's `hover`.
+        let hover_fill = crate::theme::Roles::of(&window.theme).hover;
+        assert!(
+            hovered.iter().any(|s| matches!(&s.shape,
+                egui::Shape::Rect(r) if r.fill == hover_fill && r.rect.contains(rename))),
+            "the pointer did not hover Rename"
+        );
         assert_eq!(text_at(&hovered, "Close console"), below);
     }
 

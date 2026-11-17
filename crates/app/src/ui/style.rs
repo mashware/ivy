@@ -27,30 +27,32 @@ pub(crate) fn install(ctx: &egui::Context, theme: &Theme) {
     ctx.data_mut(|d| d.insert_temp(id, *theme));
 }
 
-/// How many themes the roles memo keeps. One frame can ask about several: the live theme, the
-/// Board's derived one, the Settings draft, the factory theme a Board card falls back to — and a
-/// single slot made each of them evict the other on every frame.
+/// How many themes the roles memo keeps. One frame can ask about several — the live theme, the
+/// Board's derived one, the Settings draft — and a single slot made each evict the other.
 const REMEMBERED_THEMES: usize = 4;
 
 /// The roles of `theme`, memoized in egui's memory for the last few themes asked about.
 ///
 /// Hand-painted surfaces ask for them every frame, and deriving them walks the contrast search of
-/// every text role; on a frame where nothing changed the work is a few comparisons.
+/// every text role; on a hit the work is a few comparisons in place. A hit moves its theme to the
+/// back, so the theme asked about least recently is the one a new theme evicts — a Settings draft
+/// changing on every keystroke then evicts older drafts, not the live theme.
 pub(crate) fn roles(ctx: &egui::Context, theme: &Theme) -> Roles {
     let id = egui::Id::new("ivy-roles");
-    let mut memo = ctx
-        .data(|d| d.get_temp::<Vec<(Theme, Roles)>>(id))
-        .unwrap_or_default();
-    if let Some((_, roles)) = memo.iter().find(|(cached, _)| cached == theme) {
-        return *roles;
-    }
-    let roles = Roles::of(theme);
-    if memo.len() == REMEMBERED_THEMES {
-        memo.remove(0);
-    }
-    memo.push((*theme, roles));
-    ctx.data_mut(|d| d.insert_temp(id, memo));
-    roles
+    ctx.data_mut(|d| {
+        let memo = d.get_temp_mut_or_default::<Vec<(Theme, Roles)>>(id);
+        if let Some(at) = memo.iter().position(|(cached, _)| cached == theme) {
+            let hit = memo.remove(at);
+            memo.push(hit);
+            return hit.1;
+        }
+        let roles = Roles::of(theme);
+        if memo.len() == REMEMBERED_THEMES {
+            memo.remove(0);
+        }
+        memo.push((*theme, roles));
+        roles
+    })
 }
 
 /// Writes the roles into one style.
@@ -138,6 +140,32 @@ mod tests {
             ctx.options(|o| o.theme_preference),
             egui::ThemePreference::Dark
         );
+    }
+
+    /// The memo keeps the four themes asked about most recently: one asked about again survives a
+    /// fifth, and the least recent is the one evicted.
+    #[test]
+    fn the_roles_memo_keeps_the_most_recently_asked_themes() {
+        let ctx = egui::Context::default();
+        let [a, b, c, d, e] = [
+            NamedTheme::IvyNight,
+            NamedTheme::IvyDay,
+            NamedTheme::Nord,
+            NamedTheme::TokyoNight,
+            NamedTheme::GruvboxDark,
+        ]
+        .map(|t| t.theme());
+        for theme in [a, b, c, d, a, e] {
+            assert_eq!(roles(&ctx, &theme), Roles::of(&theme));
+        }
+        let kept: Vec<Theme> = ctx.data(|data| {
+            data.get_temp::<Vec<(Theme, Roles)>>(egui::Id::new("ivy-roles"))
+                .unwrap()
+                .into_iter()
+                .map(|(t, _)| t)
+                .collect()
+        });
+        assert_eq!(kept, vec![c, d, a, e]);
     }
 
     /// A change of theme is installed on the next call; the same theme twice writes nothing new.

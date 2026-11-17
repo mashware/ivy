@@ -416,7 +416,8 @@ fn the_theme_picker_samples_each_theme_and_filters_by_darkness() {
         "{checks:?} {selected:?}"
     );
     click_label(&mut editor, &ctx, "Light");
-    let (text, shapes) = scene(&mut editor, &ctx, size, vec![]);
+    // The pointer leaves, so the fill read below is the choice's and not a hover's.
+    let (text, shapes) = scene(&mut editor, &ctx, size, vec![egui::Event::PointerGone]);
     let mut rects = Vec::new();
     for clipped in &shapes {
         fills(&clipped.shape, &mut rects);
@@ -440,4 +441,29 @@ fn the_theme_picker_samples_each_theme_and_filters_by_darkness() {
             .any(|(s, _)| s.starts_with("Ivy Night") || s == "Tokyo Night"),
         "{rows:?}"
     );
+}
+
+/// The picker's sample reads the theme's slots directly; for every theme they are the roles they
+/// stand for — background, accent, waiting, finished.
+#[test]
+fn every_theme_sample_shows_its_base_accent_wait_and_done_roles() {
+    let ctx = egui::Context::default();
+    for named in crate::theme::NamedTheme::ALL {
+        let theme = named.theme();
+        let roles = crate::theme::Roles::of(&theme);
+        let output = ctx.run_ui(Default::default(), |ui| {
+            appearance::swatch(ui.painter(), egui::pos2(10.0, 10.0), &theme, egui::Color32::RED);
+        });
+        let mut rects = Vec::new();
+        for clipped in &output.shapes {
+            fills(&clipped.shape, &mut rects);
+        }
+        output.drop_without_applying_deltas();
+        let strips: Vec<_> = rects
+            .iter()
+            .filter(|(r, _)| r.size() == egui::vec2(8.0, 14.0))
+            .map(|(_, c)| *c)
+            .collect();
+        assert_eq!(strips, [roles.base, roles.accent, roles.wait, roles.done], "{named:?}");
+    }
 }

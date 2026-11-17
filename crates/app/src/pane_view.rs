@@ -305,66 +305,70 @@ pub(crate) fn before_keys(
             .pane_called(pane)
             .and_then(|pane| pane.screen.selected_text());
         let viewport = ui.ctx().viewport_rect();
-        let menu =
-            egui::Area::new(egui::Id::new("console-context-menu"))
-                .order(egui::Order::Foreground)
-                .fixed_pos(at)
-                .constrain_to(ui.ctx().viewport_rect())
-                .show(ui.ctx(), |ui| {
-                    crate::ui::floating::menu_frame(&crate::ui::style::roles(ui.ctx(), &theme))
-                        .show(ui, |ui| {
-                            // The scroll bar is for a window too short for the menu. A menu that
-                            // fits can still measure a fraction of a point over its own height on
-                            // a scaled desktop, and egui would then show the bar on hover; the
-                            // last frame's height, with room for that rounding, decides instead.
-                            let room = (viewport.height() - 20.0).max(1.0);
-                            let tall = egui::Id::new("console-context-menu-height");
-                            let last = ui.ctx().data(|d| d.get_temp::<f32>(tall));
-                            let bar = menu_scroll_bar(last, room);
-                            let shown = egui::ScrollArea::vertical()
-                                .max_height(room)
-                                .scroll_bar_visibility(bar)
-                                .show(ui, |ui| {
-                                    crate::settings::editor::view::style(ui, theme);
-                                    ui.set_width(190.0_f32.min((viewport.width() - 20.0).max(1.0)));
-                                    ui.spacing_mut().item_spacing = egui::vec2(0.0, 2.0);
-                                    let roles = crate::ui::style::roles(ui.ctx(), &theme);
-                                    ui.visuals_mut().widgets.hovered.weak_bg_fill = roles.hover;
-                                    ui.visuals_mut().widgets.active.weak_bg_fill = roles.sel;
-                                    if let Some(index) = split_buttons(ui, enabled) {
-                                        action = Some(5 + index);
-                                    }
-                                    ui.separator();
-                                    if menu_item(ui, "Copy", selected.is_some()) {
-                                        action = Some(8);
-                                    }
-                                    if menu_item(ui, "Paste", true) {
-                                        action = Some(9);
-                                    }
-                                    ui.separator();
-                                    if menu_item(ui, "Rename", true) {
-                                        action = Some(0);
-                                    }
-                                    if menu_item(ui, "Review changes", true) {
-                                        action = Some(7);
-                                    }
-                                    if menu_item(ui, "Toggle information panel", true) {
-                                        action = Some(1);
-                                    }
-                                    if pane_count > 1 && menu_item(ui, "Maximize / restore", true) {
-                                        action = Some(2);
-                                    }
-                                    if menu_item(ui, "Close console", can_close) {
-                                        action = Some(3);
-                                    }
-                                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                                        action = Some(4);
-                                    }
-                                });
-                            ui.ctx()
-                                .data_mut(|d| d.insert_temp(tall, shown.content_size.y));
-                        });
-                });
+        let menu = egui::Area::new(egui::Id::new("console-context-menu"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(at)
+            .constrain_to(ui.ctx().viewport_rect())
+            .show(ui.ctx(), |ui| {
+                crate::ui::floating::menu_frame(&crate::ui::style::roles(ui.ctx(), &theme)).show(
+                    ui,
+                    |ui| {
+                        // The scroll bar is for a window too short for the menu. A menu that
+                        // fits can still measure a fraction of a point over its own height on
+                        // a scaled desktop, and egui would then show the bar on hover; the
+                        // last frame's height, with room for that rounding, decides instead.
+                        // It is kept per row count (Maximize shows only beside other consoles),
+                        // so a menu with another set of rows never reads this one's height.
+                        // On the first frame of a menu nobody has measured, the bar waits a
+                        // frame rather than show on a menu that fits.
+                        let room = (viewport.height() - 20.0).max(1.0);
+                        let tall = egui::Id::new(("console-context-menu-height", pane_count > 1));
+                        let last = ui.ctx().data(|d| d.get_temp::<f32>(tall));
+                        let bar = menu_scroll_bar(last, room);
+                        let shown = egui::ScrollArea::vertical()
+                            .max_height(room)
+                            .scroll_bar_visibility(bar)
+                            .show(ui, |ui| {
+                                crate::settings::editor::view::style(ui, theme);
+                                ui.set_width(190.0_f32.min((viewport.width() - 20.0).max(1.0)));
+                                ui.spacing_mut().item_spacing = egui::vec2(0.0, 2.0);
+                                ui.visuals_mut().widgets.active.weak_bg_fill =
+                                    crate::ui::style::roles(ui.ctx(), &theme).sel;
+                                if let Some(index) = split_buttons(ui, enabled) {
+                                    action = Some(5 + index);
+                                }
+                                ui.separator();
+                                if menu_item(ui, "Copy", selected.is_some()) {
+                                    action = Some(8);
+                                }
+                                if menu_item(ui, "Paste", true) {
+                                    action = Some(9);
+                                }
+                                ui.separator();
+                                if menu_item(ui, "Rename", true) {
+                                    action = Some(0);
+                                }
+                                if menu_item(ui, "Review changes", true) {
+                                    action = Some(7);
+                                }
+                                if menu_item(ui, "Toggle information panel", true) {
+                                    action = Some(1);
+                                }
+                                if pane_count > 1 && menu_item(ui, "Maximize / restore", true) {
+                                    action = Some(2);
+                                }
+                                if menu_item(ui, "Close console", can_close) {
+                                    action = Some(3);
+                                }
+                                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                                    action = Some(4);
+                                }
+                            });
+                        ui.ctx()
+                            .data_mut(|d| d.insert_temp(tall, shown.content_size.y));
+                    },
+                );
+            });
         if ui.input(|input| {
             input.pointer.any_pressed()
                 && input

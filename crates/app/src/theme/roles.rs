@@ -85,6 +85,16 @@ pub(crate) mod metrics {
 }
 
 impl Roles {
+    /// `panel` for a surface that sets `ink` on it, or `fallback` where the person's own `panel`
+    /// colour would leave that ink unreadable — `panel` is configured apart from the text.
+    pub(crate) fn panel_or(&self, ink: Color32, fallback: Color32) -> Color32 {
+        if project_ink_contrast(ink, self.panel) >= TEXT_CONTRAST {
+            self.panel
+        } else {
+            fallback
+        }
+    }
+
     pub(crate) fn of(theme: &Theme) -> Self {
         let bg = theme.background;
         let fg = theme.foreground;

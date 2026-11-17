@@ -91,10 +91,12 @@ impl Menu {
             .with_clip_rect(ctx.viewport_rect());
         // A floating menu of the kit (D98): raised, a control border, the chosen row on `sel`.
         let roles = crate::ui::style::roles(ctx, theme);
-        painter.rect_filled(self.rect, 2.0, roles.raised);
+        let radius = crate::theme::metrics::RADIUS_FLOATING;
+        painter.add(roles.shadow.as_shape(self.rect, radius));
+        painter.rect_filled(self.rect, radius, roles.raised);
         painter.rect_stroke(
             self.rect,
-            2.0,
+            radius,
             egui::Stroke::new(1.0, roles.line2),
             egui::StrokeKind::Inside,
         );

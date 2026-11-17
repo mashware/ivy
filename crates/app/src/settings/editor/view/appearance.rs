@@ -314,7 +314,7 @@ fn check(painter: &egui::Painter, at: egui::Pos2, color: egui::Color32) {
     ));
 }
 
-/// The kit's segmented control: a sunk track, the chosen (or hovered) segment filled with `hover`.
+/// The kit's segmented control: a sunk track and the chosen segment filled with `hover`.
 fn segmented(ui: &mut egui::Ui, value: &mut usize, labels: &[&str]) {
     let (track, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), egui::Sense::hover());
@@ -346,12 +346,16 @@ fn segmented(ui: &mut egui::Ui, value: &mut usize, labels: &[&str]) {
             *value = index;
         }
         let selected = *value == index;
+        // The chosen segment is filled with `hover`; one only pointed at, with the raised fill, so
+        // the choice never looks like two.
         if selected || response.hovered() {
-            ui.painter().rect_filled(
-                rect,
-                crate::theme::metrics::RADIUS_CHIP,
-                v.widgets.hovered.bg_fill,
-            );
+            let fill = if selected {
+                v.widgets.hovered.bg_fill
+            } else {
+                v.widgets.inactive.bg_fill
+            };
+            ui.painter()
+                .rect_filled(rect, crate::theme::metrics::RADIUS_CHIP, fill);
         }
         ui.painter().text(
             rect.center(),

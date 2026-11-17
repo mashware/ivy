@@ -40,13 +40,14 @@ pub(super) fn show(
                 // background: the kit's floating viewer.
                 let roles = crate::ui::style::roles(parent.ctx(), &theme);
                 // `panel` is a colour of its own the person may set; where the text cannot be read on
-                // it the chrome stays on the document's background instead.
-                let surface = if crate::theme::project_ink_contrast(roles.tx, roles.panel) >= 4.5 {
-                    roles.panel
+                // it the chrome stays on the document's background instead. The rules are the
+                // person's `divider`, drawn toward the text where it would vanish into the chrome.
+                let surface = roles.panel_or(roles.tx, roles.base);
+                let line = if crate::theme::project_ink_contrast(roles.line, surface) < 1.03 {
+                    crate::theme::mix(surface, roles.tx, 0.16)
                 } else {
-                    roles.base
+                    roles.line
                 };
-                let line = roles.line;
                 let frame = egui::Frame::new()
                     .fill(surface)
                     .corner_radius(0)

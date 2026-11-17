@@ -231,7 +231,7 @@ pub(super) fn show(
                     Align2::RIGHT_CENTER,
                     hint,
                     FontId::proportional(10.0),
-                    hover,
+                    roles.tx3,
                 );
             }
             if response.clicked() && menu_rect.contains_rect(item) {

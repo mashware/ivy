@@ -264,12 +264,6 @@ fn point_field(ui: &mut egui::Ui, id_salt: &str, value: &mut String, hint: &str)
     let (rect, outer) = ui.allocate_exact_size(egui::vec2(113.0, 40.0), egui::Sense::click());
     ui.painter()
         .rect_filled(rect, 6.0, ui.visuals().extreme_bg_color);
-    ui.painter().rect_stroke(
-        rect,
-        6.0,
-        egui::Stroke::new(1.0, ui.visuals().widgets.inactive.bg_stroke.color),
-        egui::StrokeKind::Inside,
-    );
     let font = egui::FontId::proportional(14.0);
     let line_height = ui.fonts_mut(|fonts| fonts.row_height(&font));
     let inner = egui::Rect::from_min_size(
@@ -287,6 +281,14 @@ fn point_field(ui: &mut egui::Ui, id_salt: &str, value: &mut String, hint: &str)
     if outer.clicked() {
         response.request_focus();
     }
+    // The box is the field, so it carries the ring a framed field shows while it has the keyboard.
+    let edge = if response.has_focus() {
+        ui.visuals().selection.stroke
+    } else {
+        egui::Stroke::new(1.0, ui.visuals().widgets.inactive.bg_stroke.color)
+    };
+    ui.painter()
+        .rect_stroke(rect, 6.0, edge, egui::StrokeKind::Inside);
     ui.painter().text(
         rect.right_center() - egui::vec2(10.0, 0.0),
         egui::Align2::RIGHT_CENTER,

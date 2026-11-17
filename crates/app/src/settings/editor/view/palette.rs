@@ -14,10 +14,12 @@ pub(super) struct Palette {
     pub hover: Color32,
     pub active: Color32,
     pub error: Color32,
-    /// A control's border, and the caret and focus ring over a field: the kit's roles, moved only
-    /// where a collapsed palette made them vanish.
+    /// A control's border, and the caret (also a pressed control's border and the picker's check):
+    /// the kit's roles, moved only where a collapsed palette made them vanish.
     pub edge: Color32,
     pub caret: Color32,
+    /// The theme's roles with those corrections written back, so every field egui derives from
+    /// them — the dialog's outline, a field's border, the selection — inherits the correction.
     roles: Roles,
 }
 
@@ -34,14 +36,23 @@ fn readable(candidate: Color32, surface: Color32, minimum: f32) -> Color32 {
 }
 
 /// Below this contrast two colours read as one. The kit's own quietest step — Ivy Night's `hover`
-/// over `raised`, about 1.08:1 — sits above it on purpose, so only a collapsed palette is moved.
+/// over `raised`, about 1.09:1 — sits above it on purpose, so only a collapsed palette is moved.
 const INVISIBLE: f32 = 1.03;
 
 /// `role`, unless a collapsed palette left it indistinguishable from the surface it must stand out
 /// from: then moved toward the ink, so a hovered control, a field's edge or the caret still shows.
 fn distinct(role: Color32, from: Color32, ink: Color32, amount: f32) -> Color32 {
-    if project_ink_contrast(role, from) < INVISIBLE {
-        mix(from, ink, amount)
+    apart(role, &[from], from, ink, amount)
+}
+
+/// `role`, unless it vanishes into any of the fills it is painted over: then `base` moved toward
+/// the ink, which a collapsed palette leaves apart from all of them.
+fn apart(role: Color32, over: &[Color32], base: Color32, ink: Color32, amount: f32) -> Color32 {
+    if over
+        .iter()
+        .any(|fill| project_ink_contrast(role, *fill) < INVISIBLE)
+    {
+        mix(base, ink, amount)
     } else {
         role
     }
@@ -64,11 +75,30 @@ impl Palette {
         let hover = distinct(roles.hover, surface, ink, 0.10);
         // The navigation sits on the person's own `panel` colour; where that leaves its text
         // unreadable it falls back to the dialog's surface rather than hide the way back.
-        let nav = if project_ink_contrast(ink, roles.panel) >= 4.5 {
-            roles.panel
-        } else {
-            surface
-        };
+        let nav = roles.panel_or(ink, surface);
+        // The selection is painted over a field (`base`), the dialog, the navigation and a hovered
+        // row alike, so it has to stand apart from every one of them.
+        let active = apart(
+            roles.sel,
+            &[hover, roles.base, surface, nav],
+            surface,
+            ink,
+            0.20,
+        );
+        let edge = distinct(roles.line2, surface, ink, 0.40);
+        let caret = apart(
+            roles.accent,
+            &[roles.base, surface, active],
+            surface,
+            ink,
+            1.0,
+        );
+        let mut fixed = roles;
+        fixed.tx = ink;
+        fixed.tx3 = readable(roles.tx3, surface, 4.5);
+        fixed.hover = hover;
+        fixed.sel = active;
+        fixed.line2 = edge;
         Self {
             surface,
             nav,
@@ -76,11 +106,11 @@ impl Palette {
             accent: roles.accent,
             selected_ink: roles.on_accent,
             hover,
-            active: distinct(roles.sel, hover, ink, 0.20),
-            edge: distinct(roles.line2, surface, ink, 0.40),
-            caret: distinct(roles.accent, roles.base, ink, 1.0),
+            active,
+            edge,
+            caret,
             error: readable(roles.block, surface, 4.5),
-            roles,
+            roles: fixed,
         }
     }
 
@@ -95,24 +125,11 @@ impl Palette {
         super::settings_geometry(style);
         let v = &mut style.visuals;
         v.panel_fill = self.nav;
-        v.weak_text_color = Some(readable(self.roles.tx3, self.surface, 4.5));
         v.error_fg_color = self.error;
         v.warn_fg_color = self.error;
+        // Selected text, and egui's focus ring around a field, are drawn in this ink.
         v.selection.stroke.color = readable(self.ink, self.active, 4.5);
-        for (widget, fill) in [
-            (&mut v.widgets.hovered, self.hover),
-            (&mut v.widgets.active, self.hover),
-            (&mut v.widgets.open, self.hover),
-        ] {
-            widget.bg_fill = fill;
-            widget.weak_bg_fill = fill;
-        }
-        v.selection.bg_fill = self.active;
-        for widget in [&mut v.widgets.inactive, &mut v.widgets.hovered] {
-            widget.bg_stroke.color = self.edge;
-        }
         v.widgets.active.bg_stroke.color = self.caret;
-        v.widgets.open.bg_stroke.color = self.edge;
         v.text_cursor.stroke.color = self.caret;
         for widget in [
             &mut v.widgets.noninteractive,
@@ -151,7 +168,8 @@ pub(super) fn primary_style(ui: &mut egui::Ui, palette: &Palette) {
         let fill = mix(accent, ink, amount);
         widget.bg_fill = fill;
         widget.weak_bg_fill = fill;
-        // Its edge is the control border, so a collapsed accent still leaves the button findable.
+        // Its edge is its own fill, moved toward the ink only where it vanishes into the surface,
+        // so a collapsed accent still leaves the button findable.
         widget.bg_stroke =
             egui::Stroke::new(1.0, distinct(fill, palette.surface, palette.ink, 0.40));
         widget.fg_stroke.color = readable(ink, fill, 4.5);
@@ -225,26 +243,27 @@ mod tests {
                 );
                 // The accent is the person's focus colour verbatim (D94); only ink is corrected.
                 assert_eq!(p.accent, theme.focus(), "{name:?}");
-                // Where a control is, and where the caret is, stays findable (D98).
+                // Where a control is, the selection and the caret stay findable over every fill
+                // they are painted on (D98). The floor is written out, not read from the code.
                 let base = Roles::of(&theme).base;
-                assert!(
-                    project_ink_contrast(p.hover, p.surface) >= INVISIBLE,
-                    "{name:?}"
-                );
-                assert!(
-                    project_ink_contrast(p.active, p.hover) >= INVISIBLE,
-                    "{name:?}"
-                );
-                assert!(
-                    project_ink_contrast(p.edge, p.surface) >= INVISIBLE,
-                    "{name:?}"
-                );
-                assert!(project_ink_contrast(p.caret, base) >= INVISIBLE, "{name:?}");
+                let apart = |a: Color32, over: &[Color32]| {
+                    over.iter().all(|b| project_ink_contrast(a, *b) >= 1.03)
+                };
+                assert!(apart(p.hover, &[p.surface]), "{name:?} hover");
+                assert!(apart(p.edge, &[p.surface]), "{name:?} edge");
+                assert!(apart(p.active, &[p.hover, base, p.surface, p.nav]), "{name:?} sel");
+                assert!(apart(p.caret, &[base, p.surface, p.active]), "{name:?} caret");
+                assert_eq!(p.frame().stroke.color, p.edge, "{name:?} outline");
                 egui::Context::default()
                     .run_ui(Default::default(), |ui| {
                         p.apply(ui);
                         assert_eq!(ui.visuals().widgets.inactive.bg_stroke.color, p.edge);
+                        assert_eq!(ui.visuals().window_stroke.color, p.edge);
+                        assert_eq!(ui.visuals().selection.bg_fill, p.active);
                         assert_eq!(ui.visuals().text_cursor.stroke.color, p.caret);
+                        primary_style(ui, &p);
+                        let primary = ui.visuals().widgets.inactive.bg_stroke.color;
+                        assert!(project_ink_contrast(primary, p.surface) >= 1.03, "{name:?}");
                         for widget in [
                             ui.visuals().widgets.inactive,
                             ui.visuals().widgets.hovered,
