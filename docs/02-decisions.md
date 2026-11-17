@@ -9748,8 +9748,8 @@ than it says. The bar's controls are pressed through the Board's own hit list, l
 so one input pass decides what a press reaches; the filter field edits its text in that same
 pass, Enter or the first Escape leaves the field and the next Escape closes the Board. The console
 headers the Board covers do not take its presses: the header pass ignored the Board's claim on the
-frame, and a press on the bar's filter field also pressed the Git button of the header beneath it
-and swapped the Board for the diff viewer. An unpublished console is a dashed card and
+frame, so a press on the Board also pressed the header button beneath it — the Git button swapped
+the Board for the diff viewer, and the close button closed a console nobody could see. An unpublished console is a dashed card and
 an old state nobody refreshes is veiled. The roadmap's source is **named, not linked**: it is a
 file path or a publication, and the Board opens only web addresses; an unreadable roadmap says why
 in «By milestone» as it does in «By state». Discarded: a per-project choice of arrangement
