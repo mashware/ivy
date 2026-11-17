@@ -416,8 +416,10 @@ fn the_theme_picker_samples_each_theme_and_filters_by_darkness() {
         "{checks:?} {selected:?}"
     );
     click_label(&mut editor, &ctx, "Light");
-    // The pointer leaves, so the fill read below is the choice's and not a hover's.
-    let (text, shapes) = scene(&mut editor, &ctx, size, vec![egui::Event::PointerGone]);
+    // The pointer leaves, so the fill read below is the choice's and not a hover's; egui decides
+    // a hover from the frame before, so the reading is the frame after it left.
+    scene(&mut editor, &ctx, size, vec![egui::Event::PointerGone]);
+    let (text, shapes) = scene(&mut editor, &ctx, size, vec![]);
     let mut rects = Vec::new();
     for clipped in &shapes {
         fills(&clipped.shape, &mut rects);
