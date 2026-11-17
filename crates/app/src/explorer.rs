@@ -1,6 +1,7 @@
 //! A window-owned file surface with navigation owned by runtime console identity.
 mod load;
 mod model;
+mod search;
 mod view;
 
 use crate::{Window, painter::CellMetrics};
@@ -41,6 +42,12 @@ pub(crate) struct Explorer {
     events: Option<Vec<egui::Event>>,
     viewport_rows: usize,
     row_stride: f32,
+    /// The floating name search is open.
+    searching: bool,
+    search_index: usize,
+    search_rect: Option<egui::Rect>,
+    focus_search: bool,
+    pick: Option<search::Pick>,
 }
 
 impl Default for Explorer {
@@ -64,6 +71,11 @@ impl Default for Explorer {
             events: None,
             viewport_rows: 24,
             row_stride: 27.0,
+            searching: false,
+            search_index: 0,
+            search_rect: None,
+            focus_search: false,
+            pick: None,
         }
     }
 }
@@ -216,6 +228,25 @@ impl Explorer {
         self.visible = false;
         self.keyboard = false;
         self.resizing = false;
+        self.searching = false;
+        self.search_rect = None;
+    }
+
+    /// Open the floating name search with its field focused.
+    fn open_search(&mut self) {
+        self.searching = true;
+        self.focus_search = true;
+        self.keyboard = true;
+        self.search_index = 0;
+    }
+
+    fn close_search(&mut self, pane: Option<usize>) {
+        if let Some(nav) = pane.and_then(|pane| self.navigation.get_mut(&pane)) {
+            nav.query.clear();
+            nav.refresh();
+        }
+        self.searching = false;
+        self.search_rect = None;
     }
 }
 
@@ -294,8 +325,14 @@ pub(crate) fn before_keys(
         };
         let state = &mut window.explorer;
         let rect = state.rect(area);
+        // The floating search overhangs the consoles; a press on it is Files', not theirs.
+        let list = state.search_rect.filter(|_| state.searching);
         let over = state.visible
-            && ctx.input(|i| i.pointer.interact_pos().is_some_and(|p| rect.contains(p)));
+            && ctx.input(|i| {
+                i.pointer
+                    .interact_pos()
+                    .is_some_and(|p| rect.contains(p) || list.is_some_and(|r| r.contains(p)))
+            });
         if ctx.input(|i| i.pointer.any_pressed()) && !state.held {
             state.keyboard = over;
             state.held = over;
@@ -312,21 +349,17 @@ pub(crate) fn before_keys(
             state.keyboard || gesture || (over && pointer) || state.blocked_frame == Some(frame);
         if state.visible && state.keyboard {
             if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-                if let Some(nav) = target
-                    .and_then(|pane| state.navigation.get_mut(&pane))
-                    .filter(|nav| !nav.query.is_empty())
-                {
-                    nav.query.clear();
-                    nav.scroll = 0.0;
-                    nav.refresh();
+                // Escape leaves the search before it closes Files.
+                if state.searching {
+                    state.close_search(target);
                 } else {
                     state.hide();
                 }
-            } else if let Some(pane) = target
-                && !ctx.memory(|memory| {
-                    memory.has_focus(egui::Id::new(("explorer-name-search", pane)))
-                })
-            {
+            } else if state.searching {
+                if let Some(pane) = target {
+                    state.pick = search::keys(state, pane, ctx).or(state.pick.take());
+                }
+            } else if let Some(pane) = target {
                 view::keys(state, pane, ctx);
             }
         }
@@ -372,7 +405,22 @@ pub(crate) fn show(window: &mut Window, ui: &mut egui::Ui, area: egui::Rect) {
         if let Some(events) = window.explorer.events.take() {
             ui.ctx().input_mut(|input| input.events = events);
         }
-        let open = view::show(&mut window.explorer, ui, area, target, window.theme);
+        let mut open = view::show(&mut window.explorer, ui, area, target, window.theme);
+        let state = &mut window.explorer;
+        if let Some(pane) = target.filter(|_| state.searching && state.visible) {
+            let clicked = search::show(state, ui.ctx(), pane, area, &window.theme);
+            match clicked.or(state.pick.take()) {
+                Some(search::Pick::Reveal(path)) => search::reveal(state, pane, &path),
+                Some(search::Pick::Open(entry)) => {
+                    search::reveal(state, pane, &entry.path);
+                    open = open.or(view::activate(state, pane, &entry));
+                }
+                None => {}
+            }
+        } else {
+            state.search_rect = None;
+            state.pick = None;
+        }
         ui.ctx().input_mut(|input| input.events = filtered);
         if let Some((pane, path)) = open {
             if crate::viewer::open_markdown_target(window, pane, path, None) {
