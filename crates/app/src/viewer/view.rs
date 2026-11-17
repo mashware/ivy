@@ -77,7 +77,11 @@ pub(super) fn show(
                 for (action, place) in &strip.places {
                     let hint = super::drawer::hint(*action, maximized);
                     let response = content
-                        .interact(*place, egui::Id::new(("drawer", hint)), egui::Sense::hover())
+                        .interact(
+                            *place,
+                            egui::Id::new(("drawer", hint)),
+                            egui::Sense::hover(),
+                        )
                         .on_hover_text(hint);
                     response.widget_info(|| {
                         egui::WidgetInfo::labeled(egui::WidgetType::Button, true, hint)
@@ -243,57 +247,118 @@ fn controls(state: &mut State, ui: &mut egui::Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use eframe::egui::Color32;
 
-    #[test]
-    fn markdown_header_centers_title_on_its_icon_and_draws_a_readable_zoom_control() {
-        fn inspect(
-            shape: &egui::Shape,
-            title: &mut Option<f32>,
-            icon: &mut Option<f32>,
-            zoom: &mut Option<(f32, f32)>,
-        ) {
-            match shape {
-                egui::Shape::Text(text) if text.galley.text() == "Markdown viewer" => {
-                    *title = Some(text.pos.y + text.galley.rect.center().y)
-                }
-                egui::Shape::Rect(rect)
-                    if rect.rect.center().x < 100.0 && (rect.rect.width() - 16.0).abs() < 0.1 =>
-                {
-                    *icon = Some(rect.rect.center().y)
-                }
-                egui::Shape::Rect(rect) if rect.rect.center().x > 400.0 => {
-                    *zoom = Some((rect.rect.width(), rect.rect.center().y))
-                }
-                egui::Shape::Vec(shapes) => {
-                    for shape in shapes {
-                        inspect(shape, title, icon, zoom);
-                    }
-                }
-                _ => {}
-            }
+    fn tabs(markdown: bool) -> super::super::drawer::Tabs {
+        super::super::drawer::Tabs {
+            changes: Some(3),
+            document: Some("PLAN.md".into()),
+            markdown,
+            side_by_side: false,
         }
+    }
+
+    fn texts(shape: &egui::Shape, found: &mut Vec<(String, egui::Rect)>) {
+        match shape {
+            egui::Shape::Text(text) => found.push((
+                text.galley.text().to_owned(),
+                text.galley.rect.translate(text.pos.to_vec2()),
+            )),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| texts(s, found)),
+            _ => {}
+        }
+    }
+
+    /// The strip reads as the artboard: source, then the tabs with the count, the layout toggle
+    /// for a diff, and maximize and close at the right, all on one row.
+    #[test]
+    fn the_drawer_strip_lays_its_tabs_and_controls_on_one_row() {
+        use super::super::drawer::{HEIGHT, Strip, StripAction};
+        let drawer = egui::Rect::from_min_size(egui::pos2(270.0, 400.0), egui::vec2(1000.0, 360.0));
+        let strip = Strip::of(drawer, &tabs(false));
+        let order: Vec<_> = strip.places.iter().map(|(action, _)| *action).collect();
+        for action in [
+            StripAction::Changes,
+            StripAction::Document,
+            StripAction::Unified,
+            StripAction::SideBySide,
+            StripAction::Maximize,
+            StripAction::Close,
+        ] {
+            assert!(order.contains(&action), "{action:?} missing: {order:?}");
+        }
+        let place = |action| strip.places.iter().find(|(a, _)| *a == action).unwrap().1;
+        assert!(place(StripAction::Changes).right() <= place(StripAction::Document).left());
+        assert!(place(StripAction::SideBySide).right() < place(StripAction::Maximize).left());
+        assert!(place(StripAction::Maximize).right() < place(StripAction::Close).left());
+        assert!(place(StripAction::Close).right() <= drawer.right());
+        for (_, rect) in &strip.places {
+            assert!((rect.center().y - (drawer.top() + HEIGHT / 2.0)).abs() < 0.5);
+        }
+        let markdown = Strip::of(drawer, &tabs(true));
+        assert!(
+            !markdown
+                .places
+                .iter()
+                .any(|(a, _)| matches!(a, StripAction::Unified | StripAction::SideBySide)),
+            "a document has no diff layout to choose"
+        );
+        let narrow = Strip::of(
+            egui::Rect::from_min_size(drawer.min, egui::vec2(300.0, 360.0)),
+            &tabs(false),
+        );
+        let kept: Vec<_> = narrow.places.iter().map(|(a, _)| *a).collect();
+        assert!(kept.contains(&StripAction::Maximize) && kept.contains(&StripAction::Close));
+        let maximize = narrow
+            .places
+            .iter()
+            .find(|(a, _)| *a == StripAction::Maximize)
+            .unwrap()
+            .1;
+        assert!(
+            narrow.places.iter().all(|(a, r)| matches!(
+                a,
+                StripAction::Maximize | StripAction::Close
+            ) || r.right() <= maximize.left()),
+            "a tab runs under the drawer's own buttons"
+        );
         let ctx = egui::Context::default();
-        let area = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(480.0, 62.0));
-        let mut state = State::default();
         let output = ctx.run_ui(Default::default(), |ui| {
-            header(&mut state, ui, area, Color32::GRAY, false)
+            let roles = crate::ui::style::roles(ui.ctx(), &crate::theme::Theme::default());
+            super::super::drawer::paint(
+                ui,
+                &strip,
+                &tabs(false),
+                &roles,
+                "billing-api / Refunds",
+                false,
+            );
         });
-        let (mut title, mut icon, mut zoom) = (None, None, None);
+        let mut found = Vec::new();
         for shape in &output.shapes {
-            inspect(&shape.shape, &mut title, &mut icon, &mut zoom);
+            texts(&shape.shape, &mut found);
         }
         output.drop_without_applying_deltas();
+        for (label, action) in [
+            ("Changes", StripAction::Changes),
+            ("3", StripAction::Changes),
+            ("PLAN.md", StripAction::Document),
+            ("Unified", StripAction::Unified),
+            ("Side by side", StripAction::SideBySide),
+        ] {
+            let (_, rect) = found
+                .iter()
+                .find(|(text, _)| text == label)
+                .unwrap_or_else(|| panic!("{label} is not painted: {found:?}"));
+            assert!(
+                place(action).contains(rect.center()),
+                "{label} outside its place"
+            );
+        }
         assert!(
-            (title.expect("title painted") - icon.expect("document icon painted")).abs() < 1.0,
-            "title and icon are on different rows"
-        );
-        assert!(
-            (title.unwrap() - zoom.expect("zoom outline painted").1).abs() < 1.0,
-            "zoom control is not centered on the header row"
-        );
-        assert!(
-            zoom.expect("zoom outline painted").0 >= 14.0,
-            "zoom glyph is too small for the document header"
+            found
+                .iter()
+                .any(|(text, _)| text == "billing-api / Refunds")
         );
     }
 
@@ -328,6 +393,7 @@ mod tests {
                         crate::theme::Theme::default(),
                         false,
                         false,
+                        &tabs(true),
                     )
                 },
             );
@@ -348,7 +414,7 @@ mod tests {
         }
     }
 
-    /// The viewer's chrome sits on `panel` and the document on `base`; a `panel` the text cannot be
+    /// The drawer's chrome sits on `panel` and the document on `base`; a `panel` the text cannot be
     /// read on leaves the chrome on `base` instead (D98).
     #[test]
     fn the_viewer_frames_the_document_with_the_theme_roles() {
@@ -387,7 +453,7 @@ mod tests {
                         screen_rect: Some(screen),
                         ..Default::default()
                     },
-                    |ui| show(&mut state, ui, area, theme, true, false),
+                    |ui| show(&mut state, ui, area, theme, true, false, &tabs(false)),
                 );
                 shapes = output.shapes.clone();
                 output.drop_without_applying_deltas();
@@ -427,7 +493,7 @@ mod tests {
     #[test]
     fn dock_content_stays_within_the_supplied_rectangle() {
         let ctx = egui::Context::default();
-        let area = egui::Rect::from_min_size(egui::Pos2::new(620.0, 0.0), egui::vec2(360.0, 480.0));
+        let area = egui::Rect::from_min_size(egui::Pos2::new(300.0, 0.0), egui::vec2(680.0, 480.0));
         let mut state = State::default();
         state.open_diff();
         let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 600.0));
@@ -437,7 +503,17 @@ mod tests {
                     screen_rect: Some(screen),
                     ..Default::default()
                 },
-                |ui| show(state, ui, area, crate::theme::Theme::default(), true, false),
+                |ui| {
+                    show(
+                        state,
+                        ui,
+                        area,
+                        crate::theme::Theme::default(),
+                        true,
+                        false,
+                        &tabs(false),
+                    )
+                },
             )
         };
         frame(&mut state).drop_without_applying_deltas();
@@ -469,7 +545,7 @@ mod tests {
         }
         output.drop_without_applying_deltas();
         for expected in [
-            "Review changes",
+            "Changes",
             "Local changes",
             "No source console - unavailable",
         ] {

@@ -27,9 +27,6 @@ mod tests {
     fn prepare(window: &mut Window) {
         window.chrome.enable();
         window.headers = window.headers.integrated(true);
-        // Keep parity tests in the wide, five-column Board regime. Separate tests exercise the
-        // narrow dock's stacked status columns and ordinary preferred-width behavior.
-        window.sidebar.set_width(1500.0);
     }
 
     fn text_position(shapes: &[egui::epaint::ClippedShape], needle: &str) -> Option<egui::Pos2> {

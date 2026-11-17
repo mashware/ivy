@@ -53,6 +53,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/sidebar/probe.rs"),
     ),
     (
+        "src/sidebar/layout.rs",
+        include_str!("../src/sidebar/layout.rs"),
+    ),
+    (
         "src/sidebar/tests.rs",
         include_str!("../src/sidebar/tests.rs"),
     ),
@@ -249,6 +253,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/viewer/delivery.rs"),
     ),
     ("src/viewer/diff.rs", include_str!("../src/viewer/diff.rs")),
+    (
+        "src/viewer/drawer.rs",
+        include_str!("../src/viewer/drawer.rs"),
+    ),
     (
         "src/viewer/review.rs",
         include_str!("../src/viewer/review.rs"),
@@ -461,6 +469,10 @@ const MODULES: &[(&str, &str)] = &[
     (
         "src/chrome/strip.rs",
         include_str!("../src/chrome/strip.rs"),
+    ),
+    (
+        "src/chrome/tools.rs",
+        include_str!("../src/chrome/tools.rs"),
     ),
     (
         "src/tab_bar/title.rs",

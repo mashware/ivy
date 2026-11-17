@@ -76,6 +76,12 @@ fn background_refresh_does_not_move_or_hide_the_markdown() {
                     crate::theme::Theme::default(),
                     false,
                     false,
+                    &super::drawer::Tabs {
+                        changes: None,
+                        document: Some("document.md".into()),
+                        markdown: true,
+                        side_by_side: false,
+                    },
                 );
             },
         );
@@ -127,7 +133,7 @@ fn viewer_typing_and_dismissal_never_reach_the_program() {
         let names: Vec<_> = window.all_panes().map(|p| p.name).collect();
         crate::viewer::activate(&mut window, markdown);
         if maximized {
-            crate::sidebar::toggle_maximize(&mut window, &ctx);
+            crate::sidebar::toggle_maximize(&mut window);
         }
         one_frame_in(&mut window, &ctx, area, vec![]);
         one_frame_in(

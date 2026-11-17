@@ -293,10 +293,7 @@ fn control_click_reveals_markdown_in_files_before_opening_its_viewer() {
             },
         ],
     );
-    assert_eq!(
-        crate::sidebar::active(&window),
-        Some(crate::sidebar::Tool::Files)
-    );
+    assert!(crate::sidebar::files_visible(&window));
     frame(
         &mut window,
         &ctx,

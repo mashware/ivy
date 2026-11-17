@@ -68,23 +68,24 @@ pub(crate) fn layout(
     let Some(preferred) = drawer else {
         return result;
     };
-    if maximized {
-        result.dock = Some(rest.shrink(DRAWER_MARGIN));
-        return result;
-    }
     let spare = rest.height() - DIVIDER - floors.height;
-    if spare < DRAWER_MINIMUM {
-        return result;
+    if spare >= DRAWER_MINIMUM && rest.width() > 2.0 * DRAWER_MARGIN {
+        let height = preferred.clamp(DRAWER_MINIMUM, spare);
+        let (consoles, below) = rest.split_top_bottom_at_y(rest.bottom() - height - DIVIDER);
+        let (divider, drawer) = below.split_top_bottom_at_y(below.top() + DIVIDER);
+        result.consoles = consoles;
+        result.divider = Some(divider);
+        result.dock = Some(egui::Rect::from_min_max(
+            drawer.min + egui::vec2(DRAWER_MARGIN, 0.0),
+            drawer.max - egui::vec2(DRAWER_MARGIN, DRAWER_MARGIN),
+        ));
     }
-    let height = preferred.clamp(DRAWER_MINIMUM, spare);
-    let (consoles, below) = rest.split_top_bottom_at_y(rest.bottom() - height - DIVIDER);
-    let (divider, drawer) = below.split_top_bottom_at_y(below.top() + DIVIDER);
-    result.consoles = consoles;
-    result.divider = Some(divider);
-    result.dock = Some(egui::Rect::from_min_max(
-        drawer.min + egui::vec2(DRAWER_MARGIN, 0.0),
-        drawer.max - egui::vec2(DRAWER_MARGIN, DRAWER_MARGIN),
-    ));
+    // Maximized, the drawer covers the consoles where they stand: toggling it resizes no
+    // program, as the Board does not.
+    if maximized && rest.width() > 2.0 * DRAWER_MARGIN && rest.height() > 2.0 * DRAWER_MARGIN {
+        result.divider = None;
+        result.dock = Some(rest.shrink(DRAWER_MARGIN));
+    }
     result
 }
 
@@ -141,21 +142,21 @@ pub(crate) fn partition(window: &Window, area: egui::Rect, metrics: &CellMetrics
     };
     let files = window.explorer.visible().then_some(state.files_width);
     let drawer = matches!(state.active, Some(Tool::Markdown | Tool::Git)).then_some(state.height);
-    // Tiling clamps degenerate weights: verify the real allocations, giving the room back to the
-    // consoles one surface at a time (the drawer first) rather than handing a console less than its
-    // floor. A maximized drawer covers the consoles without resizing them, like the Board.
-    let fits = |result: &Layout| {
-        root.place(result.consoles, metrics.width())
-            .parts
-            .iter()
-            .all(|r| r.width() + 0.01 >= leaf.x && r.height() + 0.01 >= leaf.y)
-    };
-    let covering = drawer.filter(|_| state.maximized);
-    for (files, drawer) in [(files, drawer), (files, covering)] {
-        let result = layout(area, files, drawer, state.maximized, floors);
-        if fits(&result) {
-            return result;
-        }
+    // Tiling clamps degenerate weights: verify the real allocations. A surface steps aside only
+    // when it is what leaves a console under its floor — Files along the width, the drawer along
+    // the height — never because the tree does not fit the window anyway.
+    let parts = |result: &Layout| root.place(result.consoles, metrics.width()).parts;
+    let wide = |result: &Layout| parts(result).iter().all(|r| r.width() + 0.01 >= leaf.x);
+    let tall = |result: &Layout| parts(result).iter().all(|r| r.height() + 0.01 >= leaf.y);
+    let maximized = state.maximized;
+    let probe = |files, drawer| layout(area, files, drawer, maximized, floors);
+    let mut files = files;
+    if files.is_some() && !wide(&probe(files, None)) && wide(&probe(None, None)) {
+        files = None;
     }
-    layout(area, None, covering, state.maximized, floors)
+    let mut result = probe(files, drawer);
+    if drawer.is_some() && !maximized && !tall(&result) && tall(&probe(files, None)) {
+        result = probe(files, None);
+    }
+    result
 }

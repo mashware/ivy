@@ -29,15 +29,17 @@ pub(super) fn left_offset() -> f32 {
     if cfg!(target_os = "macos") { 78.0 } else { 6.0 }
 }
 
-/// How many of the right-hand buttons this platform paints, Markdown and Board included: macOS
-/// draws its own three window buttons.
+/// How many of the right-hand buttons this platform paints: macOS draws its own three.
 pub(super) fn right_buttons() -> usize {
-    if cfg!(target_os = "macos") { 5 } else { 8 }
+    if cfg!(target_os = "macos") { 3 } else { 6 }
 }
 
-/// What the right-hand buttons, the gap before the tools and the margin take from a full bar.
+/// The Markdown and Board buttons, left of the right-hand group with a separator's gap.
+pub(super) const RIGHT_TOOLS: f32 = 2.0 * BUTTON + 6.0;
+
+/// What the right-hand buttons, the tools and the margin take from a full bar.
 fn right_reserve() -> f32 {
-    RIGHT_MARGIN + right_buttons() as f32 * BUTTON + 6.0
+    RIGHT_MARGIN + right_buttons() as f32 * BUTTON + RIGHT_TOOLS
 }
 
 /// Whether a bar `width` points wide is compact: a full bar there would leave its tab band without
@@ -122,7 +124,7 @@ mod tests {
         assert_eq!(strip.tabs.bottom(), 40.0);
         let logo = strip.logo.expect("a wide bar has its logo");
         assert!(logo.right() <= strip.tabs.left());
-        assert_eq!(logo.left(), left_offset() + 2.0 * BUTTON + 14.0);
+        assert_eq!(logo.left(), left_offset() + TOOLS + 2.0 * BUTTON + 14.0);
         assert_eq!(strip.right_start - strip.tabs.right(), DRAG_MIN);
         for width in [240.0, 120.0, 30.0, 0.0] {
             let area = Rect::from_min_size(egui::pos2(5.0, 7.0), egui::vec2(width, 800.0));
@@ -134,12 +136,13 @@ mod tests {
     }
 
     /// Above the old 300-point threshold the full bar used to leave the tabs a band of zero below
-    /// about 380 points, and one too narrow for a pill up to about 456. At every width one tab keeps
+    /// about 380 points, and one too narrow for a pill up to about 456 — 572 since the bar also
+    /// carries Files, Markdown and the Board (D72). At every width one tab keeps
     /// its pill whole, some label and an add target, and a full bar's right-hand buttons all fit
     /// after the left group, so the band starts where the drawn buttons leave it.
     #[test]
     fn one_tab_keeps_its_pill_label_and_add_target_at_every_narrow_width() {
-        for width in 300..=520 {
+        for width in 300..=640 {
             let width = width as f32;
             let area = Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(width, 800.0));
             let strip = within(area, 40.0, 34.0, |_| 74.0);
@@ -163,13 +166,14 @@ mod tests {
             }
         }
         // Both sides of the boundary are reached by the sweep, and the boundary is the one D96
-        // publishes: 456 points where the window draws its own buttons, 426 on macOS.
+        // publishes, as D72 moved it: 572 points where the window draws its own buttons, 542 on
+        // macOS.
         assert!(is_compact(300.0));
-        assert!(!is_compact(520.0));
+        assert!(!is_compact(640.0));
         let boundary = if cfg!(target_os = "macos") {
-            426.0
+            542.0
         } else {
-            456.0
+            572.0
         };
         assert!(is_compact(boundary - 1.0), "{boundary}");
         assert!(!is_compact(boundary), "{boundary}");

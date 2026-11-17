@@ -82,6 +82,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         0,
     ),
     (
+        "src/sidebar/layout.rs",
+        include_str!("../src/sidebar/layout.rs"),
+        0,
+    ),
+    (
         "src/sidebar/tests.rs",
         include_str!("../src/sidebar/tests.rs"),
         0,
@@ -348,6 +353,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
     (
         "src/viewer/diff.rs",
         include_str!("../src/viewer/diff.rs"),
+        0,
+    ),
+    (
+        "src/viewer/drawer.rs",
+        include_str!("../src/viewer/drawer.rs"),
         0,
     ),
     (
@@ -691,6 +701,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         "src/chrome/strip.rs",
         include_str!("../src/chrome/strip.rs"),
         19,
+    ),
+    (
+        "src/chrome/tools.rs",
+        include_str!("../src/chrome/tools.rs"),
+        0,
     ),
     (
         "src/tab_bar/title.rs",

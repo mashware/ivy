@@ -357,8 +357,8 @@ mod tests {
             let shapes = open_connection_guide(&mut window, &ctx, area);
             assert!(has_text(&shapes, "Connect agents"));
             assert!(
-                !has_text(&shapes, "Markdown viewer"),
-                "viewer overlaps the modal"
+                !has_text(&shapes, "Choose a Markdown file in Files."),
+                "the drawer overlaps the modal"
             );
             assert!(has_text(&shapes, "No panels published yet"));
             let heading = text_center(&shapes, "Connect agents");
@@ -380,17 +380,10 @@ mod tests {
             frame(&mut window, &ctx, area, click_at(close));
             let shapes = frame(&mut window, &ctx, area, vec![]);
             assert!(!has_text(&shapes, "No panels published yet"));
-            if width >= 700.0 {
-                assert!(
-                    has_text(&shapes, "Markdown viewer"),
-                    "viewer did not resume after closure"
-                );
-            } else {
-                assert!(
-                    !has_text(&shapes, "Markdown viewer"),
-                    "the dock body was not suppressed below its minimum width"
-                );
-            }
+            assert!(
+                has_text(&shapes, "Choose a Markdown file in Files."),
+                "the drawer did not resume after closure at {width}"
+            );
         }
     }
 
@@ -795,7 +788,7 @@ mod tests {
         window.headers = window.headers.integrated(true);
         for (width, visible) in [
             (1400.0, true),
-            (480.0, true),
+            (600.0, true),
             (240.0, false),
             (100.0, false),
         ] {
@@ -817,7 +810,7 @@ mod tests {
                 let left = if cfg!(target_os = "macos") { 78.0 } else { 6.0 };
                 assert!(bounds.top() >= area.top());
                 assert!(bounds.bottom() <= area.top() + crate::theme::metrics::TITLE_BAR_HEIGHT);
-                assert!(bounds.left() >= area.left() + left + 2.0 * 34.0 + 14.0);
+                assert!(bounds.left() >= area.left() + left + 42.0 + 2.0 * 34.0 + 14.0);
                 assert!(bounds.right() <= tabs.left());
             }
         }
@@ -1269,7 +1262,7 @@ mod tests {
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 3]);
         window.chrome.enable();
         window.headers = window.headers.integrated(true);
-        let area = area_of(900.0);
+        let area = area_of(1016.0);
         frame(&mut window, &ctx, area, vec![]);
         let at = tab_target(&window, &ctx, area, 1, "body");
         let button = |pressed| egui::Event::PointerButton {
@@ -2269,6 +2262,9 @@ mod tests {
                             _ => None,
                         })
                         .unwrap();
+                    let in_menu = |label: &str| {
+                        shapes.iter().any(|shape| shape.clip_rect == menu_clip && matches!(&shape.shape, egui::Shape::Text(t) if t.galley.text() == label))
+                    };
                     for removed in [
                         "New tab",
                         "Split right",
@@ -2276,9 +2272,12 @@ mod tests {
                         "Toggle information panel",
                         "Markdown viewer",
                         "Git diff viewer",
-                        "Board",
                     ] {
-                        assert!(!shapes.iter().any(|shape| shape.clip_rect == menu_clip && matches!(&shape.shape, egui::Shape::Text(t) if t.galley.text() == removed)), "menu retained {removed}");
+                        assert!(!in_menu(removed), "menu retained {removed}");
+                    }
+                    // A compact bar has no room for the tools' buttons, so its menu carries them.
+                    for tool in ["Files", "Markdown", "Board"] {
+                        assert_eq!(in_menu(tool), width < 500.0, "{tool} at {width}");
                     }
                     let at = text_center(&shapes, label);
                     separate_click(&mut window, &ctx, area, at);
@@ -2678,7 +2677,7 @@ mod tests {
     /// shows its number and the named one its name cut with «…», both inside the label's room.
     #[test]
     fn tab_labels_fit_their_room_whole_cut_or_as_a_number() {
-        for width in [616.0, 650.0, 690.0, 716.0, 1400.0] {
+        for width in [732.0, 766.0, 806.0, 832.0, 1400.0] {
             let ctx = egui::Context::default();
             let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
             window.chrome.enable();

@@ -538,7 +538,9 @@ mod tests {
     fn docked_window_insert_is_live_only_and_other_git_requests_reveal_retained_review() {
         let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
         let ctx = egui::Context::default();
-        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 1400.0));
+        // Tall enough for the preview's Insert without scrolling the review's column.
+        window.sidebar.set_height(900.0);
         crate::tests::one_frame_in(&mut window, &ctx, area, vec![]);
         crate::viewer::select_state(&mut window, false);
         let ids: Vec<_> = window.all_panes().map(|pane| pane.name).collect();
@@ -573,10 +575,11 @@ mod tests {
         // The actual Window -> dock -> viewer -> Review path enables Insert for the live origin.
         window.viewer.message.clear();
         window_frame(&mut window, &ctx, area, vec![]);
-        let insert = window_frame(&mut window, &ctx, area, vec![])
-            .into_iter()
+        let painted = window_frame(&mut window, &ctx, area, vec![]);
+        let insert = painted
+            .iter()
             .find(|(text, _)| text == "Insert into console")
-            .expect("live Git dock paints its Insert control")
+            .unwrap_or_else(|| panic!("live Git dock paints its Insert control: {painted:?}"))
             .1;
         let button = |pressed| egui::Event::PointerButton {
             pos: insert,
@@ -830,7 +833,7 @@ mod tests {
         // TextEdit owns the typed text after its real click.
         review.draft.as_mut().unwrap().text = "Please revise".into();
         click(&mut review, &ctx, &doc, "Add comment");
-        click(&mut review, &ctx, &doc, "Side by side");
+        review.set_side_by_side(true);
         assert!(review.mode == Mode::SideBySide);
         click(&mut review, &ctx, &doc, "Preview comments");
         let sent = click(&mut review, &ctx, &doc, "Insert into console").unwrap();

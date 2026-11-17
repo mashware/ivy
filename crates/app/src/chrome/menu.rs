@@ -21,13 +21,6 @@ pub(super) fn show(
         ("What's new", Action::Updates(false), None, false),
         ("Preferences", Action::Preferences, None, true),
         ("Keyboard shortcuts", Action::Shortcuts, None, false),
-        ("Connect agents", Action::Connect, None, true),
-        (
-            "Search console",
-            Action::Search,
-            Some(crate::keyboard::Action::Search),
-            true,
-        ),
         (
             "Files",
             Action::Tool(crate::sidebar::Tool::Files),
@@ -45,6 +38,13 @@ pub(super) fn show(
             Action::Tool(crate::sidebar::Tool::Board),
             Some(crate::keyboard::Action::Board),
             false,
+        ),
+        ("Connect agents", Action::Connect, None, true),
+        (
+            "Search console",
+            Action::Search,
+            Some(crate::keyboard::Action::Search),
+            true,
         ),
         ("Minimize window", Action::Minimize, None, true),
         ("Maximize window", Action::Maximize, None, false),

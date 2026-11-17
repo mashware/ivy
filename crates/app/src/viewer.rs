@@ -275,6 +275,20 @@ pub(crate) fn strip_action(
     drawer::Strip::of(dock, &drawer::tabs(window)).at(pos)
 }
 
+/// Where the strip paints `action` over `dock`, for tests that click it as a person would.
+#[cfg(test)]
+pub(crate) fn strip_place(
+    window: &crate::Window,
+    dock: egui::Rect,
+    action: StripAction,
+) -> Option<egui::Pos2> {
+    drawer::Strip::of(dock, &drawer::tabs(window))
+        .places
+        .iter()
+        .find(|(which, _)| *which == action)
+        .map(|(_, place)| place.center())
+}
+
 pub(crate) fn apply_strip_action(
     window: &mut crate::Window,
     action: StripAction,

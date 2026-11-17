@@ -38,12 +38,26 @@ pub(super) struct Strip {
 
 impl Strip {
     pub(super) fn of(drawer: Rect, tabs: &Tabs) -> Self {
-        let rect = Rect::from_min_size(drawer.min, vec2(drawer.width(), HEIGHT.min(drawer.height())));
+        let rect = Rect::from_min_size(
+            drawer.min,
+            vec2(drawer.width(), HEIGHT.min(drawer.height())),
+        );
         let middle = |width: f32, x: f32| {
             Rect::from_min_size(pos2(x, rect.center().y - width / 2.0), vec2(width, width))
         };
-        let tab = |x: f32, width: f32| Rect::from_min_max(pos2(x, rect.top()), pos2(x + width, rect.bottom()));
-        let source = tab(rect.left() + 8.0, SOURCE.min((rect.width() - 8.0).max(0.0)));
+        let tab = |x: f32, width: f32| {
+            Rect::from_min_max(pos2(x, rect.top()), pos2(x + width, rect.bottom()))
+        };
+        let close = middle(BUTTON, rect.right() - 8.0 - BUTTON);
+        let maximize = middle(BUTTON, close.left() - 2.0 - BUTTON);
+        // The tabs come before the source's label: a narrow drawer shortens the label first.
+        let tabs_width = tabs.changes.map_or(0.0, |_| CHANGES)
+            + tabs.document.as_ref().map_or(0.0, |_| DOCUMENT);
+        let room = maximize.left() - 8.0 - rect.left() - 8.0 - 4.0 - tabs_width;
+        let source = tab(
+            rect.left() + 8.0,
+            if room >= 60.0 { room.min(SOURCE) } else { 0.0 },
+        );
         let mut places = Vec::new();
         let mut x = source.right() + 4.0;
         if tabs.changes.is_some() {
@@ -54,8 +68,6 @@ impl Strip {
             places.push((StripAction::Document, tab(x, DOCUMENT)));
             x += DOCUMENT;
         }
-        let close = middle(BUTTON, rect.right() - 8.0 - BUTTON);
-        let maximize = middle(BUTTON, close.left() - 2.0 - BUTTON);
         places.push((StripAction::Maximize, maximize));
         places.push((StripAction::Close, close));
         if !tabs.markdown {
@@ -63,8 +75,10 @@ impl Strip {
             let height = 20.0;
             let top = rect.center().y - height / 2.0;
             let side = Rect::from_min_size(pos2(right - 2.0 - SEGMENT, top), vec2(SEGMENT, height));
-            let unified =
-                Rect::from_min_size(pos2(side.left() - 2.0 - SEGMENT, top), vec2(SEGMENT, height));
+            let unified = Rect::from_min_size(
+                pos2(side.left() - 2.0 - SEGMENT, top),
+                vec2(SEGMENT, height),
+            );
             if unified.left() > x {
                 places.push((StripAction::Unified, unified));
                 places.push((StripAction::SideBySide, side));
@@ -73,7 +87,8 @@ impl Strip {
         // A narrow drawer keeps maximize and close; a tab that would run under them is dropped.
         let reserved = maximize.left();
         places.retain(|(action, place)| {
-            matches!(action, StripAction::Maximize | StripAction::Close) || place.right() <= reserved
+            matches!(action, StripAction::Maximize | StripAction::Close)
+                || place.right() <= reserved
         });
         Self {
             rect,
@@ -124,6 +139,27 @@ fn selected(action: StripAction, tabs: &Tabs, maximized: bool) -> bool {
     }
 }
 
+/// Text cut with an ellipsis where it would run past `width`.
+fn text(
+    painter: &egui::Painter,
+    at: egui::Pos2,
+    align: egui::Align2,
+    label: &str,
+    color: Color32,
+    width: f32,
+) -> Rect {
+    let mut job = egui::text::LayoutJob::simple_singleline(
+        label.to_owned(),
+        FontId::proportional(12.5),
+        color,
+    );
+    job.wrap = egui::text::TextWrapping::truncate_at_width(width.max(0.0));
+    let galley = painter.layout_job(job);
+    let rect = align.anchor_size(at, galley.size());
+    painter.galley(rect.min, galley, color);
+    rect
+}
+
 pub(super) fn paint(
     ui: &egui::Ui,
     strip: &Strip,
@@ -138,109 +174,45 @@ pub(super) fn paint(
         [strip.rect.left_bottom(), strip.rect.right_bottom()],
         egui::Stroke::new(1.0, roles.line),
     );
-    let font = FontId::proportional(12.5);
-    let text = |at: egui::Pos2, align: egui::Align2, label: &str, color: Color32, width: f32| {
-        let galley = painter.layout(
-            label.to_owned(),
-            font.clone(),
-            color,
-            f32::INFINITY,
+    if strip.source.width() > 0.0 {
+        let stripe = Rect::from_center_size(
+            pos2(strip.source.left() + 2.0, strip.source.center().y),
+            vec2(3.0, 14.0),
         );
-        let galley = if galley.size().x > width {
-            let mut job = egui::text::LayoutJob::simple_singleline(
-                label.to_owned(),
-                font.clone(),
-                color,
-            );
-            job.wrap = egui::text::TextWrapping::truncate_at_width(width);
-            painter.layout_job(job)
-        } else {
-            galley
-        };
-        let rect = align.anchor_size(at, galley.size());
-        painter.galley(rect.min, galley, color);
-        rect
-    };
-    let stripe = Rect::from_center_size(
-        pos2(strip.source.left() + 2.0, strip.source.center().y),
-        vec2(3.0, 14.0),
-    );
-    painter.rect_filled(stripe, 2, roles.accent);
-    text(
-        pos2(stripe.right() + 6.0, strip.source.center().y),
-        egui::Align2::LEFT_CENTER,
-        source,
-        roles.tx2,
-        (strip.source.right() - stripe.right() - 14.0).max(0.0),
-    );
-    painter.line_segment(
-        [
-            pos2(strip.source.right(), strip.rect.center().y - 10.0),
-            pos2(strip.source.right(), strip.rect.center().y + 10.0),
-        ],
-        egui::Stroke::new(1.0, roles.line),
-    );
+        painter.rect_filled(stripe, 2, roles.accent);
+        text(
+            painter,
+            pos2(stripe.right() + 6.0, strip.source.center().y),
+            egui::Align2::LEFT_CENTER,
+            source,
+            roles.tx2,
+            strip.source.right() - stripe.right() - 14.0,
+        );
+        painter.line_segment(
+            [
+                pos2(strip.source.right(), strip.rect.center().y - 10.0),
+                pos2(strip.source.right(), strip.rect.center().y + 10.0),
+            ],
+            egui::Stroke::new(1.0, roles.line),
+        );
+    }
+    if let Some(group) = segment(strip) {
+        painter.rect(
+            group.expand(2.0),
+            6,
+            roles.base,
+            egui::Stroke::new(1.0, roles.line2),
+            egui::StrokeKind::Inside,
+        );
+    }
     for (action, place) in &strip.places {
         let chosen = selected(*action, tabs, maximized);
         let hovered = hover.is_some_and(|p| place.contains(p));
         match action {
             StripAction::Changes | StripAction::Document => {
-                let ink = if chosen { roles.tx } else { roles.tx2 };
-                let label = match action {
-                    StripAction::Changes => "Changes".to_owned(),
-                    _ => tabs.document.clone().unwrap_or_default(),
-                };
-                let count = match action {
-                    StripAction::Changes => tabs.changes.map(|n| n.to_string()),
-                    _ => None,
-                };
-                let room = place.width() - 20.0 - count.as_ref().map_or(0.0, |_| 26.0);
-                let written = text(
-                    pos2(place.left() + 10.0, place.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    &label,
-                    if hovered { roles.tx } else { ink },
-                    room.max(0.0),
-                );
-                if let Some(count) = count {
-                    let chip = Rect::from_min_size(
-                        pos2(written.right() + 6.0, place.center().y - 8.0),
-                        vec2(20.0, 16.0),
-                    );
-                    painter.rect_filled(chip, 4, roles.hover);
-                    painter.text(
-                        chip.center(),
-                        egui::Align2::CENTER_CENTER,
-                        count,
-                        FontId::proportional(10.5),
-                        roles.tx2,
-                    );
-                }
-                if chosen {
-                    painter.rect_filled(
-                        Rect::from_min_max(pos2(place.left(), place.bottom() - 2.0), place.max),
-                        0,
-                        roles.accent,
-                    );
-                }
+                tab(painter, *action, *place, tabs, roles, chosen, hovered)
             }
             StripAction::Unified | StripAction::SideBySide => {
-                if *action == StripAction::Unified {
-                    let group = place.union(
-                        strip
-                            .places
-                            .iter()
-                            .find(|(a, _)| *a == StripAction::SideBySide)
-                            .map_or(*place, |(_, r)| *r),
-                    );
-                    painter.rect(
-                        group.expand(2.0),
-                        6,
-                        roles.base,
-                        egui::Stroke::new(1.0, roles.line2),
-                        egui::StrokeKind::Inside,
-                    );
-                }
                 if chosen || hovered {
                     painter.rect_filled(*place, 4, roles.hover);
                 }
@@ -275,6 +247,67 @@ pub(super) fn paint(
                 );
             }
         }
+    }
+}
+
+/// The Unified / Side by side pair, framed as one segmented control.
+fn segment(strip: &Strip) -> Option<Rect> {
+    let place = |which| {
+        strip
+            .places
+            .iter()
+            .find(|(action, _)| *action == which)
+            .map(|(_, r)| *r)
+    };
+    Some(place(StripAction::Unified)?.union(place(StripAction::SideBySide)?))
+}
+
+fn tab(
+    painter: &egui::Painter,
+    action: StripAction,
+    place: Rect,
+    tabs: &Tabs,
+    roles: &Roles,
+    chosen: bool,
+    hovered: bool,
+) {
+    let (label, count) = match action {
+        StripAction::Changes => ("Changes".to_owned(), tabs.changes.map(|n| n.to_string())),
+        _ => (tabs.document.clone().unwrap_or_default(), None),
+    };
+    let room = place.width() - 20.0 - count.as_ref().map_or(0.0, |_| 26.0);
+    let written = text(
+        painter,
+        pos2(place.left() + 10.0, place.center().y),
+        egui::Align2::LEFT_CENTER,
+        &label,
+        if chosen || hovered {
+            roles.tx
+        } else {
+            roles.tx2
+        },
+        room,
+    );
+    if let Some(count) = count {
+        let chip = Rect::from_min_size(
+            pos2(written.right() + 6.0, place.center().y - 8.0),
+            vec2(20.0, 16.0),
+        );
+        painter.rect_filled(chip, 4, roles.hover);
+        painter.text(
+            chip.center(),
+            egui::Align2::CENTER_CENTER,
+            count,
+            FontId::proportional(10.5),
+            roles.tx2,
+        );
+    }
+    if chosen {
+        painter.rect_filled(
+            Rect::from_min_max(pos2(place.left(), place.bottom() - 2.0), place.max),
+            0,
+            roles.accent,
+        );
     }
 }
 
