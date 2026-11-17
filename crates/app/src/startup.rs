@@ -74,6 +74,9 @@ pub fn run() -> eframe::Result {
     // it exported.
     let wants_headers = std::env::var_os(header::HEADER_VARIABLE).is_some();
     let project_probe = project_view::probe_at_startup(measuring);
+    // The Board remembers its arrangement in the person's file; a measured run and every test
+    // window leave it `None`, so neither can write there.
+    let arrangement_file = (!measuring).then(settings::path).flatten();
     if let Some(size) = requested {
         options.viewport = options.viewport.with_inner_size(size);
     }
@@ -85,6 +88,7 @@ pub fn run() -> eframe::Result {
             let mut window =
                 opening::native_window(cc, with_what, requested, persistence, measuring)?;
             window.restoration = restoration;
+            window.board.remember_in = arrangement_file;
             window.board.plans = board::plans::Store::at(
                 session::path().and_then(|p| p.parent().map(|p| p.join("plans"))),
                 !measuring,

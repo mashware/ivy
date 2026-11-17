@@ -109,10 +109,6 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/board/style.rs"),
     ),
     (
-        "app/src/board/roadmap/presentation.rs",
-        include_str!("../src/board/roadmap/presentation.rs"),
-    ),
-    (
         "app/src/board/branches.rs",
         include_str!("../src/board/branches.rs"),
     ),

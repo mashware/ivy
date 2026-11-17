@@ -9728,13 +9728,20 @@ top-toolbar shortcut is removed; the rail and keyboard binding remain available.
 Discarded: opening Board in the shared narrow dock, which hides it in narrow windows and makes
 its project overview unnecessarily small. Other sidebar tools keep their existing dock behavior.
 
-**Two arrangements on trial, 17 November 2026 — #93, fourth PR.** The design kit (`Board.dc.html`)
+**Two arrangements, 17 November 2026 — #93, fourth PR.** The design kit (`Board.dc.html`)
 lays each project out by milestone: one column per milestone with its progress and «after
 <milestone>» resolved to titles, each console's card under the deliverable its panel declares, and
-an «Off the plan» column. The owner asked to keep **both** layouts, behind two buttons at the top of
-the Board — «By state» (this decision's five columns, restyled to the kit) and «By milestone» — and
-to delete the loser once used side by side. The duplication is **temporary and on purpose**; it is
-not a setting, and the choice is not persisted. Placement reads only the panel's declared
+an «Off the plan» column. The owner asked for **both** layouts, behind two buttons at the top of
+the Board — «By state» (this decision's five columns, restyled to the kit) and «By milestone». It
+began as a trial whose loser would be deleted; after using both on a real desktop the owner kept
+them **for good, as the person's choice**, and the last one chosen is remembered as
+`board.arrangement` in the configuration file (written when the choice changes, only by the window
+the person launched: a measured run and every test window have no file to write to). With the plan
+laid out in «By milestone», **«By state» no longer carries the roadmap**: its project rows show the
+project, its consoles and its claims, a project known only by its roadmap appears only in «By
+milestone», and `roadmap.window` — which sized the roadmap those rows folded open — is retired and
+reported as unknown rather than read as a roadmap file called «window». The rest of this
+decision's roadmap behaviour above (the fold, the window, the chips) is superseded by that. Placement reads only the panel's declared
 `milestone` / `deliverable` (D6): a console that declares neither lands in «Off the plan», which on
 today's producers is most of them. Both arrangements share a kit top bar — totals (which leave the
 first project's summary row), a «Claiming you» narrowing, a filter over console, tab and task

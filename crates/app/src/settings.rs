@@ -214,6 +214,22 @@ pub struct Colors {
     pub panel: Option<Color32>,
 }
 
+/// Which of the Board's two arrangements opens: both stay, and the last one chosen is remembered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoardArrangement {
+    State,
+    Milestone,
+}
+
+impl BoardArrangement {
+    pub(crate) fn as_written(self) -> &'static str {
+        match self {
+            Self::State => "state",
+            Self::Milestone => "milestone",
+        }
+    }
+}
+
 /// What the primary window restores on its next launch.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum StartupRestore {
@@ -236,6 +252,8 @@ impl StartupRestore {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Settings {
     pub startup_restore: StartupRestore,
+    /// The Board arrangement last chosen; absent until somebody chooses one.
+    pub board_arrangement: Option<BoardArrangement>,
     pub colors: Colors,
     pub agent_claude: bool,
     pub agent_codex: bool,
@@ -281,21 +299,6 @@ pub struct Settings {
     pub copy: Option<bool>,
     /// Markdown roadmaps keyed by the configured section name.
     pub roadmaps: BTreeMap<String, PathBuf>,
-    /// Number of completed milestones before and upcoming milestones after the anchor.
-    pub roadmap_window: RoadmapWindow,
-}
-
-/// How many milestones the board shows around its current milestone.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RoadmapWindow {
-    pub done: usize,
-    pub next: usize,
-}
-
-impl Default for RoadmapWindow {
-    fn default() -> Self {
-        Self { done: 2, next: 3 }
-    }
 }
 
 /// The least and the most admitted as a font body.
@@ -643,20 +646,11 @@ impl Settings {
 /// Puts the value where it belongs, if the key and the value are valid.
 fn apply(settings: &mut Settings, key: &str, value: &str) -> Result<(), Missing> {
     if let Some(name) = key.strip_prefix("roadmap.") {
+        // `roadmap.window` sized the roadmap the Board's state rows used to fold open; that roadmap
+        // moved to «By milestone», which lays every milestone out (D93). Retired, and never read
+        // as a roadmap file called «window».
         if name == "window" {
-            let mut pieces = value.split_whitespace();
-            let done = pieces.next().and_then(|n| n.parse::<usize>().ok());
-            let next = pieces.next().and_then(|n| n.parse::<usize>().ok());
-            if let (Some(done), Some(next)) = (done, next)
-                && pieces.next().is_none()
-            {
-                settings.roadmap_window = RoadmapWindow { done, next };
-                return Ok(());
-            }
-            return Err(Missing::InvalidValue {
-                key: key.to_owned(),
-                value: value.to_owned(),
-            });
+            return Err(Missing::UnknownKey(key.to_owned()));
         }
         if valid_roadmap_name(name) && !value.trim().is_empty() {
             settings
@@ -743,6 +737,19 @@ fn apply(settings: &mut Settings, key: &str, value: &str) -> Result<(), Missing>
     }
     if key == "font" {
         settings.font = Some(value.to_owned());
+        return Ok(());
+    }
+    if key == "board.arrangement" {
+        settings.board_arrangement = Some(match value {
+            "state" => BoardArrangement::State,
+            "milestone" => BoardArrangement::Milestone,
+            _ => {
+                return Err(Missing::InvalidValue {
+                    key: key.to_owned(),
+                    value: value.to_owned(),
+                });
+            }
+        });
         return Ok(());
     }
     if key == "startup.restore" {
@@ -877,27 +884,45 @@ mod tests {
     use crate::tests::markdown;
 
     #[test]
-    fn markdown_roadmaps_and_window_are_tolerant_and_defaulted() {
-        let defaults = interpret("").unwrap().0;
-        assert_eq!(defaults.roadmap_window, RoadmapWindow { done: 2, next: 3 });
+    fn markdown_roadmaps_are_tolerant_and_the_retired_window_is_reported() {
         let (settings, warnings) = interpret(
             "roadmap.backend = docs/roadmap.md\nroadmap.window = 1 4\nroadmap.bad value = x\n",
         )
         .unwrap();
-        assert_eq!(warnings.total(), 1);
+        assert_eq!(warnings.total(), 2, "the bad name and the retired window");
         assert_eq!(
             settings.roadmaps.get("backend"),
             Some(&PathBuf::from("docs/roadmap.md"))
         );
-        assert_eq!(settings.roadmap_window, RoadmapWindow { done: 1, next: 4 });
-        assert_eq!(
-            interpret("roadmap.window = 21 1").unwrap().0.roadmap_window,
-            RoadmapWindow { done: 21, next: 1 }
+        assert!(
+            !settings.roadmaps.contains_key("window"),
+            "the retired key is not a roadmap file"
         );
-        assert_eq!(interpret("roadmap.window = 1").unwrap().1.total(), 1);
     }
 
     /// What parsing a text that is understood in full returns.
+    #[test]
+    fn the_board_arrangement_reads_state_or_milestone_and_reports_anything_else() {
+        assert_eq!(interpret("").unwrap().0.board_arrangement, None);
+        assert_eq!(
+            interpret("board.arrangement = milestone")
+                .unwrap()
+                .0
+                .board_arrangement,
+            Some(BoardArrangement::Milestone)
+        );
+        assert_eq!(
+            interpret("board.arrangement = state")
+                .unwrap()
+                .0
+                .board_arrangement,
+            Some(BoardArrangement::State)
+        );
+        let (settings, warnings) = interpret("board.arrangement = columns").unwrap();
+        assert_eq!(settings.board_arrangement, None);
+        assert_eq!(warnings.total(), 1);
+    }
+
     #[test]
     fn startup_restore_is_tolerant_and_last_valid_value_wins() {
         assert_eq!(
@@ -1953,7 +1978,7 @@ mod tests {
         // blocks, this test passes by being empty.
         assert_eq!(
             examples.len(),
-            20,
+            21,
             "the document's example blocks gave {} configuration lines: either the document \
              changed shape, or this walk stopped finding them — {examples:?}",
             examples.len()
@@ -2383,16 +2408,12 @@ mod tests {
         /// artifact to satisfy a test, which is the tail wagging the dog.
         const DRAWN_RULE: char = '\u{2500}';
 
-        const SOURCES: [(&str, &str); 58] = [
+        const SOURCES: [(&str, &str); 57] = [
             ("board/plans.rs", include_str!("board/plans.rs")),
             ("board/plans/disk.rs", include_str!("board/plans/disk.rs")),
             ("board/roadmap.rs", include_str!("board/roadmap.rs")),
             ("board/cards.rs", include_str!("board/cards.rs")),
             ("board/style.rs", include_str!("board/style.rs")),
-            (
-                "board/roadmap/presentation.rs",
-                include_str!("board/roadmap/presentation.rs"),
-            ),
             ("board/view.rs", include_str!("board/view.rs")),
             ("roadmap_file.rs", include_str!("roadmap_file.rs")),
             ("git_process.rs", include_str!("git_process.rs")),

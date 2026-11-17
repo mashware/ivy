@@ -29,7 +29,6 @@ pub(crate) struct State {
     file_snapshots: Vec<files::Snapshot>,
     file_config: std::collections::BTreeMap<String, std::path::PathBuf>,
     file_reload: bool,
-    roadmap_window: (usize, usize),
     pub(crate) enabled: bool,
     pub(crate) probe: Option<probe::Probe>,
     input_frame: Option<u64>,
@@ -47,6 +46,8 @@ pub(crate) struct State {
     pointer_owned: bool,
     keyboard_focus: bool,
     close_requested: bool,
+    /// The configuration file the chosen arrangement is written to; `None` writes nothing.
+    pub(crate) remember_in: Option<std::path::PathBuf>,
     arrangement: filter::Arrangement,
     filter: filter::Filter,
     pub(crate) timing: crate::measure::Board,
@@ -63,7 +64,6 @@ impl Default for State {
             file_snapshots: Vec::new(),
             file_config: Default::default(),
             file_reload: false,
-            roadmap_window: (2, 3),
             enabled: true,
             probe: None,
             input_frame: None,
@@ -80,6 +80,7 @@ impl Default for State {
             pointer_owned: false,
             keyboard_focus: false,
             close_requested: false,
+            remember_in: None,
             arrangement: Default::default(),
             filter: Default::default(),
             timing: crate::measure::Board::default(),
@@ -302,7 +303,12 @@ pub(crate) fn configure(window: &mut crate::Window, settings: &crate::settings::
         window.board.file_config = settings.roadmaps.clone();
         window.board.file_reload = true;
     }
-    window.board.roadmap_window = (settings.roadmap_window.done, settings.roadmap_window.next);
+    if let Some(chosen) = settings.board_arrangement {
+        window.board.arrangement = match chosen {
+            crate::settings::BoardArrangement::State => filter::Arrangement::ByState,
+            crate::settings::BoardArrangement::Milestone => filter::Arrangement::ByMilestone,
+        };
+    }
 }
 
 /// Observation is independent of whether the reader has the Board on screen.

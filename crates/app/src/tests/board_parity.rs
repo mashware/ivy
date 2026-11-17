@@ -665,7 +665,9 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             let shapes = pass(&mut window, vec![]);
-            if the_text_queued_up(&shapes, "Board") && the_text_queued_up(&shapes, "empty") {
+            if the_text_queued_up(&shapes, "Board")
+                && the_text_queued_up(&shapes, "WAITING FOR YOU")
+            {
                 for label in ["WAITING FOR YOU", "STUCK", "WORKING", "FINISHED", "IDLE"] {
                     let header = text_position(&shapes, label).unwrap_or_else(|| {
                         panic!(
@@ -682,7 +684,7 @@ mod tests {
             }
             assert!(
                 Instant::now() < deadline,
-                "configured project rows did not arrive"
+                "the Board's state columns did not arrive"
             );
             std::thread::sleep(Duration::from_millis(20));
         }

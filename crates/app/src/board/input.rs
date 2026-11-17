@@ -162,6 +162,7 @@ pub(crate) fn before_keys(
     };
     let started = Instant::now();
     let events = ui.input(|i| i.events.clone());
+    let arrangement_before = window.board.arrangement;
     let mut owns_events = false;
     for event in &events {
         if window.board.keyboard_focus && super::filter::edit(&mut window.board.filter, event) {
@@ -257,6 +258,18 @@ pub(crate) fn before_keys(
                 owns_events = true;
             }
             _ => {}
+        }
+    }
+    if window.board.arrangement != arrangement_before {
+        // Remembered in the configuration file; a refusal (Settings open, measuring) keeps the
+        // choice on screen for this session and says why on the console that launched Ivy.
+        let chosen = match window.board.arrangement {
+            super::filter::Arrangement::ByState => crate::settings::BoardArrangement::State,
+            super::filter::Arrangement::ByMilestone => crate::settings::BoardArrangement::Milestone,
+        };
+        if let Err(error) = crate::settings::editor::runtime::save_board_arrangement(window, chosen)
+        {
+            eprintln!("the Board arrangement was not remembered: {error}");
         }
     }
     if std::mem::take(&mut window.board.close_requested) {

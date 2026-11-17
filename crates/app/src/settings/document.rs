@@ -17,9 +17,6 @@ pub(crate) struct Document {
 
 /// Semantic spelling, including aliases the startup parser already accepts.
 fn canonical(key: &str) -> Option<String> {
-    if key == "roadmap.window" {
-        return Some(key.to_owned());
-    }
     if let Some(name) = key.strip_prefix("roadmap.")
         && name != "window"
         && !name.is_empty()
@@ -47,6 +44,7 @@ fn canonical(key: &str) -> Option<String> {
     }
     [
         "startup.restore",
+        "board.arrangement",
         "agent.claude.enabled",
         "agent.codex.enabled",
         "agent.opencode.enabled",
@@ -72,6 +70,7 @@ impl Document {
     pub fn new(source: String) -> Self {
         let mut keys: Vec<String> = [
             "startup.restore",
+            "board.arrangement",
             "agent.claude.enabled",
             "agent.codex.enabled",
             "agent.opencode.enabled",
@@ -260,7 +259,7 @@ mod tests {
     }
     #[test]
     fn configured_roadmap_paths_are_editable_without_losing_names() {
-        let mut doc = Document::new("roadmap.backend = docs/old.md\nroadmap.window = 2 3\n".into());
+        let mut doc = Document::new("roadmap.backend = docs/old.md\n".into());
         set(&mut doc, "roadmap.backend", "docs/new plan.md");
         let source = doc.text();
         assert!(source.contains("roadmap.backend = docs/new plan.md"));

@@ -118,11 +118,6 @@ const SOURCES: &[(&str, &str, usize)] = &[
         1,
     ),
     (
-        "src/board/roadmap/presentation.rs",
-        include_str!("../src/board/roadmap/presentation.rs"),
-        1,
-    ),
-    (
         "src/client_attestation/mod.rs",
         include_str!("../src/client_attestation/mod.rs"),
         0,

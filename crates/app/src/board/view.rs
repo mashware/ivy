@@ -4,7 +4,6 @@ use super::{
     layout::Slot,
     model::{Entry, Section},
     observation::{self, COLUMNS, Column},
-    roadmap,
 };
 use crate::{Window, agent_signals::View};
 use eframe::egui::{self, Rect, Vec2};
@@ -14,7 +13,6 @@ use std::time::{Instant, SystemTime};
 #[derive(Default)]
 pub(super) struct ViewState {
     pub(super) cards: std::collections::HashMap<usize, cards::Reader>,
-    pub(super) roadmaps: roadmap::Reader,
     pub(super) child_hits: Vec<(Rect, cards::Command)>,
     pub(super) child_pressed: Option<(Rect, cards::Command)>,
     pub(super) link_to_open: Option<String>,
@@ -182,17 +180,17 @@ fn paint_contents(
             let widths = super::layout::column_widths(canvas_width - 16.0, 8.0);
             let mut row_base = 0;
             for section in sections {
+                let mut claims = super::milestones::Claims::default();
+                for entry in &section.entries {
+                    match column(entry, signals, now) {
+                        Column::Wait => claims.wait += 1,
+                        Column::Block => claims.block += 1,
+                        Column::Done => claims.done += 1,
+                        Column::Working | Column::Idle => {}
+                    }
+                }
                 if window.board.arrangement == super::filter::Arrangement::ByMilestone {
                     let started = Instant::now();
-                    let mut claims = super::milestones::Claims::default();
-                    for entry in &section.entries {
-                        match column(entry, signals, now) {
-                            Column::Wait => claims.wait += 1,
-                            Column::Block => claims.block += 1,
-                            Column::Done => claims.done += 1,
-                            Column::Working | Column::Idle => {}
-                        }
-                    }
                     let base = row_base;
                     // Cards are timed by their own spans (`content_layout`, `content_paint`), and
                     // «By state» paints them outside the plan's span: subtract them here too, or
@@ -246,30 +244,19 @@ fn paint_contents(
                         .plan_paint(started.elapsed().saturating_sub(cards));
                     continue;
                 }
-                let section_top = ui.next_widget_position().y;
-                let started = Instant::now();
-                if let Some(pane) = roadmap::paint_project_with_signals(
-                    ui,
-                    section,
-                    &mut window.board.surface.roadmaps,
-                    window.board.roadmap_window,
-                    &theme,
-                    signals,
-                    now,
-                ) {
-                    window.board.activate = Some(pane);
-                }
-                window.board.timing.plan_paint(started.elapsed());
+                // «By state» is about consoles: a project known only by its roadmap lives in
+                // «By milestone», which lays the whole plan out.
                 if section.entries.is_empty() {
-                    ui.separator();
                     continue;
                 }
-                let context_top = if roadmap::project_open(&window.board.surface.roadmaps, section)
-                {
-                    ui.next_widget_position().y
-                } else {
-                    section_top
-                };
+                let context_top = ui.next_widget_position().y;
+                let started = Instant::now();
+                egui::Frame::new()
+                    .inner_margin(egui::Margin::symmetric(super::bar::GUTTER, 4))
+                    .show(ui, |ui| {
+                        super::milestones::project_header(ui, section, claims, &roles);
+                    });
+                window.board.timing.plan_paint(started.elapsed());
                 if stacked {
                     for c in COLUMNS {
                         let mut entries: Vec<_> = section

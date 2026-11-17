@@ -298,10 +298,6 @@ const MODULES: &[(&str, &str)] = &[
     ("src/board/cards.rs", include_str!("../src/board/cards.rs")),
     ("src/board/style.rs", include_str!("../src/board/style.rs")),
     (
-        "src/board/roadmap/presentation.rs",
-        include_str!("../src/board/roadmap/presentation.rs"),
-    ),
-    (
         "src/board/observation.rs",
         include_str!("../src/board/observation.rs"),
     ),
