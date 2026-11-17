@@ -62,6 +62,33 @@ pub(crate) fn save_agent_preferences(
     Ok(())
 }
 
+/// Remember the Board arrangement in the configuration file, preserving every other line.
+///
+/// Nothing is re-applied: the arrangement is already the one on screen. Why the file and not the
+/// saved layout is D93's.
+pub(crate) fn save_board_arrangement(
+    window: &mut Window,
+    arrangement: crate::settings::BoardArrangement,
+) -> Result<(), String> {
+    let Some(path) = window.board.remember_in.clone() else {
+        return Ok(());
+    };
+    // Writing under an open Settings would make its next save see an outside change.
+    let editor = &window.settings_editor;
+    if editor.is_open() || editor.application.pending.is_some() {
+        return Err("Settings is open or still applying a save".into());
+    }
+    let (mut store, text) = super::super::store::Store::open(path)?;
+    let mut draft = super::super::document::Document::new(text);
+    let field = draft
+        .fields
+        .iter_mut()
+        .find(|f| f.key == "board.arrangement")
+        .ok_or("the settings document has no board.arrangement field")?;
+    field.value = arrangement.as_written().to_owned();
+    store.save(&draft.text())
+}
+
 impl Editor {
     pub(crate) fn is_applying(&self) -> bool {
         self.application.pending.is_some()

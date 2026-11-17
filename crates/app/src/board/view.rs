@@ -4,7 +4,6 @@ use super::{
     layout::Slot,
     model::{Entry, Section},
     observation::{self, COLUMNS, Column},
-    roadmap,
 };
 use crate::{Window, agent_signals::View};
 use eframe::egui::{self, Rect, Vec2};
@@ -14,7 +13,6 @@ use std::time::{Instant, SystemTime};
 #[derive(Default)]
 pub(super) struct ViewState {
     pub(super) cards: std::collections::HashMap<usize, cards::Reader>,
-    pub(super) roadmaps: roadmap::Reader,
     pub(super) child_hits: Vec<(Rect, cards::Command)>,
     pub(super) child_pressed: Option<(Rect, cards::Command)>,
     pub(super) link_to_open: Option<String>,
@@ -32,6 +30,7 @@ impl ViewState {
             cards::Command::Body(pane, _)
             | cards::Command::Expand(pane)
             | cards::Command::Compact(pane) => *pane,
+            cards::Command::Bar(_) => return,
         };
         if !self.cards.contains_key(&pane) {
             return;
@@ -49,6 +48,7 @@ impl ViewState {
                 timing.expanded();
             }
             cards::Command::Compact(_) => self.cards.get_mut(&pane).unwrap().apply(command),
+            cards::Command::Bar(_) => {}
         }
     }
 }
@@ -92,6 +92,7 @@ pub(super) fn paint(
     sections: &[Section],
     signals: &HashMap<usize, View>,
     now: SystemTime,
+    totals: super::bar::Totals,
 ) {
     // ScrollArea resolves wheel ownership through registered Areas, not painted layer IDs.
     // Keep the Board's foreground layer in that registry as well as in the paint list.
@@ -102,7 +103,7 @@ pub(super) fn paint(
         .constrain(false)
         .show(parent.ctx(), |registered| {
             registered.allocate_rect(area, egui::Sense::hover());
-            paint_contents(window, registered, area, sections, signals, now);
+            paint_contents(window, registered, area, sections, signals, now, totals);
         });
 }
 
@@ -113,8 +114,10 @@ fn paint_contents(
     sections: &[Section],
     signals: &HashMap<usize, View>,
     now: SystemTime,
+    totals: super::bar::Totals,
 ) {
     let theme = super::style::theme(window.theme);
+    let roles = crate::ui::style::roles(parent.ctx(), &window.theme);
     let mut ui = egui::Ui::new(
         parent.ctx().clone(),
         egui::Id::new("board-screen"),
@@ -127,20 +130,22 @@ fn paint_contents(
     );
     ui.set_clip_rect(area);
     super::style::apply(&mut ui, &theme);
-    ui.painter().rect_filled(area, 0.0, theme.background());
-    let total = sections.iter().map(|s| s.entries.len()).sum::<usize>();
-    if sections.is_empty() {
-        egui::Frame::new()
-            .fill(theme.divider())
-            .inner_margin(egui::Margin::symmetric(12, 8))
-            .show(&mut ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.heading("Board");
-                    ui.weak("0 consoles · 0 projects");
-                });
-            });
-    }
-    if sections
+    ui.painter().rect_filled(area, 0.0, roles.base);
+    window.board.surface.child_hits.clear();
+    super::bar::paint(
+        &mut ui,
+        area.width(),
+        totals,
+        window.board.arrangement,
+        &window.board.filter,
+        &roles,
+        &mut window.board.surface.child_hits,
+    );
+    if sections.is_empty() && window.board.filter.is_active() {
+        ui.weak(
+            "No console matches this filter. Clear the field or choose All to see every console.",
+        );
+    } else if sections
         .iter()
         .flat_map(|s| &s.entries)
         .all(|e| e.snapshot.document.is_none())
@@ -148,7 +153,6 @@ fn paint_contents(
         ui.weak("No task state has been published yet");
     }
     window.board.surface.painted.clear();
-    window.board.surface.child_hits.clear();
     window.board.order.clear();
     let reveal = std::mem::take(&mut window.board.scroll_selected);
     let scroll_id = ui.make_persistent_id("board-list");
@@ -169,37 +173,89 @@ fn paint_contents(
         .scroll_offset(offset)
         .id_salt("board-list")
         .auto_shrink([false, false])
+        .max_height((ui.available_height() - HINT_HEIGHT).max(0.0))
         .show(&mut ui, |ui| {
             let canvas_width = ui.available_width().max(1.0);
             let stacked = canvas_width < 1360.0;
             let widths = super::layout::column_widths(canvas_width - 16.0, 8.0);
             let mut row_base = 0;
-            for (section_index, section) in sections.iter().enumerate() {
-                let section_top = ui.next_widget_position().y;
-                let started = Instant::now();
-                if let Some(pane) = roadmap::paint_project_with_signals(
-                    ui,
-                    section,
-                    &mut window.board.surface.roadmaps,
-                    window.board.roadmap_window,
-                    &theme,
-                    signals,
-                    now,
-                    (section_index == 0).then_some((total, sections.len())),
-                ) {
-                    window.board.activate = Some(pane);
+            for section in sections {
+                let mut claims = super::milestones::Claims::default();
+                for entry in &section.entries {
+                    match column(entry, signals, now) {
+                        Column::Wait => claims.wait += 1,
+                        Column::Block => claims.block += 1,
+                        Column::Done => claims.done += 1,
+                        Column::Working | Column::Idle => {}
+                    }
                 }
-                window.board.timing.plan_paint(started.elapsed());
-                if section.entries.is_empty() {
-                    ui.separator();
+                if window.board.arrangement == super::filter::Arrangement::ByMilestone {
+                    let started = Instant::now();
+                    let base = row_base;
+                    // Cards are timed by their own spans (`content_layout`, `content_paint`), and
+                    // «By state» paints them outside the plan's span: subtract them here too, or
+                    // their cost is published twice and once under the plan's name (D13).
+                    let mut cards = std::time::Duration::ZERO;
+                    let mut paint_card =
+                        |ui: &mut egui::Ui, entry: &Entry, row: usize, index: usize, width: f32| {
+                            let card_started = Instant::now();
+                            let context_top = ui.next_widget_position().y;
+                            paint_entries(
+                                window,
+                                ui,
+                                vec![entry],
+                                column(entry, signals, now),
+                                index,
+                                base + row,
+                                context_top,
+                                reveal,
+                                previous.as_ref(),
+                                &mut geometry,
+                                signals,
+                                width,
+                                &theme,
+                            );
+                            cards += card_started.elapsed();
+                        };
+                    let plan = section.roadmap.as_ref().and_then(|r| r.plan.clone());
+                    // The bar's 16-point gutter, so columns and cards never touch the window's edges.
+                    row_base += egui::Frame::new()
+                        .inner_margin(egui::Margin::symmetric(super::bar::GUTTER, 4))
+                        .show(ui, |ui| {
+                            super::milestones::project_header(ui, section, claims, true, &roles);
+                            match &plan {
+                                Some(plan) => super::milestones::paint_plan(
+                                    ui,
+                                    section,
+                                    plan,
+                                    &roles,
+                                    &mut paint_card,
+                                ),
+                                None => {
+                                    super::milestones::paint_loose(ui, section, &mut paint_card)
+                                }
+                            }
+                        })
+                        .inner;
+                    super::milestones::rule(ui, &roles);
+                    window
+                        .board
+                        .timing
+                        .plan_paint(started.elapsed().saturating_sub(cards));
                     continue;
                 }
-                let context_top = if roadmap::project_open(&window.board.surface.roadmaps, section)
-                {
-                    ui.next_widget_position().y
-                } else {
-                    section_top
-                };
+                // «By state» is about consoles: a project known only by its roadmap lives in
+                // «By milestone», which lays the whole plan out.
+                if section.entries.is_empty() {
+                    continue;
+                }
+                let context_top = ui.next_widget_position().y;
+                // No plan is painted here, so nothing goes under the plan's paint span (D13).
+                egui::Frame::new()
+                    .inner_margin(egui::Margin::symmetric(super::bar::GUTTER, 4))
+                    .show(ui, |ui| {
+                        super::milestones::project_header(ui, section, claims, false, &roles);
+                    });
                 if stacked {
                     for c in COLUMNS {
                         let mut entries: Vec<_> = section
@@ -213,7 +269,7 @@ fn paint_contents(
                         }
                         let entry_count = entries.len();
                         let context_top = ui.next_widget_position().y;
-                        paint_stacked_header(ui, c, entries.len(), canvas_width, &theme);
+                        paint_stacked_header(ui, c, entries.len(), canvas_width, &theme, &roles);
                         egui::Frame::new().inner_margin(8).show(ui, |ui| {
                             let card_width = ui.available_width().max(1.0);
                             if entries.is_empty() {
@@ -245,7 +301,7 @@ fn paint_contents(
                             .filter(|entry| column(entry, signals, now) == c)
                             .count()
                     });
-                    paint_columns(ui, canvas_width, &widths, counts, &theme);
+                    paint_columns(ui, canvas_width, &widths, counts, &theme, &roles);
                     let mut longest = 0;
                     egui::Frame::new().inner_margin(8).show(ui, |ui| {
                         ui.horizontal_top(|ui| {
@@ -294,6 +350,7 @@ fn paint_contents(
                 ui.separator();
             }
         });
+    paint_hint(&mut ui, window.board.remember_error.as_deref(), &roles);
     geometry.viewport = output.inner_rect;
     geometry.offset = offset;
     geometry.next_offset = output.state.offset;
@@ -303,6 +360,39 @@ fn paint_contents(
         .board
         .order
         .sort_by_key(|slot| (slot.row, slot.column));
+}
+
+const HINT_HEIGHT: f32 = 26.0;
+pub(crate) const HINT: &str = "Enter go to console  ·  Arrows move between cards  ·  Esc close";
+
+/// The keys, named once at the foot of the Board instead of in every card.
+fn paint_hint(ui: &mut egui::Ui, refused: Option<&str>, roles: &crate::theme::Roles) {
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), HINT_HEIGHT),
+        egui::Sense::hover(),
+    );
+    ui.painter().rect_filled(rect, 0.0, roles.chrome);
+    ui.painter().line_segment(
+        [rect.left_top(), rect.right_top()],
+        egui::Stroke::new(1.0, roles.line),
+    );
+    // A refusal takes the hint's place: the two on one line overlap in a narrow window.
+    let (text, ink) = match refused {
+        Some(reason) => (
+            format!("This arrangement will not be remembered: {reason}"),
+            roles.wait,
+        ),
+        None => (HINT.to_owned(), roles.tx3),
+    };
+    ui.painter()
+        .with_clip_rect(rect.intersect(ui.clip_rect()))
+        .text(
+            egui::pos2(rect.left() + 16.0, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            text,
+            egui::FontId::proportional(11.5),
+            ink,
+        );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -322,6 +412,7 @@ fn paint_entries(
     theme: &crate::theme::Theme,
 ) {
     ui.set_min_width(width);
+    let roles = crate::ui::style::roles(ui.ctx(), &window.theme);
     for (row, entry) in entries.into_iter().enumerate() {
         let signal = signals.get(&entry.pane).copied();
         let panel_wait = entry
@@ -356,6 +447,7 @@ fn paint_entries(
             reader,
             &mut window.discoverer,
             theme,
+            &roles,
             &mut board.timing,
             &mut board.surface.child_hits,
         );
@@ -395,6 +487,7 @@ fn paint_stacked_header(
     count: usize,
     width: f32,
     theme: &crate::theme::Theme,
+    roles: &crate::theme::Roles,
 ) {
     let (header, _) = ui.allocate_exact_size(egui::vec2(width, 30.0), egui::Sense::hover());
     let ink = cards::color(column, theme);
@@ -414,21 +507,17 @@ fn paint_stacked_header(
         egui::pos2(header.right() - 18.0, header.center().y),
         egui::vec2(28.0, 18.0),
     );
-    ui.painter().rect_filled(badge, 9.0, theme.divider());
+    ui.painter().rect_filled(badge, 9.0, roles.raised);
     ui.painter().text(
         badge.center(),
         egui::Align2::CENTER_CENTER,
         count.to_string(),
         egui::FontId::monospace(11.0),
-        if count > 0 {
-            ink
-        } else {
-            super::style::dim(theme)
-        },
+        if count > 0 { ink } else { roles.tx3 },
     );
     ui.painter().line_segment(
         [header.left_bottom(), header.right_bottom()],
-        egui::Stroke::new(1.0, theme.divider()),
+        egui::Stroke::new(1.0, roles.line),
     );
 }
 
@@ -438,6 +527,7 @@ fn paint_columns(
     widths: &[f32; 5],
     counts: [usize; 5],
     theme: &crate::theme::Theme,
+    roles: &crate::theme::Roles,
 ) {
     let (header, _) = ui.allocate_exact_size(egui::vec2(canvas, 34.0), egui::Sense::hover());
     let mut left = header.left() + 8.0;
@@ -461,23 +551,19 @@ fn paint_columns(
             egui::pos2(left + widths[index] - width / 2.0, header.center().y),
             egui::vec2(width, 18.0),
         );
-        ui.painter().rect_filled(rect, 9.0, theme.divider());
+        ui.painter().rect_filled(rect, 9.0, roles.raised);
         ui.painter().text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
             count,
             egui::FontId::monospace(11.0),
-            if counts[index] > 0 {
-                ink
-            } else {
-                super::style::dim(theme)
-            },
+            if counts[index] > 0 { ink } else { roles.tx3 },
         );
         left += widths[index] + 8.0;
     }
     ui.painter().line_segment(
         [header.left_bottom(), header.right_bottom()],
-        egui::Stroke::new(1.0, theme.divider()),
+        egui::Stroke::new(1.0, roles.line),
     );
 }
 
@@ -495,6 +581,7 @@ mod tests {
                 &widths,
                 [2, 1, 0, 2, 0],
                 &crate::theme::Theme::default(),
+                &crate::theme::Roles::of(&crate::theme::Theme::default()),
             )
         });
         let mut left = 8.0;
@@ -536,7 +623,8 @@ mod tests {
                     _ => None,
                 })
                 .expect("right aligned local count");
-            assert!(output.shapes.iter().any(|s|matches!(&s.shape,egui::Shape::Rect(r) if r.rect.height()==18.0 && r.rect.contains(count.pos) )));
+            let raised = crate::theme::Roles::of(&crate::theme::Theme::default()).raised;
+            assert!(output.shapes.iter().any(|s|matches!(&s.shape,egui::Shape::Rect(r) if r.rect.height()==18.0 && r.rect.contains(count.pos) && r.fill == raised)), "count badge on the kit's raised surface");
             left += width + 8.0;
         }
         output.drop_without_applying_deltas();

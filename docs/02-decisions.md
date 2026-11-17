@@ -9348,7 +9348,7 @@ one owner:
   no published plan or it is retired. There is no merge. The published plan is kept in Ivy's state
   per project and restored after restart. Otherwise, Markdown task items from the configured file
   form the plan; the first unchecked item is in progress. The board shows a window around it
-  (`roadmap.window`, two done and three next by default). File changes repaint the board. A project
+  (`roadmap.window`, two done and three next by default; retired by D93 on 17 November 2026). File changes repaint the board. A project
   named in settings has a section even with no console open; a stored plan alone does not create a
   section.
 - **A console's card starts from its existing panel document**, so every console with a panel is on
@@ -9727,6 +9727,54 @@ resizable Board dock. The covered consoles retain their geometry and pump budget
 top-toolbar shortcut is removed; the rail and keyboard binding remain available.
 Discarded: opening Board in the shared narrow dock, which hides it in narrow windows and makes
 its project overview unnecessarily small. Other sidebar tools keep their existing dock behavior.
+
+**Two arrangements, 17 November 2026 — #93, fourth PR.** The design kit (`Board.dc.html`)
+lays each project out by milestone: one column per milestone with its progress and «after
+<milestone>» resolved to titles, each console's card under the deliverable its panel declares, and
+an «Off the plan» column. The owner asked for **both** layouts, behind two buttons at the top of
+the Board — «By state» (this decision's five columns, restyled to the kit) and «By milestone». It
+began as a trial whose loser would be deleted; after using both on a real desktop the owner kept
+them **for good, as the person's choice**, and the last one chosen is remembered as
+`board.arrangement` in the configuration file (written when the choice changes, only by the window
+the person launched: a measured run and every test window have no file to write to). With the plan
+laid out in «By milestone», **«By state» no longer carries the roadmap**: its project rows show the
+project, its consoles and its claims, a project known only by its roadmap appears only in «By
+milestone», and `roadmap.window` — which sized the roadmap those rows folded open — is retired and
+reported as unknown rather than read as a roadmap file called «window». Superseded above by that:
+the roadmap folds and the configured detail window, the inspect-all controls, and the
+summary-roadmap-columns order of a project row with its plan-only rows; «By milestone» keeps the
+milestone cards, every item, each milestone's **done when** and the plan's outside work, which it
+lists at the top of «Off the plan». Dropped with the strip, deliberately: the plan's title (the
+project header names its source instead) and the fallback that listed producers' section headings
+for a project without a plan — the cards already carry those headings. **The arrangement lives in
+the configuration file, not in the saved layout**, because it is a preference a person may write by
+hand and keep across layouts; the saved layout (D16) is the window's shape. The Board applies the
+file's value only when the file changed since it last applied it, so an unrelated Settings save
+never undoes a choice made since, and removing the line returns «By state». A file that cannot be
+written — a symbolic link, which the store refuses — keeps the choice for the session and says so
+at the Board's foot, not only on the console that launched Ivy. Placement reads only the panel's declared
+`milestone` / `deliverable` (D6): a console that declares neither lands in «Off the plan», which on
+today's producers is most of them. Both arrangements share a kit top bar — totals (which leave the
+first project's summary row), a «Claiming you» narrowing, a filter over console, tab and task
+names, and Close — and a key hint at the foot; a narrow Board stacks the bar's controls on more
+rows rather than hiding the field while its query still narrows. **One projection decides every
+state on screen**: the effective column of the rule above paints the card's state row (the kit
+pill for wait, stuck and finished; the column's mark for working and idle), counts the project
+header's claims and decides «Claiming you», which counts finished because D18 makes «finished,
+nobody looked» a claim. The count is taken over the whole Board, so a query can leave fewer cards
+than it says. The bar's controls are pressed through the Board's own hit list, like a card's fold,
+so one input pass decides what a press reaches; the filter field edits its text in that same
+pass, Enter or the first Escape leaves the field and the next Escape closes the Board. The console
+headers the Board covers do not take its presses: the header pass ignored the Board's claim on the
+frame, so a press on the Board also pressed the header button beneath it — the Git button swapped
+the Board for the diff viewer, and the close button closed a console nobody could see. An unpublished console is a dashed card and
+an old state nobody refreshes is veiled. The roadmap's source is **named, not linked**: it is a
+file path or a publication, and the Board opens only web addresses; an unreadable roadmap says why
+in the project's header. Discarded: a per-project choice of arrangement
+(doubles the surface for no signal); remembering the arrangement in the saved layout (it is a
+preference, not the window's shape, and could not be written by hand); inferring a milestone from the branch or the tab name
+(D6); painting the declared `attention` on the card while the columns follow the effective state
+(a card read «waiting» in the Working column).
 
 ## D94 — Ivy Night is the factory theme, and the interface's colors are roles derived from any theme
 

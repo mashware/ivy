@@ -41,7 +41,12 @@ fn refused(dir: &Path, privacy: bool) {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        helper.stdin.take().unwrap().write_all(b"{}").unwrap();
+        // The helper refuses the directory before it reads its input, so it may already be gone
+        // when this write lands: a closed pipe is that refusal arriving first, not a failure. What
+        // the test proves is the exit code and the message below.
+        if let Err(error) = helper.stdin.take().unwrap().write_all(b"{}") {
+            assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe, "{error}");
+        }
         let output = helper.wait_with_output().unwrap();
         assert_eq!(output.status.code(), Some(1));
         let error = String::from_utf8(output.stderr).unwrap();

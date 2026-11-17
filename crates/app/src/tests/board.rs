@@ -54,44 +54,6 @@ mod tests {
         })
     }
 
-    fn hover_roadmap(window: &mut Window, ctx: &egui::Context, expected: &str) {
-        ctx.style_mut_of(egui::Theme::Dark, |style| {
-            style.interaction.tooltip_delay = 0.0
-        });
-        for _ in 0..3 {
-            frame(window, ctx, vec![]);
-        }
-        let shapes = frame(window, ctx, vec![]);
-        let at = shapes
-            .iter()
-            .filter_map(|shape| match &shape.shape {
-                egui::Shape::Text(t) => {
-                    if t.galley.text() != "Roadmap" {
-                        return None;
-                    }
-                    let i = 0;
-                    let cursor = t.galley.text()[..i].chars().count() + 3;
-                    let at = t
-                        .galley
-                        .pos_from_cursor(egui::text::CCursor::new(cursor))
-                        .center()
-                        + t.pos.to_vec2();
-                    shape.clip_rect.contains(at).then_some(at)
-                }
-                _ => None,
-            })
-            .max_by(|a, b| a.x.total_cmp(&b.x))
-            .expect("project Roadmap disclosure");
-        frame(window, ctx, vec![egui::Event::PointerMoved(at)]);
-        for _ in 0..80 {
-            let shapes = frame(window, ctx, vec![]);
-            if the_text_queued_up(&shapes, expected) {
-                return;
-            }
-        }
-        panic!("Roadmap hover omitted source {expected:?}");
-    }
-
     fn show_panel(window: &mut Window, ctx: &egui::Context, pane: usize) {
         let shapes = frame(window, ctx, vec![]);
         let card = window.board.card_rect(pane).expect("card painted");
@@ -115,31 +77,9 @@ mod tests {
         frame(window, ctx, vec![]);
     }
 
-    fn open_roadmaps(window: &mut Window, ctx: &egui::Context) {
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        loop {
-            frame(window, ctx, vec![]);
-            let shapes = frame(window, ctx, vec![]);
-            let point = shapes.iter().find_map(|s| match &s.shape {
-                egui::Shape::Text(t) if t.galley.text() == "Roadmap" => Some(
-                    t.pos
-                        + t.galley
-                            .pos_from_cursor(egui::text::CCursor::new(3))
-                            .center()
-                            .to_vec2(),
-                ),
-                _ => None,
-            });
-            if let Some(at) = point {
-                frame(window, ctx, click_at(at));
-                return;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "no roadmap control after configured files resolved"
-            );
-            std::thread::sleep(Duration::from_millis(20));
-        }
+    /// Switches the Board to «By milestone», where a project's roadmap is laid out.
+    fn arrange_by_milestone(window: &mut Window, ctx: &egui::Context) {
+        arrange(window, ctx, "By milestone");
     }
 
     #[test]
@@ -513,9 +453,10 @@ mod tests {
         };
         let asking = window.tabs[0].panes()[0].name;
         let card = window.board.card_rect(asking).unwrap();
-        let wait_ink = window.theme.color(term_core::TermColor::Indexed(3));
-        let dim_wait_ink = wait_ink.gamma_multiply(0.45);
-        assert!(shapes.iter().any(|s|matches!(&s.shape, egui::Shape::Rect(r) if (r.rect.intersect(s.clip_rect).width()-card.width()).abs()<2.0 && card.contains(r.rect.center()) && (r.stroke.color == wait_ink || r.stroke.color == dim_wait_ink))), "waiting state border is absent");
+        // Since the kit (#93) the claim is the card's pill, not its border: a solid wait pill
+        // inside this console's own card.
+        let wait = crate::theme::Roles::of(&window.theme).wait;
+        assert!(shapes.iter().any(|s|matches!(&s.shape, egui::Shape::Rect(r) if card.contains_rect(r.rect) && r.fill == wait && r.rect.width() == crate::ui::claim_pill::SIZE)), "waiting state pill is absent");
         assert!(
             !on_card(asking, "it is waiting for you"),
             "removed duplicate attention prose returned"
@@ -1239,22 +1180,23 @@ mod tests {
             )
             .unwrap();
         frame(&mut window, &ctx, chord_with(egui::Key::O));
-        open_roadmaps(&mut window, &ctx);
+        arrange_by_milestone(&mut window, &ctx);
         let shapes = frame(&mut window, &ctx, vec![]);
-        for expected in ["From roadmap.md", "Build", "0/1", "Feature", "Off the plan"] {
+        for expected in [
+            "roadmap.md",
+            "published ",
+            "Build",
+            "0/1",
+            "Feature",
+            "Off the plan",
+        ] {
             assert!(the_text_queued_up(&shapes, expected), "missing {expected}");
         }
-        assert!(
-            text_point(&shapes, "Feature").unwrap().y
-                < text_point(&shapes, "WAITING FOR YOU").unwrap().y,
-            "expanded roadmap must precede this project's state headers"
-        );
-        hover_roadmap(&mut window, &ctx, "published ");
         let first = window.board.card_rect(origins[0]).unwrap();
         let second = window.board.card_rect(origins[1]).unwrap();
         assert!(
-            first.top() < second.top(),
-            "deliverable card must precede the off-plan card"
+            first.right() <= second.left(),
+            "the deliverable's card sits in its milestone, left of the off-plan column"
         );
         let mut report = Vec::new();
         window.board.timing.publish(&mut report).unwrap();
@@ -1320,7 +1262,7 @@ mod tests {
             panel_control::Answer::Text(_)
         ));
         frame(&mut window, &ctx, chord_with(egui::Key::O));
-        open_roadmaps(&mut window, &ctx);
+        arrange_by_milestone(&mut window, &ctx);
         let deadline = Instant::now() + std::time::Duration::from_secs(5);
         let published_shapes = loop {
             let shapes = frame(&mut window, &ctx, vec![]);
@@ -1347,7 +1289,10 @@ mod tests {
         loop {
             let shapes = frame(&mut window, &ctx, vec![]);
             if the_text_queued_up(&shapes, "file only task") {
-                hover_roadmap(&mut window, &ctx, &format!("from {}", roadmap.display()));
+                assert!(the_text_queued_up(
+                    &shapes,
+                    &format!("from {}", roadmap.display())
+                ));
                 assert!(!the_text_queued_up(&shapes, "published task"));
                 break;
             }
@@ -1410,20 +1355,26 @@ mod tests {
             panel_control::Answer::Text(_)
         ));
         frame(&mut window, &ctx, chord_with(egui::Key::O));
-        let shapes = frame(&mut window, &ctx, vec![]);
-        assert!(!the_text_queued_up(&shapes, "unconfigured stored task"));
 
         settings::interpret(&format!("roadmap.configured={}", roadmap.display()))
             .unwrap()
             .0
             .apply_to(&mut window);
-        open_roadmaps(&mut window, &ctx);
+        arrange_by_milestone(&mut window, &ctx);
         let deadline = Instant::now() + std::time::Duration::from_secs(5);
         loop {
             let shapes = frame(&mut window, &ctx, vec![]);
 
             if the_text_queued_up(&shapes, "visible configured task") {
                 assert!(!the_text_queued_up(&shapes, "unconfigured stored task"));
+                // «By state» is about consoles: the console-less project is not a row there.
+                let at = text_point(&shapes, "By state").expect("the arrangement toggle");
+                frame(&mut window, &ctx, click_at(at));
+                let shapes = frame(&mut window, &ctx, vec![]);
+                let named = shapes.iter().any(
+                    |s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.text() == "configured"),
+                );
+                assert!(!named, "a project without consoles got a By-state row");
                 break;
             }
             assert!(
@@ -1434,5 +1385,427 @@ mod tests {
         }
         drop(window);
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn by_milestone_places_each_card_under_its_declared_deliverable_and_the_rest_off_the_plan() {
+        let mut window = window_with("sleep 30", "sleep 30");
+        integrated(&mut window);
+        let ctx = egui::Context::default();
+        let origins: Vec<_> = window.all_panes().map(|p| p.name).collect();
+        for pane in window.all_panes_mut() {
+            pane.project = Some(crate::project_view::Badge {
+                key: crate::project::Key::Repository("/sample/.git".into()),
+                name: "Sample".into(),
+                details: String::new(),
+                ink: egui::Color32::RED,
+                painted: Default::default(),
+            });
+        }
+        for origin in &origins {
+            attach_a_channel(&mut window, *origin);
+        }
+        let document = r#"{"title":"Delivery","source":"roadmap.md","milestones":[{"id":"H2","title":"Design","items":[{"id":"S","text":"Sketch","mark":"done"}]},{"id":"H3","title":"Build","depends_on":["H2"],"items":[{"id":"D","text":"Feature","mark":"current"}]}]}"#;
+        let (plan, dropped) = panel_contract::plan::parse_document_noting(document).unwrap();
+        ask_the_window(
+            &mut window,
+            &ctx,
+            origins[0],
+            1,
+            panel_control::What::PlanSet {
+                document: document.into(),
+                plan,
+                dropped,
+            },
+        );
+        crate::board::plans::refresh_readers(&mut window);
+        for (origin, doc) in [
+            (
+                origins[0],
+                r#"{"milestone":"H3","deliverable":"D","attention":"wait","lines":["working"]}"#,
+            ),
+            (origins[1], r#"{"lines":["Off-plan witness"]}"#),
+        ] {
+            window
+                .all_panes_mut()
+                .find(|p| p.name == origin)
+                .unwrap()
+                .panel_state
+                .deliver(
+                    1,
+                    "flow",
+                    panel_contract::parse_document(doc).unwrap(),
+                    SystemTime::now(),
+                )
+                .unwrap();
+        }
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
+        let shapes = frame(&mut window, &ctx, vec![]);
+        let toggle =
+            text_point(&shapes, "By milestone").expect("the arrangement toggle is painted");
+        frame(&mut window, &ctx, click_at(toggle));
+        frame(&mut window, &ctx, vec![]);
+        let shapes = frame(&mut window, &ctx, vec![]);
+        for expected in [
+            "H3 · Build",
+            "after H2 · Design",
+            "Feature",
+            "Off the plan",
+            "Waiting for you",
+            crate::board::HINT,
+        ] {
+            assert!(the_text_queued_up(&shapes, expected), "missing {expected}");
+        }
+        assert!(
+            !the_text_queued_up(&shapes, "WAITING FOR YOU"),
+            "the state columns are gone in this arrangement"
+        );
+        let on_plan = window
+            .board
+            .card_rect(origins[0])
+            .expect("declared card painted");
+        let off_plan = window
+            .board
+            .card_rect(origins[1])
+            .expect("off-plan card painted");
+        let build = text_point(&shapes, "H3 · Build").unwrap();
+        let off = text_point(&shapes, "Off the plan").unwrap();
+        let feature = text_point(&shapes, "Feature").unwrap();
+        assert!(
+            on_plan.x_range().contains(build.x) && on_plan.top() > feature.y,
+            "the declared card sits under its deliverable in its milestone's column"
+        );
+        assert!(
+            off_plan.x_range().contains(off.x),
+            "the undeclared card sits in Off the plan"
+        );
+        assert!(!on_plan.x_range().contains(off.x));
+        // The arrangement keeps the bar's side gutter: nothing touches the Board's left edge.
+        // The bar's title starts one gutter in from the Board's left edge.
+        let board_left = shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == "Board" => Some(t.pos.x - 16.0),
+                _ => None,
+            })
+            .expect("the bar's title is painted");
+        let first_column = shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == "H2 · Design" => Some(t.pos.x),
+                _ => None,
+            })
+            .expect("the first milestone's header is painted");
+        assert!(
+            first_column >= board_left + 16.0,
+            "the first milestone column touches the edge: {first_column} from {board_left}"
+        );
+        // Reading order runs across the columns: right from the declared card reaches the off-plan one.
+        crate::board::select_for_test(&mut window, origins[0]);
+        frame(&mut window, &ctx, vec![key(egui::Key::ArrowRight)]);
+        assert_eq!(window.board.selected(), Some(origins[1]));
+    }
+
+    #[test]
+    fn the_filter_field_takes_typing_and_escape_leaves_it_before_closing_the_board() {
+        let mut window = window_with("sleep 30", "sleep 30");
+        integrated(&mut window);
+        let ctx = egui::Context::default();
+        let origins: Vec<_> = window.all_panes().map(|p| p.name).collect();
+        for origin in &origins {
+            attach_a_channel(&mut window, *origin);
+        }
+        for (origin, doc) in [
+            (
+                origins[0],
+                r#"{"attention":"wait","lines":[{"text":"Refund webhooks","style":"title"}]}"#,
+            ),
+            (
+                origins[1],
+                r#"{"lines":[{"text":"Docs site","style":"title"}]}"#,
+            ),
+        ] {
+            window
+                .all_panes_mut()
+                .find(|p| p.name == origin)
+                .unwrap()
+                .panel_state
+                .deliver(
+                    1,
+                    "flow",
+                    panel_contract::parse_document(doc).unwrap(),
+                    SystemTime::now(),
+                )
+                .unwrap();
+        }
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
+        let shapes = frame(&mut window, &ctx, vec![]);
+        assert!(
+            the_text_queued_up(&shapes, "Claiming you  1"),
+            "one console of two claims the reader"
+        );
+        let field = text_point(&shapes, "Filter consoles").expect("the filter field is painted");
+        frame(&mut window, &ctx, click_at(field));
+        assert_eq!(
+            window.board.filter_state(),
+            ("", true),
+            "a click on the field edits it"
+        );
+        // Switching the sidebar away and back takes the field's focus with the Board's.
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Board);
+        assert_eq!(
+            window.board.filter_state(),
+            ("", false),
+            "the field's focus left with the Board"
+        );
+        frame(&mut window, &ctx, vec![]);
+        let shapes = frame(&mut window, &ctx, vec![]);
+        let field = text_point(&shapes, "Filter consoles").expect("the filter field is painted");
+        frame(&mut window, &ctx, click_at(field));
+        frame(
+            &mut window,
+            &ctx,
+            vec![egui::Event::Text("webhooks".into())],
+        );
+        assert_eq!(window.board.filter_state(), ("webhooks", true));
+        frame(&mut window, &ctx, vec![]);
+        assert!(
+            window.board.card_rect(origins[0]).is_some(),
+            "the matching card stays"
+        );
+        assert!(
+            window.board.card_rect(origins[1]).is_none(),
+            "the other card is filtered away"
+        );
+        let escape = || {
+            let mut released = key(egui::Key::Escape);
+            if let egui::Event::Key { pressed, .. } = &mut released {
+                *pressed = false;
+            }
+            // Pressed and released, as a hand does: a second press with no release between is a
+            // held key's repeat, which the Board rightly ignores.
+            vec![key(egui::Key::Escape), released]
+        };
+        frame(&mut window, &ctx, escape());
+        frame(&mut window, &ctx, vec![]);
+        assert!(
+            window.board.is_open(),
+            "the first Escape only leaves the field"
+        );
+        // Typing after leaving the field no longer edits the query, so the match survives.
+        frame(&mut window, &ctx, vec![egui::Event::Text("zz".into())]);
+        frame(&mut window, &ctx, vec![]);
+        assert!(window.board.card_rect(origins[0]).is_some());
+        frame(&mut window, &ctx, escape());
+        frame(&mut window, &ctx, vec![]);
+        assert!(
+            !window.board.is_open(),
+            "the second Escape closes the Board"
+        );
+        // Reopened through the rail's door: the chord's key is still held from the first opening.
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Board);
+        frame(&mut window, &ctx, vec![]);
+        let shapes = frame(&mut window, &ctx, vec![]);
+        let close = text_point(&shapes, "Close").expect("Close is painted");
+        frame(&mut window, &ctx, click_at(close));
+        frame(&mut window, &ctx, vec![]);
+        assert!(!window.board.is_open(), "Close closes the Board");
+    }
+
+    #[test]
+    fn a_press_on_the_board_never_reaches_the_console_header_it_covers() {
+        let mut window = window_with("sleep 30", "sleep 30");
+        integrated(&mut window);
+        let ctx = egui::Context::default();
+        frame(&mut window, &ctx, vec![]);
+        let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
+        let work = tab_bar::geometry(&window, area(), &metrics).consoles;
+        let rect = window.active().root.place(work, metrics.width()).parts[0];
+        let strip = header::set_the_header_aside(rect, &metrics, window.headers)
+            .0
+            .expect("the console carries a header strip");
+        let panes = window.all_panes().count();
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
+        frame(&mut window, &ctx, vec![]);
+        // Across the strip's right end, where its Git, panel, maximize and close buttons sit.
+        for offset in (6..=150).step_by(12) {
+            let at = egui::pos2(strip.right() - offset as f32, strip.center().y);
+            frame(&mut window, &ctx, click_at(at));
+            frame(&mut window, &ctx, vec![]);
+            assert_eq!(
+                window.all_panes().count(),
+                panes,
+                "a header close button took the press at {at:?}"
+            );
+            assert!(
+                window.board.is_open(),
+                "a header button under the Board took the press at {at:?} and replaced the Board"
+            );
+        }
+    }
+
+    #[test]
+    fn moving_the_pointer_over_the_board_does_not_blink_the_title_bar() {
+        let mut window = window_with("sleep 30", "sleep 30");
+        integrated(&mut window);
+        let ctx = egui::Context::default();
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
+        frame(&mut window, &ctx, vec![]);
+        // What the title bar paints: every shape above the Board's own bar.
+        let title_bar = |shapes: &[egui::epaint::ClippedShape]| -> Vec<String> {
+            shapes
+                .iter()
+                .filter(|s| s.shape.visual_bounding_rect().max.y <= 40.0)
+                .map(|s| format!("{:?}", s.shape))
+                .collect()
+        };
+        let still = title_bar(&frame(&mut window, &ctx, vec![]));
+        let moving = title_bar(&frame(
+            &mut window,
+            &ctx,
+            vec![egui::Event::PointerMoved(egui::pos2(600.0, 400.0))],
+        ));
+        assert!(!still.is_empty(), "the title bar paints something");
+        assert_eq!(
+            still, moving,
+            "a pointer move over the Board repainted the title bar differently"
+        );
+    }
+
+    /// A file path of its own for each test that writes the arrangement.
+    fn arrangement_file(label: &str) -> std::path::PathBuf {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        std::env::temp_dir().join(format!("ivy-board-{label}-{}-{n}", std::process::id()))
+    }
+
+    fn arrange(window: &mut Window, ctx: &egui::Context, label: &str) {
+        frame(window, ctx, vec![]);
+        let shapes = frame(window, ctx, vec![]);
+        let at = text_point(&shapes, label).expect("the arrangement toggle is painted");
+        frame(window, ctx, click_at(at));
+    }
+
+    #[test]
+    fn the_chosen_arrangement_is_written_to_the_file_and_opens_the_next_board() {
+        let file = arrangement_file("arrangement");
+        std::fs::write(&file, "theme = ivy-day\n").unwrap();
+        let mut window = window_with("sleep 30", "sleep 30");
+        integrated(&mut window);
+        window.board.remember_in = Some(file.clone());
+        let ctx = egui::Context::default();
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
+        arrange(&mut window, &ctx, "By milestone");
+        arrange(&mut window, &ctx, "By state");
+        arrange(&mut window, &ctx, "By milestone");
+        let written = std::fs::read_to_string(&file).unwrap();
+        let _ = std::fs::remove_file(&file);
+        assert_eq!(
+            written.matches("board.arrangement").count(),
+            1,
+            "a second choice replaces the line: {written}"
+        );
+        assert!(
+            written.contains("board.arrangement = milestone"),
+            "{written}"
+        );
+        assert!(
+            written.contains("theme = ivy-day"),
+            "every other line survives: {written}"
+        );
+
+        // A new window that reads the file opens on the remembered arrangement.
+        let mut next = window_with("sleep 30", "sleep 30");
+        integrated(&mut next);
+        settings::interpret(&written).unwrap().0.apply_to(&mut next);
+        let ctx = egui::Context::default();
+        frame(&mut next, &ctx, chord_with(egui::Key::O));
+        let shapes = frame(&mut next, &ctx, vec![]);
+        assert!(the_text_queued_up(&shapes, "Board"));
+        assert!(
+            !the_text_queued_up(&shapes, "WAITING FOR YOU"),
+            "the remembered arrangement is By milestone, which has no state columns"
+        );
+        // Re-applying the same file (an unrelated Settings save) leaves a later choice alone;
+        // removing the line returns the default.
+        arrange(&mut next, &ctx, "By state");
+        settings::interpret(&written).unwrap().0.apply_to(&mut next);
+        let shapes = frame(&mut next, &ctx, vec![]);
+        assert!(
+            the_text_queued_up(&shapes, "WAITING FOR YOU"),
+            "the re-apply undid a choice"
+        );
+        arrange(&mut next, &ctx, "By milestone");
+        settings::interpret("theme = ivy-day")
+            .unwrap()
+            .0
+            .apply_to(&mut next);
+        let shapes = frame(&mut next, &ctx, vec![]);
+        assert!(
+            the_text_queued_up(&shapes, "WAITING FOR YOU"),
+            "no line opens By state"
+        );
+    }
+
+    #[test]
+    fn a_first_choice_creates_the_file() {
+        let file = arrangement_file("first");
+        let mut window = window_with("sleep 30", "sleep 30");
+        integrated(&mut window);
+        window.board.remember_in = Some(file.clone());
+        let ctx = egui::Context::default();
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
+        arrange(&mut window, &ctx, "By milestone");
+        let written = std::fs::read_to_string(&file).unwrap_or_default();
+        let _ = std::fs::remove_file(&file);
+        assert!(
+            written.contains("board.arrangement = milestone"),
+            "{written:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_choice_stays_on_screen_and_is_said_on_the_board() {
+        let mut window = window_with("sleep 30", "sleep 30");
+        integrated(&mut window);
+        let ctx = egui::Context::default();
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
+        // A symlinked file is never written: the choice stays on screen and the foot says why.
+        let target = arrangement_file("target");
+        let link = arrangement_file("link");
+        std::fs::write(&target, "theme = ivy-day\n").unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        window.board.remember_in = Some(link.clone());
+        arrange(&mut window, &ctx, "By milestone");
+        arrange(&mut window, &ctx, "By state");
+        let shapes = frame(&mut window, &ctx, vec![]);
+        let untouched = std::fs::read_to_string(&target).unwrap();
+        let _ = std::fs::remove_file(&link);
+        let _ = std::fs::remove_file(&target);
+        assert_eq!(untouched, "theme = ivy-day\n");
+        assert!(
+            the_text_queued_up(&shapes, "WAITING FOR YOU"),
+            "the choice stays on screen"
+        );
+        assert!(
+            the_text_queued_up(&shapes, "This arrangement will not be remembered"),
+            "the refusal is said on the Board"
+        );
+        assert!(
+            !the_text_queued_up(&shapes, crate::board::HINT),
+            "the refusal takes the hint's place instead of painting over it"
+        );
+        // Once the file can be written, reopening the Board writes the choice and clears the note.
+        let fixed = arrangement_file("fixed");
+        window.board.remember_in = Some(fixed.clone());
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Board);
+        let shapes = frame(&mut window, &ctx, vec![]);
+        let written = std::fs::read_to_string(&fixed).unwrap_or_default();
+        let _ = std::fs::remove_file(&fixed);
+        assert!(written.contains("board.arrangement = state"), "{written:?}");
+        assert!(the_text_queued_up(&shapes, crate::board::HINT));
     }
 }

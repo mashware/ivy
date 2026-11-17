@@ -1435,7 +1435,10 @@ impl eframe::App for Window {
             ui,
             &metrics,
             header_owns_pointer,
-            viewer_owned || board_owned || pane_owned || chrome_owned,
+            // Neither the Board's claim nor the sidebar's: both flip from frame to frame with the
+            // pointer (a move over the Board, a wheel delta over the rail), and dimming on them made
+            // the title bar blink under the mouse.
+            viewer_owned || pane_owned || chrome_owned,
         );
 
         // **Walking the tree is timed, and it is not zeal: it is the instrument's rule.** The

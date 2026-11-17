@@ -1,11 +1,14 @@
 //! Read-only live board of every console, grouped by project. Its state never owns a console or
 //! producer authority.
+mod bar;
 mod branches;
 mod cards;
 #[path = "roadmap_file.rs"]
 mod files;
+mod filter;
 mod input;
 mod layout;
+mod milestones;
 mod model;
 mod observation;
 pub(crate) mod plans;
@@ -26,7 +29,6 @@ pub(crate) struct State {
     file_snapshots: Vec<files::Snapshot>,
     file_config: std::collections::BTreeMap<String, std::path::PathBuf>,
     file_reload: bool,
-    roadmap_window: (usize, usize),
     pub(crate) enabled: bool,
     pub(crate) probe: Option<probe::Probe>,
     input_frame: Option<u64>,
@@ -43,6 +45,16 @@ pub(crate) struct State {
     awaiting_release: bool,
     pointer_owned: bool,
     keyboard_focus: bool,
+    close_requested: bool,
+    /// The `board.arrangement` the file held when last applied, so a re-apply changes the Board
+    /// only when the file changed.
+    file_arrangement: Option<Option<crate::settings::BoardArrangement>>,
+    /// Why the last choice could not be remembered, shown at the Board's foot.
+    remember_error: Option<String>,
+    /// The configuration file the chosen arrangement is written to; `None` writes nothing.
+    pub(crate) remember_in: Option<std::path::PathBuf>,
+    arrangement: filter::Arrangement,
+    filter: filter::Filter,
     pub(crate) timing: crate::measure::Board,
 }
 
@@ -57,7 +69,6 @@ impl Default for State {
             file_snapshots: Vec::new(),
             file_config: Default::default(),
             file_reload: false,
-            roadmap_window: (2, 3),
             enabled: true,
             probe: None,
             input_frame: None,
@@ -73,6 +84,12 @@ impl Default for State {
             awaiting_release: false,
             pointer_owned: false,
             keyboard_focus: false,
+            close_requested: false,
+            file_arrangement: None,
+            remember_error: None,
+            remember_in: None,
+            arrangement: Default::default(),
+            filter: Default::default(),
             timing: crate::measure::Board::default(),
         }
     }
@@ -85,6 +102,10 @@ impl State {
     #[cfg(test)]
     pub(crate) fn observed_since(&self, pane: usize) -> Option<Instant> {
         self.observations.since(pane)
+    }
+    #[cfg(test)]
+    pub(crate) fn filter_state(&self) -> (&str, bool) {
+        (&self.filter.query, self.filter.editing)
     }
     #[cfg(test)]
     pub(crate) fn selected(&self) -> Option<usize> {
@@ -102,6 +123,14 @@ impl State {
 
 #[cfg(test)]
 pub(crate) use input::toggle;
+
+#[cfg(test)]
+pub(crate) use view::HINT;
+
+#[cfg(test)]
+pub(crate) fn select_for_test(window: &mut crate::Window, pane: usize) {
+    window.board.selected = Some(pane);
+}
 pub(crate) use input::{before_keys, blocked, cancel_gestures, dismiss_for_chrome, reanchor};
 
 /// Called by the shared sidebar host when Board becomes the selected tool.
@@ -111,6 +140,10 @@ pub(crate) fn reveal(window: &mut crate::Window, ctx: &egui::Context) {
         return;
     }
     if !window.board.open {
+        // A choice the file refused is tried again each time the Board opens.
+        if window.board.remember_error.is_some() {
+            input::remember(window);
+        }
         window.board.open = true;
         window.board.original = Some(window.active().focus);
         if window.board.selected.is_none() {
@@ -131,6 +164,8 @@ pub(crate) fn reveal(window: &mut crate::Window, ctx: &egui::Context) {
 pub(crate) fn suspend(window: &mut crate::Window) {
     window.board.open = false;
     window.board.keyboard_focus = false;
+    // The field's focus is part of the Board's keyboard focus and leaves with it.
+    window.board.filter.editing = false;
     if window.board.pointer_owned {
         window.board.awaiting_release = true;
         window.board.pointer_owned = false;
@@ -200,6 +235,31 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, area: egui::R
             format!("{:?}", section.key),
         )
     });
+    let claiming = sections
+        .iter()
+        .flat_map(|s| &s.entries)
+        .filter(|entry| {
+            let signal = signals.get(&entry.pane).copied();
+            filter::claims(observation::classify(
+                entry.snapshot.document.as_deref(),
+                signal,
+                wall,
+            ))
+        })
+        .count();
+    let totals = bar::Totals {
+        consoles: sections.iter().map(|s| s.entries.len()).sum(),
+        // Projects with a console: a roadmap-only project is a row in «By milestone» alone.
+        projects: sections
+            .iter()
+            .filter(|s| matches!(s.kind, model::Kind::Repository { .. }) && !s.entries.is_empty())
+            .count(),
+        claiming,
+    };
+    filter::apply(&mut sections, &window.board.filter, |entry| {
+        let signal = signals.get(&entry.pane).copied();
+        observation::classify(entry.snapshot.document.as_deref(), signal, wall)
+    });
     let panes: Vec<usize> = sections
         .iter()
         .flat_map(|s| &s.entries)
@@ -218,7 +278,7 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, area: egui::R
         .iter()
         .position(|pane| Some(*pane) == window.board.selected)
         .unwrap_or(0);
-    view::paint(window, ui, area, &sections, &signals, wall);
+    view::paint(window, ui, area, &sections, &signals, wall, totals);
     if let Some(target) = window.board.activate.take() {
         activate(window, ui.ctx(), target);
     }
@@ -255,7 +315,12 @@ pub(crate) fn configure(window: &mut crate::Window, settings: &crate::settings::
         window.board.file_config = settings.roadmaps.clone();
         window.board.file_reload = true;
     }
-    window.board.roadmap_window = (settings.roadmap_window.done, settings.roadmap_window.next);
+    // Only a change in the file moves the Board: re-applying an unrelated Settings save must not
+    // undo a choice made since, and removing the line returns the default.
+    if window.board.file_arrangement != Some(settings.board_arrangement) {
+        window.board.file_arrangement = Some(settings.board_arrangement);
+        window.board.arrangement = settings.board_arrangement.into();
+    }
 }
 
 /// Observation is independent of whether the reader has the Board on screen.
