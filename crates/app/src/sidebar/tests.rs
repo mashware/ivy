@@ -783,9 +783,11 @@ fn header_inks(shapes: &[egui::epaint::ClippedShape], consoles: egui::Rect) -> V
     let mut inks: Vec<_> = shapes
         .iter()
         .filter_map(|s| match &s.shape {
+            // A dimmed pass multiplies its opacity into the text it paints.
             egui::Shape::Text(text) if band.contains(text.pos) => Some(
                 text.override_text_color
-                    .unwrap_or(text.galley.job.sections[0].format.color),
+                    .unwrap_or(text.galley.job.sections[0].format.color)
+                    .gamma_multiply(text.opacity_factor),
             ),
             _ => None,
         })
