@@ -1642,4 +1642,32 @@ mod tests {
         frame(&mut window, &ctx, vec![]);
         assert!(!window.board.is_open(), "Close closes the Board");
     }
+
+    #[test]
+    fn a_press_on_the_board_never_reaches_the_console_header_it_covers() {
+        let mut window = window_with("sleep 30", "sleep 30");
+        integrated(&mut window);
+        let ctx = egui::Context::default();
+        frame(&mut window, &ctx, vec![]);
+        let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
+        let work = tab_bar::geometry(&window, area(), &metrics).consoles;
+        let rect = window.active().root.place(work, metrics.width()).parts[0];
+        let strip = header::set_the_header_aside(rect, &metrics, window.headers)
+            .0
+            .expect("the console carries a header strip");
+        let panes = window.all_panes().count();
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
+        frame(&mut window, &ctx, vec![]);
+        // Across the strip's right end, where its Git, panel, maximize and close buttons sit.
+        for offset in (6..=150).step_by(12) {
+            let at = egui::pos2(strip.right() - offset as f32, strip.center().y);
+            frame(&mut window, &ctx, click_at(at));
+            frame(&mut window, &ctx, vec![]);
+            assert_eq!(window.all_panes().count(), panes, "a header close button took the press at {at:?}");
+            assert!(
+                window.board.is_open(),
+                "a header button under the Board took the press at {at:?} and replaced the Board"
+            );
+        }
+    }
 }
