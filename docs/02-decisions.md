@@ -8444,6 +8444,9 @@ font-definition snapshot (loses later discoveries), and reloading the font file 
 (unnecessary I/O). The native review also chose readable15-point body text, aligned40-point font/size
 controls, a compact20-point override badge, and padded cursor/shortcut controls.
 
+> **Superseded in part by D98 (November 2026).** The paragraph below no longer holds: Settings is
+> painted with the roles of the theme it previews, like every floating surface.
+
 **Integration with D66.** The shared chrome dialogs, window controls and pane controls retain their
 effective-Theme-derived style. The separately approved Settings presentation keeps its neutral editor
 palette, including its popups, so selecting a console theme does not silently replace the approved
@@ -10020,3 +10023,41 @@ above them are not measured; the chevron is painted only where a batch's panels 
 a run from before this decision and one after measure different panels, the report does not say which
 panel it painted, and nothing invalidates the older runs on its own — a comparison needs a new pair
 measured after it, the same day.
+
+## D98 — Settings and the floating surfaces are painted with the roles of the theme they show
+
+**New signal, 17 November 2026 — #93.** With D94 every surface reads the theme's roles, and the
+kit draws Settings, the menus and the viewers as one family of floating surfaces. Settings still
+started from a neutral palette of its own (D67) on top of egui's stock dark look; the viewer, the
+chrome's dialogs and the console's menu each started from egui's stock dark or light look and
+painted their own mixes over it. That stock start is what let the desktop's light/dark switch reach
+them, and what made Settings look like another application. This supersedes D67's «Integration with
+D66» paragraph; the rest of D67 — the grouping, the footer, the typography preview — stands.
+
+**Decision.** A floating surface is `raised` with a 1-point `line2` border and the kit's one shadow:
+10 points of radius for a menu, 12 for a dialog. Its controls take the roles through the style
+egui already installs (D94), written into the surface's own `Ui` from **the theme it shows** —
+Settings its draft, the Board its derived theme, every other surface the live theme — so no
+surface depends on what egui was told about the desktop. Settings' navigation sits on `panel`, its
+selected row on `sel`, its primary action on `accent` with `on_accent` ink, its rules on `line`. The
+theme picker is a floating menu: a search field, a segmented All / Dark / Light, and each theme with
+a four-colour sample — background, accent, waiting, finished — and a check on the selected one. The
+docked viewer keeps its header and footer on `panel` and lays the document on `base`. The console's
+search row is laid on `raised`.
+
+**Collapsed palettes.** Settings is where a broken configuration is undone, so its text, its error
+ink and the ink on every control keep 4.5:1 over the fill they sit on, and hover and pressed fills
+stay distinct from the surface. The accent and the borders are **not** corrected: an explicit focus
+is the person's colour verbatim (D94), and D67's 3:1 floor on borders and accent is dropped with
+the neutral palette.
+
+**Measures kept.** The dialogs keep the sizes D67's native review chose (15-point body, 40-point
+controls) and the viewer keeps its two-line header; only colours, radii and the picker change. The
+artboard's 40-point header and toolbar for the viewer, and its settings search field, were not
+taken: the first would cut the path line, the second is a feature no section asked for yet.
+
+| Discarded | Why |
+|---|---|
+| Keep D67's neutral Settings palette | The one window that did not look like Ivy, and the stock dark start under it followed the desktop. |
+| Install the style once and let every surface inherit it | Settings previews a draft theme and the Board a derived one; the installed style is the live theme's. |
+| Correct accent and borders to 3:1 as D67 did | Rewrites an explicit focus colour; D94 keeps it verbatim and corrects only text. |

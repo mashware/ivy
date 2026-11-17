@@ -3,7 +3,7 @@
 //!
 //! These surfaces used to start from egui's stock dark (or light) look and paint a palette of their
 //! own over it — Settings kept a neutral one on purpose (D67). That stock start is what let the
-//! desktop's light/dark switch reach them, and it is gone: every one now reads the roles (D96).
+//! desktop's light/dark switch reach them, and it is gone: every one now reads the roles (D98).
 
 use crate::theme::{Roles, Theme, metrics};
 use eframe::egui::{self, CornerRadius, FontId, Stroke, TextStyle};

@@ -1,7 +1,7 @@
 use crate::theme::{Roles, Theme, mix, project_ink_contrast};
 use eframe::egui::{self, Color32};
 
-/// Settings' colors: the roles of the theme the dialog previews (D96, superseding D67's neutral
+/// Settings' colors: the roles of the theme the dialog previews (D98, superseding D67's neutral
 /// palette), with the dialog's ink kept readable when a configuration collapsed the palette —
 /// Settings is the one place that configuration can be undone from.
 #[derive(Clone, Copy)]
@@ -125,7 +125,7 @@ mod tests {
     }
 
     /// Settings shows the kit's roles of the theme it previews, written out, and not a palette of
-    /// its own (D96).
+    /// its own (D98).
     #[test]
     fn settings_is_painted_with_the_previewed_themes_roles() {
         for (id, raised, panel, line2, accent, on_accent) in [

@@ -1643,7 +1643,7 @@ mod tests {
                 "Paste"
             };
             // Floating on the theme's `raised` role, with its `tx` ink — which turns white when an
-            // override leaves the foreground unreadable over the background (D96).
+            // override leaves the foreground unreadable over the background (D98).
             for (config, surface, ink) in [
                 (
                     "panel=#112233\nforeground=#efcba9",
@@ -2811,7 +2811,7 @@ mod tests {
     }
 
     /// The application menu floats on the theme's `raised` role with a control border, and the
-    /// console's search row is laid on the same surface (D96).
+    /// console's search row is laid on the same surface (D98).
     #[test]
     fn the_application_menu_and_the_search_row_float_on_raised() {
         fn rects(shape: &egui::Shape, out: &mut Vec<egui::epaint::RectShape>) {
