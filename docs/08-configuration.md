@@ -565,11 +565,29 @@ Like other bindings, it can be changed or disabled with `key.board = none`, whic
 chord to the program when the board is closed. The Shortcuts section in Settings edits the same key.
 `key.overview`, the name before the board, is no longer understood and is reported as an unknown key.
 
-The board has one row per Git repository and five state columns: **Waiting for you**, **Stuck**,
+A bar across the top of the board carries **Board**, the window's console and project counts, two
+buttons that choose the arrangement — **By state** and **By milestone** — the **All / Claiming you**
+narrowing, a field that filters consoles by console, tab or task name, and **Close**. **Claiming
+you** keeps the consoles waiting for you, stuck, or finished with nobody having looked; its count is
+taken over the whole window. Click the field to type in it; Enter or the first Escape leaves the
+field, and the next Escape closes the board. A query holds at most 256 characters. In a narrow
+window the bar stacks its controls on more rows. A key hint runs along the board's foot. Both
+arrangements are kept while one is chosen; the choice is not saved.
+
+**By state** has one row per Git repository and five state columns: **Waiting for you**, **Stuck**,
 **Working**, **Finished** and **Idle**. Repository rows sort by their strongest state, then name;
 **Other consoles** stays last for consoles outside a repository. Each project's summary and roadmap
-appear above its terminal columns. Right-edge column badges count that project's consoles; toolbar
-totals count the whole window. Projects without consoles keep their roadmap without an empty terminal
+appear above its terminal columns. Right-edge column badges count that project's consoles.
+
+**By milestone** lays each project's roadmap out as columns, one per milestone, with its
+deliverables, their progress and **after** the milestones it depends on, named by title. A
+console's card sits under the deliverable its panel declares (`milestone` and `deliverable`), at
+milestone level when the deliverable is not in the plan, and in **Off the plan** when it declares
+none or a milestone the plan lacks — nothing is guessed. A project without a roadmap shows its
+cards in one row and says **no roadmap**; one whose roadmap cannot be read says why. Each project
+header shows its colour, how many consoles sit in each claiming column and its roadmap's source.
+Every card opens with its state: the claim's pill and words for waiting, stuck and finished, the
+column's mark for working and idle, and the observed wait in minutes. Projects without consoles keep their roadmap without an empty terminal
 grid. Narrow windows scroll horizontally instead of shrinking the columns.
 
 A card uses the first producer title, the current phase and the available worktree branch. Its body
@@ -578,8 +596,9 @@ monospaced presentation, with aligned references and independent reader controls
 panels initially show eighteen source lines; **Show all** exposes the remainder. Finished and Idle
 cards start compact; **Show panel** opens them. Section-fold choices belong to the Board reader and
 survive producer republishes independently of the sidebar. Freshness and publication-origin notices
-remain visible. A console without a panel says **publishes nothing**; when none has published, the
-screen says **No task state has been published yet** and still includes every console.
+remain visible. A console without a panel says **publishes nothing** and its card is dashed; an old
+state nobody refreshes is veiled. When none has published, the screen says **No task state has been
+published yet** and still includes every console; when the narrowing leaves nothing, it says so.
 
 State comes only from published attention and supported explicit client declarations. An explicit
 working signal suppresses a lingering panel wait; block and done retain priority, followed by an
@@ -593,7 +612,6 @@ restart is unknown. Leaving
 wait, replacing the shell or closing the console clears it. Silence alone does not move Wait or Done
 to Idle; freshness/backing warnings remain visible.
 
-The first gray summary row carries **Board**, the global console count and project count.
 Each project's **Roadmap** button opens or folds its own plan; there is no separate global toggle.
 Project roadmaps start folded. The summary shows the plan title, deliverable progress
 and active milestone IDs. Expanded plans show separate milestone/deliverable totals and wrapping,
