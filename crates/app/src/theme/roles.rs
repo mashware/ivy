@@ -410,8 +410,8 @@ mod collapse_tests {
             "{step:?}"
         );
         // Near black, with fills at 0x00–0x06 and the text 0x10 listed: every step between lies
-        // under 1.03:1 from 0x06 or from 0x10 (0x0b misses both by a hair), so nothing stands
-        // apart and the first step comes back.
+        // under 1.03:1 from 0x06 or from 0x10 (0x0b misses 0x06 and 0x0c misses 0x10, each by a
+        // hair), so nothing stands apart and the first step comes back.
         let (dark, dark_text) = (grey(0x00), grey(0x10));
         let mut crowd: Vec<Color32> = (0x00..=0x06).map(grey).collect();
         crowd.push(dark_text);

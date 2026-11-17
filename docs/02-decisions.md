@@ -10057,8 +10057,9 @@ of the ink itself; text on a moved fill is re-inked to what reads on it, which i
 legible; the caret, a line and not a fill, becomes the ink itself — so the control can still be
 found; Settings
 paints from the roles with those corrections written back, so its outline and every field egui
-derives from them carry them too. Nothing else is
-corrected: an explicit focus is the person's colour verbatim (D94) wherever it can be seen, and the
+derives from them carry them too. Settings, where a broken configuration is undone, also keeps
+its hover and selection apart from its own surfaces when a theme's narrow mixes or a `panel` set to
+one of them would merge them. Nothing else is corrected: an explicit focus is the person's colour verbatim (D94) wherever it can be seen, and the
 old Settings palette's 3:1 floor on every border and on the accent is dropped with it.
 
 **The surfaces step toward the readable text.** `raised`, `hover`, `line2` and a light theme's

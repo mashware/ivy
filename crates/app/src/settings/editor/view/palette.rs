@@ -54,16 +54,16 @@ impl Palette {
         // unreadable it falls back to the dialog's surface rather than hide the way back.
         let nav = roles.panel_or(ink, surface);
         // The roles floor a collapsed foreground; Settings also meets a theme's own narrow mixes
-        // (black and #757575: hover 1.02:1 over raised) and a `panel` set to the selection's tint,
-        // and it is where a broken configuration is undone, so it floors them here too.
-        fixed.hover = fixed.apart(roles.hover, &[surface, roles.base], surface, 0.10);
+        // (black and #757575: hover 1.02:1 over raised) and a `panel` set to the hover or the
+        // selection's tint, and it is where a broken configuration is undone, so it floors its
+        // hover and selection here too. (The border, a 17 % step, stands apart wherever text reads.)
+        fixed.hover = fixed.apart(roles.hover, &[surface, roles.base, nav], surface, 0.10);
         fixed.sel = fixed.apart(
             roles.sel,
             &[fixed.hover, roles.base, surface, nav],
             surface,
             0.20,
         );
-        fixed.line2 = fixed.apart(roles.line2, &[surface], surface, 0.40);
         // The caret — the text cursor and a pressed control's border — is drawn over fields, the
         // dialog, the selection, a pressed control's hover fill and the navigation: the accent where
         // it stands apart from all of them, else the ink.
@@ -221,6 +221,7 @@ mod tests {
         for (config, name) in [
             ("background=#000000\nforeground=#757575\n", "narrow"),
             ("theme=ivy-night\npanel=#1a372e\n", "panel on sel"),
+            ("theme=ivy-night\npanel=#262b2d\n", "panel on hover"),
         ] {
             let theme = super::super::appearance::effective_theme(&Document::new(config.into()));
             let p = Palette::new(theme);
@@ -237,6 +238,15 @@ mod tests {
                 apart(p.roles.sel, p.surface),
                 "{name}: selection on the dialog"
             );
+            assert!(
+                apart(p.roles.hover, p.nav),
+                "{name}: hover on the navigation"
+            );
+            assert!(
+                apart(p.caret, p.roles.sel),
+                "{name}: caret on the selection"
+            );
+            assert!(apart(p.caret, p.roles.hover), "{name}: caret on hover");
         }
     }
 
