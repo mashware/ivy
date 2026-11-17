@@ -1435,10 +1435,10 @@ impl eframe::App for Window {
             ui,
             &metrics,
             header_owns_pointer,
-            // The Board's own claim is left out — it covers every console, and whether it took
-            // this frame's input flips with each pointer move, so dimming on it made the title
-            // bar blink under the mouse. The sidebar's claim, folded into the same flag, stays.
-            viewer_owned || sidebar_owned || pane_owned || chrome_owned,
+            // Neither the Board's claim nor the sidebar's: both flip from frame to frame with the
+            // pointer (a move over the Board, a wheel delta over the rail), and dimming on them made
+            // the title bar blink under the mouse.
+            viewer_owned || pane_owned || chrome_owned,
         );
 
         // **Walking the tree is timed, and it is not zeal: it is the instrument's rule.** The

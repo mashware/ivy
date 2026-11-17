@@ -1749,7 +1749,7 @@ mod tests {
     }
 
     #[test]
-    fn a_first_choice_creates_the_file_and_a_refused_one_is_said_on_the_board() {
+    fn a_first_choice_creates_the_file() {
         let file = arrangement_file("first");
         let mut window = window_with("sleep 30", "sleep 30");
         integrated(&mut window);
@@ -1763,13 +1763,22 @@ mod tests {
             written.contains("board.arrangement = milestone"),
             "{written:?}"
         );
+    }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_choice_stays_on_screen_and_is_said_on_the_board() {
+        let mut window = window_with("sleep 30", "sleep 30");
+        integrated(&mut window);
+        let ctx = egui::Context::default();
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
         // A symlinked file is never written: the choice stays on screen and the foot says why.
         let target = arrangement_file("target");
         let link = arrangement_file("link");
         std::fs::write(&target, "theme = ivy-day\n").unwrap();
         std::os::unix::fs::symlink(&target, &link).unwrap();
         window.board.remember_in = Some(link.clone());
+        arrange(&mut window, &ctx, "By milestone");
         arrange(&mut window, &ctx, "By state");
         let shapes = frame(&mut window, &ctx, vec![]);
         let untouched = std::fs::read_to_string(&target).unwrap();
@@ -1784,5 +1793,19 @@ mod tests {
             the_text_queued_up(&shapes, "This arrangement will not be remembered"),
             "the refusal is said on the Board"
         );
+        assert!(
+            !the_text_queued_up(&shapes, crate::board::HINT),
+            "the refusal takes the hint's place instead of painting over it"
+        );
+        // Once the file can be written, reopening the Board writes the choice and clears the note.
+        let fixed = arrangement_file("fixed");
+        window.board.remember_in = Some(fixed.clone());
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Board);
+        let shapes = frame(&mut window, &ctx, vec![]);
+        let written = std::fs::read_to_string(&fixed).unwrap_or_default();
+        let _ = std::fs::remove_file(&fixed);
+        assert!(written.contains("board.arrangement = state"), "{written:?}");
+        assert!(the_text_queued_up(&shapes, crate::board::HINT));
     }
 }

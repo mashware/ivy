@@ -154,6 +154,7 @@ mod arrangement_tests {
     #[test]
     fn a_measured_run_and_a_fresh_board_have_no_file_to_write_the_arrangement_to() {
         assert_eq!(super::arrangement_file(true), None);
+        assert_eq!(super::arrangement_file(false), crate::settings::path());
         assert_eq!(crate::board::State::default().remember_in, None);
     }
 }

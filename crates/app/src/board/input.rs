@@ -264,13 +264,7 @@ pub(crate) fn before_keys(
         // Remembered in the configuration file. A refusal (a symlinked or unreadable file, a
         // Settings save still applying) keeps the choice on screen for this session and is said at
         // the Board's foot, where somebody who launched Ivy from the desktop can see it.
-        let chosen = window.board.arrangement.into();
-        window.board.remember_error =
-            crate::settings::editor::runtime::save_board_arrangement(window, chosen).err();
-        // What the file now holds, when there is a file and it took the line.
-        if window.board.remember_error.is_none() && window.board.remember_in.is_some() {
-            window.board.file_arrangement = Some(Some(chosen));
-        }
+        remember(window);
     }
     if std::mem::take(&mut window.board.close_requested) {
         dismiss(window, ui.ctx());
@@ -283,6 +277,29 @@ pub(crate) fn before_keys(
     window.board.timing.record_work(started.elapsed());
     window.timed_separately += window.board.timing.take_cost();
     owns_events
+}
+
+/// Writes the arrangement on screen to the person's file. The store's own messages speak to the
+/// Settings dialog, so the Board says what happened in its own words and leaves the detail on the
+/// console that launched Ivy.
+pub(super) fn remember(window: &mut Window) {
+    let chosen = window.board.arrangement.into();
+    match crate::settings::editor::runtime::save_board_arrangement(window, chosen) {
+        Ok(()) => {
+            window.board.remember_error = None;
+            // What the file now holds, when there is a file and it took the line.
+            if window.board.remember_in.is_some() {
+                window.board.file_arrangement = Some(Some(chosen));
+            }
+        }
+        Err(detail) => {
+            eprintln!("the Board arrangement was not remembered: {detail}");
+            window.board.remember_error = Some(
+                "the configuration file could not be written (it is retried when the Board opens)"
+                    .into(),
+            );
+        }
+    }
 }
 
 fn navigate(state: &mut State, key: egui::Key) {

@@ -248,7 +248,8 @@ pub(super) fn paint_plan(
                                 row += 1;
                             }
                         } else {
-                            let count = placed.off.len();
+                            // Everything the column holds: the plan's outside work and the consoles.
+                            let count = placed.off.len() + plan.outside.len();
                             column_header(ui, width, "Off the plan", None, count, None, roles);
                             // The plan's own work outside its milestones (a contract, a review) is
                             // the plan's, not a console's: listed here, above the consoles.
@@ -588,6 +589,10 @@ mod tests {
     }
 
     fn header_texts(section: &Section) -> Vec<String> {
+        header_texts_with(section, true)
+    }
+
+    fn header_texts_with(section: &Section, with_roadmap: bool) -> Vec<String> {
         let ctx = egui::Context::default();
         crate::fonts::install_bundled(&ctx);
         let roles = Roles::of(&crate::theme::Theme::default());
@@ -600,7 +605,7 @@ mod tests {
                     block: 0,
                     done: 1,
                 },
-                true,
+                with_roadmap,
                 &roles,
             );
         });
@@ -672,32 +677,18 @@ mod tests {
 
     #[test]
     fn by_state_headers_and_other_consoles_say_nothing_about_a_roadmap() {
-        let ctx = egui::Context::default();
-        crate::fonts::install_bundled(&ctx);
-        let roles = Roles::of(&crate::theme::Theme::default());
-        let painted = |section: &Section, with_roadmap: bool| {
-            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                project_header(ui, section, Claims::default(), with_roadmap, &roles);
-            });
-            let texts: Vec<String> = output
-                .shapes
-                .iter()
-                .filter_map(|s| match &s.shape {
-                    egui::Shape::Text(t) => Some(t.galley.text().to_owned()),
-                    _ => None,
-                })
-                .collect();
-            output.drop_without_applying_deltas();
-            texts
-        };
+        let says = |texts: Vec<String>, needle: &str| texts.iter().any(|t| t.contains(needle));
         let with_plan = section(vec![entry(1, None, None)], Some(plan()), None);
-        assert!(!painted(&with_plan, false).iter().any(|t| t == "ROADMAP.md"));
+        assert!(!says(header_texts_with(&with_plan, false), "ROADMAP.md"));
+        let without = section(vec![entry(1, None, None)], None, None);
+        assert!(!says(header_texts_with(&without, false), "no roadmap"));
+        let unreadable = section(vec![entry(1, None, None)], None, Some("not UTF-8"));
+        assert!(!says(
+            header_texts_with(&unreadable, false),
+            "roadmap unreadable"
+        ));
         let mut other = section(vec![entry(1, None, None)], None, None);
         other.kind = crate::board::model::Kind::Other;
-        assert!(
-            !painted(&other, true)
-                .iter()
-                .any(|t| t.contains("no roadmap"))
-        );
+        assert!(!says(header_texts_with(&other, true), "no roadmap"));
     }
 }

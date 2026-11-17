@@ -140,6 +140,10 @@ pub(crate) fn reveal(window: &mut crate::Window, ctx: &egui::Context) {
         return;
     }
     if !window.board.open {
+        // A choice the file refused is tried again each time the Board opens.
+        if window.board.remember_error.is_some() {
+            input::remember(window);
+        }
         window.board.open = true;
         window.board.original = Some(window.active().focus);
         if window.board.selected.is_none() {

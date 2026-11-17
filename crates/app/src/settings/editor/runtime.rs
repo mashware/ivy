@@ -73,9 +73,10 @@ pub(crate) fn save_board_arrangement(
     let Some(path) = window.board.remember_in.clone() else {
         return Ok(());
     };
-    // Settings cannot be open while the Board takes input; a save of its own can still be applying.
-    if window.settings_editor.application.pending.is_some() {
-        return Err("Settings is still applying a save".into());
+    // Writing under an open Settings would make its next save see an outside change.
+    let editor = &window.settings_editor;
+    if editor.is_open() || editor.application.pending.is_some() {
+        return Err("Settings is open or still applying a save".into());
     }
     let (mut store, text) = super::super::store::Store::open(path)?;
     let mut draft = super::super::document::Document::new(text);

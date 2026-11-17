@@ -376,25 +376,23 @@ fn paint_hint(ui: &mut egui::Ui, refused: Option<&str>, roles: &crate::theme::Ro
         [rect.left_top(), rect.right_top()],
         egui::Stroke::new(1.0, roles.line),
     );
-    ui.painter().text(
-        egui::pos2(rect.left() + 16.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        HINT,
-        egui::FontId::proportional(11.5),
-        roles.tx3,
-    );
-    if let Some(reason) = refused {
-        ui.painter().text(
-            egui::pos2(rect.right() - 16.0, rect.center().y),
-            egui::Align2::RIGHT_CENTER,
-            format!(
-                "This arrangement will not be remembered: {}",
-                super::cards::clean(reason)
-            ),
-            egui::FontId::proportional(11.5),
+    // A refusal takes the hint's place: the two on one line overlap in a narrow window.
+    let (text, ink) = match refused {
+        Some(reason) => (
+            format!("This arrangement will not be remembered: {reason}"),
             roles.wait,
+        ),
+        None => (HINT.to_owned(), roles.tx3),
+    };
+    ui.painter()
+        .with_clip_rect(rect.intersect(ui.clip_rect()))
+        .text(
+            egui::pos2(rect.left() + 16.0, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            text,
+            egui::FontId::proportional(11.5),
+            ink,
         );
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
