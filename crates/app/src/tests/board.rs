@@ -1436,4 +1436,78 @@ mod tests {
         drop(window);
         let _ = fs::remove_dir_all(root);
     }
+
+    #[test]
+    fn by_milestone_places_each_card_under_its_declared_deliverable_and_the_rest_off_the_plan() {
+        let mut window = window_with("sleep 30", "sleep 30");
+        integrated(&mut window);
+        let ctx = egui::Context::default();
+        let origins: Vec<_> = window.all_panes().map(|p| p.name).collect();
+        for pane in window.all_panes_mut() {
+            pane.project = Some(crate::project_view::Badge {
+                key: crate::project::Key::Repository("/sample/.git".into()),
+                name: "Sample".into(),
+                details: String::new(),
+                ink: egui::Color32::RED,
+                painted: Default::default(),
+            });
+        }
+        for origin in &origins {
+            attach_a_channel(&mut window, *origin);
+        }
+        let document = r#"{"title":"Delivery","source":"roadmap.md","milestones":[{"id":"H2","title":"Design","items":[{"id":"S","text":"Sketch","mark":"done"}]},{"id":"H3","title":"Build","depends_on":["H2"],"items":[{"id":"D","text":"Feature","mark":"current"}]}]}"#;
+        let (plan, dropped) = panel_contract::plan::parse_document_noting(document).unwrap();
+        ask_the_window(
+            &mut window,
+            &ctx,
+            origins[0],
+            1,
+            panel_control::What::PlanSet {
+                document: document.into(),
+                plan,
+                dropped,
+            },
+        );
+        crate::board::plans::refresh_readers(&mut window);
+        for (origin, doc) in [
+            (origins[0], r#"{"milestone":"H3","deliverable":"D","attention":"wait","lines":["working"]}"#),
+            (origins[1], r#"{"lines":["Off-plan witness"]}"#),
+        ] {
+            window
+                .all_panes_mut()
+                .find(|p| p.name == origin)
+                .unwrap()
+                .panel_state
+                .deliver(1, "flow", panel_contract::parse_document(doc).unwrap(), SystemTime::now())
+                .unwrap();
+        }
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
+        let shapes = frame(&mut window, &ctx, vec![]);
+        let toggle = text_point(&shapes, "By milestone").expect("the arrangement toggle is painted");
+        frame(&mut window, &ctx, click_at(toggle));
+        frame(&mut window, &ctx, vec![]);
+        let shapes = frame(&mut window, &ctx, vec![]);
+        for expected in ["H3 · Build", "after H2 · Design", "Feature", "Off the plan", "Waiting for you", crate::board::HINT] {
+            assert!(the_text_queued_up(&shapes, expected), "missing {expected}");
+        }
+        assert!(
+            !the_text_queued_up(&shapes, "WAITING FOR YOU"),
+            "the state columns are gone in this arrangement"
+        );
+        let on_plan = window.board.card_rect(origins[0]).expect("declared card painted");
+        let off_plan = window.board.card_rect(origins[1]).expect("off-plan card painted");
+        let build = text_point(&shapes, "H3 · Build").unwrap();
+        let off = text_point(&shapes, "Off the plan").unwrap();
+        let feature = text_point(&shapes, "Feature").unwrap();
+        assert!(
+            on_plan.x_range().contains(build.x) && on_plan.top() > feature.y,
+            "the declared card sits under its deliverable in its milestone's column"
+        );
+        assert!(off_plan.x_range().contains(off.x), "the undeclared card sits in Off the plan");
+        assert!(!on_plan.x_range().contains(off.x));
+        // Reading order runs across the columns: right from the declared card reaches the off-plan one.
+        crate::board::select_for_test(&mut window, origins[0]);
+        frame(&mut window, &ctx, vec![key(egui::Key::ArrowRight)]);
+        assert_eq!(window.board.selected(), Some(origins[1]));
+    }
 }

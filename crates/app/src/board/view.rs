@@ -143,7 +143,6 @@ fn paint_contents(
         &roles,
         &mut window.board.surface.child_hits,
     );
-    let total = sections.iter().map(|s| s.entries.len()).sum::<usize>();
     if sections
         .iter()
         .flat_map(|s| &s.entries)
@@ -172,12 +171,58 @@ fn paint_contents(
         .scroll_offset(offset)
         .id_salt("board-list")
         .auto_shrink([false, false])
+        .max_height((ui.available_height() - HINT_HEIGHT).max(0.0))
         .show(&mut ui, |ui| {
             let canvas_width = ui.available_width().max(1.0);
             let stacked = canvas_width < 1360.0;
             let widths = super::layout::column_widths(canvas_width - 16.0, 8.0);
             let mut row_base = 0;
-            for (section_index, section) in sections.iter().enumerate() {
+            for section in sections {
+                if window.board.arrangement == super::filter::Arrangement::ByMilestone {
+                    let started = Instant::now();
+                    let claims = [Column::Wait, Column::Block, Column::Done].map(|c| {
+                        section
+                            .entries
+                            .iter()
+                            .filter(|entry| column(entry, signals, now) == c)
+                            .count()
+                    });
+                    super::milestones::project_header(ui, section, claims, &roles);
+                    let base = row_base;
+                    let mut paint_card =
+                        |ui: &mut egui::Ui, entry: &Entry, row: usize, index: usize, width: f32| {
+                            let context_top = ui.next_widget_position().y;
+                            paint_entries(
+                                window,
+                                ui,
+                                vec![entry],
+                                column(entry, signals, now),
+                                index,
+                                base + row,
+                                context_top,
+                                reveal,
+                                previous.as_ref(),
+                                &mut geometry,
+                                signals,
+                                width,
+                                &theme,
+                            );
+                        };
+                    let plan = section.roadmap.as_ref().and_then(|r| r.plan.clone());
+                    row_base += match &plan {
+                        Some(plan) => super::milestones::paint_plan(
+                            ui,
+                            section,
+                            plan,
+                            &roles,
+                            &mut paint_card,
+                        ),
+                        None => super::milestones::paint_loose(ui, section, &mut paint_card),
+                    };
+                    super::milestones::rule(ui, &roles);
+                    window.board.timing.plan_paint(started.elapsed());
+                    continue;
+                }
                 let section_top = ui.next_widget_position().y;
                 let started = Instant::now();
                 if let Some(pane) = roadmap::paint_project_with_signals(
@@ -188,7 +233,8 @@ fn paint_contents(
                     &theme,
                     signals,
                     now,
-                    (section_index == 0).then_some((total, sections.len())),
+                    // The totals moved to the Board's top bar (#93); every project keeps its name.
+                    None,
                 ) {
                     window.board.activate = Some(pane);
                 }
@@ -297,6 +343,7 @@ fn paint_contents(
                 ui.separator();
             }
         });
+    paint_hint(&mut ui, &roles);
     geometry.viewport = output.inner_rect;
     geometry.offset = offset;
     geometry.next_offset = output.state.offset;
@@ -306,6 +353,27 @@ fn paint_contents(
         .board
         .order
         .sort_by_key(|slot| (slot.row, slot.column));
+}
+
+const HINT_HEIGHT: f32 = 26.0;
+pub(crate) const HINT: &str = "Enter go to console  ·  Arrows move between cards  ·  Esc close";
+
+/// The keys, named once at the foot of the Board instead of in every card.
+fn paint_hint(ui: &mut egui::Ui, roles: &crate::theme::Roles) {
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), HINT_HEIGHT), egui::Sense::hover());
+    ui.painter().rect_filled(rect, 0.0, roles.chrome);
+    ui.painter().line_segment(
+        [rect.left_top(), rect.right_top()],
+        egui::Stroke::new(1.0, roles.line),
+    );
+    ui.painter().text(
+        egui::pos2(rect.left() + 16.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        HINT,
+        egui::FontId::proportional(11.5),
+        roles.tx3,
+    );
 }
 
 #[allow(clippy::too_many_arguments)]

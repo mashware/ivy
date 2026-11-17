@@ -8,6 +8,7 @@ mod files;
 mod filter;
 mod input;
 mod layout;
+mod milestones;
 mod model;
 mod observation;
 pub(crate) mod plans;
@@ -110,6 +111,14 @@ impl State {
 
 #[cfg(test)]
 pub(crate) use input::toggle;
+
+#[cfg(test)]
+pub(crate) use view::HINT;
+
+#[cfg(test)]
+pub(crate) fn select_for_test(window: &mut crate::Window, pane: usize) {
+    window.board.selected = Some(pane);
+}
 pub(crate) use input::{before_keys, blocked, cancel_gestures, dismiss_for_chrome, reanchor};
 
 /// Called by the shared sidebar host when Board becomes the selected tool.
