@@ -409,7 +409,7 @@ mod collapse_tests {
         );
         // Fills up to just short of the text leave only steps that read as the text: the first
         // step, not a shade one level off the text.
-        let crowd: Vec<Color32> = (0x60..=0x8b).map(grey).collect();
+        let crowd: Vec<Color32> = (0x60..=0x8c).map(grey).collect();
         assert_eq!(apart(fill, &crowd, fill, text, 0.2), mix(fill, text, 0.2));
         // Nothing stands apart (the fills cover every step): the first step, not the text.
         let all: Vec<Color32> = (0..=255).map(grey).collect();
