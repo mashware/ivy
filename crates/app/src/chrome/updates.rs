@@ -106,7 +106,7 @@ pub(super) fn begin_pass(window: &mut Window, ui: &mut egui::Ui) {
     state.service.poll();
     if state.blocked(&ctx) {
         if state.open {
-            show(state, &ctx, &mut window.desktop);
+            show(state, &ctx, &mut window.desktop, &window.theme);
         }
         state.blocked_frame = Some(ctx.cumulative_frame_nr());
         state.held = ctx.input(|input| input.focused && input.pointer.any_down());
@@ -120,13 +120,18 @@ pub(super) fn begin_pass(window: &mut Window, ui: &mut egui::Ui) {
     window.timed_separately += window.chrome.take_cost();
 }
 
-fn show(state: &mut Dialog, ctx: &egui::Context, desktop: &mut crate::links::Desktop) {
+fn show(
+    state: &mut Dialog,
+    ctx: &egui::Context,
+    desktop: &mut crate::links::Desktop,
+    theme: &crate::theme::Theme,
+) {
     let available = ctx.content_rect().size();
     let mut close = false;
     egui::Modal::new(egui::Id::new("ivy-updates"))
-        .frame(crate::settings::editor::view::modal_frame().inner_margin(16))
+        .frame(crate::ui::floating::dialog_frame(&crate::ui::style::roles(ctx, theme)).inner_margin(16))
         .show(ctx, |ui| {
-            crate::settings::editor::view::settings_style(ui);
+            crate::ui::floating::style(ui, theme);
             ui.set_width((available.x - 64.0).clamp(80.0, 640.0));
             ui.horizontal_top(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
@@ -284,7 +289,7 @@ mod tests {
                     events,
                     ..Default::default()
                 },
-                |_ui| show(dialog, ctx, desktop),
+                |_ui| show(dialog, ctx, desktop, &crate::theme::Theme::default()),
             );
             let shapes = output.shapes.clone();
             output.drop_without_applying_deltas();

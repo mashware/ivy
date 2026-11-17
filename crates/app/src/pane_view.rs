@@ -217,9 +217,9 @@ fn split_buttons(
                 "",
                 label,
                 if enabled[index] {
-                    theme.foreground()
+                    ui.visuals().widgets.inactive.fg_stroke.color
                 } else {
-                    theme.foreground().gamma_multiply(0.35)
+                    ui.visuals().widgets.inactive.fg_stroke.color.gamma_multiply(0.35)
                 },
             );
             if response.clicked() {
@@ -281,9 +281,7 @@ pub(crate) fn before_keys(
             .fixed_pos(at)
             .constrain_to(ui.ctx().viewport_rect())
             .show(ui.ctx(), |ui| {
-                egui::Frame::popup(ui.style())
-                    .fill(theme.panel_background())
-                    .stroke(egui::Stroke::new(1.0, theme.divider()))
+                crate::ui::floating::menu_frame(&crate::ui::style::roles(ui.ctx(), &theme))
                     .show(ui, |ui| {
                         egui::ScrollArea::vertical()
                             .max_height((viewport.height() - 20.0).max(1.0))
@@ -291,9 +289,9 @@ pub(crate) fn before_keys(
                                 crate::settings::editor::view::style(ui, theme);
                                 ui.set_width(190.0_f32.min((viewport.width() - 20.0).max(1.0)));
                                 ui.spacing_mut().item_spacing = egui::vec2(0.0, 2.0);
-                                ui.visuals_mut().widgets.hovered.weak_bg_fill =
-                                    theme.divider().gamma_multiply(0.55);
-                                ui.visuals_mut().widgets.active.weak_bg_fill = theme.divider();
+                                let roles = crate::ui::style::roles(ui.ctx(), &theme);
+                                ui.visuals_mut().widgets.hovered.weak_bg_fill = roles.hover;
+                                ui.visuals_mut().widgets.active.weak_bg_fill = roles.sel;
                                 if let Some(index) = split_buttons(ui, theme, enabled) {
                                     action = Some(5 + index);
                                 }
@@ -438,10 +436,8 @@ pub(crate) fn before_keys(
         .movable(false)
         .default_width(380.0)
         .frame(
-            egui::Frame::window(ui.style())
-                .inner_margin(20.0)
-                .fill(theme.panel_background())
-                .stroke(egui::Stroke::new(1.0, theme.divider())),
+            crate::ui::floating::dialog_frame(&crate::ui::style::roles(ui.ctx(), &theme))
+                .inner_margin(20.0),
         )
         .collapsible(false)
         .resizable(false)

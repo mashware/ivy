@@ -457,6 +457,7 @@ const MODULES: &[(&str, &str)] = &[
         "src/ui/claim_pill.rs",
         include_str!("../src/ui/claim_pill.rs"),
     ),
+    ("src/ui/floating.rs", include_str!("../src/ui/floating.rs")),
     (
         "src/chrome/strip.rs",
         include_str!("../src/chrome/strip.rs"),

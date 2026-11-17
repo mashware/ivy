@@ -1,9 +1,13 @@
-use crate::theme::{Theme, project_ink_contrast};
+use crate::theme::{Roles, Theme, mix, project_ink_contrast};
 use eframe::egui::{self, Color32};
 
+/// Settings' colors: the roles of the theme the dialog previews (D96, superseding D67's neutral
+/// palette), with the dialog's ink kept readable when a configuration collapsed the palette —
+/// Settings is the one place that configuration can be undone from.
 #[derive(Clone, Copy)]
 pub(super) struct Palette {
     pub surface: Color32,
+    pub nav: Color32,
     pub ink: Color32,
     pub border: Color32,
     pub accent: Color32,
@@ -11,6 +15,7 @@ pub(super) struct Palette {
     pub hover: Color32,
     pub active: Color32,
     pub error: Color32,
+    roles: Roles,
 }
 
 fn readable(candidate: Color32, surface: Color32, minimum: f32) -> Color32 {
@@ -25,82 +30,63 @@ fn readable(candidate: Color32, surface: Color32, minimum: f32) -> Color32 {
     }
 }
 
-fn blend(a: Color32, b: Color32, amount: f32) -> Color32 {
-    let channel = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * amount).round() as u8;
-    Color32::from_rgb(
-        channel(a.r(), b.r()),
-        channel(a.g(), b.g()),
-        channel(a.b(), b.b()),
-    )
+/// `role`, unless a collapsed palette made it the surface it must stand out from: then moved toward
+/// the ink, so a hovered or pressed control still shows it.
+fn distinct(role: Color32, from: Color32, ink: Color32, amount: f32) -> Color32 {
+    if role == from { mix(from, ink, amount) } else { role }
 }
 
 impl Palette {
     pub fn new(theme: Theme) -> Self {
-        let surface = blend(theme.background(), theme.panel_background(), 0.5);
-        // Custom overrides can collapse all theme roles to one color. Correct presentation
-        // ink and boundaries without altering the user's terminal colors or draft.
-        let ink = readable(theme.foreground(), surface, 4.5);
-        let accent = readable(theme.focus(), surface, 3.0);
+        let roles = Roles::of(&theme);
+        let surface = roles.raised;
         Self {
             surface,
-            ink,
-            border: readable(theme.divider(), surface, 3.0),
-            accent,
-            selected_ink: readable(theme.foreground(), accent, 4.5),
-            hover: blend(surface, ink, 0.10),
-            active: blend(surface, ink, 0.20),
-            error: readable(theme.color(term_core::TermColor::Indexed(1)), surface, 4.5),
+            nav: roles.panel,
+            ink: readable(roles.tx, surface, 4.5),
+            border: roles.line2,
+            accent: roles.accent,
+            selected_ink: roles.on_accent,
+            hover: distinct(roles.hover, surface, roles.tx, 0.10),
+            active: distinct(roles.sel, distinct(roles.hover, surface, roles.tx, 0.10), roles.tx, 0.20),
+            error: readable(roles.block, surface, 4.5),
+            roles,
         }
     }
 
     pub fn frame(self) -> egui::Frame {
-        egui::Frame::new()
-            .fill(self.surface)
-            .stroke(egui::Stroke::new(1.0, self.border))
-            .corner_radius(14)
-            .inner_margin(0)
+        crate::ui::floating::dialog_frame(&self.roles)
     }
 
     pub fn apply(self, ui: &mut egui::Ui) {
-        // Retain the existing Preferences geometry and typography.
-        super::settings_style(ui);
-        let v = &mut ui.style_mut().visuals;
-        *v = if project_ink_contrast(Color32::BLACK, self.surface)
-            > project_ink_contrast(Color32::WHITE, self.surface)
-        {
-            egui::Visuals::light()
-        } else {
-            egui::Visuals::dark()
-        };
-        v.override_text_color = None;
-        v.weak_text_color = Some(self.ink);
-        v.panel_fill = self.surface;
-        v.window_fill = self.surface;
-        // Inputs use the body surface so inherited text and error ink share its contrast.
-        v.extreme_bg_color = self.surface;
-        v.faint_bg_color = self.surface;
-        v.window_stroke = egui::Stroke::new(1.0, self.border);
-        v.hyperlink_color = readable(self.accent, self.surface, 4.5);
-        v.warn_fg_color = self.error;
+        let style = ui.style_mut();
+        crate::ui::style::apply(style, &self.roles);
+        // The dialog keeps its own measures (D67's native review); only its colors are the kit's.
+        super::settings_geometry(style);
+        let v = &mut style.visuals;
+        v.panel_fill = self.nav;
+        v.weak_text_color = Some(readable(self.roles.tx3, self.surface, 4.5));
         v.error_fg_color = self.error;
-        v.selection.bg_fill = self.accent;
-        v.selection.stroke = egui::Stroke::new(1.0, self.selected_ink);
+        v.warn_fg_color = self.error;
+        v.selection.stroke.color = readable(self.ink, self.active, 4.5);
         for (widget, fill) in [
-            (&mut v.widgets.noninteractive, self.surface),
-            (&mut v.widgets.inactive, self.surface),
             (&mut v.widgets.hovered, self.hover),
-            (&mut v.widgets.active, self.active),
+            (&mut v.widgets.active, self.hover),
             (&mut v.widgets.open, self.hover),
         ] {
             widget.bg_fill = fill;
             widget.weak_bg_fill = fill;
-            widget.bg_stroke = egui::Stroke::new(1.0, self.border);
-            widget.fg_stroke.color = readable(self.ink, fill, 4.5);
-            widget.corner_radius = egui::CornerRadius::same(6);
         }
-        v.widgets.active.bg_stroke = egui::Stroke::new(2.0, self.accent);
-        v.widgets.open.bg_stroke = egui::Stroke::new(2.0, self.accent);
-        v.text_cursor.stroke.color = self.ink;
+        v.selection.bg_fill = self.active;
+        for widget in [
+            &mut v.widgets.noninteractive,
+            &mut v.widgets.inactive,
+            &mut v.widgets.hovered,
+            &mut v.widgets.active,
+            &mut v.widgets.open,
+        ] {
+            widget.fg_stroke.color = readable(self.ink, widget.bg_fill, 4.5);
+        }
     }
 }
 
@@ -108,22 +94,24 @@ pub(super) fn popup_frame(ui: &egui::Ui) -> egui::Frame {
     egui::Frame::new()
         .fill(ui.visuals().window_fill)
         .stroke(ui.visuals().window_stroke)
-        .corner_radius(9)
+        .corner_radius(crate::theme::metrics::RADIUS_FLOATING)
+        .shadow(ui.visuals().popup_shadow)
         .inner_margin(10)
 }
 
-pub(super) fn primary_style(ui: &mut egui::Ui) {
-    let accent = ui.visuals().selection.bg_fill;
-    let ink = ui.visuals().selection.stroke.color;
+/// The primary action: filled with the accent, its label in the ink the accent carries.
+pub(super) fn primary_style(ui: &mut egui::Ui, palette: &Palette) {
+    let (accent, ink) = (palette.accent, palette.selected_ink);
     let v = &mut ui.style_mut().visuals;
     for (widget, amount) in [
         (&mut v.widgets.inactive, 0.0),
         (&mut v.widgets.hovered, 0.10),
         (&mut v.widgets.active, 0.20),
     ] {
-        let fill = blend(accent, ink, amount);
+        let fill = mix(accent, ink, amount);
         widget.bg_fill = fill;
         widget.weak_bg_fill = fill;
+        widget.bg_stroke = egui::Stroke::new(1.0, fill);
         widget.fg_stroke.color = readable(ink, fill, 4.5);
     }
 }
@@ -133,6 +121,32 @@ mod tests {
     use super::*;
     use crate::settings::document::Document;
     use crate::theme::NamedTheme;
+
+    fn rgb(hex: u32) -> Color32 {
+        Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
+    }
+
+    /// Settings shows the kit's roles of the theme it previews, written out, and not a palette of
+    /// its own (D96).
+    #[test]
+    fn settings_is_painted_with_the_previewed_themes_roles() {
+        for (id, raised, panel, line2, accent, on_accent) in [
+            ("ivy-night", 0x202427, 0x171d21, 0x373b3d, 0x3cc384, 0x000000),
+            ("ivy-day", 0xffffff, 0xf2f5f0, 0xd3d5d2, 0x0b7a4b, 0xffffff),
+        ] {
+            let theme = super::super::appearance::effective_theme(&Document::new(format!(
+                "theme={id}\n"
+            )));
+            let p = Palette::new(theme);
+            assert_eq!(
+                [p.surface, p.nav, p.border, p.accent, p.selected_ink],
+                [raised, panel, line2, accent, on_accent].map(rgb),
+                "{id}"
+            );
+            assert_eq!(p.frame().fill, rgb(raised));
+            assert_eq!(p.frame().stroke.color, rgb(line2));
+        }
+    }
 
     #[test]
     fn every_catalog_theme_and_collapsed_overrides_keep_readable_states() {
@@ -152,8 +166,8 @@ mod tests {
                     project_ink_contrast(p.selected_ink, p.accent) >= 4.5,
                     "{name:?}"
                 );
-                assert!(project_ink_contrast(p.border, p.surface) >= 3.0, "{name:?}");
-                assert!(project_ink_contrast(p.accent, p.surface) >= 3.0, "{name:?}");
+                // The accent is the person's focus colour verbatim (D94); only ink is corrected.
+                assert_eq!(p.accent, theme.focus(), "{name:?}");
                 assert_ne!(p.surface, p.hover);
                 assert_ne!(p.hover, p.active);
                 egui::Context::default()

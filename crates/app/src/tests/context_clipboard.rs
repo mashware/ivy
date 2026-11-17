@@ -71,7 +71,7 @@ mod tests {
                 let area = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
                 ui_pass(&mut window, &ctx, area, egui::RawInput::default());
                 let shapes = ui_pass(&mut window, &ctx, area, egui::RawInput::default());
-                let rect = dialog_rect(&shapes, title, window.theme.panel_background());
+                let rect = dialog_rect(&shapes, title, crate::theme::Roles::of(&window.theme).raised);
                 assert!(
                     rect.center().distance(area.center()) < 2.0,
                     "{title}: {rect:?}"
@@ -178,7 +178,7 @@ mod tests {
         );
         one_frame_in(&mut window, &ctx, area, vec![]);
         let shapes = ui_pass(&mut window, &ctx, area, egui::RawInput::default());
-        let rect = dialog_rect(&shapes, "Paste", window.theme.panel_background());
+        let rect = dialog_rect(&shapes, "Paste", crate::theme::Roles::of(&window.theme).raised);
         assert!(area.contains_rect(rect), "menu escapes viewport: {rect:?}");
         assert!(
             rect.distance_to_pos(at) < 3.0,
@@ -621,7 +621,7 @@ mod tests {
         let area = area_of(1280.0);
         one_frame_in(&mut window, &ctx, area, vec![]);
         let shapes = menu_at_console(&mut window, &ctx, area, 1);
-        let rect = dialog_rect(&shapes, "Paste", window.theme.panel_background());
+        let rect = dialog_rect(&shapes, "Paste", crate::theme::Roles::of(&window.theme).raised);
         assert!(
             area.contains_rect(rect),
             "menu escapes a short viewport: {rect:?}"

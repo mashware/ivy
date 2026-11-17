@@ -1642,16 +1642,18 @@ mod tests {
                     .open_menu(tab, pane, true, egui::pos2(400.0, 300.0));
                 "Paste"
             };
+            // Floating on the theme's `raised` role, with its `tx` ink — which turns white when an
+            // override leaves the foreground unreadable over the background (D96).
             for (config, surface, ink) in [
                 (
                     "panel=#112233\nforeground=#efcba9",
-                    egui::Color32::from_rgb(0x11, 0x22, 0x33),
+                    egui::Color32::from_rgb(0x20, 0x23, 0x24),
                     egui::Color32::from_rgb(0xef, 0xcb, 0xa9),
                 ),
                 (
                     "theme=gruvbox-dark\npanel=#e2d4c6\nforeground=#241c14",
-                    egui::Color32::from_rgb(0xe2, 0xd4, 0xc6),
-                    egui::Color32::from_rgb(0x24, 0x1c, 0x14),
+                    egui::Color32::from_rgb(0x28, 0x27, 0x27),
+                    egui::Color32::WHITE,
                 ),
             ] {
                 let (settings, warnings) = settings::interpret(config).unwrap();
@@ -1665,7 +1667,15 @@ mod tests {
                     "{heading} ignored the configured dialog surface"
                 );
                 assert!(shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Text(t)
-                    if t.galley.text() == heading && t.galley.job.sections.iter().all(|section| section.format.color == ink))),
+                    if t.galley.text() == heading && t.galley.job.sections.iter().all(|section| {
+                        // A label with no colour of its own is painted in the shape's fallback.
+                        let color = if section.format.color == egui::Color32::PLACEHOLDER {
+                            t.fallback_color
+                        } else {
+                            section.format.color
+                        };
+                        color == ink
+                    }))),
                     "{heading} ignored the configured heading foreground");
             }
         }

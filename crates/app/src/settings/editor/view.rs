@@ -9,7 +9,6 @@ mod palette;
 pub(super) mod typography;
 
 const SECTIONS: [&str; 4] = ["Appearance", "Cursor", "Shortcuts", "Startup"];
-const ACCENT: egui::Color32 = egui::Color32::from_rgb(173, 195, 255);
 
 pub(super) fn show(
     editor: &mut Editor,
@@ -56,30 +55,10 @@ pub(super) fn show(
     }
 }
 
+/// The chrome's own dialogs and menus over the consoles: the roles of `theme`, at these measures.
 pub(crate) fn style(ui: &mut egui::Ui, theme: crate::theme::Theme) {
+    crate::ui::floating::style(ui, &theme);
     let style = ui.style_mut();
-    style.visuals = egui::Visuals::dark();
-    style.visuals.override_text_color = Some(theme.foreground());
-    style.visuals.extreme_bg_color = theme.background();
-    style.visuals.faint_bg_color = theme.panel_background();
-    style.visuals.window_fill = theme.panel_background();
-    style.visuals.panel_fill = theme.panel_background();
-    style.visuals.selection.bg_fill = theme.focus();
-    style.visuals.selection.stroke.color = theme.background();
-    style.visuals.error_fg_color = theme.color(term_core::TermColor::Indexed(1));
-    for widget in [
-        &mut style.visuals.widgets.noninteractive,
-        &mut style.visuals.widgets.inactive,
-        &mut style.visuals.widgets.hovered,
-        &mut style.visuals.widgets.active,
-        &mut style.visuals.widgets.open,
-    ] {
-        widget.bg_fill = theme.panel_background();
-        widget.weak_bg_fill = theme.background();
-        widget.bg_stroke.color = theme.divider();
-        widget.fg_stroke.color = theme.foreground();
-    }
-    style.visuals.widgets.hovered.bg_fill = theme.divider();
     style.spacing.item_spacing = egui::vec2(10.0, 9.0);
     style.spacing.button_padding = egui::vec2(10.0, 7.0);
     style.spacing.interact_size.y = 30.0;
@@ -106,64 +85,18 @@ mod theme_tests {
         assert_ne!(first.focus(), second.focus());
         ctx.run_ui(Default::default(), |ui| {
             style(ui, first);
-            assert_eq!(ui.visuals().selection.bg_fill, first.focus());
-            assert_eq!(ui.visuals().override_text_color, Some(first.foreground()));
+            assert_eq!(ui.visuals().widgets.active.bg_stroke.color, first.focus());
+            assert_eq!(ui.visuals().widgets.inactive.fg_stroke.color, first.foreground());
             style(ui, second);
-            assert_eq!(ui.visuals().selection.bg_fill, second.focus());
-            assert_eq!(ui.visuals().override_text_color, Some(second.foreground()));
+            assert_eq!(ui.visuals().widgets.active.bg_stroke.color, second.focus());
+            assert_eq!(ui.visuals().widgets.inactive.fg_stroke.color, second.foreground());
         })
         .drop_without_applying_deltas();
     }
 }
 
-pub(crate) fn modal_frame() -> egui::Frame {
-    egui::Frame::new()
-        .fill(egui::Color32::from_rgb(25, 29, 38))
-        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(48, 55, 68)))
-        .corner_radius(14)
-        .inner_margin(0)
-}
-
-pub(crate) fn settings_style(ui: &mut egui::Ui) {
-    let style = ui.style_mut();
-    style.visuals = egui::Visuals::dark();
-    style.visuals.override_text_color = Some(egui::Color32::from_rgb(233, 237, 245));
-    style.visuals.extreme_bg_color = egui::Color32::from_rgb(21, 26, 34);
-    style.visuals.selection.bg_fill = egui::Color32::from_rgb(43, 54, 80);
-    style.visuals.selection.stroke.color = ACCENT;
-    style.visuals.panel_fill = egui::Color32::from_rgb(25, 29, 38);
-    style.visuals.window_fill = egui::Color32::from_rgb(35, 41, 54);
-    style.visuals.extreme_bg_color = egui::Color32::from_rgb(32, 37, 49);
-    for (widgets, fill, stroke) in [
-        (
-            &mut style.visuals.widgets.inactive,
-            [32, 37, 49],
-            [54, 62, 80],
-        ),
-        (
-            &mut style.visuals.widgets.hovered,
-            [43, 50, 65],
-            [90, 108, 144],
-        ),
-        (
-            &mut style.visuals.widgets.active,
-            [48, 57, 76],
-            [169, 191, 255],
-        ),
-        (
-            &mut style.visuals.widgets.open,
-            [43, 50, 65],
-            [90, 108, 144],
-        ),
-    ] {
-        widgets.bg_fill = egui::Color32::from_rgb(fill[0], fill[1], fill[2]);
-        widgets.weak_bg_fill = widgets.bg_fill;
-        widgets.bg_stroke = egui::Stroke::new(
-            1.0,
-            egui::Color32::from_rgb(stroke[0], stroke[1], stroke[2]),
-        );
-        widgets.corner_radius = egui::CornerRadius::same(6);
-    }
+/// Settings' measures (D67's native review), apart from its colors so both can change alone.
+pub(super) fn settings_geometry(style: &mut egui::Style) {
     style.spacing.item_spacing = egui::vec2(10.0, 8.0);
     style.spacing.button_padding = egui::vec2(12.0, 8.0);
     style.spacing.interact_size.y = 36.0;
