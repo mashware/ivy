@@ -1,12 +1,14 @@
 //! Read-only document views, independent of console and producer identity.
 mod delivery;
 mod diff;
+mod drawer;
 mod load;
 pub(crate) mod markdown;
 mod origin;
 mod review;
 mod view;
 
+pub(crate) use drawer::StripAction;
 use eframe::egui;
 use load::{Job, Kind, Loaded};
 use std::{
@@ -264,6 +266,43 @@ pub(crate) fn activate(window: &mut crate::Window, markdown: bool) {
     }
 }
 
+/// The drawer place under `pos`, as the strip is laid out over `dock` this frame.
+pub(crate) fn strip_action(
+    window: &crate::Window,
+    dock: egui::Rect,
+    pos: egui::Pos2,
+) -> Option<StripAction> {
+    drawer::Strip::of(dock, &drawer::tabs(window)).at(pos)
+}
+
+pub(crate) fn apply_strip_action(
+    window: &mut crate::Window,
+    action: StripAction,
+    ctx: &egui::Context,
+) {
+    match action {
+        StripAction::Changes => activate(window, false),
+        StripAction::Document => activate(window, true),
+        StripAction::Unified | StripAction::SideBySide => {
+            for state in [&mut window.viewer, &mut window.viewer_other] {
+                if state.tool_markdown == Some(false) {
+                    state
+                        .review
+                        .set_side_by_side(action == StripAction::SideBySide);
+                }
+            }
+        }
+        StripAction::Maximize => crate::sidebar::toggle_maximize(window),
+        StripAction::Close => crate::sidebar::close(window, ctx),
+    }
+    ctx.request_repaint();
+}
+
+/// Leave the keys to Files, which has just opened beside the drawer.
+pub(crate) fn blur(window: &mut crate::Window) {
+    window.viewer.keyboard = false;
+}
+
 pub(crate) fn release_gesture(window: &mut crate::Window) {
     window.viewer.held = false;
 }
@@ -318,7 +357,7 @@ pub(crate) fn before_keys(
         };
         select_state(window, markdown);
         let geometry = crate::tab_bar::geometry(window, ui.max_rect(), metrics);
-        let Some(rect) = geometry.document.or(geometry.dock) else {
+        let Some(rect) = geometry.dock else {
             window.viewer.keyboard = false;
             window.viewer.held = false;
             window.viewer.refresh_at = None;
@@ -342,7 +381,7 @@ pub(crate) fn before_keys(
         let pointer_activity =
             ctx.input(|i| i.pointer.any_pressed() || i.smooth_scroll_delta != egui::Vec2::ZERO);
         let was_open = window.viewer.open;
-        let reading_keys = window.sidebar.markdown_maximized
+        let reading_keys = window.sidebar.maximized
             && ctx.input(|i| {
                 i.events.iter().any(|event| {
                     matches!(
@@ -431,13 +470,15 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
     if let Some(events) = window.viewer.events.take() {
         ctx.input_mut(|input| input.events = events);
     }
+    let tabs = drawer::tabs(window);
     view::show(
         &mut window.viewer,
         ui,
         dock,
         window.theme,
         unavailable,
-        window.sidebar.markdown_maximized,
+        window.sidebar.maximized,
+        &tabs,
     );
     ctx.input_mut(|input| input.events = filtered);
     window.viewer.record(started.elapsed());
@@ -456,6 +497,7 @@ mod tests;
 pub(crate) fn hide(window: &mut crate::Window) {
     suspend(window);
 }
+#[cfg(test)]
 pub(crate) fn is_open(window: &crate::Window) -> bool {
     window.viewer.open
 }

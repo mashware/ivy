@@ -28,13 +28,36 @@ pub(super) fn show(
             Some(crate::keyboard::Action::Search),
             true,
         ),
+        (
+            "Files",
+            Action::Tool(crate::sidebar::Tool::Files),
+            None,
+            true,
+        ),
+        (
+            "Markdown",
+            Action::Tool(crate::sidebar::Tool::Markdown),
+            None,
+            false,
+        ),
+        (
+            "Board",
+            Action::Tool(crate::sidebar::Tool::Board),
+            Some(crate::keyboard::Action::Board),
+            false,
+        ),
         ("Minimize window", Action::Minimize, None, true),
         ("Maximize window", Action::Maximize, None, false),
         ("Close window", Action::Close, None, false),
     ]
     .into_iter()
     .filter(|entry| {
-        compact || !matches!(entry.1, Action::Minimize | Action::Maximize | Action::Close)
+        // A compact bar has no room for the tools' and the window's own buttons; its menu does.
+        compact
+            || !matches!(
+                entry.1,
+                Action::Tool(_) | Action::Minimize | Action::Maximize | Action::Close
+            )
     })
     .collect();
     let menu_height = 12.0

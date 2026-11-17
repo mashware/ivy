@@ -1,6 +1,6 @@
-//! Docked document and review content.
+//! The drawer's document and review content.
 use super::{Kind, State};
-use eframe::egui::{self, Color32, FontId, RichText};
+use eframe::egui::{self, FontId};
 use std::path::Path;
 
 pub(super) fn show(
@@ -10,6 +10,7 @@ pub(super) fn show(
     theme: crate::theme::Theme,
     unavailable: bool,
     maximized: bool,
+    tabs: &super::drawer::Tabs,
 ) {
     let namespace = if state.kind == Kind::Markdown {
         "markdown-viewer"
@@ -36,20 +37,24 @@ pub(super) fn show(
                 ui.set_clip_rect(rect);
                 ui.set_min_size(rect.size());
                 ui.set_max_size(rect.size());
-                // Header and footer on the side-list surface, the document on the console's own
-                // background: the kit's floating viewer.
+                // The strip on the side-list surface, the document on the console's own
+                // background: the kit's drawer (`DockB.dc.html`).
                 let roles = crate::ui::style::roles(parent.ctx(), &theme);
                 // `panel` is a colour of its own the person may set; where the text cannot be read on
-                // it the chrome stays on the document's background instead. The rules are the
-                // person's `divider`, drawn toward the text where it would vanish into the chrome.
+                // it the chrome stays on the document's background instead. The border is drawn
+                // toward the text where it would vanish into either surface.
                 let surface = roles.panel_or(roles.tx, roles.base);
-                // The frame's sides also border the document, which is on `base`.
-                let line = roles.apart(roles.line, &[surface, roles.base], surface, 0.16);
+                let line = roles.apart(roles.line2, &[surface, roles.base], surface, 0.16);
                 let frame = egui::Frame::new()
                     .fill(surface)
-                    .corner_radius(0)
+                    .corner_radius(crate::theme::metrics::RADIUS_CARD)
                     .stroke(egui::Stroke::new(1.0, line));
                 ui.painter().add(frame.paint(rect));
+                let grip = egui::Rect::from_center_size(
+                    egui::pos2(rect.center().x, rect.top() + 4.5),
+                    egui::vec2(36.0, 3.0),
+                );
+                ui.painter().rect_filled(grip, 2, line);
                 let inner = rect.shrink(1.0);
                 let mut content = ui.new_child(
                     egui::UiBuilder::new()
@@ -58,22 +63,48 @@ pub(super) fn show(
                 );
                 content.set_clip_rect(inner);
                 style(&mut content, &theme);
-                let (head, rest) =
-                    inner.split_top_bottom_at_y((inner.top() + 62.0).min(inner.bottom()));
-                header(state, &mut content, head, line, maximized);
+                let strip = super::drawer::Strip::of(inner, tabs);
+                let source = state
+                    .origin
+                    .as_ref()
+                    .map_or("No source console", |s| s.label.as_str());
+                let source = if unavailable {
+                    format!("{source} - unavailable")
+                } else {
+                    source.to_owned()
+                };
+                super::drawer::paint(&content, &strip, tabs, &roles, &source, maximized);
+                for (action, place) in &strip.places {
+                    let hint = super::drawer::hint(*action, maximized);
+                    let response = content
+                        .interact(*place, egui::Id::new(("drawer", hint)), egui::Sense::hover())
+                        .on_hover_text(hint);
+                    response.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, hint)
+                    });
+                }
                 if !state.open {
                     return;
                 }
-                let (body, foot) =
-                    rest.split_top_bottom_at_y((rest.bottom() - 38.0).max(rest.top()));
-                footer(state, &mut content, foot, line, unavailable);
+                let body = egui::Rect::from_min_max(
+                    egui::pos2(inner.left(), strip.rect.bottom()),
+                    inner.max,
+                );
                 let mut body_ui = content.new_child(
                     egui::UiBuilder::new()
                         .max_rect(body)
                         .layout(egui::Layout::top_down(egui::Align::Min)),
                 );
                 body_ui.set_clip_rect(body);
-                body_ui.painter().rect_filled(body, 0.0, roles.base);
+                body_ui.painter().rect_filled(
+                    body,
+                    egui::CornerRadius {
+                        sw: crate::theme::metrics::RADIUS_CARD - 1,
+                        se: crate::theme::metrics::RADIUS_CARD - 1,
+                        ..Default::default()
+                    },
+                    roles.base,
+                );
                 body_content(state, &mut body_ui, theme, unavailable);
             });
         });
@@ -85,135 +116,6 @@ fn style(ui: &mut egui::Ui, theme: &crate::theme::Theme) {
     style.override_font_id = Some(FontId::proportional(13.0));
     style.spacing.item_spacing = egui::vec2(6.0, 6.0);
     style.spacing.button_padding = egui::vec2(8.0, 5.0);
-}
-
-/// Secondary text in the viewer's chrome: the path, the source console, the save note.
-fn muted(ui: &egui::Ui) -> Color32 {
-    ui.visuals().weak_text_color()
-}
-
-fn header(state: &mut State, ui: &mut egui::Ui, rect: egui::Rect, line: Color32, maximized: bool) {
-    ui.painter().line_segment(
-        [rect.left_bottom(), rect.right_bottom()],
-        egui::Stroke::new(1.0, line),
-    );
-    let markdown = state.kind == Kind::Markdown;
-    let title = if markdown {
-        state
-            .requested
-            .as_ref()
-            .and_then(|(p, _)| p.file_name())
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "Markdown viewer".into())
-    } else {
-        "Review changes".into()
-    };
-    let path = state
-        .requested
-        .as_ref()
-        .map(|(p, _)| p.display().to_string())
-        .unwrap_or_else(|| {
-            if markdown {
-                String::new()
-            } else {
-                "Current console".into()
-            }
-        });
-    let title_y = rect.center().y - if path.is_empty() { 0.0 } else { 9.0 };
-    let icon_rect = egui::Rect::from_center_size(
-        egui::pos2(rect.left() + 23.0, title_y),
-        egui::vec2(16.0, 16.0),
-    );
-    crate::sidebar::icon(
-        ui,
-        icon_rect,
-        if markdown {
-            crate::sidebar::Tool::Markdown
-        } else {
-            crate::sidebar::Tool::Git
-        },
-        ui.visuals().widgets.inactive.fg_stroke.color,
-    );
-    if markdown {
-        let target = crate::sidebar::maximize_rect(rect.expand(1.0));
-        let label = if maximized { "Restore" } else { "Maximize" };
-        let response = ui
-            .interact(
-                target,
-                egui::Id::new("markdown-maximize"),
-                egui::Sense::click(),
-            )
-            .on_hover_text(label);
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
-        if response.hovered() || response.is_pointer_button_down_on() {
-            ui.painter().rect_filled(
-                target,
-                4,
-                if response.is_pointer_button_down_on() {
-                    ui.visuals().widgets.active.bg_fill
-                } else {
-                    ui.visuals().widgets.hovered.bg_fill
-                },
-            );
-        }
-        crate::header::integrated::paint_icon(
-            ui.painter(),
-            target.center(),
-            crate::header::integrated::Target::Zoom,
-            maximized,
-            ui.visuals().widgets.inactive.fg_stroke.color,
-            24.0,
-        );
-    }
-    let right = (rect.right() - 54.0).max(rect.left() + 42.0);
-    let title_rect = egui::Rect::from_min_max(
-        egui::pos2(rect.left() + 42.0, title_y - 10.0),
-        egui::pos2(right, title_y + 10.0),
-    );
-    let mut text_ui = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(title_rect)
-            .layout(egui::Layout::left_to_right(egui::Align::Center)),
-    );
-    text_ui.set_min_height(20.0);
-    text_ui.add(egui::Label::new(RichText::new(title).size(14.0)).truncate());
-    if !path.is_empty() {
-        let path_rect = egui::Rect::from_min_max(
-            egui::pos2(title_rect.left(), title_y + 12.0),
-            egui::pos2(right, rect.bottom() - 5.0),
-        );
-        let mut path_ui = ui.new_child(egui::UiBuilder::new().max_rect(path_rect));
-        path_ui
-            .add(egui::Label::new(RichText::new(&path).size(11.0).color(muted(ui))).truncate())
-            .on_hover_text(path);
-    }
-}
-
-fn footer(state: &State, ui: &mut egui::Ui, rect: egui::Rect, line: Color32, unavailable: bool) {
-    ui.painter().line_segment(
-        [rect.left_top(), rect.right_top()],
-        egui::Stroke::new(1.0, line),
-    );
-    let mut child = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(rect.shrink2(egui::vec2(13.0, 8.0)))
-            .layout(egui::Layout::left_to_right(egui::Align::Center)),
-    );
-    let source = state
-        .origin
-        .as_ref()
-        .map_or("No source console", |s| s.label.as_str());
-    let source = if unavailable {
-        format!("{source} - unavailable")
-    } else {
-        source.to_owned()
-    };
-    child.add(egui::Label::new(RichText::new(&source).size(11.0).color(muted(ui))).truncate());
-    if state.kind == Kind::Markdown {
-        child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(RichText::new("Updates on save").size(11.0).color(muted(ui)));
-        });
-    }
 }
 
 fn body_content(

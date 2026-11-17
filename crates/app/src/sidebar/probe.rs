@@ -1,15 +1,15 @@
-//! Deterministic rail and divider exercise for the versioned dock measurement regimes.
+//! Deterministic title-bar and drawer-divider exercise for the versioned dock measurement regimes.
 use eframe::egui;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum Stage {
     ClickMarkdown,
     ReleaseMarkdown,
-    ClickBoard,
-    ReleaseBoard,
     PressDivider,
     MoveDivider,
     ReleaseDivider,
+    ClickBoard,
+    ReleaseBoard,
     NavigateToLastCard,
     ActivateCard,
     ReturnToMarkdown,
@@ -28,8 +28,9 @@ pub(crate) struct Probe {
     stage: Stage,
     last_active: Option<Option<super::Tool>>,
     switches: usize,
-    minimum_width: f32,
-    maximum_width: f32,
+    /// The drawer's height while it is shown: the divider drag is witnessed by its range.
+    minimum_height: f32,
+    maximum_height: f32,
 }
 
 pub(crate) fn configure(window: &mut crate::Window, measuring: bool, mode: Option<&str>) {
@@ -133,13 +134,13 @@ pub(crate) fn inject(window: &mut crate::Window, raw: &mut egui::RawInput, ctx: 
     } else {
         probe.last_active = Some(active);
     }
-    if let Some(dock) = last_dock {
-        let width = dock.width();
-        if width > 0.0 {
-            if probe.minimum_width == 0.0 || width < probe.minimum_width {
-                probe.minimum_width = width;
+    if let Some(dock) = last_dock.filter(|_| active == Some(super::Tool::Markdown)) {
+        let height = dock.height();
+        if height > 0.0 {
+            if probe.minimum_height == 0.0 || height < probe.minimum_height {
+                probe.minimum_height = height;
             }
-            probe.maximum_width = probe.maximum_width.max(width);
+            probe.maximum_height = probe.maximum_height.max(height);
         }
     }
     if !probe.open {
@@ -147,7 +148,7 @@ pub(crate) fn inject(window: &mut crate::Window, raw: &mut egui::RawInput, ctx: 
         return;
     }
 
-    // Rail coordinates come from the host's painted rectangles; no toolbar spacing is re-created.
+    // Button coordinates come from the title bar's painted rectangles; no spacing is re-created.
     match probe.stage {
         Stage::ClickMarkdown => {
             if let Some(pos) = markdown_button {
@@ -159,7 +160,28 @@ pub(crate) fn inject(window: &mut crate::Window, raw: &mut egui::RawInput, ctx: 
             if let Some(pos) = markdown_button {
                 pointer(raw, pos, false);
             }
-            probe.stage = Stage::ClickBoard;
+            probe.stage = Stage::PressDivider;
+        }
+        Stage::PressDivider => {
+            if let Some(dock) = last_dock.filter(|_| active == Some(super::Tool::Markdown)) {
+                let pos = egui::pos2(dock.center().x, dock.top() - super::DIVIDER / 2.0);
+                pointer(raw, pos, true);
+                probe.stage = Stage::MoveDivider;
+            }
+        }
+        Stage::MoveDivider => {
+            if let Some(dock) = last_dock {
+                let pos = egui::pos2(dock.center().x, dock.top() - 43.0);
+                raw.events.push(egui::Event::PointerMoved(pos));
+                probe.stage = Stage::ReleaseDivider;
+            }
+        }
+        Stage::ReleaseDivider => {
+            if let Some(dock) = last_dock {
+                let pos = egui::pos2(dock.center().x, dock.top() - super::DIVIDER / 2.0);
+                pointer(raw, pos, false);
+                probe.stage = Stage::ClickBoard;
+            }
         }
         Stage::ClickBoard => {
             if let Some(pos) = board_button {
@@ -171,29 +193,7 @@ pub(crate) fn inject(window: &mut crate::Window, raw: &mut egui::RawInput, ctx: 
             if let Some(pos) = board_button {
                 pointer(raw, pos, false);
             }
-            probe.stage = Stage::PressDivider;
-        }
-        Stage::PressDivider => {
-            if let Some(dock) = last_dock {
-                let divider_x = dock.left() - 3.0;
-                let y = dock.center().y;
-                pointer(raw, egui::pos2(divider_x, y), true);
-                probe.stage = Stage::MoveDivider;
-            }
-        }
-        Stage::MoveDivider => {
-            if let Some(dock) = last_dock {
-                let pos = egui::pos2(dock.left() - 43.0, dock.center().y);
-                raw.events.push(egui::Event::PointerMoved(pos));
-                probe.stage = Stage::ReleaseDivider;
-            }
-        }
-        Stage::ReleaseDivider => {
-            if let Some(dock) = last_dock {
-                let pos = egui::pos2(dock.left() - 43.0, dock.center().y);
-                pointer(raw, pos, false);
-                probe.stage = Stage::NavigateToLastCard;
-            }
+            probe.stage = Stage::NavigateToLastCard;
         }
         Stage::NavigateToLastCard => {
             key(raw, egui::Key::End);
@@ -253,10 +253,10 @@ pub(crate) fn publish(window: &crate::Window, to: &mut dyn std::io::Write) -> st
         .join(";");
     let identities = window.all_panes().count();
     let switches = probe.map_or(0, |probe| probe.switches);
-    let resize_delta = probe.map_or(0.0, |probe| probe.maximum_width - probe.minimum_width);
+    let resize_delta = probe.map_or(0.0, |probe| probe.maximum_height - probe.minimum_height);
     writeln!(
         to,
-        "sidebar witnesses: selected={selected}, preferred_width={:.0}, effective_width={effective_width:.0}, console_grid={grids}, pane_identities={identities}, switches={switches}, resize_delta={resize_delta:.0}",
-        window.sidebar.width
+        "sidebar witnesses: selected={selected}, drawer_height={:.0}, effective_width={effective_width:.0}, console_grid={grids}, pane_identities={identities}, switches={switches}, resize_delta={resize_delta:.0}",
+        window.sidebar.height
     )
 }

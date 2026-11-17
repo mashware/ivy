@@ -1,13 +1,12 @@
-//! A shared dock whose partition is also the console dispatch and PTY sizing boundary.
+//! Files at the left of the consoles, the review drawer below them and the Board over them: the
+//! partition is also the console dispatch and PTY sizing boundary (D72).
+mod layout;
 pub(crate) mod probe;
 
-use crate::{Window, painter::CellMetrics, tiling::Orientation, tree::Node};
+use crate::{Window, painter::CellMetrics};
 use eframe::egui;
+pub(crate) use layout::{DIVIDER, partition};
 use std::time::{Duration, Instant};
-
-const RAIL: f32 = 36.0;
-const DIVIDER: f32 = 6.0;
-const MINIMUM: f32 = 320.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Tool {
@@ -18,7 +17,7 @@ pub(crate) enum Tool {
 }
 
 impl Tool {
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Files => "Files",
             Self::Markdown => "Markdown",
@@ -28,22 +27,29 @@ impl Tool {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Edge {
+    Files,
+    Drawer,
+}
+
 pub(crate) struct Sidebar {
     enabled: bool,
     probe: Option<probe::Probe>,
+    /// The drawer's tab (Markdown or Git) or the Board; Files is independent of it.
     active: Option<Tool>,
-    width: f32,
-    pub(crate) markdown_maximized: bool,
-    files_companion: bool,
-    companion_width: f32,
-    maximize_pressed: bool,
+    files_width: f32,
+    height: f32,
+    pub(crate) maximized: bool,
     context: Option<egui::Context>,
-    buttons: Vec<(Tool, egui::Rect)>,
+    /// Where the title bar painted each tool's button this frame.
+    pub(crate) buttons: Vec<(Tool, egui::Rect)>,
+    pressed: Option<crate::viewer::StripAction>,
     held: bool,
-    resizing: bool,
+    resizing: Option<Edge>,
     blocked_frame: Option<u64>,
     pub(crate) last_dock: Option<egui::Rect>,
-    pub(crate) last_document: Option<egui::Rect>,
+    pub(crate) last_files: Option<egui::Rect>,
     last_consoles: egui::Rect,
     touched: bool,
     frame: Duration,
@@ -58,18 +64,17 @@ impl Default for Sidebar {
             enabled: true,
             probe: None,
             active: None,
-            width: 480.0,
-            markdown_maximized: false,
-            files_companion: false,
-            companion_width: 480.0,
-            maximize_pressed: false,
+            files_width: layout::FILES_WIDTH,
+            height: layout::DRAWER_HEIGHT,
+            maximized: false,
             context: None,
             buttons: Vec::new(),
+            pressed: None,
             held: false,
-            resizing: false,
+            resizing: None,
             blocked_frame: None,
             last_dock: None,
-            last_document: None,
+            last_files: None,
             last_consoles: egui::Rect::NOTHING,
             touched: false,
             frame: Duration::ZERO,
@@ -82,8 +87,12 @@ impl Default for Sidebar {
 
 impl Sidebar {
     #[cfg(test)]
-    pub(crate) fn set_width(&mut self, width: f32) {
-        self.width = width.max(MINIMUM);
+    pub(crate) fn set_files_width(&mut self, width: f32) {
+        self.files_width = width.max(layout::FILES_MINIMUM);
+    }
+    #[cfg(test)]
+    pub(crate) fn set_height(&mut self, height: f32) {
+        self.height = height.max(layout::DRAWER_MINIMUM);
     }
     pub(crate) fn record(&mut self, duration: Duration) {
         self.touched = true;
@@ -106,137 +115,21 @@ impl Sidebar {
             self.frames, self.total
         )
     }
-}
-
-pub(crate) struct Layout {
-    pub(crate) consoles: egui::Rect,
-    pub(crate) rail: egui::Rect,
-    pub(crate) dock: Option<egui::Rect>,
-    pub(crate) document: Option<egui::Rect>,
-    pub(crate) divider: Option<egui::Rect>,
-}
-
-fn layout(area: egui::Rect, active: bool, preferred: f32, floor: f32) -> Layout {
-    let right = area.right();
-    let x = (right - RAIL).max(area.left());
-    let rail = egui::Rect::from_min_max(egui::pos2(x, area.top()), area.max);
-    let available = (x - area.left()).max(0.0);
-    let width = if active && available >= floor + DIVIDER + MINIMUM {
-        preferred.clamp(MINIMUM, available - floor - DIVIDER)
-    } else {
-        0.0
-    };
-    let dock = (width > 0.0)
-        .then(|| egui::Rect::from_min_max(egui::pos2(x - width, area.top()), rail.left_bottom()));
-    let divider = dock.map(|dock| {
-        egui::Rect::from_min_max(
-            egui::pos2(dock.left() - DIVIDER, area.top()),
-            dock.left_bottom(),
-        )
-    });
-    Layout {
-        consoles: egui::Rect::from_min_max(
-            area.min,
-            egui::pos2(divider.map_or(x, |r| r.left()), area.bottom()),
-        ),
-        rail,
-        document: None,
-        dock,
-        divider,
+    fn block(&mut self) {
+        let ctx = self.context.clone().unwrap_or_default();
+        self.blocked_frame = Some(ctx.cumulative_frame_nr());
+        ctx.request_repaint();
     }
-}
-
-fn tree_floor(node: &Node, leaf: f32) -> f32 {
-    match node {
-        Node::Leaf(_) => leaf,
-        Node::Branch {
-            orientation: Orientation::Rows,
-            children,
-        } => children
-            .iter()
-            .map(|child| tree_floor(&child.node, leaf))
-            .fold(leaf, f32::max),
-        Node::Branch { children, .. } => {
-            let total: f64 = children.iter().map(|c| f64::from(c.weight.value())).sum();
-            let usable = children
-                .iter()
-                .map(|child| {
-                    f64::from(tree_floor(&child.node, leaf)) * total
-                        / f64::from(child.weight.value())
-                })
-                .fold(0.0_f64, f64::max);
-            (usable
-                + children.len().saturating_sub(1) as f64
-                    * f64::from(crate::tiling::DIVIDER_THICKNESS)) as f32
-        }
-    }
-}
-
-pub(crate) fn partition(window: &Window, area: egui::Rect, metrics: &CellMetrics) -> Layout {
-    if !window.sidebar.enabled {
-        return Layout {
-            consoles: area,
-            rail: egui::Rect::NOTHING,
-            document: None,
-            dock: None,
-            divider: None,
-        };
-    }
-    if window.sidebar.active == Some(Tool::Board) {
-        // Cover the console surface without changing the programs' terminal dimensions.
-        let mut result = layout(area, false, window.sidebar.width, MINIMUM);
-        result.dock = Some(result.consoles);
-        return result;
-    }
-    let leaf = crate::panel::MINIMUM_CONSOLE * metrics.width()
-        + 2.0 * crate::painter::CONSOLE_PADDING
-        + 2.0 * window.headers.pane_inset();
-    let floor = tree_floor(&window.active().root, leaf).max(MINIMUM);
-    let mut result = layout(
-        area,
-        window.sidebar.active.is_some(),
-        window.sidebar.width,
-        floor,
-    );
-    // Tiling clamps degenerate weights. Verify the actual allocations before reserving a dock.
-    if result.dock.is_some()
-        && window
-            .active()
-            .root
-            .place(result.consoles, metrics.width())
-            .parts
-            .iter()
-            .any(|r| r.width() + 0.01 < leaf)
-    {
-        result = layout(area, false, window.sidebar.width, floor);
-    }
-    if window.sidebar.markdown_maximized {
-        let companion = layout(
-            area,
-            window.sidebar.files_companion,
-            window.sidebar.companion_width,
-            MINIMUM,
-        );
-        result.document = Some(companion.consoles);
-        result.dock = companion.dock;
-        result.divider = companion.divider;
-    }
-    result
 }
 
 pub(crate) fn files_visible(window: &Window) -> bool {
-    active(window) == Some(Tool::Files)
-        || (window.sidebar.markdown_maximized && window.sidebar.files_companion)
+    window.explorer.visible()
 }
 
-pub(crate) fn toggle_maximize(window: &mut Window, ctx: &egui::Context) {
-    window.sidebar.markdown_maximized = !window.sidebar.markdown_maximized;
-    window.sidebar.files_companion = false;
+pub(crate) fn toggle_maximize(window: &mut Window) {
+    window.sidebar.maximized = !window.sidebar.maximized;
     crate::viewer::release_gesture(window);
-    window.sidebar.companion_width = window.sidebar.width;
-    crate::explorer::suspend(window);
-    window.sidebar.blocked_frame = Some(ctx.cumulative_frame_nr());
-    ctx.request_repaint();
+    window.sidebar.block();
 }
 
 /// Complete releases for presses already sent to a program, even under a newly covered console.
@@ -257,51 +150,63 @@ pub(crate) fn consume_input(window: &Window, ctx: &egui::Context) {
     });
 }
 
+/// The drawer's tab or the Board; `None` when neither is open, whatever Files shows.
 pub(crate) fn active(window: &Window) -> Option<Tool> {
     window.sidebar.active
 }
 
+/// Show a tool. Files opens beside whatever else is open; the drawer's two tabs and the Board
+/// replace each other.
 pub(crate) fn select(window: &mut Window, tool: Tool) {
-    if window.sidebar.markdown_maximized && tool == Tool::Files {
-        window.sidebar.files_companion = !window.sidebar.files_companion;
-        if window.sidebar.files_companion {
+    if tool == Tool::Files {
+        if !files_visible(window) {
             crate::explorer::reveal(window);
-        } else {
-            crate::explorer::suspend(window);
+            crate::viewer::blur(window);
         }
-        let ctx = window.sidebar.context.clone().unwrap_or_default();
-        window.sidebar.blocked_frame = Some(ctx.cumulative_frame_nr());
-        ctx.request_repaint();
+        window.sidebar.block();
         return;
     }
     if window.sidebar.active == Some(tool) {
         return;
     }
-    window.sidebar.markdown_maximized = false;
-    window.sidebar.files_companion = false;
+    if tool == Tool::Board || window.sidebar.active == Some(Tool::Board) {
+        window.sidebar.maximized = false;
+    }
     crate::viewer::suspend(window);
-    crate::explorer::suspend(window);
     crate::board::suspend(window);
     window.sidebar.active = Some(tool);
-    let ctx = window.sidebar.context.clone().unwrap_or_default();
-    match tool {
-        Tool::Files => crate::explorer::reveal(window),
-        Tool::Board => crate::board::reveal(window, &ctx),
-        Tool::Markdown | Tool::Git => {}
+    if tool == Tool::Board {
+        let ctx = window.sidebar.context.clone().unwrap_or_default();
+        crate::board::reveal(window, &ctx);
+    } else {
+        crate::explorer::blur(window);
     }
-    window.sidebar.blocked_frame = Some(ctx.cumulative_frame_nr());
-    ctx.request_repaint();
+    window.sidebar.block();
 }
 
+/// Close the drawer or the Board. Files stays as it is.
 pub(crate) fn close(window: &mut Window, ctx: &egui::Context) {
-    window.sidebar.markdown_maximized = false;
-    window.sidebar.files_companion = false;
+    window.sidebar.maximized = false;
     crate::viewer::suspend(window);
-    crate::explorer::suspend(window);
     crate::board::suspend(window);
     window.sidebar.active = None;
-    window.sidebar.blocked_frame = Some(ctx.cumulative_frame_nr());
-    ctx.request_repaint();
+    window.sidebar.context.get_or_insert_with(|| ctx.clone());
+    window.sidebar.block();
+}
+
+pub(crate) fn close_files(window: &mut Window) {
+    crate::explorer::suspend(window);
+    window.sidebar.block();
+}
+
+pub(crate) fn toggle(window: &mut Window, tool: Tool, ctx: &egui::Context) {
+    match tool {
+        Tool::Files if files_visible(window) => close_files(window),
+        _ if active(window) == Some(tool) => close(window, ctx),
+        Tool::Markdown => crate::viewer::activate(window, true),
+        Tool::Git => crate::viewer::activate(window, false),
+        _ => select(window, tool),
+    }
 }
 
 pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &CellMetrics) -> bool {
@@ -313,7 +218,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     window.sidebar.context = Some(ctx.clone());
     let geometry = crate::tab_bar::geometry(window, ui.max_rect(), metrics);
     window.sidebar.last_dock = geometry.dock;
-    window.sidebar.last_document = geometry.document;
+    window.sidebar.last_files = geometry.files;
     window.sidebar.last_consoles = geometry.consoles;
     if window.settings_editor.is_open()
         || window.pane_view.is_modal()
@@ -324,38 +229,41 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         return false;
     }
     let frame = ctx.cumulative_frame_nr();
-    // Header actions are resolved before final tiling, against the displayed target.
-    let target = (active(window) == Some(Tool::Markdown))
-        .then(|| window.sidebar.last_document.or(window.sidebar.last_dock))
-        .flatten()
-        .map(maximize_rect);
+    // The drawer's own buttons change the partition, so they are resolved before final tiling,
+    // against the drawer as displayed.
+    let drawer = matches!(active(window), Some(Tool::Markdown | Tool::Git))
+        .then_some(geometry.dock)
+        .flatten();
+    let target = |window: &Window| {
+        ctx.input(|i| i.pointer.interact_pos())
+            .zip(drawer)
+            .and_then(|(p, dock)| crate::viewer::strip_action(window, dock, p))
+    };
     if ctx.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary)) {
-        window.sidebar.maximize_pressed = ctx.input(|i| {
-            i.pointer
-                .interact_pos()
-                .is_some_and(|p| target.is_some_and(|r| r.contains(p)))
-        });
+        window.sidebar.pressed = target(window);
     }
     if ctx.input(|i| i.pointer.button_released(egui::PointerButton::Primary))
-        && std::mem::take(&mut window.sidebar.maximize_pressed)
-        && ctx.input(|i| {
-            i.pointer.button_clicked(egui::PointerButton::Primary)
-                && i.pointer
-                    .interact_pos()
-                    .is_some_and(|p| target.is_some_and(|r| r.contains(p)))
-        })
+        && let Some(pressed) = window.sidebar.pressed.take()
+        && ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Primary))
+        && target(window) == Some(pressed)
     {
-        toggle_maximize(window, &ctx);
+        crate::viewer::apply_strip_action(window, pressed, &ctx);
     }
-    let over = ctx.input(|i| {
-        i.pointer.interact_pos().is_some_and(|p| {
-            geometry.rail.contains(p) || geometry.divider.is_some_and(|r| r.contains(p))
-        })
-    });
+    let over_divider = |p: egui::Pos2| {
+        geometry.files_divider.is_some_and(|r| r.contains(p))
+            || geometry.divider.is_some_and(|r| r.contains(p))
+    };
+    let over = ctx.input(|i| i.pointer.interact_pos().is_some_and(over_divider));
     if ctx.input(|i| i.pointer.any_pressed()) && !window.sidebar.held {
         window.sidebar.held = over;
-        window.sidebar.resizing = geometry.divider.is_some_and(|r| {
-            ctx.input(|i| i.pointer.interact_pos().is_some_and(|p| r.contains(p)))
+        window.sidebar.resizing = ctx.input(|i| i.pointer.interact_pos()).and_then(|p| {
+            if geometry.files_divider.is_some_and(|r| r.contains(p)) {
+                Some(Edge::Files)
+            } else if geometry.divider.is_some_and(|r| r.contains(p)) {
+                Some(Edge::Drawer)
+            } else {
+                None
+            }
         });
         if over {
             window.drag_in_progress = None;
@@ -367,111 +275,66 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         }
     }
     let held = window.sidebar.held;
-    if window.sidebar.resizing
+    if let Some(edge) = window.sidebar.resizing
         && let Some(pos) = ctx.input(|i| i.pointer.interact_pos())
     {
-        let width = (geometry.rail.left() - pos.x).max(MINIMUM);
-        if window.sidebar.markdown_maximized {
-            window.sidebar.companion_width = width;
-        } else {
-            window.sidebar.width = width;
+        match (edge, geometry.files, geometry.dock) {
+            (Edge::Files, Some(files), _) => {
+                window.sidebar.files_width = (pos.x - files.left()).max(layout::FILES_MINIMUM);
+            }
+            (Edge::Drawer, _, Some(dock)) => {
+                let bottom = dock.bottom() + layout::DRAWER_MARGIN;
+                window.sidebar.height =
+                    (bottom - pos.y - DIVIDER / 2.0).max(layout::DRAWER_MINIMUM);
+            }
+            _ => {}
         }
         ctx.request_repaint();
     }
     if !ctx.input(|i| i.focused && i.pointer.any_down()) {
         window.sidebar.held = false;
-        window.sidebar.resizing = false;
+        window.sidebar.resizing = None;
     }
-    let mut clicked = None;
-    let mut buttons = Vec::new();
-    egui::Area::new(egui::Id::new("sidebar-rail"))
-        .fade_in(false)
-        .constrain(false)
-        .fixed_pos(geometry.rail.min)
-        .movable(false)
-        .order(egui::Order::Foreground)
-        .show(&ctx, |ui| {
-            ui.set_min_size(geometry.rail.size());
-            ui.set_max_size(geometry.rail.size());
-            ui.set_clip_rect(geometry.rail);
-            ui.painter()
-                .rect_filled(geometry.rail, 0, window.theme.panel_background());
-            egui::ScrollArea::vertical()
-                .id_salt("sidebar-tools")
-                .show(ui, |ui| {
-                    for tool in [Tool::Files, Tool::Markdown, Tool::Git, Tool::Board] {
-                        let (rect, response) =
-                            ui.allocate_exact_size(egui::vec2(32.0, 32.0), egui::Sense::CLICK);
-                        buttons.push((tool, rect));
-                        let selected = active(window) == Some(tool)
-                            || (tool == Tool::Files && files_visible(window));
-                        response.widget_info(|| {
-                            egui::WidgetInfo::selected(
-                                egui::WidgetType::SelectableLabel,
-                                true,
-                                selected,
-                                tool.label(),
-                            )
-                        });
-                        let response =
-                            response.on_hover_text(if selected && geometry.dock.is_none() {
-                                format!(
-                                    "Widen the window to show {} beside the consoles.",
-                                    tool.label()
-                                )
-                            } else {
-                                tool.label().into()
-                            });
-                        if selected || response.hovered() {
-                            ui.painter()
-                                .rect_filled(rect.shrink(1.0), 3, window.theme.divider());
-                        }
-                        icon(ui, rect.shrink(8.0), tool, window.theme.foreground());
-                        if response.clicked() {
-                            clicked = Some(tool);
-                        }
-                    }
-                });
-        });
-    window.sidebar.buttons = buttons;
-    if let Some(divider) = geometry.divider {
-        ui.painter().rect_filled(divider, 0, window.theme.divider());
-        if window.sidebar.resizing
-            || ctx.input(|i| i.pointer.hover_pos().is_some_and(|p| divider.contains(p)))
+    for (divider, cursor) in [
+        (geometry.files_divider, egui::CursorIcon::ResizeHorizontal),
+        (geometry.divider, egui::CursorIcon::ResizeVertical),
+    ] {
+        if let Some(divider) = divider
+            && ctx.input(|i| i.pointer.hover_pos().is_some_and(|p| divider.contains(p)))
         {
-            ctx.set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+            ctx.set_cursor_icon(cursor);
         }
+    }
+    match window.sidebar.resizing {
+        Some(Edge::Files) => ctx.set_cursor_icon(egui::CursorIcon::ResizeHorizontal),
+        Some(Edge::Drawer) => ctx.set_cursor_icon(egui::CursorIcon::ResizeVertical),
+        None => {}
     }
     let pointer =
         ctx.input(|i| i.pointer.any_pressed() || i.smooth_scroll_delta != egui::Vec2::ZERO);
-    let own = held
-        || (over && pointer)
-        || clicked.is_some()
-        || window.sidebar.blocked_frame == Some(frame);
+    let own = held || (over && pointer) || window.sidebar.blocked_frame == Some(frame);
     // Only host work goes in this span; tool lifecycle and rendering have their own accounting.
     window.sidebar.record(started.elapsed());
     window.timed_separately += window.sidebar.take_cost();
-    if let Some(tool) = clicked {
-        if window.sidebar.markdown_maximized
-            && tool == Tool::Markdown
-            && window.sidebar.files_companion
-        {
-            select(window, Tool::Files);
-        } else if active(window) == Some(tool) {
-            close(window, &ctx);
-        } else {
-            match tool {
-                Tool::Markdown => crate::viewer::activate(window, true),
-                Tool::Git => crate::viewer::activate(window, false),
-                _ => select(window, tool),
-            }
-        }
-    }
     if own {
         window.header_input.block_for_settings(frame);
         consume_input(window, &ctx);
     }
     own
+}
+
+/// The dividers between the consoles, Files and the drawer, painted after the consoles.
+pub(crate) fn paint_dividers(window: &Window, ui: &egui::Ui) {
+    let roles = crate::ui::style::roles(ui.ctx(), &window.theme);
+    if let Some(divider) = window.sidebar.last_files.map(|files| {
+        egui::Rect::from_min_size(files.right_top(), egui::vec2(DIVIDER, files.height()))
+    }) {
+        ui.painter().rect_filled(divider, 0, roles.base);
+        ui.painter().line_segment(
+            [divider.left_top(), divider.left_bottom()],
+            egui::Stroke::new(1.0, roles.line),
+        );
+    }
 }
 
 pub(crate) fn tool_keys(
@@ -481,14 +344,8 @@ pub(crate) fn tool_keys(
     blocked: bool,
     chrome_owned: bool,
 ) -> (bool, bool, Vec<crate::WindowRequest>) {
-    let (explorer_keys, explorer_pointer) = crate::explorer::before_keys(
-        window,
-        ui,
-        metrics,
-        blocked
-            || chrome_owned
-            || (crate::viewer::is_open(window) && !window.sidebar.markdown_maximized),
-    );
+    let (explorer_keys, explorer_pointer) =
+        crate::explorer::before_keys(window, ui, metrics, blocked || chrome_owned);
     let (viewer_owned, requests) =
         crate::viewer::keys(window, ui, metrics, blocked || explorer_keys);
     (viewer_owned, explorer_pointer, requests)
@@ -529,16 +386,13 @@ pub(crate) fn paint_file_icon(
     }
 }
 
-pub(crate) fn maximize_rect(area: egui::Rect) -> egui::Rect {
-    egui::Rect::from_min_size(
-        egui::pos2(area.right() - 42.0, area.top() + 18.0),
-        egui::vec2(28.0, 28.0),
-    )
-}
-
-pub(crate) fn icon(ui: &egui::Ui, rect: egui::Rect, tool: Tool, color: egui::Color32) {
+pub(crate) fn paint_icon(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    tool: Tool,
+    color: egui::Color32,
+) {
     let stroke = egui::Stroke::new(1.4, color);
-    let painter = ui.painter();
     match tool {
         Tool::Files => paint_file_icon(painter, rect, true, stroke),
         Tool::Markdown => {

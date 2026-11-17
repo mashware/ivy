@@ -115,6 +115,7 @@ pub(crate) use connection::{begin_pass, prepare};
 
 #[derive(Clone, Copy)]
 enum Action {
+    Tool(crate::sidebar::Tool),
     SplitRight,
     SplitDown,
     Search,
@@ -129,8 +130,22 @@ enum Action {
 }
 
 fn button(ui: &egui::Ui, rect: Rect, label: &str, hint: &str, bg: Color32, fg: Color32) -> bool {
+    button_of(ui, rect, label, hint, bg, fg, false).0
+}
+
+/// A title-bar button; `on` keeps the hover fill while the tool it opens is shown. Returns
+/// whether it was clicked and its response, for the tool buttons' hover text.
+fn button_of(
+    ui: &egui::Ui,
+    rect: Rect,
+    label: &str,
+    hint: &str,
+    bg: Color32,
+    fg: Color32,
+    on: bool,
+) -> (bool, Option<egui::Response>) {
     if !rect.is_positive() {
-        return false;
+        return (false, None);
     }
     // The viewport state may change in the same event batch as a click. Keep its identity
     // stable when the tooltip changes from maximizing to restoring the window.
@@ -146,11 +161,19 @@ fn button(ui: &egui::Ui, rect: Rect, label: &str, hint: &str, bg: Color32, fg: C
             Sense::CLICK,
         )
         .on_hover_text(hint);
-    if response.hovered() {
+    if response.hovered() || on {
         ui.painter().rect_filled(rect.shrink(2.0), 4.0, bg);
     }
     paint_button_icon(&ui.painter_at(rect), rect, label, hint, fg);
-    response.clicked()
+    (response.clicked(), Some(response))
+}
+
+/// The tool a title-bar button opens, read from its hover text (the Board's carries its chord).
+fn tool_of(hint: &str) -> Option<crate::sidebar::Tool> {
+    use crate::sidebar::Tool;
+    [Tool::Files, Tool::Markdown, Tool::Board]
+        .into_iter()
+        .find(|tool| hint.starts_with(tool.label()))
 }
 
 pub(crate) fn paint_button_icon(
@@ -197,6 +220,9 @@ pub(crate) fn paint_button_icon(
             }
         }
         "Connect agents" => connection::paint_icon(p, rect, fg, false),
+        _ if let Some(tool) = tool_of(hint) => {
+            crate::sidebar::paint_icon(p, Rect::from_center_size(c, egui::vec2(16.0, 16.0)), tool, fg);
+        }
         "Close window" => {
             line((-6.0, -6.0), (6.0, 6.0));
             line((6.0, -6.0), (-6.0, 6.0));
@@ -256,12 +282,42 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
     let left_offset = strip::left_offset();
     let width = strip::BUTTON;
     let compact = geometry.compact();
+    let shown = |tool| match tool {
+        crate::sidebar::Tool::Files => crate::sidebar::files_visible(window),
+        tool => crate::sidebar::active(window) == Some(tool),
+    };
+    let suppressed = |tool| match tool {
+        crate::sidebar::Tool::Files => window.sidebar.last_files.is_none(),
+        _ => window.sidebar.last_dock.is_none(),
+    };
+    let mut tools = Vec::new();
+    let mut tool_button = |ui: &egui::Ui, rect: Rect, tool: crate::sidebar::Tool, hint: &str| {
+        let on = shown(tool);
+        let (clicked, response) = button_of(ui, rect, "", hint, hover, fg, on);
+        if let Some(response) = response {
+            tools.push((tool, rect));
+            if on && suppressed(tool) {
+                response.on_hover_text(format!(
+                    "Widen the window to show {} beside the consoles.",
+                    tool.label()
+                ));
+            }
+        }
+        clicked.then_some(Action::Tool(tool))
+    };
+    let files = Rect::from_min_size(
+        egui::pos2(row.left() + left_offset, row.top() + 7.0),
+        Vec2::new(width, (row.height() - 14.0).max(0.0)),
+    );
+    if !compact && files.right() <= row.right() {
+        action = tool_button(ui, files, crate::sidebar::Tool::Files, "Files").or(action);
+    }
     let left = [
         ("⊞", "Split right", Action::SplitRight),
         ("⊟", "Split down", Action::SplitDown),
     ];
     for (i, (label, hint, cmd)) in left.into_iter().enumerate() {
-        let x = row.left() + left_offset + i as f32 * width;
+        let x = row.left() + left_offset + strip::TOOLS + i as f32 * width;
         let rect = Rect::from_min_size(
             egui::pos2(x, row.top() + 7.0),
             Vec2::new(width, (row.height() - 14.0).max(0.0)),
@@ -290,7 +346,11 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         ("⌕", "Search console", Action::Search),
         ("", "Connect agents", Action::Connect),
     ];
-    let skip = right.len() - strip::right_buttons();
+    let board_hint = window
+        .keymap
+        .chord_for(crate::keyboard::Action::Board)
+        .map_or_else(|| "Board".to_owned(), |chord| format!("Board ({})", shortcut_label(chord)));
+    let skip = right.len() + 2 - strip::right_buttons();
     for (i, (label, hint, cmd)) in right.into_iter().skip(skip).enumerate() {
         let x = row.right() - 6.0 - (i + 1) as f32 * width;
         let rect = Rect::from_min_size(
@@ -302,10 +362,29 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
             action = Some(cmd);
         }
     }
+    let first_tool = row.right() - 6.0 - (strip::right_buttons() - 2) as f32 * width;
+    for (i, (tool, hint)) in [
+        (crate::sidebar::Tool::Board, board_hint.as_str()),
+        (crate::sidebar::Tool::Markdown, "Markdown"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let rect = Rect::from_min_size(
+            egui::pos2(first_tool - (i + 1) as f32 * width, row.top() + 7.0),
+            Vec2::new(width, (row.height() - 14.0).max(0.0)),
+        );
+        if !compact && rect.left() >= geometry.left_end {
+            action = tool_button(ui, rect, tool, hint).or(action);
+        }
+    }
+    window.sidebar.buttons = tools;
     if !compact {
         for x in [
-            row.left() + left_offset + 2.0 * width + 6.0,
+            row.left() + left_offset + width + strip::TOOLS_GAP / 2.0,
+            row.left() + left_offset + strip::TOOLS + 2.0 * width + 6.0,
             row.right() - 6.0 - 3.0 * width,
+            first_tool - 2.0 * width - 3.0,
         ] {
             ui.painter().line_segment(
                 [
@@ -463,6 +542,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         )
     );
     match action {
+        Some(Action::Tool(tool)) => crate::sidebar::toggle(window, tool, &ctx),
         Some(Action::SplitRight) => window.apply(
             WindowRequest::Split(Orientation::Columns),
             &ctx,
@@ -545,12 +625,13 @@ fn resize_direction(area: Rect, p: egui::Pos2) -> Option<egui::ResizeDirection> 
 }
 
 pub(crate) fn after_panels(window: &mut Window, ui: &mut egui::Ui, area: Rect) {
-    if let Some(document) = window.sidebar.last_document.or(window.sidebar.last_dock) {
-        crate::viewer::paint(window, ui, document);
-    }
     if let Some(dock) = window.sidebar.last_dock {
-        crate::explorer::show(window, ui, dock);
+        crate::viewer::paint(window, ui, dock);
     }
+    if let Some(files) = window.sidebar.last_files {
+        crate::explorer::show(window, ui, files);
+    }
+    crate::sidebar::paint_dividers(window, ui);
     connection::after_panels(window, ui, area);
 }
 

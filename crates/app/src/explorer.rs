@@ -208,6 +208,10 @@ impl Explorer {
         area
     }
 
+    pub(crate) fn visible(&self) -> bool {
+        self.visible
+    }
+
     fn hide(&mut self) {
         self.visible = false;
         self.keyboard = false;
@@ -226,6 +230,11 @@ pub(crate) fn suspend(window: &mut Window) {
     window.explorer.hide();
     window.explorer.held = false;
     window.explorer.queued_open = false;
+}
+
+/// Leave the keys to another surface that has just opened; Files stays shown.
+pub(crate) fn blur(window: &mut Window) {
+    window.explorer.keyboard = false;
 }
 
 pub(crate) fn reveal(window: &mut Window) {
@@ -278,7 +287,7 @@ pub(crate) fn before_keys(
         if !state.visible && !state.held && state.blocked_frame != Some(frame) {
             return (false, false);
         }
-        let Some(area) = crate::tab_bar::geometry(window, ui.max_rect(), metrics).dock else {
+        let Some(area) = crate::tab_bar::geometry(window, ui.max_rect(), metrics).files else {
             window.explorer.keyboard = false;
             window.explorer.held = false;
             return (false, false);
@@ -337,17 +346,6 @@ pub(crate) fn before_keys(
             }
             crate::sidebar::consume_input(window, ctx);
         }
-        if !window.explorer.visible
-            && window.sidebar.markdown_maximized
-            && crate::sidebar::files_visible(window)
-        {
-            crate::sidebar::select(window, crate::sidebar::Tool::Files);
-        }
-        if !window.explorer.visible
-            && crate::sidebar::active(window) == Some(crate::sidebar::Tool::Files)
-        {
-            crate::sidebar::close(window, ctx);
-        }
         (owned, pointer_owned)
     })();
     window.sidebar.record(started.elapsed());
@@ -360,7 +358,6 @@ pub(crate) fn show(window: &mut Window, ui: &mut egui::Ui, area: egui::Rect) {
         || window.board.is_open()
         || window.pane_view.is_modal()
         || window.chrome.guide_blocked(ui.ctx())
-        || (crate::viewer::is_open(window) && !window.sidebar.markdown_maximized)
     {
         return;
     }
@@ -377,18 +374,8 @@ pub(crate) fn show(window: &mut Window, ui: &mut egui::Ui, area: egui::Rect) {
         }
         let open = view::show(&mut window.explorer, ui, area, target, window.theme);
         ui.ctx().input_mut(|input| input.events = filtered);
-        if !window.explorer.visible {
-            if window.sidebar.markdown_maximized {
-                crate::sidebar::select(window, crate::sidebar::Tool::Files);
-            } else {
-                crate::sidebar::close(window, ui.ctx());
-            }
-        }
         if let Some((pane, path)) = open {
             if crate::viewer::open_markdown_target(window, pane, path, None) {
-                if !window.sidebar.markdown_maximized {
-                    window.explorer.hide();
-                }
                 ui.ctx().request_repaint();
             } else {
                 window.explorer.message =

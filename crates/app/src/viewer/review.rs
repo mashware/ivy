@@ -56,6 +56,17 @@ impl Review {
     pub(super) fn set_theme(&mut self, theme: crate::theme::Theme) {
         self.theme = theme;
     }
+    pub(super) fn side_by_side(&self) -> bool {
+        self.mode == Mode::SideBySide
+    }
+    /// The drawer's strip chooses the layout; the review only draws it.
+    pub(super) fn set_side_by_side(&mut self, side_by_side: bool) {
+        self.mode = if side_by_side {
+            Mode::SideBySide
+        } else {
+            Mode::Unified
+        };
+    }
     pub(super) fn has_comments(&self) -> bool {
         !self.comments.is_empty() || self.draft.as_ref().is_some_and(|d| !d.text.is_empty())
     }
@@ -69,18 +80,6 @@ impl Review {
         }
         self.file = self.file.min(doc.files.len() - 1);
         let count = doc.files[self.file].hunks.len();
-        if ui
-            .add(egui::Button::new("Unified").selected(self.mode == Mode::Unified))
-            .clicked()
-        {
-            self.mode = Mode::Unified;
-        }
-        if ui
-            .add(egui::Button::new("Side by side").selected(self.mode == Mode::SideBySide))
-            .clicked()
-        {
-            self.mode = Mode::SideBySide;
-        }
         if ui
             .small_button("‹")
             .on_hover_text("Previous hunk")

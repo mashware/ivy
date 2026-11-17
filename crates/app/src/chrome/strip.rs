@@ -8,8 +8,12 @@ use eframe::egui::{self, Rect};
 
 /// The width of one title-bar button.
 pub(super) const BUTTON: f32 = 34.0;
-/// The left group: two split buttons, a separator's gap and the logo's slot.
-pub(super) const LEFT_GROUP: f32 = 3.0 * BUTTON + 14.0;
+/// The gap that separates the Files button from the split buttons.
+pub(super) const TOOLS_GAP: f32 = 8.0;
+/// What the Files button and its gap take at the left end.
+pub(super) const TOOLS: f32 = BUTTON + TOOLS_GAP;
+/// The left group: Files, two split buttons, the separators' gaps and the logo's slot.
+pub(super) const LEFT_GROUP: f32 = TOOLS + 3.0 * BUTTON + 14.0;
 /// The margin between the right-hand buttons and the window's edge.
 pub(super) const RIGHT_MARGIN: f32 = 6.0;
 /// The menu button a compact bar keeps at its right edge.
@@ -25,14 +29,15 @@ pub(super) fn left_offset() -> f32 {
     if cfg!(target_os = "macos") { 78.0 } else { 6.0 }
 }
 
-/// How many of the right-hand buttons this platform paints: macOS draws its own three.
+/// How many of the right-hand buttons this platform paints, Markdown and Board included: macOS
+/// draws its own three window buttons.
 pub(super) fn right_buttons() -> usize {
-    if cfg!(target_os = "macos") { 3 } else { 6 }
+    if cfg!(target_os = "macos") { 5 } else { 8 }
 }
 
-/// What the right-hand buttons and their margin take from a full bar.
+/// What the right-hand buttons, the gap before the tools and the margin take from a full bar.
 fn right_reserve() -> f32 {
-    RIGHT_MARGIN + right_buttons() as f32 * BUTTON
+    RIGHT_MARGIN + right_buttons() as f32 * BUTTON + 6.0
 }
 
 /// Whether a bar `width` points wide is compact: a full bar there would leave its tab band without
