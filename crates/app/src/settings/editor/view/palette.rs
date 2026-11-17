@@ -187,6 +187,16 @@ mod tests {
             assert_eq!(p.frame().fill, rgb(raised));
             // A normal theme's caret is its accent, not the ink.
             assert_eq!(p.caret, rgb(accent), "{id}");
+            // A focus set to the hover shade or the navigation's colour would hide a pressed
+            // control's border on that fill: the caret is then the ink.
+            for (fill, name) in [(p.roles.hover, "hover"), (p.nav, "nav")] {
+                let focus = format!("#{:02x}{:02x}{:02x}", fill.r(), fill.g(), fill.b());
+                let theme = super::super::appearance::effective_theme(&Document::new(format!(
+                    "theme={id}\nfocus={focus}\n"
+                )));
+                let q = Palette::new(theme);
+                assert_eq!(q.caret, q.ink, "{id}: caret over {name}");
+            }
             assert_eq!(p.frame().stroke.color, rgb(line2));
         }
         // A `panel` its text cannot be read on leaves the navigation on the dialog's surface.
