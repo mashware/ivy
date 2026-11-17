@@ -96,6 +96,10 @@ impl State {
         self.observations.since(pane)
     }
     #[cfg(test)]
+    pub(crate) fn filter_state(&self) -> (&str, bool) {
+        (&self.filter.query, self.filter.editing)
+    }
+    #[cfg(test)]
     pub(crate) fn selected(&self) -> Option<usize> {
         self.selected
     }
@@ -148,6 +152,8 @@ pub(crate) fn reveal(window: &mut crate::Window, ctx: &egui::Context) {
 pub(crate) fn suspend(window: &mut crate::Window) {
     window.board.open = false;
     window.board.keyboard_focus = false;
+    // The field's focus is part of the Board's keyboard focus and leaves with it.
+    window.board.filter.editing = false;
     if window.board.pointer_owned {
         window.board.awaiting_release = true;
         window.board.pointer_owned = false;

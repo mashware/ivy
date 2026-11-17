@@ -77,6 +77,11 @@ pub(crate) fn pointer(
             the_tree_changed: apply(window, name, action, ui.ctx(), metrics),
         });
     }
+    // The Board covers the console headers and took this frame's input before this pass ran: a
+    // press on it must not also press the header strip underneath (a Git or close button).
+    if crate::board::blocked(window, ui.ctx()) {
+        return Some(quiet());
+    }
     let events = ui.ctx().input(|input| input.events.clone());
     // egui reports a double click on the second release, not on its press.
     if window.chrome.enabled()

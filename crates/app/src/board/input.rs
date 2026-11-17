@@ -62,6 +62,7 @@ pub(crate) fn cancel_gestures(window: &mut Window, ctx: &egui::Context) {
         window.board.pointer_owned = false;
     }
     window.board.keyboard_focus = false;
+    window.board.filter.editing = false;
     window.board.surface.pressed = None;
     window.board.surface.child_pressed = None;
     window
@@ -241,6 +242,7 @@ pub(crate) fn before_keys(
                         // Clicking a console transfers keyboard ownership without hiding Board.
                         window.board.pointer_owned = false;
                         window.board.keyboard_focus = false;
+                        window.board.filter.editing = false;
                         window.board.surface.pressed = None;
                         window.board.surface.child_pressed = None;
                     }

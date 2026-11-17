@@ -26,14 +26,18 @@ impl Filter {
     }
 }
 
-/// A console claims the reader when its effective column is waiting or stuck — the same projection
-/// the columns paint, so the count on the button and the cards it leaves never disagree.
+/// What a console claims, judged on its effective column — the projection the columns, the card's
+/// pill and the project header all paint. Finished counts: D18 makes «finished, nobody looked» a
+/// claim on the reader, ranked below waiting and stuck.
 pub(super) fn claims(column: Column) -> bool {
-    matches!(column, Column::Wait | Column::Block)
+    matches!(column, Column::Wait | Column::Block | Column::Done)
 }
 
+/// The most a query holds. A paste is the likeliest way text reaches the field, and the whole query
+/// is matched against every console each frame.
+pub(super) const QUERY_LIMIT: usize = 256;
+
 fn matches(entry: &Entry, query: &str) -> bool {
-    let query = query.trim().to_lowercase();
     query.is_empty()
         || [
             entry.console_label.as_str(),
@@ -41,7 +45,7 @@ fn matches(entry: &Entry, query: &str) -> bool {
             super::cards::title(entry),
         ]
         .iter()
-        .any(|text| text.to_lowercase().contains(&query))
+        .any(|text| text.to_lowercase().contains(query))
 }
 
 /// Narrows the sections in place. With a narrowing active, a project left without consoles is
@@ -54,9 +58,10 @@ pub(super) fn apply(
     if !filter.is_active() {
         return;
     }
+    let query = filter.query.trim().to_lowercase();
     for section in sections.iter_mut() {
         section.entries.retain(|entry| {
-            (!filter.claiming_only || claims(column(entry))) && matches(entry, &filter.query)
+            (!filter.claiming_only || claims(column(entry))) && matches(entry, &query)
         });
     }
     sections.retain(|section| !section.entries.is_empty());
@@ -70,9 +75,19 @@ pub(super) fn edit(filter: &mut Filter, event: &eframe::egui::Event) -> bool {
     }
     match event {
         Event::Text(text) | Event::Paste(text) => {
+            let room = QUERY_LIMIT.saturating_sub(filter.query.chars().count());
             filter
                 .query
-                .extend(text.chars().filter(|c| !c.is_control()));
+                .extend(text.chars().filter(|c| !c.is_control()).take(room));
+            true
+        }
+        // Enter leaves the field rather than opening the selected card under it.
+        Event::Key {
+            key: Key::Enter,
+            pressed: true,
+            ..
+        } => {
+            filter.editing = false;
             true
         }
         Event::Key {
@@ -126,27 +141,31 @@ mod tests {
             1 => Column::Wait,
             2 => Column::Block,
             3 => Column::Working,
-            _ => Column::Done,
+            5 => Column::Done,
+            _ => Column::Idle,
         }
     }
 
     #[test]
-    fn claiming_keeps_waiting_and_stuck_consoles_and_drops_emptied_projects() {
+    fn claiming_keeps_waiting_stuck_and_unread_finished_consoles_and_drops_emptied_projects() {
         let mut sections = vec![
             section(vec![entry(1, "api", "Billing"), entry(3, "web", "Billing")]),
             section(vec![entry(4, "ci", "Ops")]),
-            section(vec![entry(2, "tokens", "Dashboard")]),
+            section(vec![
+                entry(2, "tokens", "Dashboard"),
+                entry(5, "docs", "Dashboard"),
+            ]),
         ];
         let filter = Filter {
             claiming_only: true,
             ..Filter::default()
         };
         apply(&mut sections, &filter, |e| column_of(e.pane));
-        assert_eq!(panes(&sections), [1, 2]);
+        assert_eq!(panes(&sections), [1, 2, 5]);
         assert_eq!(
             sections.len(),
             2,
-            "the project with only a finished console is gone"
+            "the project with only an idle console is gone"
         );
     }
 
@@ -170,6 +189,21 @@ mod tests {
         };
         apply(&mut sections, &filter, |e| column_of(e.pane));
         assert_eq!(panes(&sections), [1]);
+        // The task name a producer published, matched where neither label carries the word.
+        let mut titled = entry(4, "shell", "Tab");
+        titled.snapshot.document = Some(std::sync::Arc::new(
+            panel_contract::parse_document(
+                r#"{"lines":[{"text":"Refund webhooks","style":"title"}]}"#,
+            )
+            .unwrap(),
+        ));
+        let mut sections = vec![section(vec![titled, entry(3, "web", "Tab")])];
+        let filter = Filter {
+            query: "webhooks".into(),
+            ..Filter::default()
+        };
+        apply(&mut sections, &filter, |e| column_of(e.pane));
+        assert_eq!(panes(&sections), [4]);
     }
 
     #[test]
@@ -196,5 +230,23 @@ mod tests {
         assert!(edit(&mut filter, &Event::Text("ab\u{7}".into())));
         assert!(edit(&mut filter, &backspace));
         assert_eq!(filter.query, "a");
+        assert!(edit(
+            &mut filter,
+            &Event::Paste("x".repeat(QUERY_LIMIT * 4))
+        ));
+        assert_eq!(
+            filter.query.chars().count(),
+            QUERY_LIMIT,
+            "a paste stops at the limit"
+        );
+        let enter = Event::Key {
+            key: Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        };
+        assert!(edit(&mut filter, &enter));
+        assert!(!filter.editing, "Enter leaves the field");
     }
 }

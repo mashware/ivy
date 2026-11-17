@@ -124,9 +124,7 @@ pub(super) fn paint(
     let response = frame.show(ui, |ui| {
         ui.style_mut().interaction.selectable_labels = false;
         ui.set_width(ui.available_width());
-        if let Some(claim) = entry.snapshot.attention {
-            claim_row(ui, claim, age, roles);
-        }
+        state_row(ui, column, backed, age, theme, roles);
         ui.horizontal(|ui| {
             let phase = doc.and_then(|d| d.phase.as_deref());
             let available = ui.available_width();
@@ -230,7 +228,12 @@ pub(super) fn paint(
                 )
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
                 .on_hover_text(hint);
-                child_hits.push((rect, Command::Body(entry.pane, action)));
+                // Only the part on screen: since the top bar and the key hint live inside the
+                // Board's area, a row half under them would otherwise take their presses.
+                let visible = rect.intersect(ui.clip_rect());
+                if visible.is_positive() {
+                    child_hits.push((visible, Command::Body(entry.pane, action)));
+                }
             }
             timing.content_rows(body.rows());
             timing.content_paint(started.elapsed());
@@ -344,32 +347,51 @@ pub(super) fn paint(
     rect
 }
 
-/// The claim the producer declared, as the kit's pill, its words and the observed age (D18, D93).
-fn claim_row(
+/// The card's effective state — the column «By state» would put it in — so «By milestone», which
+/// has no state columns, still says which console waits. A claim (D18) is the kit's pill; working
+/// and idle are the column's own mark. The age is the Board's observation, said as one (D93).
+fn state_row(
     ui: &mut egui::Ui,
-    claim: crate::panel::AttentionState,
+    column: Column,
+    backed: bool,
     age: Option<Duration>,
+    theme: &Theme,
     roles: &crate::theme::Roles,
 ) {
     use panel_contract::Attention;
-    let (words, ink) = match claim.class {
-        Attention::Wait => ("Waiting for you", roles.wait),
-        Attention::Block => ("Stuck", roles.block),
-        Attention::Done => ("Finished · unread", roles.done),
-    };
-    let ink = if claim.backed { ink } else { roles.tx3 };
     let (row, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 20.0), egui::Sense::hover());
-    let pill = Rect::from_min_size(
+    let slot = Rect::from_min_size(
         row.min,
         egui::vec2(crate::ui::claim_pill::SIZE, row.height()),
     );
-    crate::ui::claim_pill::paint(ui.painter(), pill, claim, roles);
+    let class = match column {
+        Column::Wait => Some((Attention::Wait, roles.wait)),
+        Column::Block => Some((Attention::Block, roles.block)),
+        Column::Done => Some((Attention::Done, roles.done)),
+        Column::Working | Column::Idle => None,
+    };
+    let ink = match class {
+        Some((class, ink)) => {
+            let claim = crate::panel::AttentionState { class, backed };
+            crate::ui::claim_pill::paint(ui.painter(), slot, claim, roles);
+            if backed { ink } else { roles.tx3 }
+        }
+        None => {
+            let ink = if column == Column::Working {
+                color(column, theme)
+            } else {
+                roles.tx3
+            };
+            super::style::column_mark(ui.painter(), slot, column, ink);
+            ink
+        }
+    };
     let font = egui::FontId::new(12.0, crate::fonts::ui_weight(ui.ctx(), 500));
     ui.painter().text(
-        egui::pos2(pill.right() + 6.0, row.center().y),
+        egui::pos2(slot.right() + 6.0, row.center().y),
         egui::Align2::LEFT_CENTER,
-        words,
+        column.name(),
         font,
         ink,
     );
@@ -377,7 +399,7 @@ fn claim_row(
         ui.painter().text(
             egui::pos2(row.right(), row.center().y),
             egui::Align2::RIGHT_CENTER,
-            format!("{} min ago", age.as_secs() / 60),
+            format!("observed {} min", age.as_secs() / 60),
             egui::FontId::proportional(11.5),
             roles.tx3,
         );
@@ -500,7 +522,7 @@ mod tests {
                     egui::Shape::LineSegment { points, stroke }
                         if stroke.color == Theme::default().focus()
                             && points[0].y == points[1].y
-                            && points[0].y < card.top() + 30.0 =>
+                            && points[0].y < card.top() + 54.0 =>
                     {
                         Some((points[0].x + points[1].x) / 2.0)
                     }
@@ -569,6 +591,17 @@ mod tests {
         claim: Option<panel_contract::Attention>,
         selected: bool,
     ) -> (Vec<egui::epaint::ClippedShape>, Rect) {
+        painted_panel(
+            doc.map(|d| panel_contract::parse_document(d).unwrap()),
+            claim,
+            selected,
+        )
+    }
+    fn painted_panel(
+        doc: Option<panel_contract::Panel>,
+        claim: Option<panel_contract::Attention>,
+        selected: bool,
+    ) -> (Vec<egui::epaint::ClippedShape>, Rect) {
         let ctx = egui::Context::default();
         crate::fonts::install_bundled(&ctx);
         let entry = Entry {
@@ -576,8 +609,7 @@ mod tests {
             console_label: "Console".into(),
             tab_label: "Tab".into(),
             snapshot: crate::panel::summary::Snapshot {
-                document: doc
-                    .map(|d| std::sync::Arc::new(panel_contract::parse_document(d).unwrap())),
+                document: doc.map(std::sync::Arc::new),
                 warning: None,
                 attention: claim.map(|class| crate::panel::AttentionState {
                     class,
@@ -661,5 +693,23 @@ mod tests {
                 .any(|s| matches!(&s.shape, egui::Shape::Rect(r)
             if r.fill == roles.wait && r.rect.width() == crate::ui::claim_pill::SIZE))
         );
+    }
+
+    #[test]
+    fn an_old_state_nobody_refreshes_is_veiled_and_a_fresh_one_is_not() {
+        let roles = crate::theme::Roles::of(&Theme::default());
+        let veiled = |doc: panel_contract::Panel| {
+            let (shapes, card) = painted_panel(Some(doc), None, false);
+            shapes.iter().any(|s| {
+                matches!(&s.shape, egui::Shape::Rect(r)
+                if r.rect == card && r.fill == roles.base.gamma_multiply(0.45))
+            })
+        };
+        let fresh = panel_contract::parse_document(DOC).unwrap();
+        let mut stale = fresh.clone();
+        stale.written_at =
+            Some(std::time::SystemTime::now() - stale.stale_after - Duration::from_secs(1));
+        assert!(veiled(stale));
+        assert!(!veiled(fresh));
     }
 }

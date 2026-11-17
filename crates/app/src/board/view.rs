@@ -143,7 +143,11 @@ fn paint_contents(
         &roles,
         &mut window.board.surface.child_hits,
     );
-    if sections
+    if sections.is_empty() && window.board.filter.is_active() {
+        ui.weak(
+            "No console matches this filter. Clear the field or choose All to see every console.",
+        );
+    } else if sections
         .iter()
         .flat_map(|s| &s.entries)
         .all(|e| e.snapshot.document.is_none())
@@ -180,17 +184,24 @@ fn paint_contents(
             for section in sections {
                 if window.board.arrangement == super::filter::Arrangement::ByMilestone {
                     let started = Instant::now();
-                    let claims = [Column::Wait, Column::Block, Column::Done].map(|c| {
-                        section
-                            .entries
-                            .iter()
-                            .filter(|entry| column(entry, signals, now) == c)
-                            .count()
-                    });
+                    let mut claims = super::milestones::Claims::default();
+                    for entry in &section.entries {
+                        match column(entry, signals, now) {
+                            Column::Wait => claims.wait += 1,
+                            Column::Block => claims.block += 1,
+                            Column::Done => claims.done += 1,
+                            Column::Working | Column::Idle => {}
+                        }
+                    }
                     super::milestones::project_header(ui, section, claims, &roles);
                     let base = row_base;
+                    // Cards are timed by their own spans (`content_layout`, `content_paint`), and
+                    // «By state» paints them outside the plan's span: subtract them here too, or
+                    // their cost is published twice and once under the plan's name (D13).
+                    let mut cards = std::time::Duration::ZERO;
                     let mut paint_card =
                         |ui: &mut egui::Ui, entry: &Entry, row: usize, index: usize, width: f32| {
+                            let card_started = Instant::now();
                             let context_top = ui.next_widget_position().y;
                             paint_entries(
                                 window,
@@ -207,6 +218,7 @@ fn paint_contents(
                                 width,
                                 &theme,
                             );
+                            cards += card_started.elapsed();
                         };
                     let plan = section.roadmap.as_ref().and_then(|r| r.plan.clone());
                     row_base += match &plan {
@@ -220,7 +232,10 @@ fn paint_contents(
                         None => super::milestones::paint_loose(ui, section, &mut paint_card),
                     };
                     super::milestones::rule(ui, &roles);
-                    window.board.timing.plan_paint(started.elapsed());
+                    window
+                        .board
+                        .timing
+                        .plan_paint(started.elapsed().saturating_sub(cards));
                     continue;
                 }
                 let section_top = ui.next_widget_position().y;
@@ -233,8 +248,6 @@ fn paint_contents(
                     &theme,
                     signals,
                     now,
-                    // The totals moved to the Board's top bar (#93); every project keeps its name.
-                    None,
                 ) {
                     window.board.activate = Some(pane);
                 }
@@ -395,6 +408,7 @@ fn paint_entries(
     theme: &crate::theme::Theme,
 ) {
     ui.set_min_width(width);
+    let roles = crate::ui::style::roles(ui.ctx(), &window.theme);
     for (row, entry) in entries.into_iter().enumerate() {
         let signal = signals.get(&entry.pane).copied();
         let panel_wait = entry
@@ -414,7 +428,6 @@ fn paint_entries(
         };
         let since = window.board.observations.since(entry.pane);
         let branch = window.board.branches.get(entry.pane).map(str::to_owned);
-        let roles = crate::ui::style::roles(ui.ctx(), &window.theme);
         let selected = window.board.selected == Some(entry.pane);
         let show_selection = selected && window.board.original != Some(entry.pane);
         let board = &mut window.board;

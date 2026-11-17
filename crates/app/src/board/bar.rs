@@ -1,8 +1,8 @@
 //! The Board's top bar on the kit: totals, the arrangement toggle, the narrowing and Close.
 //!
-//! Its controls are painted, not egui widgets, because the Board consumes the pointer before egui
-//! sees it (D93): a press reaches them the same way it reaches a card's fold, through the painted
-//! hit list the input pass reads.
+//! Its controls are painted and pressed through the Board's own hit list, like a card's fold
+//! (D93: the Board owns its painted child hit geometry), so one input pass decides what a press on
+//! the Board reaches and the bar never competes with a card for it.
 use super::{
     cards::Command,
     filter::{Arrangement, Filter},
@@ -98,6 +98,20 @@ fn segmented(
     outer.right()
 }
 
+/// One bar row; a narrow Board stacks rows instead of letting controls overlap or vanish.
+const ROW: f32 = 40.0;
+const FIELD_MIN: f32 = 140.0;
+const FIELD_MAX: f32 = 240.0;
+
+fn segment_width(ui: &egui::Ui, segments: &[(String, bool, Action)]) -> f32 {
+    let font = FontId::proportional(12.5);
+    segments
+        .iter()
+        .map(|(label, ..)| text_width(ui, label, &font) + 20.0)
+        .sum::<f32>()
+        + 4.0
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn paint(
     ui: &mut egui::Ui,
@@ -108,20 +122,8 @@ pub(super) fn paint(
     roles: &Roles,
     hits: &mut Vec<(Rect, Command)>,
 ) -> Rect {
-    let (bar, _) = ui.allocate_exact_size(vec2(width, HEIGHT), egui::Sense::hover());
-    let painter = ui.painter().clone();
-    painter.rect_filled(bar, 0.0, roles.chrome);
-    painter.line_segment(
-        [bar.left_bottom(), bar.right_bottom()],
-        Stroke::new(1.0, roles.line),
-    );
-    let y = bar.center().y;
-    let title = FontId::new(15.0, crate::fonts::ui_weight(ui.ctx(), 600));
-    let mut x = bar.left() + 16.0;
-    x += painter
-        .text(pos2(x, y), Align2::LEFT_CENTER, "Board", title, roles.tx)
-        .width()
-        + 10.0;
+    let title_font = FontId::new(15.0, crate::fonts::ui_weight(ui.ctx(), 600));
+    let small = FontId::proportional(12.5);
     let summary = format!(
         "{} {} · {} {}",
         totals.consoles,
@@ -137,60 +139,102 @@ pub(super) fn paint(
             "projects"
         },
     );
-    x += painter
-        .text(
-            pos2(x, y),
+    let arrange: [(String, bool, Action); 2] = [
+        (
+            "By state".into(),
+            arrangement == Arrangement::ByState,
+            Action::Arrange(Arrangement::ByState),
+        ),
+        (
+            "By milestone".into(),
+            arrangement == Arrangement::ByMilestone,
+            Action::Arrange(Arrangement::ByMilestone),
+        ),
+    ];
+    let narrowing: [(String, bool, Action); 2] = [
+        (
+            "All".into(),
+            !filter.claiming_only,
+            Action::ClaimingOnly(false),
+        ),
+        (
+            format!("Claiming you  {}", totals.claiming),
+            filter.claiming_only,
+            Action::ClaimingOnly(true),
+        ),
+    ];
+    let title_w = text_width(ui, "Board", &title_font);
+    let summary_w = text_width(ui, &summary, &small);
+    let close_w = text_width(ui, "Close", &small) + 20.0 + 34.0;
+    let controls = [
+        segment_width(ui, &arrange),
+        segment_width(ui, &narrowing),
+        FIELD_MIN,
+    ];
+    let lead = 16.0 + title_w + 10.0 + summary_w + 16.0;
+    let one_row = lead + controls.iter().map(|w| w + GAP).sum::<f32>() + close_w + 16.0 <= width;
+    // Where each control goes: (row, left). On one row they follow the summary; otherwise they flow
+    // from the left edge onto rows under the title, wrapping before they would cross the edge.
+    let mut placed = [(0usize, 0.0f32); 3];
+    let mut rows = 1;
+    if one_row {
+        let mut x = lead;
+        for (slot, w) in placed.iter_mut().zip(controls) {
+            *slot = (0, x);
+            x += w + GAP;
+        }
+    } else {
+        let (mut row, mut x) = (1, 16.0);
+        for (slot, w) in placed.iter_mut().zip(controls) {
+            if x > 16.0 && x + w > width - 16.0 {
+                row += 1;
+                x = 16.0;
+            }
+            *slot = (row, x);
+            x += w + GAP;
+        }
+        rows = row + 1;
+    }
+    let height = if one_row {
+        HEIGHT
+    } else {
+        8.0 + ROW * rows as f32
+    };
+    let (bar, _) = ui.allocate_exact_size(vec2(width, height), egui::Sense::hover());
+    let painter = ui.painter().clone();
+    painter.rect_filled(bar, 0.0, roles.chrome);
+    painter.line_segment(
+        [bar.left_bottom(), bar.right_bottom()],
+        Stroke::new(1.0, roles.line),
+    );
+    let center = |row: usize| {
+        if one_row {
+            bar.center().y
+        } else {
+            bar.top() + 4.0 + ROW * (row as f32 + 0.5)
+        }
+    };
+    let y = center(0);
+    painter.text(
+        pos2(bar.left() + 16.0, y),
+        Align2::LEFT_CENTER,
+        "Board",
+        title_font,
+        roles.tx,
+    );
+    // The summary is the one thing the bar drops when even its own row is short.
+    if one_row || 16.0 + title_w + 10.0 + summary_w + GAP + close_w + 16.0 <= width {
+        painter.text(
+            pos2(bar.left() + 16.0 + title_w + 10.0, y),
             Align2::LEFT_CENTER,
             summary,
-            FontId::proportional(12.5),
+            small.clone(),
             roles.tx3,
-        )
-        .width()
-        + 16.0;
-    x = segmented(
-        ui,
-        x,
-        y,
-        &[
-            (
-                "By state".into(),
-                arrangement == Arrangement::ByState,
-                Action::Arrange(Arrangement::ByState),
-            ),
-            (
-                "By milestone".into(),
-                arrangement == Arrangement::ByMilestone,
-                Action::Arrange(Arrangement::ByMilestone),
-            ),
-        ],
-        roles,
-        hits,
-    ) + GAP;
-    x = segmented(
-        ui,
-        x,
-        y,
-        &[
-            (
-                "All".into(),
-                !filter.claiming_only,
-                Action::ClaimingOnly(false),
-            ),
-            (
-                format!("Claiming you  {}", totals.claiming),
-                filter.claiming_only,
-                Action::ClaimingOnly(true),
-            ),
-        ],
-        roles,
-        hits,
-    ) + GAP;
-    // Close sits at the right edge; the field takes what is left between, capped at the kit's 240.
-    let close_font = FontId::proportional(12.5);
-    let close_width = text_width(ui, "Close", &close_font) + 20.0 + 34.0;
+        );
+    }
     let close = Rect::from_min_size(
-        pos2(bar.right() - 16.0 - close_width, y - CONTROL / 2.0),
-        vec2(close_width, CONTROL),
+        pos2(bar.right() - 16.0 - close_w, y - CONTROL / 2.0),
+        vec2(close_w, CONTROL),
     );
     painter.rect(
         close,
@@ -203,7 +247,7 @@ pub(super) fn paint(
         pos2(close.left() + 10.0, y),
         Align2::LEFT_CENTER,
         "Close",
-        close_font,
+        small,
         roles.tx,
     );
     painter.text(
@@ -213,17 +257,29 @@ pub(super) fn paint(
         FontId::monospace(11.0),
         roles.tx3,
     );
+    // Close goes first so nothing laid out after it can take its presses.
     hits.push((close, Command::Bar(Action::Close)));
-    let field_width = (close.left() - GAP - x).min(240.0);
-    if field_width >= 80.0 {
-        paint_field(
-            &painter,
-            Rect::from_min_size(pos2(x, y - CONTROL / 2.0), vec2(field_width, CONTROL)),
-            filter,
-            roles,
-            hits,
-        );
-    }
+    let (row, x) = placed[0];
+    segmented(ui, bar.left() + x, center(row), &arrange, roles, hits);
+    let (row, x) = placed[1];
+    segmented(ui, bar.left() + x, center(row), &narrowing, roles, hits);
+    let (row, x) = placed[2];
+    let right = if row == 0 {
+        close.left() - GAP
+    } else {
+        bar.right() - 16.0
+    };
+    let field_width = (right - (bar.left() + x)).clamp(1.0, FIELD_MAX);
+    paint_field(
+        &painter,
+        Rect::from_min_size(
+            pos2(bar.left() + x, center(row) - CONTROL / 2.0),
+            vec2(field_width, CONTROL),
+        ),
+        filter,
+        roles,
+        hits,
+    );
     bar
 }
 
@@ -310,36 +366,36 @@ mod tests {
         filter: &Filter,
         arrangement: Arrangement,
     ) -> (Vec<egui::epaint::ClippedShape>, Vec<(Rect, Command)>, Rect) {
+        painted_at(1200.0, filter, arrangement)
+    }
+    fn painted_at(
+        width: f32,
+        filter: &Filter,
+        arrangement: Arrangement,
+    ) -> (Vec<egui::epaint::ClippedShape>, Vec<(Rect, Command)>, Rect) {
         let ctx = egui::Context::default();
         crate::fonts::install_bundled(&ctx);
         let roles = Roles::of(&crate::theme::Theme::default());
         let mut hits = Vec::new();
         let mut bar = Rect::NOTHING;
-        // The first pass only loads the fonts.
-        for _ in 0..2 {
-            hits.clear();
-            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                bar = paint(
-                    ui,
-                    1200.0,
-                    Totals {
-                        consoles: 7,
-                        projects: 3,
-                        claiming: 2,
-                    },
-                    arrangement,
-                    filter,
-                    &roles,
-                    &mut hits,
-                );
-            });
-            let shapes = output.shapes.clone();
-            output.drop_without_applying_deltas();
-            if !hits.is_empty() {
-                return (shapes, hits, bar);
-            }
-        }
-        unreachable!()
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            bar = paint(
+                ui,
+                width,
+                Totals {
+                    consoles: 7,
+                    projects: 3,
+                    claiming: 2,
+                },
+                arrangement,
+                filter,
+                &roles,
+                &mut hits,
+            );
+        });
+        let shapes = output.shapes.clone();
+        output.drop_without_applying_deltas();
+        (shapes, hits, bar)
     }
     fn text<'a>(
         shapes: &'a [egui::epaint::ClippedShape],
@@ -435,5 +491,41 @@ mod tests {
         assert!(!apply(&mut arrangement, &mut filter, Action::ClearQuery));
         assert_eq!((filter.query.as_str(), filter.editing), ("", false));
         assert!(apply(&mut arrangement, &mut filter, Action::Close));
+    }
+
+    #[test]
+    fn a_narrow_bar_stacks_its_controls_instead_of_hiding_or_overlapping_them() {
+        let filter = Filter {
+            query: "api".into(),
+            ..Filter::default()
+        };
+        for width in [1200.0, 760.0, 520.0, 360.0] {
+            let (_, hits, bar) = painted_at(width, &filter, Arrangement::ByState);
+            let bars: Vec<Rect> = hits
+                .iter()
+                .filter(|(_, c)| !matches!(c, Command::Bar(Action::ClearQuery)))
+                .map(|(r, _)| *r)
+                .collect();
+            assert!(
+                bars.len() >= 6,
+                "{width}: every control is painted, the field included"
+            );
+            for (i, a) in bars.iter().enumerate() {
+                assert!(bar.contains_rect(*a), "{width}: {a:?} outside the bar");
+                for b in &bars[i + 1..] {
+                    if a.intersects(*b) {
+                        let inner = a.intersect(*b);
+                        // Segments of one control share an edge, never an area.
+                        assert!(
+                            inner.width() < 0.5 || inner.height() < 0.5,
+                            "{width}: {a:?} overlaps {b:?}"
+                        );
+                    }
+                }
+            }
+        }
+        let (_, _, wide) = painted_at(1200.0, &filter, Arrangement::ByState);
+        let (_, _, narrow) = painted_at(520.0, &filter, Arrangement::ByState);
+        assert!(narrow.height() > wide.height(), "a narrow bar grows rows");
     }
 }

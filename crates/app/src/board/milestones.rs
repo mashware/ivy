@@ -19,7 +19,7 @@ const GAP: f32 = 8.0;
 pub(super) struct Placed<'a> {
     /// Per deliverable, in the plan's order, the consoles that declared it.
     pub(super) items: Vec<Vec<&'a Entry>>,
-    /// Consoles that declared the milestone and no deliverable of it.
+    /// Consoles that declared the milestone and no deliverable the plan lists under it.
     pub(super) loose: Vec<&'a Entry>,
 }
 
@@ -92,7 +92,8 @@ fn column_header(
     ui: &mut egui::Ui,
     width: f32,
     title: &str,
-    count: (usize, usize),
+    progress: Option<(usize, usize)>,
+    tally: usize,
     after: Option<&str>,
     roles: &Roles,
 ) {
@@ -100,7 +101,8 @@ fn column_header(
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), egui::Sense::hover());
     let painter = ui.painter();
     let font = FontId::new(13.0, crate::fonts::ui_weight(ui.ctx(), 600));
-    let counted = format!("{}/{}", count.0, count.1);
+    // A milestone counts deliverables done; «Off the plan» has none, so it counts its consoles.
+    let counted = progress.map_or_else(|| tally.to_string(), |(done, all)| format!("{done}/{all}"));
     let count_at = pos2(rect.right() - 4.0, rect.top() + 12.0);
     let count_width = painter
         .text(
@@ -125,9 +127,11 @@ fn column_header(
         pos2(rect.left() + 4.0, rect.top() + 26.0),
         vec2(width - 8.0, 3.0),
     );
-    painter.rect_filled(track, 1.5, roles.line);
-    if count.1 > 0 {
-        let filled = track.width() * count.0 as f32 / count.1 as f32;
+    if progress.is_some() {
+        painter.rect_filled(track, 1.5, roles.line);
+    }
+    if let Some((done, all)) = progress.filter(|(_, all)| *all > 0) {
+        let filled = track.width() * done as f32 / all as f32;
         painter.rect_filled(
             Rect::from_min_size(track.min, vec2(filled, 3.0)),
             1.5,
@@ -205,7 +209,8 @@ pub(super) fn paint_plan(
                                 ui,
                                 width,
                                 &super::cards::clean(&title),
-                                progress(milestone),
+                                Some(progress(milestone)),
+                                0,
                                 after.as_deref(),
                                 roles,
                             );
@@ -214,22 +219,24 @@ pub(super) fn paint_plan(
                             {
                                 deliverable(ui, width, &item.text, item.mark, roles);
                                 for entry in consoles {
-                                    paint_card(ui, entry, row, index, width);
+                                    paint_card(ui, entry, row, index - first, width);
                                     row += 1;
                                 }
                             }
                             for entry in &placed.milestones[index].loose {
-                                paint_card(ui, entry, row, index, width);
+                                paint_card(ui, entry, row, index - first, width);
                                 row += 1;
                             }
                         } else {
                             let count = placed.off.len();
-                            column_header(ui, width, "Off the plan", (count, count), None, roles);
+                            column_header(ui, width, "Off the plan", None, count, None, roles);
                             if placed.off.is_empty() {
                                 ui.weak("—");
                             }
                             for entry in &placed.off {
-                                paint_card(ui, entry, row, index, width);
+                                // The grid column on screen, not the milestone's index: ↑/↓ move
+                                // between wrapped rows by it.
+                                paint_card(ui, entry, row, index - first, width);
                                 row += 1;
                             }
                         }
@@ -280,15 +287,18 @@ pub(super) fn rule(ui: &mut egui::Ui, roles: &Roles) {
     );
 }
 
-/// A project's name in its header ink, its consoles, how many claim the reader by kind, and where
-/// its roadmap came from. The source is named, not linked: it is a file path or a publication,
-/// and the Board opens only web addresses (`links::WebTarget`).
-pub(super) fn project_header(
-    ui: &mut egui::Ui,
-    section: &Section,
-    claims: [usize; 3],
-    roles: &Roles,
-) {
+/// How many of a project's consoles sit in each claiming column (D18's three claims).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct Claims {
+    pub(super) wait: usize,
+    pub(super) block: usize,
+    pub(super) done: usize,
+}
+
+/// A project's name in its header ink, its consoles, how many sit in each claiming column, and
+/// where its roadmap came from — or why it could not be read. The source is named, not linked: it
+/// is a file path or a publication, and the Board opens only web addresses (`links::WebTarget`).
+pub(super) fn project_header(ui: &mut egui::Ui, section: &Section, claims: Claims, roles: &Roles) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), egui::Sense::hover());
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
     let y = rect.center().y;
@@ -311,7 +321,8 @@ pub(super) fn project_header(
         "{consoles} {}",
         if consoles == 1 { "console" } else { "consoles" }
     );
-    if section.roadmap.as_ref().is_none_or(|r| r.plan.is_none()) {
+    let error = section.roadmap.as_ref().and_then(|r| r.error.as_deref());
+    if section.roadmap.as_ref().is_none_or(|r| r.plan.is_none()) && error.is_none() {
         detail.push_str(" · no roadmap");
     }
     x += painter
@@ -325,11 +336,11 @@ pub(super) fn project_header(
         .width()
         + 12.0;
     use panel_contract::Attention;
-    for (count, class) in
-        claims
-            .into_iter()
-            .zip([Attention::Wait, Attention::Block, Attention::Done])
-    {
+    for (count, class) in [
+        (claims.wait, Attention::Wait),
+        (claims.block, Attention::Block),
+        (claims.done, Attention::Done),
+    ] {
         if count == 0 {
             continue;
         }
@@ -355,7 +366,16 @@ pub(super) fn project_header(
             .width()
             + 10.0;
     }
-    if let Some(source) = section.roadmap.as_ref().filter(|r| r.plan.is_some()) {
+    // An unreadable roadmap says why, as «By state» does, instead of passing for no roadmap.
+    if let Some(error) = error {
+        painter.text(
+            pos2(rect.right() - 4.0, y),
+            Align2::RIGHT_CENTER,
+            format!("roadmap unreadable: {}", super::cards::clean(error)),
+            FontId::proportional(11.5),
+            roles.block,
+        );
+    } else if let Some(source) = section.roadmap.as_ref().filter(|r| r.plan.is_some()) {
         painter.text(
             pos2(rect.right() - 4.0, y),
             Align2::RIGHT_CENTER,
@@ -449,5 +469,127 @@ mod tests {
         let (fit, width) = grid(500.0, 3);
         assert_eq!(fit, 1);
         assert_eq!(width, 500.0);
+    }
+
+    fn section(entries: Vec<Entry>, plan: Option<Plan>, error: Option<&str>) -> Section {
+        Section {
+            key: None,
+            kind: crate::board::model::Kind::Repository {
+                name: "billing".into(),
+            },
+            entries,
+            roadmap: (plan.is_some() || error.is_some()).then(|| crate::board::roadmap::Resolved {
+                plan: plan.map(std::sync::Arc::new),
+                source: "ROADMAP.md".into(),
+                error: error.map(str::to_owned),
+            }),
+            ink: None,
+        }
+    }
+
+    /// Runs one painting and returns what the card painter was asked: `(pane, row, column)`.
+    fn laid_out(width: f32, section: &Section, plan: &Plan) -> Vec<(usize, usize, usize)> {
+        let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
+        let roles = Roles::of(&crate::theme::Theme::default());
+        let mut asked = Vec::new();
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.set_width(width);
+            let mut card = |ui: &mut egui::Ui, entry: &Entry, row: usize, column: usize, _: f32| {
+                ui.add_space(40.0);
+                asked.push((entry.pane, row, column));
+            };
+            paint_plan(ui, section, plan, &roles, &mut card);
+        })
+        .drop_without_applying_deltas();
+        asked
+    }
+
+    #[test]
+    fn wrapped_milestones_restart_their_grid_column_so_up_and_down_stay_in_line() {
+        let plan = panel_contract::plan::parse_document_noting(
+            r#"{"milestones":[{"id":"A","title":"A","items":[]},{"id":"B","title":"B","items":[]},{"id":"C","title":"C","items":[]}]}"#,
+        )
+        .unwrap()
+        .0;
+        let entries = vec![entry(1, Some("A"), None), entry(3, Some("C"), None)];
+        let section = section(entries, None, None);
+        // Two columns fit: A and B on the first row, C and Off the plan on the second.
+        let asked = laid_out(600.0, &section, &plan);
+        let a = asked.iter().find(|(p, ..)| *p == 1).unwrap();
+        let c = asked.iter().find(|(p, ..)| *p == 3).unwrap();
+        assert_eq!(a.2, 0);
+        assert_eq!(
+            c.2, 0,
+            "C is the first column of its row, not the third column overall"
+        );
+        assert!(c.1 > a.1, "C sits on a later navigation row");
+    }
+
+    #[test]
+    fn a_card_lands_under_the_deliverable_it_declares_not_merely_in_its_milestone() {
+        // Given in the opposite order to the plan's: loose first, then R2, then R1.
+        let entries = vec![
+            entry(0, Some("Q4"), None),
+            entry(1, Some("Q4"), Some("R2")),
+            entry(2, Some("Q4"), Some("R1")),
+        ];
+        let section = section(entries, None, None);
+        let asked = laid_out(1200.0, &section, &plan());
+        // Painted in the plan's order: under R1, under R2, then the loose card after them all.
+        let order: Vec<usize> = asked.iter().map(|(p, ..)| *p).collect();
+        assert_eq!(order, [2, 1, 0]);
+        assert_eq!(
+            progress(&plan().milestones[0]),
+            (0, 2),
+            "current is not done"
+        );
+    }
+
+    fn header_texts(section: &Section) -> Vec<String> {
+        let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
+        let roles = Roles::of(&crate::theme::Theme::default());
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            project_header(
+                ui,
+                section,
+                Claims {
+                    wait: 2,
+                    block: 0,
+                    done: 1,
+                },
+                &roles,
+            );
+        });
+        let texts = output
+            .shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Text(t) => Some(t.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect();
+        output.drop_without_applying_deltas();
+        texts
+    }
+
+    #[test]
+    fn the_project_header_names_its_source_its_claims_or_why_its_roadmap_failed() {
+        let texts = header_texts(&section(vec![entry(1, None, None)], Some(plan()), None));
+        for expected in ["billing", "1 console", "2", "1", "ROADMAP.md"] {
+            assert!(
+                texts.iter().any(|t| t == expected),
+                "missing {expected} in {texts:?}"
+            );
+        }
+        let texts = header_texts(&section(vec![], None, None));
+        assert!(texts.iter().any(|t| t == "0 consoles · no roadmap"));
+        let texts = header_texts(&section(vec![], None, Some("not UTF-8")));
+        assert!(texts.iter().any(|t| t == "roadmap unreadable: not UTF-8"));
+        assert!(
+            !texts.iter().any(|t| t.contains("no roadmap")),
+            "an error is not an absence"
+        );
     }
 }

@@ -1535,4 +1535,99 @@ mod tests {
         frame(&mut window, &ctx, vec![key(egui::Key::ArrowRight)]);
         assert_eq!(window.board.selected(), Some(origins[1]));
     }
+
+    #[test]
+    fn the_filter_field_takes_typing_and_escape_leaves_it_before_closing_the_board() {
+        let mut window = window_with("sleep 30", "sleep 30");
+        integrated(&mut window);
+        let ctx = egui::Context::default();
+        let origins: Vec<_> = window.all_panes().map(|p| p.name).collect();
+        for origin in &origins {
+            attach_a_channel(&mut window, *origin);
+        }
+        for (origin, doc) in [
+            (
+                origins[0],
+                r#"{"attention":"wait","lines":[{"text":"Refund webhooks","style":"title"}]}"#,
+            ),
+            (
+                origins[1],
+                r#"{"lines":[{"text":"Docs site","style":"title"}]}"#,
+            ),
+        ] {
+            window
+                .all_panes_mut()
+                .find(|p| p.name == origin)
+                .unwrap()
+                .panel_state
+                .deliver(
+                    1,
+                    "flow",
+                    panel_contract::parse_document(doc).unwrap(),
+                    SystemTime::now(),
+                )
+                .unwrap();
+        }
+        frame(&mut window, &ctx, chord_with(egui::Key::O));
+        let shapes = frame(&mut window, &ctx, vec![]);
+        assert!(
+            the_text_queued_up(&shapes, "Claiming you  1"),
+            "one console of two claims the reader"
+        );
+        let field = text_point(&shapes, "Filter consoles").expect("the filter field is painted");
+        frame(&mut window, &ctx, click_at(field));
+        assert_eq!(
+            window.board.filter_state(),
+            ("", true),
+            "a click on the field edits it"
+        );
+        frame(
+            &mut window,
+            &ctx,
+            vec![egui::Event::Text("webhooks".into())],
+        );
+        assert_eq!(window.board.filter_state(), ("webhooks", true));
+        frame(&mut window, &ctx, vec![]);
+        assert!(
+            window.board.card_rect(origins[0]).is_some(),
+            "the matching card stays"
+        );
+        assert!(
+            window.board.card_rect(origins[1]).is_none(),
+            "the other card is filtered away"
+        );
+        let escape = || {
+            let mut released = key(egui::Key::Escape);
+            if let egui::Event::Key { pressed, .. } = &mut released {
+                *pressed = false;
+            }
+            // Pressed and released, as a hand does: a second press with no release between is a
+            // held key's repeat, which the Board rightly ignores.
+            vec![key(egui::Key::Escape), released]
+        };
+        frame(&mut window, &ctx, escape());
+        frame(&mut window, &ctx, vec![]);
+        assert!(
+            window.board.is_open(),
+            "the first Escape only leaves the field"
+        );
+        // Typing after leaving the field no longer edits the query, so the match survives.
+        frame(&mut window, &ctx, vec![egui::Event::Text("zz".into())]);
+        frame(&mut window, &ctx, vec![]);
+        assert!(window.board.card_rect(origins[0]).is_some());
+        frame(&mut window, &ctx, escape());
+        frame(&mut window, &ctx, vec![]);
+        assert!(
+            !window.board.is_open(),
+            "the second Escape closes the Board"
+        );
+        // Reopened through the rail's door: the chord's key is still held from the first opening.
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Board);
+        frame(&mut window, &ctx, vec![]);
+        let shapes = frame(&mut window, &ctx, vec![]);
+        let close = text_point(&shapes, "Close").expect("Close is painted");
+        frame(&mut window, &ctx, click_at(close));
+        frame(&mut window, &ctx, vec![]);
+        assert!(!window.board.is_open(), "Close closes the Board");
+    }
 }

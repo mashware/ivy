@@ -55,21 +55,12 @@ pub(super) fn paint_project_contents(
             ui.horizontal(|ui| {
                 let offset = (ui.clip_rect().left() - ui.max_rect().left()).max(0.0);
                 ui.add_space(offset);
-                if let Some((total, projects)) = surface.board_totals {
-                    ui.heading("Board");
-                    ui.weak(format!(
-                        "{total} console{} · {projects} project{}",
-                        if total == 1 { "" } else { "s" },
-                        if projects == 1 { "" } else { "s" }
-                    ));
-                } else {
-                    ui.label(
-                        egui::RichText::new(crate::board::cards::clean(section.name()))
-                            .size(13.0)
-                            .strong(),
-                    );
-                    ui.weak(format!("{} consoles", section.entries.len()));
-                }
+                ui.label(
+                    egui::RichText::new(crate::board::cards::clean(section.name()))
+                        .size(13.0)
+                        .strong(),
+                );
+                ui.weak(format!("{} consoles", section.entries.len()));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if resolved.is_some() || !fallback.is_empty() {
                         let notice = resolved.map_or_else(

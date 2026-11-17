@@ -248,7 +248,6 @@ struct Surface<'a> {
     theme: &'a Theme,
     signals: &'a HashMap<usize, crate::agent_signals::View>,
     now: SystemTime,
-    board_totals: Option<(usize, usize)>,
 }
 fn chip(
     ui: &mut egui::Ui,
@@ -323,7 +322,6 @@ pub(super) fn paint_project(
         theme,
         &HashMap::new(),
         SystemTime::now(),
-        None,
     )
 }
 #[allow(clippy::too_many_arguments)]
@@ -335,7 +333,6 @@ pub(super) fn paint_project_with_signals(
     theme: &Theme,
     signals: &HashMap<usize, crate::agent_signals::View>,
     now: SystemTime,
-    board_totals: Option<(usize, usize)>,
 ) -> Option<usize> {
     let id = egui::Id::new((
         "board-roadmap-project",
@@ -346,7 +343,6 @@ pub(super) fn paint_project_with_signals(
         theme,
         signals,
         now,
-        board_totals,
     };
     ui.scope_builder(egui::UiBuilder::new().id(id), |ui| {
         presentation::paint_project_contents(ui, section, reader, window, &surface)
@@ -500,7 +496,6 @@ mod tests {
                         theme: &Theme::default(),
                         signals: &HashMap::new(),
                         now: SystemTime::now(),
-                        board_totals: None,
                     },
                 );
             })

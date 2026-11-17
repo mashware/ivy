@@ -9737,16 +9737,25 @@ to delete the loser once used side by side. The duplication is **temporary and o
 not a setting, and the choice is not persisted. Placement reads only the panel's declared
 `milestone` / `deliverable` (D6): a console that declares neither lands in «Off the plan», which on
 today's producers is most of them. Both arrangements share a kit top bar — totals (which leave the
-first project's summary row), a «Claiming you» narrowing counted from the same projection the
-columns paint, a filter over console, tab and task names, and Close — and a key hint at the foot.
-The bar's controls are painted and reached through the Board's own hit list, not egui widgets,
-because the Board takes the pointer and the keyboard before egui sees them; the filter field
-therefore edits its text from the Board's own key pass, and the first Escape leaves the field while
-the second closes the Board. A card's claim is now its kit pill and words, not its border; an
-unpublished console is a dashed card and an old state nobody refreshes is veiled. The roadmap's
-source is **named, not linked**: it is a file path or a publication, and the Board opens only web
-addresses. Discarded: a per-project choice of arrangement (doubles the trial's surface for no
-signal); inferring a milestone from the branch or the tab name (D6).
+first project's summary row), a «Claiming you» narrowing, a filter over console, tab and task
+names, and Close — and a key hint at the foot; a narrow Board stacks the bar's controls on more
+rows rather than hiding the field while its query still narrows. **One projection decides every
+state on screen**: the effective column of the rule above paints the card's state row (the kit
+pill for wait, stuck and finished; the column's mark for working and idle), counts the project
+header's claims and decides «Claiming you», which counts finished because D18 makes «finished,
+nobody looked» a claim. The count is taken over the whole Board, so a query can leave fewer cards
+than it says. The bar's controls are pressed through the Board's own hit list, like a card's fold,
+so one input pass decides what a press reaches; the filter field edits its text in that same
+pass, Enter or the first Escape leaves the field and the next Escape closes the Board. The console
+headers the Board covers do not take its presses: the header pass ignored the Board's claim on the
+frame, and a press on the bar's filter field also pressed the Git button of the header beneath it
+and swapped the Board for the diff viewer. An unpublished console is a dashed card and
+an old state nobody refreshes is veiled. The roadmap's source is **named, not linked**: it is a
+file path or a publication, and the Board opens only web addresses; an unreadable roadmap says why
+in «By milestone» as it does in «By state». Discarded: a per-project choice of arrangement
+(doubles the trial's surface for no signal); inferring a milestone from the branch or the tab name
+(D6); painting the declared `attention` on the card while the columns follow the effective state
+(a card read «waiting» in the Working column).
 
 ## D94 — Ivy Night is the factory theme, and the interface's colors are roles derived from any theme
 
