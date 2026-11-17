@@ -407,10 +407,15 @@ mod collapse_tests {
             stands_apart(step, &[fill]) && stands_apart(step, &[text]),
             "{step:?}"
         );
-        // Fills up to just short of the text leave only steps that read as the text: the first
-        // step, not a shade one level off the text.
-        let crowd: Vec<Color32> = (0x60..=0x8c).map(grey).collect();
-        assert_eq!(apart(fill, &crowd, fill, text, 0.2), mix(fill, text, 0.2));
+        // Near black a step of the text is far apart: with the fills crowding the steps up to
+        // 0x06, the only steps left that stand apart from them read as the text 0x10 itself, so
+        // the answer is the first step, not a shade of the text.
+        let (dark, dark_text) = (grey(0x00), grey(0x10));
+        let crowd: Vec<Color32> = (0x00..=0x06).map(grey).collect();
+        assert_eq!(
+            apart(dark, &crowd, dark, dark_text, 0.2),
+            mix(dark, dark_text, 0.2)
+        );
         // Nothing stands apart (the fills cover every step): the first step, not the text.
         let all: Vec<Color32> = (0..=255).map(grey).collect();
         assert_eq!(apart(bg, &all, bg, tx, 0.2), first);
