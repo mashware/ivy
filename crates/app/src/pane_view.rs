@@ -215,7 +215,12 @@ fn split_buttons(ui: &mut egui::Ui, enabled: [bool; 2]) -> Option<usize> {
                 if enabled[index] {
                     ui.visuals().widgets.inactive.fg_stroke.color
                 } else {
-                    ui.visuals().widgets.inactive.fg_stroke.color.gamma_multiply(0.35)
+                    ui.visuals()
+                        .widgets
+                        .inactive
+                        .fg_stroke
+                        .color
+                        .gamma_multiply(0.35)
                 },
             );
             if response.clicked() {
@@ -272,54 +277,55 @@ pub(crate) fn before_keys(
             .pane_called(pane)
             .and_then(|pane| pane.screen.selected_text());
         let viewport = ui.ctx().viewport_rect();
-        let menu = egui::Area::new(egui::Id::new("console-context-menu"))
-            .order(egui::Order::Foreground)
-            .fixed_pos(at)
-            .constrain_to(ui.ctx().viewport_rect())
-            .show(ui.ctx(), |ui| {
-                crate::ui::floating::menu_frame(&crate::ui::style::roles(ui.ctx(), &theme))
-                    .show(ui, |ui| {
-                        egui::ScrollArea::vertical()
-                            .max_height((viewport.height() - 20.0).max(1.0))
-                            .show(ui, |ui| {
-                                crate::settings::editor::view::style(ui, theme);
-                                ui.set_width(190.0_f32.min((viewport.width() - 20.0).max(1.0)));
-                                ui.spacing_mut().item_spacing = egui::vec2(0.0, 2.0);
-                                let roles = crate::ui::style::roles(ui.ctx(), &theme);
-                                ui.visuals_mut().widgets.hovered.weak_bg_fill = roles.hover;
-                                ui.visuals_mut().widgets.active.weak_bg_fill = roles.sel;
-                                if let Some(index) = split_buttons(ui, enabled) {
-                                    action = Some(5 + index);
-                                }
-                                ui.separator();
-                                if menu_item(ui, "Copy", selected.is_some()) {
-                                    action = Some(8);
-                                }
-                                if menu_item(ui, "Paste", true) {
-                                    action = Some(9);
-                                }
-                                ui.separator();
-                                if menu_item(ui, "Rename", true) {
-                                    action = Some(0);
-                                }
-                                if menu_item(ui, "Review changes", true) {
-                                    action = Some(7);
-                                }
-                                if menu_item(ui, "Toggle information panel", true) {
-                                    action = Some(1);
-                                }
-                                if pane_count > 1 && menu_item(ui, "Maximize / restore", true) {
-                                    action = Some(2);
-                                }
-                                if menu_item(ui, "Close console", can_close) {
-                                    action = Some(3);
-                                }
-                                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                                    action = Some(4);
-                                }
-                            });
-                    });
-            });
+        let menu =
+            egui::Area::new(egui::Id::new("console-context-menu"))
+                .order(egui::Order::Foreground)
+                .fixed_pos(at)
+                .constrain_to(ui.ctx().viewport_rect())
+                .show(ui.ctx(), |ui| {
+                    crate::ui::floating::menu_frame(&crate::ui::style::roles(ui.ctx(), &theme))
+                        .show(ui, |ui| {
+                            egui::ScrollArea::vertical()
+                                .max_height((viewport.height() - 20.0).max(1.0))
+                                .show(ui, |ui| {
+                                    crate::settings::editor::view::style(ui, theme);
+                                    ui.set_width(190.0_f32.min((viewport.width() - 20.0).max(1.0)));
+                                    ui.spacing_mut().item_spacing = egui::vec2(0.0, 2.0);
+                                    let roles = crate::ui::style::roles(ui.ctx(), &theme);
+                                    ui.visuals_mut().widgets.hovered.weak_bg_fill = roles.hover;
+                                    ui.visuals_mut().widgets.active.weak_bg_fill = roles.sel;
+                                    if let Some(index) = split_buttons(ui, enabled) {
+                                        action = Some(5 + index);
+                                    }
+                                    ui.separator();
+                                    if menu_item(ui, "Copy", selected.is_some()) {
+                                        action = Some(8);
+                                    }
+                                    if menu_item(ui, "Paste", true) {
+                                        action = Some(9);
+                                    }
+                                    ui.separator();
+                                    if menu_item(ui, "Rename", true) {
+                                        action = Some(0);
+                                    }
+                                    if menu_item(ui, "Review changes", true) {
+                                        action = Some(7);
+                                    }
+                                    if menu_item(ui, "Toggle information panel", true) {
+                                        action = Some(1);
+                                    }
+                                    if pane_count > 1 && menu_item(ui, "Maximize / restore", true) {
+                                        action = Some(2);
+                                    }
+                                    if menu_item(ui, "Close console", can_close) {
+                                        action = Some(3);
+                                    }
+                                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                                        action = Some(4);
+                                    }
+                                });
+                        });
+                });
         if ui.input(|input| {
             input.pointer.any_pressed()
                 && input

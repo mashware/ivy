@@ -17,14 +17,14 @@ pub(super) fn show(
 ) {
     let theme =
         appearance::effective_theme(editor.draft.as_ref().expect("open editor has a draft"));
-    let palette = palette::Palette::new(theme);
+    let palette = palette::Palette::of(ctx, &theme);
     let mut close = false;
     let popup_was_open = egui::Popup::is_any_open(ctx);
     egui::Modal::new(egui::Id::new("terminal-settings"))
         .frame(palette.frame())
         .show(ctx, |ui| {
             palette.apply(ui);
-            form(editor, ui, discoverer, &mut close);
+            form(editor, ui, discoverer, &mut close, &palette);
         });
     if ctx.input(|i| i.key_pressed(egui::Key::Escape))
         && !popup_was_open
@@ -55,7 +55,8 @@ pub(super) fn show(
     }
 }
 
-/// The chrome's own dialogs and menus over the consoles: the roles of `theme`, at these measures.
+/// The console's menu and rename dialog, the Board and the Explorer: the roles of `theme`, at these
+/// measures.
 pub(crate) fn style(ui: &mut egui::Ui, theme: crate::theme::Theme) {
     crate::ui::floating::style(ui, &theme);
     let style = ui.style_mut();
@@ -86,17 +87,23 @@ mod theme_tests {
         ctx.run_ui(Default::default(), |ui| {
             style(ui, first);
             assert_eq!(ui.visuals().widgets.active.bg_stroke.color, first.focus());
-            assert_eq!(ui.visuals().widgets.inactive.fg_stroke.color, first.foreground());
+            assert_eq!(
+                ui.visuals().widgets.inactive.fg_stroke.color,
+                first.foreground()
+            );
             style(ui, second);
             assert_eq!(ui.visuals().widgets.active.bg_stroke.color, second.focus());
-            assert_eq!(ui.visuals().widgets.inactive.fg_stroke.color, second.foreground());
+            assert_eq!(
+                ui.visuals().widgets.inactive.fg_stroke.color,
+                second.foreground()
+            );
         })
         .drop_without_applying_deltas();
     }
 }
 
 /// Settings' measures (D67's native review), apart from its colors so both can change alone.
-pub(super) fn settings_geometry(style: &mut egui::Style) {
+pub(crate) fn settings_geometry(style: &mut egui::Style) {
     style.spacing.item_spacing = egui::vec2(10.0, 8.0);
     style.spacing.button_padding = egui::vec2(12.0, 8.0);
     style.spacing.interact_size.y = 36.0;
@@ -116,6 +123,7 @@ fn form(
     ui: &mut egui::Ui,
     discoverer: &mut crate::fonts::Discoverer,
     close: &mut bool,
+    palette: &palette::Palette,
 ) {
     let screen = ui.ctx().content_rect();
     let size = egui::vec2(
@@ -212,11 +220,31 @@ fn form(
                     + 92.0;
                 let (rect, _) =
                     ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
-                main_column(editor, ui, discoverer, close, rect, padding, &errors);
+                let column = Column {
+                    main: rect,
+                    padding,
+                    errors: &errors,
+                    palette,
+                };
+                main_column(editor, ui, discoverer, close, column);
             });
     } else {
-        main_column(editor, ui, discoverer, close, main, padding, &errors);
+        let column = Column {
+            main,
+            padding,
+            errors: &errors,
+            palette,
+        };
+        main_column(editor, ui, discoverer, close, column);
     }
+}
+
+/// Where the main column goes and what it paints with.
+struct Column<'a> {
+    main: egui::Rect,
+    padding: f32,
+    errors: &'a [(String, String)],
+    palette: &'a palette::Palette,
 }
 
 fn main_column(
@@ -224,10 +252,14 @@ fn main_column(
     ui: &mut egui::Ui,
     discoverer: &mut crate::fonts::Discoverer,
     close: &mut bool,
-    main: egui::Rect,
-    padding: f32,
-    errors: &[(String, String)],
+    column: Column<'_>,
 ) {
+    let Column {
+        main,
+        padding,
+        errors,
+        palette,
+    } = column;
     let inner = egui::Rect::from_min_max(
         main.min + egui::vec2(padding, 0.0),
         main.max - egui::vec2(padding, 0.0),
@@ -298,7 +330,7 @@ fn main_column(
             .max_rect(footer_rect),
     );
     foot_ui.set_clip_rect(footer_rect.intersect(ui.clip_rect()));
-    footer::show(editor, &mut foot_ui, close, errors, discoverer);
+    footer::show(editor, &mut foot_ui, close, errors, discoverer, palette);
 }
 
 fn navigation(editor: &mut Editor, ui: &mut egui::Ui, vertical: bool) {

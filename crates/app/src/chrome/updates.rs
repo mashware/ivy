@@ -129,9 +129,14 @@ fn show(
     let available = ctx.content_rect().size();
     let mut close = false;
     egui::Modal::new(egui::Id::new("ivy-updates"))
-        .frame(crate::ui::floating::dialog_frame(&crate::ui::style::roles(ctx, theme)).inner_margin(16))
+        .frame(
+            crate::ui::floating::dialog_frame(&crate::ui::style::roles(ctx, theme))
+                .inner_margin(16),
+        )
         .show(ctx, |ui| {
             crate::ui::floating::style(ui, theme);
+            // The chrome's dialogs read at Settings' measures (D67's native review).
+            crate::settings::editor::view::settings_geometry(ui.style_mut());
             ui.set_width((available.x - 64.0).clamp(80.0, 640.0));
             ui.horizontal_top(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
@@ -270,6 +275,67 @@ mod tests {
         assert!(chrome.enabled());
         assert!(!chrome.updates.service.checking());
         assert!(chrome.updates.service.releases().is_empty());
+    }
+
+    /// The dialog floats on the theme's `raised` role, whatever egui was told about the desktop,
+    /// and keeps Settings' measures (D98).
+    #[test]
+    fn the_updates_dialog_floats_on_raised_at_settings_measures() {
+        for preference in [egui::ThemePreference::Dark, egui::ThemePreference::Light] {
+            let mut dialog = Dialog::default();
+            dialog.service.fixture(vec![release("99.0.0")]);
+            let ctx = egui::Context::default();
+            ctx.set_theme(preference);
+            // Final colours, without the modal's time-dependent fade multiplying alpha.
+            ctx.all_styles_mut(|style| style.animation_time = 0.0);
+            let mut desktop = crate::links::Desktop::Recorded(Vec::new());
+            let mut shapes = Vec::new();
+            for _ in 0..2 {
+                let output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1000.0, 800.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |_ui| {
+                        show(
+                            &mut dialog,
+                            &ctx,
+                            &mut desktop,
+                            &crate::theme::Theme::default(),
+                        )
+                    },
+                );
+                shapes = output.shapes.clone();
+                output.drop_without_applying_deltas();
+            }
+            fn big_raised(shape: &egui::Shape) -> bool {
+                match shape {
+                    egui::Shape::Rect(r) => {
+                        r.fill == egui::Color32::from_rgb(0x20, 0x24, 0x27)
+                            && r.rect.width() > 300.0
+                            && r.rect.height() > 80.0
+                    }
+                    egui::Shape::Vec(shapes) => shapes.iter().any(big_raised),
+                    _ => false,
+                }
+            }
+            assert!(
+                shapes.iter().any(|s| big_raised(&s.shape)),
+                "{preference:?}: the dialog is not on raised"
+            );
+            // Settings' 25-point heading, not the 20 of the floating preset.
+            assert!(
+                shapes
+                    .iter()
+                    .any(|s| matches!(&s.shape, egui::Shape::Text(t)
+                    if t.galley.text() == "What's new"
+                        && t.galley.job.sections.iter().all(|x| x.format.font_id.size == 25.0))),
+                "{preference:?}: the heading lost Settings' measure"
+            );
+        }
     }
 
     #[test]

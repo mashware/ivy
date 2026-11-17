@@ -269,21 +269,35 @@ pub(super) fn selector(ui: &mut egui::Ui, title: &str, width: f32, lead: f32) ->
 }
 
 /// A theme's four-colour sample: its background, accent, and the waiting and finished claims —
-/// the colours a person tells themes apart by. Returns where it ends.
-pub(super) fn swatch(painter: &egui::Painter, left_center: egui::Pos2, theme: &crate::theme::Theme) -> f32 {
-    let roles = crate::theme::Roles::of(theme);
-    let colors = [roles.base, roles.accent, roles.wait, roles.done];
+/// the colours a person tells themes apart by — outlined in `edge`. Returns where it ends.
+pub(super) fn swatch(
+    painter: &egui::Painter,
+    left_center: egui::Pos2,
+    theme: &crate::theme::Theme,
+    edge: egui::Color32,
+) -> f32 {
+    use term_core::TermColor::Indexed;
+    // The roles these name (`base`, `accent`, `wait`, `done`) are these slots unchanged.
+    let colors = [
+        theme.background(),
+        theme.focus(),
+        theme.color(Indexed(3)),
+        theme.color(Indexed(4)),
+    ];
     let size = egui::vec2(8.0, 14.0);
     let top = left_center.y - size.y / 2.0;
     for (i, color) in colors.into_iter().enumerate() {
         let min = egui::pos2(left_center.x + i as f32 * size.x, top);
         painter.rect_filled(egui::Rect::from_min_size(min, size), 0.0, color);
     }
-    let whole = egui::Rect::from_min_size(egui::pos2(left_center.x, top), egui::vec2(size.x * 4.0, size.y));
+    let whole = egui::Rect::from_min_size(
+        egui::pos2(left_center.x, top),
+        egui::vec2(size.x * 4.0, size.y),
+    );
     painter.rect_stroke(
         whole,
         3.0,
-        egui::Stroke::new(1.0, painter.ctx().global_style().visuals.widgets.inactive.bg_stroke.color),
+        egui::Stroke::new(1.0, edge),
         egui::StrokeKind::Outside,
     );
     whole.right()
@@ -291,12 +305,16 @@ pub(super) fn swatch(painter: &egui::Painter, left_center: egui::Pos2, theme: &c
 
 fn check(painter: &egui::Painter, at: egui::Pos2, color: egui::Color32) {
     painter.add(egui::Shape::line(
-        vec![at + egui::vec2(-5.0, 0.5), at + egui::vec2(-2.0, 3.5), at + egui::vec2(5.0, -3.5)],
+        vec![
+            at + egui::vec2(-5.0, 0.5),
+            at + egui::vec2(-2.0, 3.5),
+            at + egui::vec2(5.0, -3.5),
+        ],
         egui::Stroke::new(2.0, color),
     ));
 }
 
-/// The kit's segmented control: a sunk track holding one raised segment per choice.
+/// The kit's segmented control: a sunk track, the chosen (or hovered) segment filled with `hover`.
 fn segmented(ui: &mut egui::Ui, value: &mut usize, labels: &[&str]) {
     let (track, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), egui::Sense::hover());
@@ -317,21 +335,34 @@ fn segmented(ui: &mut egui::Ui, value: &mut usize, labels: &[&str]) {
         );
         let response = ui.interact(rect, ui.id().with(("segment", index)), egui::Sense::click());
         response.widget_info(|| {
-            egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, *value == index, *label)
+            egui::WidgetInfo::selected(
+                egui::WidgetType::SelectableLabel,
+                true,
+                *value == index,
+                *label,
+            )
         });
         if response.clicked() {
             *value = index;
         }
         let selected = *value == index;
         if selected || response.hovered() {
-            ui.painter().rect_filled(rect, crate::theme::metrics::RADIUS_CHIP, v.widgets.hovered.bg_fill);
+            ui.painter().rect_filled(
+                rect,
+                crate::theme::metrics::RADIUS_CHIP,
+                v.widgets.hovered.bg_fill,
+            );
         }
         ui.painter().text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
             *label,
             egui::FontId::new(12.0, crate::fonts::ui_weight(ui.ctx(), 500)),
-            if selected { v.widgets.inactive.fg_stroke.color } else { v.weak_text_color() },
+            if selected {
+                v.widgets.inactive.fg_stroke.color
+            } else {
+                v.weak_text_color()
+            },
         );
     }
 }
@@ -358,6 +389,7 @@ fn theme_picker(editor: &mut Editor, ui: &mut egui::Ui, count: usize) {
         ui.painter(),
         response.rect.left_center() + egui::vec2(12.0, 0.0),
         &current,
+        ui.visuals().widgets.inactive.bg_stroke.color,
     );
     let opened = response.clicked();
     let popup_style = ui.style().clone();
@@ -458,7 +490,10 @@ fn theme_picker(editor: &mut Editor, ui: &mut egui::Ui, count: usize) {
                     }
                     for (id, label) in choices {
                         let (rect, response) = ui.allocate_exact_size(
-                            egui::vec2(ui.available_width(), crate::theme::metrics::MENU_ROW_HEIGHT),
+                            egui::vec2(
+                                ui.available_width(),
+                                crate::theme::metrics::MENU_ROW_HEIGHT,
+                            ),
                             egui::Sense::click(),
                         );
                         response.widget_info(|| {
@@ -481,10 +516,18 @@ fn theme_picker(editor: &mut Editor, ui: &mut egui::Ui, count: usize) {
                         }
                         let sample = NamedTheme::from_written(id)
                             .map_or_else(crate::theme::Theme::default, |t| t.theme());
-                        let swatch_end =
-                            swatch(ui.painter(), rect.left_center() + egui::vec2(8.0, 0.0), &sample);
+                        let swatch_end = swatch(
+                            ui.painter(),
+                            rect.left_center() + egui::vec2(8.0, 0.0),
+                            &sample,
+                            ui.visuals().widgets.inactive.bg_stroke.color,
+                        );
                         if current == id {
-                            check(ui.painter(), rect.right_center() - egui::vec2(16.0, 0.0), ui.visuals().widgets.active.bg_stroke.color);
+                            check(
+                                ui.painter(),
+                                rect.right_center() - egui::vec2(16.0, 0.0),
+                                ui.visuals().widgets.active.bg_stroke.color,
+                            );
                         }
                         ui.painter().with_clip_rect(rect).text(
                             egui::pos2(swatch_end + 10.0, rect.center().y),

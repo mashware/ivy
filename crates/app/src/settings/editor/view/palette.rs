@@ -14,6 +14,10 @@ pub(super) struct Palette {
     pub hover: Color32,
     pub active: Color32,
     pub error: Color32,
+    /// A control's border, and the caret and focus ring over a field: the kit's roles, moved only
+    /// where a collapsed palette made them vanish.
+    pub edge: Color32,
+    pub caret: Color32,
     roles: Roles,
 }
 
@@ -29,24 +33,52 @@ fn readable(candidate: Color32, surface: Color32, minimum: f32) -> Color32 {
     }
 }
 
-/// `role`, unless a collapsed palette made it the surface it must stand out from: then moved toward
-/// the ink, so a hovered or pressed control still shows it.
+/// Below this contrast two colours read as one. The kit's own quietest step — Ivy Night's `hover`
+/// over `raised`, about 1.08:1 — sits above it on purpose, so only a collapsed palette is moved.
+const INVISIBLE: f32 = 1.03;
+
+/// `role`, unless a collapsed palette left it indistinguishable from the surface it must stand out
+/// from: then moved toward the ink, so a hovered control, a field's edge or the caret still shows.
 fn distinct(role: Color32, from: Color32, ink: Color32, amount: f32) -> Color32 {
-    if role == from { mix(from, ink, amount) } else { role }
+    if project_ink_contrast(role, from) < INVISIBLE {
+        mix(from, ink, amount)
+    } else {
+        role
+    }
 }
 
 impl Palette {
+    #[cfg(test)]
     pub fn new(theme: Theme) -> Self {
-        let roles = Roles::of(&theme);
+        Self::from_roles(Roles::of(&theme))
+    }
+
+    /// The palette of `theme`, its roles taken from the frame's memo.
+    pub fn of(ctx: &egui::Context, theme: &Theme) -> Self {
+        Self::from_roles(crate::ui::style::roles(ctx, theme))
+    }
+
+    fn from_roles(roles: Roles) -> Self {
         let surface = roles.raised;
+        let ink = readable(roles.tx, surface, 4.5);
+        let hover = distinct(roles.hover, surface, ink, 0.10);
+        // The navigation sits on the person's own `panel` colour; where that leaves its text
+        // unreadable it falls back to the dialog's surface rather than hide the way back.
+        let nav = if project_ink_contrast(ink, roles.panel) >= 4.5 {
+            roles.panel
+        } else {
+            surface
+        };
         Self {
             surface,
-            nav: roles.panel,
-            ink: readable(roles.tx, surface, 4.5),
+            nav,
+            ink,
             accent: roles.accent,
             selected_ink: roles.on_accent,
-            hover: distinct(roles.hover, surface, roles.tx, 0.10),
-            active: distinct(roles.sel, distinct(roles.hover, surface, roles.tx, 0.10), roles.tx, 0.20),
+            hover,
+            active: distinct(roles.sel, hover, ink, 0.20),
+            edge: distinct(roles.line2, surface, ink, 0.40),
+            caret: distinct(roles.accent, roles.base, ink, 1.0),
             error: readable(roles.block, surface, 4.5),
             roles,
         }
@@ -76,6 +108,12 @@ impl Palette {
             widget.weak_bg_fill = fill;
         }
         v.selection.bg_fill = self.active;
+        for widget in [&mut v.widgets.inactive, &mut v.widgets.hovered] {
+            widget.bg_stroke.color = self.edge;
+        }
+        v.widgets.active.bg_stroke.color = self.caret;
+        v.widgets.open.bg_stroke.color = self.edge;
+        v.text_cursor.stroke.color = self.caret;
         for widget in [
             &mut v.widgets.noninteractive,
             &mut v.widgets.inactive,
@@ -88,10 +126,14 @@ impl Palette {
     }
 }
 
+/// A dropdown inside Settings: the kit's menu, drawn from the dialog's own (draft) style.
 pub(super) fn popup_frame(ui: &egui::Ui) -> egui::Frame {
-    egui::Frame::new()
+    egui::Frame::menu(ui.style())
         .fill(ui.visuals().window_fill)
-        .stroke(ui.visuals().window_stroke)
+        .stroke(egui::Stroke::new(
+            1.0,
+            ui.visuals().widgets.inactive.bg_stroke.color,
+        ))
         .corner_radius(crate::theme::metrics::RADIUS_FLOATING)
         .shadow(ui.visuals().popup_shadow)
         .inner_margin(10)
@@ -109,7 +151,9 @@ pub(super) fn primary_style(ui: &mut egui::Ui, palette: &Palette) {
         let fill = mix(accent, ink, amount);
         widget.bg_fill = fill;
         widget.weak_bg_fill = fill;
-        widget.bg_stroke = egui::Stroke::new(1.0, fill);
+        // Its edge is the control border, so a collapsed accent still leaves the button findable.
+        widget.bg_stroke =
+            egui::Stroke::new(1.0, distinct(fill, palette.surface, palette.ink, 0.40));
         widget.fg_stroke.color = readable(ink, fill, 4.5);
     }
 }
@@ -129,12 +173,18 @@ mod tests {
     #[test]
     fn settings_is_painted_with_the_previewed_themes_roles() {
         for (id, raised, panel, line2, accent, on_accent) in [
-            ("ivy-night", 0x202427, 0x171d21, 0x373b3d, 0x3cc384, 0x000000),
+            (
+                "ivy-night",
+                0x202427,
+                0x171d21,
+                0x373b3d,
+                0x3cc384,
+                0x000000,
+            ),
             ("ivy-day", 0xffffff, 0xf2f5f0, 0xd3d5d2, 0x0b7a4b, 0xffffff),
         ] {
-            let theme = super::super::appearance::effective_theme(&Document::new(format!(
-                "theme={id}\n"
-            )));
+            let theme =
+                super::super::appearance::effective_theme(&Document::new(format!("theme={id}\n")));
             let p = Palette::new(theme);
             assert_eq!(
                 [p.surface, p.nav, p.roles.line2, p.accent, p.selected_ink],
@@ -154,6 +204,8 @@ mod tests {
                 "background=#777777\npanel=#777777\nforeground=#777777\nfocus=#777777\ndivider=#777777\ncolor.red=#777777\n",
                 "background=#ffffff\npanel=#ffffff\nforeground=#ffffff\nfocus=#ffffff\ndivider=#ffffff\n",
                 "background=#000000\npanel=#000000\nforeground=#000000\nfocus=#000000\ndivider=#000000\n",
+                // Nearly collapsed: one step apart is not apart for the eye.
+                "background=#777777\npanel=#777777\nforeground=#787878\nfocus=#777777\ndivider=#777777\n",
             ] {
                 let draft = Document::new(format!("theme={}\n{overrides}", name.id()));
                 let theme = super::super::appearance::effective_theme(&draft);
@@ -166,11 +218,26 @@ mod tests {
                 );
                 // The accent is the person's focus colour verbatim (D94); only ink is corrected.
                 assert_eq!(p.accent, theme.focus(), "{name:?}");
-                assert_ne!(p.surface, p.hover);
-                assert_ne!(p.hover, p.active);
+                // Where a control is, and where the caret is, stays findable (D98).
+                let base = Roles::of(&theme).base;
+                assert!(
+                    project_ink_contrast(p.hover, p.surface) >= INVISIBLE,
+                    "{name:?}"
+                );
+                assert!(
+                    project_ink_contrast(p.active, p.hover) >= INVISIBLE,
+                    "{name:?}"
+                );
+                assert!(
+                    project_ink_contrast(p.edge, p.surface) >= INVISIBLE,
+                    "{name:?}"
+                );
+                assert!(project_ink_contrast(p.caret, base) >= INVISIBLE, "{name:?}");
                 egui::Context::default()
                     .run_ui(Default::default(), |ui| {
                         p.apply(ui);
+                        assert_eq!(ui.visuals().widgets.inactive.bg_stroke.color, p.edge);
+                        assert_eq!(ui.visuals().text_cursor.stroke.color, p.caret);
                         for widget in [
                             ui.visuals().widgets.inactive,
                             ui.visuals().widgets.hovered,

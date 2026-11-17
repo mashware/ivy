@@ -3,7 +3,7 @@
 //!
 //! These surfaces used to start from egui's stock dark (or light) look and paint a palette of their
 //! own over it — Settings kept a neutral one on purpose (D67). That stock start is what let the
-//! desktop's light/dark switch reach them, and it is gone: every one now reads the roles (D98).
+//! desktop's light/dark switch reach them; the surfaces built on this module read the roles (D98).
 
 use crate::theme::{Roles, Theme, metrics};
 use eframe::egui::{self, CornerRadius, FontId, Stroke, TextStyle};
@@ -11,13 +11,13 @@ use eframe::egui::{self, CornerRadius, FontId, Stroke, TextStyle};
 /// Writes `theme`'s roles and the floating surfaces' spacing into `ui`'s own style.
 ///
 /// The theme is passed rather than read from the installed style because the surfaces that call it
-/// do not all show the live theme: Settings shows its draft, the Board its derived theme.
+/// do not all show the live theme: the Board shows its derived one.
 pub(crate) fn style(ui: &mut egui::Ui, theme: &Theme) {
     let roles = crate::ui::style::roles(ui.ctx(), theme);
     apply(ui.style_mut(), &roles);
 }
 
-pub(crate) fn apply(style: &mut egui::Style, roles: &Roles) {
+fn apply(style: &mut egui::Style, roles: &Roles) {
     crate::ui::style::apply(style, roles);
     style.spacing.item_spacing = egui::vec2(8.0, 8.0);
     style.spacing.button_padding = egui::vec2(12.0, 6.0);
@@ -70,7 +70,13 @@ mod tests {
             ctx.set_theme(preference);
             for (theme, raised, base, line2, ink) in [
                 (Theme::default(), 0x202427, 0x13181b, 0x373b3d, 0xe4e8e2),
-                (NamedTheme::IvyDay.theme(), 0xffffff, 0xfafbf8, 0xd3d5d2, 0x151d19),
+                (
+                    NamedTheme::IvyDay.theme(),
+                    0xffffff,
+                    0xfafbf8,
+                    0xd3d5d2,
+                    0x151d19,
+                ),
             ] {
                 ctx.run_ui(Default::default(), |ui| {
                     style(ui, &theme);

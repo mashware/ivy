@@ -1642,8 +1642,8 @@ mod tests {
                     .open_menu(tab, pane, true, egui::pos2(400.0, 300.0));
                 "Paste"
             };
-            // Floating on the theme's `raised` role, with its `tx` ink — which turns white when an
-            // override leaves the foreground unreadable over the background (D98).
+            // Floating on the theme's `raised` role (D98), with its `tx` ink — which turns white
+            // when an override leaves the foreground unreadable over the background (D94).
             for (config, surface, ink) in [
                 (
                     "panel=#112233\nforeground=#efcba9",
@@ -1664,7 +1664,7 @@ mod tests {
                 let shapes = frame(&mut window, &ctx, area, vec![]);
                 assert!(
                     shapes.iter().any(|s| dialog_surface(&s.shape, surface)),
-                    "{heading} ignored the configured dialog surface"
+                    "{heading} is not on the theme's raised surface"
                 );
                 assert!(shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Text(t)
                     if t.galley.text() == heading && t.galley.job.sections.iter().all(|section| {
@@ -2831,17 +2831,22 @@ mod tests {
         window.chrome.enable();
         window.headers = window.headers.integrated(true);
         let area = area_of(1400.0);
-        frame(&mut window, &ctx, area, vec![]);
+        let search_row = |shapes: &[egui::epaint::ClippedShape]| {
+            let mut found = Vec::new();
+            for clipped in shapes {
+                rects(&clipped.shape, &mut found);
+            }
+            found
+                .iter()
+                .any(|r| r.fill == raised && r.rect.height() < 40.0 && r.rect.width() > 200.0)
+        };
+        // The control: no such row before the search opens.
+        assert!(!search_row(&frame(&mut window, &ctx, area, vec![])));
         let search = egui::pos2(area.right() - 159.0, area.top() + 24.0);
         frame(&mut window, &ctx, area, click_at(search));
         // Read before the menu opens: an open menu dims the consoles beneath it.
-        let mut row = Vec::new();
-        for clipped in &frame(&mut window, &ctx, area, vec![]) {
-            rects(&clipped.shape, &mut row);
-        }
         assert!(
-            row.iter()
-                .any(|r| r.fill == raised && r.rect.height() < 40.0 && r.rect.width() > 200.0),
+            search_row(&frame(&mut window, &ctx, area, vec![])),
             "the search row is not on raised"
         );
         let menu = egui::pos2(area.right() - 125.0, area.top() + 24.0);
@@ -2863,6 +2868,5 @@ mod tests {
                 .any(|r| r.rect == body.rect && r.stroke == egui::Stroke::new(1.0, line2)),
             "the menu has no control border"
         );
-
     }
 }

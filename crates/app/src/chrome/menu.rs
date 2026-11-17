@@ -13,7 +13,8 @@ pub(super) fn show(
     let ctx = ui.ctx().clone();
     // A floating menu of the kit: raised, a control border, the hovered row on `hover`.
     let roles = crate::ui::style::roles(&ctx, &window.theme);
-    let (bg, fg, hover, border, rule) = (roles.raised, roles.tx, roles.hover, roles.line2, roles.line);
+    let (bg, fg, hover, border, rule) =
+        (roles.raised, roles.tx, roles.hover, roles.line2, roles.line);
     let mut action = None;
     let menu_entries: Vec<_> = [
         ("Check for updates", Action::Updates(true), None, false),
@@ -151,7 +152,9 @@ pub(super) fn show(
         let ui = &menu_ui;
         let painter = ui.painter();
         let radius = crate::theme::metrics::RADIUS_FLOATING;
-        painter.add(roles.shadow.as_shape(menu_rect, radius));
+        // The rows' painter is clipped to the menu; the shadow falls outside it.
+        ctx.layer_painter(layer)
+            .add(roles.shadow.as_shape(menu_rect, radius));
         painter.rect_filled(menu_rect, radius, bg);
         painter.rect_stroke(
             menu_rect,
@@ -206,7 +209,11 @@ pub(super) fn show(
                 window.chrome.menu_selected = Some(index);
             }
             if response.hovered() || window.chrome.menu_selected == Some(index) {
-                painter.rect_filled(item.shrink2(egui::vec2(4.0, 0.0)), crate::theme::metrics::RADIUS_CONTROL, hover);
+                painter.rect_filled(
+                    item.shrink2(egui::vec2(4.0, 0.0)),
+                    crate::theme::metrics::RADIUS_CONTROL,
+                    hover,
+                );
             }
             painter.text(
                 item.left_center() + egui::vec2(10.0, 0.0),

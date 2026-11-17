@@ -89,17 +89,19 @@ impl Menu {
                 egui::Id::new("pane-actions"),
             ))
             .with_clip_rect(ctx.viewport_rect());
-        painter.rect_filled(self.rect, 2.0, theme.panel_background());
+        // A floating menu of the kit (D98): raised, a control border, the chosen row on `sel`.
+        let roles = crate::ui::style::roles(ctx, theme);
+        painter.rect_filled(self.rect, 2.0, roles.raised);
         painter.rect_stroke(
             self.rect,
             2.0,
-            egui::Stroke::new(1.0, theme.divider()),
+            egui::Stroke::new(1.0, roles.line2),
             egui::StrokeKind::Inside,
         );
         for (index, action) in Action::ALL.into_iter().enumerate() {
             let row = self.row(index);
             if self.enabled[index] && index == self.selected {
-                painter.rect_filled(row.shrink(1.0), 0.0, theme.focus().gamma_multiply(0.25));
+                painter.rect_filled(row.shrink(1.0), 0.0, roles.sel);
             }
             let text = if self.enabled[index] {
                 action.label(self.folded).to_owned()
@@ -114,9 +116,9 @@ impl Menu {
                 text,
                 egui::FontId::monospace(metrics.height() * 0.75),
                 if self.enabled[index] {
-                    theme.foreground()
+                    roles.tx
                 } else {
-                    theme.divider()
+                    roles.tx3
                 },
             );
         }

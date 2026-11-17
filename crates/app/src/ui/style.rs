@@ -27,20 +27,29 @@ pub(crate) fn install(ctx: &egui::Context, theme: &Theme) {
     ctx.data_mut(|d| d.insert_temp(id, *theme));
 }
 
-/// The roles of `theme`, memoized for the last theme asked about in egui's memory.
+/// How many themes the roles memo keeps. One frame can ask about several: the live theme, the
+/// Board's derived one, the Settings draft, the factory theme a Board card falls back to — and a
+/// single slot made each of them evict the other on every frame.
+const REMEMBERED_THEMES: usize = 4;
+
+/// The roles of `theme`, memoized in egui's memory for the last few themes asked about.
 ///
 /// Hand-painted surfaces ask for them every frame, and deriving them walks the contrast search of
-/// every text role; the comparison against the theme last asked about is the whole of the work on a
-/// frame where nothing changed.
+/// every text role; on a frame where nothing changed the work is a few comparisons.
 pub(crate) fn roles(ctx: &egui::Context, theme: &Theme) -> Roles {
     let id = egui::Id::new("ivy-roles");
-    if let Some((cached, roles)) = ctx.data(|d| d.get_temp::<(Theme, Roles)>(id))
-        && cached == *theme
-    {
-        return roles;
+    let mut memo = ctx
+        .data(|d| d.get_temp::<Vec<(Theme, Roles)>>(id))
+        .unwrap_or_default();
+    if let Some((_, roles)) = memo.iter().find(|(cached, _)| cached == theme) {
+        return *roles;
     }
     let roles = Roles::of(theme);
-    ctx.data_mut(|d| d.insert_temp(id, (*theme, roles)));
+    if memo.len() == REMEMBERED_THEMES {
+        memo.remove(0);
+    }
+    memo.push((*theme, roles));
+    ctx.data_mut(|d| d.insert_temp(id, memo));
     roles
 }
 

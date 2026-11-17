@@ -8444,8 +8444,8 @@ font-definition snapshot (loses later discoveries), and reloading the font file 
 (unnecessary I/O). The native review also chose readable15-point body text, aligned40-point font/size
 controls, a compact20-point override badge, and padded cursor/shortcut controls.
 
-> **Superseded in part by D98 (November 2026).** The paragraph below no longer holds: Settings is
-> painted with the roles of the theme it previews, like every floating surface.
+> **Superseded in part by D98 (November 2026).** The Settings half of the paragraph below no longer
+> holds: Settings is painted with the roles of the theme it previews, like the chrome's dialogs.
 
 **Integration with D66.** The shared chrome dialogs, window controls and pane controls retain their
 effective-Theme-derived style. The separately approved Settings presentation keeps its neutral editor
@@ -10043,16 +10043,22 @@ selected row on `sel`, its primary action on `accent` with `on_accent` ink, its 
 theme picker is a floating menu: a search field, a segmented All / Dark / Light, and each theme with
 a four-colour sample — background, accent, waiting, finished — and a check on the selected one. The
 docked viewer keeps its header and footer on `panel` and lays the document on `base`. The console's
-search row is laid on `raised`.
+search row is laid on `raised`, and the console header's actions menu floats like the others.
+Surfaces that show a theme of their own derive roles for it as well, so one frame may ask about
+several themes; the memo of derived roles keeps the last four.
 
 **Collapsed palettes.** Settings is where a broken configuration is undone, so its text, its error
-ink and the ink on every control keep 4.5:1 over the fill they sit on, and hover and pressed fills
-stay distinct from the surface. The accent and the borders are **not** corrected: an explicit focus
-is the person's colour verbatim (D94), and D67's 3:1 floor on borders and accent is dropped with
-the neutral palette.
+ink and the ink on every control keep 4.5:1 over the fill they sit on; its navigation leaves a
+`panel` its text cannot be read on for the dialog's surface (and the viewer's chrome leaves it for
+`base`). Where a collapsed palette makes a fill, a control's border, the primary button or the
+caret indistinguishable from what lies under it (under 1.03:1, below the kit's own quietest step),
+that one colour is moved toward the ink so the control can still be found. Nothing else is
+corrected: an explicit focus is the person's colour verbatim (D94) wherever it can be seen, and the
+old Settings palette's 3:1 floor on every border and on the accent is dropped with it.
 
-**Measures kept.** The dialogs keep the sizes D67's native review chose (15-point body, 40-point
-controls) and the viewer keeps its two-line header; only colours, radii and the picker change. The
+**Measures kept.** Settings and the chrome's dialogs (Connect agents, What's new) keep the sizes
+D67's native review chose (15-point body, 36-point controls) and the viewer keeps its two-line
+header; only colours, radii and the picker change. The
 artboard's 40-point header and toolbar for the viewer, and its settings search field, were not
 taken: the first would cut the path line, the second is a feature no section asked for yet.
 
@@ -10060,4 +10066,4 @@ taken: the first would cut the path line, the second is a feature no section ask
 |---|---|
 | Keep D67's neutral Settings palette | The one window that did not look like Ivy, and the stock dark start under it followed the desktop. |
 | Install the style once and let every surface inherit it | Settings previews a draft theme and the Board a derived one; the installed style is the live theme's. |
-| Correct accent and borders to 3:1 as D67 did | Rewrites an explicit focus colour; D94 keeps it verbatim and corrects only text. |
+| Correct accent and borders to 3:1 as the old palette did | Rewrites an explicit focus colour wherever it is visible; D94 keeps it verbatim and corrects only text. |

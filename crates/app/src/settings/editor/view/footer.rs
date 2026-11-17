@@ -83,6 +83,7 @@ pub(super) fn show(
     close: &mut bool,
     errors: &[(String, String)],
     discoverer: &mut crate::fonts::Discoverer,
+    palette: &super::palette::Palette,
 ) {
     let bounds = ui.max_rect();
     let mut top = bounds.top() + 16.0;
@@ -138,10 +139,7 @@ pub(super) fn show(
             let mut button_ui = ui.new_child(egui::UiBuilder::new().id_salt(label).max_rect(rect));
             button_ui.set_clip_rect(rect.intersect(ui.clip_rect()));
             if primary {
-                let palette = super::palette::Palette::new(super::appearance::effective_theme(
-                    editor.draft.as_ref().expect("open editor has a draft"),
-                ));
-                super::palette::primary_style(&mut button_ui, &palette);
+                super::palette::primary_style(&mut button_ui, palette);
             }
             if !(quiet || can_save) {
                 button_ui.disable();
