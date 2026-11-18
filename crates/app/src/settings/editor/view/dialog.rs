@@ -18,6 +18,23 @@ pub(crate) fn header(ui: &mut egui::Ui, title: &str) -> bool {
     close
 }
 
+/// The muted note ink and the error ink Settings paints with for `theme`.
+#[cfg(test)]
+pub(crate) fn inks(
+    ctx: &egui::Context,
+    theme: &crate::theme::Theme,
+) -> (egui::Color32, egui::Color32) {
+    let palette = Palette::of(ctx, theme);
+    let mut inks = None;
+    egui::Context::default()
+        .run_ui(egui::RawInput::default(), |ui| {
+            palette.apply(ui);
+            inks = Some((ui.visuals().weak_text_color(), ui.visuals().error_fg_color));
+        })
+        .drop_without_applying_deltas();
+    inks.unwrap()
+}
+
 /// What the person did with the rename dialog in this pass.
 #[derive(Default)]
 pub(crate) struct Rename {
@@ -65,7 +82,9 @@ pub(crate) fn rename(
             }
             let field = ui.add(
                 egui::TextEdit::singleline(draft)
-                    .margin(egui::Margin::symmetric(10, 9))
+                    // `min_size` does not reach the painted box; the margin around Settings' 15-point
+                    // body is what makes the field as tall as the 36-point controls.
+                    .margin(egui::Margin::symmetric(10, 10))
                     .min_size(egui::vec2(0.0, 36.0))
                     .desired_width(ui.available_width()),
             );

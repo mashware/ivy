@@ -374,6 +374,10 @@ mod tests {
                 "the drawer overlaps the modal"
             );
             assert!(has_text(&shapes, "No panels published yet"));
+            assert!(
+                !has_text(&shapes, "Cancel"),
+                "the guide has no Save/Cancel footer"
+            );
             let heading = text_center(&shapes, "Connect agents");
             let close = shapes
                 .iter()
