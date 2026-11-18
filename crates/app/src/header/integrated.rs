@@ -1172,6 +1172,45 @@ mod tests {
         );
     }
 
+    /// The pass in which a header's controls first appear asks for exactly one more, so the control
+    /// under a still pointer gets its hover; a header that stays shown asks for none.
+    #[test]
+    fn controls_appearing_ask_for_one_more_pass_and_staying_asks_for_none() {
+        let ctx = egui::Context::default();
+        let strip = strip_of(500.0);
+        let pass = |focused: bool| {
+            let out = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let mut look = appearance(None, focused, None);
+                look.name = 7;
+                paint(ui, strip, &Theme::default(), look);
+            });
+            let asked = out
+                .viewport_output
+                .get(&egui::ViewportId::ROOT)
+                .is_some_and(|v| v.repaint_delay == std::time::Duration::ZERO);
+            out.drop_without_applying_deltas();
+            asked
+        };
+        pass(false);
+        pass(false);
+        assert!(!pass(false), "a hidden header asked for a pass");
+        assert!(
+            pass(true),
+            "controls that just appeared did not ask for one more pass"
+        );
+        // egui answers one request with the pass it asked for, which still reports it; after that
+        // a header that stays shown must leave the window at rest.
+        pass(true);
+        assert!(
+            !pass(true),
+            "a header that stays shown keeps waking the window"
+        );
+        assert!(
+            !pass(true),
+            "a header that stays shown keeps waking the window"
+        );
+    }
+
     /// Every control cell answers its own target, and nothing outside the cells does.
     #[test]
     fn each_control_cell_answers_its_own_target() {

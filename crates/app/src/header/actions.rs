@@ -18,8 +18,9 @@ pub(crate) struct Input {
     last_frame: Option<u64>,
     pub(super) blocked_frame: Option<u64>,
     pub(super) pending: Option<(usize, Action)>,
-    /// The console whose hidden control cell was last pressed, and when (egui's input time).
-    unseen: Option<(usize, f64)>,
+    /// The console whose hidden control cell was last pressed, and when that press was released
+    /// (egui's input time; `None` while it is still held).
+    unseen: Option<(usize, Option<f64>)>,
 }
 
 impl Input {
@@ -54,13 +55,14 @@ pub(crate) fn enabled(
 }
 
 /// What a press at `at` reaches on one of the active tab's integrated headers: the console, the
-/// target, and whether that target is a control the press may not use because it was not seen.
+/// target — the title's whenever the control there may not be used — and whether that is because
+/// the header's controls were not painted in the previous pass (D99's rule).
 ///
-/// **Not seen** is D99's rule — the header's controls were not painted in the previous pass — and
-/// one more case: a press within a double click of a press that already fell on this console's
-/// hidden controls. That first press is the title's and hands the console the keyboard, which
-/// paints its controls at once; without this, the second click of a double click aimed at the
-/// title would land on whatever control appeared under it, a close included.
+/// The other reason a control may not be used: the press comes within a double click of the release
+/// of a press that fell on this console's hidden controls. That first press is the title's and hands
+/// the console the keyboard, which paints its controls at once; without this, the second click of a
+/// double click aimed at the title would land on whatever appeared under it, a close included. The
+/// window is counted from the release because egui counts a double click from release to release.
 fn integrated_hit(
     window: &Window,
     ctx: &egui::Context,
@@ -93,15 +95,15 @@ fn integrated_hit(
                 zoomed == Some(pane.name),
             );
             let target = hit(strip, offer, at)?;
-            let just_unseen = window
-                .header_input
-                .unseen
-                .is_some_and(|(name, when)| name == pane.name && now - when <= delay);
-            let hidden = target != Target::Label && (!revealed(ctx, pane.name) || just_unseen);
+            let second_click = window.header_input.unseen.is_some_and(|(name, released)| {
+                name == pane.name && released.is_none_or(|released| now - released <= delay)
+            });
+            let unpainted = target != Target::Label && !revealed(ctx, pane.name);
+            let usable = target == Target::Label || !(unpainted || second_click);
             Some((
                 pane.name,
-                if hidden { Target::Label } else { target },
-                hidden,
+                if usable { target } else { Target::Label },
+                unpainted,
             ))
         })
 }
@@ -138,6 +140,23 @@ pub(crate) fn pointer(
         return Some(quiet());
     }
     let events = ui.ctx().input(|input| input.events.clone());
+    let released = |events: &[egui::Event]| {
+        events.iter().any(|event| {
+            matches!(
+                event,
+                egui::Event::PointerButton {
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    ..
+                }
+            )
+        })
+    };
+    if let Some((_, pending @ None)) = &mut window.header_input.unseen
+        && released(&events)
+    {
+        *pending = Some(ui.ctx().input(|i| i.time));
+    }
     // egui reports a double click on the second release, not on its press.
     if window.chrome.enabled()
         && ui.is_enabled()
@@ -230,11 +249,14 @@ pub(crate) fn pointer(
         }
         if window.chrome.enabled()
             && *button == egui::PointerButton::Primary
-            && let Some((name, target, hidden)) =
+            && let Some((name, target, unpainted)) =
                 integrated_hit(window, ui.ctx(), rects, metrics, *pos)
         {
-            if hidden {
-                window.header_input.unseen = Some((name, ui.ctx().input(|i| i.time)));
+            if unpainted {
+                let now = ui.ctx().input(|i| i.time);
+                let pressed_at = events.iter().position(|e| std::ptr::eq(e, event));
+                let released_after = pressed_at.is_some_and(|at| released(&events[at..]));
+                window.header_input.unseen = Some((name, released_after.then_some(now)));
             }
             if target == super::integrated::Target::Label {
                 continue;
@@ -247,14 +269,7 @@ pub(crate) fn pointer(
             window.drag_in_progress = None;
             let tab = window.active().name;
             let changed = match target {
-                super::integrated::Target::Label => {
-                    let initial = window
-                        .pane_called(name)
-                        .map(|p| crate::pane_view::display_label(p).into_owned())
-                        .unwrap_or_else(|| format!("Console {}", name + 1));
-                    window.pane_view.begin_rename(tab, name, initial);
-                    false
-                }
+                super::integrated::Target::Label => unreachable!("a title press continued above"),
                 super::integrated::Target::SplitRight => {
                     apply(window, name, Action::SplitRight, ui.ctx(), metrics)
                 }

@@ -985,16 +985,31 @@ mod tests {
             strokes_in(&away, focused_cells) > 0,
             "the focused console hid its controls"
         );
-        // The icons are paths and the two rules between the three groups are the only segments.
-        let rules = away
+        // The icons are paths and the two rules between the three groups are the only segments, in
+        // the ink of the title's own separator — muted text, not the border role the owner found
+        // barely visible on the desktop.
+        let roles = crate::ui::style::roles(&ctx, &window.theme);
+        let rules: Vec<_> = away
             .iter()
-            .filter(|s| {
-                matches!(&s.shape, egui::Shape::LineSegment { points, .. }
+            .filter_map(|s| match &s.shape {
+                egui::Shape::LineSegment { points, stroke }
                     if focused_cells.contains(points[0])
-                        && (points[0].x - points[1].x).abs() < 0.01)
+                        && (points[0].x - points[1].x).abs() < 0.01 =>
+                {
+                    Some(stroke.color)
+                }
+                _ => None,
             })
-            .count();
-        assert_eq!(rules, 2, "the groups are not separated by two rules");
+            .collect();
+        assert_eq!(rules.len(), 2, "the groups are not separated by two rules");
+        assert!(
+            roles.tx3 != roles.line2,
+            "the colour check below would be vacuous"
+        );
+        assert!(
+            rules.iter().all(|c| *c == roles.tx3),
+            "the rules are not in the title separator's ink: {rules:?}"
+        );
         let title = egui::pos2(cells.left() - 40.0, cells.center().y);
         let over = frame(
             &mut window,
@@ -1082,6 +1097,80 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The second click of a slow double click on hidden controls is the title's too — egui counts
+    /// a double click from release to release, so the press that started it was held — and once
+    /// the double click is over the same console's controls answer again.
+    #[test]
+    fn a_double_click_on_hidden_controls_is_the_titles_until_it_is_over() {
+        let ctx = egui::Context::default();
+        let mut window = integrated_pair();
+        let area = tall_area();
+        let at_time = |window: &mut Window, time: f64, events: Vec<egui::Event>| {
+            ui_pass(
+                window,
+                &ctx,
+                area,
+                egui::RawInput {
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+            );
+        };
+        let button = |at, pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::default(),
+        };
+        at_time(&mut window, 0.0, vec![]);
+        let close = control(&window, &ctx, area, 1, 12.5);
+        // Pressed unseen and held for 200 ms, then pressed again 150 ms after the release: 350 ms
+        // from press to press, over egui's 300 ms, and still one double click.
+        at_time(
+            &mut window,
+            1.0,
+            vec![egui::Event::PointerMoved(close), button(close, true)],
+        );
+        at_time(&mut window, 1.2, vec![button(close, false)]);
+        at_time(&mut window, 1.3, vec![]);
+        at_time(
+            &mut window,
+            1.35,
+            vec![button(close, true), button(close, false)],
+        );
+        at_time(&mut window, 1.4, vec![]);
+        assert_eq!(
+            window.active().panes().len(),
+            2,
+            "the second click of a double click closed the console"
+        );
+        // A double click on the title renames: that is what the person aimed at.
+        assert!(
+            window.pane_view.is_renaming(),
+            "the double click did not reach the title"
+        );
+        at_time(
+            &mut window,
+            2.0,
+            key_with(egui::Key::Escape, egui::Modifiers::NONE),
+        );
+        at_time(&mut window, 2.1, vec![]);
+        assert!(!window.pane_view.is_renaming());
+        at_time(&mut window, 3.0, vec![egui::Event::PointerMoved(close)]);
+        at_time(
+            &mut window,
+            3.1,
+            vec![button(close, true), button(close, false)],
+        );
+        at_time(&mut window, 3.2, vec![]);
+        assert_eq!(
+            window.active().panes().len(),
+            1,
+            "the console's close stayed swallowed after the double click was over"
+        );
     }
 
     /// A console too short to split below offers only the split beside it, in the cell next to

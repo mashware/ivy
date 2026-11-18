@@ -10227,7 +10227,9 @@ on the focused console, stay. This **amends D66**, whose approved per-pane set h
 - **What the strip's span measures.** The integrated strip's timed span now paints icons for the
   focused console and for any header under the pointer only, so its cost depends on focus and on
   where the pointer is; a batch that moves the pointer over headers paints more than one that does
-  not, and the two are not the same work.
+  not, and the two are not the same work. And a header whose controls appear asks egui for one more
+  pass, so the control under a still pointer gets its hover: a frame no report counts yet, one per
+  header revealed, never one while a header stays shown.
 - **Unavailable is absent.** A split the console cannot give both halves their minimum is not drawn
   and not pressable. For this header that replaces D62's dimmed control and F2.14's «visibly
   unavailable»; the historical strip keeps both. Painting and pressing read one offer, built with the
