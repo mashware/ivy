@@ -517,6 +517,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         1,
     ),
     (
+        "src/settings/editor/view/dialog.rs",
+        include_str!("../src/settings/editor/view/dialog.rs"),
+        1,
+    ),
+    (
         "src/settings/editor/view/typography.rs",
         include_str!("../src/settings/editor/view/typography.rs"),
         1,

@@ -445,6 +445,13 @@ mod tests {
                 dialogs.windows(2).all(|w| w[0] == w[1]),
                 "{heading}: the dialog changed size between passes: {dialogs:?}"
             );
+            // 380 points of content and 20 of margin on each side, whatever the right-aligned
+            // header and footer would otherwise settle on.
+            assert!(
+                (415.0..=425.0).contains(&dialogs[0].width()),
+                "{heading}: the dialog is not 380 points wide: {:?}",
+                dialogs[0]
+            );
             let texts = texts(&shapes);
             let fills = fills(&shapes);
             let roles = crate::ui::style::roles(&ctx, &window.theme);

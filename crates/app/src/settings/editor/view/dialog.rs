@@ -72,8 +72,8 @@ pub(crate) fn rename(
         .resizable(false)
         .show(ctx, |ui| {
             palette.apply(ui);
-            // Auto-sized: the right-to-left header and footer would otherwise grow to fill the
-            // viewport.
+            // An auto-sized window settles on whatever its right-aligned rows leave it; the
+            // dialog's width is chosen here instead.
             ui.set_width(width);
             out.cancel = header(ui, title);
             ui.add_space(4.0);
