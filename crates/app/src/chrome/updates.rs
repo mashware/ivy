@@ -140,16 +140,8 @@ fn show(
             // The chrome's dialogs read at Settings' measures (D67's native review).
             crate::settings::editor::view::settings_geometry(ui.style_mut());
             ui.set_width((available.x - 64.0).clamp(80.0, 640.0));
-            ui.horizontal_top(|ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                    close |= crate::ui::icons::close_button(ui).clicked();
-                    ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                        ui.heading("What's new");
-                        ui.label(format!("Installed: Ivy {}", env!("CARGO_PKG_VERSION")));
-                    });
-                });
-            });
-            ui.separator();
+            close |= crate::settings::editor::view::dialog::header(ui, "What's new");
+            ui.label(format!("Installed: Ivy {}", env!("CARGO_PKG_VERSION")));
             egui::ScrollArea::vertical()
                 .id_salt("release-history")
                 .max_height((available.y - 150.0).max(40.0))
@@ -280,13 +272,14 @@ mod tests {
     }
 
     /// The dialog floats on the theme's `raised` role, whatever egui was told about the desktop,
-    /// and keeps Settings' measures (D98).
+    /// and keeps the shared dialog's heading and Settings' body measures (D98).
     #[test]
     fn the_updates_dialog_floats_on_raised_at_settings_measures() {
         for preference in [egui::ThemePreference::Dark, egui::ThemePreference::Light] {
             let mut dialog = Dialog::default();
             dialog.service.fixture(vec![release("99.0.0")]);
             let ctx = egui::Context::default();
+            crate::fonts::install_icons_only(&ctx);
             ctx.set_theme(preference);
             // Final colours, without the modal's time-dependent fade multiplying alpha.
             ctx.all_styles_mut(|style| style.animation_time = 0.0);
@@ -328,14 +321,33 @@ mod tests {
                 shapes.iter().any(|s| big_raised(&s.shape)),
                 "{preference:?}: the dialog is not on raised"
             );
-            // Settings' 25-point heading, not the 20 of the floating preset.
+            let title = shapes
+                .iter()
+                .find_map(|s| match &s.shape {
+                    egui::Shape::Text(t) if t.galley.text() == "What's new" => Some(t),
+                    _ => None,
+                })
+                .expect("the dialog's title is painted");
             assert!(
-                shapes
+                title
+                    .galley
+                    .job
+                    .sections
                     .iter()
-                    .any(|s| matches!(&s.shape, egui::Shape::Text(t)
-                    if t.galley.text() == "What's new"
-                        && t.galley.job.sections.iter().all(|x| x.format.font_id.size == 25.0))),
-                "{preference:?}: the heading lost Settings' measure"
+                    .all(|x| x.format.font_id.size == 20.0),
+                "{preference:?}: the heading lost the shared dialog's measure"
+            );
+            let title = Rect::from_min_size(title.pos, title.galley.size());
+            let close = shapes
+                .iter()
+                .filter_map(|s| crate::ui::icons::painted_icon(&s.shape))
+                .find_map(|(glyph, _, square)| {
+                    (glyph == egui_phosphor::regular::X).then_some(square)
+                })
+                .expect("the dialog's close cross is painted");
+            assert!(
+                (close.center().y - title.center().y).abs() < 1.5,
+                "{preference:?}: close {close:?} and title {title:?} are not on one line"
             );
         }
     }
