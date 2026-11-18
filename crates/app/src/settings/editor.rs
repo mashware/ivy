@@ -803,7 +803,7 @@ mod tests {
                 .find(|f| f.key == "size")
                 .unwrap()
                 .value,
-            "21"
+            "15.75"
         );
         assert!(editor.message.is_empty() && editor.fonts.is_none() && editor.store.is_some());
         editor.save(&mut crate::fonts::Discoverer::default());
@@ -831,7 +831,7 @@ mod tests {
         assert!(editor.message.contains("Applying settings"));
         assert_eq!(
             fs::read_to_string(&path).unwrap(),
-            "# retain\nversion=1\nfuture=yes\n"
+            "# retain\nversion=2\nfuture=yes\n"
         );
         assert_eq!(
             super::super::read(&path).unwrap().0,

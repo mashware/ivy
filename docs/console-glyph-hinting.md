@@ -1,5 +1,8 @@
 # Does hinting reach console text?
 
+> Historical baseline: the results below describe unmodified epaint0.36.1. Ivy now applies the
+> targeted fallback and raw-coverage policy described in the production update below.
+
 Yes for the bundled Geist Mono in the tested configurations. Every sampled glyph changes when
 hinting is disabled. Ubuntu Sans Mono 1.100 produces identical bitmaps with hinting on and off,
 but **this is not an initialization fallback or a swallowed error**: the actual epaint hinted
@@ -142,3 +145,30 @@ cmp /tmp/hinting-a.json /tmp/hinting-instrumented.json
 ```
 
 The temporary dependency and Cargo patch are not part of the repository configuration.
+
+
+## Production update: instructionless fonts and raw coverage
+
+The accepted native comparison used Ubuntu Sans Mono1.006 at11 typographic points on Wayland,
+against the normal Tilix profile. The owner accepted the combined automatic-hinting/raw-coverage
+preview after rejecting the original and automatic-hinting-only previews. This is visual acceptance
+of that setup, not a claim of pixel parity with every desktop renderer or platform.
+
+Ivy sets `FontColorTransferFunction::Off` for both context themes once when installing its fonts.
+This preserves raster coverage instead of applying egui's default edge-weight boost. The policy
+survives theme switching and font-definition rebuilds without rewriting styles every frame.
+
+The local epaint patch caches a per-face decision: when the font prefers the interpreter but none
+of its glyphs contains native hint instructions, use automatic hinting. Fonts with native glyph
+instructions, CFF and unknown hint-information formats keep the original selection. The decision
+is reused when size, scale, variation location or target reconfigures the hinter. Disabling hinting
+still bypasses it. Glyph placement, target, cell flooring and default geometry remain unchanged.
+
+`font_rasterization` checks actual fixture atlas masks: Ubuntu must change when hinting is enabled;
+Geist keeps its exact original mask fingerprints at scales1 and2. A startup regression compares
+actual glyph coverage to independent raw and boosted contexts in both themes. These tests use
+repository fixtures and do not depend on an installed font.
+
+The vendored sources retain their licenses and a bounded patch description in
+`vendor/epaint/IVY-PATCH.md`. Raster initialization changes, so historical frame results are not a
+measurement of this revision; no new performance improvement is claimed.

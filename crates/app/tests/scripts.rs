@@ -973,6 +973,10 @@ const MODULES: &[(&str, &str)] = &[
     ),
     ("app/tests/batches.rs", include_str!("batches.rs")),
     ("app/tests/decisions.rs", include_str!("decisions.rs")),
+    (
+        "app/tests/font_rasterization.rs",
+        include_str!("font_rasterization.rs"),
+    ),
     ("app/tests/glossary.rs", include_str!("glossary.rs")),
     ("app/tests/prose.rs", include_str!("prose.rs")),
     ("app/tests/shape.rs", include_str!("shape.rs")),

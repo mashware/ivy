@@ -46,7 +46,7 @@ fn size_and_family_have_equal_height_and_aligned_value_baselines() {
         "font {font:?}, size {number_frame:?}"
     );
     let selected = text.iter().find(|(s, _)| s == "Fixture Family").unwrap().1;
-    let number = text.iter().find(|(s, _)| s == "49").unwrap().1;
+    let number = text.iter().find(|(s, _)| s == "36.75").unwrap().1;
     assert!(
         (selected.center().y - number.center().y).abs() <= 2.0,
         "font {selected:?}, number {number:?}"
@@ -359,7 +359,7 @@ fn title_sizes_use_the_point_size_box() {
         rect_fills(&clipped.shape, &mut rects);
     }
     let base = egui::Color32::from_rgb(0x13, 0x18, 0x1b);
-    for hint in ["14", "12"] {
+    for hint in ["10.5", "9"] {
         let boxes = text
             .iter()
             .filter(|(s, _)| s == hint)
@@ -369,7 +369,7 @@ fn title_sizes_use_the_point_size_box() {
                 })
             })
             .count();
-        let expected = if hint == "12" { 2 } else { 1 };
+        let expected = if hint == "9" { 2 } else { 1 };
         assert_eq!(boxes, expected, "{hint}: {text:?}");
     }
 }

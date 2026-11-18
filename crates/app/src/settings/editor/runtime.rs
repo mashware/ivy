@@ -630,7 +630,7 @@ mod tests {
         frame(&mut window, &ctx);
         frame(&mut window, &ctx);
         assert!(!window.ligatures, "reset must disable live drawing");
-        assert_eq!(file.read(), "# retain\n");
+        assert_eq!(file.read(), "# retain\nversion=2\n");
         let after_reset = window.discoverer.ligature_cost().eligible_runs;
         frame(&mut window, &ctx);
         assert_eq!(
@@ -661,8 +661,8 @@ mod tests {
             original,
             "# preserved\npane.title_size=12\ntab.label_size=12\n"
         );
-        set(&mut window, "pane.title_size", "24");
-        set(&mut window, "tab.label_size", "10");
+        set(&mut window, "pane.title_size", "18");
+        set(&mut window, "tab.label_size", "7.5");
         save(&mut window);
         frame(&mut window, &ctx);
         frame(&mut window, &ctx);
@@ -673,7 +673,7 @@ mod tests {
         let (reopened, _) = crate::settings::interpret(&saved).unwrap();
         assert_eq!(reopened.pane_title_size, Some(24.0));
         assert_eq!(reopened.tab_label_size, Some(10.0));
-        set(&mut window, "pane.title_size", "30");
+        set(&mut window, "pane.title_size", "22.5");
         one_frame_in(
             &mut window,
             &ctx,
@@ -699,7 +699,7 @@ mod tests {
         crate::fonts::install_bundled(&ctx);
         let mut window = window(&file);
         frame(&mut window, &ctx);
-        set(&mut window, "size", "24");
+        set(&mut window, "size", "18");
         window
             .settings_editor
             .save_in_frame(&mut window.discoverer, &ctx);
@@ -742,7 +742,7 @@ mod tests {
                 .settings_editor
                 .save_in_frame(&mut window.discoverer, &ctx)
         );
-        set(&mut window, "size", "24");
+        set(&mut window, "size", "18");
         assert!(
             !window
                 .settings_editor
@@ -760,10 +760,10 @@ mod tests {
         frame(&mut window, &ctx);
         let builtin = metrics(&ctx);
         set(&mut window, "font", "Ubuntu");
-        set(&mut window, "size", "24");
+        set(&mut window, "size", "18");
         save(&mut window);
         let saved = file.read();
-        set(&mut window, "size", "32");
+        set(&mut window, "size", "24");
         one_frame_in(
             &mut window,
             &ctx,
@@ -827,7 +827,7 @@ mod tests {
                 )
             })
             .collect();
-        set(&mut window, "size", "28");
+        set(&mut window, "size", "21");
         save(&mut window);
         assert_eq!(window.settings_editor.application.committed, 0);
         assert_ne!(window.font_size, 28.0);
@@ -877,7 +877,7 @@ mod tests {
         let mut window = window(&file);
         frame(&mut window, &ctx);
         let before = window.font_size;
-        set(&mut window, "size", "20");
+        set(&mut window, "size", "15");
         set(&mut window, "font", "Missing fixture");
         save(&mut window);
         assert!(window.settings_editor.message.contains("not installed"));
@@ -940,7 +940,7 @@ mod tests {
         let mut window = window(&file);
         window.settings_editor.application.family = Some("Missing fixture".into());
         frame(&mut window, &ctx);
-        set(&mut window, "size", "20");
+        set(&mut window, "size", "15");
         save(&mut window);
         assert_eq!(window.settings_editor.application.prepared, 0);
         frame(&mut window, &ctx);

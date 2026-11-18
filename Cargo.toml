@@ -28,7 +28,7 @@ eframe = { version = "0.36", default-features = false, features = [
     "wayland",
 ] }
 
-# **The only patched dependency in this repository, and it exists because the fix is not ours to
+# **The clipboard dependency patch exists because the fix is not ours to
 # make.** `egui-winit` recognises the paste chord, reads the clipboard as text and, finding none,
 # returns without emitting anything — not the paste, and not the key event either. So `Ctrl+V` over a
 # clipboard holding an image, or holding nothing, reaches the program inside a console as **nothing at
@@ -49,3 +49,6 @@ eframe = { version = "0.36", default-features = false, features = [
 # directory go away together. **D33.**
 [patch.crates-io]
 egui-winit = { path = "vendor/egui-winit" }
+
+# Prep-only instructionless fonts need automatic hinting; see vendor/epaint/IVY-PATCH.md.
+epaint = { path = "vendor/epaint" }
