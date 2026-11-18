@@ -253,14 +253,12 @@ pub(super) fn selector(ui: &mut egui::Ui, title: &str, width: f32, lead: f32) ->
         egui::FontId::proportional(14.0),
         ui.style().interact(&response).fg_stroke.color,
     );
-    let arrow = response.rect.right_center() - egui::vec2(15.0, 0.0);
-    ui.painter().line_segment(
-        [arrow + egui::vec2(-4.0, -2.0), arrow + egui::vec2(0.0, 2.0)],
-        egui::Stroke::new(1.3, ui.style().interact(&response).fg_stroke.color),
-    );
-    ui.painter().line_segment(
-        [arrow + egui::vec2(0.0, 2.0), arrow + egui::vec2(4.0, -2.0)],
-        egui::Stroke::new(1.3, ui.style().interact(&response).fg_stroke.color),
+    crate::ui::icons::paint(
+        ui.painter(),
+        response.rect.right_center() - egui::vec2(15.0, 0.0),
+        crate::ui::icons::Icon::Caret { open: true },
+        12.0,
+        ui.style().interact(&response).fg_stroke.color,
     );
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), title)
@@ -304,14 +302,8 @@ pub(super) fn swatch(
 }
 
 fn check(painter: &egui::Painter, at: egui::Pos2, color: egui::Color32) {
-    painter.add(egui::Shape::line(
-        vec![
-            at + egui::vec2(-5.0, 0.5),
-            at + egui::vec2(-2.0, 3.5),
-            at + egui::vec2(5.0, -3.5),
-        ],
-        egui::Stroke::new(2.0, color),
-    ));
+    // Larger than the drawn check's square: Regular's stroke is thinner than its two points were.
+    crate::ui::icons::paint(painter, at, crate::ui::icons::Icon::Check, 16.0, color);
 }
 
 /// The kit's segmented control: a sunk track and the chosen segment filled with `hover`.
@@ -422,12 +414,12 @@ fn theme_picker(editor: &mut Editor, ui: &mut egui::Ui, count: usize) {
                     ui.horizontal(|ui| {
                         let (rect, _) =
                             ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
-                        let center = rect.center() - egui::vec2(1.0, 1.0);
-                        let stroke = egui::Stroke::new(1.2, ui.visuals().weak_text_color());
-                        ui.painter().circle_stroke(center, 4.0, stroke);
-                        ui.painter().line_segment(
-                            [center + egui::vec2(3.0, 3.0), center + egui::vec2(6.0, 6.0)],
-                            stroke,
+                        crate::ui::icons::paint(
+                            ui.painter(),
+                            rect.center(),
+                            crate::ui::icons::Icon::Search,
+                            14.0,
+                            ui.visuals().weak_text_color(),
                         );
                         ui.add(
                             egui::TextEdit::singleline(&mut editor.picker_query)

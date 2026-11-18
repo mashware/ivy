@@ -28,8 +28,10 @@ use skrifa::MetadataProvider as _;
 mod atlas;
 mod bundled;
 #[cfg(test)]
-pub(crate) use bundled::install as install_bundled;
-pub(crate) use bundled::ui_weight;
+pub(crate) use bundled::UI_ICONS;
+#[cfg(test)]
+pub(crate) use bundled::{install as install_bundled, install_icons_only};
+pub(crate) use bundled::{ui_icon_family, ui_weight};
 mod ligatures;
 pub use ligatures::LigatureCost;
 pub(crate) use ligatures::{

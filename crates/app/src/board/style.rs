@@ -80,22 +80,13 @@ pub(super) fn branch(ui: &mut egui::Ui, rect: egui::Rect, name: &str, theme: &Th
     job.wrap.max_rows = 1;
     job.wrap.break_anywhere = true;
     let galley = ui.painter().layout_job(job);
-    let x = rect.left() + 4.0;
-    let y = rect.center().y;
-    let stroke = egui::Stroke::new(1.0, ink);
-    ui.painter()
-        .line_segment([egui::pos2(x, y - 4.0), egui::pos2(x, y + 4.0)], stroke);
-    ui.painter().line_segment(
-        [egui::pos2(x, y + 2.0), egui::pos2(x + 5.0, y - 2.0)],
-        stroke,
+    crate::ui::icons::paint(
+        ui.painter(),
+        egui::pos2(rect.left() + 7.0, rect.center().y),
+        crate::ui::icons::Icon::Branch,
+        13.0,
+        ink,
     );
-    for point in [
-        egui::pos2(x, y - 5.0),
-        egui::pos2(x, y + 5.0),
-        egui::pos2(x + 6.0, y - 3.0),
-    ] {
-        ui.painter().circle_stroke(point, 1.5, stroke);
-    }
     ui.painter().galley(
         egui::pos2(rect.left() + 18.0, rect.center().y - galley.size().y / 2.0),
         galley,
@@ -107,16 +98,16 @@ pub(super) fn branch(ui: &mut egui::Ui, rect: egui::Rect, name: &str, theme: &Th
 
 pub(super) fn console_navigation(ui: &mut egui::Ui, width: f32, theme: &Theme) {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 20.0), egui::Sense::hover());
-    let c = rect.center();
-    let r = (width * 0.3).min(4.0);
-    let stroke = egui::Stroke::new(1.0, theme.focus());
-    for (a, b) in [
-        (c + egui::vec2(-r, r), c + egui::vec2(r, -r)),
-        (c + egui::vec2(0.0, -r), c + egui::vec2(r, -r)),
-        (c + egui::vec2(r, 0.0), c + egui::vec2(r, -r)),
-    ] {
-        ui.painter().line_segment([a, b], stroke);
-    }
+    // The square that keeps the arrow the eight points the drawn one reached, smaller in a narrower
+    // column.
+    let size = (width * 0.85).min(11.0);
+    crate::ui::icons::paint(
+        ui.painter(),
+        rect.center(),
+        crate::ui::icons::Icon::ArrowUpRight,
+        size,
+        theme.focus(),
+    );
     response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .on_hover_text("Go to console");

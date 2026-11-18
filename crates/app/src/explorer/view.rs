@@ -1,5 +1,5 @@
 use super::*;
-use crate::sidebar::paint_file_icon;
+use crate::ui::icons::{FileKind, Icon as Glyph};
 
 struct Row {
     entry: Entry,
@@ -56,36 +56,12 @@ fn icon_button(
     } else {
         roles.tx3
     };
-    let stroke = egui::Stroke::new(1.4, color);
-    let center = rect.center();
-    let painter = ui.painter();
-    match icon {
-        Icon::Search => {
-            crate::ui::icons::paint(painter, center, crate::ui::icons::Icon::Search, 13.0, color);
-        }
-        Icon::Refresh => {
-            crate::ui::icons::paint(
-                painter,
-                center,
-                crate::ui::icons::Icon::Refresh,
-                13.0,
-                color,
-            );
-        }
-        Icon::Collapse => {
-            for (top, sign) in [(-6.0, 1.0), (6.0, -1.0)] {
-                let tip = center + egui::vec2(0.0, top + sign * 4.0);
-                painter.add(egui::Shape::line(
-                    vec![
-                        tip + egui::vec2(-3.5, -sign * 3.0),
-                        tip,
-                        tip + egui::vec2(3.5, -sign * 3.0),
-                    ],
-                    stroke,
-                ));
-            }
-        }
-    }
+    let shown = match icon {
+        Icon::Search => crate::ui::icons::Icon::Search,
+        Icon::Refresh => crate::ui::icons::Icon::Refresh,
+        Icon::Collapse => crate::ui::icons::Icon::CollapseAll,
+    };
+    crate::ui::icons::paint(ui.painter(), rect.center(), shown, 13.0, color);
     #[cfg(test)]
     ui.ctx().data_mut(|data| {
         data.get_temp_mut_or_default::<Vec<(Icon, egui::Rect)>>(egui::Id::new("explorer-icons"))
@@ -283,6 +259,7 @@ pub(super) fn show(
             // from the text would leave the names unreadable (D98).
             let roles = crate::ui::style::roles(ui.ctx(), &theme);
             let surface = roles.panel_or(roles.tx, roles.base);
+            let grounds = crate::ui::icons::row_grounds(surface, roles.list_hover, roles.list_sel);
             ui.painter().rect_filled(rect, 0.0, surface);
             ui.painter().line_segment(
                 [rect.right_top(), rect.right_bottom()],
@@ -335,11 +312,12 @@ pub(super) fn show(
                 body.horizontal(|ui| {
                     let (icon, _) =
                         ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
-                    paint_file_icon(
+                    crate::ui::icons::paint(
                         ui.painter(),
-                        icon,
-                        true,
-                        egui::Stroke::new(1.0, roles.accent),
+                        icon.center(),
+                        Glyph::Folder { open: true },
+                        16.0,
+                        roles.accent,
                     );
                     let name = root
                         .file_name()
@@ -428,25 +406,17 @@ pub(super) fn show(
                         }
                         let indent = row.depth as f32 * 12.0;
                         let center_y = row_rect.center().y;
-                        if row.entry.kind == EntryKind::Directory {
-                            let expanded =
-                                state.navigation[&pane].expanded.contains(&row.entry.path);
-                            let center = egui::pos2(row_rect.left() + indent + 8.0, center_y);
-                            let points = if expanded {
-                                vec![
-                                    center + egui::vec2(-3.0, -1.5),
-                                    center + egui::vec2(0.0, 1.5),
-                                    center + egui::vec2(3.0, -1.5),
-                                ]
-                            } else {
-                                vec![
-                                    center + egui::vec2(-1.5, -3.0),
-                                    center + egui::vec2(1.5, 0.0),
-                                    center + egui::vec2(-1.5, 3.0),
-                                ]
-                            };
-                            ui.painter()
-                                .add(egui::Shape::line(points, egui::Stroke::new(1.2, roles.tx3)));
+                        let directory = row.entry.kind == EntryKind::Directory;
+                        let expanded =
+                            directory && state.navigation[&pane].expanded.contains(&row.entry.path);
+                        if directory {
+                            crate::ui::icons::paint(
+                                ui.painter(),
+                                egui::pos2(row_rect.left() + indent + 8.0, center_y),
+                                Glyph::Caret { open: expanded },
+                                12.0,
+                                roles.tx3,
+                            );
                             let toggle_rect = egui::Rect::from_min_size(
                                 egui::pos2(row_rect.left() + indent, row_rect.top()),
                                 egui::vec2(18.0, row_rect.height()),
@@ -466,16 +436,18 @@ pub(super) fn show(
                             egui::pos2(row_rect.left() + indent + 18.0, center_y - 8.0),
                             egui::vec2(16.0, 16.0),
                         );
-                        let icon_color = if row.entry.kind == EntryKind::Directory {
-                            roles.accent
+                        let (glyph, icon_color) = if directory {
+                            (Glyph::Folder { open: expanded }, roles.accent)
                         } else {
-                            roles.tx2
+                            let kind = FileKind::of(&row.entry.path);
+                            (Glyph::File(kind), kind.color(&theme, &roles, &grounds))
                         };
-                        paint_file_icon(
+                        crate::ui::icons::paint(
                             ui.painter(),
-                            icon_rect,
-                            row.entry.kind == EntryKind::Directory,
-                            egui::Stroke::new(1.0, icon_color),
+                            icon_rect.center(),
+                            glyph,
+                            16.0,
+                            icon_color,
                         );
                         let name =
                             display(Path::new(row.entry.path.file_name().unwrap_or_default()));
@@ -570,13 +542,13 @@ mod tests {
 
     #[test]
     fn header_icons_and_their_hover_use_the_effective_themes_roles() {
-        use egui::epaint::{ColorMode, Shape};
+        use egui::epaint::Shape;
         for named in [
             crate::theme::NamedTheme::GithubLightDefault,
             crate::theme::NamedTheme::TokyoNight,
         ] {
             let theme = named.theme();
-            let ctx = egui::Context::default();
+            let ctx = crate::ui::icons::installed_for_tests(1.0);
             let mut center = egui::Pos2::ZERO;
             for hover in [false, true] {
                 let events = if hover {
@@ -602,19 +574,13 @@ mod tests {
                 let strokes: Vec<_> = output
                     .shapes
                     .iter()
-                    .filter_map(|shape| match &shape.shape {
-                        Shape::Path(path) => Some(path.stroke.color.clone()),
-                        _ => None,
-                    })
+                    .filter_map(|shape| crate::ui::icons::painted_icon(&shape.shape))
+                    .map(|(_, color, _)| color)
                     .collect();
                 let roles = crate::theme::Roles::of(&theme);
                 let hover_fill = output.shapes.iter().any(|shape| matches!(&shape.shape, Shape::Rect(rect) if rect.rect.size() == egui::vec2(24.0, 24.0) && rect.fill == roles.hover));
                 output.drop_without_applying_deltas();
-                assert_eq!(
-                    strokes,
-                    vec![ColorMode::Solid(roles.tx2); 2],
-                    "{named:?}, hover={hover}"
-                );
+                assert_eq!(strokes, vec![roles.tx2], "{named:?}, hover={hover}");
                 if hover {
                     assert!(hover_fill, "hover did not paint the effective theme's fill");
                 }
@@ -818,5 +784,84 @@ mod tests {
                 output.drop_without_applying_deltas();
             }
         }
+    }
+
+    /// The tree shows what each row is: a folder closed or open with the caret that says which, and
+    /// a file by its type in its type's colour.
+    #[test]
+    fn tree_rows_show_folders_open_or_closed_and_files_by_type() {
+        use egui_phosphor::regular as glyph;
+        let theme = crate::theme::Theme::default();
+        let ctx = crate::ui::icons::installed_for_tests(1.0);
+        ctx.global_style_mut(|s| s.animation_time = 0.0);
+        let mut state = Explorer::default();
+        state.reconcile(&[(1, Some("/root".into()))]);
+        listing(
+            &mut state,
+            "/root",
+            vec![
+                entry("/root/src", EntryKind::Directory),
+                entry("/root/main.rs", EntryKind::File),
+                entry("/root/Cargo.lock", EntryKind::File),
+            ],
+        );
+        listing(&mut state, "/root/src", vec![]);
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 600.0));
+        // A surface's first pass only measures itself and paints nothing: the second is read.
+        let painted = |state: &mut Explorer| {
+            let pass = |state: &mut Explorer| {
+                ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(area),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        show(state, ui, area, Some(1), theme);
+                    },
+                )
+            };
+            pass(state).drop_without_applying_deltas();
+            let output = pass(state);
+            let icons: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|s| crate::ui::icons::painted_icon(&s.shape))
+                .map(|(g, color, _)| (g, color))
+                .collect();
+            output.drop_without_applying_deltas();
+            icons
+        };
+        let roles = crate::ui::style::roles(&ctx, &theme);
+        let has = |icons: &[(String, egui::Color32)], g: &str, color: egui::Color32| {
+            icons.iter().any(|(painted, c)| painted == g && *c == color)
+        };
+        let closed = painted(&mut state);
+        assert!(has(&closed, glyph::CARET_RIGHT, roles.tx3), "{closed:?}");
+        assert!(has(&closed, glyph::FOLDER, roles.accent), "{closed:?}");
+        assert!(!has(&closed, glyph::CARET_DOWN, roles.tx3));
+        let red = theme.color(term_core::TermColor::Indexed(1));
+        assert!(has(&closed, glyph::FILE_RS, red), "{closed:?}");
+        assert!(
+            closed.iter().any(|(g, _)| g == glyph::FILE_LOCK),
+            "{closed:?}"
+        );
+        state
+            .navigation
+            .get_mut(&1)
+            .unwrap()
+            .expanded
+            .insert("/root/src".into());
+        let open = painted(&mut state);
+        assert!(has(&open, glyph::CARET_DOWN, roles.tx3), "{open:?}");
+        assert!(!has(&open, glyph::CARET_RIGHT, roles.tx3), "{open:?}");
+        // The root row's open folder is there in both passes; the tree's own folder now opens too.
+        let opened = |icons: &[(String, egui::Color32)]| {
+            icons
+                .iter()
+                .filter(|(g, _)| g == glyph::FOLDER_OPEN)
+                .count()
+        };
+        assert_eq!(opened(&open), opened(&closed) + 1);
+        assert!(!has(&open, glyph::FOLDER, roles.accent), "{open:?}");
     }
 }

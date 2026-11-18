@@ -10,7 +10,7 @@ use super::{CLOSE_MIN_WIDTH, feedback};
 use crate::Window;
 use crate::theme::{Roles, Theme, metrics};
 use crate::tree::Tab;
-use eframe::egui::{self, Color32, CornerRadius, Rect, Stroke, pos2, vec2};
+use eframe::egui::{self, Color32, CornerRadius, Rect, Stroke, pos2};
 use panel_contract::Attention;
 use std::time::SystemTime;
 
@@ -270,19 +270,6 @@ fn feedback_fill(ui: &egui::Ui, id: egui::Id, roles: &Roles) -> (Option<Color32>
     (fill, held)
 }
 
-fn cross(painter: &egui::Painter, center: egui::Pos2, half: f32, color: Color32) {
-    let stroke = Stroke::new(1.2, color);
-    for (a, b) in [((-1.0, -1.0), (1.0, 1.0)), ((1.0, -1.0), (-1.0, 1.0))] {
-        painter.line_segment(
-            [
-                center + vec2(a.0, a.1) * half,
-                center + vec2(b.0, b.1) * half,
-            ],
-            stroke,
-        );
-    }
-}
-
 /// A card's label as it fits in its room.
 enum Fitted {
     /// Painted as it is, braille spinners included.
@@ -459,7 +446,14 @@ pub(super) fn paint(window: &Window, ui: &egui::Ui, band: Rect, now: SystemTime)
             } else {
                 roles.tx3
             };
-            cross(&painter, close.center(), 3.5, ink);
+            // The square that keeps the cross the seven points across the drawn one was.
+            crate::ui::icons::paint(
+                &painter,
+                close.center(),
+                crate::ui::icons::Icon::Close,
+                11.0,
+                ink,
+            );
         }
     }
     if let Some(add) = add_target(band, count) {
@@ -471,10 +465,14 @@ pub(super) fn paint(window: &Window, ui: &egui::Ui, band: Rect, now: SystemTime)
                 fill,
             );
         }
-        let stroke = Stroke::new(1.3, roles.tx3);
-        let c = add.center();
-        painter.line_segment([c - vec2(5.0, 0.0), c + vec2(5.0, 0.0)], stroke);
-        painter.line_segment([c - vec2(0.0, 5.0), c + vec2(0.0, 5.0)], stroke);
+        // The square that keeps the plus the ten points across the drawn one was.
+        crate::ui::icons::paint(
+            &painter,
+            add.center(),
+            crate::ui::icons::Icon::Plus,
+            13.0,
+            roles.tx3,
+        );
     }
     marked
 }
@@ -482,6 +480,7 @@ pub(super) fn paint(window: &Window, ui: &egui::Ui, band: Rect, now: SystemTime)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use eframe::egui::vec2;
 
     #[test]
     fn cards_the_add_button_and_their_contents_stay_disjoint_at_every_width() {

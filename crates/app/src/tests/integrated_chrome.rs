@@ -329,32 +329,18 @@ mod tests {
                 if button.expand(4.0).contains(c.center) && c.radius == 3.0)),
             "the connect button still carries a dot"
         );
-        // Match the connector's central diagonal, not any neutral path in the button.
-        // Chrome paints a base icon before after_panels repaints it, so only the last
-        // matching stroke is the visible result; the earlier one can be covered by amber.
-        let center = connection_button(area);
-        let expected = [
-            center + egui::vec2(-1.875, 1.875),
-            center + egui::vec2(1.875, -1.875),
-        ];
-        let stroke = shapes
+        // Chrome paints a base icon before after_panels repaints it, so only the last icon painted
+        // in the button is the visible one; the earlier one can be covered by amber.
+        let ink = shapes
             .iter()
             .rev()
-            .find_map(|shape| match &shape.shape {
-                egui::Shape::Path(path)
-                    if path.points.len() == 2
-                        && path
-                            .points
-                            .iter()
-                            .zip(expected)
-                            .all(|(a, b)| a.distance(b) < 0.01) =>
-                {
-                    Some(&path.stroke.color)
-                }
-                _ => None,
+            .filter_map(|shape| crate::ui::icons::painted_icon(&shape.shape))
+            .find(|(glyph, _, square)| {
+                glyph == egui_phosphor::regular::PLUGS_CONNECTED && button.contains(square.center())
             })
-            .expect("the connector's visible central stroke must be painted");
-        *stroke == egui::epaint::ColorMode::Solid(neutral)
+            .map(|(_, color, _)| color)
+            .expect("the connector's visible icon must be painted");
+        ink == neutral
     }
 
     fn open_connection_guide(
@@ -372,6 +358,7 @@ mod tests {
     fn connection_guide_opens_from_wide_and_compact_title_bars_and_close_is_reachable() {
         for width in [1400.0, 240.0] {
             let ctx = egui::Context::default();
+            crate::fonts::install_icons_only(&ctx);
             chrome::prepare(&ctx);
             let mut window = window_with("sleep 30", "sleep 30");
             window.chrome.enable();
@@ -390,12 +377,9 @@ mod tests {
             let heading = text_center(&shapes, "Connect agents");
             let close = shapes
                 .iter()
-                .filter_map(|s| match &s.shape {
-                    egui::Shape::Text(t) if t.galley.text() == "×" => {
-                        Some(t.pos + t.galley.size() / 2.0)
-                    }
-                    _ => None,
-                })
+                .filter_map(|s| crate::ui::icons::painted_icon(&s.shape))
+                .filter(|(glyph, _, _)| glyph == egui_phosphor::regular::X)
+                .map(|(_, _, square)| square.center())
                 .min_by(|a, b| (a.y - heading.y).abs().total_cmp(&(b.y - heading.y).abs()))
                 .expect("guide has a close icon");
             assert!(area.contains(close), "guide close control left the window");
@@ -417,6 +401,7 @@ mod tests {
     fn neutral_connection_icon_and_guide_observe_file_publication_even_in_a_background_tab() {
         for tab in [0, 1] {
             let ctx = egui::Context::default();
+            crate::fonts::install_icons_only(&ctx);
             ctx.global_style_mut(|style| style.animation_time = 0.0);
             let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
             window.chrome.enable();
@@ -468,6 +453,7 @@ mod tests {
     #[test]
     fn connection_icon_stays_neutral_through_publication_and_retirement() {
         let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
         let mut window = window_with("sleep 30", "sleep 30");
         window.chrome.enable();
         window.headers = window.headers.integrated(true);
@@ -981,14 +967,17 @@ mod tests {
         )
     }
 
-    /// Strokes of icons and rules painted inside `cells`.
+    /// Icons and rules painted inside `cells`. Icons are glyphs since D103, and a context without
+    /// the icon family paints none, so a test counting them must install it
+    /// (`crate::fonts::install_icons_only`) or a zero here proves nothing.
     fn strokes_in(shapes: &[egui::epaint::ClippedShape], cells: egui::Rect) -> usize {
         shapes
             .iter()
             .filter(|s| match &s.shape {
                 egui::Shape::Path(path) => path.points.first().is_some_and(|p| cells.contains(*p)),
                 egui::Shape::LineSegment { points, .. } => cells.contains(points[0]),
-                _ => false,
+                shape => crate::ui::icons::painted_icon(shape)
+                    .is_some_and(|(_, _, square)| cells.contains(square.center())),
             })
             .count()
     }
@@ -1051,6 +1040,7 @@ mod tests {
     #[test]
     fn an_unfocused_header_shows_its_controls_only_under_the_pointer() {
         let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
         let mut window = integrated_pair();
         let area = tall_area();
         frame(&mut window, &ctx, area, vec![]);
@@ -1069,7 +1059,7 @@ mod tests {
             strokes_in(&away, focused_cells) > 0,
             "the focused console hid its controls"
         );
-        // The icons are paths and the two rules between the three groups are the only segments, in
+        // The icons are glyphs and the two rules between the three groups are the only segments, in
         // the ink of the title's own separator — muted text, not the border role the owner found
         // barely visible on the desktop.
         let roles = crate::ui::style::roles(&ctx, &window.theme);
@@ -1141,6 +1131,7 @@ mod tests {
             ("painted in the previous pass", 1, true),
         ] {
             let ctx = egui::Context::default();
+            crate::fonts::install_icons_only(&ctx);
             let mut window = integrated_pair();
             let area = tall_area();
             frame(&mut window, &ctx, area, vec![]);
@@ -1262,6 +1253,7 @@ mod tests {
     #[test]
     fn a_split_that_cannot_fit_is_not_offered_and_a_maximized_console_offers_none() {
         let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
         let mut window = integrated_pair();
         let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 200.0));
         frame(&mut window, &ctx, area, vec![]);
@@ -1302,6 +1294,7 @@ mod tests {
         );
 
         let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
         let mut window = integrated_pair();
         let area = tall_area();
         frame(&mut window, &ctx, area, vec![]);
@@ -3257,23 +3250,18 @@ mod tests {
         tab_bar::title_card(band, which, window.tabs.len())
     }
 
-    /// The colours of a tab cross's strokes inside `close`: the 1.2-point segments the tab paints.
+    /// The colours of the tab crosses painted inside `close`.
     fn cross_strokes(
         shapes: &[egui::epaint::ClippedShape],
         close: egui::Rect,
     ) -> Vec<egui::Color32> {
         shapes
             .iter()
-            .filter_map(|s| match &s.shape {
-                egui::Shape::LineSegment { points, stroke }
-                    if stroke.width == 1.2
-                        && close.contains(points[0])
-                        && close.contains(points[1]) =>
-                {
-                    Some(stroke.color)
-                }
-                _ => None,
+            .filter_map(|s| crate::ui::icons::painted_icon(&s.shape))
+            .filter(|(glyph, _, square)| {
+                glyph == egui_phosphor::regular::X && close.contains(square.center())
             })
+            .map(|(_, color, _)| color)
             .collect()
     }
 
@@ -3285,6 +3273,7 @@ mod tests {
         let tx3 = egui::Color32::from_rgb(0x8e, 0x93, 0x90);
         let tx = egui::Color32::from_rgb(0xe4, 0xe8, 0xe2);
         let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
         window.chrome.enable();
         window.headers = window.headers.integrated(true);

@@ -487,8 +487,8 @@ fn paint(ui: &egui::Ui, strip: egui::Rect, theme: &Theme, appearance: Appearance
     }
 }
 
-/// The kit's 16-unit icons (`Window.dc.html`) in a `size`-point box: the branch for the review,
-/// diagonal arrows to maximize and back, and the cross.
+/// The header's icons from the interface's set (D103) in a `size`-point square: the splits, the
+/// branch for the review, the panel, diagonal arrows to maximize and back, and the cross.
 pub(crate) fn paint_icon(
     painter: &egui::Painter,
     center: egui::Pos2,
@@ -553,48 +553,57 @@ mod tests {
     }
 
     #[test]
-    fn pane_icons_match_the_prototype_paths_and_have_no_overflow_control() {
-        let ctx = egui::Context::default();
-        let out = ctx.run_ui(Default::default(), |ui| {
-            paint_icon(
-                ui.painter(),
-                egui::pos2(30.0, 30.0),
-                Target::Close,
+    fn pane_icons_are_the_set_s_glyphs_and_have_no_overflow_control() {
+        let ctx = crate::ui::icons::installed_for_tests(1.0);
+        let painted = [
+            (Target::Close, false, egui_phosphor::regular::X),
+            (
+                Target::Zoom,
                 false,
-                egui::Color32::WHITE,
-                13.0,
-            );
-            let targets = targets(
-                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 33.0)),
-                &CellMetrics::of(8.0, 16.0),
-                true,
-            );
-            assert_eq!(
-                targets.iter().map(|(t, _)| *t as u8).collect::<Vec<_>>(),
-                vec![
-                    Target::Label as u8,
-                    Target::Review as u8,
-                    Target::Panel as u8,
-                    Target::Zoom as u8,
-                    Target::Close as u8
-                ]
-            );
-        });
-        // The kit's cross: two strokes 8 of its 16 units across, 1.5 units wide.
-        let lines: Vec<_> = out
-            .shapes
-            .iter()
-            .filter_map(|s| match &s.shape {
-                egui::Shape::Path(path) => Some(path),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(lines.len(), 2);
-        for path in lines {
-            assert!(((path.points[1].x - path.points[0].x).abs() - 6.5).abs() < 0.001);
-            assert!((path.stroke.width - 13.0 * 1.5 / 16.0).abs() < 0.001);
+                egui_phosphor::regular::ARROWS_OUT_SIMPLE,
+            ),
+            (Target::Zoom, true, egui_phosphor::regular::ARROWS_IN_SIMPLE),
+            (Target::Review, false, egui_phosphor::regular::GIT_BRANCH),
+            (Target::Panel, false, egui_phosphor::regular::SIDEBAR_SIMPLE),
+        ];
+        for (target, zoomed, glyph) in painted {
+            let out = ctx.run_ui(Default::default(), |ui| {
+                paint_icon(
+                    ui.painter(),
+                    egui::pos2(30.0, 30.0),
+                    target,
+                    zoomed,
+                    egui::Color32::WHITE,
+                    13.0,
+                );
+            });
+            let texts: Vec<_> = out
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(texts, vec![glyph.to_owned()], "{target:?} zoomed {zoomed}");
+            assert_eq!(out.shapes.len(), 1, "{target:?}: nothing drawn by hand");
+            out.drop_without_applying_deltas();
         }
-        out.drop_without_applying_deltas();
+        let targets = targets(
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 33.0)),
+            &CellMetrics::of(8.0, 16.0),
+            true,
+        );
+        assert_eq!(
+            targets.iter().map(|(t, _)| *t as u8).collect::<Vec<_>>(),
+            vec![
+                Target::Label as u8,
+                Target::Review as u8,
+                Target::Panel as u8,
+                Target::Zoom as u8,
+                Target::Close as u8
+            ]
+        );
     }
 
     #[test]
@@ -895,7 +904,7 @@ mod tests {
         let review = targets(strip, &metrics, true)[1].1;
         let close = targets(strip, &metrics, true)[4].1;
         for backed in [true, false] {
-            let ctx = egui::Context::default();
+            let ctx = crate::ui::icons::installed_for_tests(1.0);
             let run = |events| {
                 ctx.run_ui(
                     egui::RawInput {
@@ -928,15 +937,9 @@ mod tests {
             let reached_close: Vec<_> = reached
                 .shapes
                 .iter()
-                .filter_map(|s| match &s.shape {
-                    egui::Shape::Path(path) if close.contains(path.points[0]) => {
-                        match path.stroke.color {
-                            egui::epaint::ColorMode::Solid(color) => Some(color),
-                            _ => None,
-                        }
-                    }
-                    _ => None,
-                })
+                .filter_map(|s| crate::ui::icons::painted_icon(&s.shape))
+                .filter(|(_, _, square)| close.contains(square.center()))
+                .map(|(_, color, _)| color)
                 .collect();
             assert!(
                 !reached_close.is_empty() && reached_close.iter().all(|c| *c == rgb(0xe4e8e2)),
@@ -957,15 +960,9 @@ mod tests {
             let strokes_in = |rect: egui::Rect| -> Vec<egui::Color32> {
                 out.shapes
                     .iter()
-                    .filter_map(|s| match &s.shape {
-                        egui::Shape::Path(path) if rect.contains(path.points[0]) => {
-                            match path.stroke.color {
-                                egui::epaint::ColorMode::Solid(color) => Some(color),
-                                _ => None,
-                            }
-                        }
-                        _ => None,
-                    })
+                    .filter_map(|s| crate::ui::icons::painted_icon(&s.shape))
+                    .filter(|(_, _, square)| rect.contains(square.center()))
+                    .map(|(_, color, _)| color)
                     .collect()
             };
             let hovered = strokes_in(review);

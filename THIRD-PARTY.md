@@ -38,6 +38,12 @@ distributed under the [SIL Open Font License 1.1](resources/fonts/Geist-OFL.txt)
 unmodified from the `geist` 1.9.2 package and embedded in the binary as Ivy's interface and default
 terminal fonts (D95).
 
+## Interface icons
+
+The Phosphor icon font (Phosphor Regular), by Phosphor Icons, is embedded in the binary through the
+`egui-phosphor` 0.14.0 crate and draws every interface icon (D103). Both are under the MIT License;
+their notices are kept in [Phosphor-MIT.txt](resources/fonts/Phosphor-MIT.txt).
+
 ## Test font
 
 `crates/app/tests/fixtures/ligatures/JetBrainsMono-Regular.ttf` is distributed under the

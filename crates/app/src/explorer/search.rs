@@ -133,6 +133,8 @@ pub(super) fn show(
     let screen = ctx.content_rect();
     let rect = place(files, screen, found.entries.len().max(1));
     let roles = crate::ui::style::roles(ctx, theme);
+    // The surfaces under an entry's icon: the floating list, and its hovered and chosen rows.
+    let grounds = crate::ui::icons::row_grounds(roles.raised, roles.hover, roles.sel);
     let root = state.navigation[&pane].root.clone().unwrap_or_default();
     let query = state.navigation[&pane].query.trim().to_lowercase();
     let mut pick = None;
@@ -167,8 +169,13 @@ pub(super) fn show(
                                 for index in range {
                                     let entry = &found.entries[index];
                                     let chosen = index == state.search_index;
-                                    let (choice, response) =
-                                        row(ui, entry, (&root, &query), chosen, &roles);
+                                    let (choice, response) = row(
+                                        ui,
+                                        entry,
+                                        (&root, &query),
+                                        chosen,
+                                        (theme, &roles, &grounds),
+                                    );
                                     if chosen && scroll {
                                         response.scroll_to_me(None);
                                     }
@@ -331,9 +338,13 @@ fn row(
     entry: &Entry,
     (root, query): (&Path, &str),
     chosen: bool,
-    roles: &crate::theme::Roles,
+    (theme, roles, grounds): (
+        &crate::theme::Theme,
+        &crate::theme::Roles,
+        &[egui::Color32; 3],
+    ),
 ) -> (Option<Pick>, egui::Response) {
-    use crate::ui::icons::{Icon, paint};
+    use crate::ui::icons::{FileKind, Icon, legible_or, paint};
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW), egui::Sense::click());
     if chosen {
@@ -343,13 +354,18 @@ fn row(
     }
     let directory = entry.kind == EntryKind::Directory;
     let icon = egui::pos2(rect.left() + 8.0 + 7.0, rect.center().y);
-    paint(
-        ui.painter(),
-        icon,
-        if directory { Icon::Folder } else { Icon::File },
-        14.0,
-        roles.tx2,
-    );
+    // The tree's glyph and colour rule, judged on this list's own surfaces; a folder is shown
+    // closed, and its accent falls back like a file's colour where it would not read.
+    let (glyph, color) = if directory {
+        (
+            Icon::Folder { open: false },
+            legible_or(roles.accent, grounds, roles.tx2),
+        )
+    } else {
+        let kind = FileKind::of(&entry.path);
+        (Icon::File(kind), kind.color(theme, roles, grounds))
+    };
+    paint(ui.painter(), icon, glyph, 14.0, color);
     let name = display(Path::new(entry.path.file_name().unwrap_or_default()));
     let folder = entry
         .path

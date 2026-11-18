@@ -132,6 +132,12 @@ harfrust = "0.12"
 # how many lines the manifest has.
 image = { version = "0.25", default-features = false, features = ["png"] }
 
+# The interface's icons: Phosphor Regular and its codepoints (D103). Only the face and the constants
+# are used — never `add_to_fonts`, which puts the face in the proportional chain where its blank
+# lowercase letters and its private-use codepoints would meet the interface's and the terminal's text. Pinned
+# exactly: a release that renumbers a glyph changes what the chrome shows without a compile error.
+egui-phosphor = { version = "=0.14.0", default-features = false, features = ["regular"] }
+
 # Clipboard reads run away from the UI; normal Copy keeps egui's existing writer.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 arboard = { version = "3.6.1", default-features = false }

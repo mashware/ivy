@@ -714,6 +714,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
     ),
     ("src/ui/icons.rs", include_str!("../src/ui/icons.rs"), 0),
     (
+        "src/ui/icons/file_kind.rs",
+        include_str!("../src/ui/icons/file_kind.rs"),
+        0,
+    ),
+    (
         "src/tab_bar/title.rs",
         include_str!("../src/tab_bar/title.rs"),
         20,

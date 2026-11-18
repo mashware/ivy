@@ -467,6 +467,7 @@ mod tests {
     #[test]
     fn toolbar_icons_are_painted_and_unavailable_actions_are_dimmed() {
         let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
         let mut window = window_with("sleep 30", "sleep 30");
         let area = area_of(480.0);
         let metrics = warmed(&mut window, &ctx, area);
@@ -481,10 +482,53 @@ mod tests {
                 .targets()
                 .find_map(|(hit, rect)| (hit == Hit::Action(action)).then_some(rect))
                 .unwrap();
-            assert!(shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(icon) if rect.contains_rect(icon.rect) && icon.stroke.color == color && icon.stroke.width > 0.0)), "the visible {action:?} icon is missing or has the wrong availability ink");
-            if action != Action::TogglePanel {
-                assert!(shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::LineSegment {points, stroke} if rect.contains(points[0]) && rect.contains(points[1]) && stroke.color == color && if action == Action::SplitRight { points[0].x == points[1].x && points[0].y != points[1].y } else { points[0].y == points[1].y && points[0].x != points[1].x })), "the painted split direction is wrong");
+            let glyph = match action {
+                Action::SplitRight => egui_phosphor::regular::SQUARE_SPLIT_HORIZONTAL,
+                Action::SplitDown => egui_phosphor::regular::SQUARE_SPLIT_VERTICAL,
+                Action::TogglePanel if window.active().panes()[1].folded => {
+                    egui_phosphor::regular::SIDEBAR_SIMPLE
+                }
+                Action::TogglePanel => egui_phosphor::regular::SQUARE_HALF,
+            };
+            assert!(
+                shapes
+                    .iter()
+                    .filter_map(|shape| crate::ui::icons::painted_icon(&shape.shape))
+                    .any(|(painted, ink, square)| painted == glyph
+                        && ink == color
+                        && rect.contains(square.center())),
+                "the visible {action:?} icon is missing or has the wrong availability ink"
+            );
+        }
+        // Folding the panel changes the toggle's drawing, and unfolding it changes it back.
+        let toggle = targets(&window, area, 1, &metrics)
+            .targets()
+            .find_map(|(hit, rect)| (hit == Hit::Action(Action::TogglePanel)).then_some(rect))
+            .unwrap();
+        let toggle_glyph = |shapes: &[egui::epaint::ClippedShape]| {
+            shapes
+                .iter()
+                .filter_map(|shape| crate::ui::icons::painted_icon(&shape.shape))
+                .find(|(_, _, square)| toggle.contains(square.center()))
+                .map(|(glyph, _, _)| glyph)
+        };
+        let glyph_for = |folded: bool| {
+            if folded {
+                egui_phosphor::regular::SIDEBAR_SIMPLE.to_owned()
+            } else {
+                egui_phosphor::regular::SQUARE_HALF.to_owned()
             }
+        };
+        let folded = window.active().panes()[1].folded;
+        assert_eq!(toggle_glyph(&shapes), Some(glyph_for(folded)));
+        for state in [!folded, folded] {
+            window.active_mut().panes_mut()[1].folded = state;
+            let painted = ui_pass(&mut window, &ctx, area, egui::RawInput::default());
+            assert_eq!(
+                toggle_glyph(&painted),
+                Some(glyph_for(state)),
+                "folded={state}: the toggle does not show the panel's state"
+            );
         }
     }
 

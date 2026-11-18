@@ -161,23 +161,16 @@ impl Editor {
             } else {
                 egui::Color32::from_rgb(153, 163, 182)
             };
-            let radius = (gear.width().min(gear.height()) * 0.24).min(8.0);
-            let stroke = egui::Stroke::new(1.6, ink);
-            painter.circle_stroke(gear.center(), radius * 0.7, stroke);
-            painter.circle_stroke(gear.center(), radius * 0.26, stroke);
-            for tooth in 0..8 {
-                let direction = egui::vec2(
-                    (tooth as f32 * std::f32::consts::TAU / 8.0).cos(),
-                    (tooth as f32 * std::f32::consts::TAU / 8.0).sin(),
-                );
-                painter.line_segment(
-                    [
-                        gear.center() + direction * radius * 0.7,
-                        gear.center() + direction * radius,
-                    ],
-                    stroke,
-                );
-            }
+            // A square of 0.55 of the shorter side, eighteen points at most: the size at which the
+            // gear read as the drawn one did at the desktop check.
+            let size = (gear.width().min(gear.height()) * 0.55).min(18.0);
+            crate::ui::icons::paint(
+                &painter,
+                gear.center(),
+                crate::ui::icons::Icon::Gear,
+                size,
+                ink,
+            );
         }
         self.timing.record_work(0, started.elapsed());
         if opening {
