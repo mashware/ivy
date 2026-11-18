@@ -484,6 +484,86 @@ mod tests {
     }
 
     #[test]
+    fn a_match_on_the_top_row_but_clear_of_the_box_leaves_it_at_the_top() {
+        let mut screen = Screen::new(Size { rows: ROWS, cols: 80 });
+        screen.advance(b"needle");
+        let mut search = Search::literal("needle", Options::default()).unwrap();
+        assert_eq!(
+            screen.find(&mut search, Toward::Older, 0),
+            term_core::Found::Match
+        );
+        let layout = layout(console(), &metrics(), &screen.view(), false, &[]);
+        assert_eq!(layout.frame.top(), console().top() + MARGIN);
+    }
+
+    #[test]
+    fn a_notice_at_the_top_sends_the_box_to_the_bottom() {
+        let screen = Screen::new(Size { rows: ROWS, cols: 80 });
+        let notice = Rect::from_min_size(console().min, vec2(console().width(), 60.0));
+        let layout = layout(console(), &metrics(), &screen.view(), false, &[notice]);
+        assert!(
+            !layout.frame.intersects(notice),
+            "the box covers the notice: {layout:?}"
+        );
+        let beside = Rect::from_min_size(console().min, vec2(100.0, 60.0));
+        let layout = layout_with(&screen, &[beside]);
+        assert_eq!(
+            layout.frame.top(),
+            console().top() + MARGIN,
+            "a notice clear of the box moved it"
+        );
+    }
+
+    fn layout_with(screen: &Screen, notices: &[Rect]) -> Layout {
+        layout(console(), &metrics(), &screen.view(), false, notices)
+    }
+
+    #[test]
+    fn on_a_short_console_every_part_stays_inside_it() {
+        let short = Rect::from_min_size(pos2(100.0, 50.0), vec2(800.0, 60.0));
+        let screen = Screen::new(Size { rows: 3, cols: 80 });
+        for covered in [false, true] {
+            let notices = if covered { vec![short] } else { Vec::new() };
+            let layout = layout(short, &metrics(), &screen.view(), true, &notices);
+            assert!(short.contains_rect(layout.frame), "{layout:?}");
+            let list = layout.list.expect("the list is laid out");
+            assert!(short.contains_rect(list), "the list left its console: {list:?}");
+            for (target, rect) in &layout.targets {
+                assert!(short.contains_rect(*rect), "{target:?} outside the console: {rect:?}");
+            }
+            assert!(
+                layout
+                    .targets
+                    .iter()
+                    .any(|(target, _)| matches!(target, Target::Choice(_))),
+                "the options were dropped instead of moved inside"
+            );
+        }
+    }
+
+    #[test]
+    fn each_option_reads_and_shows_its_own_choice() {
+        let labels: Vec<&str> = Choice::ALL.iter().map(|choice| choice.label()).collect();
+        assert_eq!(labels, vec!["Match case", "Whole word only", "Wrap around"]);
+        for choice in Choice::ALL {
+            let mut options = Options {
+                match_case: false,
+                whole_word: false,
+                wrap: false,
+            };
+            choice.flip(&mut options);
+            for other in Choice::ALL {
+                assert_eq!(
+                    other.is_on(options),
+                    other == choice,
+                    "flipping {choice:?} showed {other:?} as {}",
+                    other.is_on(options)
+                );
+            }
+        }
+    }
+
+    #[test]
     fn the_buttons_ask_what_their_keys_ask() {
         assert_eq!(Target::Next.step(), Some(Step::Go(Toward::Older)));
         assert_eq!(Target::Previous.step(), Some(Step::Go(Toward::Newer)));

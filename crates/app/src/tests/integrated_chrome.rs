@@ -3927,4 +3927,74 @@ mod tests {
             "the premise: the same press on the console opens its menu"
         );
     }
+
+    /// AC6, AC7 at window level: a press on a box that is not the focused console's acts on that
+    /// console — the step moves its match, the keys follow — and a press on the field leaves the
+    /// match where it was. The box's surface is painted where its presses are judged.
+    #[test]
+    fn a_press_on_an_unfocused_console_s_box_acts_on_that_console() {
+        use search::floating::Target;
+        let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
+        let mut window = integrated_pair();
+        let area = tall_area();
+        frame(&mut window, &ctx, area, vec![]);
+        let names = names_in_order(&window);
+        window
+            .pane_called(names[0])
+            .unwrap()
+            .screen
+            .advance(b"one needle\r\ntwo needle\r\n");
+        let at = control(&window, &ctx, area, 0, 112.5);
+        frame(&mut window, &ctx, area, click_at(at));
+        frame(&mut window, &ctx, area, vec![egui::Event::Text("needle".into())]);
+        let shapes = frame(&mut window, &ctx, area, vec![]);
+        let painted = pane_of(&window, names[0])
+            .search
+            .open
+            .as_ref()
+            .unwrap()
+            .painted
+            .clone()
+            .unwrap();
+        let raised = crate::ui::style::roles(&ctx, &window.theme).raised;
+        let mut surfaces = Vec::new();
+        for clipped in &shapes {
+            if let egui::Shape::Rect(rect) = &clipped.shape {
+                surfaces.push((rect.rect, rect.fill));
+            }
+        }
+        assert!(
+            surfaces
+                .iter()
+                .any(|(rect, fill)| *rect == painted.layout.frame && *fill == raised),
+            "no surface was painted where the box takes its presses"
+        );
+
+        let selected_row = |window: &Window| {
+            let view = pane_of(window, names[0]).screen.view();
+            let cols = usize::from(view.size().cols);
+            view.cells()
+                .chunks_exact(cols)
+                .position(|row| row.iter().any(|cell| cell.selected))
+        };
+        window.active_mut().focus = names[1];
+        frame(&mut window, &ctx, area, vec![]);
+        let at = search_target(&window, 0, Target::Next);
+        frame(&mut window, &ctx, area, click_at(at));
+        let first = selected_row(&window).expect("next selected a match on its own console");
+        assert_eq!(window.active().focus, names[0], "the keys stayed on the other console");
+        assert!(!pane_of(&window, names[1]).search.is_open());
+
+        window.active_mut().focus = names[1];
+        frame(&mut window, &ctx, area, vec![]);
+        let at = search_target(&window, 0, Target::Field);
+        frame(&mut window, &ctx, area, click_at(at));
+        assert_eq!(window.active().focus, names[0]);
+        assert_eq!(
+            selected_row(&window),
+            Some(first),
+            "a press on the field moved or cleared the match"
+        );
+    }
 }
