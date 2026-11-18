@@ -3060,23 +3060,18 @@ mod tests {
         tab_bar::title_card(band, which, window.tabs.len())
     }
 
-    /// The colours of a tab cross's strokes inside `close`: the 1.2-point segments the tab paints.
+    /// The colours of the tab crosses painted inside `close`.
     fn cross_strokes(
         shapes: &[egui::epaint::ClippedShape],
         close: egui::Rect,
     ) -> Vec<egui::Color32> {
         shapes
             .iter()
-            .filter_map(|s| match &s.shape {
-                egui::Shape::LineSegment { points, stroke }
-                    if stroke.width == 1.2
-                        && close.contains(points[0])
-                        && close.contains(points[1]) =>
-                {
-                    Some(stroke.color)
-                }
-                _ => None,
+            .filter_map(|s| crate::ui::icons::painted_icon(&s.shape))
+            .filter(|(glyph, _, square)| {
+                glyph == egui_phosphor::regular::X && close.contains(square.center())
             })
+            .map(|(_, color, _)| color)
             .collect()
     }
 
@@ -3088,6 +3083,7 @@ mod tests {
         let tx3 = egui::Color32::from_rgb(0x8e, 0x93, 0x90);
         let tx = egui::Color32::from_rgb(0xe4, 0xe8, 0xe2);
         let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
         window.chrome.enable();
         window.headers = window.headers.integrated(true);

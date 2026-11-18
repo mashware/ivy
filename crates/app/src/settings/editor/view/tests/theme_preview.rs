@@ -351,6 +351,7 @@ fn the_theme_picker_samples_each_theme_and_filters_by_darkness() {
         ..Default::default()
     };
     let ctx = egui::Context::default();
+    crate::fonts::install_icons_only(&ctx);
     let size = egui::vec2(1100.0, 850.0);
     click_label(&mut editor, &ctx, "Change");
     let (text, shapes) = scene(&mut editor, &ctx, size, vec![]);
@@ -398,15 +399,11 @@ fn the_theme_picker_samples_each_theme_and_filters_by_darkness() {
     // The selected theme, and only it, carries the accent check at the right of its row.
     let checks: Vec<_> = shapes
         .iter()
-        .filter_map(|s| match &s.shape {
-            egui::Shape::Path(path)
-                if path.stroke.color == egui::epaint::ColorMode::Solid(rgb(0x3cc384))
-                    && path.points.len() == 3 =>
-            {
-                Some(path.points[0])
-            }
-            _ => None,
+        .filter_map(|s| crate::ui::icons::painted_icon(&s.shape))
+        .filter(|(glyph, color, _)| {
+            glyph == egui_phosphor::regular::CHECK && *color == rgb(0x3cc384)
         })
+        .map(|(_, _, square)| square.center())
         .collect();
     // `theme=ivy-night` selects the named row, not the «(default)» one that stands for no theme.
     let selected = rows.iter().find(|(s, _)| s == "Ivy Night").unwrap().1;

@@ -12862,6 +12862,7 @@ mod tests {
         // removing the cross left the whole suite green. What that ships is a destructive surface
         // nobody can see — two cells of a strip that end a program when pressed and say nothing.
         let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
         let area = area_of_cells(200.0);
         let shapes = ui_pass(&mut window, &ctx, area, egui::RawInput::default());
@@ -12875,17 +12876,15 @@ mod tests {
             .clone();
         let button = close_button_of(&window, &rects, 0, &metrics);
 
-        let strokes = shapes
+        let crosses = shapes
             .iter()
-            .filter(|clipped| match &clipped.shape {
-                egui::Shape::LineSegment { points, .. } => {
-                    points.iter().all(|point| button.contains(*point))
-                }
-                _ => false,
+            .filter_map(|clipped| crate::ui::icons::painted_icon(&clipped.shape))
+            .filter(|(glyph, _, square)| {
+                glyph == egui_phosphor::regular::X && button.contains(square.center())
             })
             .count();
         assert_eq!(
-            strokes, 2,
+            crosses, 1,
             "the button answers presses and paints no cross, so it is a couple of cells that end a \
              program with nothing on screen to say so"
         );

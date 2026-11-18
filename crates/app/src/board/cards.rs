@@ -465,6 +465,9 @@ mod tests {
             "[DEMO] A much longer title that must be truncated within the card",
         ] {
             let ctx = egui::Context::default();
+            crate::fonts::install_icons_only(&ctx);
+            ctx.run_ui(egui::RawInput::default(), |_| {})
+                .drop_without_applying_deltas();
             let entry = Entry {
                 pane: 1, console_label:"Console".into(), tab_label:"Tab".into(),
                 snapshot: crate::panel::summary::Snapshot {
@@ -518,15 +521,12 @@ mod tests {
             let navigation = output
                 .shapes
                 .iter()
-                .find_map(|s| match &s.shape {
-                    egui::Shape::LineSegment { points, stroke }
-                        if stroke.color == Theme::default().focus()
-                            && points[0].y == points[1].y
-                            && points[0].y < card.top() + 54.0 =>
-                    {
-                        Some((points[0].x + points[1].x) / 2.0)
-                    }
-                    _ => None,
+                .filter_map(|s| crate::ui::icons::painted_icon(&s.shape))
+                .find_map(|(glyph, color, square)| {
+                    (glyph == egui_phosphor::regular::ARROW_UP_RIGHT
+                        && color == Theme::default().focus()
+                        && square.center().y < card.top() + 54.0)
+                        .then_some(square.center().x)
                 })
                 .expect("console navigation arrow painted");
             neighbors.push((position("design"), navigation));

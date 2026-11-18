@@ -37,7 +37,7 @@ pub(crate) enum Icon {
     Gear,
     ArrowUpRight,
     CircleHalf,
-    NavigationArrow,
+    Cursor,
     Keyboard,
 }
 
@@ -73,7 +73,7 @@ impl Icon {
             Self::Gear => glyph::GEAR,
             Self::ArrowUpRight => glyph::ARROW_UP_RIGHT,
             Self::CircleHalf => glyph::CIRCLE_HALF,
-            Self::NavigationArrow => glyph::NAVIGATION_ARROW,
+            Self::Cursor => glyph::CURSOR,
             Self::Keyboard => glyph::KEYBOARD,
         }
     }
@@ -128,7 +128,7 @@ mod tests {
         Icon::Gear,
         Icon::ArrowUpRight,
         Icon::CircleHalf,
-        Icon::NavigationArrow,
+        Icon::Cursor,
         Icon::Keyboard,
     ];
 

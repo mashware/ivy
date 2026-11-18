@@ -304,12 +304,12 @@ fn paint_field(
         Stroke::new(width, ink),
         egui::StrokeKind::Inside,
     );
-    // A drawn magnifier: Geist has no search glyph, and a fallback face would move the text (D9).
-    let lens = pos2(field.left() + 13.0, field.center().y - 1.0);
-    painter.circle_stroke(lens, 4.0, Stroke::new(1.3, roles.tx3));
-    painter.line_segment(
-        [lens + vec2(3.0, 3.0), lens + vec2(6.0, 6.0)],
-        Stroke::new(1.3, roles.tx3),
+    crate::ui::icons::paint(
+        painter,
+        pos2(field.left() + 14.0, field.center().y),
+        crate::ui::icons::Icon::Search,
+        13.0,
+        roles.tx3,
     );
     let text_at = pos2(field.left() + 26.0, field.center().y);
     let clip = Rect::from_min_max(
@@ -337,11 +337,11 @@ fn paint_field(
             pos2(field.right() - 12.0, field.center().y),
             vec2(16.0, 16.0),
         );
-        painter.text(
+        crate::ui::icons::paint(
+            painter,
             clear.center(),
-            Align2::CENTER_CENTER,
-            "×",
-            FontId::proportional(13.0),
+            crate::ui::icons::Icon::Close,
+            13.0,
             roles.tx2,
         );
         hits.push((clear, Command::Bar(Action::ClearQuery)));

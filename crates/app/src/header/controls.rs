@@ -125,60 +125,23 @@ impl Controls {
             } else {
                 theme.foreground().gamma_multiply(0.35)
             };
-            paint_icon(&painter, rect, hit, color, folded);
+            paint_icon(&painter, rect, hit, color);
         }
     }
 }
 
-fn paint_icon(
-    painter: &egui::Painter,
-    target: egui::Rect,
-    hit: Hit,
-    color: egui::Color32,
-    folded: bool,
-) {
-    let radius = target.width().min(target.height()) * 0.3;
-    let icon = egui::Rect::from_center_size(target.center(), egui::Vec2::splat(radius * 2.0));
-    let stroke = egui::Stroke::new(1.0, color);
-    if hit == Hit::Menu {
-        for offset in [-1.0, 0.0, 1.0] {
-            painter.circle_filled(icon.center() + egui::vec2(offset * radius, 0.0), 1.0, color);
-        }
-        return;
-    }
-    painter.rect_stroke(icon, 0.0, stroke, egui::StrokeKind::Inside);
-    match hit {
-        Hit::Action(Action::SplitRight) => {
-            painter.line_segment(
-                [
-                    egui::pos2(icon.center().x, icon.top()),
-                    egui::pos2(icon.center().x, icon.bottom()),
-                ],
-                stroke,
-            );
-        }
-        Hit::Action(Action::SplitDown) => {
-            painter.line_segment(
-                [
-                    egui::pos2(icon.left(), icon.center().y),
-                    egui::pos2(icon.right(), icon.center().y),
-                ],
-                stroke,
-            );
-        }
-        Hit::Action(Action::TogglePanel) => {
-            let side = egui::Rect::from_min_max(
-                egui::pos2(icon.center().x + radius * 0.2, icon.top()),
-                icon.max,
-            );
-            if !folded {
-                painter.rect_filled(side, 0.0, color);
-            } else {
-                painter.line_segment([side.left_top(), side.left_bottom()], stroke);
-            }
-        }
-        Hit::Menu => {}
-    }
+fn paint_icon(painter: &egui::Painter, target: egui::Rect, hit: Hit, color: egui::Color32) {
+    use crate::ui::icons::{Icon, paint};
+    let icon = match hit {
+        Hit::Menu => Icon::DotsThree,
+        Hit::Action(Action::SplitRight) => Icon::SplitRight,
+        Hit::Action(Action::SplitDown) => Icon::SplitDown,
+        Hit::Action(Action::TogglePanel) => Icon::Panel,
+    };
+    // A Phosphor glyph's ink fills about three quarters of its square: this keeps the drawing the
+    // size the hand-drawn one had, six tenths of the target.
+    let size = target.width().min(target.height()) * 0.8;
+    paint(painter, target.center(), icon, size, color);
 }
 
 #[cfg(test)]

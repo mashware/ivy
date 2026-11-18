@@ -393,50 +393,13 @@ fn navigation(editor: &mut Editor, ui: &mut egui::Ui, vertical: bool) {
 }
 
 fn navigation_icon(painter: &egui::Painter, index: usize, at: egui::Pos2, color: egui::Color32) {
-    let stroke = egui::Stroke::new(1.2, color);
-    match index {
-        0 => {
-            painter.circle_stroke(at, 6.0, stroke);
-            let points: Vec<_> = (0..=12)
-                .map(|i| {
-                    let angle =
-                        std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::PI / 12.0;
-                    at + egui::vec2(angle.cos(), angle.sin()) * 5.0
-                })
-                .collect();
-            painter.add(egui::Shape::convex_polygon(
-                points,
-                color,
-                egui::Stroke::NONE,
-            ));
-        }
-        1 => {
-            painter.add(egui::Shape::closed_line(
-                vec![
-                    at + egui::vec2(-4.0, -7.0),
-                    at + egui::vec2(6.0, 1.0),
-                    at + egui::vec2(0.0, 2.0),
-                    at + egui::vec2(-2.0, 7.0),
-                ],
-                stroke,
-            ));
-        }
-        _ => {
-            painter.rect_stroke(
-                egui::Rect::from_center_size(at, egui::vec2(14.0, 10.0)),
-                2.0,
-                stroke,
-                egui::StrokeKind::Inside,
-            );
-            for x in [-4.0, 0.0, 4.0] {
-                painter.circle_filled(at + egui::vec2(x, -1.5), 0.7, color);
-            }
-            painter.line_segment(
-                [at + egui::vec2(-4.0, 2.0), at + egui::vec2(4.0, 2.0)],
-                stroke,
-            );
-        }
-    }
+    use crate::ui::icons::Icon;
+    let icon = match index {
+        0 => Icon::CircleHalf,
+        1 => Icon::Cursor,
+        _ => Icon::Keyboard,
+    };
+    crate::ui::icons::paint(painter, at, icon, 16.0, color);
 }
 
 fn cursor(editor: &mut Editor, ui: &mut egui::Ui) {

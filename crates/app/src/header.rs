@@ -165,10 +165,9 @@ const GRIP_THICKNESS: f32 = 1.0;
 /// corner and the grip is a band.
 const BUTTON_CELLS: f32 = 2.0;
 
-/// How much of the button's shorter side each arm of the cross reaches from its centre, and how
-/// thick the two strokes are.
-const CROSS_REACH: f32 = 0.22;
-const CROSS_THICKNESS: f32 = 1.0;
+/// The cross's square, as a share of the button's shorter side: Phosphor's `X` inks ten sixteenths
+/// of its square, so the cross spans about the 0.44 of the side the hand-drawn one did.
+const CROSS_SQUARE: f32 = 0.7;
 
 /// How much of the strip's right-hand end the button leaves alone, **and it is the folded panel's
 /// handle, taken from the two constants that build it** rather than copied as a number.
@@ -385,22 +384,12 @@ pub(crate) fn paint(
     // file (**D26**) and be explained in its manual, for a mark two cells wide.
     if let Some(button) = button_within(header, metrics, button) {
         let button = button.rect();
-        let reach = CROSS_REACH * button.height().min(button.width());
-        let centre = button.center();
-        let stroke = egui::Stroke::new(CROSS_THICKNESS, theme.foreground());
-        painter.line_segment(
-            [
-                centre - egui::vec2(reach, reach),
-                centre + egui::vec2(reach, reach),
-            ],
-            stroke,
-        );
-        painter.line_segment(
-            [
-                centre + egui::vec2(reach, -reach),
-                centre - egui::vec2(reach, -reach),
-            ],
-            stroke,
+        crate::ui::icons::paint(
+            painter,
+            button.center(),
+            crate::ui::icons::Icon::Close,
+            CROSS_SQUARE * button.height().min(button.width()),
+            theme.foreground(),
         );
     }
 
