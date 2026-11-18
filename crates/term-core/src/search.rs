@@ -459,23 +459,40 @@ mod tests {
     }
 
     #[test]
-    fn whole_word_follows_a_wrap_that_left_a_spacer_in_the_last_column() {
-        // Five columns: «日» has no room after four letters, so the line ends in a spacer and «日»
-        // opens the next row.
+    fn whole_word_follows_a_wrap_to_the_character_on_the_other_row() {
+        // Five columns, so the text wraps after five characters.
         let wrapped = |text: &str| {
             let mut screen = Screen::new(Size { rows: 3, cols: 5 });
             screen.advance(text.as_bytes());
             screen
         };
-        assert_eq!(
-            wrapped("abcd日本").find(&mut with("日本", whole_word()), Toward::Older),
-            Found::Nothing,
-            "the letter before the wrap did not count as touching the match"
-        );
-        assert_eq!(
-            wrapped("abc 日本").find(&mut with("日本", whole_word()), Toward::Older),
-            Found::Match
-        );
+        for toward in [Toward::Older, Toward::Newer] {
+            assert_eq!(
+                wrapped("abcdeneed").find(&mut with("need", whole_word()), toward),
+                Found::Nothing,
+                "the letter before the wrap did not count as touching the match, walking {toward:?}"
+            );
+            assert_eq!(
+                wrapped(" needcde").find(&mut with("need", whole_word()), toward),
+                Found::Nothing,
+                "the letter after the wrap did not count as touching the match, walking {toward:?}"
+            );
+            assert_eq!(
+                wrapped("abcd need").find(&mut with("need", whole_word()), toward),
+                Found::Match
+            );
+            // «日» has no room after four letters, so the row ends in a spacer of its own.
+            assert_eq!(
+                wrapped("abcd日本").find(&mut with("日本", whole_word()), toward),
+                Found::Nothing,
+                "the spacer a wrap leaves before a wide character hid the letter in front, walking \
+                 {toward:?}"
+            );
+            assert_eq!(
+                wrapped("abc 日本").find(&mut with("日本", whole_word()), toward),
+                Found::Match
+            );
+        }
     }
 
     #[test]
@@ -525,6 +542,20 @@ mod tests {
         assert_eq!(screen.find(&mut search, Toward::Older), Found::NoMore);
         assert_eq!(row_text(&screen).as_deref(), Some("item 1"));
         assert_eq!(screen.view().scroll(), scroll);
+        // The same end with a line above the oldest match, so the step does not fall off the
+        // history's edge and only the match's place tells the wrap apart.
+        let mut above = vec!["header"];
+        above.extend_from_slice(&lines);
+        let mut screen = screen_with(4, &above);
+        for _ in 0..2 {
+            assert_eq!(screen.find(&mut search, Toward::Older), Found::Match);
+        }
+        assert_eq!(screen.find(&mut search, Toward::Older), Found::NoMore);
+        assert_eq!(row_text(&screen).as_deref(), Some("item 1"));
+        // And walking newer from the newest match.
+        assert_eq!(screen.find(&mut search, Toward::Newer), Found::Match);
+        assert_eq!(screen.find(&mut search, Toward::Newer), Found::NoMore);
+        assert_eq!(row_text(&screen).as_deref(), Some("item 2"));
 
         let mut screen = screen_with(4, &lines);
         let mut search = literal("item");
