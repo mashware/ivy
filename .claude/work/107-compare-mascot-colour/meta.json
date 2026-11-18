@@ -1,0 +1,31 @@
+{
+  "ticket": "107",
+  "slug": "compare-mascot-colour",
+  "type": "feat",
+  "title": "Check that Claude Code's mascot colour in Ivy matches another terminal",
+  "branch": "107-compare-mascot-colour",
+  "base": "main",
+  "stacked_on": null,
+  "worktree": null,
+  "size": "XS",
+  "phase": "context",
+  "phases_done": [
+    "context"
+  ],
+  "draft_from_conversation": false,
+  "tracker_issue": null,
+  "related_repos": [],
+  "roadmap": null,
+  "started_at": "2026-11-18T10:35:40.711618+00:00",
+  "updated_at": "2026-11-18T10:36:34.382855+00:00",
+  "notes": "Study complete at the door to code. Comparison unverified; requires graphical host with Ivy and Tilix.",
+  "pending": null,
+  "ticket_deps": [],
+  "defaults_used": [
+    {
+      "key": "unattended:size",
+      "default": "XS: controlled colour comparison; no API, schema or domain logic changes planned",
+      "phase": "start"
+    }
+  ]
+}
