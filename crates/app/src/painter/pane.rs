@@ -242,9 +242,19 @@ pub(crate) fn paint_pane(
         panel_split.console,
         blink.keys,
     );
-    if let Some(search) = pane.search.open.as_ref() {
+    let options = pane.search.options;
+    if let Some(search) = pane.search.open.as_mut() {
         let painter = ui.painter_at(panel_split.console);
-        crate::search::paint_the_row(&painter, search, &view, theme, metrics, panel_split.console);
+        search.painted = Some(crate::search::floating::paint(
+            ui,
+            &painter,
+            search,
+            options,
+            &view,
+            theme,
+            metrics,
+            panel_split.console,
+        ));
     }
     let painted = crate::links::PaintedConsole {
         view,

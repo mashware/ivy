@@ -42,7 +42,8 @@ pub(super) fn window_buttons() -> bool {
 }
 
 /// What the right-hand groups and the margin take from a full bar: the Board, the two splits,
-/// Markdown, search, connect and the menu, then the window's buttons.
+/// Markdown, connect and the menu, then the window's buttons. Search has no button here: each
+/// console carries its own in its header (D61).
 fn right_reserve() -> f32 {
     RIGHT_MARGIN
         + if window_buttons() {
@@ -50,8 +51,8 @@ fn right_reserve() -> f32 {
         } else {
             0.0
         }
-        + 4.0 * BUTTON
-        + 3.0 * GAP
+        + 3.0 * BUTTON
+        + 2.0 * GAP
         + SEPARATOR
         + 2.0 * BUTTON
         + GAP
@@ -68,7 +69,6 @@ pub(crate) struct Slots {
     pub(crate) split_right: Rect,
     pub(crate) split_down: Rect,
     pub(crate) markdown: Rect,
-    pub(crate) search: Rect,
     pub(crate) connect: Rect,
     pub(crate) menu: Rect,
     /// Minimize, maximize and close, where this bar draws them.
@@ -97,8 +97,7 @@ pub(crate) fn slots(row: Rect) -> Slots {
     let late = x + SEPARATOR / 2.0;
     let menu = at(x - BUTTON, BUTTON);
     let connect = at(menu.left() - GAP - BUTTON, BUTTON);
-    let search = at(connect.left() - GAP - BUTTON, BUTTON);
-    let markdown = at(search.left() - GAP - BUTTON, BUTTON);
+    let markdown = at(connect.left() - GAP - BUTTON, BUTTON);
     let early = markdown.left() - SEPARATOR / 2.0;
     let split_down = at(markdown.left() - SEPARATOR - BUTTON, BUTTON);
     let split_right = at(split_down.left() - GAP - BUTTON, BUTTON);
@@ -113,7 +112,6 @@ pub(crate) fn slots(row: Rect) -> Slots {
         split_right,
         split_down,
         markdown,
-        search,
         connect,
         menu,
         window,
@@ -210,7 +208,7 @@ mod tests {
     }
 
     /// The kit's order, with the owner's change of 17 November 2026: the logo first, Files a
-    /// little apart from it; then, right of the tabs, the Board, the two splits, Markdown, search,
+    /// little apart from it; then, right of the tabs, the Board, the two splits, Markdown,
     /// connect and the menu, and the window's own buttons.
     #[test]
     fn the_bar_lays_its_buttons_out_in_the_kits_order() {
@@ -233,7 +231,6 @@ mod tests {
             s.split_right,
             s.split_down,
             s.markdown,
-            s.search,
             s.connect,
             s.menu,
         ];

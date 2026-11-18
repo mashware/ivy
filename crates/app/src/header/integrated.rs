@@ -123,6 +123,8 @@ pub(crate) enum Target {
     Panel,
     Zoom,
     Close,
+    /// Opens or closes the search on this console, whichever has the keyboard (D61).
+    Search,
 }
 
 /// Which controls a header carries. Painting and pressing build it with this one constructor
@@ -169,7 +171,7 @@ struct Layout {
 
 fn layout(strip: egui::Rect, offer: Offer) -> Layout {
     let right = (strip.right() - super::CORNER_LEFT_TO_THE_GRAB).max(strip.left());
-    let mut base = vec![Target::Review, Target::Panel];
+    let mut base = vec![Target::Search, Target::Review, Target::Panel];
     if offer.can_close {
         base.extend([Target::Zoom, Target::Close]);
     }
@@ -390,6 +392,7 @@ fn paint(ui: &egui::Ui, strip: egui::Rect, theme: &Theme, appearance: Appearance
             Target::Zoom if zoomed => "Restore console",
             Target::Zoom => "Maximize console",
             Target::Close => "Close console",
+            Target::Search => "Search this console",
         };
         let response = ui.interact(
             rect,
@@ -506,6 +509,7 @@ pub(crate) fn paint_icon(
         Target::Zoom if zoomed => Icon::Collapse,
         Target::Zoom => Icon::Expand,
         Target::Close => Icon::Close,
+        Target::Search => Icon::Search,
         Target::Label => unreachable!(),
     };
     paint(painter, center, icon, size, color);

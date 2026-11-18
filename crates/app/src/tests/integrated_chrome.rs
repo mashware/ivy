@@ -951,7 +951,7 @@ mod tests {
         pane_view::view_tiling(window, work, &m).parts[at]
     }
 
-    /// The six control cells of console `which`'s header, from the left of split right to close.
+    /// The seven control cells of console `which`'s header, from the left of split right to close.
     fn control_cells(
         window: &Window,
         ctx: &egui::Context,
@@ -962,7 +962,7 @@ mod tests {
         let right = control(window, ctx, area, which, 0.0).x;
         let rect = pane_rect(window, ctx, area, names_in_order(window)[which]);
         egui::Rect::from_min_max(
-            egui::pos2(right - 150.0, rect.top()),
+            egui::pos2(right - 175.0, rect.top()),
             egui::pos2(right, rect.top() + header::height(&m, window.headers)),
         )
     }
@@ -993,7 +993,7 @@ mod tests {
     /// focused console does not move.
     #[test]
     fn an_unfocused_console_splits_from_its_own_header() {
-        for (from_right, beside) in [(137.5, true), (112.5, false)] {
+        for (from_right, beside) in [(162.5, true), (137.5, false)] {
             let ctx = egui::Context::default();
             let mut window = integrated_pair();
             let area = tall_area();
@@ -1274,7 +1274,7 @@ mod tests {
             ),
             "this test needs a console that fits a split beside it and not below it: {short:?}"
         );
-        let next_to_review = control(&window, &ctx, area, 1, 112.5);
+        let next_to_review = control(&window, &ctx, area, 1, 137.5);
         frame(
             &mut window,
             &ctx,
@@ -1315,7 +1315,7 @@ mod tests {
             0,
             "a maximized console painted a split"
         );
-        for from_right in [137.5, 112.5] {
+        for from_right in [162.5, 137.5] {
             let at = control(&window, &ctx, area, 0, from_right);
             frame(&mut window, &ctx, area, click_at(at));
             frame(&mut window, &ctx, area, vec![]);
@@ -1586,14 +1586,14 @@ mod tests {
         assert_eq!(read, document);
     }
     #[test]
-    fn global_search_opens_the_focused_consoles_search_and_menu_escape_is_owned() {
+    fn a_header_search_opens_its_consoles_search_and_menu_escape_is_owned() {
         let ctx = egui::Context::default();
         let mut window = window_with("sleep 30", "sleep 30");
         window.chrome.enable();
         window.headers = window.headers.integrated(true);
         let area = area_of(1400.0);
         frame(&mut window, &ctx, area, vec![]);
-        let search = slots(area).search.center();
+        let search = control(&window, &ctx, area, 0, 112.5);
         frame(&mut window, &ctx, area, click_at(search));
         assert!(window.active().panes()[0].search.is_open());
         assert!(!window.active().panes()[1].search.is_open());
@@ -3569,7 +3569,7 @@ mod tests {
         };
         // The control: no such row before the search opens.
         assert!(!search_row(&frame(&mut window, &ctx, area, vec![])));
-        let search = slots(area).search.center();
+        let search = control(&window, &ctx, area, 0, 112.5);
         frame(&mut window, &ctx, area, click_at(search));
         // Read before the menu opens: an open menu dims the consoles beneath it.
         assert!(

@@ -30,6 +30,7 @@ pub(crate) enum Icon {
     Refresh,
     Folder { open: bool },
     Caret { open: bool },
+    CaretUp,
     CollapseAll,
     File(FileKind),
     Plus,
@@ -67,6 +68,7 @@ impl Icon {
             Self::Folder { open: true } => glyph::FOLDER_OPEN,
             Self::Caret { open: false } => glyph::CARET_RIGHT,
             Self::Caret { open: true } => glyph::CARET_DOWN,
+            Self::CaretUp => glyph::CARET_UP,
             Self::CollapseAll => glyph::ARROWS_IN_LINE_VERTICAL,
             Self::File(kind) => kind.glyph(),
             Self::Plus => glyph::PLUS,
@@ -156,6 +158,7 @@ mod tests {
             Icon::Folder { open: true },
             Icon::Caret { open: false },
             Icon::Caret { open: true },
+            Icon::CaretUp,
             Icon::CollapseAll,
             Icon::Plus,
             Icon::Check,
@@ -189,6 +192,7 @@ mod tests {
                 | Icon::Refresh
                 | Icon::Folder { .. }
                 | Icon::Caret { .. }
+                | Icon::CaretUp
                 | Icon::CollapseAll
                 | Icon::File(_)
                 | Icon::Plus

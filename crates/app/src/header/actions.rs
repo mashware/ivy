@@ -294,6 +294,15 @@ pub(crate) fn pointer(
                     window.pane_view.toggle(tab, name, rects.len());
                     true
                 }
+                super::integrated::Target::Search => {
+                    // The keyboard follows the search, so what is typed next lands in its query.
+                    window.active_mut().focus = name;
+                    if let Some(pane) = window.pane_called(name) {
+                        crate::search::toggle_on(&mut pane.search, &mut pane.screen);
+                    }
+                    ui.ctx().request_repaint();
+                    false
+                }
                 super::integrated::Target::Close => {
                     window.pane_view.clear(tab);
                     if let Err(error) = window.close_a_pane_called(name, ui.ctx()) {

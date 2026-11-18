@@ -43,6 +43,7 @@ use term_core::Cell;
 mod clipboard;
 mod header;
 pub(crate) mod links;
+mod search;
 
 /// What the mouse's pass over the consoles leaves for the rest of the frame.
 ///
