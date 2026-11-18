@@ -4139,4 +4139,51 @@ mod tests {
             "a press a header control took left the list unfolded"
         );
     }
+
+    /// The search box keeps clear of a held paste's question: it is laid out around the notices
+    /// the painter actually drew, so it neither hides them nor takes their presses.
+    #[test]
+    fn the_search_box_keeps_clear_of_a_held_paste_s_question() {
+        let Some(boundary) = keyboard::the_longest_line_a_reader_keeps() else {
+            return;
+        };
+        let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
+        let mut window = integrated_pair();
+        let area = tall_area();
+        frame(&mut window, &ctx, area, vec![]);
+        let names = names_in_order(&window);
+        {
+            let pane = window.pane_called(names[0]).unwrap();
+            keyboard::paste_or_hold(
+                &"x".repeat(boundary + 1),
+                false,
+                &mut Vec::new(),
+                &mut pane.held,
+            );
+            assert!(pane.held.is_some(), "the premise: the paste is held");
+        }
+        let at = control(&window, &ctx, area, 0, 112.5);
+        frame(&mut window, &ctx, area, click_at(at));
+        frame(&mut window, &ctx, area, vec![]);
+        let pane = pane_of(&window, names[0]);
+        let painted = pane.search.open.as_ref().unwrap().painted.clone().unwrap();
+        let painter = ctx.layer_painter(egui::LayerId::background());
+        let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
+        let console = pane.painted_console.as_ref().unwrap().area;
+        let question = crate::painter::notices::the_boxes(
+            &painter,
+            pane,
+            &window.theme,
+            &metrics,
+            console,
+        )
+        .question
+        .expect("the question is laid out");
+        assert!(
+            !painted.layout.frame.intersects(question),
+            "the box covers the held paste's question: {:?} over {question:?}",
+            painted.layout.frame
+        );
+    }
 }

@@ -28,9 +28,12 @@ pub(super) fn intercept(window: &mut Window, ui: &egui::Ui) -> bool {
         let Some((name, target)) = box_under(window, frame, button.at) else {
             continue;
         };
-        let down = ui
-            .ctx()
-            .input(|input| input.pointer.button_down(button.button));
+        // Held only where the header pass runs to release it: with no headers painted that pass
+        // returns before its release branch, and a hold would lock the pointer for good.
+        let down = window.headers.are_painted()
+            && ui
+                .ctx()
+                .input(|input| input.pointer.button_down(button.button));
         window
             .header_input
             .claim_press(down.then_some(button.button), frame);

@@ -244,8 +244,9 @@ pub(crate) fn paint_pane(
         blink.keys,
     );
     let options = pane.search.options();
+    let mut over_the_box = false;
     if let Some(search) = pane.search.open.as_mut() {
-        search.painted = Some(crate::search::floating::paint(
+        let painted = crate::search::floating::paint(
             ui,
             search,
             options,
@@ -253,14 +254,26 @@ pub(crate) fn paint_pane(
             theme,
             metrics,
             (panel_split.console, &notices),
-        ));
+        );
+        let pointer = ui.ctx().input(|input| input.pointer.hover_pos());
+        over_the_box = pointer.is_some_and(|at| painted.covers(at));
+        // No room for the box beside the notices: the search closes rather than go on taking keys
+        // nobody can see it take (D61).
+        if painted.layout.is_hidden() {
+            pane.search.open = None;
+        } else {
+            search.painted = Some(painted);
+        }
     }
     let painted = crate::links::PaintedConsole {
         view,
         area: panel_split.console,
         frame: ui.ctx().cumulative_frame_nr(),
     };
-    painted.disclose_hovered_link(ui, metrics);
+    // A link hidden under the box is not offered: the box takes the click.
+    if !over_the_box {
+        painted.disclose_hovered_link(ui, metrics);
+    }
     // **Inside the console's span on purpose**: only batch W walks this, and outside every span it
     // would be published as the framework's cost (**D13**).
     let console_links = measure_links.then(|| painted.a_point_per_source(metrics));

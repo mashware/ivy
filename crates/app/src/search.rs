@@ -137,6 +137,10 @@ pub(crate) struct Mode {
     outcome: Outcome,
     /// Whether the options' list is unfolded beside the box. Changed only by the steps.
     list: bool,
+    /// Whether a step has found a match since the search opened: from then on the selection is
+    /// the match, whoever made it, and the box keeps clear of it; before, a selection made by hand
+    /// does not move it (D61).
+    found_once: bool,
     /// Where the box was painted, and in which pass: **what a press is judged against**, never a
     /// layout worked out again by the pointer, which has no snapshot to place the box by.
     pub(crate) painted: Option<floating::Painted>,
@@ -383,7 +387,7 @@ pub(crate) fn apply(console: &mut OnThisConsole, screen: &mut Screen, steps: Ste
             Step::Clear => open.query.clear(),
             Step::Go(toward) => {
                 // The rows the box takes, as it was last painted: the step keeps the match off them
-                // wherever the view can scroll. Before the first painting there is no box yet.
+                // while the view is in the history. Before the first painting there is no box yet.
                 let keep_clear = open
                     .painted
                     .as_ref()
@@ -398,6 +402,7 @@ pub(crate) fn apply(console: &mut OnThisConsole, screen: &mut Screen, steps: Ste
                         let before = std::time::Instant::now();
                         let found = screen.find(search, toward, keep_clear);
                         pressed.one(before.elapsed(), found == Found::Match);
+                        open.found_once |= found == Found::Match;
                         match found {
                             Found::Match => Outcome::Found,
                             Found::Nothing => Outcome::NotFound,
@@ -421,6 +426,10 @@ impl Mode {
 
     pub(crate) fn list(&self) -> bool {
         self.list
+    }
+
+    pub(crate) fn has_found(&self) -> bool {
+        self.found_once
     }
 
     /// What the box says about the last press, beside the query: nothing while typing or after a

@@ -15,9 +15,9 @@
 //! design set the line at **4 ms** for the slowest press (D61); under it, the walk stays whole.
 //!
 //! **Whole word adds a second worst case** (#120): a query that is inside a word on every line is
-//! found and rejected once per line, and every rejection is a fresh call into the engine. It is
-//! measured over the same history, and over **one line wrapped across the whole history**, where
-//! each call walks that line again from its start.
+//! found and rejected once per line, inside a single walk. It is measured over the same history,
+//! and over **one line wrapped across the whole history**, the case that made a walk which asked
+//! the engine again after each rejection quadratic (D61).
 //!
 //! **In debug the numbers come out many times worse.** The one that counts is the `--release` one.
 

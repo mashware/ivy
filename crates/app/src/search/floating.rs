@@ -70,8 +70,8 @@ pub(crate) struct Layout {
     pub(crate) frame: Rect,
     pub(crate) list: Option<Rect>,
     pub(crate) targets: Vec<(Target, Rect)>,
-    /// The rows the box takes, at the edge it sits on: a step keeps its match off them wherever
-    /// the view can scroll, so the box seldom has to move.
+    /// The rows the box (and its unfolded list) takes, at the edge it sits on: a step keeps its
+    /// match off them while the view is in the history, so the box seldom has to move.
     pub(crate) keep_clear: KeepClear,
 }
 
@@ -85,9 +85,14 @@ pub(crate) struct Painted {
 impl Painted {
     /// What a press at `at` reaches, if it fell on the box or its list.
     ///
-    /// **Only a box painted in the pass before this one answers**, D99's rule for a header's
-    /// controls: one recorded on a console that then stopped being painted — a background tab, a
+    /// **Only a box painted in the frame before this one answers** (by frame number, as D99's
+    /// header controls are judged): one recorded on a console that then stopped being painted — a background tab, a
     /// sibling of a maximized console — must not take a press nobody saw it under.
+    /// Whether `at` lies on the box or its list as painted, whatever the frame.
+    pub(crate) fn covers(&self, at: Pos2) -> bool {
+        self.layout.frame.contains(at) || self.layout.list.is_some_and(|list| list.contains(at))
+    }
+
     pub(crate) fn hit(&self, now: u64, at: Pos2) -> Option<Target> {
         if self.frame + 1 != now {
             return None;
@@ -104,20 +109,22 @@ impl Painted {
 
 /// Where the box goes over `console`.
 ///
-/// **At the top-right, and at the bottom-right when the selection on screen or a notice lies under
+/// **At the top-right, and at the bottom-right when the match a step found or a notice lies under
 /// it** — the held paste's question and the «stopped receiving» sentence keep the console's top
-/// (D41), and the box must neither hide them nor take their presses. It is placed from the console,
-/// the selection and those notices only — **never from whether the list is unfolded**, so
-/// unfolding it cannot move the button a second press is aimed at. Everything is kept inside the
-/// console: a part painted outside it would be clipped away and still take presses there. **A
-/// console too short for the box beside its notices gets no box at all**: the notices are the more
-/// urgent of the two, and the search keeps its keys.
+/// (D41), and the box must neither hide them nor take their presses. Before any step has found a
+/// match a selection made by hand does not move it, so it never jumps under a drag. It is placed
+/// from the console, that match and those notices only — **never from whether the list is
+/// unfolded**, so unfolding it does not move the box. Everything is kept inside the console: a
+/// part painted outside it would be clipped away and still take presses there. **A console too
+/// short for the box beside its notices gets no box** — [`Layout::hidden`], and the painter closes
+/// the search: the notices are the more urgent of the two.
 pub(crate) fn layout(
     console: Rect,
     metrics: &CellMetrics,
     view: &View,
     list: bool,
     notices: &[Rect],
+    follows_the_match: bool,
 ) -> Layout {
     let button = metrics.height() + 2.0 * PAD;
     let room = (console.width() - 2.0 * MARGIN).max(0.0);
@@ -127,27 +134,20 @@ pub(crate) fn layout(
         pos2(console.right() - MARGIN - width, console.top() + MARGIN),
         vec2(width, height),
     );
-    let covered = selection_rects(view, console, metrics)
+    let the_match = follows_the_match
+        .then(|| selection_rects(view, console, metrics))
+        .into_iter()
+        .flatten();
+    let covered = the_match
         .chain(notices.iter().copied())
-        .any(|under| under.intersects(at_top));
+        .any(|under| overlaps(under, at_top));
     let frame = if covered {
         at_top.translate(vec2(0.0, console.height() - height - 2.0 * MARGIN))
     } else {
         at_top
     };
-    let rows = |edge: f32| (edge / metrics.height()).ceil() as usize;
-    let keep_clear = if covered {
-        KeepClear::Bottom(rows(console.bottom() - frame.top()))
-    } else {
-        KeepClear::Top(rows(frame.bottom() - console.top()))
-    };
-    if covered && notices.iter().any(|notice| notice.intersects(frame)) {
-        return Layout {
-            frame: Rect::NOTHING,
-            list: None,
-            targets: Vec::new(),
-            keep_clear: KeepClear::NONE,
-        };
+    if covered && notices.iter().any(|notice| overlaps(*notice, frame)) {
+        return Layout::hidden();
     }
 
     let mut targets = Vec::with_capacity(8);
@@ -179,20 +179,15 @@ pub(crate) fn layout(
         Rect::from_min_max(row.min, pos2(right, row.bottom())),
     ));
 
-    let list = list.then(|| {
-        let width = (LIST_CELLS * metrics.width() + 2.0 * PAD).min(room);
-        let height = Choice::ALL.len() as f32 * button + 2.0 * PAD;
-        let wanted = if covered {
-            frame.top() - height
-        } else {
-            frame.bottom()
-        };
-        // Moved back inside the console when it does not fit on its side of the box.
-        let top = wanted.min(console.bottom() - height).max(console.top());
-        let list = Rect::from_min_size(pos2(frame.right() - width, top), vec2(width, height));
-        // Where a short console made the list fall over the box, the box's parts under it are
-        // hidden by it and give way: a press on a choice must reach the choice.
-        targets.retain(|(_, rect)| !rect.intersects(list));
+    let list = list
+        .then(|| the_list(console, frame, covered, metrics, room))
+        // Never over a notice: the list is the less urgent of the two.
+        .filter(|list| !notices.iter().any(|notice| overlaps(*notice, *list)));
+    if let Some(list) = list {
+        // Only where the console has room neither beside nor to the left of the box does the
+        // list fall over it; the box's parts under it are then hidden and give way, so a press on
+        // a choice reaches the choice.
+        targets.retain(|(_, rect)| !overlaps(*rect, list));
         for (index, choice) in Choice::ALL.into_iter().enumerate() {
             targets.insert(
                 index,
@@ -205,8 +200,17 @@ pub(crate) fn layout(
                 ),
             );
         }
-        list.intersect(console)
-    });
+    }
+    // The rows a step keeps its match off: the box's, and the list's while it is unfolded on the
+    // same side.
+    let rows = |edge: f32| (edge / metrics.height()).ceil() as usize;
+    let keep_clear = if covered {
+        let top = list.map_or(frame.top(), |list| list.top().min(frame.top()));
+        KeepClear::Bottom(rows(console.bottom() - top))
+    } else {
+        let bottom = list.map_or(frame.bottom(), |list| list.bottom().max(frame.bottom()));
+        KeepClear::Top(rows(bottom - console.top()))
+    };
     let frame = frame.intersect(console);
     for (_, rect) in &mut targets {
         *rect = rect.intersect(console);
@@ -214,10 +218,62 @@ pub(crate) fn layout(
     targets.retain(|(_, rect)| rect.is_positive());
     Layout {
         frame,
-        list,
+        list: list.map(|list| list.intersect(console)),
         targets,
         keep_clear,
     }
+}
+
+impl Layout {
+    /// No box: the console has no room for one beside its notices.
+    pub(crate) fn hidden() -> Self {
+        Self {
+            frame: Rect::NOTHING,
+            list: None,
+            targets: Vec::new(),
+            keep_clear: KeepClear::NONE,
+        }
+    }
+
+    pub(crate) fn is_hidden(&self) -> bool {
+        !self.frame.is_positive()
+    }
+}
+
+/// Whether two rectangles share area — not merely an edge, which `Rect::intersects` counts, so a
+/// match a step left right under the box's bottom edge does not send the box away.
+fn overlaps(a: Rect, b: Rect) -> bool {
+    a.intersect(b).is_positive()
+}
+
+/// Where the options list goes: on the far side of the box from the console's edge, then to the
+/// box's left, and over the box only when the console has room for neither.
+fn the_list(
+    console: Rect,
+    frame: Rect,
+    covered: bool,
+    metrics: &CellMetrics,
+    room: f32,
+) -> Rect {
+    let button = metrics.height() + 2.0 * PAD;
+    let width = (LIST_CELLS * metrics.width() + 2.0 * PAD).min(room);
+    let height = Choice::ALL.len() as f32 * button + 2.0 * PAD;
+    let beside = if covered {
+        frame.top() - height
+    } else {
+        frame.bottom()
+    };
+    let fits = |rect: Rect| console.contains_rect(rect);
+    let below_or_above = Rect::from_min_size(pos2(frame.right() - width, beside), vec2(width, height));
+    if fits(below_or_above) {
+        return below_or_above;
+    }
+    let top = frame.top().min(console.bottom() - height).max(console.top());
+    let to_the_left = Rect::from_min_size(pos2(frame.left() - MARGIN - width, top), vec2(width, height));
+    if fits(to_the_left) {
+        return to_the_left;
+    }
+    Rect::from_min_size(pos2(frame.right() - width, top), vec2(width, height))
 }
 
 /// The selected cells on screen, one rectangle per row they sit on.
@@ -256,10 +312,18 @@ pub(crate) fn paint(
     metrics: &CellMetrics,
     (console, notices): (Rect, &[Rect]),
 ) -> Painted {
-    let layout = layout(console, metrics, view, mode.list(), notices);
+    let layout = layout(
+        console,
+        metrics,
+        view,
+        mode.list(),
+        notices,
+        mode.has_found(),
+    );
     let painter = &ui.painter_at(console);
     let roles = crate::ui::style::roles(painter.ctx(), theme);
-    let corner = 6.0;
+    // The floating surfaces' own corner, so the box reads as one of the application's menus.
+    let corner = crate::theme::metrics::RADIUS_FLOATING;
     let stroke = egui::Stroke::new(1.0, roles.line2);
     for surface in std::iter::once(layout.frame)
         .chain(layout.list)
@@ -431,7 +495,7 @@ mod tests {
             rows: ROWS,
             cols: 80,
         });
-        let layout = layout(console(), &metrics(), &screen.view(), false, &[]);
+        let layout = layout(console(), &metrics(), &screen.view(), false, &[], true);
         assert!(console().contains_rect(layout.frame), "{layout:?}");
         assert_eq!(layout.frame.right(), console().right() - MARGIN);
         assert_eq!(layout.frame.top(), console().top() + MARGIN);
@@ -456,6 +520,7 @@ mod tests {
             &with_the_match_on(0).view(),
             false,
             &[],
+            true,
         );
         assert_eq!(
             under.frame.bottom(),
@@ -468,16 +533,27 @@ mod tests {
             &with_the_match_on(5).view(),
             false,
             &[],
+            true,
         );
         assert_eq!(clear.frame.top(), console().top() + MARGIN);
+        // A selection made by hand, before any step found a match, leaves the box where it is.
+        let by_hand = layout(
+            console(),
+            &metrics(),
+            &with_the_match_on(0).view(),
+            false,
+            &[],
+            false,
+        );
+        assert_eq!(by_hand.frame.top(), console().top() + MARGIN);
     }
 
     #[test]
     fn unfolding_the_list_never_moves_the_box() {
         for row in [0, 5] {
             let screen = with_the_match_on(row);
-            let folded = layout(console(), &metrics(), &screen.view(), false, &[]);
-            let unfolded = layout(console(), &metrics(), &screen.view(), true, &[]);
+            let folded = layout(console(), &metrics(), &screen.view(), false, &[], true);
+            let unfolded = layout(console(), &metrics(), &screen.view(), true, &[], true);
             assert_eq!(folded.frame, unfolded.frame);
             let list = unfolded.list.expect("the list is laid out");
             assert!(
@@ -507,7 +583,7 @@ mod tests {
         });
         let painted = Painted {
             frame: 7,
-            layout: layout(console(), &metrics(), &screen.view(), false, &[]),
+            layout: layout(console(), &metrics(), &screen.view(), false, &[], true),
         };
         let (_, close) = painted.layout.targets[0];
         assert_eq!(painted.hit(8, close.center()), Some(Target::Close));
@@ -541,7 +617,7 @@ mod tests {
             screen.find(&mut search, Toward::Older, term_core::KeepClear::NONE),
             term_core::Found::Match
         );
-        let layout = layout(console(), &metrics(), &screen.view(), false, &[]);
+        let layout = layout(console(), &metrics(), &screen.view(), false, &[], true);
         assert_eq!(layout.frame.top(), console().top() + MARGIN);
     }
 
@@ -552,7 +628,7 @@ mod tests {
             cols: 80,
         });
         let notice = Rect::from_min_size(console().min, vec2(console().width(), 60.0));
-        let layout = layout(console(), &metrics(), &screen.view(), false, &[notice]);
+        let layout = layout(console(), &metrics(), &screen.view(), false, &[notice], true);
         assert!(
             !layout.frame.intersects(notice),
             "the box covers the notice: {layout:?}"
@@ -567,20 +643,29 @@ mod tests {
     }
 
     fn layout_with(screen: &Screen, notices: &[Rect]) -> Layout {
-        layout(console(), &metrics(), &screen.view(), false, notices)
+        layout(console(), &metrics(), &screen.view(), false, notices, true)
     }
 
     #[test]
     fn on_a_short_console_every_part_stays_inside_it() {
         let short = Rect::from_min_size(pos2(100.0, 50.0), vec2(800.0, 60.0));
         let screen = Screen::new(Size { rows: 3, cols: 80 });
+        // A thin notice along the top: enough to send the box down, not to leave it no room.
+        let thin = Rect::from_min_size(short.min, vec2(short.width(), 8.0));
         for covered in [false, true] {
-            // A thin notice along the top: enough to send the box down, not to leave it no room.
-            let thin = Rect::from_min_size(short.min, vec2(short.width(), 8.0));
             let notices = if covered { vec![thin] } else { Vec::new() };
-            let layout = layout(short, &metrics(), &screen.view(), true, &notices);
+            let layout = layout(short, &metrics(), &screen.view(), true, &notices, true);
             assert!(short.contains_rect(layout.frame), "{layout:?}");
-            let list = layout.list.expect("the list is laid out");
+            assert_eq!(
+                layout.frame.top() > short.top() + MARGIN,
+                covered,
+                "the premise: the notice sends the box down"
+            );
+            // With the notice, a list that has room nowhere but over it is not shown.
+            let Some(list) = layout.list else {
+                assert!(covered, "the list was dropped with no notice to protect");
+                continue;
+            };
             assert!(
                 short.contains_rect(list),
                 "the list left its console: {list:?}"
@@ -603,11 +688,11 @@ mod tests {
 
     #[test]
     fn a_list_that_falls_over_the_box_takes_the_presses_on_its_choices() {
-        // Five rows of twenty points: the list (three rows of choices) cannot fit under the box
-        // and is moved back inside the console, over it.
-        let short = Rect::from_min_size(pos2(100.0, 50.0), vec2(800.0, 100.0));
+        // Five rows of twenty points and barely wider than the box: the list (three rows of
+        // choices) fits neither under the box nor to its left, so it falls over it.
+        let short = Rect::from_min_size(pos2(100.0, 50.0), vec2(400.0, 100.0));
         let screen = Screen::new(Size { rows: 5, cols: 80 });
-        let layout = layout(short, &metrics(), &screen.view(), true, &[]);
+        let layout = layout(short, &metrics(), &screen.view(), true, &[], true);
         let list = layout.list.expect("the list is laid out");
         assert!(
             list.intersects(layout.frame),
@@ -641,11 +726,73 @@ mod tests {
     }
 
     #[test]
+    fn a_list_with_no_room_under_the_box_unfolds_to_its_left() {
+        let short = Rect::from_min_size(pos2(100.0, 50.0), vec2(800.0, 100.0));
+        let screen = Screen::new(Size { rows: 5, cols: 80 });
+        let layout = layout(short, &metrics(), &screen.view(), true, &[], true);
+        let list = layout.list.expect("the list is laid out");
+        assert!(short.contains_rect(list));
+        assert!(
+            !overlaps(list, layout.frame),
+            "the list fell over the box with room to its left: {layout:?}"
+        );
+        assert!(list.right() <= layout.frame.left());
+        assert!(
+            [Target::Options, Target::Close]
+                .iter()
+                .all(|kept| layout.targets.iter().any(|(target, _)| target == kept)),
+            "a button the person just pressed went under the list"
+        );
+    }
+
+    #[test]
+    fn a_list_that_would_cover_a_notice_is_not_shown() {
+        let screen = Screen::new(Size { rows: ROWS, cols: 80 });
+        // A notice down the console's right side, where the list would unfold under the box.
+        let notice = Rect::from_min_max(
+            pos2(console().right() - 300.0, console().top() + 60.0),
+            console().max,
+        );
+        let layout = layout(console(), &metrics(), &screen.view(), true, &[notice], true);
+        assert!(layout.frame.is_positive(), "the premise: the box itself has room");
+        assert_eq!(layout.list, None);
+        assert!(
+            layout
+                .targets
+                .iter()
+                .all(|(target, _)| !matches!(target, Target::Choice(_)))
+        );
+    }
+
+    #[test]
+    fn rectangles_that_only_share_an_edge_do_not_overlap() {
+        let a = Rect::from_min_size(pos2(0.0, 0.0), vec2(10.0, 10.0));
+        assert!(!overlaps(a, a.translate(vec2(0.0, 10.0))));
+        assert!(!overlaps(a, a.translate(vec2(10.0, 0.0))));
+        assert!(overlaps(a, a.translate(vec2(0.0, 9.0))));
+    }
+
+    #[test]
+    fn an_unfolded_list_widens_the_rows_a_step_keeps_clear() {
+        let screen = Screen::new(Size { rows: ROWS, cols: 80 });
+        let folded = layout(console(), &metrics(), &screen.view(), false, &[], true);
+        let unfolded = layout(console(), &metrics(), &screen.view(), true, &[], true);
+        let (KeepClear::Top(folded), KeepClear::Top(unfolded_rows)) =
+            (folded.keep_clear, unfolded.keep_clear)
+        else {
+            panic!("the box sits at the top in both");
+        };
+        let list = unfolded.list.expect("the list is laid out");
+        assert!(unfolded_rows > folded);
+        assert!(unfolded_rows as f32 * metrics().height() >= list.bottom() - console().top());
+    }
+
+    #[test]
     fn a_console_too_short_for_the_box_beside_its_notices_gets_none() {
         let short = Rect::from_min_size(pos2(100.0, 50.0), vec2(800.0, 80.0));
         let screen = Screen::new(Size { rows: 4, cols: 80 });
         let notice = Rect::from_min_size(short.min, vec2(short.width(), 50.0));
-        let layout = layout(short, &metrics(), &screen.view(), true, &[notice]);
+        let layout = layout(short, &metrics(), &screen.view(), true, &[notice], true);
         assert!(!layout.frame.is_positive(), "{layout:?}");
         assert!(layout.targets.is_empty());
         assert_eq!(layout.keep_clear, KeepClear::NONE);
@@ -657,7 +804,7 @@ mod tests {
             rows: ROWS,
             cols: 80,
         });
-        let top = layout(console(), &metrics(), &screen.view(), false, &[]);
+        let top = layout(console(), &metrics(), &screen.view(), false, &[], true);
         let KeepClear::Top(rows) = top.keep_clear else {
             panic!(
                 "a box at the top keeps rows at the top: {:?}",
@@ -667,7 +814,7 @@ mod tests {
         assert!(rows as f32 * metrics().height() >= top.frame.bottom() - console().top());
         assert!((rows - 1) as f32 * metrics().height() < top.frame.bottom() - console().top());
         let notice = Rect::from_min_size(console().min, vec2(console().width(), 60.0));
-        let bottom = layout(console(), &metrics(), &screen.view(), false, &[notice]);
+        let bottom = layout(console(), &metrics(), &screen.view(), false, &[notice], true);
         let KeepClear::Bottom(rows) = bottom.keep_clear else {
             panic!(
                 "a box at the bottom keeps rows at the bottom: {:?}",
@@ -675,6 +822,7 @@ mod tests {
             );
         };
         assert!(rows as f32 * metrics().height() >= console().bottom() - bottom.frame.top());
+        assert!((rows - 1) as f32 * metrics().height() < console().bottom() - bottom.frame.top());
     }
 
     #[test]

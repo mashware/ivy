@@ -8174,23 +8174,26 @@ searched, and the one-row line took no clicks, so pressing the button seemed to 
 - **The line becomes a box at the console's top-right**: the query, next (`Enter`, an up arrow,
   since it walks toward older lines), previous (`Shift+Enter`, a down arrow), an options button and
   close (`Escape`), **painted over the console and never cut out of it**, as the line was, and with
-  every part kept inside the console — a part clipped away would still take presses there; where a
-  short console makes the options list fall over the box, the box's parts under the list give way
-  to it. **A step keeps its match off the rows the box takes**, at the edge the box sits on, while
-  the view is in the history and can still scroll, which replaces the keep-off-the-last-row scroll
+  every part kept inside the console — a part clipped away would still take presses there. The
+  options list unfolds on the far side of the box from the console's edge, to the box's left when
+  there is no room for that, and over the box — whose parts under it then give way — only when
+  there is room for neither; a list that would cover a notice is not shown. **A step keeps its
+  match off the rows the box takes** (and the list's, while it is unfolded), at the edge the box
+  sits on, while the view is in the history and can still scroll, which replaces the keep-off-the-last-row scroll
   that served the line: walking older the engine lands a match on the top row, and a box that moved
   there would leave the next click on «next» to fall on the console. A match on the live screen
   leaves the view where the program writes, and at the oldest line the history has no room: there
-  **the box moves to the bottom-right** when the selection on screen lies under it. It does the same
-  for the held paste's question and the «stopped receiving» sentence, which keep the console's top
-  (D41); **a console too short to hold the box beside them gets no box**, and the search keeps its
-  keys. Its place comes from the console, the selection and those notices only,
-  never from whether the options list is unfolded, so unfolding it cannot move a button a second
-  press is aimed at.
+  **the box moves to the bottom-right** when the match a step found lies under it — a selection made
+  by hand before any step found one does not move it, so the box never jumps under a drag. It does
+  the same for the held paste's question and the «stopped receiving» sentence, which keep the
+  console's top (D41); **a console too short to hold the box beside them closes the search**, since
+  a box nobody can see must not go on taking keys. Its place comes from the console, that match and
+  those notices only, never from whether the options list is unfolded. A link hidden under the box
+  is not offered under the pointer: the box takes the click.
 - **The box takes presses, and what lies under it hears none.** A press on it is claimed before
   the console's own routing — no selection, no mouse report to a program that asked for the mouse,
   no context menu or paste from the hidden text — and a press on its field hands that console the
-  keyboard. As with D99's header controls, **only a box painted in the pass before answers**, so one
+  keyboard. As with D99's header controls, **only a box painted in the frame before answers**, so one
   recorded on a console that stopped being painted cannot take a press unseen. A press anywhere
   else folds every unfolded options list it did not land on, before the header controls and the
   consoles' own routing take it, and goes on to what it was aimed at.
@@ -8214,8 +8217,10 @@ searched, and the one-row line took no clicks, so pressing the button seemed to 
   origin's logical line every time, and stepping past rejections that way was quadratic — over a
   history that is one wrapped line, minutes for one press. Whole word is judged before wrapping, so
   «no more matches» is only said of a match that counts. Matches do not overlap, as the engine's
-  never do: a rejected candidate's cells are not searched again, so `1.1` as a whole word is not
-  found inside `v1.1.1`. **Wrap around** — on by default, which is what
+  never do: a rejected candidate's cells are not searched again, so a whole word that overlaps a
+  rejected one — `1.1` inside `v1.1.1` — is found walking one way and missed walking the other, and
+  marking (which walks rightward) may not light the match a step older selected. Accepted: it needs
+  a query that overlaps itself. **Wrap around** — on by default, which is what
   the search did; off, a step past the last match says «no more matches» and moves nothing.
   Changing an option re-marks the screen and takes back what the box said, as editing the query
   does.

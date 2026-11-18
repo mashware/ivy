@@ -32,7 +32,8 @@ pub struct Options {
     /// Off, case is ignored always — not the engine's own rule, which turns case-sensitive the
     /// moment the query holds an uppercase letter. An explicit box means what it says (**D61**).
     pub match_case: bool,
-    /// A match counts only when neither of its ends touches a word character.
+    /// A match counts only when each of its ends that is a word character does not touch another
+    /// one — the boundary rule of `\b`.
     pub whole_word: bool,
     /// Past the last match, carry on from the other end of the history.
     pub wrap: bool,
