@@ -34,9 +34,12 @@ const RING_WIDTH: f32 = 1.5;
 const RING_GAP: f32 = 1.5;
 /// How far a ring reaches from its dot's centre.
 const RING_REACH: f32 = DOT / 2.0 + RING_GAP + RING_WIDTH;
-/// From one dot's centre to the next: two rings' reach and one point between them. Fixed whether
-/// or not anything claims, so a claim arriving never moves the label.
-const DOT_STEP: f32 = 2.0 * RING_REACH + 1.0;
+/// The space left between two neighbouring rings, so they never touch.
+const RING_SPACING: f32 = 1.0;
+/// From one dot's centre to the next. Fixed whether or not anything claims, so a claim arriving
+/// never moves the label.
+const DOT_STEP: f32 = 2.0 * RING_REACH + RING_SPACING;
+const _: () = assert!(RING_SPACING > 0.0, "neighbouring rings would touch");
 /// The close target's width at the card's right edge.
 const CLOSE_WIDTH: f32 = 26.0;
 /// The narrowest card the title bar keeps before turning compact. The value is the pill era's
@@ -98,9 +101,11 @@ pub(super) struct Layout {
     pub body: Rect,
     pub close: Option<Rect>,
     pub label: Rect,
-    /// The dots and their rings' reach. Absent when the card cannot hold them, and then the card
-    /// shows no claim at all (D96, amended for #113).
+    /// The dots and their rings' reach. Absent when the card cannot hold them all.
     pub dots: Option<Rect>,
+    /// One dot's slot, only where the dots did not fit: the tab's loudest claim, ringed (D96,
+    /// amended for #113). Reserved whether or not anything claims, so a claim never moves the label.
+    pub summary: Option<Rect>,
 }
 
 /// Whether the cross shows: on the active tab, and on the one under the pointer.
@@ -169,14 +174,25 @@ impl Layout {
         } else {
             (body.right() - padding).max(label_left)
         };
-        let dots_width = dots as f32 * DOT_STEP - (DOT_STEP - 2.0 * RING_REACH);
-        let dots = (dots > 0 && end - label_left - dots_width - 8.0 >= 24.0).then(|| {
-            Rect::from_min_max(pos2(end - dots_width, body.top()), pos2(end, body.bottom()))
-        });
+        // `n` dots, right-aligned, where the label keeps at least 24 points and 8 of air before them.
+        let fit = |n: usize| {
+            let width = n as f32 * DOT_STEP - RING_SPACING;
+            (n > 0 && end - label_left - width - 8.0 >= 24.0).then(|| {
+                Rect::from_min_max(pos2(end - width, body.top()), pos2(end, body.bottom()))
+            })
+        };
+        let all = fit(dots);
+        let summary = if all.is_none() {
+            fit(dots.min(1))
+        } else {
+            None
+        };
         let label = Rect::from_min_max(
             pos2(label_left, body.top()),
             pos2(
-                dots.map_or(end, |d| d.left() - 8.0).max(label_left),
+                all.or(summary)
+                    .map_or(end, |d| d.left() - 8.0)
+                    .max(label_left),
                 body.bottom(),
             ),
         );
@@ -184,16 +200,30 @@ impl Layout {
             body,
             close,
             label,
-            dots,
+            dots: all,
+            summary,
         }
     }
 }
 
-/// The label and the dots of a card, for tests outside this module.
+/// The label, the dots and the summary slot of a card, for tests outside this module.
 #[cfg(test)]
-pub(crate) fn label_and_dots(card: Rect, dots: usize, close: bool) -> (Rect, Option<Rect>) {
+pub(crate) fn label_dots_summary(
+    card: Rect,
+    dots: usize,
+    close: bool,
+) -> (Rect, Option<Rect>, Option<Rect>) {
     let layout = Layout::new(card, dots, close);
-    (layout.label, layout.dots)
+    (layout.label, layout.dots, layout.summary)
+}
+
+/// A dot's ring, in the colour `attention_color` gives its claim.
+fn ring(painter: &egui::Painter, center: egui::Pos2, color: Color32) {
+    painter.circle_stroke(
+        center,
+        RING_REACH - RING_WIDTH / 2.0,
+        Stroke::new(RING_WIDTH, color),
+    );
 }
 
 /// Where the `n`th dot of a card's dots sits.
@@ -268,7 +298,7 @@ fn fitted(
 }
 
 /// Paints every card and the add button; returns how many cards painted at least one ring — what
-/// was drawn, not what was claimed, so a claiming card too narrow for its dots does not count.
+/// was drawn, not what was claimed, so a claiming card too narrow even for one dot does not count.
 pub(super) fn paint(window: &Window, ui: &egui::Ui, band: Rect, now: SystemTime) -> usize {
     let roles = crate::ui::style::roles(ui.ctx(), &window.theme);
     let count = window.tabs.len();
@@ -368,21 +398,30 @@ pub(super) fn paint(window: &Window, ui: &egui::Ui, band: Rect, now: SystemTime)
                         painter.circle_stroke(center, DOT / 2.0 - 0.5, Stroke::new(1.0, roles.tx3));
                     }
                 }
-                // The claim is the console's own, as its producer declared it (D18); the ring
-                // never changes the dot, which stays the project's.
+                // The claim is the console's own, as its producer declared it (D18), and it is
+                // drawn around the dot, not on it.
                 if let Some(claim) = pane.effective_attention(now) {
-                    painter.circle_stroke(
+                    ring(
+                        &painter,
                         center,
-                        RING_REACH - RING_WIDTH / 2.0,
-                        Stroke::new(
-                            RING_WIDTH,
-                            window.theme.attention_color(claim.class, claim.backed),
-                        ),
+                        window.theme.attention_color(claim.class, claim.backed),
                     );
                     ringed = true;
                 }
             });
             marked += usize::from(ringed);
+        } else if let Some(summary) = layout.summary
+            && let Some(claim) = tab.attention(now)
+        {
+            // No room for every console's dot: one muted dot carries the loudest claim of them all.
+            let center = dot_center(summary, 0);
+            painter.circle_filled(center, DOT / 2.0, roles.tx3);
+            ring(
+                &painter,
+                center,
+                window.theme.attention_color(claim.class, claim.backed),
+            );
+            marked += 1;
         }
         // Advanced every pass, shown or not, so a pointer that leaves from the cross does not leave
         // its hover at full strength for the next time the cross appears.
@@ -439,23 +478,39 @@ mod tests {
                         assert!(card.right() <= super::card(band, which + 1, count).left());
                     }
                     for close in [false, true] {
-                        for dots in [0, 1, 4] {
-                            let layout = Layout::new(card, dots, close);
+                        for n in [0, 1, 4] {
+                            let layout = Layout::new(card, n, close);
                             assert!(card.contains_rect(layout.body));
-                            assert!(layout.label.left() >= layout.body.left());
+                            // The label starts at the padding the card's width earns.
+                            let padding = if card.width() >= ROOMY {
+                                PADDING
+                            } else {
+                                TIGHT
+                            };
+                            assert_eq!(
+                                layout.label.left(),
+                                (card.left() + padding.min(card.width() / 2.0))
+                                    .min(layout.body.right()),
+                                "{width} {count} {n}"
+                            );
                             assert!(layout.label.right() <= layout.body.right());
                             if let Some(close) = layout.close {
                                 assert_eq!(layout.body.right(), close.left());
                             }
+                            assert!(layout.dots.is_none() || layout.summary.is_none());
                             if let Some(dots) = layout.dots {
                                 assert!(dots.left() >= layout.label.right() + 8.0);
                                 assert!(dots.right() <= layout.body.right());
-                                // Every ring inside the dots' rect, none touching the next.
-                                let first = dot_center(dots, 0);
-                                let last = dot_center(dots, dots_of(dots));
-                                assert!(first.x - RING_REACH >= dots.left() - 1e-3);
-                                assert!(last.x + RING_REACH <= dots.right() + 1e-3);
-                                assert!(dot_center(dots, 1).x - first.x > 2.0 * RING_REACH);
+                                // The last of the `n` rings ends inside the dots' rect.
+                                assert!(
+                                    dot_center(dots, n - 1).x + RING_REACH <= dots.right() + 1e-3
+                                );
+                            }
+                            if let Some(summary) = layout.summary {
+                                assert!(n > 1, "one dot that fits is a dot, not a summary");
+                                assert!(summary.left() >= layout.label.right() + 8.0);
+                                assert_eq!(summary.right(), dots_end(&layout));
+                                assert_eq!(summary.width(), 2.0 * RING_REACH);
                             }
                         }
                     }
@@ -471,21 +526,38 @@ mod tests {
         assert_eq!(layout.label.left(), PADDING);
     }
 
-    /// The last dot's index in a dots rect laid out by [`Layout::new`].
-    fn dots_of(dots: Rect) -> usize {
-        ((dots.width() + 1.0) / DOT_STEP).round() as usize - 1
+    /// Where the dots end: the body's right edge with the cross, its padding short of it without.
+    fn dots_end(layout: &Layout) -> f32 {
+        if layout.close.is_some() {
+            layout.body.right()
+        } else {
+            layout.body.right()
+                - if layout.body.width() >= ROOMY {
+                    PADDING
+                } else {
+                    TIGHT
+                }
+        }
     }
 
     /// Four consoles keep their dots, rings included, down to a 119-point card with the cross
-    /// shown, and lose them below it; the dots are 13 points apart and their rect is 51 wide.
+    /// shown; the dots are 13 points apart and their rect is 51 wide. Below that the card keeps one
+    /// 12-point summary slot down to 80 points, and below 80 it has neither.
     #[test]
-    fn four_dots_with_their_rings_fit_down_to_a_119_point_card() {
+    fn four_dots_fit_down_to_119_points_and_one_summary_slot_down_to_80() {
         let at = |width: f32| Rect::from_min_size(pos2(0.0, 6.0), vec2(width, 34.0));
-        let fits = Layout::new(at(119.0), 4, true)
-            .dots
-            .expect("119 points hold four dots");
-        assert_eq!(fits.width(), 51.0);
-        assert_eq!(dot_center(fits, 1).x - dot_center(fits, 0).x, 13.0);
-        assert!(Layout::new(at(118.0), 4, true).dots.is_none());
+        let fits = Layout::new(at(119.0), 4, true);
+        let dots = fits.dots.expect("119 points hold four dots");
+        assert_eq!(fits.summary, None);
+        assert_eq!(dots.width(), 51.0);
+        assert_eq!(dot_center(dots, 1).x - dot_center(dots, 0).x, 13.0);
+        let short = Layout::new(at(118.0), 4, true);
+        assert_eq!(short.dots, None);
+        let summary = short.summary.expect("118 points hold one summary slot");
+        assert_eq!(summary.right(), 118.0 - CLOSE_WIDTH);
+        assert_eq!(summary.width(), 12.0);
+        assert!(Layout::new(at(80.0), 4, true).summary.is_some());
+        let none = Layout::new(at(79.0), 4, true);
+        assert_eq!((none.dots, none.summary), (None, None));
     }
 }

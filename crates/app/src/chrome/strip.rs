@@ -251,8 +251,9 @@ mod tests {
     }
 
     /// Above the old 300-point threshold the full bar used to leave the tabs a band of zero below
-    /// about 380 points, and one too narrow for a pill up to about 456 — 600 since the bar carries
-    /// the kit's full set, Files, Markdown and a labelled Board included (D72, D96). At every width one tab keeps
+    /// about 380 points, and one too narrow for one card ([`crate::tab_bar::MIN_BAND`]) up to about
+    /// 456 — 600 since the bar carries the kit's full set, Files, Markdown and a labelled Board
+    /// included (D72, D96). At every width one tab keeps
     /// some label and an add target, and a full bar's right-hand buttons all fit after the left
     /// group, so the band starts where the drawn buttons leave it.
     #[test]
@@ -262,7 +263,7 @@ mod tests {
             let area = Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(width, 800.0));
             let strip = within(area, 40.0, 34.0, |_| 74.0);
             let card = crate::tab_bar::title_card(strip.tabs, 0, 1);
-            let (label, _) = crate::tab_bar::title_label_and_dots(card, 1, false);
+            let (label, _, _) = crate::tab_bar::title_label_dots_summary(card, 1, false);
             assert!(label.width() >= 12.0, "{width}: {label:?}");
             assert!(
                 crate::tab_bar::add_target(strip.tabs, 1).is_some(),

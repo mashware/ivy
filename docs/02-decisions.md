@@ -10116,24 +10116,31 @@ keeps its fill — the project ink, or the hollow muted outline of a console wit
 while that console claims, gets a ring 1.5 points wide, 1.5 points off the dot's edge, in that
 claim's color as `attention_color` gives it: wait and block as before, **done blue** and not green
 (D94: green is the accent and focus; the owner confirmed it against the mock that drew it green),
-and a claim nobody holds up dimmed toward the background, as everywhere else (D18). Dots are 13
-points apart whether or not anything claims, so a claim arriving never moves the label. **A card too
-narrow for its dots shows no claim at all** — the owner's choice over a summary ring for that case
-and over shrinking the label to keep the dots; four consoles stop fitting below about 119 points of
-card with the cross shown (127 before). The Board is where a narrow tab's claims are read. The
-compact threshold does not move: the narrowest card keeps its old width, written without the pill.
+and a claim nobody holds up dimmed toward the background, as `attention_color` gives it (D18) — the
+same rule the historical strip's glyph follows; the pill keeps its dashed outline on the panel and
+the Board. Dots are 13 points apart whether or not anything claims, so a claim arriving never moves
+the label. **A card without room for all its dots keeps one dot's slot**: a muted dot ringed with
+the tab's loudest claim, wait over block over done — chosen by the owner at review, once it was
+measured that «show nothing» left no claim on the bar with eight two-console tabs in a 1280-point
+window, and none ever on a tab of ten consoles or more. The slot is reserved whether or not anything
+claims, so the label does not move when a claim arrives. Four consoles keep their dots down to about
+119 points of card with the cross shown, one dot fits down to 80, and below 80 a card shows no claim
+at all. The compact threshold does not move: the narrowest card keeps its old width, written without
+the pill.
 
-*Discarded:* a summary ring only when the dots do not fit; the label giving way to the dots; a
-green done ring; a dashed, thinner or gapless ring for an unheld claim (the dimmed class color is the
-rule every other claim surface follows).
+*Discarded:* nothing at all when the dots do not fit (the owner's first choice, reversed at review on
+the numbers above); the label giving way to the dots (still leaves ten consoles with nothing); a
+green done ring; a dashed, thinner or gapless ring for an unheld claim. The class and whether it is
+held now read by colour alone on the ring: the pill's glyph does not fit a 6-point dot, and the
+console's own claim strip still carries it.
 
 *Measurement:* a card counts as marked when it painted at least one ring, so «tabs marked» still
-counts what was drawn and not what was claimed (a narrow card that claims but paints nothing is not
-marked). The batches that paint this bar — `chrome`, `chrome-zoom`, `projects`, `dock-v2-4-*` — paint
-rings instead of pills from this change on, and their reports from before it are not averaged with
-later ones. The two-tab ones need their two-console cards to keep their dots (about 93 points) or
-their run is invalidated by the «tabs marked» guard. `F` and `G` paint the historical strip and do
-not change.
+counts what was drawn and not what was claimed (a card under 80 points that claims but paints
+nothing is not marked). The batches that paint this bar — `chrome`, `chrome-zoom`, `projects`,
+`dock-v2-4-*` — paint rings instead of pills from this change on, and their reports from before it
+are not averaged with later ones. The two-tab ones need cards of at least 80 points or their run is
+invalidated by the «tabs marked» guard, whose message now names that cause too. `F` and `G` paint the
+historical strip and do not change.
 
 ## D97 — A panel's claim is a strip across its top, and its controls look like controls
 
