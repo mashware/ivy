@@ -2000,8 +2000,11 @@ mod tests {
         assert!(window.all_panes_mut().all(|p| p.keystrokes.is_empty()));
     }
 
-    /// The rings a tab card painted around its dots: 1.5-point strokes (0.75 for a claim nobody
-    /// holds) with no fill, centred inside the card, with their centre, radius, colour and width.
+    /// A tab dot's own radius: a ring is anything drawn beyond it.
+    const DOT_RADIUS: f32 = 3.0;
+
+    /// The whole rings a tab card painted around its dots (a claim nobody holds is dashed, not
+    /// here): 1-point strokes with no fill, centred in the card — centre, radius, colour, width.
     fn rings_in(
         shapes: &[egui::epaint::ClippedShape],
         card: egui::Rect,
@@ -2010,7 +2013,8 @@ mod tests {
             .iter()
             .filter_map(|s| match &s.shape {
                 egui::Shape::Circle(c)
-                    if (c.stroke.width == 1.5 || c.stroke.width == 0.75)
+                    if c.stroke.width == 1.0
+                        && c.radius > DOT_RADIUS
                         && c.fill == egui::Color32::TRANSPARENT
                         && card.contains(c.center) =>
                 {
@@ -2093,7 +2097,7 @@ mod tests {
             for ((at, radius, color, width), (n, class)) in rings.into_iter().zip(expected) {
                 assert_eq!(color, class, "tab {which}, dot {n}");
                 assert_eq!(radius, 5.25, "tab {which}, dot {n}");
-                assert_eq!(width, 1.5, "tab {which}, dot {n}: a held claim's ring");
+                assert_eq!(width, 1.0, "tab {which}, dot {n}: a held claim's ring");
                 assert_eq!(at, center(n), "tab {which}: the ring is not on dot {n}");
             }
             // No pill and no muted dot where the summary used to be — the card's first 36 points,
@@ -2124,11 +2128,11 @@ mod tests {
         assert_eq!(window.tab_bar_cost.marked_tabs, 2);
     }
 
-    /// A claim nobody holds up keeps its class's full colour on a thinner ring — 0.75 points
-    /// instead of 1.5 — on the same centre line. Dimming the colour turned the red brown at the
-    /// owner's desktop check (D96).
+    /// A claim nobody holds up draws the same whole ring as a held one: the class's full colour,
+    /// 1 point, 5.25 out — not dimmed (the owner read the dimmed red as brown) and not dashed
+    /// (the owner asked for a continuous ring) at the desktop check (D96).
     #[test]
-    fn an_unheld_claims_ring_is_thinner_in_its_full_colour() {
+    fn an_unheld_claims_ring_is_the_same_whole_ring_in_its_full_colour() {
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
         window.chrome.enable();
@@ -2138,10 +2142,17 @@ mod tests {
         let area = area_of(1400.0);
         frame(&mut window, &ctx, area, vec![]);
         let shapes = frame(&mut window, &ctx, area, vec![]);
-        let rings = rings_in(&shapes, title_card(&window, &ctx, area, 1));
+        // The premise: nobody holds this claim up, or the test proves nothing about it.
+        assert!(
+            window.tabs[1]
+                .attention(std::time::SystemTime::now())
+                .is_some_and(|c| !c.backed)
+        );
+        let card = title_card(&window, &ctx, area, 1);
+        let rings = rings_in(&shapes, card);
         assert_eq!(
             rings.iter().map(|r| (r.1, r.2, r.3)).collect::<Vec<_>>(),
-            vec![(5.25, BLOCK, 0.75)]
+            vec![(5.25, BLOCK, 1.0)]
         );
         // The control inside: the first card paints its dots and claims nothing, so it is not marked.
         assert!(rings_in(&shapes, title_card(&window, &ctx, area, 0)).is_empty());
@@ -2177,7 +2188,7 @@ mod tests {
             dot_at(&shapes, center, MUTED),
             "the summary dot is not the muted one"
         );
-        assert_eq!(rings_in(&shapes, card), vec![(center, 5.25, WAIT, 1.5)]);
+        assert_eq!(rings_in(&shapes, card), vec![(center, 5.25, WAIT, 1.0)]);
         for other in 1..3 {
             assert!(rings_in(&shapes, title_card(&window, &ctx, area, other)).is_empty());
         }

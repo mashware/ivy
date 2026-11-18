@@ -30,14 +30,14 @@ const ROOMY: f32 = 58.0;
 /// The accent line along the open tab's top edge.
 const ACCENT_LINE: f32 = 2.0;
 const DOT: f32 = 6.0;
-/// A claiming console's ring: its width, and the gap between the dot and the ring.
-const RING_WIDTH: f32 = 1.5;
-/// The ring of a claim nobody holds up: the class's own colour, thinner. Dimming the colour instead
-/// — the rule of the panel's text — turned the red into a brown at the desktop check (D96).
-const UNHELD_RING_WIDTH: f32 = 0.75;
+/// A claiming console's ring, always in its class's full colour: 1.5 points read too heavy at the
+/// desktop check (D96).
+const RING_WIDTH: f32 = 1.0;
+/// The band a ring is laid out in, wider than the stroke, so the geometry does not move with it.
+const RING_BAND: f32 = 1.5;
 const RING_GAP: f32 = 1.5;
 /// How far a ring reaches from its dot's centre.
-const RING_REACH: f32 = DOT / 2.0 + RING_GAP + RING_WIDTH;
+const RING_REACH: f32 = DOT / 2.0 + RING_GAP + RING_BAND;
 /// The space left between two neighbouring rings: at 1 point they read as touching (D96).
 const RING_SPACING: f32 = 4.0;
 /// From one dot's centre to the next. Fixed whether or not anything claims, so a claim arriving
@@ -221,18 +221,14 @@ pub(crate) fn label_dots_summary(
     (layout.label, layout.dots, layout.summary)
 }
 
-/// A dot's ring for `claim`: always in its class's full colour, and thinner when nobody holds the
-/// claim up. Both widths share one centre line, so an unheld ring sits where a held one would.
+/// A dot's ring for `claim`: one whole ring in its class's full colour, held or not. Whether
+/// somebody holds the claim up is the console's panel's to say; on the tab the owner wanted every
+/// ring the same at the desktop check (D96).
 fn ring(painter: &egui::Painter, center: egui::Pos2, claim: AttentionState, theme: &Theme) {
-    let width = if claim.backed {
-        RING_WIDTH
-    } else {
-        UNHELD_RING_WIDTH
-    };
     painter.circle_stroke(
         center,
-        RING_REACH - RING_WIDTH / 2.0,
-        Stroke::new(width, theme.attention_color(claim.class, true)),
+        RING_REACH - RING_BAND / 2.0,
+        Stroke::new(RING_WIDTH, theme.attention_color(claim.class, true)),
     );
 }
 
