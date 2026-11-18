@@ -10207,8 +10207,10 @@ split from its own header whether or not it has the keyboard; the titlebar's spl
 on the focused console, stay. This **amends D66**, whose approved per-pane set had no splits.
 
 - **Groups.** After the title, right to left: maximize and close; review and information panel;
-  split right and split down. A one-point rule in the titlebar's separator colour sits on the
-  boundary between groups and costs no width, so the cells and their thresholds stay where they were.
+  split right and split down. A one-point rule sits on the boundary between groups and costs no
+  width, so the cells and their thresholds stay where they were. It takes the ink of the title's
+  own « / » separator, which reads at 4.5:1 on every header surface; the titlebar's border role was
+  tried first and the owner found it barely visible on the desktop.
   A lone console has no maximize or close, and one rule.
 - **Shown where wanted.** The focused console shows its controls all the time. Any other console
   shows them while the pointer is over its header. Hidden controls keep their place, so the title is

@@ -370,7 +370,9 @@ fn paint(ui: &egui::Ui, strip: egui::Rect, theme: &Theme, appearance: Appearance
                     egui::pos2(*x, strip.center().y - 7.0),
                     egui::pos2(*x, strip.center().y + 7.0),
                 ],
-                egui::Stroke::new(1.0, roles.line2),
+                // The ink of the title's own « / » separator: the border role the titlebar uses was
+                // reported barely visible on a header's tinted surface (18 November 2026).
+                egui::Stroke::new(1.0, colors.separator),
             );
         }
     }
