@@ -5858,7 +5858,8 @@ even after **D34**, and the shades come out as moiré instead of an even wash.
 characters themselves. This is the same answer, kept to the one range where the defect **survived
 D34** — the gap in a run of `─` was in the box drawing range and closed with the step, and what a
 whole step does not close is a glyph rasterized for one nominal size and stamped into a cell of
-another, which is what a block is made of.
+another, which is what a block is made of. *(The gap did close; what replaced it was an overlap, and
+the amendment at the end of this decision draws the box drawing range too.)*
 
 **Two rectangles are enough for all thirty-two**, which is not obvious: the three-quadrant characters
 look as though they need three, and `▙` is the left half plus the bottom half. Every one of them
@@ -5899,7 +5900,7 @@ the hottest path in the project.
   that fraction instead of parting — on both axes, which is precisely the half of **D34** that had to
   be corrected in review. The visible defect is gone without synthesising the range, and synthesising
   it means also deciding about heavy, double, rounded and diagonal, which is a different and much
-  larger piece of work. When the day comes that it is wanted, this is the module it goes in.
+  larger piece of work. *(Reversed by the amendment below, in a module of its own, `box_drawing`.)*
 - **Rounding a sliver away to zero.** An eighth of a cell of seventeen is a little over two, so the
   parts are snapped like everything else in **D34** — but a part that would round to nothing is given
   one pixel, because a vanished mark is not a thinner mark: for `▏` used as a rule, the rule is
@@ -5918,7 +5919,7 @@ above, «extending it to the box drawing block», is reversed.
 
 **The new signal, measured and not inferred.** A screenshot showed Claude Code's input-box border
 dotted and blurred. A probe painted a run of `─` through the production painter at scales 1, 1.25,
-1.5, 5/3 and 2, with the built-in font and with Ubuntu Sans Mono, and rasterized the tessellation.
+1.5, 5/3 and 2, with the built-in font (Hack) and with Ubuntu Sans Mono, and rasterized the tessellation.
 Two defects showed at every scale and with both fonts:
 
 - **A bead at every seam.** The overlap the paragraph above counted on is real, and it is the
@@ -5931,14 +5932,18 @@ Two defects showed at every scale and with both fonts:
   so the blur is inside the raster, and no rounding of the origin can remove it.
 
 **How it is drawn.** The cell is taken to device pixels by rounding its two corners, which the next
-cell shares. Every thickness and band position is a whole number of pixels, centred by rounding
-down from the cell's own size, so a band leaves one cell on exactly the rows the next one enters on.
+cell shares. Every thickness is a whole number of pixels, and every band is centred by rounding
+down from the cell's own pixel size, so a band leaves one cell on exactly the rows the next one
+enters on.
 The shape is rasterized into a mask and the mask is cut into disjoint rectangles. Two rectangles over
 the same pixel of a translucent ink would paint the bead again. A light line is
 `round(points × scale / 12)` pixels, never fewer than one: one at the default size at 100 %, two at
 166 % and 200 %. Heavy is twice that. A double is two light lines a light line apart, and each of
-its lines stops against the line it would otherwise cross. Arcs are a quarter circle tangent to both
-bands, rasterized hard-edged.
+its lines stops against the line it would otherwise cross; a single line that crosses a double
+(`╪` `╫`) runs through both of its lines unbroken. Arcs are a quarter circle tangent to both bands,
+in whole pixels. A dashed line whose cell has no room for every dash and its gap is drawn solid,
+because merging two dashes would draw a different character. What a shape comes out as at a cell
+size and a thickness is computed once and kept, so a frame only places rectangles.
 
 **What was discarded.**
 
@@ -5949,13 +5954,14 @@ bands, rasterized hard-edged.
 - **Antialiased arcs.** Tried and seen on the desktop: at a radius of a few pixels the curve's
   pixels came out at half ink beside lines at full ink, and the corner read as a gap. So did the
   first hard-edged version, which inked only the pixels the centre line crosses: two pixels touching
-  at a corner. The arc now inks whole any pixel the stroke covers at least a third of, which makes
-  every step share an edge with the next, and ends a pixel inside the cell.
+  at a corner. The arc now inks whole any pixel whose coverage — estimated from its distance to the
+  curve — is at least a third, which makes every step share an edge with the next, and it ends a
+  pixel inside the cell.
 - **The diagonals.** A diagonal on a pixel grid is a staircase whichever way it is drawn, and
   nothing in a box has to meet it on a shared row.
 
 **What is not measured.** Like the blocks, no batch of `scripts/measure-frame.sh` puts a box drawing
-character on screen. A box character now costs a small mask and a few rectangles instead of a text
+character on screen. A box character now costs a lookup and a few rectangles instead of a text
 shape, and that is a gap in the bench, not a number.
 
 ## D36 — Only the console being typed into fills its cursor, and none of them does it when the window is not

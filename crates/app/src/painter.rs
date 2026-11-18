@@ -96,9 +96,10 @@ static SAID_THE_LETTERS_DIFFER: std::sync::Once = std::sync::Once::new();
 /// accumulates every **4.3** columns and every **1.6** rows.
 ///
 /// **Down and never up**, and that is the half that is not obvious: a cell wider than the glyph's own
-/// advance makes a run of `─` stop touching, which is the gap this exists to close. Going down leaves
-/// the cell a fraction narrower than the advance, and consecutive glyphs overlap by that fraction
-/// instead of parting.
+/// advance leaves a column of nothing between two glyphs, which is the gap this exists to close. Going
+/// down leaves the cell a fraction narrower than the advance, and consecutive glyphs overlap by that
+/// fraction instead of parting. A run of `─` was the case that showed it; that range is no longer a
+/// glyph (`box_drawing`), because for a line the overlap is a defect of its own (**D35**).
 ///
 /// **Nearest is not good enough for that, and it was what this shipped first.** Rounding to the
 /// nearest goes up whenever the fraction is at least a half — with the seventeen-point body it would
@@ -1179,8 +1180,8 @@ mod tests {
         // **The half a whole-pixel guard cannot see, and this shipped the wrong rounding first.**
         // «The cell is a whole number of pixels» is satisfied by `floor`, by `round` and by `ceil`
         // alike; what separates them is whether the cell can come out **bigger** than the advance the
-        // engine draws the glyph with, because that is what makes a run of `─` stop touching — the very
-        // gap the change exists to close.
+        // engine draws the glyph with, because that is what leaves a column of nothing between two
+        // glyphs — the very gap the change exists to close.
         //
         // **Measured, which is why these bodies and not others**: with the family in use, `round` takes
         // 9.52 pixels to ten at 17 points —0.48 of a gap at every column boundary— and 7.84 to eight at

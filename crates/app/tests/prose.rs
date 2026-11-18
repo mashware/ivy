@@ -871,7 +871,7 @@ const SOURCES: &[(&str, &str, usize)] = &[
     (
         "src/painter/blocks.rs",
         include_str!("../src/painter/blocks.rs"),
-        87,
+        85,
     ),
     (
         "src/painter/box_drawing.rs",

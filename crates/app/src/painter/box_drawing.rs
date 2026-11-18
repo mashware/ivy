@@ -536,6 +536,9 @@ fn dashes_of(from: i32, to: i32, dashes: u8) -> Vec<(i32, i32)> {
         .collect()
 }
 
+/// A shape at a cell's width and height in device pixels, with its light thickness.
+type Drawing = (Shape, i32, i32, i32);
+
 thread_local! {
     /// What each shape comes out as at a cell size and a thickness, kept across frames.
     ///
@@ -543,7 +546,7 @@ thread_local! {
     /// the drawing depends on nothing but the shape and those three numbers. Rasterizing each cell
     /// again was a mask allocation and a pass over its pixels per cell per frame, where the font path
     /// it replaced reused the engine's laid-out glyph.
-    static DRAWN: std::cell::RefCell<std::collections::HashMap<(Shape, i32, i32, i32), Vec<Run>>> =
+    static DRAWN: std::cell::RefCell<std::collections::HashMap<Drawing, Vec<Run>>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
