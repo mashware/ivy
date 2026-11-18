@@ -142,7 +142,7 @@ fn console_samples(
     ligatures: bool,
 ) -> Result<Vec<Sample>> {
     let first = samples(bytes, hinting, size, scale, "M", ligatures)?;
-    let width = first[0].advance;
+    let width = (first[0].advance * scale).floor().max(1.0) / scale;
     let mut result = if ligatures {
         samples(bytes, hinting, size, scale, GLYPHS, true)?
     } else {
@@ -300,6 +300,28 @@ mod tests {
         b.size[0] = 2;
         b.alpha.push(50);
         assert_eq!(difference(&a, &b), (1, 50));
+    }
+    #[test]
+    fn console_rows_floor_the_cell_step_before_placing_columns() {
+        let bytes = include_bytes!("../../../resources/fonts/GeistMono-Regular.ttf");
+        for ligatures in [false, true] {
+            let row = console_samples(bytes, None, 14.7, 1.0, ligatures).unwrap();
+            assert_eq!(
+                row.iter()
+                    .take(4)
+                    .map(|s| s.position[0])
+                    .collect::<Vec<_>>(),
+                vec![0.0, 8.0, 16.0, 24.0]
+            );
+            let row = console_samples(bytes, None, 14.7, 2.0, ligatures).unwrap();
+            assert_eq!(
+                row.iter()
+                    .take(4)
+                    .map(|s| s.position[0])
+                    .collect::<Vec<_>>(),
+                vec![0.0, 8.5, 17.0, 25.5]
+            );
+        }
     }
     #[test]
     fn missing_face_or_character_never_becomes_equality() {

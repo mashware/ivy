@@ -25,7 +25,8 @@ Atlas alpha includes epaint's default color transfer; it is not raw rasterizer c
 The same matrix also measures a fixed-column console row, a normally shaped ASCII run, and the
 optional ligature registration (a second copy of the face, bins disabled) placed on fixed columns.
 The diagnostic mirrors the placement in `painter/ligatures.rs::on_grid`; it does not instantiate
-the GUI or call the private painter. The fixed-column row uses individual layouts, as ordinary
+the GUI or call the private painter. The column step floors the measured `M` width to device pixels before multiplying columns,
+as `CellMetrics::measure` does. The fixed-column row uses individual layouts, as ordinary
 console cells do. The ordinary shaped run retains epaint's subpixel positions. Actual bin choices
 are visible in the instrumented trace. No ligature-font substitution or ligature-specific glyph
 claim is made for these two fonts.
