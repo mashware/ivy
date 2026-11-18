@@ -11,6 +11,7 @@
 #[cfg(test)]
 mod background_tests;
 mod blocks;
+mod box_drawing;
 mod ligatures;
 mod pane;
 #[cfg(test)]
@@ -95,9 +96,10 @@ static SAID_THE_LETTERS_DIFFER: std::sync::Once = std::sync::Once::new();
 /// accumulates every **4.3** columns and every **1.6** rows.
 ///
 /// **Down and never up**, and that is the half that is not obvious: a cell wider than the glyph's own
-/// advance makes a run of `─` stop touching, which is the gap this exists to close. Going down leaves
-/// the cell a fraction narrower than the advance, and consecutive glyphs overlap by that fraction
-/// instead of parting.
+/// advance leaves a column of nothing between two glyphs, which is the gap this exists to close. Going
+/// down leaves the cell a fraction narrower than the advance, and consecutive glyphs overlap by that
+/// fraction instead of parting. A run of `─` was the case that showed it; that range is no longer a
+/// glyph (`box_drawing`), because for a line the overlap is a defect of its own (**D35**).
 ///
 /// **Nearest is not good enough for that, and it was what this shipped first.** Rounding to the
 /// nearest goes up whenever the fraction is at least a half — with the seventeen-point body it would
@@ -511,6 +513,19 @@ fn paint_character(
     // `blocks`, which carries the reason and what was left out.
     if let Some(filling) = blocks::filling_of(character) {
         paint_a_block(painter, &filling, slot, color, metrics);
+        return;
+    }
+    // The box drawing lines likewise: they have to meet the line in the next cell. See
+    // `box_drawing`, which carries what a font's glyph does instead.
+    if let Some(shape) = box_drawing::shape_of(character) {
+        box_drawing::paint(
+            painter,
+            shape,
+            slot,
+            color,
+            metrics.font.size,
+            metrics.per_point,
+        );
         return;
     }
     // **A wide emoji occupies the TWO columns the engine reserved for it**, not one. The slot that
@@ -1132,8 +1147,10 @@ mod tests {
         // has to come out with unequal steps — otherwise this machine's font or this version of the
         // engine does not have the defect at all, and the assertion below would hold with the fix
         // deleted.
+        // A row of letters, not of `─`: the box drawing range is no longer a glyph (`box_drawing`),
+        // and what this guards is the step between any two glyphs.
         let steps = |cell: fn(&Context) -> CellMetrics| {
-            glyph_edges(cell, "──────")
+            glyph_edges(cell, "MMMMMM")
                 .windows(2)
                 .map(|pair| pair[1] - pair[0])
                 .collect::<Vec<f32>>()
@@ -1163,8 +1180,8 @@ mod tests {
         // **The half a whole-pixel guard cannot see, and this shipped the wrong rounding first.**
         // «The cell is a whole number of pixels» is satisfied by `floor`, by `round` and by `ceil`
         // alike; what separates them is whether the cell can come out **bigger** than the advance the
-        // engine draws the glyph with, because that is what makes a run of `─` stop touching — the very
-        // gap the change exists to close.
+        // engine draws the glyph with, because that is what leaves a column of nothing between two
+        // glyphs — the very gap the change exists to close.
         //
         // **Measured, which is why these bodies and not others**: with the family in use, `round` takes
         // 9.52 pixels to ten at 17 points —0.48 of a gap at every column boundary— and 7.84 to eight at
@@ -1204,7 +1221,7 @@ mod tests {
             assert!(
                 width <= raw_width,
                 "at {body} points the cell is {width} wide against an advance of {raw_width}: a cell \
-                 wider than the advance is what opens the gap in a run of `─`"
+                 wider than the advance is what leaves a column of nothing between two glyphs"
             );
             assert!(
                 height <= raw_height,

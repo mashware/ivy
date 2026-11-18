@@ -9,11 +9,9 @@
 //!
 //! **Everybody outside solves it the same way** —Kitty, WezTerm, Ghostty and VTE all draw these
 //! characters themselves— and this is the same answer, kept to the 32 characters of the Block Elements
-//! range. **The box drawing block (`U+2500`–`U+257F`) is deliberately left out**: its lines close with
-//! the neighbouring cell **because the cell is never larger than what the font measured** —
-//! consecutive glyphs overlap by that fraction instead of parting, on both axes, which is the half of
-//! **D34** that had to be corrected in review — and synthesising the range means also deciding about
-//! heavy, double, rounded and diagonal, which is a different piece of work.
+//! range. The box drawing block (`U+2500`–`U+257F`) is drawn the same way, by its own module,
+//! `box_drawing`: it was left to the font here at first, and the overlap that was expected to close
+//! its lines turned out to be the defect (**D35**'s amendment).
 //!
 //! **The three shades are a fraction of the ink, not a dot pattern.** A real 25 % dither has to land on
 //! the pixel lattice to look even, and at a cell of eight by seventeen there are not enough pixels for

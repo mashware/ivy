@@ -781,6 +781,14 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/painter/blocks.rs"),
     ),
     (
+        "app/src/painter/box_drawing.rs",
+        include_str!("../src/painter/box_drawing.rs"),
+    ),
+    (
+        "app/src/painter/box_drawing/tests.rs",
+        include_str!("../src/painter/box_drawing/tests.rs"),
+    ),
+    (
         "app/src/painter/emoji.rs",
         include_str!("../src/painter/emoji.rs"),
     ),
