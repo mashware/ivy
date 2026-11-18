@@ -141,13 +141,21 @@ cargo build --locked --workspace --release
    Do not hard-code a pane's directory in the client configuration: every console has its own.
 3. The client starts the bridge and discovers its tools through MCP. The tool descriptions and
    parameter schemas tell the model how to call them.
-4. When the bridge has a complete console identity and metadata finds its control socket, it also
-   answers the MCP handshake with instructions asking the agent to publish its progress and
-   attention changes. A client that passes server instructions to its model — Claude Code does —
-   shows them to the agent. Outside those conditions, including Windows until its control channel
-   exists, the bridge sends none. The socket check is presence only; it does not establish that a
-   server is listening. Those instructions ask; they do not schedule status updates on the agent's
-   behalf.
+4. With a complete inherited console identity and an existing pane directory, the bridge answers
+   the MCP handshake with conditional instructions asking the agent to publish progress and
+   attention changes. It does not wait for a control socket: Ivy can still be starting it. The
+   agent checks availability with `panel_get`; actual calls validate and connect to that console.
+   A client that passes server instructions to its model — Claude Code does — shows them to the
+   agent. Missing/broken identity, a gone directory or an unsupported control channel gets none.
+   Instructions ask; they do not schedule status updates on the agent's behalf.
+
+**Configure once per AI client.** Normal package updates keep the saved registration and the stable
+bridge path. An empty panel means no status has been published, not that setup was lost. In an
+existing Claude Code session, reconnect the registered server from `/mcp`; for a server named
+`ivy`, `/mcp reconnect ivy` is available in current Claude Code. If that running session does not
+list the server, restart Claude in the same Ivy console and resume the conversation. Closing the
+terminal or repeating the installation prompt is unnecessary. The first-time setup prompt remains
+available under **Connect agents → Manual setup and diagnostics**.
 
 If this client did not pass the bridge's server instructions to its agent, add this instruction to
 the agent's session or project instructions:

@@ -10352,3 +10352,28 @@ regressions preserve the original native Geist masks and distinguish fitted from
 Forcing the automatic hinter for every font was used to diagnose but rejected for delivery: a
 font with deliberate native instructions should not silently lose them. Configurable sizes use
 D100's true points; this does not change placement, cell rounding or DPI/backend selection.
+
+
+## D102 — Empty panels do not request setup, and startup guidance survives a late channel
+
+The owner reported repeating setup after updates, including already running Claude sessions that
+only learned of the MCP after restart. Saved registration and connectivity are distinct from panel
+publication. The connection guide no longer colours its icon from a zero publication count; it
+explains reconnection first and keeps first-time registration under manual diagnostics. Copy actions
+remain clipboard-only. This supersedes D73's zero-publication highlight without claiming detected
+connection health.
+
+The bridge also took its publication-guidance snapshot before reading initialize, while Ivy starts
+the child PTY before binding its control socket. An isolated same-process regression proved that
+tools could work after late binding despite the missing guidance. D88's socket-presence gate is
+replaced by existing-directory/whole-identity gates and explicitly conditional instructions. The
+handshake claims no publisher and promises no live endpoint; actual tool calls keep their existing
+identity, directory, peer and permission checks. Missing/gone directories and unsupported channels
+still receive no guidance. No timeout, automatic client-config edits or injected reconnect commands
+are introduced. Deferred tool schemas keep their existing client policy.
+
+A native auxiliary test retained one Claude registration across replacement of the installed Ivy
+payload with current main and verified publication/readback under a fresh console identity. This
+proves that controlled replacement; it does not prove hot reload in a running Claude conversation
+or identify the exact cause of the owner's earlier incident. Debian upgrade tests additionally
+preserve Claude/Codex registration fixtures alongside Ivy's own data.

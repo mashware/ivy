@@ -127,8 +127,7 @@ pub(super) fn compact_button(window: &mut Window, ui: &egui::Ui, row: Rect) {
     }
 }
 
-/// The link icon; a call for attention colours it and adds nothing beside it (the owner removed
-/// the dot on 17 November 2026).
+/// The neutral link icon opens help; unpublished panels do not diagnose client setup.
 pub(super) fn paint_icon(painter: &egui::Painter, rect: Rect, fg: Color32) {
     crate::ui::icons::paint(
         painter,
@@ -270,13 +269,7 @@ pub(crate) fn after_panels(window: &mut Window, ui: &mut egui::Ui, _area: Rect) 
         if hovered {
             painter.rect_filled(rect.shrink(2.0), 4.0, roles.hover);
         }
-        let highlighted = current.documents == 0;
-        let fg = if highlighted {
-            window.theme.color(term_core::TermColor::Indexed(3))
-        } else {
-            roles.tx2
-        };
-        paint_icon(&painter, rect, fg);
+        paint_icon(&painter, rect, roles.tx2);
     }
     window.chrome.record_work(started.elapsed());
     window.timed_separately += window.chrome.take_cost();
@@ -402,7 +395,7 @@ fn manual(published: Published, copied: &mut Option<&'static str>, ui: &mut egui
     ui.label("Other platforms, unsupported versions and advanced options use an independent session with a diagnostic when supported. That session does not provide live mobile access to the same desktop conversation. Explicit --no-daemon keeps its behavior.");
     ui.label("To enable remote control, run codex remote-control start. A connected host does not prove that a phone can load history or send input to the live conversation. Phone history, input and panel publication were verified on Linux with CLI/server 0.167.2, including after resume; verify them on your device. If a pre-integration session cannot be attached, leave its old desktop session before resuming.");
     ui.label("A successful tool call proves a usable connection. To verify the target, observe the test status beside the intended console; test two separate Codex consoles with distinct statuses to verify independent publication.");
-    ui.label("The indicator stops highlighting when a valid panel is published in any console, by MCP or panel.json. Opening this guide changes no running programs.");
+    ui.label("Panel publication is independent of client registration. Opening this guide changes no running programs.");
 }
 
 fn setup_prompt(bridge: &Bridge) -> String {
@@ -418,25 +411,41 @@ fn setup_prompt(bridge: &Bridge) -> String {
 
 fn body(guide: &mut Guide, ui: &mut egui::Ui) {
     let published = guide.published;
-    ui.label("Copy these instructions and paste them into the AI client you use inside Ivy.");
-    let bridge = ui
-        .ctx()
-        .data(|data| data.get_temp::<Bridge>(egui::Id::new(BRIDGE_KEY)))
-        .unwrap_or_default();
-    copy_button(ui, "Copy setup prompt", &mut guide.copied, || {
-        setup_prompt(&bridge)
-    });
-    ui.label("Your AI will set up the connection and publish a test panel. It will tell you if it needs a restart.");
-    ui.separator();
+    ui.label(
+        "Set up Ivy once per AI client. Ivy updates normally keep your saved MCP registration.",
+    );
+    ui.label("An empty panel only means no status has been published.");
     ui.label(if published.documents == 0 {
         "No panels published yet"
     } else {
         "A panel has been published"
     });
+    ui.strong("Reconnect an existing Claude session");
+    ui.label("If Ivy is already listed in /mcp, reconnect it. Use its existing server name if it differs from ivy.");
+    copyable(
+        ui,
+        "/mcp reconnect ivy",
+        "Copy reconnect command",
+        &mut guide.copied,
+    );
+    ui.label("If Ivy is absent from this running session, restart Claude in this same Ivy console and resume your conversation. You do not need to close the terminal.");
+    ui.separator();
     if ui.button("Manual setup and diagnostics").clicked() {
         guide.manual_open = !guide.manual_open;
     }
     if guide.manual_open {
+        ui.strong("First-time setup");
+        ui.label("For a client that has not been registered, copy these instructions into that AI client inside Ivy.");
+        let bridge = ui
+            .ctx()
+            .data(|data| data.get_temp::<Bridge>(egui::Id::new(BRIDGE_KEY)))
+            .unwrap_or_default();
+        copy_button(
+            ui,
+            "Copy first-time setup prompt",
+            &mut guide.copied,
+            || setup_prompt(&bridge),
+        );
         manual(published, &mut guide.copied, ui);
     }
     recovery::show(guide.recovery, &mut guide.copied, ui);

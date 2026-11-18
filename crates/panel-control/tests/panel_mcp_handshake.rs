@@ -27,6 +27,7 @@ fn exchange(env: &[(&str, &str)], message: &[u8]) -> serde_json::Value {
         bridge.env_remove(name);
     }
     let mut bridge = bridge
+        .env_remove(panel_control::codex_route::ENV)
         .envs(env.iter().copied())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -55,15 +56,15 @@ fn nowhere(name: &str) -> String {
     }
 }
 
-/// A whole identity with no bound socket still gets a normal handshake, without instructions.
+/// A whole identity with a gone directory does not get guidance; tool calls explain the failure.
 #[test]
-fn the_bridge_asks_for_a_panel_only_when_started_inside_a_console() {
+fn the_bridge_gives_conditional_guidance_only_for_a_whole_console_identity() {
     let dir = nowhere("ivy-a1b2c3d4");
     let dir = dir.as_str();
     let outside = handshake(&[("PANEL_ID", "a1b2c3d4"), ("PANEL_DIR", dir)]);
     assert!(
         outside["result"].get("instructions").is_none(),
-        "a missing socket must not be promised: {outside}"
+        "a missing pane directory is not live: {outside}"
     );
 
     for (env, why) in [
@@ -96,7 +97,7 @@ fn the_bridge_asks_for_a_panel_only_when_started_inside_a_console() {
 
 #[cfg(unix)]
 #[test]
-fn instructions_require_socket_metadata_without_connecting() {
+fn conditional_instructions_neither_probe_nor_promise_a_socket() {
     use std::os::unix::net::UnixListener;
 
     let panel = panel_contract::PanelDir::create().unwrap();
@@ -109,14 +110,21 @@ fn instructions_require_socket_metadata_without_connecting() {
     assert_eq!(
         listener.accept().unwrap_err().kind(),
         std::io::ErrorKind::WouldBlock,
-        "the metadata check connected"
+        "delivering guidance connected"
     );
     drop(listener);
 
     std::fs::remove_file(&socket_path).unwrap();
     std::fs::write(&socket_path, b"regular file").unwrap();
     let regular = handshake(&[("PANEL_ID", panel.id()), ("PANEL_DIR", dir)]);
-    assert!(regular["result"].get("instructions").is_none(), "{regular}");
+    assert_eq!(
+        regular["result"]["instructions"],
+        bound["result"]["instructions"]
+    );
+    assert!(
+        panel_get_refusal(&[("PANEL_ID", panel.id()), ("PANEL_DIR", dir)])
+            .contains("could not be reached")
+    );
 }
 
 /// The text of a `panel_get` call's reply, which is a tool error in every case below: outside a
@@ -198,4 +206,95 @@ fn a_tool_call_tells_a_missing_identity_from_a_broken_one() {
             "where nothing binds, the platform is named, not the console: {whole}"
         );
     }
+}
+
+/// The child replies before binding is permitted, so this exercises ordering without sleeps.
+#[cfg(unix)]
+#[test]
+fn an_early_bridge_keeps_publication_guidance_when_the_channel_binds_later() {
+    use std::io::{BufRead, BufReader};
+    use std::sync::{Arc, mpsc};
+    use std::time::Duration;
+
+    struct Bridge {
+        child: std::process::Child,
+        input: Option<std::process::ChildStdin>,
+        replies: mpsc::Receiver<serde_json::Value>,
+        reader: Option<std::thread::JoinHandle<()>>,
+    }
+    impl Bridge {
+        fn exchange(&mut self, message: serde_json::Value) -> serde_json::Value {
+            let input = self.input.as_mut().unwrap();
+            writeln!(input, "{message}").unwrap();
+            input.flush().unwrap();
+            self.replies
+                .recv_timeout(Duration::from_secs(5))
+                .expect("bounded bridge reply")
+        }
+    }
+    impl Drop for Bridge {
+        fn drop(&mut self) {
+            self.input.take();
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+            if let Some(reader) = self.reader.take() {
+                reader.join().unwrap();
+            }
+        }
+    }
+    let panel = panel_contract::PanelDir::create().unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_panel-mcp"))
+        .env_remove(panel_control::codex_route::ENV)
+        .env("PANEL_ID", panel.id())
+        .env("PANEL_DIR", panel.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let input = child.stdin.take().unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let (send, replies) = mpsc::channel();
+    let reader = std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            let Ok(line) = line else { break };
+            let value = serde_json::from_str(&line).expect("bridge JSON");
+            if send.send(value).is_err() {
+                break;
+            }
+        }
+    });
+    let mut bridge = Bridge {
+        child,
+        input: Some(input),
+        replies,
+        reader: Some(reader),
+    };
+    let early = bridge.exchange(serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize"}));
+    assert!(!panel.path().join(panel_contract::CONTROL_SOCKET).exists());
+    let (sender, _inbox) = mpsc::sync_channel(8);
+    let channel = panel_control::Channel::open_with_reader(
+        panel.path(),
+        panel.id(),
+        sender,
+        Arc::new(|| Ok(r#"{"lines":["late channel ready"]}"#.into())),
+        Arc::new(|| {}),
+    )
+    .unwrap();
+    let later = bridge.exchange(serde_json::json!({"jsonrpc":"2.0","id":2,"method":"initialize"}));
+    let read = bridge.exchange(serde_json::json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"panel_get","arguments":{}}}));
+    assert_ne!(read["result"]["isError"], true, "{read}");
+    assert!(read.to_string().contains("late channel ready"), "{read}");
+    for reply in [early, later] {
+        let instructions = reply["result"]["instructions"]
+            .as_str()
+            .expect("startup must not lose publication guidance");
+        assert!(instructions.contains("panel_set"));
+        assert!(instructions.contains("panel_get"));
+        assert!(
+            !instructions.contains("This session runs in an Ivy console"),
+            "do not promise that the channel is live"
+        );
+    }
+    drop(bridge);
+    drop(channel);
 }

@@ -318,9 +318,9 @@ mod tests {
         }
     }
 
-    /// The connect icon drawn in the call-for-attention yellow, with no dot beside it.
-    fn connection_highlight(shapes: &[egui::epaint::ClippedShape], area: egui::Rect) -> bool {
-        let yellow = crate::theme::Theme::default().color(term_core::TermColor::Indexed(3));
+    /// The connect icon stays in neutral ink, with no dot beside it.
+    fn connection_neutral(shapes: &[egui::epaint::ClippedShape], area: egui::Rect) -> bool {
+        let neutral = crate::theme::Roles::of(&crate::theme::Theme::default()).tx2;
         let button = egui::Rect::from_center_size(connection_button(area), egui::vec2(28.0, 28.0));
         assert!(
             !shapes
@@ -329,11 +329,32 @@ mod tests {
                 if button.expand(4.0).contains(c.center) && c.radius == 3.0)),
             "the connect button still carries a dot"
         );
-        shapes.iter().any(|s| {
-            matches!(&s.shape, egui::Shape::Path(path)
-            if button.contains(path.points[0])
-                && path.stroke.color == egui::epaint::ColorMode::Solid(yellow))
-        })
+        // Match the connector's central diagonal, not any neutral path in the button.
+        // Chrome paints a base icon before after_panels repaints it, so only the last
+        // matching stroke is the visible result; the earlier one can be covered by amber.
+        let center = connection_button(area);
+        let expected = [
+            center + egui::vec2(-1.875, 1.875),
+            center + egui::vec2(1.875, -1.875),
+        ];
+        let stroke = shapes
+            .iter()
+            .rev()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Path(path)
+                    if path.points.len() == 2
+                        && path
+                            .points
+                            .iter()
+                            .zip(expected)
+                            .all(|(a, b)| a.distance(b) < 0.01) =>
+                {
+                    Some(&path.stroke.color)
+                }
+                _ => None,
+            })
+            .expect("the connector's visible central stroke must be painted");
+        *stroke == egui::epaint::ColorMode::Solid(neutral)
     }
 
     fn open_connection_guide(
@@ -358,7 +379,7 @@ mod tests {
             crate::viewer::activate(&mut window, true);
             let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 420.0));
             let shapes = frame(&mut window, &ctx, area, vec![]);
-            assert!(connection_highlight(&shapes, area));
+            assert!(connection_neutral(&shapes, area));
             let shapes = open_connection_guide(&mut window, &ctx, area);
             assert!(has_text(&shapes, "Connect agents"));
             assert!(
@@ -393,8 +414,7 @@ mod tests {
     }
 
     #[test]
-    fn connection_indicator_sees_a_first_file_publication_in_the_same_pass_even_in_a_background_tab()
-     {
+    fn neutral_connection_icon_and_guide_observe_file_publication_even_in_a_background_tab() {
         for tab in [0, 1] {
             let ctx = egui::Context::default();
             ctx.global_style_mut(|style| style.animation_time = 0.0);
@@ -402,7 +422,7 @@ mod tests {
             window.chrome.enable();
             window.headers = window.headers.integrated(true);
             let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1800.0));
-            assert!(connection_highlight(
+            assert!(connection_neutral(
                 &frame(&mut window, &ctx, area, vec![]),
                 area
             ));
@@ -412,8 +432,8 @@ mod tests {
             pane.to_reread.raise();
             let shapes = frame(&mut window, &ctx, area, vec![]);
             assert!(
-                !connection_highlight(&shapes, area),
-                "first publication left a stale setup highlight"
+                connection_neutral(&shapes, area),
+                "publication changed the neutral connection icon"
             );
             let shapes = open_connection_guide(&mut window, &ctx, area);
             assert!(has_text(&shapes, "A panel has been published"));
@@ -446,13 +466,13 @@ mod tests {
     }
 
     #[test]
-    fn connection_indicator_follows_committed_producer_publication_and_retirement() {
+    fn connection_icon_stays_neutral_through_publication_and_retirement() {
         let ctx = egui::Context::default();
         let mut window = window_with("sleep 30", "sleep 30");
         window.chrome.enable();
         window.headers = window.headers.integrated(true);
         let area = area_of(1400.0);
-        assert!(connection_highlight(
+        assert!(connection_neutral(
             &frame(&mut window, &ctx, area, vec![]),
             area
         ));
@@ -466,7 +486,7 @@ mod tests {
                 SystemTime::now(),
             )
             .unwrap();
-        assert!(!connection_highlight(
+        assert!(connection_neutral(
             &frame(&mut window, &ctx, area, vec![]),
             area
         ));
@@ -492,7 +512,7 @@ mod tests {
                 },
             )
             .unwrap();
-        assert!(connection_highlight(
+        assert!(connection_neutral(
             &frame(&mut window, &ctx, area, vec![]),
             area
         ));
@@ -584,6 +604,66 @@ mod tests {
     }
 
     #[test]
+    fn reconnect_help_copies_only_the_command_and_never_types_into_the_console() {
+        let ctx = egui::Context::default();
+        chrome::prepare(&ctx);
+        let received = term_core::received::Received::new("connection-reconnect-copy");
+        let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        received.wait_until_ready(Duration::from_secs(5));
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 800.0));
+        let shapes = open_connection_guide(&mut window, &ctx, area);
+        assert!(!has_text(&shapes, "Copy first-time setup prompt"));
+        assert!(has_text(&shapes, "Reconnect an existing Claude session"));
+        let at = text_center(&shapes, "Copy reconnect command");
+        frame(&mut window, &ctx, area, click_at(at)[..2].to_vec());
+        let mut native = eframe::Frame::_new_kittest();
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(area),
+                events: click_at(at)[2..].to_vec(),
+                ..Default::default()
+            },
+            |ui| eframe::App::ui(&mut window, ui, &mut native),
+        );
+        let copied: Vec<_> = output
+            .platform_output
+            .commands
+            .iter()
+            .filter_map(|command| {
+                if let egui::OutputCommand::CopyText(text) = command {
+                    Some(text.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(copied, vec!["/mcp reconnect ivy"]);
+        assert!(has_text(&output.shapes, "Copied"));
+        output.drop_without_applying_deltas();
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::Text("SAFE".into())],
+        );
+        assert_eq!(received.wait_for(4, Duration::from_secs(5)), b"SAFE");
+    }
+
+    #[test]
     fn connection_guide_copies_setup_prompt_with_local_path_without_typing_it() {
         fn button_fill(shapes: &[egui::epaint::ClippedShape], at: egui::Pos2) -> egui::Color32 {
             shapes
@@ -603,10 +683,17 @@ mod tests {
         window.chrome.enable();
         window.headers = window.headers.integrated(true);
         received.wait_until_ready(Duration::from_secs(5));
-        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 800.0));
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1200.0));
         let shapes = open_connection_guide(&mut window, &ctx, area);
         assert!(!has_text(&shapes, "1. Locate the MCP bridge"));
-        let at = text_center(&shapes, "Copy setup prompt");
+        assert!(!has_text(&shapes, "Copy first-time setup prompt"));
+        assert!(has_text(&shapes, "Copy reconnect command"));
+        let manual = text_center(&shapes, "Manual setup and diagnostics");
+        frame(&mut window, &ctx, area, click_at(manual));
+        frame(&mut window, &ctx, area, vec![]);
+        let shapes = frame(&mut window, &ctx, area, vec![]);
+        assert!(has_text(&shapes, "First-time setup"));
+        let at = text_center(&shapes, "Copy first-time setup prompt");
         let idle = button_fill(&shapes, at);
         frame(&mut window, &ctx, area, vec![egui::Event::PointerMoved(at)]);
         let shapes = frame(&mut window, &ctx, area, vec![]);
@@ -685,10 +772,7 @@ mod tests {
             "copy has no visible confirmation"
         );
         output.drop_without_applying_deltas();
-        let shapes = frame(&mut window, &ctx, area, vec![]);
-        let at = text_center(&shapes, "Manual setup and diagnostics");
-        frame(&mut window, &ctx, area, vec![egui::Event::PointerMoved(at)]);
-        frame(&mut window, &ctx, area, click_at(at));
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 800.0));
         let time = ctx.input(|input| input.time) + 1.0;
         ui_pass(
             &mut window,
@@ -2465,7 +2549,7 @@ mod tests {
             frame(&mut window, &ctx, area, click_at(at));
             frame(&mut window, &ctx, area, vec![]);
             let shapes = frame(&mut window, &ctx, area, vec![]);
-            assert!(has_text(&shapes, "Copy setup prompt"));
+            assert!(has_text(&shapes, "Set up Ivy once per AI client."));
             frame(
                 &mut window,
                 &ctx,
@@ -2642,7 +2726,7 @@ mod tests {
                 for (label, proof) in [
                     ("Check for updates", "Installed: Ivy"),
                     ("What's new", "New in this alpha"),
-                    ("Connect agents", "Copy setup prompt"),
+                    ("Connect agents", "Set up Ivy once per AI client."),
                     ("Search console", ""),
                 ] {
                     let ctx = egui::Context::default();
