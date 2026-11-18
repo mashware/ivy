@@ -53,8 +53,8 @@ impl Target {
     fn hint(self) -> &'static str {
         match self {
             Self::Field => "",
-            Self::Previous => "Previous match (Shift+Enter)",
-            Self::Next => "Next match (Enter)",
+            Self::Previous => "Previous match, newer (Shift+Enter)",
+            Self::Next => "Next match, older (Enter)",
             Self::Options => "Search options",
             Self::Close => "Close search (Escape)",
             Self::Choice(choice) => choice.label(),
@@ -62,13 +62,17 @@ impl Target {
     }
 }
 
-/// Where the box's parts are, worked out from the console and from what is selected on screen.
+/// Where the box's parts are, worked out from the console, what is selected on screen and the
+/// notices over it.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Layout {
     /// The box, without its list.
     pub(crate) frame: Rect,
     pub(crate) list: Option<Rect>,
     pub(crate) targets: Vec<(Target, Rect)>,
+    /// How many of the console's rows the box takes when it sits at the top: a step keeps its
+    /// match below them wherever the view can scroll, so the box seldom has to move.
+    pub(crate) clear_rows: usize,
 }
 
 /// What the painter recorded of a box it painted: the pass, and where each part was.
@@ -100,10 +104,19 @@ impl Painted {
 
 /// Where the box goes over `console`.
 ///
-/// **At the top-right, and at the bottom-right when the current match lies under it.** It is
-/// placed from the console and the selection on screen only — **never from whether the list is
-/// unfolded**, so opening the list cannot move the button a second press is aimed at.
-pub(crate) fn layout(console: Rect, metrics: &CellMetrics, view: &View, list: bool) -> Layout {
+/// **At the top-right, and at the bottom-right when the selection on screen or a notice lies under
+/// it** — the held paste's question and the «stopped receiving» sentence keep the console's top
+/// (D41), and the box must neither hide them nor take their presses. It is placed from the console,
+/// the selection and those notices only — **never from whether the list is unfolded**, so
+/// unfolding it cannot move the button a second press is aimed at. Everything is kept inside the
+/// console: a part painted outside it would be clipped away and still take presses there.
+pub(crate) fn layout(
+    console: Rect,
+    metrics: &CellMetrics,
+    view: &View,
+    list: bool,
+    notices: &[Rect],
+) -> Layout {
     let button = metrics.height() + 2.0 * PAD;
     let room = (console.width() - 2.0 * MARGIN).max(0.0);
     let width = (FIELD_CELLS * metrics.width() + 4.0 * button + 2.0 * PAD).min(room);
@@ -112,12 +125,15 @@ pub(crate) fn layout(console: Rect, metrics: &CellMetrics, view: &View, list: bo
         pos2(console.right() - MARGIN - width, console.top() + MARGIN),
         vec2(width, height),
     );
-    let covered = selection_rects(view, console, metrics).any(|cells| cells.intersects(at_top));
+    let covered = selection_rects(view, console, metrics)
+        .chain(notices.iter().copied())
+        .any(|under| under.intersects(at_top));
     let frame = if covered {
         at_top.translate(vec2(0.0, console.height() - height - 2.0 * MARGIN))
     } else {
         at_top
     };
+    let clear_rows = ((at_top.bottom() - console.top()) / metrics.height()).ceil() as usize;
 
     let mut targets = Vec::with_capacity(8);
     let row = Rect::from_min_size(
@@ -125,12 +141,9 @@ pub(crate) fn layout(console: Rect, metrics: &CellMetrics, view: &View, list: bo
         vec2(frame.width() - 2.0 * PAD, button),
     );
     let mut right = row.right();
-    for target in [
-        Target::Close,
-        Target::Options,
-        Target::Next,
-        Target::Previous,
-    ] {
+    // Right to left: close, options, then the two steps — down for newer, and up for older, which
+    // is where `Enter` walks.
+    for target in [Target::Close, Target::Options, Target::Previous, Target::Next] {
         let left = right - button;
         if left < row.left() {
             break;
@@ -149,11 +162,13 @@ pub(crate) fn layout(console: Rect, metrics: &CellMetrics, view: &View, list: bo
     let list = list.then(|| {
         let width = (LIST_CELLS * metrics.width() + 2.0 * PAD).min(room);
         let height = Choice::ALL.len() as f32 * button + 2.0 * PAD;
-        let top = if covered {
+        let wanted = if covered {
             frame.top() - height
         } else {
             frame.bottom()
         };
+        // Moved back inside the console when it does not fit on its side of the box.
+        let top = wanted.min(console.bottom() - height).max(console.top());
         let list = Rect::from_min_size(pos2(frame.right() - width, top), vec2(width, height));
         for (index, choice) in Choice::ALL.into_iter().enumerate() {
             targets.push((
@@ -164,12 +179,18 @@ pub(crate) fn layout(console: Rect, metrics: &CellMetrics, view: &View, list: bo
                 ),
             ));
         }
-        list
+        list.intersect(console)
     });
+    let frame = frame.intersect(console);
+    for (_, rect) in &mut targets {
+        *rect = rect.intersect(console);
+    }
+    targets.retain(|(_, rect)| rect.is_positive());
     Layout {
         frame,
         list,
         targets,
+        clear_rows,
     }
 }
 
@@ -207,9 +228,9 @@ pub(crate) fn paint(
     view: &View,
     theme: &Theme,
     metrics: &CellMetrics,
-    console: Rect,
+    (console, notices): (Rect, &[Rect]),
 ) -> Painted {
-    let layout = layout(console, metrics, view, mode.list);
+    let layout = layout(console, metrics, view, mode.list(), notices);
     let painter = &ui.painter_at(console);
     let roles = crate::ui::style::roles(painter.ctx(), theme);
     let corner = 6.0;
@@ -228,11 +249,15 @@ pub(crate) fn paint(
     for (index, (target, rect)) in layout.targets.iter().enumerate() {
         let hovered = pointer.is_some_and(|at| rect.contains(at));
         if *target != Target::Field {
-            ui.interact(
-                *rect,
-                ui.id().with(("search-box", index)),
-                egui::Sense::hover(),
-            )
+            // Salted with the console's corner: every pane is painted with the same `ui`, and two
+            // boxes sharing ids would merge their hover areas and tooltips.
+            let id = ui.id().with((
+                "search-box",
+                console.min.x.to_bits(),
+                console.min.y.to_bits(),
+                index,
+            ));
+            ui.interact(*rect, id, egui::Sense::hover())
             .on_hover_text(target.hint());
         }
         match target {
@@ -258,12 +283,13 @@ pub(crate) fn paint(
                 );
             }
             button => {
-                if hovered || (*button == Target::Options && mode.list) {
+                if hovered || (*button == Target::Options && mode.list()) {
                     painter.rect_filled(*rect, 4.0, roles.hover);
                 }
                 let glyph = match button {
-                    Target::Previous => Icon::CaretUp,
-                    Target::Next => Icon::Caret { open: true },
+                    // `Enter` walks toward older lines, which are up the screen.
+                    Target::Next => Icon::CaretUp,
+                    Target::Previous => Icon::Caret { open: true },
                     Target::Options => Icon::Gear,
                     _ => Icon::Close,
                 };
@@ -293,7 +319,16 @@ fn paint_the_field(
     );
     let inner = rect.shrink2(vec2(PAD, 0.0));
     let clipped = painter.with_clip_rect(inner.intersect(painter.clip_rect()));
-    let status = super::status(mode);
+    // The status gives way to the query: it is left out where it would leave fewer than six
+    // cells for what was typed.
+    let wanted = mode.status();
+    let fits = clipped
+        .layout_no_wrap(wanted.to_owned(), metrics.font(), roles.tx2)
+        .size()
+        .x
+        + 6.0 * metrics.width()
+        <= inner.width();
+    let status = if fits { wanted } else { "" };
     let said = clipped.layout_no_wrap(status.to_owned(), metrics.font(), roles.tx2);
     let status_left = inner.right() - said.size().x;
     clipped.galley(
@@ -349,7 +384,7 @@ mod tests {
         }
         let mut search = Search::literal("needle", Options::default()).unwrap();
         assert_eq!(
-            screen.find(&mut search, Toward::Older),
+            screen.find(&mut search, Toward::Older, 0),
             term_core::Found::Match,
             "the premise: the needle is found"
         );
@@ -362,7 +397,7 @@ mod tests {
             rows: ROWS,
             cols: 80,
         });
-        let layout = layout(console(), &metrics(), &screen.view(), false);
+        let layout = layout(console(), &metrics(), &screen.view(), false, &[]);
         assert!(console().contains_rect(layout.frame), "{layout:?}");
         assert_eq!(layout.frame.right(), console().right() - MARGIN);
         assert_eq!(layout.frame.top(), console().top() + MARGIN);
@@ -372,8 +407,8 @@ mod tests {
             vec![
                 Target::Close,
                 Target::Options,
-                Target::Next,
                 Target::Previous,
+                Target::Next,
                 Target::Field
             ]
         );
@@ -381,13 +416,13 @@ mod tests {
 
     #[test]
     fn the_box_moves_to_the_bottom_when_the_match_lies_under_it_and_only_then() {
-        let under = layout(console(), &metrics(), &with_the_match_on(0).view(), false);
+        let under = layout(console(), &metrics(), &with_the_match_on(0).view(), false, &[]);
         assert_eq!(
             under.frame.bottom(),
             console().bottom() - MARGIN,
             "the box stayed over the match it found"
         );
-        let clear = layout(console(), &metrics(), &with_the_match_on(5).view(), false);
+        let clear = layout(console(), &metrics(), &with_the_match_on(5).view(), false, &[]);
         assert_eq!(clear.frame.top(), console().top() + MARGIN);
     }
 
@@ -395,8 +430,8 @@ mod tests {
     fn unfolding_the_list_never_moves_the_box() {
         for row in [0, 5] {
             let screen = with_the_match_on(row);
-            let folded = layout(console(), &metrics(), &screen.view(), false);
-            let unfolded = layout(console(), &metrics(), &screen.view(), true);
+            let folded = layout(console(), &metrics(), &screen.view(), false, &[]);
+            let unfolded = layout(console(), &metrics(), &screen.view(), true, &[]);
             assert_eq!(folded.frame, unfolded.frame);
             let list = unfolded.list.expect("the list is laid out");
             assert!(
@@ -426,7 +461,7 @@ mod tests {
         });
         let painted = Painted {
             frame: 7,
-            layout: layout(console(), &metrics(), &screen.view(), false),
+            layout: layout(console(), &metrics(), &screen.view(), false, &[]),
         };
         let (_, close) = painted.layout.targets[0];
         assert_eq!(painted.hit(8, close.center()), Some(Target::Close));

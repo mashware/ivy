@@ -14,8 +14,8 @@ use super::*;
 /// **Any button**: what lies under the box is out of sight, so neither a menu nor a paste may
 /// come from a press on it. Only the primary button acts.
 ///
-/// A press anywhere else **folds an unfolded options list and goes on to whatever it was aimed
-/// at**, as a menu closes under a click outside it.
+/// A press anywhere else is left to whatever it was aimed at; [`fold_the_lists`] has already folded
+/// the options lists it did not land on.
 pub(super) fn intercept(window: &mut Window, ui: &egui::Ui) -> bool {
     if !ui.is_enabled() {
         return false;
@@ -25,31 +25,7 @@ pub(super) fn intercept(window: &mut Window, ui: &egui::Ui) -> bool {
         if !button.pressed {
             continue;
         }
-        let mut aimed = None;
-        for pane in window.active_mut().panes_mut() {
-            let Some(open) = pane.search.open.as_ref() else {
-                continue;
-            };
-            match open
-                .painted
-                .as_ref()
-                .and_then(|box_| box_.hit(frame, button.at))
-            {
-                Some(target) => {
-                    aimed = Some((pane.name, target));
-                    break;
-                }
-                None if open.list => {
-                    crate::search::press(
-                        &mut pane.search,
-                        &mut pane.screen,
-                        crate::search::Step::FoldList,
-                    );
-                }
-                None => {}
-            }
-        }
-        let Some((name, target)) = aimed else {
+        let Some((name, target)) = box_under(window, frame, button.at) else {
             continue;
         };
         let down = ui
@@ -70,4 +46,41 @@ pub(super) fn intercept(window: &mut Window, ui: &egui::Ui) -> bool {
         return true;
     }
     false
+}
+
+/// Folds every unfolded options list this pass's presses did not land on, as a menu closes under
+/// a click outside it — **before any other surface takes the press**, a header control included,
+/// and whatever order the consoles are walked in.
+pub(super) fn fold_the_lists(window: &mut Window, ui: &egui::Ui) {
+    if !ui.is_enabled() {
+        return;
+    }
+    let frame = ui.ctx().cumulative_frame_nr();
+    for button in Window::collect_the_buttons(ui) {
+        if !button.pressed {
+            continue;
+        }
+        let kept = box_under(window, frame, button.at).map(|(name, _)| name);
+        for pane in window.active_mut().panes_mut() {
+            if Some(pane.name) != kept && pane.search.open.as_ref().is_some_and(|open| open.list()) {
+                crate::search::press(
+                    &mut pane.search,
+                    &mut pane.screen,
+                    crate::search::Step::FoldList,
+                );
+            }
+        }
+    }
+}
+
+/// The console whose box, painted in the pass before `frame`, lies under `at`, and its part there.
+fn box_under(
+    window: &mut Window,
+    frame: u64,
+    at: egui::Pos2,
+) -> Option<(usize, crate::search::floating::Target)> {
+    window.active_mut().panes_mut().into_iter().find_map(|pane| {
+        let target = pane.search.open.as_ref()?.painted.as_ref()?.hit(frame, at)?;
+        Some((pane.name, target))
+    })
 }

@@ -1,9 +1,10 @@
 //! Searching what a console still holds, its history included.
 //!
-//! **The engine already knows how to search its own grid**, wrapped lines and wide characters
-//! included, so this module only decides what is searched for and in which direction. The search
-//! itself and the rules for what a match is stay in `alacritty_terminal`, the way the rules for
-//! what «the text» is stay there for copying (D22).
+//! **The engine already knows how to walk its own grid**, wrapped lines and wide characters
+//! included. This module decides what is searched for and in which direction, and two rules the
+//! engine has no notion of: case, set by an inline flag ahead of the escaped text, and whole word,
+//! judged on each match the engine returns. The walk itself stays in `alacritty_terminal`, the
+//! way the rules for what «the text» is stay there for copying (D22).
 
 use alacritty_terminal::Term;
 use alacritty_terminal::grid::Dimensions;
@@ -93,7 +94,7 @@ pub enum Found {
     Match,
     /// Nothing anywhere in what the console holds.
     Nothing,
-    /// Matches exist, but only behind the end the step walked to, and wrapping is off.
+    /// A match that counts lies only past the end the step walked to, and wrapping is off.
     NoMore,
 }
 
@@ -117,8 +118,27 @@ pub enum Toward {
 /// take a Unicode boundary over non-ASCII text.
 pub(crate) fn is_whole_word<T>(term: &Term<T>, found: &Match) -> bool {
     let word = |c: char| c.is_alphanumeric() || c == '_';
-    !neighbour(term, *found.start(), Direction::Left).is_some_and(word)
-        && !neighbour(term, *found.end(), Direction::Right).is_some_and(word)
+    // **Only an end that is itself a word character has to stand apart**, the boundary rule of
+    // `\b` and of the reference editors: `foo(` is a whole word in `foo(bar)`, its own `(` being
+    // the boundary.
+    let stands_apart = |at: Point, inward: Direction, outward: Direction| {
+        !own(term, at, inward).is_some_and(word) || !neighbour(term, at, outward).is_some_and(word)
+    };
+    stands_apart(*found.start(), Direction::Right, Direction::Left)
+        && stands_apart(*found.end(), Direction::Left, Direction::Right)
+}
+
+/// The character `point` holds, or — on a spacer — the one it belongs to, found that way.
+fn own<T>(term: &Term<T>, point: Point, inward: Direction) -> Option<char> {
+    let cell = &term.grid()[point];
+    if cell
+        .flags
+        .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
+    {
+        neighbour(term, point, inward)
+    } else {
+        Some(cell.c)
+    }
 }
 
 /// The character next to `point` that way, on the same logical line, if there is one.
@@ -205,7 +225,7 @@ mod tests {
         assert!(selected_row(&screen).is_none());
 
         assert_eq!(
-            screen.find(&mut literal("needle"), Toward::Older),
+            screen.find(&mut literal("needle"), Toward::Older, 0),
             Found::Match
         );
 
@@ -228,7 +248,7 @@ mod tests {
         let mut screen = screen_with(4, &["a.c abc"]);
 
         assert_eq!(
-            screen.find(&mut literal("a.c"), Toward::Older),
+            screen.find(&mut literal("a.c"), Toward::Older, 0),
             Found::Match
         );
 
@@ -241,15 +261,15 @@ mod tests {
         let mut search = literal("item");
         let row_text = |screen: &Screen| selected_row(screen).map(|(_, text)| text);
 
-        assert_eq!(screen.find(&mut search, Toward::Older), Found::Match);
+        assert_eq!(screen.find(&mut search, Toward::Older, 0), Found::Match);
         assert_eq!(row_text(&screen).as_deref(), Some("item 3"));
-        assert_eq!(screen.find(&mut search, Toward::Older), Found::Match);
+        assert_eq!(screen.find(&mut search, Toward::Older, 0), Found::Match);
         assert_eq!(
             row_text(&screen).as_deref(),
             Some("item 2"),
             "the second press found the match it started on"
         );
-        assert_eq!(screen.find(&mut search, Toward::Newer), Found::Match);
+        assert_eq!(screen.find(&mut search, Toward::Newer, 0), Found::Match);
         assert_eq!(row_text(&screen).as_deref(), Some("item 3"));
     }
 
@@ -263,7 +283,7 @@ mod tests {
         let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
         let mut screen = screen_with(4, &lines);
         let mut search = literal("item");
-        assert_eq!(screen.find(&mut search, Toward::Older), Found::Match);
+        assert_eq!(screen.find(&mut search, Toward::Older, 0), Found::Match);
         assert_eq!(
             selected_row(&screen).map(|(_, text)| text).as_deref(),
             Some("item 3")
@@ -272,7 +292,7 @@ mod tests {
         for n in 0..5 {
             screen.advance(format!("noise {n}\r\n").as_bytes());
         }
-        assert_eq!(screen.find(&mut search, Toward::Older), Found::Match);
+        assert_eq!(screen.find(&mut search, Toward::Older, 0), Found::Match);
 
         assert_eq!(
             selected_row(&screen).map(|(_, text)| text).as_deref(),
@@ -289,14 +309,14 @@ mod tests {
         let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
         let mut screen = screen_with(4, &lines);
         assert_eq!(
-            screen.find(&mut literal("item"), Toward::Older),
+            screen.find(&mut literal("item"), Toward::Older, 0),
             Found::Match
         );
         let scroll = screen.view().scroll();
         assert!(scroll > 0, "the premise: the view moved to the match");
 
         assert_eq!(
-            screen.find(&mut literal("absent"), Toward::Older),
+            screen.find(&mut literal("absent"), Toward::Older, 0),
             Found::Nothing
         );
 
@@ -308,7 +328,7 @@ mod tests {
     fn a_match_pushed_out_of_the_history_is_no_longer_found() {
         let mut screen = screen_with(4, &["needle"]);
         assert_eq!(
-            screen.find(&mut literal("needle"), Toward::Older),
+            screen.find(&mut literal("needle"), Toward::Older, 0),
             Found::Match,
             "the premise: it is found while kept"
         );
@@ -319,7 +339,7 @@ mod tests {
         }
 
         assert_eq!(
-            screen.find(&mut literal("needle"), Toward::Older),
+            screen.find(&mut literal("needle"), Toward::Older, 0),
             Found::Nothing
         );
         assert_eq!(screen.selected_text(), None);
@@ -403,12 +423,12 @@ mod tests {
     fn match_case_off_ignores_case_whatever_the_query_holds_and_on_respects_it() {
         let mut screen = screen_with(4, &["Needle"]);
         assert_eq!(
-            screen.find(&mut literal("needle"), Toward::Older),
+            screen.find(&mut literal("needle"), Toward::Older, 0),
             Found::Match
         );
         let mut screen = screen_with(4, &["needle"]);
         assert_eq!(
-            screen.find(&mut literal("Needle"), Toward::Older),
+            screen.find(&mut literal("Needle"), Toward::Older, 0),
             Found::Match,
             "an uppercase letter made the search case-sensitive with the box unchecked"
         );
@@ -419,13 +439,13 @@ mod tests {
         };
         let mut screen = screen_with(4, &["Needle"]);
         assert_eq!(
-            screen.find(&mut with("needle", exact), Toward::Older),
+            screen.find(&mut with("needle", exact), Toward::Older, 0),
             Found::Nothing
         );
         // The newer line is the lowercase one, so a search that ignored case would stop there.
         let mut screen = screen_with(4, &["Needle", "needle"]);
         assert_eq!(
-            screen.find(&mut with("Needle", exact), Toward::Older),
+            screen.find(&mut with("Needle", exact), Toward::Older, 0),
             Found::Match
         );
         assert_eq!(
@@ -438,14 +458,14 @@ mod tests {
     fn whole_word_skips_a_query_inside_a_longer_word() {
         let mut screen = screen_with(4, &["needle kneed"]);
         assert_eq!(
-            screen.find(&mut with("need", whole_word()), Toward::Older),
+            screen.find(&mut with("need", whole_word()), Toward::Older, 0),
             Found::Nothing,
             "a word containing the query was taken for the word"
         );
 
         let mut screen = screen_with(4, &["a need.", "needle"]);
         assert_eq!(
-            screen.find(&mut with("need", whole_word()), Toward::Older),
+            screen.find(&mut with("need", whole_word()), Toward::Older, 0),
             Found::Match
         );
         assert_eq!(
@@ -460,7 +480,7 @@ mod tests {
             for toward in [Toward::Older, Toward::Newer] {
                 let mut screen = screen_with(4, &[line]);
                 assert_eq!(
-                    screen.find(&mut with("日本", whole_word()), toward),
+                    screen.find(&mut with("日本", whole_word()), toward, 0),
                     Found::Nothing,
                     "«日本» was a whole word inside «{line}» walking {toward:?}"
                 );
@@ -468,7 +488,7 @@ mod tests {
         }
         let mut screen = screen_with(4, &["語 日本"]);
         assert_eq!(
-            screen.find(&mut with("日本", whole_word()), Toward::Older),
+            screen.find(&mut with("日本", whole_word()), Toward::Older, 0),
             Found::Match
         );
     }
@@ -483,28 +503,28 @@ mod tests {
         };
         for toward in [Toward::Older, Toward::Newer] {
             assert_eq!(
-                wrapped("abcdeneed").find(&mut with("need", whole_word()), toward),
+                wrapped("abcdeneed").find(&mut with("need", whole_word()), toward, 0),
                 Found::Nothing,
                 "the letter before the wrap did not count as touching the match, walking {toward:?}"
             );
             assert_eq!(
-                wrapped(" needcde").find(&mut with("need", whole_word()), toward),
+                wrapped(" needcde").find(&mut with("need", whole_word()), toward, 0),
                 Found::Nothing,
                 "the letter after the wrap did not count as touching the match, walking {toward:?}"
             );
             assert_eq!(
-                wrapped("abcd need").find(&mut with("need", whole_word()), toward),
+                wrapped("abcd need").find(&mut with("need", whole_word()), toward, 0),
                 Found::Match
             );
             // «日» has no room after four letters, so the row ends in a spacer of its own.
             assert_eq!(
-                wrapped("abcd日本").find(&mut with("日本", whole_word()), toward),
+                wrapped("abcd日本").find(&mut with("日本", whole_word()), toward, 0),
                 Found::Nothing,
                 "the spacer a wrap leaves before a wide character hid the letter in front, walking \
                  {toward:?}"
             );
             assert_eq!(
-                wrapped("abc 日本").find(&mut with("日本", whole_word()), toward),
+                wrapped("abc 日本").find(&mut with("日本", whole_word()), toward, 0),
                 Found::Match
             );
         }
@@ -515,7 +535,7 @@ mod tests {
         let mut screen = screen_with(4, &["needle", "needles", "kneed"]);
         for toward in [Toward::Older, Toward::Newer] {
             assert_eq!(
-                screen.find(&mut with("need", whole_word()), toward),
+                screen.find(&mut with("need", whole_word()), toward, 0),
                 Found::Nothing
             );
         }
@@ -549,12 +569,12 @@ mod tests {
                 ..Options::default()
             },
         );
-        assert_eq!(screen.find(&mut search, Toward::Older), Found::Match);
-        assert_eq!(screen.find(&mut search, Toward::Older), Found::Match);
+        assert_eq!(screen.find(&mut search, Toward::Older, 0), Found::Match);
+        assert_eq!(screen.find(&mut search, Toward::Older, 0), Found::Match);
         assert_eq!(row_text(&screen).as_deref(), Some("item 1"));
         let scroll = screen.view().scroll();
 
-        assert_eq!(screen.find(&mut search, Toward::Older), Found::NoMore);
+        assert_eq!(screen.find(&mut search, Toward::Older, 0), Found::NoMore);
         assert_eq!(row_text(&screen).as_deref(), Some("item 1"));
         assert_eq!(screen.view().scroll(), scroll);
         // The same end with a line above the oldest match, so the step does not fall off the
@@ -563,26 +583,96 @@ mod tests {
         above.extend_from_slice(&lines);
         let mut screen = screen_with(4, &above);
         for _ in 0..2 {
-            assert_eq!(screen.find(&mut search, Toward::Older), Found::Match);
+            assert_eq!(screen.find(&mut search, Toward::Older, 0), Found::Match);
         }
-        assert_eq!(screen.find(&mut search, Toward::Older), Found::NoMore);
+        assert_eq!(screen.find(&mut search, Toward::Older, 0), Found::NoMore);
         assert_eq!(row_text(&screen).as_deref(), Some("item 1"));
         // And walking newer from the newest match.
-        assert_eq!(screen.find(&mut search, Toward::Newer), Found::Match);
-        assert_eq!(screen.find(&mut search, Toward::Newer), Found::NoMore);
+        assert_eq!(screen.find(&mut search, Toward::Newer, 0), Found::Match);
+        assert_eq!(screen.find(&mut search, Toward::Newer, 0), Found::NoMore);
         assert_eq!(row_text(&screen).as_deref(), Some("item 2"));
 
         let mut screen = screen_with(4, &lines);
         let mut search = literal("item");
         for _ in 0..2 {
-            assert_eq!(screen.find(&mut search, Toward::Older), Found::Match);
+            assert_eq!(screen.find(&mut search, Toward::Older, 0), Found::Match);
         }
-        assert_eq!(screen.find(&mut search, Toward::Older), Found::Match);
+        assert_eq!(screen.find(&mut search, Toward::Older, 0), Found::Match);
         assert_eq!(
             row_text(&screen).as_deref(),
             Some("item 2"),
             "with wrapping on, the walk did not carry on from the other end"
         );
+    }
+
+    #[test]
+    fn whole_word_asks_only_an_end_that_is_a_word_character_to_stand_apart() {
+        for (line, query) in [("foo(bar)", "foo("), ("a /path/x", "/path/"), ("say hi", " hi")] {
+            let mut screen = screen_with(4, &[line]);
+            assert_eq!(
+                screen.find(&mut with(query, whole_word()), Toward::Older, 0),
+                Found::Match,
+                "«{query}» in «{line}» ends on a boundary of its own"
+            );
+        }
+        let mut screen = screen_with(4, &["xfoo(bar)"]);
+        assert_eq!(
+            screen.find(&mut with("foo(", whole_word()), Toward::Older, 0),
+            Found::Nothing,
+            "the word end of «foo(» touches «x»"
+        );
+    }
+
+    #[test]
+    fn without_wrap_only_a_match_that_counts_is_more_matches() {
+        // Whole word rejects both candidates; with wrapping off, the one past the end must not
+        // be reported as «no more matches» when nothing anywhere is a whole word.
+        let lines: Vec<String> = std::iter::once("kneed".to_owned())
+            .chain((0..12).map(|n| format!("filler {n}")))
+            .chain(std::iter::once("kneed".to_owned()))
+            .chain((0..12).map(|n| format!("filler {n}")))
+            .collect();
+        let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+        let mut screen = screen_with(4, &lines);
+        screen.scroll_by(Scroll::Lines(14));
+        let mut search = with(
+            "need",
+            Options {
+                whole_word: true,
+                wrap: false,
+                ..Options::default()
+            },
+        );
+        for toward in [Toward::Older, Toward::Newer] {
+            assert_eq!(screen.find(&mut search, toward, 0), Found::Nothing);
+        }
+    }
+
+    #[test]
+    fn a_step_keeps_its_match_below_the_rows_it_is_asked_to_keep_clear() {
+        let lines: Vec<String> = (0..40)
+            .map(|n| if n % 10 == 3 { "needle".to_owned() } else { format!("line {n}") })
+            .collect();
+        let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+        let row = |screen: &Screen| selected_row(screen).map(|(row, _)| row);
+
+        let mut screen = screen_with(8, &lines);
+        let mut search = literal("needle");
+        for _ in 0..3 {
+            assert_eq!(screen.find(&mut search, Toward::Older, 3), Found::Match);
+            let on = row(&screen).expect("the match is on screen");
+            assert!(on >= 3, "the match was left under the box, on row {on}");
+        }
+        // The oldest match cannot be brought further down: the history ends above it.
+        assert_eq!(screen.find(&mut search, Toward::Older, 3), Found::Match);
+        let oldest = screen.view().scroll();
+        screen.scroll_by(Scroll::ToTop);
+        assert_eq!(screen.view().scroll(), oldest, "the premise: the oldest line is in view");
+        // Without rows to keep clear, the step leaves the match where the engine put it.
+        let mut screen = screen_with(8, &lines);
+        assert_eq!(screen.find(&mut literal("needle"), Toward::Older, 0), Found::Match);
+        assert_eq!(screen.find(&mut literal("needle"), Toward::Older, 0), Found::Match);
+        assert_eq!(row(&screen), Some(0));
     }
 
     #[test]

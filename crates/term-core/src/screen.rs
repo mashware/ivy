@@ -764,7 +764,13 @@ impl Screen {
     ///
     /// **When nothing is found nothing moves**: neither the selection somebody had nor where they
     /// were looking.
-    pub fn find(&mut self, search: &mut Search, toward: Toward) -> Found {
+    ///
+    /// **`clear_rows` keeps the match below that many rows at the top of the view** whenever the
+    /// view can still scroll toward the history: the search's box sits there, and a match under it
+    /// would send the box to the other corner between two presses aimed at the same button. Where
+    /// the view cannot move — at the oldest line, or a match on the live screen — the box moves
+    /// instead.
+    pub fn find(&mut self, search: &mut Search, toward: Toward, clear_rows: usize) -> Found {
         let rows = self.term.grid().screen_lines() as i32;
         let offset = self.term.grid().display_offset() as i32;
         let current = self
@@ -820,10 +826,13 @@ impl Screen {
             else {
                 return Found::Nothing;
             };
-            if !search.wrap && wrapped(&found) {
+            // **Whole word is judged before wrapping**, so «no more matches» is only said of a
+            // match that counts: a rejected candidate past the end is not one.
+            let counts = !search.whole_word || crate::search::is_whole_word(&self.term, &found);
+            if counts && !search.wrap && wrapped(&found) {
                 return Found::NoMore;
             }
-            if !search.whole_word || crate::search::is_whole_word(&self.term, &found) {
+            if counts {
                 break found;
             }
             match first {
@@ -843,6 +852,20 @@ impl Screen {
 
         self.term.scroll_to_point(end);
         self.term.scroll_to_point(start);
+        let grid = self.term.grid();
+        let offset = grid.display_offset();
+        let room_above = grid.history_size() - offset;
+        let top_row = (start.line.0 + offset as i32).max(0) as usize;
+        let bottom_row = (end.line.0 + offset as i32).max(0) as usize;
+        // Never so far that the match's own end leaves the bottom of the view.
+        let room_below = (rows as usize).saturating_sub(1 + bottom_row);
+        let by = clear_rows
+            .saturating_sub(top_row)
+            .min(room_above)
+            .min(room_below);
+        if by > 0 {
+            self.term.scroll_display(GridScroll::Delta(by as i32));
+        }
         Found::Match
     }
 

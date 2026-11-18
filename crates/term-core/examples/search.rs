@@ -84,7 +84,7 @@ fn press(screen: &mut Screen, query: &str, options: Options, toward: Toward, his
         let mut times = Vec::with_capacity(PRESSES);
         for _ in 0..PRESSES {
             let before = Instant::now();
-            let found = screen.find(&mut search, toward);
+            let found = screen.find(&mut search, toward, 0);
             times.push(before.elapsed());
             assert_eq!(
                 found,

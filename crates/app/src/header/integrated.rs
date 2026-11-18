@@ -123,7 +123,7 @@ pub(crate) enum Target {
     Panel,
     Zoom,
     Close,
-    /// Opens or closes the search on this console, whichever has the keyboard (D61).
+    /// Opens or closes the search on this console, focused or not, and hands it the keyboard (D61).
     Search,
 }
 

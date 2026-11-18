@@ -26,8 +26,10 @@ pub(crate) mod floating;
 pub(crate) struct OnThisConsole {
     pub(crate) open: Option<Mode>,
     /// How the query is matched. **Kept here and not on the open search**, so closing the box and
-    /// opening it again finds the choices where the person left them.
-    pub(crate) options: Options,
+    /// opening it again finds the choices where the person left them. **Private, and changed only
+    /// by [`Step::Flip`]**, which also drops the compiled query: a write anywhere else would leave
+    /// the search matching with the old options.
+    options: Options,
     pressed: Presses,
     /// What marking cost on the painting in progress, kept between marking and handing it over so
     /// the painter cannot hand the window another console's.
@@ -41,7 +43,8 @@ pub(crate) struct Marking {
     pub(crate) cells: usize,
 }
 
-/// What a console's presses of `Enter` cost, for the bench (D13). Summed until the painting hands
+/// What a console's steps through its matches cost — `Enter`, `Shift+Enter` and the box's previous
+/// and next — for the bench (D13). Summed until the painting hands
 /// them to the window.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Presses {
@@ -64,7 +67,8 @@ impl Presses {
 #[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct Cost {
     /// The presses since the last painting. **Published, never subtracted here**: they ran in the
-    /// keyboard's pass, which the window times whole and subtracts there.
+    /// keyboard's pass or, from the box's buttons, in the mouse pass, and the window times each of
+    /// those whole and subtracts it there.
     pub(crate) presses: Presses,
     /// What marking the matches cost on this painting, and nothing when no search was open.
     ///
@@ -131,8 +135,8 @@ pub(crate) struct Mode {
     /// about this grid. Emptied whenever the query or an option changes.
     compiled: Option<Result<Search, Refused>>,
     outcome: Outcome,
-    /// Whether the options' list is unfolded under the box.
-    pub(crate) list: bool,
+    /// Whether the options' list is unfolded beside the box. Changed only by the steps.
+    list: bool,
     /// Where the box was painted, and in which pass: **what a press is judged against**, never a
     /// layout worked out again by the pointer, which has no snapshot to place the box by.
     pub(crate) painted: Option<floating::Painted>,
@@ -175,7 +179,7 @@ impl Choice {
     }
 }
 
-/// What the row says about the last press.
+/// What the box says about the last press.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum Outcome {
     /// Nothing pressed since the query last changed.
@@ -183,12 +187,14 @@ enum Outcome {
     Typing,
     Found,
     NotFound,
-    /// Matches exist only behind the end the press walked to, and wrapping is off.
+    /// A match that counts lies only past the end the press walked to, and wrapping is off.
     NoMore,
     Refused(Refused),
 }
 
-/// One thing a key asked of the search, in the order the keys arrived.
+/// One thing a key or a press on the box asked of the search, in the order they arrived. The first
+/// seven come from keys and from the box's previous, next and close; [`Step::List`],
+/// [`Step::FoldList`] and [`Step::Flip`] only from the pointer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Step {
     /// The search chord: opens it, or closes it if it was open.
@@ -201,7 +207,7 @@ pub(crate) enum Step {
     Clear,
     Go(Toward),
     Close,
-    /// The box's options button: unfolds the list, or folds it.
+    /// The box's options button: unfolds the list, or folds it again.
     List,
     /// A press anywhere else while the list is unfolded folds it.
     FoldList,
@@ -326,21 +332,25 @@ pub(crate) fn apply(console: &mut OnThisConsole, screen: &mut Screen, steps: Ste
         if let Step::Flip(choice) = step {
             choice.flip(options);
         }
-        if matches!(step, Step::Toggle) {
-            *mode = match mode.take() {
-                Some(_) => None,
-                None => Some(Mode::default()),
-            };
-            continue;
-        }
-        if matches!(step, Step::Close) {
-            *mode = None;
-            continue;
+        match step {
+            Step::Toggle => {
+                *mode = match mode.take() {
+                    Some(_) => None,
+                    None => Some(Mode::default()),
+                };
+                continue;
+            }
+            Step::Close => {
+                *mode = None;
+                continue;
+            }
+            _ => {}
         }
         let Some(open) = mode.as_mut() else {
             continue;
         };
         match step {
+            Step::Toggle | Step::Close => {}
             Step::List => {
                 open.list = !open.list;
                 continue;
@@ -372,13 +382,19 @@ pub(crate) fn apply(console: &mut OnThisConsole, screen: &mut Screen, steps: Ste
             }
             Step::Clear => open.query.clear(),
             Step::Go(toward) => {
+                // The rows the box takes at the top of the console, as it was last painted: the
+                // step keeps the match below them wherever the view can scroll.
+                let clear_rows = open
+                    .painted
+                    .as_ref()
+                    .map_or(0, |painted| painted.layout.clear_rows);
                 let compiled = open
                     .compiled
                     .get_or_insert_with(|| Search::literal(&open.query, *options));
                 open.outcome = match compiled {
                     Ok(search) => {
                         let before = std::time::Instant::now();
-                        let found = screen.find(search, toward);
+                        let found = screen.find(search, toward, clear_rows);
                         pressed.one(before.elapsed(), found == Found::Match);
                         match found {
                             Found::Match => Outcome::Found,
@@ -390,31 +406,41 @@ pub(crate) fn apply(console: &mut OnThisConsole, screen: &mut Screen, steps: Ste
                 };
                 continue;
             }
-            Step::Toggle | Step::Close => unreachable!("handled above"),
         }
         open.compiled = None;
         open.outcome = Outcome::Typing;
     }
 }
 
-/// What the box says about the last press, beside the query; nothing while typing.
-pub(crate) fn status(mode: &Mode) -> &'static str {
-    // A query the engine already refused while marking says so before anybody presses Enter: its
-    // matches are not lit, and the box is the only place that can say why.
-    let refused_while_typing = matches!(mode.compiled, Some(Err(Refused::TooLarge)));
-    match mode.outcome {
+impl Mode {
+    pub(crate) fn query(&self) -> &str {
+        &self.query
+    }
+
+    pub(crate) fn list(&self) -> bool {
+        self.list
+    }
+
+    /// What the box says about the last press, beside the query: nothing while typing or after a
+    /// match, and why there is nothing to show otherwise.
+    pub(crate) fn status(&self) -> &'static str {
+        // A query the engine already refused while marking says so before anybody presses Enter:
+        // its matches are not lit, and the box is the only place that can say why.
+        let refused_while_typing = matches!(self.compiled, Some(Err(Refused::TooLarge)));
+        match self.outcome {
         Outcome::Typing if refused_while_typing => "too long to search",
         Outcome::Typing | Outcome::Found => "",
         Outcome::NotFound => "no match",
         Outcome::NoMore => "no more matches",
         Outcome::Refused(Refused::Empty) => "type what to look for",
         Outcome::Refused(Refused::TooLarge) => "too long to search",
+        }
     }
 }
 
-impl Mode {
-    pub(crate) fn query(&self) -> &str {
-        &self.query
+impl OnThisConsole {
+    pub(crate) fn options(&self) -> Options {
+        self.options
     }
 }
 
@@ -426,8 +452,8 @@ pub(crate) fn toggle_on(console: &mut OnThisConsole, screen: &mut Screen) {
     apply(console, screen, steps);
 }
 
-/// Applies one press on the box: the same steps the keys ask for, so a click and a key can never
-/// do two different things.
+/// Applies one press on the box. Previous, next and close are the steps their keys ask for, so a
+/// click and a key can never do two different things; the options have no key.
 pub(crate) fn press(console: &mut OnThisConsole, screen: &mut Screen, step: Step) {
     let open = console.is_open();
     apply(
@@ -502,7 +528,7 @@ mod tests {
     fn the_box_says_what_the_last_press_found() {
         let mut screen = a_screen("needle\r\nneedle\r\n");
         let said = |asked: Vec<Step>, screen: &mut Screen| {
-            status(&opened_with(screen, asked).expect("still open"))
+            opened_with(screen, asked).expect("still open").status()
         };
 
         assert_eq!(
@@ -556,7 +582,7 @@ mod tests {
             ),
         );
         assert_eq!(
-            status(console.open.as_ref().expect("still open")),
+            console.open.as_ref().expect("still open").status(),
             "no more matches"
         );
     }
@@ -580,7 +606,7 @@ mod tests {
         );
         let open = console.open.as_ref().expect("still open");
         assert_eq!(
-            status(open),
+            open.status(),
             "no match",
             "match case did not reach the engine"
         );
@@ -602,7 +628,7 @@ mod tests {
             steps(true, vec![Step::Flip(Choice::MatchCase)]),
         );
         assert_eq!(
-            status(console.open.as_ref().expect("still open")),
+            console.open.as_ref().expect("still open").status(),
             "",
             "flipping an option left the old answer standing"
         );
@@ -623,7 +649,6 @@ mod tests {
     fn the_options_belong_to_the_console_and_outlive_the_box() {
         let mut screen = a_screen("");
         let mut one = OnThisConsole::default();
-        let other = OnThisConsole::default();
         apply(
             &mut one,
             &mut screen,
@@ -635,7 +660,6 @@ mod tests {
         toggle_on(&mut one, &mut screen);
         assert!(one.is_open());
         assert!(one.options.whole_word, "closing the box forgot the option");
-        assert!(!other.options.whole_word);
     }
 
     #[test]

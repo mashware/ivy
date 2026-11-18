@@ -242,7 +242,23 @@ pub(crate) fn paint_pane(
         panel_split.console,
         blink.keys,
     );
-    let options = pane.search.options;
+    let options = pane.search.options();
+    // The notices keep the console's top, so the box is laid out around them.
+    let notices = if pane.search.is_open() {
+        let boxes = notices::the_boxes(
+            &ui.painter_at(panel_split.console),
+            pane,
+            theme,
+            metrics,
+            panel_split.console,
+        );
+        [boxes.question, boxes.slot, boxes.silence]
+            .into_iter()
+            .flatten()
+            .collect()
+    } else {
+        Vec::new()
+    };
     if let Some(search) = pane.search.open.as_mut() {
         search.painted = Some(crate::search::floating::paint(
             ui,
@@ -251,7 +267,7 @@ pub(crate) fn paint_pane(
             &view,
             theme,
             metrics,
-            panel_split.console,
+            (panel_split.console, &notices),
         ));
     }
     let painted = crate::links::PaintedConsole {

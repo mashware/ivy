@@ -269,11 +269,10 @@ pub(crate) fn pointer(
             if target == super::integrated::Target::Label {
                 continue;
             }
-            window.header_input.held = ui
-                .ctx()
-                .input(|input| input.pointer.button_down(*button))
-                .then_some(*button);
-            window.header_input.blocked_frame = Some(frame);
+            let down = ui.ctx().input(|input| input.pointer.button_down(*button));
+            window
+                .header_input
+                .claim_press(down.then_some(*button), frame);
             window.drag_in_progress = None;
             let tab = window.active().name;
             let changed = match target {

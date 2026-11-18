@@ -3848,12 +3848,12 @@ mod tests {
                 .open
                 .as_ref()
                 .unwrap()
-                .list
+                .list()
         );
         frame(&mut window, &ctx, area, vec![]);
         let whole_word = search_target(&window, 0, Target::Choice(search::Choice::WholeWord));
         frame(&mut window, &ctx, area, click_at(whole_word));
-        assert!(pane_of(&window, names[0]).search.options.whole_word);
+        assert!(pane_of(&window, names[0]).search.options().whole_word);
         assert_eq!(
             pane_of(&window, names[0]).screen.selected_text().as_deref(),
             Some("needle"),
@@ -3864,7 +3864,7 @@ mod tests {
         frame(&mut window, &ctx, area, click_at(elsewhere));
         let pane = pane_of(&window, names[0]);
         assert!(
-            !pane.search.open.as_ref().unwrap().list,
+            !pane.search.open.as_ref().unwrap().list(),
             "a press elsewhere left the list open"
         );
 
