@@ -346,7 +346,11 @@ fn row(
     paint(
         ui.painter(),
         icon,
-        if directory { Icon::Folder } else { Icon::File },
+        if directory {
+            Icon::Folder { open: false }
+        } else {
+            Icon::File(crate::ui::icons::FileKind::of(&entry.path))
+        },
         14.0,
         roles.tx2,
     );

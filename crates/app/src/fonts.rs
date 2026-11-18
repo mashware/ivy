@@ -27,9 +27,9 @@ use fontique::{Collection, CollectionOptions, GenericFamily, SourceCache};
 use skrifa::MetadataProvider as _;
 mod atlas;
 mod bundled;
+pub(crate) use bundled::{icon_family, ui_weight};
 #[cfg(test)]
-pub(crate) use bundled::install as install_bundled;
-pub(crate) use bundled::ui_weight;
+pub(crate) use bundled::{install as install_bundled, install_icons_only};
 mod ligatures;
 pub use ligatures::LigatureCost;
 pub(crate) use ligatures::{

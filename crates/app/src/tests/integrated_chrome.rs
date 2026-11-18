@@ -329,32 +329,18 @@ mod tests {
                 if button.expand(4.0).contains(c.center) && c.radius == 3.0)),
             "the connect button still carries a dot"
         );
-        // Match the connector's central diagonal, not any neutral path in the button.
-        // Chrome paints a base icon before after_panels repaints it, so only the last
-        // matching stroke is the visible result; the earlier one can be covered by amber.
-        let center = connection_button(area);
-        let expected = [
-            center + egui::vec2(-1.875, 1.875),
-            center + egui::vec2(1.875, -1.875),
-        ];
-        let stroke = shapes
+        // Chrome paints a base icon before after_panels repaints it, so only the last icon painted
+        // in the button is the visible one; the earlier one can be covered by amber.
+        let ink = shapes
             .iter()
             .rev()
-            .find_map(|shape| match &shape.shape {
-                egui::Shape::Path(path)
-                    if path.points.len() == 2
-                        && path
-                            .points
-                            .iter()
-                            .zip(expected)
-                            .all(|(a, b)| a.distance(b) < 0.01) =>
-                {
-                    Some(&path.stroke.color)
-                }
-                _ => None,
+            .filter_map(|shape| crate::ui::icons::painted_icon(&shape.shape))
+            .find(|(glyph, _, square)| {
+                glyph == egui_phosphor::regular::PLUGS_CONNECTED && button.contains(square.center())
             })
-            .expect("the connector's visible central stroke must be painted");
-        *stroke == egui::epaint::ColorMode::Solid(neutral)
+            .map(|(_, color, _)| color)
+            .expect("the connector's visible icon must be painted");
+        ink == neutral
     }
 
     fn open_connection_guide(
@@ -372,6 +358,7 @@ mod tests {
     fn connection_guide_opens_from_wide_and_compact_title_bars_and_close_is_reachable() {
         for width in [1400.0, 240.0] {
             let ctx = egui::Context::default();
+            crate::fonts::install_icons_only(&ctx);
             chrome::prepare(&ctx);
             let mut window = window_with("sleep 30", "sleep 30");
             window.chrome.enable();
@@ -417,6 +404,7 @@ mod tests {
     fn neutral_connection_icon_and_guide_observe_file_publication_even_in_a_background_tab() {
         for tab in [0, 1] {
             let ctx = egui::Context::default();
+            crate::fonts::install_icons_only(&ctx);
             ctx.global_style_mut(|style| style.animation_time = 0.0);
             let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
             window.chrome.enable();
@@ -468,6 +456,7 @@ mod tests {
     #[test]
     fn connection_icon_stays_neutral_through_publication_and_retirement() {
         let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
         let mut window = window_with("sleep 30", "sleep 30");
         window.chrome.enable();
         window.headers = window.headers.integrated(true);

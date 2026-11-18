@@ -570,13 +570,13 @@ mod tests {
 
     #[test]
     fn header_icons_and_their_hover_use_the_effective_themes_roles() {
-        use egui::epaint::{ColorMode, Shape};
+        use egui::epaint::Shape;
         for named in [
             crate::theme::NamedTheme::GithubLightDefault,
             crate::theme::NamedTheme::TokyoNight,
         ] {
             let theme = named.theme();
-            let ctx = egui::Context::default();
+            let ctx = crate::ui::icons::installed_for_tests(1.0);
             let mut center = egui::Pos2::ZERO;
             for hover in [false, true] {
                 let events = if hover {
@@ -602,19 +602,13 @@ mod tests {
                 let strokes: Vec<_> = output
                     .shapes
                     .iter()
-                    .filter_map(|shape| match &shape.shape {
-                        Shape::Path(path) => Some(path.stroke.color.clone()),
-                        _ => None,
-                    })
+                    .filter_map(|shape| crate::ui::icons::painted_icon(&shape.shape))
+                    .map(|(_, color, _)| color)
                     .collect();
                 let roles = crate::theme::Roles::of(&theme);
                 let hover_fill = output.shapes.iter().any(|shape| matches!(&shape.shape, Shape::Rect(rect) if rect.rect.size() == egui::vec2(24.0, 24.0) && rect.fill == roles.hover));
                 output.drop_without_applying_deltas();
-                assert_eq!(
-                    strokes,
-                    vec![ColorMode::Solid(roles.tx2); 2],
-                    "{named:?}, hover={hover}"
-                );
+                assert_eq!(strokes, vec![roles.tx2], "{named:?}, hover={hover}");
                 if hover {
                     assert!(hover_fill, "hover did not paint the effective theme's fill");
                 }

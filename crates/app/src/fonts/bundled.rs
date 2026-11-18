@@ -17,7 +17,7 @@ const UI_MEDIUM: &str = "ivy-ui-medium";
 const UI_SEMIBOLD: &str = "ivy-ui-semibold";
 /// Geist Mono at medium weight, for paths and titles the chrome sets in mono.
 const MONO_MEDIUM: &str = "ivy-mono-medium";
-/// The interface's icons (D103): Phosphor Regular and nothing else. Phosphor maps `a`–`z` to blank
+/// The interface's icons (D103): Phosphor Regular and nothing else. Phosphor maps the lowercase letters to blank
 /// glyphs and lives in the private-use area the terminal's icon family serves, so it is never a
 /// member of a family that lays out text, and no text face stands behind it.
 const ICONS: &str = "ivy-icons";
@@ -136,6 +136,22 @@ pub(crate) fn install(ctx: &egui::Context) {
             egui::epaint::FontColorTransferFunction::Off;
     });
     ctx.set_fonts(base_definitions());
+}
+
+/// egui's own definitions plus the icon family, for tests written against egui's faces that also
+/// need an icon to be painted: installing the whole base would change every layout they measure.
+#[cfg(test)]
+pub(crate) fn install_icons_only(ctx: &egui::Context) {
+    let base = base_definitions();
+    let mut definitions = FontDefinitions::default();
+    let family = FontFamily::Name(ICONS.into());
+    definitions
+        .font_data
+        .insert(ICON_FACE.into(), base.font_data[ICON_FACE].clone());
+    definitions
+        .families
+        .insert(family.clone(), base.families[&family].clone());
+    ctx.set_fonts(definitions);
 }
 
 #[cfg(test)]
@@ -302,7 +318,10 @@ mod tests {
                 if *family == FontFamily::Name(ICONS.into()) {
                     assert_eq!(faces, &vec![ICON_FACE.to_owned()]);
                 } else {
-                    assert!(!faces.iter().any(|f| f == ICON_FACE), "{family:?}: {faces:?}");
+                    assert!(
+                        !faces.iter().any(|f| f == ICON_FACE),
+                        "{family:?}: {faces:?}"
+                    );
                 }
             }
         });

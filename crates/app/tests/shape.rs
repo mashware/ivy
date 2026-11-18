@@ -480,6 +480,10 @@ const MODULES: &[(&str, &str)] = &[
     ),
     ("src/ui/icons.rs", include_str!("../src/ui/icons.rs")),
     (
+        "src/ui/icons/file_kind.rs",
+        include_str!("../src/ui/icons/file_kind.rs"),
+    ),
+    (
         "src/tab_bar/title.rs",
         include_str!("../src/tab_bar/title.rs"),
     ),

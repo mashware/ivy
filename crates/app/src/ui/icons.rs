@@ -1,6 +1,12 @@
-//! The kit's line icons (`Window.dc.html`, `GitDiff.dc.html`), drawn from their 16-unit SVG paths
-//! so the title bar, the console headers and the drawer share one set (D96, D72).
-use eframe::egui::{self, Color32, Pos2, Stroke, epaint::PathShape};
+//! The interface's icons: one Phosphor glyph each (D103), so the title bar, the tabs, the console
+//! headers, the sidebar, the Files tree, the Board and Settings share one set.
+use eframe::egui::{self, Color32, FontId, Pos2};
+use egui_phosphor::regular as glyph;
+
+mod file_kind;
+pub(crate) use file_kind::FileKind;
+#[cfg(test)]
+pub(crate) use tests::{installed as installed_for_tests, painted_icon};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Icon {
@@ -21,261 +27,251 @@ pub(crate) enum Icon {
     Expand,
     Collapse,
     Refresh,
-    File,
-    Folder,
+    Folder { open: bool },
+    Caret { open: bool },
+    CaretDoubleUp,
+    File(FileKind),
+    Plus,
+    Check,
+    DotsThree,
+    Gear,
+    ArrowUpRight,
+    CircleHalf,
+    NavigationArrow,
+    Keyboard,
 }
 
-/// Paint `icon` centred on `center`, `size` points across, as the kit's 16-unit path.
+impl Icon {
+    fn glyph(self) -> &'static str {
+        match self {
+            Self::Files => glyph::FOLDERS,
+            Self::Panel => glyph::SIDEBAR_SIMPLE,
+            Self::SplitRight => glyph::SQUARE_SPLIT_HORIZONTAL,
+            Self::SplitDown => glyph::SQUARE_SPLIT_VERTICAL,
+            Self::Markdown => glyph::MARKDOWN_LOGO,
+            Self::Search => glyph::MAGNIFYING_GLASS,
+            Self::Connect => glyph::PLUGS_CONNECTED,
+            Self::Menu => glyph::LIST,
+            Self::Board => glyph::KANBAN,
+            Self::Minimize => glyph::MINUS,
+            Self::Maximize => glyph::SQUARE,
+            Self::Restore => glyph::COPY,
+            Self::Close => glyph::X,
+            Self::Branch => glyph::GIT_BRANCH,
+            Self::Expand => glyph::ARROWS_OUT_SIMPLE,
+            Self::Collapse => glyph::ARROWS_IN_SIMPLE,
+            Self::Refresh => glyph::ARROW_CLOCKWISE,
+            Self::Folder { open: false } => glyph::FOLDER,
+            Self::Folder { open: true } => glyph::FOLDER_OPEN,
+            Self::Caret { open: false } => glyph::CARET_RIGHT,
+            Self::Caret { open: true } => glyph::CARET_DOWN,
+            Self::CaretDoubleUp => glyph::CARET_DOUBLE_UP,
+            Self::File(kind) => kind.glyph(),
+            Self::Plus => glyph::PLUS,
+            Self::Check => glyph::CHECK,
+            Self::DotsThree => glyph::DOTS_THREE,
+            Self::Gear => glyph::GEAR,
+            Self::ArrowUpRight => glyph::ARROW_UP_RIGHT,
+            Self::CircleHalf => glyph::CIRCLE_HALF,
+            Self::NavigationArrow => glyph::NAVIGATION_ARROW,
+            Self::Keyboard => glyph::KEYBOARD,
+        }
+    }
+}
+
+/// Paint `icon` centred on `center`, `size` points across.
+///
+/// Every Phosphor glyph is drawn on the same em square, and laid out at `size` the galley is that
+/// square (advance and row height both one em, the height rounded to a device pixel), so centring
+/// the galley centres the square the designer centred the glyph in. Centring each glyph's ink instead would move an open folder against
+/// a closed one and pull an asymmetric glyph off its optical centre. epaint snaps the origin to whole
+/// pixels itself.
 pub(crate) fn paint(painter: &egui::Painter, center: Pos2, icon: Icon, size: f32, color: Color32) {
-    let scale = size / 16.0;
-    let at = |x: f32, y: f32| center + egui::vec2(x - 8.0, y - 8.0) * scale;
-    let width = match icon {
-        Icon::Search | Icon::Menu | Icon::Expand | Icon::Collapse | Icon::Close => 1.5,
-        _ => 1.4,
+    let Some(family) = crate::fonts::icon_family(painter.ctx()) else {
+        return;
     };
-    let stroke = Stroke::new(width * scale.max(0.75), color);
-    let polyline = |points: &[(f32, f32)], closed: bool| {
-        let points = points.iter().map(|(x, y)| at(*x, *y)).collect();
-        painter.add(if closed {
-            PathShape::closed_line(points, stroke)
-        } else {
-            PathShape::line(points, stroke)
-        });
-    };
-    let line = |a: (f32, f32), b: (f32, f32)| polyline(&[a, b], false);
-    let rounded = |x: f32, y: f32, w: f32, h: f32, r: f32| {
-        painter.rect_stroke(
-            egui::Rect::from_min_max(at(x, y), at(x + w, y + h)),
-            r * scale,
-            stroke,
-            egui::StrokeKind::Middle,
-        );
-    };
-    match icon {
-        Icon::Files => {
-            rounded(1.5, 2.5, 13.0, 11.0, 2.0);
-            line((6.0, 2.5), (6.0, 13.5));
-        }
-        Icon::Panel => {
-            rounded(1.5, 2.5, 13.0, 11.0, 2.0);
-            line((10.0, 2.5), (10.0, 13.5));
-        }
-        Icon::SplitRight => {
-            rounded(1.5, 2.5, 13.0, 11.0, 2.0);
-            line((8.0, 2.5), (8.0, 13.5));
-        }
-        Icon::SplitDown => {
-            rounded(1.5, 2.5, 13.0, 11.0, 2.0);
-            line((1.5, 8.0), (14.5, 8.0));
-        }
-        Icon::Markdown => {
-            polyline(
-                &[
-                    (3.5, 1.5),
-                    (9.5, 1.5),
-                    (12.5, 4.5),
-                    (12.5, 14.5),
-                    (3.5, 14.5),
-                ],
-                true,
-            );
-            line((5.5, 8.0), (10.5, 8.0));
-            line((5.5, 10.5), (10.5, 10.5));
-            line((5.5, 5.5), (7.5, 5.5));
-        }
-        Icon::Search => {
-            painter.circle_stroke(at(7.0, 7.0), 4.5 * scale, stroke);
-            line((10.5, 10.5), (14.0, 14.0));
-        }
-        Icon::Connect => {
-            line((6.0, 10.0), (10.0, 6.0));
-            let mut lower = vec![(5.0, 7.5), (3.5, 9.0)];
-            lower.extend(arc((3.5, 9.0), (7.0, 12.5), 2.5, false));
-            lower.push((8.5, 11.0));
-            polyline(&lower, false);
-            let mut upper = vec![(7.5, 5.0), (9.0, 3.5)];
-            upper.extend(arc((9.0, 3.5), (12.5, 7.0), 2.5, true));
-            upper.push((11.0, 8.5));
-            polyline(&upper, false);
-        }
-        Icon::Menu => {
-            for y in [4.5, 8.0, 11.5] {
-                line((3.0, y), (13.0, y));
-            }
-        }
-        Icon::Board => {
-            for (x, y) in [(2.0, 2.0), (9.0, 2.0), (2.0, 9.0), (9.0, 9.0)] {
-                rounded(x, y, 5.0, 5.0, 1.0);
-            }
-        }
-        Icon::Minimize => line((3.0, 8.0), (13.0, 8.0)),
-        Icon::Maximize => rounded(3.0, 3.0, 10.0, 10.0, 1.5),
-        Icon::Restore => {
-            rounded(2.5, 5.5, 8.0, 8.0, 1.5);
-            polyline(
-                &[
-                    (5.5, 5.5),
-                    (5.5, 2.5),
-                    (13.5, 2.5),
-                    (13.5, 10.5),
-                    (10.5, 10.5),
-                ],
-                false,
-            );
-        }
-        Icon::Close => {
-            line((4.0, 4.0), (12.0, 12.0));
-            line((12.0, 4.0), (4.0, 12.0));
-        }
-        Icon::Branch => {
-            for (x, y) in [(4.5, 3.5), (4.5, 12.5), (11.5, 6.5)] {
-                painter.circle_stroke(at(x, y), 1.8 * scale, stroke);
-            }
-            line((4.5, 5.3), (4.5, 10.7));
-            polyline(
-                &[
-                    (11.5, 8.3),
-                    (11.2, 9.6),
-                    (10.0, 10.4),
-                    (8.0, 10.9),
-                    (5.0, 11.5),
-                ],
-                false,
-            );
-        }
-        Icon::Expand => {
-            polyline(&[(9.5, 2.5), (13.5, 2.5), (13.5, 6.5)], false);
-            polyline(&[(6.5, 13.5), (2.5, 13.5), (2.5, 9.5)], false);
-            line((13.5, 2.5), (9.0, 7.0));
-            line((2.5, 13.5), (7.0, 9.0));
-        }
-        Icon::Collapse => {
-            polyline(&[(9.0, 3.0), (9.0, 7.0), (13.0, 7.0)], false);
-            polyline(&[(7.0, 13.0), (7.0, 9.0), (3.0, 9.0)], false);
-            line((9.0, 7.0), (13.5, 2.5));
-            line((7.0, 9.0), (2.5, 13.5));
-        }
-        Icon::Refresh => {
-            let mut points = arc((13.0, 8.0), (8.0, 3.0), 5.0, false);
-            points.extend(arc((8.0, 3.0), (3.0, 8.0), 5.0, false));
-            points.extend(arc((3.0, 8.0), (8.0, 13.0), 5.0, false));
-            polyline(&points, false);
-            polyline(&[(13.0, 3.5), (13.0, 7.0), (9.5, 7.0)], false);
-        }
-        Icon::File => {
-            polyline(
-                &[
-                    (4.0, 1.5),
-                    (9.0, 1.5),
-                    (12.5, 5.0),
-                    (12.5, 14.5),
-                    (4.0, 14.5),
-                ],
-                true,
-            );
-        }
-        Icon::Folder => {
-            polyline(
-                &[
-                    (1.5, 4.5),
-                    (1.5, 13.0),
-                    (14.5, 13.0),
-                    (14.5, 5.5),
-                    (8.0, 5.5),
-                    (6.5, 3.5),
-                    (1.5, 3.5),
-                ],
-                true,
-            );
-        }
-    }
-}
-
-/// Points along the shorter circular arc of `radius` from `from` to `to`, `from` excluded;
-/// `clockwise` as on screen (y grows downwards), which is SVG's sweep flag 1.
-fn arc(from: (f32, f32), to: (f32, f32), radius: f32, clockwise: bool) -> Vec<(f32, f32)> {
-    let (dx, dy) = (to.0 - from.0, to.1 - from.1);
-    let chord = (dx * dx + dy * dy).sqrt().max(f32::EPSILON);
-    let half = (chord / 2.0).min(radius);
-    let offset = (radius * radius - half * half).max(0.0).sqrt();
-    let middle = ((from.0 + to.0) / 2.0, (from.1 + to.1) / 2.0);
-    // The centre sits on the side that makes the short arc turn the asked way.
-    let side = if clockwise { 1.0 } else { -1.0 };
-    let center = (
-        middle.0 - side * dy / chord * offset,
-        middle.1 + side * dx / chord * offset,
-    );
-    let start = (from.1 - center.1).atan2(from.0 - center.0);
-    let mut end = (to.1 - center.1).atan2(to.0 - center.0);
-    if clockwise && end < start {
-        end += std::f32::consts::TAU;
-    }
-    if !clockwise && end > start {
-        end -= std::f32::consts::TAU;
-    }
-    (1..=8)
-        .map(|step| {
-            let angle = start + (end - start) * step as f32 / 8.0;
-            (
-                center.0 + radius * angle.cos(),
-                center.1 + radius * angle.sin(),
-            )
-        })
-        .collect()
+    let galley = painter.layout_no_wrap(icon.glyph().to_owned(), FontId::new(size, family), color);
+    painter.galley(center - galley.size() / 2.0, galley, color);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn an_arc_ends_where_it_was_asked_and_keeps_its_radius() {
-        for clockwise in [false, true] {
-            let points = arc((3.5, 9.0), (7.0, 12.5), 2.5, clockwise);
-            let last = points.last().unwrap();
-            assert!((last.0 - 7.0).abs() < 1e-3 && (last.1 - 12.5).abs() < 1e-3);
-        }
-        // A half turn from the right of a circle to its left, clockwise on screen, passes below.
-        let below = arc((13.0, 8.0), (3.0, 8.0), 5.0, true);
-        assert!(below.iter().any(|p| p.1 > 12.0), "{below:?}");
-        let above = arc((13.0, 8.0), (3.0, 8.0), 5.0, false);
-        assert!(above.iter().any(|p| p.1 < 4.0), "{above:?}");
+    pub(super) const ALL: &[Icon] = &[
+        Icon::Files,
+        Icon::Panel,
+        Icon::SplitRight,
+        Icon::SplitDown,
+        Icon::Markdown,
+        Icon::Search,
+        Icon::Connect,
+        Icon::Menu,
+        Icon::Board,
+        Icon::Minimize,
+        Icon::Maximize,
+        Icon::Restore,
+        Icon::Close,
+        Icon::Branch,
+        Icon::Expand,
+        Icon::Collapse,
+        Icon::Refresh,
+        Icon::Folder { open: false },
+        Icon::Folder { open: true },
+        Icon::Caret { open: false },
+        Icon::Caret { open: true },
+        Icon::CaretDoubleUp,
+        Icon::File(FileKind::Plain),
+        Icon::Plus,
+        Icon::Check,
+        Icon::DotsThree,
+        Icon::Gear,
+        Icon::ArrowUpRight,
+        Icon::CircleHalf,
+        Icon::NavigationArrow,
+        Icon::Keyboard,
+    ];
+
+    /// A context with the bundled fonts, at `ppp` device pixels per point, after one pass so the
+    /// definitions are live.
+    pub(crate) fn installed(ppp: f32) -> egui::Context {
+        let ctx = egui::Context::default();
+        crate::fonts::install_bundled(&ctx);
+        ctx.set_pixels_per_point(ppp);
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        ctx
     }
 
-    #[test]
-    fn every_icon_stays_inside_its_box() {
-        let ctx = egui::Context::default();
-        let center = egui::pos2(50.0, 50.0);
-        let mut output = ctx.run_ui(Default::default(), |ui| {
-            for icon in [
-                Icon::Files,
-                Icon::Panel,
-                Icon::SplitRight,
-                Icon::SplitDown,
-                Icon::Markdown,
-                Icon::Search,
-                Icon::Connect,
-                Icon::Menu,
-                Icon::Board,
-                Icon::Minimize,
-                Icon::Maximize,
-                Icon::Restore,
-                Icon::Close,
-                Icon::Branch,
-                Icon::Expand,
-                Icon::Collapse,
-                Icon::Refresh,
-                Icon::File,
-                Icon::Folder,
-            ] {
-                paint(ui.painter(), center, icon, 16.0, Color32::WHITE);
-            }
-        });
-        output.textures_delta.clear();
-        let bounds = egui::Rect::from_center_size(center, egui::vec2(18.0, 18.0));
-        for shape in output.shapes {
-            let rect = shape.shape.visual_bounding_rect();
-            assert!(bounds.contains_rect(rect), "{rect:?} outside {bounds:?}");
+    /// What an icon `shape` is, for tests that look at painted output: its glyph, the colour it was
+    /// painted in and the square it occupies. `None` for any shape that is not an icon's text.
+    pub(crate) fn painted_icon(shape: &egui::Shape) -> Option<(String, Color32, egui::Rect)> {
+        let egui::Shape::Text(text) = shape else {
+            return None;
+        };
+        let glyph = text.galley.text().to_owned();
+        if !glyph
+            .chars()
+            .all(|c| ('\u{E000}'..='\u{F8FF}').contains(&c))
+        {
+            return None;
         }
+        let color = text.galley.job.sections.first()?.format.color;
+        Some((
+            glyph,
+            color,
+            egui::Rect::from_min_size(text.pos, text.galley.size()),
+        ))
+    }
+
+    /// The rectangle, in points, the glyph's raster covers, and whether any of it carries ink.
+    fn ink(ctx: &egui::Context, pos: Pos2, galley: &egui::Galley) -> (egui::Rect, bool) {
+        let glyph = &galley.rows[0].glyphs[0];
+        let uv = glyph.uv_rect;
+        let min = pos + glyph.pos.to_vec2() + uv.offset;
+        let rect = egui::Rect::from_min_size(min, uv.size);
+        let inked = ctx.fonts_mut(|fonts| {
+            let image = fonts.image();
+            (uv.min[1]..uv.max[1]).any(|y| {
+                (uv.min[0]..uv.max[0]).any(|x| image[(usize::from(x), usize::from(y))].a() > 0)
+            })
+        });
+        (rect, inked)
+    }
+
+    /// Every icon is one glyph of text, inked, inside its box and centred on the point it was given —
+    /// at the sizes the chrome paints and at 1×, 1.25× and 2×.
+    #[test]
+    fn every_icon_is_one_inked_glyph_centred_in_its_box() {
+        let center = egui::pos2(50.0, 50.0);
+        for ppp in [1.0, 1.25, 2.0] {
+            let ctx = installed(ppp);
+            for size in [12.0, 13.0, 15.0, 16.0] {
+                for &icon in ALL {
+                    let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                        paint(ui.painter(), center, icon, size, Color32::WHITE);
+                    });
+                    assert_eq!(output.shapes.len(), 1, "{icon:?}");
+                    let egui::Shape::Text(text) = &output.shapes[0].shape else {
+                        panic!("{icon:?} is not a glyph: {:?}", output.shapes[0].shape);
+                    };
+                    // The row height is rounded to device pixels, so the square is exact only to
+                    // within one of them.
+                    assert!(
+                        (text.galley.size() - egui::vec2(size, size))
+                            .abs()
+                            .max_elem()
+                            <= 1.0 / ppp + 1e-3,
+                        "{icon:?} at {size}×{ppp}: {:?}",
+                        text.galley.size()
+                    );
+                    let square = egui::Rect::from_min_size(text.pos, text.galley.size());
+                    // epaint snaps the origin to a device pixel: at most half of one off.
+                    let slack = 0.5 / ppp + 1e-3;
+                    assert!(
+                        (square.center() - center).abs().max_elem() <= slack,
+                        "{icon:?} at {size}×{ppp}: {square:?}"
+                    );
+                    let (raster, inked) = ink(&ctx, text.pos, &text.galley);
+                    assert!(inked, "{icon:?} drew nothing");
+                    let bounds = egui::Rect::from_center_size(center, egui::vec2(size, size));
+                    assert!(
+                        bounds.expand(slack).contains_rect(raster),
+                        "{icon:?} at {size}×{ppp}: {raster:?} outside {bounds:?}"
+                    );
+                    output.drop_without_applying_deltas();
+                }
+            }
+        }
+    }
+
+    /// A folder that opens and a caret that turns keep their square where it was: the row does not
+    /// jump when it is expanded.
+    #[test]
+    fn paired_glyphs_share_their_square() {
+        let ctx = installed(1.25);
+        let square = |icon| {
+            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                paint(
+                    ui.painter(),
+                    egui::pos2(20.3, 31.7),
+                    icon,
+                    15.0,
+                    Color32::WHITE,
+                );
+            });
+            let egui::Shape::Text(text) = &output.shapes[0].shape else {
+                panic!("not a glyph");
+            };
+            let pos = text.pos;
+            output.drop_without_applying_deltas();
+            pos
+        };
+        assert_eq!(
+            square(Icon::Folder { open: false }),
+            square(Icon::Folder { open: true })
+        );
+        assert_eq!(
+            square(Icon::Caret { open: false }),
+            square(Icon::Caret { open: true })
+        );
+    }
+
+    /// Where the bundled definitions were never installed the icon is left out rather than asking
+    /// egui for a family it does not have, which panics.
+    #[test]
+    fn a_context_without_the_bundled_fonts_paints_nothing() {
+        let ctx = egui::Context::default();
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            paint(
+                ui.painter(),
+                egui::pos2(8.0, 8.0),
+                Icon::Close,
+                16.0,
+                Color32::WHITE,
+            );
+        });
+        assert!(output.shapes.is_empty());
+        output.drop_without_applying_deltas();
     }
 }

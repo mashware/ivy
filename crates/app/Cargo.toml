@@ -134,7 +134,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 
 # The interface's icons: Phosphor Regular and its codepoints (D103). Only the face and the constants
 # are used — never `add_to_fonts`, which puts the face in the proportional chain where its blank
-# `a`–`z` and its private-use codepoints would meet the interface's and the terminal's text. Pinned
+# lowercase letters and its private-use codepoints would meet the interface's and the terminal's text. Pinned
 # exactly: a release that renumbers a glyph changes what the chrome shows without a compile error.
 egui-phosphor = { version = "=0.14.0", default-features = false, features = ["regular"] }
 
