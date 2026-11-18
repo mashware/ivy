@@ -43,7 +43,7 @@ use alacritty_terminal::term::search::RegexIter;
 use alacritty_terminal::vte::ansi::{CursorShape as AlacrittyShape, CursorStyle, Processor};
 
 use crate::Size;
-use crate::search::{Search, Toward};
+use crate::search::{Found, Search, Toward};
 use crate::view::{self, CellWidth, Cursor, Osc8Span, View, ViewCell, ViewMetadata};
 
 mod title;
@@ -695,6 +695,9 @@ impl Screen {
         let (start, end) = self.marking_bounds();
         let mut marked = 0;
         for found in RegexIter::new(start, end, Direction::Right, &self.term, &mut search.regex) {
+            if search.whole_word && !crate::search::is_whole_word(&self.term, &found) {
+                continue;
+            }
             let mut point = *found.start();
             loop {
                 let row = point.line.0 + offset;
@@ -753,13 +756,15 @@ impl Screen {
     /// every press, for ever. With nothing selected it starts at the edge of what is being looked
     /// at, so the first press finds what is nearest to the person's eyes.
     ///
-    /// **When the view is not already at the bottom, the match is kept off the last row**, which is
-    /// where the search's own line is painted over the console. At the bottom there is nothing
-    /// newer to scroll in, and the painter moves its line instead.
+    /// **Whole word and no wrap are decided here, after the engine answers**, because the engine
+    /// knows neither: a candidate whose ends touch a word character is stepped past, and with
+    /// wrapping off a candidate on the far side of where the step started ends it. The engine's
+    /// own walk always wraps, so stepping past rejected candidates **stops when it comes back to
+    /// the first one** — with only rejected candidates in the history it would otherwise never end.
     ///
-    /// Returns whether there was a match. **When there was none nothing moves**: neither the
-    /// selection somebody had nor where they were looking.
-    pub fn find(&mut self, search: &mut Search, toward: Toward) -> bool {
+    /// **When nothing is found nothing moves**: neither the selection somebody had nor where they
+    /// were looking.
+    pub fn find(&mut self, search: &mut Search, toward: Toward) -> Found {
         let rows = self.term.grid().screen_lines() as i32;
         let offset = self.term.grid().display_offset() as i32;
         let current = self
@@ -789,12 +794,47 @@ impl Screen {
                 Point::new(Line(-offset), Column(0)),
             ),
         };
+        // Walking older the engine looks at and before the origin, so anything after it was
+        // reached by wrapping; walking newer, the other way round. **A match on the history's
+        // first or last cell puts the origin itself past the edge**, since stepping off the grid
+        // comes back at the other end, and then everything the walk finds is a wrap.
+        let origin_wrapped = match (toward, current.as_ref()) {
+            (Toward::Older, Some(range)) => origin > range.start,
+            (Toward::Newer, Some(range)) => origin < range.end,
+            (_, None) => false,
+        };
+        let wrapped = |found: &alacritty_terminal::term::search::Match| {
+            origin_wrapped
+                || match toward {
+                    Toward::Older => *found.start() > origin,
+                    Toward::Newer => *found.end() < origin,
+                }
+        };
 
-        let Some(found) = self
-            .term
-            .search_next(&mut search.regex, origin, direction, side, None)
-        else {
-            return false;
+        let mut from = origin;
+        let mut first = None;
+        let found = loop {
+            let Some(found) = self
+                .term
+                .search_next(&mut search.regex, from, direction, side, None)
+            else {
+                return Found::Nothing;
+            };
+            if !search.wrap && wrapped(&found) {
+                return Found::NoMore;
+            }
+            if !search.whole_word || crate::search::is_whole_word(&self.term, &found) {
+                break found;
+            }
+            match first {
+                Some(start) if start == *found.start() => return Found::Nothing,
+                None => first = Some(*found.start()),
+                Some(_) => {}
+            }
+            from = match toward {
+                Toward::Older => found.start().sub(&self.term, Boundary::None, 1),
+                Toward::Newer => found.end().add(&self.term, Boundary::None, 1),
+            };
         };
         let (start, end) = (*found.start(), *found.end());
         let mut selection = Selection::new(SelectionType::Simple, start, Side::Left);
@@ -803,11 +843,7 @@ impl Screen {
 
         self.term.scroll_to_point(end);
         self.term.scroll_to_point(start);
-        let offset = self.term.grid().display_offset() as i32;
-        if end.line.0 == rows - 1 - offset && offset > 0 {
-            self.term.scroll_display(GridScroll::Delta(-1));
-        }
-        true
+        Found::Match
     }
 
     /// Brings a visible cell into the engine's coordinate system.

@@ -992,7 +992,7 @@ mod tests {
         let mut screen = Screen::new(Size { rows: 2, cols: 12 });
         screen.advance(b"a needle b");
         let mut view = screen.view();
-        let mut search = term_core::Search::literal("needle").expect("a literal builds");
+        let mut search = term_core::Search::literal("needle", term_core::Options::default()).expect("a literal builds");
         screen.mark_matches(&mut view, &mut search);
         let yellow = Theme::default().color(TermColor::Indexed(3));
 

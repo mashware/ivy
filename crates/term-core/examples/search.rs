@@ -14,11 +14,16 @@
 //! frame the press arrives in, so a walk longer than a few milliseconds is a visible stall. The
 //! design set the line at **4 ms** for the slowest press (D61); under it, the walk stays whole.
 //!
+//! **Whole word adds a second worst case** (#120): a query that is inside a word on every line is
+//! found and rejected once per line, and every rejection is a fresh call into the engine. It is
+//! measured over the same history, and over **one line wrapped across the whole history**, where
+//! each call walks that line again from its start.
+//!
 //! **In debug the numbers come out many times worse.** The one that counts is the `--release` one.
 
 use std::time::{Duration, Instant};
 
-use term_core::{SCROLLBACK, Screen, Search, Size, Toward};
+use term_core::{Found, Options, SCROLLBACK, Screen, Search, Size, Toward};
 
 /// A wide console, because the walk is paid per cell and a wide one has the most of them.
 const COLS: u16 = 180;
@@ -45,14 +50,47 @@ fn main() {
         screen.advance(b"\r\n");
     }
 
-    for (query, toward) in [("absent", Toward::Older), ("absent", Toward::Newer)] {
-        let mut search = Search::literal(query).expect("an ordinary literal builds");
+    let whole_word = Options {
+        whole_word: true,
+        ..Options::default()
+    };
+    for (query, options, toward) in [
+        ("absent", Options::default(), Toward::Older),
+        ("absent", Options::default(), Toward::Newer),
+        ("modul", whole_word, Toward::Older),
+        ("modul", whole_word, Toward::Newer),
+    ] {
+        press(&mut screen, query, options, toward, "lines");
+    }
+
+    // The whole history as one logical line, which a dump with no newline produces.
+    let mut screen = Screen::new(Size {
+        rows: ROWS,
+        cols: COLS,
+    });
+    for n in 0..SCROLLBACK + ROWS as usize {
+        let line = format!("compiling module {n} of the workspace and its dependencies ");
+        let padded: String = line.chars().cycle().take(COLS as usize).collect();
+        screen.advance(padded.as_bytes());
+    }
+    for toward in [Toward::Older, Toward::Newer] {
+        press(&mut screen, "modul", whole_word, toward, "one wrapped line");
+    }
+}
+
+fn press(screen: &mut Screen, query: &str, options: Options, toward: Toward, history: &str) {
+    {
+        let mut search = Search::literal(query, options).expect("an ordinary literal builds");
         let mut times = Vec::with_capacity(PRESSES);
         for _ in 0..PRESSES {
             let before = Instant::now();
             let found = screen.find(&mut search, toward);
             times.push(before.elapsed());
-            assert!(!found, "the premise: «{query}» is not in the history");
+            assert_eq!(
+                found,
+                Found::Nothing,
+                "the premise: «{query}» is not in the history as asked"
+            );
         }
 
         let first = times[0];
@@ -61,7 +99,8 @@ fn main() {
         let median = rest[rest.len() / 2];
         let slowest = *rest.last().expect("more than one press");
         println!(
-            "{toward:?}, nothing found, {} lines of {COLS} columns: first {}, then median {} and slowest {}",
+            "{toward:?}, «{query}» whole word {}, nothing found, {history}, {} rows of {COLS} columns: first {}, then median {} and slowest {}",
+            options.whole_word,
             SCROLLBACK + ROWS as usize,
             millis(first),
             millis(median),

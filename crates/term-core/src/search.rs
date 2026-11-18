@@ -5,7 +5,11 @@
 //! itself and the rules for what a match is stay in `alacritty_terminal`, the way the rules for
 //! what «the text» is stay there for copying (D22).
 
-use alacritty_terminal::term::search::RegexSearch;
+use alacritty_terminal::Term;
+use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::index::{Column, Direction, Line, Point};
+use alacritty_terminal::term::cell::Flags;
+use alacritty_terminal::term::search::{Match, RegexSearch};
 
 /// What a console is searched for, compiled once and kept for as long as the search is open.
 ///
@@ -15,6 +19,33 @@ use alacritty_terminal::term::search::RegexSearch;
 /// Enter.
 pub struct Search {
     pub(crate) regex: RegexSearch,
+    pub(crate) whole_word: bool,
+    pub(crate) wrap: bool,
+}
+
+/// How a query is matched and walked: the three choices the search box offers.
+///
+/// **Not part of the query's text**, so changing one never edits what the person typed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Options {
+    /// Off, case is ignored always — not the engine's own rule, which turns case-sensitive the
+    /// moment the query holds an uppercase letter. An explicit box means what it says (**D61**).
+    pub match_case: bool,
+    /// A match counts only when neither of its ends touches a word character.
+    pub whole_word: bool,
+    /// Past the last match, carry on from the other end of the history.
+    pub wrap: bool,
+}
+
+impl Default for Options {
+    /// What a search did before it had options, except for case, which D61's amendment changed.
+    fn default() -> Self {
+        Self {
+            match_case: false,
+            whole_word: false,
+            wrap: true,
+        }
+    }
 }
 
 /// Why there is nothing to search with.
@@ -30,23 +61,40 @@ pub enum Refused {
 }
 
 impl Search {
-    /// Searches for exactly these characters.
+    /// Searches for exactly these characters, the way `options` says.
     ///
     /// **Literal, never a pattern**: what a person types into a terminal's search is text they saw,
     /// and a `.` or a `(` in it means that character. A pattern can also build an automaton large
     /// enough that the engine gives up mid-search and reports no match where there is one, which
     /// it only says in a log nobody reads — the reason and what was discarded are in **D61**.
     ///
-    /// **Case is the engine's rule**: insensitive unless the query holds an uppercase letter.
-    /// Escaping adds no letters, so the rule sees exactly what was typed.
-    pub fn literal(text: &str) -> Result<Self, Refused> {
+    /// **Case is set by an inline flag**, which overrides the case rule the engine builds its
+    /// syntax with: that rule looks for an uppercase letter in the pattern, and would otherwise
+    /// decide for the person whatever the box says.
+    pub fn literal(text: &str, options: Options) -> Result<Self, Refused> {
         if text.is_empty() {
             return Err(Refused::Empty);
         }
-        RegexSearch::new(&regex_syntax::escape(text))
-            .map(|regex| Self { regex })
+        let case = if options.match_case { "(?-i)" } else { "(?i)" };
+        RegexSearch::new(&format!("{case}{}", regex_syntax::escape(text)))
+            .map(|regex| Self {
+                regex,
+                whole_word: options.whole_word,
+                wrap: options.wrap,
+            })
             .map_err(|_| Refused::TooLarge)
     }
+}
+
+/// What a step through the console came back with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Found {
+    /// A match, now the selection.
+    Match,
+    /// Nothing anywhere in what the console holds.
+    Nothing,
+    /// Matches exist, but only behind the end the step walked to, and wrapping is off.
+    NoMore,
 }
 
 /// Which way through the console a search walks.
@@ -59,6 +107,52 @@ pub enum Toward {
     Older,
     /// Down, toward where the program writes.
     Newer,
+}
+
+/// Whether neither end of `found` touches a word character on its own logical line.
+///
+/// **A word character is a letter, a digit or `_`, in any script**, which is why this is a check
+/// on the match and not a `\b` in the pattern: an ASCII boundary takes every non-ASCII character
+/// for a non-word one, so `日本` would match inside `日本語`, and the engine's lazy automata do not
+/// take a Unicode boundary over non-ASCII text.
+pub(crate) fn is_whole_word<T>(term: &Term<T>, found: &Match) -> bool {
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    !neighbour(term, *found.start(), Direction::Left).is_some_and(word)
+        && !neighbour(term, *found.end(), Direction::Right).is_some_and(word)
+}
+
+/// The character next to `point` that way, on the same logical line, if there is one.
+///
+/// **Spacer cells are not characters and are stepped over.** A wide character takes two cells,
+/// and the engine's two walks leave a match's ends on different halves of it: walking newer a
+/// match ends on its last wide character's spacer, walking older one starts on the wide cell, so
+/// the cell before it can be the spacer of the wide character in front. A wrap that had no room
+/// for a wide character leaves a spacer of its own in the last column, before the line goes on.
+fn neighbour<T>(term: &Term<T>, point: Point, toward: Direction) -> Option<char> {
+    let grid = term.grid();
+    let last = grid.last_column();
+    let wraps = |line: Line| grid[line][last].flags.contains(Flags::WRAPLINE);
+    let mut at = point;
+    loop {
+        at = match toward {
+            Direction::Left if at.column > Column(0) => Point::new(at.line, at.column - 1),
+            Direction::Left if at.line > grid.topmost_line() && wraps(at.line - 1) => {
+                Point::new(at.line - 1, last)
+            }
+            Direction::Right if at.column < last => Point::new(at.line, at.column + 1),
+            Direction::Right if at.line < grid.bottommost_line() && wraps(at.line) => {
+                Point::new(at.line + 1, Column(0))
+            }
+            _ => return None,
+        };
+        let cell = &grid[at];
+        if !cell
+            .flags
+            .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
+        {
+            return Some(cell.c);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -75,7 +169,11 @@ mod tests {
     }
 
     fn literal(text: &str) -> Search {
-        Search::literal(text).expect("an ordinary literal builds")
+        with(text, Options::default())
+    }
+
+    fn with(text: &str, options: Options) -> Search {
+        Search::literal(text, options).expect("an ordinary literal builds")
     }
 
     /// The visible row the selection sits on, and that row's text — which is what tells two
@@ -106,7 +204,7 @@ mod tests {
         );
         assert!(selected_row(&screen).is_none());
 
-        assert!(screen.find(&mut literal("needle"), Toward::Older));
+        assert_eq!(screen.find(&mut literal("needle"), Toward::Older), Found::Match);
 
         assert_eq!(screen.selected_text().as_deref(), Some("needle"));
         assert!(
@@ -126,28 +224,9 @@ mod tests {
         // literal search can come back with «a.c».
         let mut screen = screen_with(4, &["a.c abc"]);
 
-        assert!(screen.find(&mut literal("a.c"), Toward::Older));
+        assert_eq!(screen.find(&mut literal("a.c"), Toward::Older), Found::Match);
 
         assert_eq!(screen.selected_text().as_deref(), Some("a.c"));
-    }
-
-    #[test]
-    fn case_is_ignored_unless_the_query_holds_an_uppercase_letter() {
-        let mut screen = screen_with(4, &["Needle"]);
-        assert!(
-            screen.find(&mut literal("needle"), Toward::Older),
-            "a lowercase query did not find the capitalised word"
-        );
-        assert_eq!(screen.selected_text().as_deref(), Some("Needle"));
-
-        // The newer line is the lowercase one, so a search that ignored case would stop there first.
-        let mut screen = screen_with(4, &["Needle", "needle"]);
-        assert!(screen.find(&mut literal("Needle"), Toward::Older));
-        assert_eq!(
-            selected_row(&screen).map(|(_, text)| text).as_deref(),
-            Some("Needle"),
-            "a query with an uppercase letter matched another case"
-        );
     }
 
     #[test]
@@ -156,15 +235,15 @@ mod tests {
         let mut search = literal("item");
         let row_text = |screen: &Screen| selected_row(screen).map(|(_, text)| text);
 
-        assert!(screen.find(&mut search, Toward::Older));
+        assert_eq!(screen.find(&mut search, Toward::Older), Found::Match);
         assert_eq!(row_text(&screen).as_deref(), Some("item 3"));
-        assert!(screen.find(&mut search, Toward::Older));
+        assert_eq!(screen.find(&mut search, Toward::Older), Found::Match);
         assert_eq!(
             row_text(&screen).as_deref(),
             Some("item 2"),
             "the second press found the match it started on"
         );
-        assert!(screen.find(&mut search, Toward::Newer));
+        assert_eq!(screen.find(&mut search, Toward::Newer), Found::Match);
         assert_eq!(row_text(&screen).as_deref(), Some("item 3"));
     }
 
@@ -178,7 +257,7 @@ mod tests {
         let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
         let mut screen = screen_with(4, &lines);
         let mut search = literal("item");
-        assert!(screen.find(&mut search, Toward::Older));
+        assert_eq!(screen.find(&mut search, Toward::Older), Found::Match);
         assert_eq!(
             selected_row(&screen).map(|(_, text)| text).as_deref(),
             Some("item 3")
@@ -187,7 +266,7 @@ mod tests {
         for n in 0..5 {
             screen.advance(format!("noise {n}\r\n").as_bytes());
         }
-        assert!(screen.find(&mut search, Toward::Older));
+        assert_eq!(screen.find(&mut search, Toward::Older), Found::Match);
 
         assert_eq!(
             selected_row(&screen).map(|(_, text)| text).as_deref(),
@@ -203,11 +282,11 @@ mod tests {
             .collect();
         let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
         let mut screen = screen_with(4, &lines);
-        assert!(screen.find(&mut literal("item"), Toward::Older));
+        assert_eq!(screen.find(&mut literal("item"), Toward::Older), Found::Match);
         let scroll = screen.view().scroll();
         assert!(scroll > 0, "the premise: the view moved to the match");
 
-        assert!(!screen.find(&mut literal("absent"), Toward::Older));
+        assert_eq!(screen.find(&mut literal("absent"), Toward::Older), Found::Nothing);
 
         assert_eq!(screen.selected_text().as_deref(), Some("item"));
         assert_eq!(screen.view().scroll(), scroll);
@@ -216,8 +295,9 @@ mod tests {
     #[test]
     fn a_match_pushed_out_of_the_history_is_no_longer_found() {
         let mut screen = screen_with(4, &["needle"]);
-        assert!(
+        assert_eq!(
             screen.find(&mut literal("needle"), Toward::Older),
+            Found::Match,
             "the premise: it is found while kept"
         );
         screen.clear_selection();
@@ -226,29 +306,8 @@ mod tests {
             screen.advance(format!("filler {n}\r\n").as_bytes());
         }
 
-        assert!(!screen.find(&mut literal("needle"), Toward::Older));
+        assert_eq!(screen.find(&mut literal("needle"), Toward::Older), Found::Nothing);
         assert_eq!(screen.selected_text(), None);
-    }
-
-    #[test]
-    fn a_match_brought_up_from_below_is_kept_off_the_last_row() {
-        let lines: Vec<String> = (0..10)
-            .map(|n| format!("above {n}"))
-            .chain(std::iter::once("needle".to_owned()))
-            .chain((0..10).map(|n| format!("below {n}")))
-            .collect();
-        let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
-        let mut screen = screen_with(4, &lines);
-        screen.scroll_by(Scroll::ToTop);
-
-        assert!(screen.find(&mut literal("needle"), Toward::Newer));
-
-        let (row, text) = selected_row(&screen).expect("the match is on screen");
-        assert_eq!(text, "needle");
-        assert!(
-            row < 3,
-            "the match landed on the last row, under the search's own line"
-        );
     }
 
     /// Which columns of each visible row are marked as matches.
@@ -318,8 +377,170 @@ mod tests {
         assert_eq!(marked(&view)[0], vec![0, 1, 2, 3]);
     }
 
+    fn whole_word() -> Options {
+        Options {
+            whole_word: true,
+            ..Options::default()
+        }
+    }
+
+    #[test]
+    fn match_case_off_ignores_case_whatever_the_query_holds_and_on_respects_it() {
+        let mut screen = screen_with(4, &["Needle"]);
+        assert_eq!(
+            screen.find(&mut literal("needle"), Toward::Older),
+            Found::Match
+        );
+        let mut screen = screen_with(4, &["needle"]);
+        assert_eq!(
+            screen.find(&mut literal("Needle"), Toward::Older),
+            Found::Match,
+            "an uppercase letter made the search case-sensitive with the box unchecked"
+        );
+
+        let exact = Options {
+            match_case: true,
+            ..Options::default()
+        };
+        let mut screen = screen_with(4, &["Needle"]);
+        assert_eq!(
+            screen.find(&mut with("needle", exact), Toward::Older),
+            Found::Nothing
+        );
+        // The newer line is the lowercase one, so a search that ignored case would stop there.
+        let mut screen = screen_with(4, &["Needle", "needle"]);
+        assert_eq!(
+            screen.find(&mut with("Needle", exact), Toward::Older),
+            Found::Match
+        );
+        assert_eq!(
+            selected_row(&screen).map(|(_, text)| text).as_deref(),
+            Some("Needle")
+        );
+    }
+
+    #[test]
+    fn whole_word_skips_a_query_inside_a_longer_word() {
+        let mut screen = screen_with(4, &["needle kneed"]);
+        assert_eq!(
+            screen.find(&mut with("need", whole_word()), Toward::Older),
+            Found::Nothing,
+            "a word containing the query was taken for the word"
+        );
+
+        let mut screen = screen_with(4, &["a need.", "needle"]);
+        assert_eq!(
+            screen.find(&mut with("need", whole_word()), Toward::Older),
+            Found::Match
+        );
+        assert_eq!(
+            selected_row(&screen).map(|(_, text)| text).as_deref(),
+            Some("a need.")
+        );
+    }
+
+    #[test]
+    fn whole_word_reads_past_a_wide_character_s_spacer_on_both_sides_and_both_ways() {
+        for line in ["日本語", "語日本"] {
+            for toward in [Toward::Older, Toward::Newer] {
+                let mut screen = screen_with(4, &[line]);
+                assert_eq!(
+                    screen.find(&mut with("日本", whole_word()), toward),
+                    Found::Nothing,
+                    "«日本» was a whole word inside «{line}» walking {toward:?}"
+                );
+            }
+        }
+        let mut screen = screen_with(4, &["語 日本"]);
+        assert_eq!(
+            screen.find(&mut with("日本", whole_word()), Toward::Older),
+            Found::Match
+        );
+    }
+
+    #[test]
+    fn whole_word_follows_a_wrap_that_left_a_spacer_in_the_last_column() {
+        // Five columns: «日» has no room after four letters, so the line ends in a spacer and «日»
+        // opens the next row.
+        let wrapped = |text: &str| {
+            let mut screen = Screen::new(Size { rows: 3, cols: 5 });
+            screen.advance(text.as_bytes());
+            screen
+        };
+        assert_eq!(
+            wrapped("abcd日本").find(&mut with("日本", whole_word()), Toward::Older),
+            Found::Nothing,
+            "the letter before the wrap did not count as touching the match"
+        );
+        assert_eq!(
+            wrapped("abc 日本").find(&mut with("日本", whole_word()), Toward::Older),
+            Found::Match
+        );
+    }
+
+    #[test]
+    fn whole_word_with_only_rejected_candidates_ends() {
+        let mut screen = screen_with(4, &["needle", "needles", "kneed"]);
+        for toward in [Toward::Older, Toward::Newer] {
+            assert_eq!(
+                screen.find(&mut with("need", whole_word()), toward),
+                Found::Nothing
+            );
+        }
+    }
+
+    #[test]
+    fn whole_word_marks_only_whole_words() {
+        let screen = screen_with(4, &["need needle"]);
+
+        let mut view = screen.view();
+        screen.mark_matches(&mut view, &mut with("need", whole_word()));
+
+        assert_eq!(marked(&view)[0], vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn without_wrap_the_last_match_is_the_last_and_nothing_moves() {
+        let lines: Vec<String> = ["item 1", "item 2"]
+            .iter()
+            .map(|line| line.to_string())
+            .chain((0..6).map(|n| format!("filler {n}")))
+            .collect();
+        let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+        let row_text = |screen: &Screen| selected_row(screen).map(|(_, text)| text);
+
+        let mut screen = screen_with(4, &lines);
+        let mut search = with(
+            "item",
+            Options {
+                wrap: false,
+                ..Options::default()
+            },
+        );
+        assert_eq!(screen.find(&mut search, Toward::Older), Found::Match);
+        assert_eq!(screen.find(&mut search, Toward::Older), Found::Match);
+        assert_eq!(row_text(&screen).as_deref(), Some("item 1"));
+        let scroll = screen.view().scroll();
+
+        assert_eq!(screen.find(&mut search, Toward::Older), Found::NoMore);
+        assert_eq!(row_text(&screen).as_deref(), Some("item 1"));
+        assert_eq!(screen.view().scroll(), scroll);
+
+        let mut screen = screen_with(4, &lines);
+        let mut search = literal("item");
+        for _ in 0..2 {
+            assert_eq!(screen.find(&mut search, Toward::Older), Found::Match);
+        }
+        assert_eq!(screen.find(&mut search, Toward::Older), Found::Match);
+        assert_eq!(
+            row_text(&screen).as_deref(),
+            Some("item 2"),
+            "with wrapping on, the walk did not carry on from the other end"
+        );
+    }
+
     #[test]
     fn nothing_typed_is_not_a_search() {
-        assert_eq!(Search::literal("").err(), Some(Refused::Empty));
+        assert_eq!(Search::literal("", Options::default()).err(), Some(Refused::Empty));
     }
 }
