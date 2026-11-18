@@ -703,6 +703,16 @@ fn show_more_reaches_deep_content_without_changing_the_root() {
         area,
         directory.0.file_name().unwrap().to_str().unwrap(),
     );
+    // The root's name is painted before its real listing lands, and a reply that lands later is
+    // cached under the same request — it would replace the listing planted below with the empty
+    // directory's. Plant only once the refresh has answered.
+    let root = window.explorer.request(pane, directory.0.clone());
+    let deadline = Instant::now() + std::time::Duration::from_secs(5);
+    while window.explorer.loading.is_some() || !window.explorer.cache.contains_key(&root) {
+        assert!(Instant::now() < deadline, "the root listing never landed");
+        frame(&mut window, &ctx, area, vec![]);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     let first = directory.0.join("4095");
     let second = first.join("4095");
     let target = second.join("deep.txt");
