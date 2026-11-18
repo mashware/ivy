@@ -106,6 +106,184 @@ fn a_run_of_lines_is_a_band_of_whole_rows_each_pixel_painted_once() {
     }
 }
 
+/// What the font inked for whatever `bytes` still asks of it, as device pixels: every glyph quad the
+/// engine tessellates, sampled from its atlas at the pixel's centre, each quad counting once where
+/// its texel is not empty. Without this, a box asked of the font would show up as no pixels at all
+/// and the test below would fail on «nothing was drawn» instead of on the gaps and the beads.
+fn ink_from_the_font(
+    bytes: &[u8],
+    per_point: f32,
+    body: f32,
+) -> std::collections::BTreeMap<(i32, i32), u32> {
+    use eframe::egui::epaint::{ClippedShape, Primitive};
+    let ctx = Context::default();
+    ctx.set_pixels_per_point(per_point);
+    let mut screen = Screen::new(Size { rows: 8, cols: 12 });
+    screen.advance(b"\x1b[?25l");
+    screen.advance(bytes);
+    let view = screen.view();
+    let mut texts = Vec::new();
+    // Twice, because the atlas only holds a glyph once a frame has asked for it.
+    for _ in 0..2 {
+        let output = ctx.run_ui(Default::default(), |ui| {
+            let metrics = CellMetrics::measure(ui.ctx(), FontId::monospace(body));
+            let painter = ui
+                .ctx()
+                .layer_painter(LayerId::new(Order::Foreground, Id::new("box drawing")));
+            paint(
+                &painter,
+                &view,
+                &Theme::default(),
+                &metrics,
+                Pos2::new(3.3, 7.7),
+                &mut crate::fonts::Discoverer::default(),
+                CursorInk::Filled,
+            );
+        });
+        fn walk(shape: &Drawn, clip: eframe::egui::Rect, texts: &mut Vec<ClippedShape>) {
+            match shape {
+                Drawn::Text(_) => texts.push(ClippedShape {
+                    clip_rect: clip,
+                    shape: shape.clone(),
+                }),
+                Drawn::Vec(many) => many.iter().for_each(|one| walk(one, clip, texts)),
+                _ => {}
+            }
+        }
+        texts.clear();
+        for shape in &output.shapes {
+            walk(&shape.shape, shape.clip_rect, &mut texts);
+        }
+        output.drop_without_applying_deltas();
+    }
+    let mut covered = std::collections::BTreeMap::new();
+    if texts.is_empty() {
+        return covered;
+    }
+    let atlas = ctx.fonts(|fonts| fonts.image());
+    let [width, height] = atlas.size;
+    for primitive in ctx.tessellate(texts, per_point) {
+        let Primitive::Mesh(mesh) = primitive.primitive else {
+            continue;
+        };
+        // A glyph is one quad: four vertices, two triangles.
+        for quad in mesh.indices.chunks(6) {
+            let corners: Vec<_> = quad.iter().map(|&i| mesh.vertices[i as usize]).collect();
+            let span = |of: &dyn Fn(&eframe::egui::epaint::Vertex) -> f32| {
+                corners.iter().fold((f32::MAX, f32::MIN), |(lo, hi), v| {
+                    (lo.min(of(v)), hi.max(of(v)))
+                })
+            };
+            let (x0, x1) = span(&|v| v.pos.x * per_point);
+            let (y0, y1) = span(&|v| v.pos.y * per_point);
+            let (u0, u1) = span(&|v| v.uv.x);
+            let (t0, t1) = span(&|v| v.uv.y);
+            for y in y0.floor() as i32..y1.ceil() as i32 {
+                for x in x0.floor() as i32..x1.ceil() as i32 {
+                    let (cx, cy) = (x as f32 + 0.5, y as f32 + 0.5);
+                    if cx < x0 || cx > x1 || cy < y0 || cy > y1 {
+                        continue;
+                    }
+                    let u = u0 + (cx - x0) / (x1 - x0) * (u1 - u0);
+                    let t = t0 + (cy - y0) / (y1 - y0) * (t1 - t0);
+                    let tx = ((u * width as f32) as usize).min(width - 1);
+                    let ty = ((t * height as f32) as usize).min(height - 1);
+                    if atlas.pixels[ty * width + tx].a() > 0 {
+                        *covered.entry((x, y)).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+    }
+    covered
+}
+
+/// How many separate pieces `pixels` falls into: four-connected when `diagonal` is false, eight
+/// when it is true.
+fn pieces(pixels: &std::collections::BTreeSet<(i32, i32)>, diagonal: bool) -> usize {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut count = 0;
+    for &start in pixels {
+        if !seen.insert(start) {
+            continue;
+        }
+        count += 1;
+        let mut pending = vec![start];
+        while let Some((x, y)) = pending.pop() {
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    if (dx, dy) == (0, 0) || (!diagonal && dx != 0 && dy != 0) {
+                        continue;
+                    }
+                    let next = (x + dx, y + dy);
+                    if pixels.contains(&next) && seen.insert(next) {
+                        pending.push(next);
+                    }
+                }
+            }
+        }
+    }
+    count
+}
+
+#[test]
+fn a_box_drawn_by_the_painter_closes_at_every_corner_and_seam() {
+    // **What a person reads as a box is a closed frame**: the corner has to meet the line beside it
+    // and the line under it, and every seam between two cells has to be neither a gap nor a pixel
+    // inked twice. Asserted on the device pixels of the whole frame, with topology instead of a
+    // shape: the strokes are four-connected rings — one, or two for a double line — and the empty
+    // pixels around them split into the outside plus one hole per ring, eight-connected, so a
+    // corner that only touches its neighbour diagonally lets the hole leak out and fails.
+    //
+    // A rounded corner is the exception and the pairing flips: a light arc is a staircase of
+    // whole pixels that steps diagonally by design, so its ink is joined eight ways and the holes
+    // are counted four ways — still the pairing in which a one-pixel gap splits the stroke and
+    // lets the inside out.
+    for (frame, rings, curved) in [
+        ("┌──┐\r\n│  │\r\n└──┘", 1, false),
+        ("┏━━┓\r\n┃  ┃\r\n┗━━┛", 1, false),
+        ("╔══╗\r\n║  ║\r\n╚══╝", 2, false),
+        ("╭──╮\r\n│  │\r\n╰──╯", 1, true),
+    ] {
+        for per_point in SCALES {
+            for body in BODIES {
+                let (rects, _) = drawn(frame.as_bytes(), per_point, body);
+                let mut covered = coverage(&rects, per_point);
+                for (pixel, n) in ink_from_the_font(frame.as_bytes(), per_point, body) {
+                    *covered.entry(pixel).or_insert(0) += n;
+                }
+                let at = format!("{frame:?} at {per_point} × {body}");
+                assert!(!covered.is_empty(), "{at}: nothing was drawn");
+                let twice: Vec<_> = covered.iter().filter(|&(_, &n)| n > 1).collect();
+                assert!(
+                    twice.is_empty(),
+                    "{at}: pixels inked twice, a bead at a seam: {twice:?}"
+                );
+                let ink: std::collections::BTreeSet<(i32, i32)> = covered.keys().copied().collect();
+                assert_eq!(
+                    pieces(&ink, curved),
+                    rings,
+                    "{at}: the strokes break into pieces, a gap at a corner or a seam"
+                );
+                // The empty pixels in a margin of one around the frame: the outside, and a hole
+                // inside each ring only if that ring is closed.
+                let (xs, ys): (Vec<i32>, Vec<i32>) = ink.iter().copied().unzip();
+                let (left, right) = (xs.iter().min().unwrap() - 1, xs.iter().max().unwrap() + 1);
+                let (top, bottom) = (ys.iter().min().unwrap() - 1, ys.iter().max().unwrap() + 1);
+                let empty: std::collections::BTreeSet<(i32, i32)> = (top..=bottom)
+                    .flat_map(|y| (left..=right).map(move |x| (x, y)))
+                    .filter(|pixel| !ink.contains(pixel))
+                    .collect();
+                assert_eq!(
+                    pieces(&empty, !curved),
+                    1 + rings,
+                    "{at}: the inside leaks to the outside, the frame does not close"
+                );
+            }
+        }
+    }
+}
+
 /// The rows (or columns) a straight line of `weight` occupies across a span.
 fn band(weight: Weight, span: i32, light: i32) -> Vec<i32> {
     match weight {
