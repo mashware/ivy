@@ -1,0 +1,12 @@
+Two unmodified runs and the instrumented run are byte-identical.
+Decompressed result SHA-256: e4dc773807eace19bf59e1cbd400826b630ec2fe58ee910895119809cca385ba
+{
+  "HINT_CREATE Ok enabled=true": 720,
+  "HINT_RECONFIG Ok ppem=Size(Some(14.0))": 252,
+  "HINT_DRAW hinted Ok": 1296,
+  "HINT_DRAW unhinted Ok": 432,
+  "HINT_RECONFIG Ok ppem=Size(Some(28.0))": 252,
+  "HINT_RECONFIG Ok ppem=Size(Some(14.7))": 252,
+  "HINT_RECONFIG Ok ppem=Size(Some(29.4))": 252
+}
+No Err lines in instrumented trace.

@@ -178,3 +178,7 @@ term-core = { path = "../term-core", features = ["testing"] }
 [[example]]
 name = "fonts"
 test = true
+
+[[example]]
+name = "hinting"
+test = true
