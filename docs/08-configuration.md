@@ -820,3 +820,18 @@ The guide previews a stable destination beneath Ivy's configuration directory: `
 The TUI plugin follows that TUI's displayed session, not every session on a server or in a directory. It reconciles root/direct-child prompts against the local pending-request API; these requests do not call a model or send prompt contents. The current adapter is inactive on Windows. A missing/moved asset, failed plugin load or lack of observed declarations remains setup-required/unverified; enabling the checkbox does not prove installation.
 
 Before marking a client version live-verified, exercise working/idle, displayed permission and question open/reply/denial/cancellation, explicit clear/exit, manual-title preservation and independent routing from two consoles on a real desktop. Source fixtures and headless painting tests do not satisfy those checks.
+
+
+## Existing agent connections after an update
+
+MCP registration is a one-time operation per AI client. Ivy's Linux packages keep their bridge at
+`/usr/lib/ivy-terminal/panel-mcp`; an ordinary package update does not rewrite the client settings.
+A client already running can retain its loaded MCP connections and tool inventory. In Claude Code,
+use `/mcp` to reconnect the existing server; `/mcp reconnect ivy` applies when its saved name is
+`ivy`. If the running session does not list it, restart Claude in the same console and resume the
+conversation. Do not close the terminal or repeat setup to refresh an existing registration.
+
+**Connect agents** stays neutral when no panel has been published: lack of a publication does not
+prove a configuration failure. Its initial guide explains reconnection; **Manual setup and
+diagnostics** contains the first-time setup prompt. Copying a reconnect command only copies text,
+without typing it into the program or editing client configuration.

@@ -41,13 +41,16 @@ fn main() {
     // variables by the same rule is D88's decision, and the binary's integration test holds both.
     let [id, dir] = panel_contract::ENV_NAMES.map(std::env::var_os);
     let route = std::env::var_os(panel_control::codex_route::ENV);
+    // Instruction delivery must not depend on a socket metadata snapshot: Ivy starts its
+    // child before binding the channel, while the bridge connects lazily on a later tool call.
+    // Conditional guidance does not prove connectivity or claim a panel.
     let instructions = handshake_instructions(
         route.as_deref(),
         id.as_deref(),
         dir.as_deref(),
         panel_control::endpoint::BINDS,
         dir.as_deref()
-            .is_some_and(|dir| panel_control::endpoint::socket_present(std::path::Path::new(dir))),
+            .is_some_and(|dir| std::path::Path::new(dir).is_dir()),
     );
 
     if let Some(route) = route {
@@ -385,12 +388,12 @@ fn handshake_instructions(
     id: Option<&std::ffi::OsStr>,
     dir: Option<&std::ffi::OsStr>,
     binds: bool,
-    socket_present: bool,
+    directory_present: bool,
 ) -> Option<&'static str> {
     if route.is_some() {
         return binds.then_some(ROUTED_INSTRUCTIONS);
     }
-    instructions_for(id, dir, binds, socket_present)
+    instructions_for(id, dir, binds, directory_present)
 }
 
 const ROUTED_INSTRUCTIONS: &str = "This server may reach the Ivy console attached to this conversation. \
@@ -403,9 +406,9 @@ fn instructions_for(
     id: Option<&std::ffi::OsStr>,
     dir: Option<&std::ffi::OsStr>,
     binds: bool,
-    socket_present: bool,
+    directory_present: bool,
 ) -> Option<&'static str> {
-    if !binds || !socket_present {
+    if !binds || !directory_present {
         return None;
     }
     panel_control::client::whole_identity(id, dir).map(|_| INSTRUCTIONS)
@@ -435,8 +438,11 @@ fn instructions_for(
 ///   again before any patch — only when it was the agent's own (a file producer may have painted
 ///   the pane meanwhile), and without a claim the dead session left, which nobody holds any more.
 const INSTRUCTIONS: &str = "\
-This session runs in an Ivy console, and Ivy paints a status panel beside it from what is \
-published for it.
+This server may reach the Ivy console named by its inherited identity. Its channel can be \
+starting or unavailable. Call this server's `panel_get` to check; a successful call verifies the \
+connection. When available, Ivy paints the status you publish beside that console. Do not repeat \
+installation just because its panel is empty. If a tool is unavailable, explain whether the client \
+needs reconnecting; never copy another console's identity or change registration automatically.
 
 - If you work for another agent in this same console (a subagent, or a worker it started), leave \
 the panel alone: it belongs to the agent the person is talking to.
@@ -1400,7 +1406,7 @@ mod tests {
             None,
             "a platform where the channel does not bind"
         );
-        assert_eq!(instructions_for(id, dir, true, false), None, "no socket");
+        assert_eq!(instructions_for(id, dir, true, false), None, "no directory");
         assert_eq!(
             instructions_for(None, dir, true, true),
             None,

@@ -98,3 +98,28 @@ fn saved_preferences_show_completion_after_the_application_finishes() {
     guide.application_status(false);
     center(&frame(&ctx, &mut guide, vec![]), "Save failed");
 }
+
+#[test]
+fn initial_help_explains_saved_setup_and_discloses_first_time_installation_only_on_request() {
+    let ctx = egui::Context::default();
+    let mut guide = Guide::default();
+    let initial = frame(&ctx, &mut guide, vec![]);
+    center(
+        &initial,
+        "Set up Ivy once per AI client. Ivy updates normally keep your saved MCP registration.",
+    );
+    center(
+        &initial,
+        "An empty panel only means no status has been published.",
+    );
+    center(
+        &initial,
+        "If Ivy is absent from this running session, restart Claude in this same Ivy console and resume your conversation. You do not need to close the terminal.",
+    );
+    assert!(!initial.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.text() == "Copy first-time setup prompt")));
+    let at = center(&initial, "Manual setup and diagnostics");
+    click(&ctx, &mut guide, at);
+    let manual = frame(&ctx, &mut guide, vec![]);
+    center(&manual, "First-time setup");
+    center(&manual, "Copy first-time setup prompt");
+}

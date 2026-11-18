@@ -23,7 +23,26 @@ mkdir -p "$config"
 printf 'fixture settings\n' > "$config/config"
 printf 'fixture layout\n' > "$config/layout.json"
 (cd "$config" && sha256sum config layout.json) > "$tmp/expected"
-check_data() { (cd "$config" && sha256sum -c "$tmp/expected"); }
+# Registration belongs to the AI clients and must survive a package upgrade or removal.
+for client_file in "$HOME/.claude.json" "$HOME/.codex/config.toml"; do
+    [[ ! -e $client_file ]] || { echo 'Disposable test requires fresh client configuration' >&2; exit 1; }
+done
+mkdir -p "$HOME/.codex"
+cat > "$HOME/.claude.json" <<'JSON'
+{"mcpServers":{"ivy":{"type":"stdio","command":"/usr/lib/ivy-terminal/panel-mcp"}},"preserve":"other Claude settings"}
+JSON
+cat > "$HOME/.codex/config.toml" <<'TOML'
+[mcp_servers.ivy]
+command = "/usr/lib/ivy-terminal/panel-mcp"
+env_vars = ["PANEL_ID", "PANEL_DIR"]
+[mcp_servers.existing]
+command = "/existing-client-server"
+TOML
+(cd "$HOME" && sha256sum .claude.json .codex/config.toml) > "$tmp/expected-clients"
+check_data() {
+    (cd "$config" && sha256sum -c "$tmp/expected")
+    (cd "$HOME" && sha256sum -c "$tmp/expected-clients")
+}
 check_commands() {
     [[ $(readlink -f /usr/bin/ivy) == /usr/lib/ivy-terminal/app ]]
     [[ $(readlink -f /usr/bin/panel-mcp) == /usr/lib/ivy-terminal/panel-mcp ]]
@@ -45,4 +64,4 @@ dpkg -r ivy-terminal
 check_data
 [[ ! -e /usr/bin/ivy && ! -e /usr/bin/panel-mcp && ! -e /usr/bin/ivy-session && ! -e /usr/bin/ivy-codex ]]
 [[ ! -e /usr/lib/ivy-terminal/session-recovery ]]
-echo 'Install, upgrade and removal preserved user data.'
+echo 'Install, upgrade and removal preserved Ivy data and AI client MCP registrations.'
