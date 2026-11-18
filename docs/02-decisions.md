@@ -8794,8 +8794,8 @@ The owner rejected the explorer's extra close/pin/navigation controls and filled
 then supplied native feedback rejecting the source/cwd-change rows, large chevrons, console
 flicker during scrolling and inactive Markdown links. Files keeps one root caption and a compact
 name-search field. Its rail icon is a recognizable folder with the adjacent tools' vector style;
-that button or Escape dismisses Files. Folder arrows are six-point open chevrons within their
-existing hit areas (Phosphor's carets in a 12-point square since **D103**, same hit areas). Normal tree activation expands/collapses without replacing the root.
+that button or Escape dismisses Files. Folder arrows were six-point open chevrons within their
+existing hit areas; since **D103** they are Phosphor's carets in a 12-point square, same hit areas. Normal tree activation expands/collapses without replacing the root.
 
 Files follows usable console-directory changes automatically, including the shell's transient
 startup directory. The same source retains navigation; remote/unavailable metadata suspends local

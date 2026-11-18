@@ -330,13 +330,14 @@ mod tests {
             ui_icon_family(&ctx),
             Some(FontFamily::Name(UI_ICONS.into()))
         );
-        // The face really draws there: a Phosphor codepoint lays out a drawing of its own, not the
-        // replacement box a codepoint the face lacks gets.
-        let x = egui_phosphor::regular::X.chars().next().unwrap();
+        // The face really draws there: two Phosphor codepoints lay out two different drawings,
+        // which one replacement box for every codepoint would not.
+        let glyph = |s: &str| s.chars().next().unwrap();
         let icons = FontFamily::Name(UI_ICONS.into());
-        let drawn = drawing(&ctx, x, icons.clone());
-        assert!(drawn.is_some());
-        assert_ne!(drawn, drawing(&ctx, '\u{F8FF}', icons));
+        let cross = drawing(&ctx, glyph(egui_phosphor::regular::X), icons.clone());
+        let minus = drawing(&ctx, glyph(egui_phosphor::regular::MINUS), icons);
+        assert!(cross.is_some() && minus.is_some());
+        assert_ne!(cross, minus);
         let bare = egui::Context::default();
         pass(&bare);
         assert_eq!(ui_icon_family(&bare), None);

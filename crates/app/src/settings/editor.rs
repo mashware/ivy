@@ -161,8 +161,8 @@ impl Editor {
             } else {
                 egui::Color32::from_rgb(153, 163, 182)
             };
-            // The square that keeps the gear about the size the drawn one had: half the shorter
-            // side, sixteen points at most.
+            // A square of 0.55 of the shorter side, eighteen points at most: the size at which the
+            // gear read as the drawn one did at the desktop check.
             let size = (gear.width().min(gear.height()) * 0.55).min(18.0);
             crate::ui::icons::paint(
                 &painter,

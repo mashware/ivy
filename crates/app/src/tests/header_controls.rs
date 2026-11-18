@@ -512,16 +512,24 @@ mod tests {
                 .find(|(_, _, square)| toggle.contains(square.center()))
                 .map(|(glyph, _, _)| glyph)
         };
-        let before = toggle_glyph(&shapes);
+        let glyph_for = |folded: bool| {
+            if folded {
+                egui_phosphor::regular::SIDEBAR_SIMPLE.to_owned()
+            } else {
+                egui_phosphor::regular::SQUARE_HALF.to_owned()
+            }
+        };
         let folded = window.active().panes()[1].folded;
-        window.active_mut().panes_mut()[1].folded = !folded;
-        let flipped = ui_pass(&mut window, &ctx, area, egui::RawInput::default());
-        assert!(before.is_some());
-        assert_ne!(
-            toggle_glyph(&flipped),
-            before,
-            "the toggle hides the panel's state"
-        );
+        assert_eq!(toggle_glyph(&shapes), Some(glyph_for(folded)));
+        for state in [!folded, folded] {
+            window.active_mut().panes_mut()[1].folded = state;
+            let painted = ui_pass(&mut window, &ctx, area, egui::RawInput::default());
+            assert_eq!(
+                toggle_glyph(&painted),
+                Some(glyph_for(state)),
+                "folded={state}: the toggle does not show the panel's state"
+            );
+        }
     }
 
     #[test]

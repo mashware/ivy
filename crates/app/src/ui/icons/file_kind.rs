@@ -42,6 +42,18 @@ pub(crate) fn row_grounds(surface: Color32, hover: Color32, chosen: Color32) -> 
     [surface, surface.blend(hover), surface.blend(chosen)]
 }
 
+/// `wanted` where it keeps 3:1 against every ground, otherwise `fallback`.
+pub(crate) fn legible_or(wanted: Color32, grounds: &[Color32; 3], fallback: Color32) -> Color32 {
+    if grounds
+        .iter()
+        .all(|ground| project_ink_contrast(wanted, *ground) >= MARK_CONTRAST)
+    {
+        wanted
+    } else {
+        fallback
+    }
+}
+
 /// Where a kind's colour comes from: a terminal palette slot, so every theme carries it (D94), or
 /// one of the interface's text roles.
 enum Tint {
@@ -148,26 +160,20 @@ impl FileKind {
     /// The colour this kind is painted in over `grounds` — every surface its row can show under
     /// it, translucent fills already blended onto what they land on: its own, unless that would not
     /// read on one of them, and then the secondary text colour every file used to have.
-    pub(crate) fn color(self, theme: &Theme, roles: &Roles, grounds: &[Color32]) -> Color32 {
+    pub(crate) fn color(self, theme: &Theme, roles: &Roles, grounds: &[Color32; 3]) -> Color32 {
         let wanted = match self.tint() {
             Tint::Ansi(slot) => theme.color(term_core::TermColor::Indexed(slot)),
             Tint::Muted => roles.tx3,
             Tint::Secondary => return roles.tx2,
         };
-        if grounds
-            .iter()
-            .all(|ground| project_ink_contrast(wanted, *ground) >= MARK_CONTRAST)
-        {
-            wanted
-        } else {
-            roles.tx2
-        }
+        legible_or(wanted, grounds, roles.tx2)
     }
 }
 
 #[cfg(test)]
 impl FileKind {
-    /// Every kind. The match below fails to compile when a kind is added and not listed here.
+    /// Every kind. The match in `listed` makes a new kind need an arm there, which is the reminder
+    /// to list it here too; nothing checks that it was.
     pub(crate) const ALL: [Self; 23] = [
         Self::Lock,
         Self::Dotfile,
@@ -271,7 +277,7 @@ mod tests {
         let theme = NamedTheme::IvyNight.theme();
         let roles = Roles::of(&theme);
         let slot = |n| theme.color(term_core::TermColor::Indexed(n));
-        let ground = [Color32::BLACK];
+        let ground = [Color32::BLACK; 3];
         for kind in FileKind::ALL {
             let expected = match kind {
                 FileKind::Rust | FileKind::Pdf => slot(1),
@@ -297,26 +303,20 @@ mod tests {
         );
     }
 
-    /// The threshold is 3:1, not a margin around it, and it is held on every ground given — one
-    /// ground it fails on is enough to fall back.
+    /// The threshold is 3:1 — the grey one step under it falls back and the grey one step over it
+    /// is kept — and it is held on every ground given: one ground it fails on is enough.
     #[test]
     fn a_colour_under_three_to_one_on_any_ground_falls_back() {
+        assert_eq!(MARK_CONTRAST, 3.0, "WCAG's figure for non-text marks");
         let theme = NamedTheme::IvyNight.theme();
         let ground = theme.color(term_core::TermColor::Indexed(0));
-        let mut greys = (0..=255u8).map(|v| Color32::from_rgb(v, v, v));
-        let ratio = |c: &Color32| project_ink_contrast(*c, ground);
-        let under = greys
-            .clone()
-            .rev()
-            .find(|c| ratio(c) < MARK_CONTRAST && c.r() > ground.r())
+        let ratio = |c: Color32| project_ink_contrast(c, ground);
+        let over = (ground.r()..=255)
+            .map(|v| Color32::from_rgb(v, v, v))
+            .find(|c| ratio(*c) >= MARK_CONTRAST)
             .unwrap();
-        let over = greys
-            .find(|c| ratio(c) >= MARK_CONTRAST && c.r() > ground.r())
-            .unwrap();
-        assert!(
-            ratio(&under) > 2.8 && ratio(&over) < 3.2,
-            "{under:?} {over:?}"
-        );
+        let under = Color32::from_rgb(over.r() - 1, over.g() - 1, over.b() - 1);
+        assert!(ratio(under) < MARK_CONTRAST, "{under:?} {over:?}");
         let with = |c| {
             let mut colors = crate::settings::Colors::default();
             colors.palette[1] = Some(c);
@@ -324,28 +324,28 @@ mod tests {
         };
         let kept = with(over);
         let roles = Roles::of(&kept);
-        assert_eq!(FileKind::Rust.color(&kept, &roles, &[ground]), over);
+        assert_eq!(FileKind::Rust.color(&kept, &roles, &[ground; 3]), over);
         assert_eq!(
-            FileKind::Rust.color(&kept, &roles, &[Color32::BLACK, ground, Color32::BLACK]),
-            over
-        );
-        assert_eq!(
-            FileKind::Rust.color(&kept, &roles, &[ground, over]),
+            FileKind::Rust.color(&kept, &roles, &[ground, ground, over]),
             roles.tx2,
-            "a ground the colour vanishes on, even one of several, sends it to tx2"
+            "a ground the colour vanishes on, even one of three, sends it to tx2"
         );
         let lost = with(under);
         let roles = Roles::of(&lost);
-        assert_eq!(FileKind::Rust.color(&lost, &roles, &[ground]), roles.tx2);
+        assert_eq!(FileKind::Rust.color(&lost, &roles, &[ground; 3]), roles.tx2);
     }
 
     #[test]
     fn a_translucent_fill_is_judged_where_it_lands() {
         let surface = Color32::from_rgb(20, 20, 20);
-        let fill = Color32::from_rgba_unmultiplied(255, 255, 255, 64);
-        let [_, hovered, _] = row_grounds(surface, fill, fill);
-        assert_eq!(hovered, surface.blend(fill));
-        assert_ne!(hovered, fill);
+        let hover = Color32::from_rgba_unmultiplied(255, 255, 255, 64);
+        let chosen = Color32::from_rgba_unmultiplied(0, 255, 0, 96);
+        assert_eq!(
+            row_grounds(surface, hover, chosen),
+            [surface, surface.blend(hover), surface.blend(chosen)]
+        );
+        assert_ne!(surface.blend(hover), surface.blend(chosen));
+        assert_ne!(surface.blend(chosen), chosen);
     }
 
     /// In every bundled theme, on the Files list's own surface, every kind is painted in a colour
@@ -362,12 +362,13 @@ mod tests {
             );
             for kind in FileKind::ALL {
                 let color = kind.color(&theme, &roles, &grounds);
+                // Whatever is painted reads — the fallback included: a tx2 that vanished too
+                // would leave an unreadable icon with this function satisfied.
                 assert!(
-                    color == roles.tx2
-                        || grounds
-                            .iter()
-                            .all(|g| project_ink_contrast(color, *g) >= MARK_CONTRAST),
-                    "{named:?} {kind:?}"
+                    grounds
+                        .iter()
+                        .all(|g| project_ink_contrast(color, *g) >= MARK_CONTRAST),
+                    "{named:?} {kind:?}: {color:?}"
                 );
             }
         }

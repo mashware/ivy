@@ -341,7 +341,7 @@ fn paint_field(
             painter,
             clear.center(),
             crate::ui::icons::Icon::Close,
-            // The size of the text cross it replaced, smaller than the magnifier beside it.
+            // So it draws about as wide as the 13-point text cross it replaced, under the magnifier.
             10.0,
             roles.tx2,
         );

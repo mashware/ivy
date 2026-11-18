@@ -147,8 +147,8 @@ fn paint_icon(
         Hit::Action(Action::TogglePanel) if folded => Icon::Panel,
         Hit::Action(Action::TogglePanel) => Icon::PanelShown,
     };
-    // The square that keeps the drawing the size the hand-drawn one had, six tenths of the target,
-    // and scaling with it.
+    // An eight-tenths square, chosen so the drawing spans the six tenths of the target the
+    // hand-drawn one did, and scales with the target as it did.
     let size = target.width().min(target.height()) * 0.8;
     paint(painter, target.center(), icon, size, color);
 }

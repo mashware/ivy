@@ -4,7 +4,7 @@ use eframe::egui::{self, Color32, FontId, Pos2};
 use egui_phosphor::regular as glyph;
 
 mod file_kind;
-pub(crate) use file_kind::{FileKind, row_grounds};
+pub(crate) use file_kind::{FileKind, legible_or, row_grounds};
 #[cfg(test)]
 pub(crate) use tests::{installed as installed_for_tests, painted_icon};
 
@@ -112,10 +112,17 @@ pub(crate) fn paint(painter: &egui::Painter, center: Pos2, icon: Icon, size: f32
 /// A floating surface's close button: egui's own button, so it keeps the surface's spacing, hover
 /// and keyboard focus, holding the set's cross instead of a text one.
 pub(crate) fn close_button(ui: &mut egui::Ui) -> egui::Response {
-    let response = match crate::fonts::ui_icon_family(ui.ctx()) {
+    let family = crate::fonts::ui_icon_family(ui.ctx());
+    debug_assert!(
+        cfg!(test) || family.is_some(),
+        "the interface's icon family is not installed"
+    );
+    let response = match family {
         Some(family) => ui.button(egui::RichText::new(Icon::Close.glyph()).family(family)),
         None => ui.button("×"),
     };
+    // The glyph is a private-use codepoint: the button is named for what it does instead.
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Close"));
     response.on_hover_text("Close")
 }
 
@@ -123,8 +130,8 @@ pub(crate) fn close_button(ui: &mut egui::Ui) -> egui::Response {
 mod tests {
     use super::*;
 
-    /// Every icon, every file kind included. The match fails to compile when a variant is added
-    /// and not handled here, which is the reminder to list it.
+    /// Every icon, every file kind included. The match makes a new variant need an arm here, which
+    /// is the reminder to list it too; nothing checks that it was.
     pub(super) fn all() -> Vec<Icon> {
         let mut all = vec![
             Icon::Files,
@@ -223,9 +230,15 @@ mod tests {
         if !ours || glyph.is_empty() {
             return None;
         }
+        // A colourless layout takes the shape's colour; one laid out in a colour shows that one.
+        let color = if section.format.color == Color32::PLACEHOLDER {
+            text.fallback_color
+        } else {
+            section.format.color
+        };
         Some((
             glyph,
-            text.fallback_color,
+            color,
             egui::Rect::from_min_size(text.pos, text.galley.size()),
         ))
     }
@@ -246,7 +259,8 @@ mod tests {
     }
 
     /// Every icon is one glyph of text, inked, inside its box and centred on the point it was given —
-    /// from 8 to 18 points, the range the chrome paints, at 1×, 1.25× and 2×.
+    /// at the fixed sizes the chrome uses, 8 to 18 points, at 1×, 1.25× and 2×. The icons sized from
+    /// the console's cells grow with its font past that range; their squares are centred the same.
     #[test]
     fn every_icon_is_one_inked_glyph_centred_in_its_box() {
         let center = egui::pos2(50.0, 50.0);
