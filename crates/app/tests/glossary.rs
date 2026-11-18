@@ -62,6 +62,7 @@ const FINISHED_CRATES: &[&str] = &["panel-contract", "host-load", "term-core", "
 const GLOSSARY_CLEAN_FILES: &[&str] = &[
     "app/tests/scope_launch.rs",
     "term-core/src/scope.rs",
+    "term-core/src/scope/protocol_tests.rs",
     "term-core/src/scope_gate.rs",
     "term-core/src/termination.rs",
     "app/src/painter/box_drawing.rs",
@@ -344,6 +345,7 @@ const GLOSSARY_PENDING_FILES: &[&str] = &[
 const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/tests/scope_launch.rs", "app"),
     ("term-core/src/scope.rs", "term-core"),
+    ("term-core/src/scope/protocol_tests.rs", "term-core"),
     ("term-core/src/scope_gate.rs", "term-core"),
     ("term-core/src/termination.rs", "term-core"),
     ("app/src/sidebar.rs", "app"),

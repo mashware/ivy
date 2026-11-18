@@ -10,6 +10,20 @@ use term_core::{Backlog, Ending, ForegroundScope, Pty, Size};
 static LAUNCHER: OnceLock<PathBuf> = OnceLock::new();
 type Spawned = (Pty, Receiver<Vec<u8>>);
 
+#[cfg(test)]
+thread_local! {
+    static TEST_LAUNCHER: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(target_os = "linux")]
+fn launcher() -> Option<PathBuf> {
+    #[cfg(test)]
+    if let Some(path) = TEST_LAUNCHER.with(|launcher| launcher.borrow().clone()) {
+        return Some(path);
+    }
+    LAUNCHER.get().cloned()
+}
+
 /// Explicit opt-in by the Ivy executable, never by a library consumer's test runner.
 pub fn enable(launcher: PathBuf) {
     let _ = LAUNCHER.set(launcher);
@@ -71,8 +85,7 @@ impl Process {
         request: Request<'_>,
     ) -> term_core::Result<(Self, Receiver<Vec<u8>>)> {
         #[cfg(target_os = "linux")]
-        if let Some(launcher) = LAUNCHER.get() {
-            let launcher = launcher.clone();
+        if let Some(launcher) = launcher() {
             let program = request.program.to_owned();
             let args: Vec<String> = request.args.iter().map(|arg| (*arg).to_owned()).collect();
             let env: Vec<(String, Option<OsString>)> = request
@@ -377,7 +390,9 @@ pub(crate) fn finish_input(pane: &mut crate::Pane) {
         .write(&input)
     {
         pane.pty.delivery_failed = true;
-        eprintln!("pending console input could not be delivered: {error}");
+        crate::pty_output::say(&format!(
+            "pending console input could not be delivered: {error}"
+        ));
     }
     pane.pty.input_since = None;
     pane.pty.cost += before.elapsed();
@@ -432,4 +447,4 @@ fn start_worker(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

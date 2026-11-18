@@ -65,89 +65,99 @@ pub(crate) fn place(
 ) -> crate::Result<Scope> {
     future::block_on(bounded(deadline, async {
         let connection = Connection::session().await?;
-        let proxy = manager(&connection).await?;
-        let _: () = proxy.call("Subscribe", &()).await?;
-        let mut jobs = proxy.receive_signal("JobRemoved").await?;
-        let description = format!("Ivy console {identity}");
-        let properties = |oom| {
-            let mut properties = vec![
-                ("Description", Value::from(description.as_str())),
-                ("Slice", Value::from("app.slice")),
-                ("PIDs", Value::from(vec![pid])),
-            ];
-            if oom {
-                properties.push(("OOMPolicy", Value::from("kill")));
-            }
-            properties
-        };
-        let mut selected_name = name.to_owned();
-        let auxiliary: Vec<(&str, Vec<(&str, Value<'_>)>)> = Vec::new();
-        let job: OwnedObjectPath = match proxy
-            .call(
-                "StartTransientUnit",
-                &(name, "fail", properties(true), &auxiliary),
-            )
-            .await
-        {
-            Ok(job) => job,
-            Err(zbus::Error::MethodError(error, message, _))
-                if unsupported_oom_property(error.as_str(), message.as_deref()) =>
-            {
-                // A rejected transient request can leave a stub unit until manager GC runs.
-                // A distinct owned name avoids racing that GC when retrying without OOMPolicy.
-                selected_name = format!("{}-basic.scope", name.trim_end_matches(".scope"));
-                proxy
-                    .call(
-                        "StartTransientUnit",
-                        &(
-                            selected_name.as_str(),
-                            "fail",
-                            properties(false),
-                            &auxiliary,
-                        ),
-                    )
-                    .await?
-            }
-            Err(error) => return Err(error),
-        };
-        let mut settled = false;
-        while let Some(signal) = jobs.next().await {
-            let (_, path, unit, result): (u32, OwnedObjectPath, String, String) =
-                signal.body().deserialize()?;
-            if path == job && unit == selected_name {
-                if result != "done" {
-                    return Err(std::io::Error::other(format!("scope job failed: {result}")).into());
-                }
-                settled = true;
-                break;
-            }
-        }
-        if !settled {
-            return Err(std::io::Error::other("scope job stream closed before settlement").into());
-        }
-        let path: OwnedObjectPath = proxy.call("GetUnit", &(selected_name.as_str(),)).await?;
-        // Retain the unit before the gated process may exit and race unit garbage collection.
-        let _: () = proxy.call("RefUnit", &(selected_name.as_str(),)).await?;
-        let scope = Scope {
-            connection: connection.clone(),
-            name: selected_name,
-            path,
-        };
-        let unit = Proxy::new(
-            &connection,
-            DESTINATION,
-            scope.path.as_str(),
-            "org.freedesktop.systemd1.Scope",
-        )
-        .await?;
-        let group: String = unit.get_property("ControlGroup").await?;
-        let actual = std::fs::read_to_string(format!("/proc/{pid}/cgroup"))?;
-        if !placed_in(&actual, &group) {
-            return Err(std::io::Error::other("scope placement was not confirmed").into());
-        }
-        Ok(scope)
+        place_connected(connection, pid, name, identity).await
     }))
     .map_err(Into::into)
+}
+
+// The same protocol serves the session bus and a private manager fixture in unit tests.
+async fn place_connected(
+    connection: Connection,
+    pid: u32,
+    name: &str,
+    identity: &str,
+) -> zbus::Result<Scope> {
+    let proxy = manager(&connection).await?;
+    let _: () = proxy.call("Subscribe", &()).await?;
+    let mut jobs = proxy.receive_signal("JobRemoved").await?;
+    let description = format!("Ivy console {identity}");
+    let properties = |oom| {
+        let mut properties = vec![
+            ("Description", Value::from(description.as_str())),
+            ("Slice", Value::from("app.slice")),
+            ("PIDs", Value::from(vec![pid])),
+        ];
+        if oom {
+            properties.push(("OOMPolicy", Value::from("kill")));
+        }
+        properties
+    };
+    let mut selected_name = name.to_owned();
+    let auxiliary: Vec<(&str, Vec<(&str, Value<'_>)>)> = Vec::new();
+    let job: OwnedObjectPath = match proxy
+        .call(
+            "StartTransientUnit",
+            &(name, "fail", properties(true), &auxiliary),
+        )
+        .await
+    {
+        Ok(job) => job,
+        Err(zbus::Error::MethodError(error, message, _))
+            if unsupported_oom_property(error.as_str(), message.as_deref()) =>
+        {
+            // A rejected transient request can leave a stub unit until manager GC runs.
+            // A distinct owned name avoids racing that GC when retrying without OOMPolicy.
+            selected_name = format!("{}-basic.scope", name.trim_end_matches(".scope"));
+            proxy
+                .call(
+                    "StartTransientUnit",
+                    &(
+                        selected_name.as_str(),
+                        "fail",
+                        properties(false),
+                        &auxiliary,
+                    ),
+                )
+                .await?
+        }
+        Err(error) => return Err(error),
+    };
+    let mut settled = false;
+    while let Some(signal) = jobs.next().await {
+        let (_, path, unit, result): (u32, OwnedObjectPath, String, String) =
+            signal.body().deserialize()?;
+        if path == job && unit == selected_name {
+            if result != "done" {
+                return Err(std::io::Error::other(format!("scope job failed: {result}")).into());
+            }
+            settled = true;
+            break;
+        }
+    }
+    if !settled {
+        return Err(std::io::Error::other("scope job stream closed before settlement").into());
+    }
+    let path: OwnedObjectPath = proxy.call("GetUnit", &(selected_name.as_str(),)).await?;
+    // Retain the unit before the gated process may exit and race unit garbage collection.
+    let _: () = proxy.call("RefUnit", &(selected_name.as_str(),)).await?;
+    let scope = Scope {
+        connection: connection.clone(),
+        name: selected_name,
+        path,
+    };
+    let unit = Proxy::new(
+        &connection,
+        DESTINATION,
+        scope.path.as_str(),
+        "org.freedesktop.systemd1.Scope",
+    )
+    .await?;
+    let group: String = unit.get_property("ControlGroup").await?;
+    let actual = std::fs::read_to_string(format!("/proc/{pid}/cgroup"))?;
+    if !placed_in(&actual, &group) {
+        return Err(std::io::Error::other("scope placement was not confirmed").into());
+    }
+    Ok(scope)
 }
 fn placed_in(actual: &str, group: &str) -> bool {
     !group.is_empty()
@@ -290,3 +300,6 @@ mod tests {
         assert!(result.is_err());
     }
 }
+
+#[cfg(test)]
+mod protocol_tests;

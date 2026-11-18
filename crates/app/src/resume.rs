@@ -378,6 +378,55 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "requires the built target/debug/app and a real systemd user manager"]
+    fn restored_client_fixed_arguments_and_directory_reach_a_real_isolated_scope() {
+        use std::os::unix::fs::PermissionsExt;
+        let _launcher = crate::launch::tests::explicit_ivy_launcher();
+        let root = std::env::temp_dir().join(format!("ivy-scoped-resume-{}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let output = root.join("proof");
+        let program = root.join("client");
+        std::fs::write(
+            &program,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$$\" \"$PWD\" \"$@\" > '{}'\nexec /bin/cat\n",
+                output.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let leaf = saved(Client::Codex, root.clone());
+        let mut pane = try_open_with(&Default::default(), &leaf, 0, Default::default(), |_| {
+            Ok(crate::ai_sessions::ResolvedLaunch {
+                program,
+                prefix_args: vec![],
+                path: "/usr/bin:/bin".into(),
+            })
+        })
+        .unwrap();
+        assert!(pane.pty.pending());
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while (!output.exists() || pane.pty.pending()) && Instant::now() < deadline {
+            crate::launch::refresh(&mut pane);
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        let proof = std::fs::read_to_string(output).unwrap();
+        let mut lines = proof.lines();
+        let pid: u32 = lines.next().unwrap().parse().unwrap();
+        assert_eq!(
+            lines.collect::<Vec<_>>(),
+            [root.to_str().unwrap(), "resume", "--no-daemon", ID]
+        );
+        let group = std::fs::read_to_string(format!("/proc/{pid}/cgroup")).unwrap();
+        assert!(group.contains("/app.slice/ivy-console-"), "{group}");
+        assert_ne!(group, std::fs::read_to_string("/proc/self/cgroup").unwrap());
+        assert_eq!(pane.restoration.resume, leaf.resume);
+        drop(pane);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn saved_identity_is_typed_and_lower_modes_remove_it() {
         let document = serde_json::json!({"v":2,"tabs":[{"root":{"leaf":{

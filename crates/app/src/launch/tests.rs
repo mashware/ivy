@@ -339,3 +339,151 @@ fn a_panicked_launch_worker_wakes_the_window_to_report_failure() {
         Some("This console's program could not be started.")
     );
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "requires the built target/debug/app and a real systemd user manager"]
+fn normal_restored_fallback_and_takeover_paths_use_the_explicit_ivy_launcher() {
+    use std::os::unix::fs::PermissionsExt;
+    let _guard = explicit_ivy_launcher();
+    let root = std::env::temp_dir().join(format!("ivy-launch-paths-{}", std::process::id()));
+    std::fs::create_dir(&root).unwrap();
+    let pidfile = root.join("pid");
+    let program = root.join("fixture");
+    std::fs::write(
+        &program,
+        format!(
+            "#!/bin/sh\nprintf '%s' $$ > '{}'\nexec /bin/cat\n",
+            pidfile.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let ctx = eframe::egui::Context::default();
+    let parent = std::fs::read_to_string("/proc/self/cgroup").unwrap();
+    let mut groups = std::collections::HashSet::new();
+    let mut check = |pane: &mut crate::Pane, kind: &str| {
+        assert!(pane.pty.pending(), "{kind} bypassed the launch worker");
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while (!pidfile.exists() || pane.pty.pending()) && Instant::now() < deadline {
+            refresh(pane);
+            finish_input(pane);
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(pane.pty.failure.is_none(), "{kind}: {:?}", pane.pty.failure);
+        let pid: u32 = std::fs::read_to_string(&pidfile).unwrap().parse().unwrap();
+        let group = std::fs::read_to_string(format!("/proc/{pid}/cgroup")).unwrap();
+        assert!(group.contains("/app.slice/ivy-console-"), "{kind}: {group}");
+        assert_ne!(group, parent, "{kind} remained in the GUI scope");
+        assert!(
+            groups.insert(group),
+            "{kind} reused another console's scope"
+        );
+        std::fs::remove_file(&pidfile).unwrap();
+    };
+    let mut normal =
+        crate::Pane::with_panel(&ctx, program.to_str().unwrap(), &[], None, 0).unwrap();
+    check(&mut normal, "normal");
+    let saved = crate::session::interpret(
+        &serde_json::json!({"v":2,"tabs":[{"root":{"leaf":{"panel_width":30,"folded":false}}}]})
+            .to_string(),
+    )
+    .unwrap();
+    let mut tabs = crate::Window::materialize(&ctx, &saved, program.to_str().unwrap()).unwrap();
+    check(tabs[0].panes_mut().into_iter().next().unwrap(), "restored");
+    let mut fallback =
+        crate::Pane::with_panel(&ctx, "/definitely/missing/ivy-client", &[], None, 1).unwrap();
+    fallback
+        .pty
+        .write(format!("printf '%s' $$ > '{}'\n", pidfile.display()).as_bytes())
+        .unwrap();
+    check(&mut fallback, "fallback");
+    normal.restoration.failed = true;
+    normal.restoration.fresh_shell_required = true;
+    crate::resume::take_over(&mut normal).unwrap();
+    normal
+        .pty
+        .write(format!("printf '%s' $$ > '{}'\n", pidfile.display()).as_bytes())
+        .unwrap();
+    check(&mut normal, "takeover");
+    drop((normal, fallback, tabs));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) struct LauncherGuard;
+#[cfg(target_os = "linux")]
+impl Drop for LauncherGuard {
+    fn drop(&mut self) {
+        TEST_LAUNCHER.with(|path| *path.borrow_mut() = None);
+    }
+}
+#[cfg(target_os = "linux")]
+pub(crate) fn explicit_ivy_launcher() -> LauncherGuard {
+    // A deliberately explicit product executable: never current_exe(), which is the test runner.
+    let launcher = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/debug/app")
+        .canonicalize()
+        .unwrap();
+    assert_eq!(launcher.file_name().unwrap(), "app");
+    TEST_LAUNCHER.with(|path| *path.borrow_mut() = Some(launcher));
+    LauncherGuard
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "requires the built target/debug/app and a real systemd user manager"]
+fn a_real_scoped_exit_keeps_repainting_until_the_observer_finishes() {
+    let _guard = explicit_ivy_launcher();
+    let ctx = eframe::egui::Context::default();
+    let mut pane = crate::Pane::with_panel(
+        &ctx,
+        "/bin/sh",
+        &["-c".into(), "printf retained; exit 0".into()],
+        None,
+        0,
+    )
+    .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while (pane.pty.pending() || pane.pty_output.is_alive()) && Instant::now() < deadline {
+        pane.pump(Default::default());
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert!(!pane.pty.pending());
+    assert!(!pane.pty_output.is_alive());
+    assert_eq!(
+        pane.pty.termination(),
+        term_core::Termination::Pending,
+        "fixture bypassed scope observation"
+    );
+    assert!(!pane.is_finished(false));
+    // Drain output/worker wakes; the observer is the only remaining reason to repaint.
+    for _ in 0..4 {
+        ctx.run_ui(Default::default(), |_| {})
+            .drop_without_applying_deltas();
+    }
+    let frame = ctx.run_ui(Default::default(), |_| refresh(&mut pane));
+    let delay = frame.viewport_output[&eframe::egui::ViewportId::ROOT].repaint_delay;
+    frame.drop_without_applying_deltas();
+    assert!(
+        delay <= Duration::from_millis(20),
+        "no wake while observing: {delay:?}"
+    );
+    while pane.pty.termination() == term_core::Termination::Pending && Instant::now() < deadline {
+        pane.pump(Default::default());
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(pane.pty.termination(), term_core::Termination::Ordinary);
+    assert!(
+        pane.is_finished(false),
+        "ordinary observed exit did not become closable"
+    );
+    let text: String = pane
+        .screen
+        .view()
+        .cells()
+        .iter()
+        .map(|cell| cell.c)
+        .collect();
+    assert!(text.contains("retained"), "observer discarded output");
+}

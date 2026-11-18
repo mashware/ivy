@@ -74,6 +74,10 @@ use std::path::Path;
 /// [`the_list_still_names_every_module`] checks it against the tree and the reviewers no longer have
 /// to.
 const MODULES: &[(&str, &str)] = &[
+    (
+        "term-core/src/scope/protocol_tests.rs",
+        include_str!("../../term-core/src/scope/protocol_tests.rs"),
+    ),
     ("app/tests/scope_launch.rs", include_str!("scope_launch.rs")),
     (
         "term-core/src/scope.rs",

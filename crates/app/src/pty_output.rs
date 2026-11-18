@@ -389,7 +389,7 @@ impl Silences {
 /// `ivy | head` takes — and a window that dies because it had something to say is worse
 /// than the silence the sentence was written against. What cannot be delivered is dropped: there is
 /// no third channel to complain on.
-fn say(sentence: &str) {
+pub(crate) fn say(sentence: &str) {
     static REPORTER: std::sync::OnceLock<Option<std::sync::mpsc::SyncSender<String>>> =
         std::sync::OnceLock::new();
     if let Some(sender) = REPORTER.get_or_init(|| query_reporter(write_diagnostic)) {

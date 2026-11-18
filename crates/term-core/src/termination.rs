@@ -23,6 +23,7 @@ struct State {
     status: Option<ExitStatus>,
     exited: Option<Instant>,
     observing: bool,
+    closing: bool,
     oom: bool,
 }
 
@@ -36,6 +37,7 @@ impl CachedChild {
             status: None,
             exited: None,
             observing: false,
+            closing: false,
             oom: false,
         })))
     }
@@ -52,10 +54,17 @@ impl CachedChild {
             Termination::Ordinary
         }
     }
+    /// Retire observer reaping before closing starts checking and signalling the owned pid.
+    /// The lock also waits for a collection already in flight; the stop flag alone cannot do so.
+    pub(crate) fn begin_close(&self) {
+        self.0.lock().unwrap().closing = true;
+    }
     #[cfg(target_os = "linux")]
     pub(crate) fn exited(&self) -> Option<Instant> {
         let mut state = self.0.lock().unwrap();
-        let _ = collect(&mut state);
+        if !state.closing {
+            let _ = collect(&mut state);
+        }
         state.exited
     }
     #[cfg(any(test, target_os = "linux"))]
@@ -116,6 +125,75 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
+
+    #[cfg(target_os = "linux")]
+    #[derive(Debug)]
+    struct ReapOnExit {
+        exited: Arc<std::sync::atomic::AtomicBool>,
+        reaped: Arc<AtomicUsize>,
+    }
+    #[cfg(target_os = "linux")]
+    impl ChildKiller for ReapOnExit {
+        fn kill(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+        fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
+            unreachable!("closing does not clone this fixture's killer")
+        }
+    }
+    #[cfg(target_os = "linux")]
+    impl Child for ReapOnExit {
+        fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
+            Ok(self.exited.load(Ordering::SeqCst).then(|| {
+                self.reaped.fetch_add(1, Ordering::SeqCst);
+                ExitStatus::with_exit_code(0)
+            }))
+        }
+        fn wait(&mut self) -> io::Result<ExitStatus> {
+            unreachable!("the fixture collects only through try_wait")
+        }
+        fn process_id(&self) -> Option<u32> {
+            Some(123)
+        }
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn observer_cannot_reap_between_the_close_status_check_and_signal() {
+        let exited = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let reaped = Arc::new(AtomicUsize::new(0));
+        let mut child = CachedChild::new(Box::new(ReapOnExit {
+            exited: exited.clone(),
+            reaped: reaped.clone(),
+        }));
+        let observer = child.clone();
+        child.begin_close();
+        assert!(child.try_wait().unwrap().is_none());
+        // Force the child to exit after closing's final check, then run the observer to
+        // completion before the signal. This order used to reap the pid before signalling it.
+        exited.store(true, Ordering::SeqCst);
+        let observed = std::thread::spawn(move || observer.exited())
+            .join()
+            .unwrap();
+        assert_eq!(observed, None);
+        assert_eq!(
+            reaped.load(Ordering::SeqCst),
+            0,
+            "pid became reusable before signal"
+        );
+        // Closing still owns reaping and its cached result remains repeatable.
+        assert!(child.try_wait().unwrap().is_some());
+        assert!(child.try_wait().unwrap().is_some());
+        assert_eq!(reaped.load(Ordering::SeqCst), 1);
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn dropping_a_pty_retires_observer_reaping_before_the_close_signal() {
+        let (pty, _output) =
+            crate::Pty::spawn("/bin/sleep", &["30"], crate::Size::default()).unwrap();
+        let observer = pty.termination.clone();
+        drop(pty);
+        assert!(observer.0.lock().unwrap().closing);
+    }
 
     #[derive(Debug)]
     struct NativeWaitOnly(Arc<AtomicUsize>);

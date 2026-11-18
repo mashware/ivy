@@ -1107,6 +1107,8 @@ fn write_chunk(writer: &mut dyn Write, bytes: &[u8]) -> std::result::Result<(), 
 ///
 /// **Signalling by pid is safe only while the child is unreaped**, which is why every signal here
 /// follows a `try_wait` that said so: a reaped pid can be handed to somebody else's process.
+/// Closing first retires the scope observer's reaping under the shared cache lock, so nobody else
+/// can collect the child between that check and its signal.
 ///
 /// `send` is `kill(2)` everywhere but in the tests that forge a refusal.
 #[cfg(unix)]
@@ -1189,6 +1191,7 @@ enum HangUp {
 
 impl Drop for Pty {
     fn drop(&mut self) {
+        self.termination.begin_close();
         #[cfg(target_os = "linux")]
         if let Some(stop) = self.scope_stop.take() {
             stop.store(true, Ordering::Relaxed);

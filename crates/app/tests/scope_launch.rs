@@ -60,17 +60,23 @@ fn real_helper_returns_failed_exec_instead_of_reporting_successful_launch() {
 }
 
 #[test]
-fn failed_and_stalled_manager_execute_the_requested_program_exactly_once() {
+fn failed_and_stalled_manager_preserve_argv_environment_cwd_exactly_once() {
+    let root = std::env::temp_dir();
     for placement in [TestScopePlacement::Denied, TestScopePlacement::Stalled] {
         let before = Instant::now();
         let (mut pty, output) = Pty::spawn_with_test_launcher_in(
             launcher(),
             "fixture",
             "/bin/sh",
-            &["-c", "printf 'ONLY-ONCE:END'"],
+            &[
+                "-c",
+                "printf 'ONLY-ONCE:%s:%s:%s:%s:END' \"$0\" \"$1\" \"$EXACT\" \"$PWD\"",
+                "literal;$argv0",
+                "mañana spaces",
+            ],
             Size::default(),
-            &[],
-            None,
+            &[("EXACT", Some(OsStr::new("spaces;$literal")))],
+            Some(&root),
             placement,
         )
         .unwrap();
@@ -83,6 +89,13 @@ fn failed_and_stalled_manager_execute_the_requested_program_exactly_once() {
             text.push_str(&String::from_utf8_lossy(&bytes));
         }
         assert_eq!(text.matches("ONLY-ONCE").count(), 1, "{text}");
+        assert!(
+            text.contains(&format!(
+                "ONLY-ONCE:literal;$argv0:mañana spaces:spaces;$literal:{}:END",
+                root.display()
+            )),
+            "{text}"
+        );
         assert!(before.elapsed() < Duration::from_secs(3));
         assert_eq!(pty.exit_success(), Some(true));
     }
@@ -273,10 +286,10 @@ fn real_systemd_oomd_kills_only_the_busy_console_in_a_disposable_guest() {
     victim.write(b"allocate\n").unwrap();
     let deadline = Instant::now() + Duration::from_secs(50);
     while victim.termination() != term_core::Termination::Oom && Instant::now() < deadline {
-        if let Ok(text) = std::fs::read_to_string(&events) {
-            if let Some(count) = text.lines().find_map(|line| line.strip_prefix("oom_kill ")) {
-                kernel_kills = kernel_kills.max(count.parse::<u64>().unwrap());
-            }
+        if let Ok(text) = std::fs::read_to_string(&events)
+            && let Some(count) = text.lines().find_map(|line| line.strip_prefix("oom_kill "))
+        {
+            kernel_kills = kernel_kills.max(count.parse::<u64>().unwrap());
         }
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -320,4 +333,40 @@ fn real_systemd_oomd_kills_only_the_busy_console_in_a_disposable_guest() {
         "oomd did not identify the test scope: {journal}"
     );
     assert_eq!(sibling.exit_success(), None, "unrelated console died");
+}
+
+#[test]
+fn real_helper_preserves_resize_input_session_and_root_close() {
+    let (mut pty, output) = Pty::spawn_with_test_launcher_in(
+        launcher(), "pty-semantics", "/usr/bin/python3",
+        &["-u", "-c", "import os,fcntl,termios,struct\nprint('ROOT:%d:%d:%d:READY' % (os.getpid(),os.getpgrp(),os.getsid(0)),flush=True)\nline=input()\nrows,cols,_,_=struct.unpack('HHHH',fcntl.ioctl(0,termios.TIOCGWINSZ,b'\\0'*8))\nprint('INPUT:%s:SIZE:%d:%d:END' % (line,rows,cols),flush=True)\ninput()"],
+        Size::default(), &[], None, TestScopePlacement::Ready).unwrap();
+    let ready = read(&output, ":READY");
+    let root = ready
+        .split("ROOT:")
+        .nth(1)
+        .unwrap()
+        .split(":READY")
+        .next()
+        .unwrap();
+    let ids: Vec<u32> = root
+        .split(':')
+        .map(|value| value.parse().unwrap())
+        .collect();
+    assert_eq!(ids.len(), 3);
+    assert_eq!(ids[0], ids[1], "root no longer leads its process group");
+    assert_eq!(ids[0], ids[2], "root no longer owns its terminal session");
+    pty.resize(Size { rows: 37, cols: 93 }).unwrap();
+    pty.write(b"literal input;$value\n").unwrap();
+    assert!(read(&output, ":END").contains("INPUT:literal input;$value:SIZE:37:93:END"));
+    drop(pty);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while unsafe { libc::kill(ids[0] as i32, 0) } == 0 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(
+        unsafe { libc::kill(ids[0] as i32, 0) },
+        -1,
+        "closing left the root alive"
+    );
 }
