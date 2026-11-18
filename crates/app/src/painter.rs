@@ -1221,7 +1221,7 @@ mod tests {
             assert!(
                 width <= raw_width,
                 "at {body} points the cell is {width} wide against an advance of {raw_width}: a cell \
-                 wider than the advance is what opens the gap in a run of `─`"
+                 wider than the advance is what leaves a column of nothing between two glyphs"
             );
             assert!(
                 height <= raw_height,

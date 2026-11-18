@@ -376,31 +376,37 @@ fn every_arm_reaches_its_edge_on_the_rows_the_neighbouring_line_uses() {
 }
 
 #[test]
-fn every_dashed_line_is_cut_into_its_number_of_dashes_or_drawn_solid() {
-    // A cell too short for every dash and its gap is drawn solid: dropping one gap would merge two
-    // dashes and draw a different character — `┈` as three uneven dashes at seven pixels.
+fn every_dashed_line_is_cut_into_its_dashes_or_as_many_as_fit() {
+    // A cell too short for every dash and its gap gets as many as fit, a pixel each: dropping one
+    // gap merged two dashes into a long one, and a solid fallback read as the plain line. The
+    // short sizes are on both axes, so the fallback cannot be measured along the wrong one.
     for (c, dashes, horizontal) in [
         ('┄', 3, true),
         ('┅', 3, true),
         ('┆', 3, false),
+        ('┇', 3, false),
         ('┈', 4, true),
+        ('┉', 4, true),
+        ('┊', 4, false),
         ('┋', 4, false),
         ('╌', 2, true),
+        ('╍', 2, true),
+        ('╎', 2, false),
         ('╏', 2, false),
     ] {
         let shape = shape_of(c).unwrap();
-        for (w, h) in [(7, 17), (8, 17), (16, 34)] {
+        for (w, h) in [(5, 5), (7, 7), (7, 17), (8, 17), (16, 34)] {
             let span = if horizontal { w } else { h };
-            let expected = if span < dashes * 2 {
-                1
-            } else {
-                dashes as usize
-            };
+            let expected = dashes.min(span / 2).max(1) as usize;
             let rects = runs(shape, w, h, 1);
             assert_eq!(
                 rects.len(),
                 expected,
                 "{c} at {w}×{h} came out as {rects:?}"
+            );
+            assert!(
+                rects.iter().all(|r| r.2 > r.0 && r.3 > r.1),
+                "{c} at {w}×{h} has an empty dash: {rects:?}"
             );
         }
     }

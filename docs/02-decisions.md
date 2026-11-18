@@ -5941,9 +5941,10 @@ the same pixel of a translucent ink would paint the bead again. A light line is
 166 % and 200 %. Heavy is twice that. A double is two light lines a light line apart, and each of
 its lines stops against the line it would otherwise cross; a single line that crosses a double
 (`╪` `╫`) runs through both of its lines unbroken. Arcs are a quarter circle tangent to both bands,
-in whole pixels. A dashed line whose cell has no room for every dash and its gap is drawn solid,
-because merging two dashes would draw a different character. What a shape comes out as at a cell
-size and a thickness is computed once and kept, so a frame only places rectangles.
+in whole pixels. A dashed line whose cell has no room for every dash and its gap gets as many
+dashes as fit, a pixel each: merging two drew one long dash, and drawing it solid made it read as
+the plain line. What a shape comes out as at a cell size and a thickness is rasterized once and
+kept in a per-thread table; a frame looks each cell up and places its rectangles.
 
 **What was discarded.**
 

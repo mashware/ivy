@@ -10,7 +10,8 @@
 //! **So the shape is computed in device pixels and painted as disjoint rectangles.** Every
 //! thickness is a whole number of pixels, taken from the font's size and the screen's scale, and
 //! every band position is taken from the cell's own pixel size, which every cell of a grid shares,
-//! so a band leaves one cell at exactly the rows the next one enters at. Kitty, WezTerm, Ghostty and VTE all draw this range themselves.
+//! so a band leaves one cell at exactly the rows the next one enters at. Kitty, WezTerm, Ghostty
+//! and VTE all draw this range themselves.
 //!
 //! **The cell is rasterized into a mask first and the mask is cut into rectangles**, rather than
 //! one rectangle per arm. Arms meet at the joint, and two translucent rectangles over the same
@@ -286,7 +287,8 @@ impl Mask {
     ///
     /// **A single arm runs through the joint**, to the far edge of the perpendicular band, so two
     /// arms of one axis overlap there and an arm always meets the other axis; the union makes the
-    /// overlap harmless. **A double arm is two light lines a light line apart**, and each of its
+    /// overlap harmless. The one exception is a single arm meeting a double at a tee (`╟` `╤`),
+    /// which stops at the double's near line so the channel between its lines stays open. **A double arm is two light lines a light line apart**, and each of its
     /// lines ends against the line of the perpendicular arm it would otherwise cross: that is what
     /// leaves `╬` its four corners and `╦` its gap underneath.
     fn lines(&mut self, shape: Shape, light: i32) {
@@ -437,7 +439,8 @@ impl Mask {
     /// a few pixels. Taking only the pixels the stroke's centre line passes through left two pixels
     /// touching at a corner, and antialiasing them left them at half ink beside lines at full ink.
     /// Both read as a gap in the corner of the box on the desktop. A pixel the stroke covers at
-    /// least a third of — by an estimate from its distance to the curve, not its area — is inked whole, which makes each step share an edge with the next.
+    /// least a third of — by an estimate from its distance to the curve, not its area — is inked
+    /// whole, which makes each step share an edge with the next.
     fn arc(&mut self, shape: Shape, light: i32) {
         let [left, _, up, _] = shape.arms;
         let (w, h) = (self.width, self.height);
@@ -520,13 +523,13 @@ impl Mask {
 /// The pieces of `from..to` a line cut into `dashes` dashes keeps, each followed by its gap.
 ///
 /// **The gap goes at the end of each piece, not around it**, so a cell's last gap sits at its
-/// seam and the next cell starts on a dash. **A span with no room for every dash and its gap is
-/// drawn solid**: dropping one gap would merge two dashes into one and draw a different character,
-/// with nothing to say so.
+/// seam and the next cell starts on a dash. **A span with no room for every dash and its gap gets
+/// as many as fit, a pixel each with a pixel between**: dropping a gap here and there merged two
+/// dashes into one longer one, and drawing it solid made it read as the plain line. Both were tried.
 fn dashes_of(from: i32, to: i32, dashes: u8) -> Vec<(i32, i32)> {
-    let n = i32::from(dashes);
+    let n = i32::from(dashes).min((to - from) / 2);
     let span = to - from;
-    if dashes == 0 || span < n * 2 {
+    if n == 0 {
         return vec![(from, to)];
     }
     let gap = (span / (n * 3)).max(1);
@@ -573,9 +576,9 @@ pub(super) fn paint(
     let key = (shape, width as i32, height as i32, light);
     DRAWN.with(|drawn| {
         let mut drawn = drawn.borrow_mut();
-        // One cell size per font and scale, so this holds a handful of sizes; a change of size
-        // leaves old entries behind, and the ceiling keeps them from piling up.
-        if drawn.len() >= 1024 {
+        // A change of cell size or scale leaves the old entries behind; the ceiling keeps them from
+        // piling up, and is only paid when a shape that is not there has to go in.
+        if drawn.len() >= 1024 && !drawn.contains_key(&key) {
             drawn.clear();
         }
         let pieces = drawn
