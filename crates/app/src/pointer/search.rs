@@ -49,8 +49,8 @@ pub(super) fn intercept(window: &mut Window, ui: &egui::Ui) -> bool {
 }
 
 /// Folds every unfolded options list this pass's presses did not land on, as a menu closes under
-/// a click outside it — **before any other surface takes the press**, a header control included,
-/// and whatever order the consoles are walked in.
+/// a click outside it — **before the header controls and the consoles' own routing take the
+/// press**, and whatever order the consoles are walked in.
 pub(super) fn fold_the_lists(window: &mut Window, ui: &egui::Ui) {
     if !ui.is_enabled() {
         return;

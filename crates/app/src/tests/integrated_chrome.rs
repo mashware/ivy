@@ -4015,4 +4015,103 @@ mod tests {
             "a press on the field moved or cleared the match"
         );
     }
+
+    /// AC14 at window level: stepping older through the history keeps the box where it is — the
+    /// step keeps its match off the rows the box was painted over — so the next press on «next»
+    /// lands on «next».
+    #[test]
+    fn stepping_through_the_history_leaves_the_box_where_the_next_press_expects_it() {
+        use search::floating::Target;
+        let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
+        let mut window = integrated_pair();
+        let area = tall_area();
+        frame(&mut window, &ctx, area, vec![]);
+        let names = names_in_order(&window);
+        let text: String = (0..200)
+            .map(|n| {
+                if n % 20 == 0 {
+                    format!("{:>70}\r\n", "needle")
+                } else {
+                    format!("line {n}\r\n")
+                }
+            })
+            .collect();
+        window
+            .pane_called(names[0])
+            .unwrap()
+            .screen
+            .advance(text.as_bytes());
+        let at = control(&window, &ctx, area, 0, 112.5);
+        frame(&mut window, &ctx, area, click_at(at));
+        frame(&mut window, &ctx, area, vec![egui::Event::Text("needle".into())]);
+        frame(&mut window, &ctx, area, vec![]);
+        let painted = |window: &Window| {
+            pane_of(window, names[0])
+                .search
+                .open
+                .as_ref()
+                .unwrap()
+                .painted
+                .clone()
+                .unwrap()
+        };
+        let top = painted(&window).layout.frame;
+        let term_core::KeepClear::Top(clear) = painted(&window).layout.keep_clear else {
+            panic!("the premise: the box starts at the top");
+        };
+        for press in 0..4 {
+            let at = search_target(&window, 0, Target::Next);
+            frame(&mut window, &ctx, area, click_at(at));
+            frame(&mut window, &ctx, area, vec![]);
+            let view = pane_of(&window, names[0]).screen.view();
+            if view.scroll() == 0 {
+                continue;
+            }
+            let cols = usize::from(view.size().cols);
+            let row = view
+                .cells()
+                .chunks_exact(cols)
+                .position(|row| row.iter().any(|cell| cell.selected))
+                .expect("the match is on screen");
+            assert!(row >= clear, "press {press}: the match was left under the box, row {row}");
+            assert_eq!(
+                painted(&window).layout.frame,
+                top,
+                "press {press}: the box moved away from under the pointer"
+            );
+        }
+        assert!(
+            pane_of(&window, names[0]).screen.view().scroll() > 0,
+            "the premise: the presses walked into the history"
+        );
+    }
+
+    /// A press on another console's header control still folds an unfolded options list: the
+    /// fold runs before the header takes the press.
+    #[test]
+    fn a_press_on_a_header_control_folds_the_options_list() {
+        use search::floating::Target;
+        let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
+        let mut window = integrated_pair();
+        let area = tall_area();
+        frame(&mut window, &ctx, area, vec![]);
+        let names = names_in_order(&window);
+        let at = control(&window, &ctx, area, 0, 112.5);
+        frame(&mut window, &ctx, area, click_at(at));
+        frame(&mut window, &ctx, area, vec![]);
+        let at = search_target(&window, 0, Target::Options);
+        frame(&mut window, &ctx, area, click_at(at));
+        frame(&mut window, &ctx, area, vec![]);
+        assert!(pane_of(&window, names[0]).search.open.as_ref().unwrap().list());
+        // The other console's review control: revealed by hovering, then pressed.
+        let review = control(&window, &ctx, area, 1, 87.5);
+        frame(&mut window, &ctx, area, vec![egui::Event::PointerMoved(review)]);
+        frame(&mut window, &ctx, area, click_at(review));
+        assert!(
+            !pane_of(&window, names[0]).search.open.as_ref().unwrap().list(),
+            "a press a header control took left the list unfolded"
+        );
+    }
 }

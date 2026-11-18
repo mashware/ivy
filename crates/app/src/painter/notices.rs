@@ -639,6 +639,9 @@ pub(crate) fn the_boxes(
 /// Says the notices over a console, and the button under the question, in the order they stack.
 ///
 /// `keys` is what the caller paints this console's cursor from. See [`crate::painter::Keys`].
+///
+/// Returns where the notices it painted are, so whatever is laid over the console afterwards —
+/// the search's box — can keep clear of them without laying them out a second time.
 pub(crate) fn paint_them_over_it(
     painter: &Painter,
     console: &crate::Pane,
@@ -646,7 +649,7 @@ pub(crate) fn paint_them_over_it(
     metrics: &CellMetrics,
     area: Rect,
     keys: crate::painter::Keys,
-) {
+) -> Vec<Rect> {
     let boxes = the_boxes(painter, console, theme, metrics, area);
 
     if let (Some(box_of_it), Some(held)) = (boxes.question, console.held.as_ref()) {
@@ -668,9 +671,15 @@ pub(crate) fn paint_them_over_it(
     if let Some(box_of_it) = boxes.send {
         paint_the_button_over_it(painter, theme, metrics, box_of_it);
     }
-    if let Some(silence) = boxes.silence.zip(what_the_silence_is(console)) {
+    let silence = boxes.silence.zip(what_the_silence_is(console));
+    if let Some(silence) = silence {
         paint_the_silence_over_it(painter, console, theme, metrics, area, silence);
     }
+    let question = boxes.question.filter(|_| console.held.is_some());
+    [question, question.and(boxes.slot), silence.map(|(rect, _)| rect)]
+        .into_iter()
+        .flatten()
+        .collect()
 }
 
 /// Paints the button that sends a held paste.

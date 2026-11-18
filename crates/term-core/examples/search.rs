@@ -23,7 +23,7 @@
 
 use std::time::{Duration, Instant};
 
-use term_core::{Found, Options, SCROLLBACK, Screen, Search, Size, Toward};
+use term_core::{Found, KeepClear, Options, SCROLLBACK, Screen, Search, Size, Toward};
 
 /// A wide console, because the walk is paid per cell and a wide one has the most of them.
 const COLS: u16 = 180;
@@ -84,7 +84,7 @@ fn press(screen: &mut Screen, query: &str, options: Options, toward: Toward, his
         let mut times = Vec::with_capacity(PRESSES);
         for _ in 0..PRESSES {
             let before = Instant::now();
-            let found = screen.find(&mut search, toward, 0);
+            let found = screen.find(&mut search, toward, KeepClear::NONE);
             times.push(before.elapsed());
             assert_eq!(
                 found,

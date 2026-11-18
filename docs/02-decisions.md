@@ -8174,14 +8174,17 @@ searched, and the one-row line took no clicks, so pressing the button seemed to 
 - **The line becomes a box at the console's top-right**: the query, next (`Enter`, an up arrow,
   since it walks toward older lines), previous (`Shift+Enter`, a down arrow), an options button and
   close (`Escape`), **painted over the console and never cut out of it**, as the line was, and with
-  every part kept inside the console — a part clipped away would still take presses there. **A
-  step keeps its match below the rows the box takes** wherever the view can still scroll toward
-  the history, which replaces the keep-off-the-last-row scroll that served the line: walking older
-  the engine lands a match on the top row, and a box that moved there would leave the next click on
-  «next» to fall on the console. Where the view cannot scroll — the oldest line, a match on the live
-  screen — **the box moves to the bottom-right** when the selection on screen lies under it, and it
-  does the same for the held paste's question and the «stopped receiving» sentence, which keep the
-  console's top (D41). Its place comes from the console, the selection and those notices only,
+  every part kept inside the console — a part clipped away would still take presses there; where a
+  short console makes the options list fall over the box, the box's parts under the list give way
+  to it. **A step keeps its match off the rows the box takes**, at the edge the box sits on, while
+  the view is in the history and can still scroll, which replaces the keep-off-the-last-row scroll
+  that served the line: walking older the engine lands a match on the top row, and a box that moved
+  there would leave the next click on «next» to fall on the console. A match on the live screen
+  leaves the view where the program writes, and at the oldest line the history has no room: there
+  **the box moves to the bottom-right** when the selection on screen lies under it. It does the same
+  for the held paste's question and the «stopped receiving» sentence, which keep the console's top
+  (D41); **a console too short to hold the box beside them gets no box**, and the search keeps its
+  keys. Its place comes from the console, the selection and those notices only,
   never from whether the options list is unfolded, so unfolding it cannot move a button a second
   press is aimed at.
 - **The box takes presses, and what lies under it hears none.** A press on it is claimed before
@@ -8189,8 +8192,8 @@ searched, and the one-row line took no clicks, so pressing the button seemed to 
   no context menu or paste from the hidden text — and a press on its field hands that console the
   keyboard. As with D99's header controls, **only a box painted in the pass before answers**, so one
   recorded on a console that stopped being painted cannot take a press unseen. A press anywhere
-  else — a header control included — folds every unfolded options list it did not land on, before
-  any other surface takes it, and goes on to what it was aimed at.
+  else folds every unfolded options list it did not land on, before the header controls and the
+  consoles' own routing take it, and goes on to what it was aimed at.
 - **The field is painted, not egui's text field**, and that keeps every key rule above: a text
   field takes every key it is given, and this decision gives every key that is not the search's to
   the program, which closes the search. So the query is still edited with the keys listed above;
@@ -8210,13 +8213,15 @@ searched, and the one-row line took no clicks, so pressing the button seemed to 
   walk**, not by asking the engine again past it: the engine's step rescans from the start of the
   origin's logical line every time, and stepping past rejections that way was quadratic — over a
   history that is one wrapped line, minutes for one press. Whole word is judged before wrapping, so
-  «no more matches» is only said of a match that counts. **Wrap around** — on by default, which is what
+  «no more matches» is only said of a match that counts. Matches do not overlap, as the engine's
+  never do: a rejected candidate's cells are not searched again, so `1.1` as a whole word is not
+  found inside `v1.1.1`. **Wrap around** — on by default, which is what
   the search did; off, a step past the last match says «no more matches» and moves nothing.
   Changing an option re-marks the screen and takes back what the box said, as editing the query
   does.
 - **Whole word costs one walk, like a query that is not there.** Measured with `cargo run --release
   --example search -p term-core` (3 549 rows of 180 columns, two runs of twenty presses each way,
-  19 November 2026): a press that finds nothing **11.4–12.2 ms** at its median as before; a
+  18 November 2026): a press that finds nothing **11.4–12.2 ms** at its median as before; a
   whole-word query rejected on every line **14.2–14.9 ms**, slowest 16.1; the same over one line
   wrapped across the whole history **14.1–14.5 ms**, slowest 16.4. One frame at 60 Hz once per
   press, never per frame — the trade above, unchanged in kind. The first version stepped past each
@@ -8230,7 +8235,7 @@ searched, and the one-row line took no clicks, so pressing the button seemed to 
 | Keeping the smart case as the unchecked state | Tilix, GNOME Terminal and VS Code's find read an unchecked box as insensitive; under the smart rule «Needle» would be case-sensitive with the box saying otherwise |
 | `\b` or `(?-u:\b)` in the pattern for whole word | ASCII boundaries match `日本` inside `日本語`; Unicode boundaries are not available to the engine's lazy automata over non-ASCII text |
 | Only moving the box, never scrolling | Walking older the engine lands a match on the top row, so the box would jump on nearly every press and the next click on «next» would fall on the console |
-| Only scrolling, never moving the box | At the oldest line, or with the match on the live screen's top rows, nothing can be scrolled |
+| Only scrolling, never moving the box | At the oldest line nothing can be scrolled, and a match on the live screen must not take the view away from where the program writes |
 | Dropping «Wrap around» because the engine always wraps | The ticket asks for it; off is decided after the engine answers, by where the match lies against the step's start |
 
 

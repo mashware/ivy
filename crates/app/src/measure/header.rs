@@ -549,14 +549,16 @@ pub struct SessionHeader {
 /// What searching a console's scrollback cost this run.
 ///
 /// **Two costs and two places, and neither may land in the framework's figure (D13).** A press of
-/// `Enter` walks the history in the keyboard's pass, which the window times whole; marking the
+/// `Enter` walks the history in the keyboard's pass, and a click on the search box's previous or
+/// next in the mouse pass, each of which the window times whole; marking the
 /// matches on screen runs inside a console's painting and is taken out of that span. Both are
 /// published here so the subtraction can be audited, and the script reads the counts in both
 /// directions: the search batch must have pressed, found and marked, and every other batch must have
 /// done none of the three.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Searching {
-    /// Presses of `Enter` or `Shift+Enter` that walked the history.
+    /// Presses of `Enter` or `Shift+Enter`, and clicks on the box's previous or next, that walked
+    /// the history.
     pub presses: usize,
     /// How many of them found a match.
     pub found: usize,
@@ -1042,8 +1044,8 @@ pub fn header(
     // search — so the script reads the presses both ways, and each painting count one way each.
     writeln!(
         a,
-        "search:       {} presses, {} found · {:?} each, {:?} the slowest (in the keyboard's pass, \
-         subtracted from its frame) · {} paintings with a search open, {} with matches marked · {:?} \
+        "search:       {} presses, {} found · {:?} each, {:?} the slowest (in the keyboard's or the \
+         mouse's pass, subtracted from its frame) · {} paintings with a search open, {} with matches marked · {:?} \
          each painting with a search open (subtracted from the console's painting)",
         search.presses,
         search.found,

@@ -105,7 +105,7 @@ pub(crate) fn paint_a_console(
     } else {
         Keys::Here
     };
-    notices::paint_them_over_it(painter, console, theme, metrics, area, keys);
+    let _ = notices::paint_them_over_it(painter, console, theme, metrics, area, keys);
     blinking
 }
 
@@ -234,7 +234,8 @@ pub(crate) fn paint_pane(
         blink.ink(pane.screen.cursor_blinks()),
         ligatures,
     );
-    notices::paint_them_over_it(
+    // The notices keep the console's top, so the search's box is laid out around them.
+    let notices = notices::paint_them_over_it(
         &ui.painter_at(panel_split.console),
         pane,
         theme,
@@ -243,22 +244,6 @@ pub(crate) fn paint_pane(
         blink.keys,
     );
     let options = pane.search.options();
-    // The notices keep the console's top, so the box is laid out around them.
-    let notices = if pane.search.is_open() {
-        let boxes = notices::the_boxes(
-            &ui.painter_at(panel_split.console),
-            pane,
-            theme,
-            metrics,
-            panel_split.console,
-        );
-        [boxes.question, boxes.slot, boxes.silence]
-            .into_iter()
-            .flatten()
-            .collect()
-    } else {
-        Vec::new()
-    };
     if let Some(search) = pane.search.open.as_mut() {
         search.painted = Some(crate::search::floating::paint(
             ui,

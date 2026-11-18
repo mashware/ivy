@@ -14,9 +14,9 @@ pub(super) fn intercept(
         target: None,
         the_tree_changed: false,
     };
+    search::fold_the_lists(window, ui);
     // **The search box before the context menu and the paste**: it is painted over the console,
     // so a press on it must not open a menu or paste into what lies hidden under it.
-    search::fold_the_lists(window, ui);
     let outcome = crate::header::actions::pointer(window, ui, rects, metrics)
         .or_else(|| search::intercept(window, ui).then(quiet))
         .or_else(|| clipboard::intercept(window, ui, rects, metrics, names, now).then(quiet))?;

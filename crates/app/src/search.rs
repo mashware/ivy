@@ -192,9 +192,9 @@ enum Outcome {
     Refused(Refused),
 }
 
-/// One thing a key or a press on the box asked of the search, in the order they arrived. The first
-/// seven come from keys and from the box's previous, next and close; [`Step::List`],
-/// [`Step::FoldList`] and [`Step::Flip`] only from the pointer.
+/// One thing a key, a paste or a press — on the box, a console's header or the menu — asked of the
+/// search, in the order they arrived. [`Step::List`], [`Step::FoldList`] and [`Step::Flip`] come
+/// only from the pointer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Step {
     /// The search chord: opens it, or closes it if it was open.
@@ -350,7 +350,7 @@ pub(crate) fn apply(console: &mut OnThisConsole, screen: &mut Screen, steps: Ste
             continue;
         };
         match step {
-            Step::Toggle | Step::Close => {}
+            Step::Toggle | Step::Close => unreachable!("handled above"),
             Step::List => {
                 open.list = !open.list;
                 continue;
@@ -382,19 +382,19 @@ pub(crate) fn apply(console: &mut OnThisConsole, screen: &mut Screen, steps: Ste
             }
             Step::Clear => open.query.clear(),
             Step::Go(toward) => {
-                // The rows the box takes at the top of the console, as it was last painted: the
-                // step keeps the match below them wherever the view can scroll.
-                let clear_rows = open
+                // The rows the box takes, as it was last painted: the step keeps the match off them
+                // wherever the view can scroll. Before the first painting there is no box yet.
+                let keep_clear = open
                     .painted
                     .as_ref()
-                    .map_or(0, |painted| painted.layout.clear_rows);
+                    .map_or(term_core::KeepClear::NONE, |painted| painted.layout.keep_clear);
                 let compiled = open
                     .compiled
                     .get_or_insert_with(|| Search::literal(&open.query, *options));
                 open.outcome = match compiled {
                     Ok(search) => {
                         let before = std::time::Instant::now();
-                        let found = screen.find(search, toward, clear_rows);
+                        let found = screen.find(search, toward, keep_clear);
                         pressed.one(before.elapsed(), found == Found::Match);
                         match found {
                             Found::Match => Outcome::Found,

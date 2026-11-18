@@ -43,7 +43,7 @@ use alacritty_terminal::term::search::RegexIter;
 use alacritty_terminal::vte::ansi::{CursorShape as AlacrittyShape, CursorStyle, Processor};
 
 use crate::Size;
-use crate::search::{Found, Search, Toward};
+use crate::search::{Found, KeepClear, Search, Toward};
 use crate::view::{self, CellWidth, Cursor, Osc8Span, View, ViewCell, ViewMetadata};
 
 mod title;
@@ -757,19 +757,19 @@ impl Screen {
     /// at, so the first press finds what is nearest to the person's eyes.
     ///
     /// **Whole word and no wrap are decided here**, because the engine knows neither: a candidate
-    /// whose ends touch a word character is skipped inside the walk
+    /// that is not a whole word by [`crate::search`]'s rule is skipped inside the walk
     /// ([`next_match_that_counts`](Self::next_match_that_counts)), and with wrapping off a match on
     /// the far side of where the step started ends it.
     ///
     /// **When nothing is found nothing moves**: neither the selection somebody had nor where they
     /// were looking.
     ///
-    /// **`clear_rows` keeps the match below that many rows at the top of the view** whenever the
-    /// view can still scroll toward the history: the search's box sits there, and a match under it
-    /// would send the box to the other corner between two presses aimed at the same button. Where
-    /// the view cannot move — at the oldest line, or a match on the live screen — the box moves
-    /// instead.
-    pub fn find(&mut self, search: &mut Search, toward: Toward, clear_rows: usize) -> Found {
+    /// **`keep_clear` keeps the match off the rows the search's box takes**, at the top or the
+    /// bottom of the view, as far as the view can scroll while it stays in the history: a match
+    /// under the box would send the box to the other corner between two presses aimed at the same
+    /// button. A match on the live screen, or one the history has no room to move, stays where the
+    /// engine put it, and the box moves instead.
+    pub fn find(&mut self, search: &mut Search, toward: Toward, keep_clear: KeepClear) -> Found {
         let rows = self.term.grid().screen_lines() as i32;
         let offset = self.term.grid().display_offset() as i32;
         let current = self
@@ -831,21 +831,38 @@ impl Screen {
 
         self.term.scroll_to_point(end);
         self.term.scroll_to_point(start);
+        self.keep_clear_of(start, end, keep_clear);
+        Found::Match
+    }
+
+    /// Scrolls a match that the step left under the box out from under it — **only while the
+    /// view is already in the history**. A match on the live screen leaves the view where the
+    /// program writes, and the box moves instead: scrolling there would push the prompt and
+    /// whatever arrives next off the bottom.
+    fn keep_clear_of(&mut self, start: Point, end: Point, keep_clear: KeepClear) {
         let grid = self.term.grid();
         let offset = grid.display_offset();
-        let room_above = grid.history_size() - offset;
+        if offset == 0 {
+            return;
+        }
+        let rows = grid.screen_lines();
         let top_row = (start.line.0 + offset as i32).max(0) as usize;
         let bottom_row = (end.line.0 + offset as i32).max(0) as usize;
-        // Never so far that the match's own end leaves the bottom of the view.
-        let room_below = (rows as usize).saturating_sub(1 + bottom_row);
-        let by = clear_rows
-            .saturating_sub(top_row)
-            .min(room_above)
-            .min(room_below);
-        if by > 0 {
-            self.term.scroll_display(GridScroll::Delta(by as i32));
+        let scroll = match keep_clear {
+            // Toward the history, never so far that the match's end leaves the bottom.
+            KeepClear::Top(clear) => clear
+                .saturating_sub(top_row)
+                .min(grid.history_size() - offset)
+                .min(rows.saturating_sub(1 + bottom_row)) as i32,
+            // Toward the live screen, never so far that the match's start leaves the top.
+            KeepClear::Bottom(clear) => -((bottom_row + clear + 1)
+                .saturating_sub(rows)
+                .min(offset)
+                .min(top_row) as i32),
+        };
+        if scroll != 0 {
+            self.term.scroll_display(GridScroll::Delta(scroll));
         }
-        Found::Match
     }
 
     /// The engine's own next-match step, walked here so whole word can be judged inside the walk.

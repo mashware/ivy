@@ -87,6 +87,19 @@ impl Search {
     }
 }
 
+/// Which rows of the view a step keeps its match off: the ones the search's box takes, at the top
+/// or at the bottom of the console.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeepClear {
+    Top(usize),
+    Bottom(usize),
+}
+
+impl KeepClear {
+    /// No rows: the match lands where the engine puts it.
+    pub const NONE: Self = Self::Top(0);
+}
+
 /// What a step through the console came back with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Found {
@@ -110,7 +123,8 @@ pub enum Toward {
     Newer,
 }
 
-/// Whether neither end of `found` touches a word character on its own logical line.
+/// Whether `found` is a whole word: each of its ends that is itself a word character does not touch
+/// another word character on its logical line.
 ///
 /// **A word character is a letter, a digit or `_`, in any script**, which is why this is a check
 /// on the match and not a `\b` in the pattern: an ASCII boundary takes every non-ASCII character
@@ -225,7 +239,7 @@ mod tests {
         assert!(selected_row(&screen).is_none());
 
         assert_eq!(
-            screen.find(&mut literal("needle"), Toward::Older, 0),
+            screen.find(&mut literal("needle"), Toward::Older, KeepClear::NONE),
             Found::Match
         );
 
@@ -248,7 +262,7 @@ mod tests {
         let mut screen = screen_with(4, &["a.c abc"]);
 
         assert_eq!(
-            screen.find(&mut literal("a.c"), Toward::Older, 0),
+            screen.find(&mut literal("a.c"), Toward::Older, KeepClear::NONE),
             Found::Match
         );
 
@@ -261,15 +275,15 @@ mod tests {
         let mut search = literal("item");
         let row_text = |screen: &Screen| selected_row(screen).map(|(_, text)| text);
 
-        assert_eq!(screen.find(&mut search, Toward::Older, 0), Found::Match);
+        assert_eq!(screen.find(&mut search, Toward::Older, KeepClear::NONE), Found::Match);
         assert_eq!(row_text(&screen).as_deref(), Some("item 3"));
-        assert_eq!(screen.find(&mut search, Toward::Older, 0), Found::Match);
+        assert_eq!(screen.find(&mut search, Toward::Older, KeepClear::NONE), Found::Match);
         assert_eq!(
             row_text(&screen).as_deref(),
             Some("item 2"),
             "the second press found the match it started on"
         );
-        assert_eq!(screen.find(&mut search, Toward::Newer, 0), Found::Match);
+        assert_eq!(screen.find(&mut search, Toward::Newer, KeepClear::NONE), Found::Match);
         assert_eq!(row_text(&screen).as_deref(), Some("item 3"));
     }
 
@@ -283,7 +297,7 @@ mod tests {
         let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
         let mut screen = screen_with(4, &lines);
         let mut search = literal("item");
-        assert_eq!(screen.find(&mut search, Toward::Older, 0), Found::Match);
+        assert_eq!(screen.find(&mut search, Toward::Older, KeepClear::NONE), Found::Match);
         assert_eq!(
             selected_row(&screen).map(|(_, text)| text).as_deref(),
             Some("item 3")
@@ -292,7 +306,7 @@ mod tests {
         for n in 0..5 {
             screen.advance(format!("noise {n}\r\n").as_bytes());
         }
-        assert_eq!(screen.find(&mut search, Toward::Older, 0), Found::Match);
+        assert_eq!(screen.find(&mut search, Toward::Older, KeepClear::NONE), Found::Match);
 
         assert_eq!(
             selected_row(&screen).map(|(_, text)| text).as_deref(),
@@ -309,14 +323,14 @@ mod tests {
         let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
         let mut screen = screen_with(4, &lines);
         assert_eq!(
-            screen.find(&mut literal("item"), Toward::Older, 0),
+            screen.find(&mut literal("item"), Toward::Older, KeepClear::NONE),
             Found::Match
         );
         let scroll = screen.view().scroll();
         assert!(scroll > 0, "the premise: the view moved to the match");
 
         assert_eq!(
-            screen.find(&mut literal("absent"), Toward::Older, 0),
+            screen.find(&mut literal("absent"), Toward::Older, KeepClear::NONE),
             Found::Nothing
         );
 
@@ -328,7 +342,7 @@ mod tests {
     fn a_match_pushed_out_of_the_history_is_no_longer_found() {
         let mut screen = screen_with(4, &["needle"]);
         assert_eq!(
-            screen.find(&mut literal("needle"), Toward::Older, 0),
+            screen.find(&mut literal("needle"), Toward::Older, KeepClear::NONE),
             Found::Match,
             "the premise: it is found while kept"
         );
@@ -339,7 +353,7 @@ mod tests {
         }
 
         assert_eq!(
-            screen.find(&mut literal("needle"), Toward::Older, 0),
+            screen.find(&mut literal("needle"), Toward::Older, KeepClear::NONE),
             Found::Nothing
         );
         assert_eq!(screen.selected_text(), None);
@@ -423,12 +437,12 @@ mod tests {
     fn match_case_off_ignores_case_whatever_the_query_holds_and_on_respects_it() {
         let mut screen = screen_with(4, &["Needle"]);
         assert_eq!(
-            screen.find(&mut literal("needle"), Toward::Older, 0),
+            screen.find(&mut literal("needle"), Toward::Older, KeepClear::NONE),
             Found::Match
         );
         let mut screen = screen_with(4, &["needle"]);
         assert_eq!(
-            screen.find(&mut literal("Needle"), Toward::Older, 0),
+            screen.find(&mut literal("Needle"), Toward::Older, KeepClear::NONE),
             Found::Match,
             "an uppercase letter made the search case-sensitive with the box unchecked"
         );
@@ -439,13 +453,13 @@ mod tests {
         };
         let mut screen = screen_with(4, &["Needle"]);
         assert_eq!(
-            screen.find(&mut with("needle", exact), Toward::Older, 0),
+            screen.find(&mut with("needle", exact), Toward::Older, KeepClear::NONE),
             Found::Nothing
         );
         // The newer line is the lowercase one, so a search that ignored case would stop there.
         let mut screen = screen_with(4, &["Needle", "needle"]);
         assert_eq!(
-            screen.find(&mut with("Needle", exact), Toward::Older, 0),
+            screen.find(&mut with("Needle", exact), Toward::Older, KeepClear::NONE),
             Found::Match
         );
         assert_eq!(
@@ -458,14 +472,14 @@ mod tests {
     fn whole_word_skips_a_query_inside_a_longer_word() {
         let mut screen = screen_with(4, &["needle kneed"]);
         assert_eq!(
-            screen.find(&mut with("need", whole_word()), Toward::Older, 0),
+            screen.find(&mut with("need", whole_word()), Toward::Older, KeepClear::NONE),
             Found::Nothing,
             "a word containing the query was taken for the word"
         );
 
         let mut screen = screen_with(4, &["a need.", "needle"]);
         assert_eq!(
-            screen.find(&mut with("need", whole_word()), Toward::Older, 0),
+            screen.find(&mut with("need", whole_word()), Toward::Older, KeepClear::NONE),
             Found::Match
         );
         assert_eq!(
@@ -480,7 +494,7 @@ mod tests {
             for toward in [Toward::Older, Toward::Newer] {
                 let mut screen = screen_with(4, &[line]);
                 assert_eq!(
-                    screen.find(&mut with("日本", whole_word()), toward, 0),
+                    screen.find(&mut with("日本", whole_word()), toward, KeepClear::NONE),
                     Found::Nothing,
                     "«日本» was a whole word inside «{line}» walking {toward:?}"
                 );
@@ -488,7 +502,7 @@ mod tests {
         }
         let mut screen = screen_with(4, &["語 日本"]);
         assert_eq!(
-            screen.find(&mut with("日本", whole_word()), Toward::Older, 0),
+            screen.find(&mut with("日本", whole_word()), Toward::Older, KeepClear::NONE),
             Found::Match
         );
     }
@@ -503,28 +517,28 @@ mod tests {
         };
         for toward in [Toward::Older, Toward::Newer] {
             assert_eq!(
-                wrapped("abcdeneed").find(&mut with("need", whole_word()), toward, 0),
+                wrapped("abcdeneed").find(&mut with("need", whole_word()), toward, KeepClear::NONE),
                 Found::Nothing,
                 "the letter before the wrap did not count as touching the match, walking {toward:?}"
             );
             assert_eq!(
-                wrapped(" needcde").find(&mut with("need", whole_word()), toward, 0),
+                wrapped(" needcde").find(&mut with("need", whole_word()), toward, KeepClear::NONE),
                 Found::Nothing,
                 "the letter after the wrap did not count as touching the match, walking {toward:?}"
             );
             assert_eq!(
-                wrapped("abcd need").find(&mut with("need", whole_word()), toward, 0),
+                wrapped("abcd need").find(&mut with("need", whole_word()), toward, KeepClear::NONE),
                 Found::Match
             );
             // «日» has no room after four letters, so the row ends in a spacer of its own.
             assert_eq!(
-                wrapped("abcd日本").find(&mut with("日本", whole_word()), toward, 0),
+                wrapped("abcd日本").find(&mut with("日本", whole_word()), toward, KeepClear::NONE),
                 Found::Nothing,
                 "the spacer a wrap leaves before a wide character hid the letter in front, walking \
                  {toward:?}"
             );
             assert_eq!(
-                wrapped("abc 日本").find(&mut with("日本", whole_word()), toward, 0),
+                wrapped("abc 日本").find(&mut with("日本", whole_word()), toward, KeepClear::NONE),
                 Found::Match
             );
         }
@@ -535,7 +549,7 @@ mod tests {
         let mut screen = screen_with(4, &["needle", "needles", "kneed"]);
         for toward in [Toward::Older, Toward::Newer] {
             assert_eq!(
-                screen.find(&mut with("need", whole_word()), toward, 0),
+                screen.find(&mut with("need", whole_word()), toward, KeepClear::NONE),
                 Found::Nothing
             );
         }
@@ -569,12 +583,12 @@ mod tests {
                 ..Options::default()
             },
         );
-        assert_eq!(screen.find(&mut search, Toward::Older, 0), Found::Match);
-        assert_eq!(screen.find(&mut search, Toward::Older, 0), Found::Match);
+        assert_eq!(screen.find(&mut search, Toward::Older, KeepClear::NONE), Found::Match);
+        assert_eq!(screen.find(&mut search, Toward::Older, KeepClear::NONE), Found::Match);
         assert_eq!(row_text(&screen).as_deref(), Some("item 1"));
         let scroll = screen.view().scroll();
 
-        assert_eq!(screen.find(&mut search, Toward::Older, 0), Found::NoMore);
+        assert_eq!(screen.find(&mut search, Toward::Older, KeepClear::NONE), Found::NoMore);
         assert_eq!(row_text(&screen).as_deref(), Some("item 1"));
         assert_eq!(screen.view().scroll(), scroll);
         // The same end with a line above the oldest match, so the step does not fall off the
@@ -583,21 +597,21 @@ mod tests {
         above.extend_from_slice(&lines);
         let mut screen = screen_with(4, &above);
         for _ in 0..2 {
-            assert_eq!(screen.find(&mut search, Toward::Older, 0), Found::Match);
+            assert_eq!(screen.find(&mut search, Toward::Older, KeepClear::NONE), Found::Match);
         }
-        assert_eq!(screen.find(&mut search, Toward::Older, 0), Found::NoMore);
+        assert_eq!(screen.find(&mut search, Toward::Older, KeepClear::NONE), Found::NoMore);
         assert_eq!(row_text(&screen).as_deref(), Some("item 1"));
         // And walking newer from the newest match.
-        assert_eq!(screen.find(&mut search, Toward::Newer, 0), Found::Match);
-        assert_eq!(screen.find(&mut search, Toward::Newer, 0), Found::NoMore);
+        assert_eq!(screen.find(&mut search, Toward::Newer, KeepClear::NONE), Found::Match);
+        assert_eq!(screen.find(&mut search, Toward::Newer, KeepClear::NONE), Found::NoMore);
         assert_eq!(row_text(&screen).as_deref(), Some("item 2"));
 
         let mut screen = screen_with(4, &lines);
         let mut search = literal("item");
         for _ in 0..2 {
-            assert_eq!(screen.find(&mut search, Toward::Older, 0), Found::Match);
+            assert_eq!(screen.find(&mut search, Toward::Older, KeepClear::NONE), Found::Match);
         }
-        assert_eq!(screen.find(&mut search, Toward::Older, 0), Found::Match);
+        assert_eq!(screen.find(&mut search, Toward::Older, KeepClear::NONE), Found::Match);
         assert_eq!(
             row_text(&screen).as_deref(),
             Some("item 2"),
@@ -614,14 +628,14 @@ mod tests {
         ] {
             let mut screen = screen_with(4, &[line]);
             assert_eq!(
-                screen.find(&mut with(query, whole_word()), Toward::Older, 0),
+                screen.find(&mut with(query, whole_word()), Toward::Older, KeepClear::NONE),
                 Found::Match,
                 "«{query}» in «{line}» ends on a boundary of its own"
             );
         }
         let mut screen = screen_with(4, &["xfoo(bar)"]);
         assert_eq!(
-            screen.find(&mut with("foo(", whole_word()), Toward::Older, 0),
+            screen.find(&mut with("foo(", whole_word()), Toward::Older, KeepClear::NONE),
             Found::Nothing,
             "the word end of «foo(» touches «x»"
         );
@@ -648,7 +662,7 @@ mod tests {
             },
         );
         for toward in [Toward::Older, Toward::Newer] {
-            assert_eq!(screen.find(&mut search, toward, 0), Found::Nothing);
+            assert_eq!(screen.find(&mut search, toward, KeepClear::NONE), Found::Nothing);
         }
     }
 
@@ -668,13 +682,18 @@ mod tests {
 
         let mut screen = screen_with(8, &lines);
         let mut search = literal("needle");
-        for _ in 0..3 {
-            assert_eq!(screen.find(&mut search, Toward::Older, 3), Found::Match);
+        let top = KeepClear::Top(3);
+        // The newest match is on the live screen: the view stays where the program writes, and
+        // the box is the one that moves.
+        assert_eq!(screen.find(&mut search, Toward::Older, top), Found::Match);
+        assert_eq!(screen.view().scroll(), 0, "a match on the live screen scrolled the view");
+        for _ in 0..2 {
+            assert_eq!(screen.find(&mut search, Toward::Older, top), Found::Match);
             let on = row(&screen).expect("the match is on screen");
             assert!(on >= 3, "the match was left under the box, on row {on}");
         }
         // The oldest match cannot be brought further down: the history ends above it.
-        assert_eq!(screen.find(&mut search, Toward::Older, 3), Found::Match);
+        assert_eq!(screen.find(&mut search, Toward::Older, top), Found::Match);
         let oldest = screen.view().scroll();
         screen.scroll_by(Scroll::ToTop);
         assert_eq!(
@@ -685,14 +704,38 @@ mod tests {
         // Without rows to keep clear, the step leaves the match where the engine put it.
         let mut screen = screen_with(8, &lines);
         assert_eq!(
-            screen.find(&mut literal("needle"), Toward::Older, 0),
+            screen.find(&mut literal("needle"), Toward::Older, KeepClear::NONE),
             Found::Match
         );
         assert_eq!(
-            screen.find(&mut literal("needle"), Toward::Older, 0),
+            screen.find(&mut literal("needle"), Toward::Older, KeepClear::NONE),
             Found::Match
         );
         assert_eq!(row(&screen), Some(0));
+    }
+
+    #[test]
+    fn with_the_box_at_the_bottom_a_step_keeps_its_match_above_it() {
+        let lines: Vec<String> = (0..40)
+            .map(|n| {
+                if n % 10 == 3 {
+                    "needle".to_owned()
+                } else {
+                    format!("line {n}")
+                }
+            })
+            .collect();
+        let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+        let mut screen = screen_with(8, &lines);
+        screen.scroll_by(Scroll::ToTop);
+        let mut search = literal("needle");
+        let bottom = KeepClear::Bottom(3);
+        // Walking newer from the top, the engine lands each match on the last row.
+        for _ in 0..3 {
+            assert_eq!(screen.find(&mut search, Toward::Newer, bottom), Found::Match);
+            let (on, _) = selected_row(&screen).expect("the match is on screen");
+            assert!(on <= 4, "the match was left under the box at the bottom, on row {on}");
+        }
     }
 
     #[test]
