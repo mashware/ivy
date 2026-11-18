@@ -2,6 +2,8 @@
 
 ## New in this alpha
 
+- Codex upgrades no longer force independent sessions: shared panel routing checks capabilities instead of exact client/server versions, preserving live mobile access when the protocol is compatible.
+
 - Console text keeps its original edge coverage, with automatic fitting for fonts that have no native glyph instructions. Fonts with their own instructions keep their existing fitting.
 - Font sizes in Settings and new version 2 configuration files use true typographic points for console text, pane titles and tab labels. Existing configurations retain their visual sizes; edited saves upgrade to version 2, which older Ivy versions do not read.
 - Box-drawing lines render continuously instead of appearing dotted or blurred.

@@ -134,13 +134,17 @@ fn nonce() -> io::Result<String> {
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
-/// Unknown versions retain the existing independent-launch path until exercised.
-pub fn supported(exe: &OsStr, args: &[OsString]) -> bool {
-    if !cfg!(target_os = "linux") || !supported_args(args) {
-        return false;
-    }
-    output(exe, &["--version"], Duration::from_secs(2))
-        .is_ok_and(|out| out.trim() == "codex-cli 0.167.2")
+/// Select the invocations this relay can preserve; compatibility is checked by
+/// advertised CLI capabilities and the live protocol, never a version number.
+pub fn supported(args: &[OsString]) -> bool {
+    cfg!(target_os = "linux") && supported_args(args)
+}
+
+fn remote_capabilities(help: &str) -> bool {
+    let words: Vec<_> = help.split_ascii_whitespace().collect();
+    ["--remote", "--remote-auth-token-env"]
+        .iter()
+        .all(|flag| words.contains(flag))
 }
 
 fn supported_args(args: &[OsString]) -> bool {
@@ -244,13 +248,6 @@ fn home() -> io::Result<PathBuf> {
     Ok(path)
 }
 
-fn verified_server(start: &Value) -> bool {
-    matches!(
-        start.get("appServerVersion").and_then(Value::as_str),
-        Some("0.167.2" | "0.169.0")
-    )
-}
-
 /// Does not enable remote control, restart an existing server, or edit user settings.
 pub fn run(exe: &OsStr, args: &[OsString]) -> io::Result<ExitStatus> {
     #[cfg(unix)]
@@ -258,6 +255,12 @@ pub fn run(exe: &OsStr, args: &[OsString]) -> io::Result<ExitStatus> {
     let [id, dir] = panel_contract::ENV_NAMES.map(std::env::var_os);
     let (id, dir) = crate::client::whole_identity(id.as_deref(), dir.as_deref())
         .ok_or_else(|| error("shared Codex launch requires this console's identity"))?;
+    let help = output(exe, &["--help"], Duration::from_secs(2))?;
+    if !remote_capabilities(&help) {
+        return Err(error(
+            "Codex does not advertise --remote and --remote-auth-token-env; no independent session was started",
+        ));
+    }
     let codex_home = home()?;
     let registry = Registry::for_home(&codex_home)?;
     let exit_registry = Registry::for_home(&codex_home)?;
@@ -272,12 +275,8 @@ pub fn run(exe: &OsStr, args: &[OsString]) -> io::Result<ExitStatus> {
         .and_then(Value::as_str)
         .ok_or_else(|| error("Codex did not report its daemon socket"))?
         .to_owned();
-    // A separately installed daemon can differ from the CLI. Do not replace it.
-    if !verified_server(&start) {
-        return Err(error(
-            "the running Codex server is not a verified version (0.167.2 or 0.169.0); use --no-daemon for independent mode",
-        ));
-    }
+    // A separately installed daemon may be newer than the CLI. The actual proxy,
+    // RPC responses and MCP proof below establish compatibility, not its version.
     let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))?;
     listener.set_nonblocking(true)?;
     let address = listener.local_addr()?;
@@ -1657,17 +1656,17 @@ mod tests {
     }
 
     #[test]
-    fn server_version_must_be_exact() {
-        assert!(verified_server(&json!({"appServerVersion":"0.167.2"})));
-        assert!(verified_server(&json!({"appServerVersion":"0.169.0"})));
-        for value in [
-            json!({}),
-            json!({"appServerVersion":null}),
-            json!({"appServerVersion":17}),
-            json!({"appServerVersion":"0.167.1"}),
-            json!({"appServerVersion":"0.169.1"}),
+    fn remote_capability_probe_requires_both_exact_options() {
+        assert!(remote_capabilities(
+            "Options:\n --remote <ADDR>\n --remote-auth-token-env <ENV>"
+        ));
+        for help in [
+            "",
+            "--remote",
+            "--remote-auth-token-env",
+            "--remote-future --remote-auth-token-env",
         ] {
-            assert!(!verified_server(&value));
+            assert!(!remote_capabilities(help));
         }
     }
 
