@@ -142,7 +142,7 @@ fn show(
             ui.set_width((available.x - 64.0).clamp(80.0, 640.0));
             ui.horizontal_top(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                    close |= ui.button("×").on_hover_text("Close").clicked();
+                    close |= crate::ui::icons::close_button(ui).clicked();
                     ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
                         ui.heading("What's new");
                         ui.label(format!("Installed: Ivy {}", env!("CARGO_PKG_VERSION")));

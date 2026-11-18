@@ -302,7 +302,8 @@ pub(super) fn swatch(
 }
 
 fn check(painter: &egui::Painter, at: egui::Pos2, color: egui::Color32) {
-    crate::ui::icons::paint(painter, at, crate::ui::icons::Icon::Check, 14.0, color);
+    // Larger than the drawn check's square: Regular's stroke is thinner than its two points were.
+    crate::ui::icons::paint(painter, at, crate::ui::icons::Icon::Check, 16.0, color);
 }
 
 /// The kit's segmented control: a sunk track and the chosen segment filled with `hover`.

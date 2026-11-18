@@ -1,4 +1,5 @@
-//! The faces Ivy ships: Geist for the interface and Geist Mono for the terminal (D95).
+//! The faces Ivy ships: Geist for the interface and Geist Mono for the terminal (D95), and
+//! Phosphor for the interface's icons (D103).
 //!
 //! **They are the base every font definition is built from**, never a `chosen` face: clearing the
 //! configured font, a fallback-discovery round or a Settings preview all rebuild the definitions
@@ -20,7 +21,7 @@ const MONO_MEDIUM: &str = "ivy-mono-medium";
 /// The interface's icons (D103): Phosphor Regular and nothing else. Phosphor maps the lowercase letters to blank
 /// glyphs and lives in the private-use area the terminal's icon family serves, so it is never a
 /// member of a family that lays out text, and no text face stands behind it.
-const ICONS: &str = "ivy-icons";
+pub(crate) const UI_ICONS: &str = "ivy-icons";
 const ICON_FACE: &str = "Phosphor";
 
 const FACES: [(&str, &[u8]); 5] = [
@@ -99,14 +100,14 @@ pub(crate) fn base_definitions() -> FontDefinitions {
     );
     definitions
         .families
-        .insert(FontFamily::Name(ICONS.into()), vec![ICON_FACE.into()]);
+        .insert(FontFamily::Name(UI_ICONS.into()), vec![ICON_FACE.into()]);
     definitions
 }
 
 /// The icon family, or `None` where the bundled definitions were never installed — a bare test
 /// context: asking egui for a family it was never given panics.
-pub(crate) fn icon_family(ctx: &egui::Context) -> Option<FontFamily> {
-    let family = FontFamily::Name(ICONS.into());
+pub(crate) fn ui_icon_family(ctx: &egui::Context) -> Option<FontFamily> {
+    let family = FontFamily::Name(UI_ICONS.into());
     ctx.fonts(|fonts| fonts.definitions().families.contains_key(&family))
         .then_some(family)
 }
@@ -144,7 +145,7 @@ pub(crate) fn install(ctx: &egui::Context) {
 pub(crate) fn install_icons_only(ctx: &egui::Context) {
     let base = base_definitions();
     let mut definitions = FontDefinitions::default();
-    let family = FontFamily::Name(ICONS.into());
+    let family = FontFamily::Name(UI_ICONS.into());
     definitions
         .font_data
         .insert(ICON_FACE.into(), base.font_data[ICON_FACE].clone());
@@ -315,7 +316,7 @@ mod tests {
         pass(&ctx);
         ctx.fonts(|fonts| {
             for (family, faces) in &fonts.definitions().families {
-                if *family == FontFamily::Name(ICONS.into()) {
+                if *family == FontFamily::Name(UI_ICONS.into()) {
                     assert_eq!(faces, &vec![ICON_FACE.to_owned()]);
                 } else {
                     assert!(
@@ -325,13 +326,20 @@ mod tests {
                 }
             }
         });
-        assert_eq!(icon_family(&ctx), Some(FontFamily::Name(ICONS.into())));
-        // The face really draws there: a Phosphor codepoint has ink in the icon family.
+        assert_eq!(
+            ui_icon_family(&ctx),
+            Some(FontFamily::Name(UI_ICONS.into()))
+        );
+        // The face really draws there: a Phosphor codepoint lays out a drawing of its own, not the
+        // replacement box a codepoint the face lacks gets.
         let x = egui_phosphor::regular::X.chars().next().unwrap();
-        assert!(drawing(&ctx, x, FontFamily::Name(ICONS.into())).is_some());
+        let icons = FontFamily::Name(UI_ICONS.into());
+        let drawn = drawing(&ctx, x, icons.clone());
+        assert!(drawn.is_some());
+        assert_ne!(drawn, drawing(&ctx, '\u{F8FF}', icons));
         let bare = egui::Context::default();
         pass(&bare);
-        assert_eq!(icon_family(&bare), None);
+        assert_eq!(ui_icon_family(&bare), None);
     }
 
     /// A heavier weight is asked for only where the bundled faces exist; elsewhere the regular family

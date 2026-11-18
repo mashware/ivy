@@ -341,7 +341,8 @@ fn paint_field(
             painter,
             clear.center(),
             crate::ui::icons::Icon::Close,
-            13.0,
+            // The size of the text cross it replaced, smaller than the magnifier beside it.
+            10.0,
             roles.tx2,
         );
         hits.push((clear, Command::Bar(Action::ClearQuery)));

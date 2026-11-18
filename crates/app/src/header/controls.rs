@@ -125,21 +125,30 @@ impl Controls {
             } else {
                 theme.foreground().gamma_multiply(0.35)
             };
-            paint_icon(&painter, rect, hit, color);
+            paint_icon(&painter, rect, hit, color, folded);
         }
     }
 }
 
-fn paint_icon(painter: &egui::Painter, target: egui::Rect, hit: Hit, color: egui::Color32) {
+fn paint_icon(
+    painter: &egui::Painter,
+    target: egui::Rect,
+    hit: Hit,
+    color: egui::Color32,
+    folded: bool,
+) {
     use crate::ui::icons::{Icon, paint};
     let icon = match hit {
         Hit::Menu => Icon::DotsThree,
         Hit::Action(Action::SplitRight) => Icon::SplitRight,
         Hit::Action(Action::SplitDown) => Icon::SplitDown,
-        Hit::Action(Action::TogglePanel) => Icon::Panel,
+        // The toggle says which state the panel is in, as its drawing did: a filled side while
+        // the panel shows, an outline with its divider while it is folded.
+        Hit::Action(Action::TogglePanel) if folded => Icon::Panel,
+        Hit::Action(Action::TogglePanel) => Icon::PanelShown,
     };
-    // A Phosphor glyph's ink fills about three quarters of its square: this keeps the drawing the
-    // size the hand-drawn one had, six tenths of the target.
+    // The square that keeps the drawing the size the hand-drawn one had, six tenths of the target,
+    // and scaling with it.
     let size = target.width().min(target.height()) * 0.8;
     paint(painter, target.center(), icon, size, color);
 }

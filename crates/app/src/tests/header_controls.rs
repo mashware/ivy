@@ -485,7 +485,10 @@ mod tests {
             let glyph = match action {
                 Action::SplitRight => egui_phosphor::regular::SQUARE_SPLIT_HORIZONTAL,
                 Action::SplitDown => egui_phosphor::regular::SQUARE_SPLIT_VERTICAL,
-                Action::TogglePanel => egui_phosphor::regular::SIDEBAR_SIMPLE,
+                Action::TogglePanel if window.active().panes()[1].folded => {
+                    egui_phosphor::regular::SIDEBAR_SIMPLE
+                }
+                Action::TogglePanel => egui_phosphor::regular::SQUARE_HALF,
             };
             assert!(
                 shapes
@@ -497,6 +500,28 @@ mod tests {
                 "the visible {action:?} icon is missing or has the wrong availability ink"
             );
         }
+        // Folding the panel changes the toggle's drawing, and unfolding it changes it back.
+        let toggle = targets(&window, area, 1, &metrics)
+            .targets()
+            .find_map(|(hit, rect)| (hit == Hit::Action(Action::TogglePanel)).then_some(rect))
+            .unwrap();
+        let toggle_glyph = |shapes: &[egui::epaint::ClippedShape]| {
+            shapes
+                .iter()
+                .filter_map(|shape| crate::ui::icons::painted_icon(&shape.shape))
+                .find(|(_, _, square)| toggle.contains(square.center()))
+                .map(|(glyph, _, _)| glyph)
+        };
+        let before = toggle_glyph(&shapes);
+        let folded = window.active().panes()[1].folded;
+        window.active_mut().panes_mut()[1].folded = !folded;
+        let flipped = ui_pass(&mut window, &ctx, area, egui::RawInput::default());
+        assert!(before.is_some());
+        assert_ne!(
+            toggle_glyph(&flipped),
+            before,
+            "the toggle hides the panel's state"
+        );
     }
 
     #[test]

@@ -487,8 +487,8 @@ fn paint(ui: &egui::Ui, strip: egui::Rect, theme: &Theme, appearance: Appearance
     }
 }
 
-/// The kit's 16-unit icons (`Window.dc.html`) in a `size`-point box: the branch for the review,
-/// diagonal arrows to maximize and back, and the cross.
+/// The header's icons from the interface's set (D103) in a `size`-point square: the splits, the
+/// branch for the review, the panel, diagonal arrows to maximize and back, and the cross.
 pub(crate) fn paint_icon(
     painter: &egui::Painter,
     center: egui::Pos2,

@@ -165,8 +165,8 @@ const GRIP_THICKNESS: f32 = 1.0;
 /// corner and the grip is a band.
 const BUTTON_CELLS: f32 = 2.0;
 
-/// The cross's square, as a share of the button's shorter side: Phosphor's `X` inks ten sixteenths
-/// of its square, so the cross spans about the 0.44 of the side the hand-drawn one did.
+/// The cross's square, as a share of the button's shorter side: chosen so the cross spans what the
+/// hand-drawn one did, 0.44 of the side, and scales with the button as it did (D10).
 const CROSS_SQUARE: f32 = 0.7;
 
 /// How much of the strip's right-hand end the button leaves alone, **and it is the folded panel's

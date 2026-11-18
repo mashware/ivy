@@ -98,8 +98,8 @@ pub(super) fn branch(ui: &mut egui::Ui, rect: egui::Rect, name: &str, theme: &Th
 
 pub(super) fn console_navigation(ui: &mut egui::Ui, width: f32, theme: &Theme) {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 20.0), egui::Sense::hover());
-    // The arrow inks about seven tenths of its square: the square keeps it the 8 points the drawn
-    // one reached, smaller in a narrower column.
+    // The square that keeps the arrow the eight points the drawn one reached, smaller in a narrower
+    // column.
     let size = (width * 0.85).min(11.0);
     crate::ui::icons::paint(
         ui.painter(),

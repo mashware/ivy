@@ -36,6 +36,12 @@ pub(crate) enum FileKind {
     Plain,
 }
 
+/// The surfaces a list row can show under its icon: the list's own, and its hovered and chosen
+/// fills as they land on it — a translucent fill is judged blended, never as stored.
+pub(crate) fn row_grounds(surface: Color32, hover: Color32, chosen: Color32) -> [Color32; 3] {
+    [surface, surface.blend(hover), surface.blend(chosen)]
+}
+
 /// Where a kind's colour comes from: a terminal palette slot, so every theme carries it (D94), or
 /// one of the interface's text roles.
 enum Tint {
@@ -139,20 +145,15 @@ impl FileKind {
         }
     }
 
-    /// The colour this kind is painted in on a Files row: its own, unless that would not read on the
-    /// panel, on a hovered row or on the chosen one — the last two are translucent and are judged
-    /// as they land on the panel — and then the secondary text colour every file used to have.
-    pub(crate) fn color(self, theme: &Theme, roles: &Roles) -> Color32 {
+    /// The colour this kind is painted in over `grounds` — every surface its row can show under
+    /// it, translucent fills already blended onto what they land on: its own, unless that would not
+    /// read on one of them, and then the secondary text colour every file used to have.
+    pub(crate) fn color(self, theme: &Theme, roles: &Roles, grounds: &[Color32]) -> Color32 {
         let wanted = match self.tint() {
             Tint::Ansi(slot) => theme.color(term_core::TermColor::Indexed(slot)),
             Tint::Muted => roles.tx3,
             Tint::Secondary => return roles.tx2,
         };
-        let grounds = [
-            roles.panel,
-            roles.panel.blend(roles.list_hover),
-            roles.panel.blend(roles.list_sel),
-        ];
         if grounds
             .iter()
             .all(|ground| project_ink_contrast(wanted, *ground) >= MARK_CONTRAST)
@@ -165,15 +166,73 @@ impl FileKind {
 }
 
 #[cfg(test)]
+impl FileKind {
+    /// Every kind. The match below fails to compile when a kind is added and not listed here.
+    pub(crate) const ALL: [Self; 23] = [
+        Self::Lock,
+        Self::Dotfile,
+        Self::Rust,
+        Self::Markdown,
+        Self::Json,
+        Self::Config,
+        Self::Image,
+        Self::Svg,
+        Self::Js,
+        Self::Jsx,
+        Self::Ts,
+        Self::Tsx,
+        Self::Python,
+        Self::C,
+        Self::Cpp,
+        Self::Html,
+        Self::Css,
+        Self::Sql,
+        Self::Code,
+        Self::Pdf,
+        Self::Archive,
+        Self::Text,
+        Self::Plain,
+    ];
+
+    fn listed(self) -> usize {
+        match self {
+            Self::Lock => 0,
+            Self::Dotfile => 1,
+            Self::Rust => 2,
+            Self::Markdown => 3,
+            Self::Json => 4,
+            Self::Config => 5,
+            Self::Image => 6,
+            Self::Svg => 7,
+            Self::Js => 8,
+            Self::Jsx => 9,
+            Self::Ts => 10,
+            Self::Tsx => 11,
+            Self::Python => 12,
+            Self::C => 13,
+            Self::Cpp => 14,
+            Self::Html => 15,
+            Self::Css => 16,
+            Self::Sql => 17,
+            Self::Code => 18,
+            Self::Pdf => 19,
+            Self::Archive => 20,
+            Self::Text => 21,
+            Self::Plain => 22,
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::theme::NamedTheme;
 
-    /// `theme` with palette slot `slot` set to `color`, the way a settings file would set it.
-    fn with_slot(theme: Theme, slot: usize, color: Color32) -> Theme {
-        let mut colors = crate::settings::Colors::default();
-        colors.palette[slot] = Some(color);
-        theme.with_colors(&colors)
+    #[test]
+    fn the_list_of_kinds_is_whole() {
+        for (index, kind) in FileKind::ALL.into_iter().enumerate() {
+            assert_eq!(kind.listed(), index, "{kind:?}");
+        }
     }
 
     #[test]
@@ -204,78 +263,111 @@ mod tests {
         }
     }
 
+    /// Each kind's own colour, on a ground every one of them reads on: the table of D103, pinned
+    /// entry by entry — Ivy Night's palette slots are distinct, so a kind moved to another slot or
+    /// role fails here.
     #[test]
-    fn a_type_keeps_its_own_colour_where_it_reads() {
+    fn each_kind_is_painted_in_its_own_colour_where_it_reads() {
         let theme = NamedTheme::IvyNight.theme();
         let roles = Roles::of(&theme);
-        let red = theme.color(term_core::TermColor::Indexed(1));
-        assert_eq!(FileKind::Rust.color(&theme, &roles), red);
-        assert_ne!(red, roles.tx2);
-        assert_eq!(FileKind::Plain.color(&theme, &roles), roles.tx2);
+        let slot = |n| theme.color(term_core::TermColor::Indexed(n));
+        let ground = [Color32::BLACK];
+        for kind in FileKind::ALL {
+            let expected = match kind {
+                FileKind::Rust | FileKind::Pdf => slot(1),
+                FileKind::Markdown => slot(4),
+                FileKind::Json => slot(3),
+                FileKind::Config => slot(6),
+                FileKind::Image | FileKind::Svg => slot(5),
+                FileKind::Lock | FileKind::Dotfile => roles.tx3,
+                FileKind::Archive | FileKind::Text | FileKind::Plain => roles.tx2,
+                _ => slot(2),
+            };
+            assert_eq!(kind.color(&theme, &roles, &ground), expected, "{kind:?}");
+        }
+        let distinct: std::collections::HashSet<_> = [1, 2, 3, 4, 5, 6]
+            .into_iter()
+            .map(slot)
+            .chain([roles.tx2, roles.tx3])
+            .collect();
+        assert_eq!(
+            distinct.len(),
+            8,
+            "the slots must differ for the table to be pinned"
+        );
     }
 
-    /// A type colour too close to the panel falls back to the secondary text colour.
+    /// The threshold is 3:1, not a margin around it, and it is held on every ground given — one
+    /// ground it fails on is enough to fall back.
     #[test]
-    fn a_type_colour_lost_in_the_panel_falls_back() {
-        let theme = NamedTheme::IvyDay.theme();
-        let roles = Roles::of(&theme);
-        let theme = with_slot(theme, 3, roles.panel);
-        let roles = Roles::of(&theme);
-        assert_eq!(FileKind::Json.color(&theme, &roles), roles.tx2);
-    }
-
-    /// A colour that reads on the panel but not on the chosen row, as the chosen row lands on it,
-    /// falls back too: the translucent selection is judged blended, not as stored.
-    #[test]
-    fn a_type_colour_lost_on_the_chosen_row_falls_back() {
+    fn a_colour_under_three_to_one_on_any_ground_falls_back() {
         let theme = NamedTheme::IvyNight.theme();
-        let roles = Roles::of(&theme);
-        let chosen = roles.panel.blend(roles.list_sel);
-        let between = (0..=255u8)
-            .flat_map(|r| {
-                (0..=255u8)
-                    .step_by(5)
-                    .map(move |g| Color32::from_rgb(r, g, 0))
-            })
-            .find(|c| {
-                project_ink_contrast(*c, roles.panel) >= MARK_CONTRAST
-                    && project_ink_contrast(*c, chosen) < MARK_CONTRAST
-            })
-            .expect("the chosen row is lighter than the panel, so such a colour exists");
-        let theme = with_slot(theme, 1, between);
-        let roles = Roles::of(&theme);
-        assert_eq!(FileKind::Rust.color(&theme, &roles), roles.tx2);
+        let ground = theme.color(term_core::TermColor::Indexed(0));
+        let mut greys = (0..=255u8).map(|v| Color32::from_rgb(v, v, v));
+        let ratio = |c: &Color32| project_ink_contrast(*c, ground);
+        let under = greys
+            .clone()
+            .rev()
+            .find(|c| ratio(c) < MARK_CONTRAST && c.r() > ground.r())
+            .unwrap();
+        let over = greys
+            .find(|c| ratio(c) >= MARK_CONTRAST && c.r() > ground.r())
+            .unwrap();
+        assert!(
+            ratio(&under) > 2.8 && ratio(&over) < 3.2,
+            "{under:?} {over:?}"
+        );
+        let with = |c| {
+            let mut colors = crate::settings::Colors::default();
+            colors.palette[1] = Some(c);
+            theme.with_colors(&colors)
+        };
+        let kept = with(over);
+        let roles = Roles::of(&kept);
+        assert_eq!(FileKind::Rust.color(&kept, &roles, &[ground]), over);
+        assert_eq!(
+            FileKind::Rust.color(&kept, &roles, &[Color32::BLACK, ground, Color32::BLACK]),
+            over
+        );
+        assert_eq!(
+            FileKind::Rust.color(&kept, &roles, &[ground, over]),
+            roles.tx2,
+            "a ground the colour vanishes on, even one of several, sends it to tx2"
+        );
+        let lost = with(under);
+        let roles = Roles::of(&lost);
+        assert_eq!(FileKind::Rust.color(&lost, &roles, &[ground]), roles.tx2);
     }
 
-    /// In every bundled theme, every type is painted in a colour that reads on all three grounds —
-    /// or in the secondary text colour.
     #[test]
-    fn every_bundled_theme_paints_every_type_legibly() {
+    fn a_translucent_fill_is_judged_where_it_lands() {
+        let surface = Color32::from_rgb(20, 20, 20);
+        let fill = Color32::from_rgba_unmultiplied(255, 255, 255, 64);
+        let [_, hovered, _] = row_grounds(surface, fill, fill);
+        assert_eq!(hovered, surface.blend(fill));
+        assert_ne!(hovered, fill);
+    }
+
+    /// In every bundled theme, on the Files list's own surface, every kind is painted in a colour
+    /// that reads on all three grounds — or in the secondary text colour.
+    #[test]
+    fn every_bundled_theme_paints_every_kind_legibly() {
         for named in NamedTheme::ALL {
             let theme = named.theme();
             let roles = Roles::of(&theme);
-            let grounds = [
-                roles.panel,
-                roles.panel.blend(roles.list_hover),
-                roles.panel.blend(roles.list_sel),
-            ];
-            for name in [
-                "a.rs",
-                "a.md",
-                "a.json",
-                "a.toml",
-                "a.png",
-                "a.ts",
-                "a.pdf",
-                "Cargo.lock",
-            ] {
-                let color = FileKind::of(Path::new(name)).color(&theme, &roles);
+            let grounds = row_grounds(
+                roles.panel_or(roles.tx, roles.base),
+                roles.list_hover,
+                roles.list_sel,
+            );
+            for kind in FileKind::ALL {
+                let color = kind.color(&theme, &roles, &grounds);
                 assert!(
                     color == roles.tx2
                         || grounds
                             .iter()
                             .all(|g| project_ink_contrast(color, *g) >= MARK_CONTRAST),
-                    "{named:?} {name}"
+                    "{named:?} {kind:?}"
                 );
             }
         }

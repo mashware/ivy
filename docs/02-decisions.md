@@ -8795,7 +8795,7 @@ then supplied native feedback rejecting the source/cwd-change rows, large chevro
 flicker during scrolling and inactive Markdown links. Files keeps one root caption and a compact
 name-search field. Its rail icon is a recognizable folder with the adjacent tools' vector style;
 that button or Escape dismisses Files. Folder arrows are six-point open chevrons within their
-existing hit areas. Normal tree activation expands/collapses without replacing the root.
+existing hit areas (Phosphor's carets in a 12-point square since **D103**, same hit areas). Normal tree activation expands/collapses without replacing the root.
 
 Files follows usable console-directory changes automatically, including the shell's transient
 startup directory. The same source retains navigation; remote/unavailable metadata suspends local
@@ -8944,6 +8944,7 @@ in-application setup guide. It is highlighted while no console has an accepted, 
 and remains available without highlighting once any console publishes. File and control-channel
 producers count equally. The menu provides the same entry, including compact windows. Since #93 the
 icon is the kit's link and the highlight is its colour alone: the owner removed the dot beside it.
+Since **D103** the icon is Phosphor's plugs.
 
 The primary action copies a setup prompt for the user's AI client inside Ivy. It asks that client
 to find the bridge, preserve existing settings, register local stdio if necessary, and verify by
@@ -9820,7 +9821,9 @@ cards; retain every pictured item, active ID, attachment, dependency, outside co
 The comparison fixture uses the actual reference plan and panels, with executable actions excluded.
 The owner further chose yellow Waiting, orange/red Stuck, blue Working and green Finished; console navigation uses one outward diagonal arrow with a “Go to console” tooltip, and the branch and its icon sit at the card's left edge, following the owner's subsequent correction.
 Native warnings remain; console identity and honest observed age are disclosed on hover. Vector
-marks avoid relying on missing glyphs, without changing D9's sidebar or terminal cell policy.
+marks avoid relying on missing glyphs, without changing D9's sidebar or terminal cell policy. Since
+**D103** the arrow and the branch are glyphs of the interface's own bundled icon face, which no
+machine can be missing; D9's policy is still untouched.
 
 **Retain string plan items.** Bellwether's reference has four deliverables and one outside item as
 plain JSON strings. Dropping them silently changed 4/14 to 4/10 and hid one pending outside task.
@@ -10403,12 +10406,21 @@ and a closed one, or a caret that turns, never move. Licence: MIT, notices in
 **Decision — Files.** A file's glyph and colour come from its name alone (`FileKind::of`; the tree
 never opens a file to decide): Rust, Markdown, JSON, TOML/YAML/INI, images, SVG, the common code
 types, PDF, archives, text, lock files and dotfiles, first match winning so `package-lock.json` is a
-lock file. Folders show closed or open as they are expanded, with Phosphor's carets. A type's colour
-is a **terminal palette slot**, so every theme and every settings file carries it (D94); where it
-would keep less than **3:1** — WCAG's figure for non-text marks, the same the focus border uses —
-against the panel, or against a hovered or chosen row **as that translucent row lands on the panel**,
-the file falls back to the secondary text colour it had before. Search results show the type's
-glyph in that secondary colour: their rows sit on other surfaces.
+lock file. Folders show closed or open as they are expanded, with Phosphor's carets. A code, data
+or image type's colour is a **terminal palette slot**, so every theme and every settings file
+carries it (D94); lock files and dotfiles take the muted text role, and archives, text and plain
+files the secondary one. Where a colour would keep less than **3:1** — WCAG's figure for non-text
+marks, the same the focus border uses — against any surface its row can show under it, the file
+falls back to the secondary text colour it had before. Those surfaces are the ones the list really
+paints: Files' own, which is the panel or the content's base by D98, and its hovered and chosen
+rows **as those translucent fills land on it**; the search results judge the same glyph and colour
+on their floating surface and its hover and selection.
+
+**The panel toggle keeps its state.** The console header's toggle shows the panel shown as a
+square with its right half filled and the panel folded as an outline with its divider, the two
+states the hand-drawn marks told apart; the integrated header's panel button keeps one glyph, as it
+had one drawing. The close buttons of the floating surfaces (What's new, Connect agents) are
+egui's own buttons holding the set's cross instead of a text one.
 
 **Out, on purpose.** The status panel's line marks and the claim pill keep their own drawing: they
 are D9's measured vocabulary and D97's, and the ticket named the chrome, not the panel. Agent and
@@ -10425,4 +10437,4 @@ nothing the ticket asks.
 
 **Measurement.** The chrome is painted in every batch of `scripts/measure-frame.sh`, so the series
 after this compares like with like; a batch measured before it and one after paint different glyphs
-and are not a delta. Binary: +489 KB.
+and are not a delta. The face adds 489 KB to the binary.

@@ -168,7 +168,7 @@ pub(super) fn show(
                                     let entry = &found.entries[index];
                                     let chosen = index == state.search_index;
                                     let (choice, response) =
-                                        row(ui, entry, (&root, &query), chosen, &roles);
+                                        row(ui, entry, (&root, &query), chosen, (theme, &roles));
                                     if chosen && scroll {
                                         response.scroll_to_me(None);
                                     }
@@ -331,9 +331,9 @@ fn row(
     entry: &Entry,
     (root, query): (&Path, &str),
     chosen: bool,
-    roles: &crate::theme::Roles,
+    (theme, roles): (&crate::theme::Theme, &crate::theme::Roles),
 ) -> (Option<Pick>, egui::Response) {
-    use crate::ui::icons::{Icon, paint};
+    use crate::ui::icons::{FileKind, Icon, paint, row_grounds};
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW), egui::Sense::click());
     if chosen {
@@ -343,17 +343,15 @@ fn row(
     }
     let directory = entry.kind == EntryKind::Directory;
     let icon = egui::pos2(rect.left() + 8.0 + 7.0, rect.center().y);
-    paint(
-        ui.painter(),
-        icon,
-        if directory {
-            Icon::Folder { open: false }
-        } else {
-            Icon::File(crate::ui::icons::FileKind::of(&entry.path))
-        },
-        14.0,
-        roles.tx2,
-    );
+    // The same glyph and colour the tree gives the entry, judged on this list's own surfaces.
+    let (glyph, color) = if directory {
+        (Icon::Folder { open: false }, roles.accent)
+    } else {
+        let kind = FileKind::of(&entry.path);
+        let grounds = row_grounds(roles.raised, roles.hover, roles.sel);
+        (Icon::File(kind), kind.color(theme, roles, &grounds))
+    };
+    paint(ui.painter(), icon, glyph, 14.0, color);
     let name = display(Path::new(entry.path.file_name().unwrap_or_default()));
     let folder = entry
         .path

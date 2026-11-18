@@ -161,8 +161,8 @@ impl Editor {
             } else {
                 egui::Color32::from_rgb(153, 163, 182)
             };
-            // The hand-drawn gear reached a quarter of the shorter side, eight points at most;
-            // Phosphor's inks about seven eighths of its square.
+            // The square that keeps the gear about the size the drawn one had: half the shorter
+            // side, sixteen points at most.
             let size = (gear.width().min(gear.height()) * 0.55).min(18.0);
             crate::ui::icons::paint(
                 &painter,

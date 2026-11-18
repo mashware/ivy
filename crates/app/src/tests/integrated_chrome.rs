@@ -377,12 +377,9 @@ mod tests {
             let heading = text_center(&shapes, "Connect agents");
             let close = shapes
                 .iter()
-                .filter_map(|s| match &s.shape {
-                    egui::Shape::Text(t) if t.galley.text() == "×" => {
-                        Some(t.pos + t.galley.size() / 2.0)
-                    }
-                    _ => None,
-                })
+                .filter_map(|s| crate::ui::icons::painted_icon(&s.shape))
+                .filter(|(glyph, _, _)| glyph == egui_phosphor::regular::X)
+                .map(|(_, _, square)| square.center())
                 .min_by(|a, b| (a.y - heading.y).abs().total_cmp(&(b.y - heading.y).abs()))
                 .expect("guide has a close icon");
             assert!(area.contains(close), "guide close control left the window");
@@ -970,14 +967,17 @@ mod tests {
         )
     }
 
-    /// Strokes of icons and rules painted inside `cells`.
+    /// Icons and rules painted inside `cells`. Icons are glyphs since D103, and a context without
+    /// the icon family paints none, so a test counting them must install it
+    /// (`crate::fonts::install_icons_only`) or a zero here proves nothing.
     fn strokes_in(shapes: &[egui::epaint::ClippedShape], cells: egui::Rect) -> usize {
         shapes
             .iter()
             .filter(|s| match &s.shape {
                 egui::Shape::Path(path) => path.points.first().is_some_and(|p| cells.contains(*p)),
                 egui::Shape::LineSegment { points, .. } => cells.contains(points[0]),
-                _ => false,
+                shape => crate::ui::icons::painted_icon(shape)
+                    .is_some_and(|(_, _, square)| cells.contains(square.center())),
             })
             .count()
     }
@@ -1040,6 +1040,7 @@ mod tests {
     #[test]
     fn an_unfocused_header_shows_its_controls_only_under_the_pointer() {
         let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
         let mut window = integrated_pair();
         let area = tall_area();
         frame(&mut window, &ctx, area, vec![]);
@@ -1058,7 +1059,7 @@ mod tests {
             strokes_in(&away, focused_cells) > 0,
             "the focused console hid its controls"
         );
-        // The icons are paths and the two rules between the three groups are the only segments, in
+        // The icons are glyphs and the two rules between the three groups are the only segments, in
         // the ink of the title's own separator — muted text, not the border role the owner found
         // barely visible on the desktop.
         let roles = crate::ui::style::roles(&ctx, &window.theme);
@@ -1130,6 +1131,7 @@ mod tests {
             ("painted in the previous pass", 1, true),
         ] {
             let ctx = egui::Context::default();
+            crate::fonts::install_icons_only(&ctx);
             let mut window = integrated_pair();
             let area = tall_area();
             frame(&mut window, &ctx, area, vec![]);
@@ -1251,6 +1253,7 @@ mod tests {
     #[test]
     fn a_split_that_cannot_fit_is_not_offered_and_a_maximized_console_offers_none() {
         let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
         let mut window = integrated_pair();
         let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 200.0));
         frame(&mut window, &ctx, area, vec![]);
@@ -1291,6 +1294,7 @@ mod tests {
         );
 
         let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
         let mut window = integrated_pair();
         let area = tall_area();
         frame(&mut window, &ctx, area, vec![]);

@@ -198,18 +198,6 @@ fn feedback_fill(ui: &egui::Ui, id: egui::Id, roles: &Roles) -> (Option<Color32>
     (fill, held)
 }
 
-/// A cross `half` points from its centre to each end: Phosphor's `X` inks ten sixteenths of its
-/// square, so the square is 3.2 halves across.
-fn cross(painter: &egui::Painter, center: egui::Pos2, half: f32, color: Color32) {
-    crate::ui::icons::paint(
-        painter,
-        center,
-        crate::ui::icons::Icon::Close,
-        half * 3.2,
-        color,
-    );
-}
-
 /// A card's label as it fits in its room.
 enum Fitted {
     /// Painted as it is, braille spinners included.
@@ -374,7 +362,14 @@ pub(super) fn paint(window: &Window, ui: &egui::Ui, band: Rect, now: SystemTime)
             } else {
                 roles.tx3
             };
-            cross(&painter, close.center(), 3.5, ink);
+            // The square that keeps the cross the seven points across the drawn one was.
+            crate::ui::icons::paint(
+                &painter,
+                close.center(),
+                crate::ui::icons::Icon::Close,
+                11.0,
+                ink,
+            );
         }
     }
     if let Some(add) = add_target(band, count) {
@@ -386,8 +381,7 @@ pub(super) fn paint(window: &Window, ui: &egui::Ui, band: Rect, now: SystemTime)
                 fill,
             );
         }
-        // Ten points across, as the hand-drawn plus was: Phosphor's inks about three quarters of
-        // its square.
+        // The square that keeps the plus the ten points across the drawn one was.
         crate::ui::icons::paint(
             &painter,
             add.center(),

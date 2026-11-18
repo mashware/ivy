@@ -259,6 +259,7 @@ pub(super) fn show(
             // from the text would leave the names unreadable (D98).
             let roles = crate::ui::style::roles(ui.ctx(), &theme);
             let surface = roles.panel_or(roles.tx, roles.base);
+            let grounds = crate::ui::icons::row_grounds(surface, roles.list_hover, roles.list_sel);
             ui.painter().rect_filled(rect, 0.0, surface);
             ui.painter().line_segment(
                 [rect.right_top(), rect.right_bottom()],
@@ -439,7 +440,7 @@ pub(super) fn show(
                             (Glyph::Folder { open: expanded }, roles.accent)
                         } else {
                             let kind = FileKind::of(&row.entry.path);
-                            (Glyph::File(kind), kind.color(&theme, &roles))
+                            (Glyph::File(kind), kind.color(&theme, &roles, &grounds))
                         };
                         crate::ui::icons::paint(
                             ui.painter(),
@@ -792,6 +793,7 @@ mod tests {
         use egui_phosphor::regular as glyph;
         let theme = crate::theme::Theme::default();
         let ctx = crate::ui::icons::installed_for_tests(1.0);
+        ctx.global_style_mut(|s| s.animation_time = 0.0);
         let mut state = Explorer::default();
         state.reconcile(&[(1, Some("/root".into()))]);
         listing(
