@@ -10198,3 +10198,41 @@ Explorer's panel-only row roles retain the original translucent mixes when their
 composites clear 1.03:1; otherwise they use corrected shared fills, selection also apart from the
 final displayed hover. Configured background, panel and focus remain verbatim. Settings no longer
 floors these fills locally, and still re-inks controls and selected text and protects the caret.
+
+## D99 — A console header splits its own console, groups its controls, and shows them where they are wanted
+
+**18 November 2026 — #104.** The integrated header gains split right and split down, so a console is
+split from its own header whether or not it has the keyboard; the titlebar's split buttons, which act
+on the focused console, stay. This **amends D66**, whose approved per-pane set had no splits.
+
+- **Groups.** After the title, right to left: maximize and close; review and information panel;
+  split right and split down. A one-point rule in the titlebar's separator colour sits on the
+  boundary between groups and costs no width, so the cells and their thresholds stay where they were.
+  A lone console has no maximize or close, and one rule.
+- **Shown where wanted.** The focused console shows its controls all the time. Any other console
+  shows them while the pointer is over its header. Hidden controls keep their place, so the title is
+  laid out the same either way and never moves. With four consoles, six icons are in view instead of
+  twenty-four.
+- **A control exists where it was painted.** A non-title target of a header is pressable only if
+  that header's controls were painted in the previous pass, the rule D96 gave the tab close. A move
+  and a press in one input batch — a fast click, the first click into a window — otherwise reaches a
+  close nobody saw. The pass is recorded by frame number, not a flag, so a console that stopped
+  being painted (a hidden sibling, a background tab) cannot come back pressable unseen.
+- **Unavailable is absent.** A split the console cannot give both halves their minimum is not drawn
+  and not pressable. For this header that replaces D62's dimmed control and F2.14's «visibly
+  unavailable»; the historical strip keeps both. Painting and pressing read one offer, built with the
+  same predicate the split itself checks.
+- **Narrow.** The title keeps its 30 points: the review, panel, maximize and close cells come first,
+  each split is added only if it still fits, and below the base the header is the title alone.
+- **Maximized.** A maximized console offers no split: it is the focused console (D66), so the
+  titlebar split already acts on it, and its view fills the area while the split judges the tree.
+
+| Discarded | Why |
+|---|---|
+| Dim an unavailable split | In this header a dimmed control takes 25 points of the title exactly when the console is small, for an action that would be refused. |
+| Every console's controls always visible | Four consoles paint twenty-four icons, most of them never aimed at. |
+| Hover-reveal on every console, the focused one too | The controls disappear from the only header a newcomer looks at. |
+| Hit by geometry alone | D96: a destructive control must not be pressable unseen. |
+| A `\|` glyph or gap cells between groups | A glyph depends on the font; extra cells move every offset and threshold. |
+| An overflow menu when narrow | One more gesture for every control, to save two cells. |
+| Removing the titlebar's split buttons | Kept by the owner's decision. |
