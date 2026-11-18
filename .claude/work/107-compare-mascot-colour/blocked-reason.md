@@ -1,0 +1,7 @@
+Ticket 107 cannot complete the approved Ivy/Tilix mascot colour comparison because Tilix is not installed in this runner. `shutil.which("tilix")` returned None; searches under /usr/bin, /usr/local/bin and /opt found no Tilix executable, and /var/cache/apt/archives contains no Tilix package. The runner is uid 1000 with no sudo command.
+
+GUI execution is available: `ivy-gui /opt/ivy-gui/smoke.sh /work/repo/.claude/work/107-compare-mascot-colour/environment-evidence` passed (exit 0), including window activation, mouse, keyboard and PNG capture. Rust is usable with CARGO_HOME=/usr/local/cargo and RUSTUP_HOME=/usr/local/rustup; cargo --version passed (1.97.1). Claude Code --version passed (2.1.310). An unset DISPLAY is not the blocker.
+
+AC1–AC3 remain unverified. No code was changed and no mascot equality/difference is claimed. Cached Ivy binaries predate the current checkout and were not used as current-build evidence.
+
+Next action: provide Tilix and its runtime dependencies in the runner, then relaunch ticket 107 with why=start to resume the comparison. The approved study in 03-design.md specifies matched theme/settings, paired lossless screenshots, three interior RGB samples per terminal and emitted SGR/attribute evidence. Full execution findings are in 05-implementation.md.

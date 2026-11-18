@@ -8,7 +8,7 @@
   "stacked_on": null,
   "worktree": null,
   "size": "XS",
-  "phase": "context",
+  "phase": "build",
   "phases_done": [
     "context"
   ],
@@ -17,8 +17,8 @@
   "related_repos": [],
   "roadmap": null,
   "started_at": "2026-11-18T10:35:40.711618+00:00",
-  "updated_at": "2026-11-18T10:36:34.382855+00:00",
-  "notes": "Study complete at the door to code. Comparison unverified; requires graphical host with Ivy and Tilix.",
+  "updated_at": "2026-11-18T10:41:12.319660+00:00",
+  "notes": "Approved comparison started; blocked by missing Tilix. Virtual-display smoke passed and Rust toolchain verified. AC1\u2013AC3 unverified; no source edits.",
   "pending": null,
   "ticket_deps": [],
   "defaults_used": [
@@ -26,6 +26,16 @@
       "key": "unattended:size",
       "default": "XS: controlled colour comparison; no API, schema or domain logic changes planned",
       "phase": "start"
+    },
+    {
+      "key": "unattended:rehomed",
+      "default": "107-compare-mascot-colour \u2192 107-compare-mascot-colour from main",
+      "phase": "run"
+    },
+    {
+      "key": "unattended:business-brief",
+      "default": "Comparison evidence only; no speculative colour changes",
+      "phase": "build"
     }
   ]
 }

@@ -1,19 +1,11 @@
 {
-  "kind": "ask",
-  "id": "107-codex:60c0d018b7a8",
-  "question": "<!-- flow-study -->\n## What and why\nCompare Claude Code's mascot colour in Ivy and Tilix with the same dark-daltonized theme. This study prepares the comparison; it does not establish that the colours match or differ.\n\n## Acceptance criteria\n- AC1: Record matching Claude version/theme plus terminal versions, palettes, bold policy, child environment, font, scale and display settings.\n- AC2: Save lossless paired screenshots and at least three interior RGB samples with coordinates per terminal; report exact equality or differences.\n- AC3: Identify the emitted foreground sequence and active attributes, distinguish explicit RGB from indexed/bold/dim colour, and explain the measured result.\n\n## Design in brief\nUse the graphical comparison procedure in 03-design.md, including explicit RGB, bright-red and bold-red control swatches. Ivy copies explicit RGB channels through its core and theme, with dim handled separately. The ticket's reported (245,154,137), hex #f59a89, also exactly matches Ivy Night's bright-red entry. That is a diagnostic clue, not proof of Claude's output.\n\nRun the comparison before changing colours. Equal results support closing the question for that setup. Different results require distinguishing palette configuration from an actual rendering defect before proposing a fix. No other ticket dependencies.\n\n## MR/PR plan\nNone at this stage: collect comparison evidence and report the result first. A demonstrated defect would need a concrete fix and regression coverage; no speculative production edits are planned.\n\n## Schema changes\nnone\n\n## Risks\nThe comparison remains unverified: Tilix is unavailable and DISPLAY/WAYLAND_DISPLAY are unset in this runner. A person or subsequent execution on a graphical host must perform AC1–AC3. Antialiasing, opacity, display profiles and differing palettes can confound screenshot samples; record and control these settings. No tests run and no code changed in this study.\n<!-- end flow-study -->",
-  "options": [
-    {
-      "label": "Approve the design and the plan",
-      "recommended": true
-    }
-  ],
-  "free_text": true,
-  "gate": "study_approval",
-  "at": "2026-11-18T10:36:37+00:00",
-  "branch": null,
-  "head": null,
+  "kind": "blocked",
+  "reason": "Ticket 107 cannot complete the approved Ivy/Tilix mascot colour comparison because Tilix is not installed in this runner. `shutil.which(\"tilix\")` returned None; searches under /usr/bin, /usr/local/bin and /opt found no Tilix executable, and /var/cache/apt/archives contains no Tilix package. The runner is uid 1000 with no sudo command.\n\nGUI execution is available: `ivy-gui /opt/ivy-gui/smoke.sh /work/repo/.claude/work/107-compare-mascot-colour/environment-evidence` passed (exit 0), including window activation, mouse, keyboard and PNG capture. Rust is usable with CARGO_HOME=/usr/local/cargo and RUSTUP_HOME=/usr/local/rustup; cargo --version passed (1.97.1). Claude Code --version passed (2.1.310). An unset DISPLAY is not the blocker.\n\nAC1–AC3 remain unverified. No code was changed and no mascot equality/difference is claimed. Cached Ivy binaries predate the current checkout and were not used as current-build evidence.\n\nNext action: provide Tilix and its runtime dependencies in the runner, then relaunch ticket 107 with why=start to resume the comparison. The approved study in 03-design.md specifies matched theme/settings, paired lossless screenshots, three interior RGB samples per terminal and emitted SGR/attribute evidence. Full execution findings are in 05-implementation.md.",
+  "block": {
+    "cause": "environment"
+  },
+  "branch": "107-compare-mascot-colour",
+  "head": "074f0e52df83b17c207a99d45f3d2359ce55ba1a",
   "after_study": "recommended",
-  "study": "pending",
   "workflow": "flow"
 }

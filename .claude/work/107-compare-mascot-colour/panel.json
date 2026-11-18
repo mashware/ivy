@@ -1,12 +1,14 @@
 {
-  "updated_at": "2026-11-18T10:36:35.048Z",
-  "phase": "context",
+  "updated_at": "2026-11-18T10:41:13.248Z",
+  "phase": "build",
   "header": true,
-  "attention": "done",
+  "attention": "block",
   "lines": [
     {"key":"title","text":"Check that Claude Code's mascot colour in Ivy matches another terminal","style":"title"},
     "",
-    {"key":"now","ref":"Now","text":"Comparison study ready; actual colour match remains unverified","mark":"info"},
-    {"key":"next","ref":"Next","text":"Approve study; collect paired screenshots on a graphical host","mark":"info"}
+    {"key":"now","ref":"Now","text":"GUI smoke passed; paired mascot comparison remains unverified","mark":"info"},
+    {"key":"next","ref":"Next","text":"Provide Tilix and resume the approved comparison","mark":"info"},
+    "",
+    {"key":"block-1","text":"Tilix is missing from the runner; AC1–AC3 cannot be completed","mark":"block"}
   ]
 }
