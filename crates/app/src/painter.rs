@@ -11,6 +11,7 @@
 #[cfg(test)]
 mod background_tests;
 mod blocks;
+mod box_drawing;
 mod ligatures;
 mod pane;
 #[cfg(test)]
@@ -511,6 +512,19 @@ fn paint_character(
     // `blocks`, which carries the reason and what was left out.
     if let Some(filling) = blocks::filling_of(character) {
         paint_a_block(painter, &filling, slot, color, metrics);
+        return;
+    }
+    // The box drawing lines likewise: they have to meet the line in the next cell. See
+    // `box_drawing`, which carries what a font's glyph does instead.
+    if let Some(shape) = box_drawing::shape_of(character) {
+        box_drawing::paint(
+            painter,
+            shape,
+            slot,
+            color,
+            metrics.font.size,
+            metrics.per_point,
+        );
         return;
     }
     // **A wide emoji occupies the TWO columns the engine reserved for it**, not one. The slot that
