@@ -1,6 +1,15 @@
-# Ivy 0.1.0-alpha.10
+# Ivy 0.1.0-alpha.11
 
 ## New in this alpha
+
+- Console text keeps its original edge coverage, with automatic fitting for fonts that have no native glyph instructions. Fonts with their own instructions keep their existing fitting.
+- Font sizes in Settings and new version 2 configuration files use true typographic points for console text, pane titles and tab labels. Existing configurations retain their visual sizes; edited saves upgrade to version 2, which older Ivy versions do not read.
+- Box-drawing lines render continuously instead of appearing dotted or blurred.
+- Split a console from its own header. Controls are grouped and appear on the focused console or when you hover another one.
+- Ivy Night's bright-red palette entry uses the reference orange for ANSI-coloured agent mascots.
+- Connect agents separates one-time setup from reconnecting an existing Claude session. Empty panels no longer imply setup is missing, and startup publication guidance survives a control channel that becomes ready later.
+
+## Previously in 0.1.0-alpha.10
 
 - Ivy has a new look, Ivy Night (and Ivy Day for light desktops), with the Geist fonts. Settings, menus and dialogs follow the theme you choose, whatever the desktop prefers.
 - The title bar holds the tabs, with each tab's claim shown as a small pill. Files, the Board, Markdown, split, search, Connect agents and the menu sit in the bar, with labelled buttons and the same icons everywhere.

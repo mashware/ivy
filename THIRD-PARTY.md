@@ -12,6 +12,15 @@ in [LICENSE-MIT](vendor/egui-winit/LICENSE-MIT) and
 [LICENSE-APACHE](vendor/egui-winit/LICENSE-APACHE). The local input-routing patches are described
 in D33 of [the decisions](docs/02-decisions.md).
 
+## Vendored epaint
+
+`vendor/epaint` contains a locally patched copy of epaint 0.36.1 from
+[emilk/egui](https://github.com/emilk/egui/tree/0.36.1/crates/epaint).
+The original code is licensed under **MIT OR Apache-2.0**, with both texts retained in
+[LICENSE-MIT](vendor/epaint/LICENSE-MIT) and [LICENSE-APACHE](vendor/epaint/LICENSE-APACHE).
+Its targeted font-hinting patch is documented in [IVY-PATCH.md](vendor/epaint/IVY-PATCH.md)
+and D101 of [the decisions](docs/02-decisions.md).
+
 ## Bundled themes
 
 Theme origins, modifications and attribution are documented in
