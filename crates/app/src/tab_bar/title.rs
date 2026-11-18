@@ -283,13 +283,12 @@ pub(super) fn paint(window: &Window, ui: &egui::Ui, band: Rect, now: SystemTime)
                 roles.base,
             );
         } else {
-            // At rest an inactive tab is a card of its own, halfway between the bar and the
-            // console, so a row of them reads as tabs and not as loose labels. The hover and held
-            // feedback below paints over it.
+            // At rest an inactive tab is a card of its own, so a row of them reads as tabs and
+            // not as loose labels. The hover and held feedback below paints over it.
             painter.rect_filled(
                 Rect::from_min_max(card.min, pos2(card.right(), card.bottom() - 1.0)),
                 top,
-                roles.chrome.lerp_to_gamma(roles.base, 0.5),
+                roles.tab,
             );
         }
         // The whole card's shape, short of the bar's bottom line, which stays drawn under it.
@@ -304,12 +303,16 @@ pub(super) fn paint(window: &Window, ui: &egui::Ui, band: Rect, now: SystemTime)
             );
         }
         // Painted after the feedback, so a held press does not cover which tab is the open one.
+        // The card's own shape clipped to its top band, not a thin rect with the card's radius:
+        // epaint caps a radius at half the rect's height, so that rect kept square-ish corners
+        // that poked out past the card's rounded ones.
         if active {
-            painter.rect_filled(
-                Rect::from_min_max(card.min, pos2(card.right(), card.top() + ACCENT_LINE)),
-                top,
-                roles.accent,
-            );
+            painter
+                .with_clip_rect(Rect::from_min_max(
+                    card.min,
+                    pos2(card.right(), card.top() + ACCENT_LINE),
+                ))
+                .rect_filled(card, top, roles.accent);
         }
         let attention = tab.attention(now);
         marked += usize::from(attention.is_some());

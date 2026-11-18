@@ -25,8 +25,11 @@ pub(crate) const INVISIBLE: f32 = 1.03;
 pub(crate) struct Roles {
     /// Whether the theme is a dark one, judged by which ink reads better on its background.
     pub dark: bool,
-    /// The title bar and inactive tabs: one step behind the console.
+    /// The title bar: one step behind the console.
     pub chrome: Color32,
+    /// An inactive tab at rest: one more step past `chrome`, away from the console, so a tab reads
+    /// as a card on the bar while the open one, on `base`, stays the lightest of the three.
+    pub tab: Color32,
     /// The console background, which is also the background of content (diffs, documents).
     pub base: Color32,
     /// The status panel and side lists.
@@ -157,6 +160,23 @@ impl Roles {
         } else {
             text_surface(bg, tx, 0.06, corrected)
         };
+        // The open tab, on `base`, stays the lightest of the three either way. A dark theme's
+        // midpoint of `chrome` and `base` measured 1.025:1 against the bar in Ivy Night — under
+        // `INVISIBLE` — so there the tab steps past the bar, away from the console. A light theme's
+        // midpoint reads apart from both, and stepping past its bar would darken the surface its
+        // text sits on, which brought Ivy Day's muted text back from 34 % to 30 %. Where neither
+        // stands apart, it is moved toward the text.
+        let tab = apart(
+            if dark {
+                mix(bg, Color32::BLACK, 0.44)
+            } else {
+                mix(chrome, bg, 0.5)
+            },
+            &[chrome, bg],
+            chrome,
+            tx,
+            0.04,
+        );
         // The selection is a row text sits on, among the console, a menu and a hovered row; a
         // focus colour that lands it on any of them (the background itself, or a shade of the
         // menu) leaves it a step of the text instead — never the text itself.
@@ -185,10 +205,11 @@ impl Roles {
         // Secondary and muted text must read on the worst of the surfaces the roles themselves
         // name. A surface painted from them — a console header tinted with its project — brings
         // its text back on its own (D96).
-        let surfaces = [bg, panel, raised, hover, chrome];
+        let surfaces = [bg, panel, raised, hover, chrome, tab];
         Self {
             dark,
             chrome,
+            tab,
             base: bg,
             panel,
             raised,
@@ -591,6 +612,8 @@ mod tests {
         // surface it is set on; the design's #7E8A85 reads at about 4.0 there.
         assert_eq!(r.tx3, rgb(0x8e9390));
         assert_eq!(r.on_accent, Color32::BLACK);
+        // An inactive tab: the console 44 % toward black, one step past the bar.
+        assert_eq!(r.tab, rgb(0x0b0d0f));
     }
 
     #[test]
@@ -612,6 +635,8 @@ mod tests {
         // brought back to 34 %; secondary text reads at its 30 % as it is.
         assert_eq!(r.tx2, rgb(0x5a605c));
         assert_eq!(r.tx3, rgb(0x636865));
+        // An inactive tab: halfway between the bar and the console.
+        assert_eq!(r.tab, rgb(0xf3f5f2));
     }
 
     #[test]
@@ -628,7 +653,7 @@ mod tests {
         // Secondary and muted text read on every surface text is set on, and never more than the
         // role above them: a secondary text fainter than muted text inverts the hierarchy.
         let text_reads = |r: &Roles, label: &str| {
-            for surface in [r.base, r.panel, r.raised, r.hover, r.chrome] {
+            for surface in [r.base, r.panel, r.raised, r.hover, r.chrome, r.tab] {
                 for ink in [r.tx2, r.tx3] {
                     assert!(
                         project_ink_contrast(ink, surface) >= TEXT_CONTRAST,
@@ -659,6 +684,14 @@ mod tests {
             // Without an explicit focus the accent is never the `done` claim's color.
             assert_ne!(r.accent, r.done, "{named:?}");
             assert_ne!(r.hover, r.base, "{named:?}");
+            // An inactive tab reads as a card on the bar, and apart from the open tab's console.
+            assert!(
+                stands_apart(r.tab, &[r.chrome, r.base]),
+                "{named:?}: tab {:?} on chrome {:?} / base {:?}",
+                r.tab,
+                r.chrome,
+                r.base
+            );
             for hex in [0x777777, 0xffffff, 0x000000] {
                 let r = Roles::of(&theme.with_colors(&collapsed(hex)));
                 text_reads(&r, &format!("{named:?} {hex:06x}"));
