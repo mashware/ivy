@@ -8168,6 +8168,7 @@ after these runs; it can only shorten the marking, and the load's lines wrap ove
 on the left; close stays on the right and the centred grip keeps its space. The controls act on
 their pane by name. Splitting successfully focuses the newborn; toggling leaves focus where it was.
 An unavailable split is visibly disabled using the same minimum-size rule execution checks.
+(The integrated header omits an unavailable split instead, by **D99**; this strip keeps the rule.)
 
 **Why a press needs an owner until release.** D46 could rely on a closed widget disappearing before
 egui starts its drag. A panel toggle leaves that widget alive, and a held control press would
@@ -8445,7 +8446,7 @@ D64's existing begin-pass boundary without restarting any console.
 
 ## D66 — Integrated, theme-derived window chrome and transient pane maximization
 
-**8 November 2026 — #326.** The user approved the interactive HTML prototype: one global titlebar carries split-right/down, new tab, search and the application menu; tabs sit below; each pane carries an explicit label, information-panel toggle, maximize/restore and close. This approval is the new signal superseding D64's exclusion of custom titlebars.
+**8 November 2026 — #326.** The user approved the interactive HTML prototype: one global titlebar carries split-right/down, new tab, search and the application menu; tabs sit below; each pane carries an explicit label, information-panel toggle, maximize/restore and close. This approval is the new signal superseding D64's exclusion of custom titlebars. (Amended 18 November 2026 by **D99**: each pane also carries split right and split down.)
 
 Every chrome surface and ink derives from the effective configured Theme after named-template selection and explicit overrides. Live Save updates chrome alongside terminal colors. Copied prototype RGB literals and an independent chrome theme are discarded because they would ignore the user's settings.
 
@@ -10255,3 +10256,52 @@ Explorer's panel-only row roles retain the original translucent mixes when their
 composites clear 1.03:1; otherwise they use corrected shared fills, selection also apart from the
 final displayed hover. Configured background, panel and focus remain verbatim. Settings no longer
 floors these fills locally, and still re-inks controls and selected text and protects the caret.
+
+## D99 — A console header splits its own console, groups its controls, and shows them where they are wanted
+
+**18 November 2026 — #104.** The integrated header gains split right and split down, so a console is
+split from its own header whether or not it has the keyboard; the titlebar's split buttons, which act
+on the focused console, stay. This **amends D66**, whose approved per-pane set had no splits.
+
+- **Groups.** After the title, right to left: maximize and close; review and information panel;
+  split right and split down. A one-point rule sits on the boundary between groups and costs no
+  width, so the cells and their thresholds stay where they were. It takes the ink of the title's
+  own « / » separator, which reads at 4.5:1 on every header surface; the titlebar's border role was
+  tried first and the owner found it barely visible on the desktop.
+  A lone console has no maximize or close, and one rule.
+- **Shown where wanted.** The focused console shows its controls all the time. Any other console
+  shows them while the pointer is over its header. Hidden controls keep their place, so the title is
+  laid out the same either way and never moves. With four consoles, six icons are in view instead of
+  twenty-four.
+- **A control exists where it was painted.** A non-title target of a header is pressable only if
+  that header's controls were painted in the previous pass, the rule D96 gave the tab close. A move
+  and a press in one input batch — a fast click, the first click into a window — otherwise reaches a
+  close nobody saw. The pass is recorded by frame number, not a flag, so a console that stopped
+  being painted (a hidden sibling, a background tab) cannot come back pressable unseen. And a
+  press within a double click of one that fell on hidden controls is the title's too: the first
+  press hands the console the keyboard, which paints its controls at once, and the second click of
+  a double click aimed at the title would otherwise land on whatever appeared under it.
+- **What the strip's span measures.** The integrated strip's timed span now paints icons for the
+  focused console and for any header under the pointer only, so its cost depends on focus and on
+  where the pointer is; a batch that moves the pointer over headers paints more than one that does
+  not, and the two are not the same work. And a header whose controls appear asks egui for one more
+  pass, so the control under a still pointer gets its hover: a frame no report counts yet, one per
+  header revealed, never one while a header stays shown.
+- **Unavailable is absent.** A split the console cannot give both halves their minimum is not drawn
+  and not pressable. For this header that replaces D62's dimmed control and F2.14's «visibly
+  unavailable»; the historical strip keeps both. Painting and pressing read one offer, built with the
+  same predicate the split itself checks.
+- **Narrow.** The title keeps its 30 points: the review, panel, maximize and close cells come first,
+  each split is added only if it still fits, and below the base the header is the title alone.
+- **Maximized.** A maximized console offers no split: it is the focused console (D66), so the
+  titlebar split already acts on it, and its view fills the area while the split judges the tree.
+
+| Discarded | Why |
+|---|---|
+| Dim an unavailable split | In this header a dimmed control takes 25 points of the title exactly when the console is small, for an action that would be refused. |
+| Every console's controls always visible | Four consoles paint twenty-four icons, most of them never aimed at. |
+| Hover-reveal on every console, the focused one too | The controls disappear from the only header a newcomer looks at. |
+| Hit by geometry alone | D96: a destructive control must not be pressable unseen. |
+| A `\|` glyph or gap cells between groups | A glyph depends on the font; extra cells move every offset and threshold. |
+| An overflow menu when narrow | One more gesture for every control, to save two cells. |
+| Removing the titlebar's split buttons | Kept by the owner's decision. |

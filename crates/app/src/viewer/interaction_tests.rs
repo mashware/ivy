@@ -85,10 +85,14 @@ fn click_review(window: &mut crate::Window, ctx: &egui::Context, index: usize) {
     let pos = (0..strip.width() as usize)
         .map(|x| egui::pos2(strip.left() + x as f32 + 0.5, strip.center().y))
         .find(|point| {
-            crate::header::integrated::hit(strip, &metrics, true, *point)
+            let offer =
+                crate::header::integrated::Offer::of(rect, &metrics, window.headers, true, false);
+            crate::header::integrated::hit(strip, offer, *point)
                 == Some(crate::header::integrated::Target::Review)
         })
         .unwrap();
+    // A header's controls are pressable once they were painted (D99): a pass over the header first.
+    frame(window, ctx, vec![egui::Event::PointerMoved(pos)]);
     for pressed in [true, false] {
         frame(
             window,

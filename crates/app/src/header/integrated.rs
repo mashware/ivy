@@ -55,17 +55,24 @@ pub(crate) fn paint_strip(
     let started = std::time::Instant::now();
     if strip.integrated {
         let label = header_label(pane);
+        let zoomed = strip.maximized == Some(pane.name);
         paint(
             ui,
             strip.header,
-            metrics,
             theme,
             Appearance {
+                name: pane.name,
                 label: &label,
                 agent: pane.signals.view(std::time::Instant::now()),
                 title_size: strip.headers.title_size(),
-                can_close: strip.button.is_drawn(),
-                zoomed: strip.maximized == Some(pane.name),
+                offer: Offer::of(
+                    strip.rect,
+                    metrics,
+                    strip.headers,
+                    strip.button.is_drawn(),
+                    zoomed,
+                ),
+                zoomed,
                 folded: pane.folded,
                 focused: strip.focused,
                 project: pane.project.as_ref(),
@@ -107,62 +114,146 @@ pub(crate) fn paint_strip(
     started.elapsed()
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Target {
     Label,
+    SplitRight,
+    SplitDown,
     Review,
     Panel,
     Zoom,
     Close,
 }
 
-fn targets(strip: egui::Rect, _m: &CellMetrics, can_close: bool) -> Vec<(Target, egui::Rect)> {
-    let width = 25.0;
-    let right = (strip.right() - super::CORNER_LEFT_TO_THE_GRAB).max(strip.left());
-    let count = if can_close { 4 } else { 2 };
-    let left = right - count as f32 * width;
-    if left - strip.left() < 30.0 {
-        return vec![(Target::Label, strip)];
+/// Which controls a header carries. Painting and pressing build it with this one constructor
+/// (D99), each from its own inputs; `a_split_that_cannot_fit_is_not_offered…` presses where a
+/// split is and is not painted.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct Offer {
+    can_close: bool,
+    split: [bool; 2],
+}
+
+impl Offer {
+    /// `rect` is the pane's padded view rectangle, the one both passes receive. A maximized console
+    /// offers no split: its view fills the area while the split judges the tree, and the titlebar's
+    /// split already acts on it because it is the focused one (D66).
+    pub(crate) fn of(
+        rect: egui::Rect,
+        metrics: &CellMetrics,
+        headers: super::Headers,
+        can_close: bool,
+        zoomed: bool,
+    ) -> Self {
+        let fits =
+            |along| !zoomed && crate::tiling::can_split_content(rect, along, metrics, headers);
+        Self {
+            can_close,
+            split: [
+                fits(crate::tiling::Orientation::Columns),
+                fits(crate::tiling::Orientation::Rows),
+            ],
+        }
     }
-    let mut out = vec![(
+}
+
+const CELL: f32 = 25.0;
+/// What the title keeps before any control is laid out beside it.
+const TITLE_MINIMUM: f32 = 30.0;
+
+/// Where each target sits, and the x of each rule between groups.
+struct Layout {
+    targets: Vec<(Target, egui::Rect)>,
+    separators: Vec<f32>,
+}
+
+fn layout(strip: egui::Rect, offer: Offer) -> Layout {
+    let right = (strip.right() - super::CORNER_LEFT_TO_THE_GRAB).max(strip.left());
+    let mut base = vec![Target::Review, Target::Panel];
+    if offer.can_close {
+        base.extend([Target::Zoom, Target::Close]);
+    }
+    let room = right - strip.left() - TITLE_MINIMUM;
+    if room < base.len() as f32 * CELL {
+        return Layout {
+            targets: vec![(Target::Label, strip)],
+            separators: Vec::new(),
+        };
+    }
+    // The splits are the first to go when the header is narrow: they are also in the titlebar.
+    let splits: Vec<Target> = [Target::SplitRight, Target::SplitDown]
+        .into_iter()
+        .zip(offer.split)
+        .filter_map(|(target, offered)| offered.then_some(target))
+        .take(((room / CELL) as usize).saturating_sub(base.len()))
+        .collect();
+    let order: Vec<Target> = splits.iter().copied().chain(base).collect();
+    let left = right - order.len() as f32 * CELL;
+    let cell = |i: usize| {
+        let x = left + i as f32 * CELL;
+        egui::Rect::from_min_max(
+            egui::pos2(x, strip.top()),
+            egui::pos2(x + CELL, strip.bottom()),
+        )
+    };
+    let mut separators = Vec::new();
+    if !splits.is_empty() {
+        separators.push(left + splits.len() as f32 * CELL);
+    }
+    if offer.can_close {
+        separators.push(right - 2.0 * CELL);
+    }
+    let mut targets = vec![(
         Target::Label,
         egui::Rect::from_min_max(strip.min, egui::pos2(left, strip.bottom())),
     )];
-    for (i, target) in [Target::Review, Target::Panel, Target::Zoom, Target::Close]
-        .into_iter()
-        .filter(|target| !matches!(target, Target::Zoom | Target::Close) || can_close)
-        .enumerate()
-    {
-        let x = left + i as f32 * width;
-        out.push((
-            target,
-            egui::Rect::from_min_max(
-                egui::pos2(x, strip.top()),
-                egui::pos2(x + width, strip.bottom()),
-            ),
-        ));
+    targets.extend(
+        order
+            .into_iter()
+            .enumerate()
+            .map(|(i, target)| (target, cell(i))),
+    );
+    Layout {
+        targets,
+        separators,
     }
-    out
 }
 
-pub(crate) fn hit(
-    strip: egui::Rect,
-    m: &CellMetrics,
-    can_close: bool,
-    at: egui::Pos2,
-) -> Option<Target> {
-    targets(strip, m, can_close)
+/// Which cell of the header lies under `at`. Whether a control there may be pressed is the
+/// caller's question ([`revealed`]): one that was not seen is the title's (D99).
+pub(crate) fn hit(strip: egui::Rect, offer: Offer, at: egui::Pos2) -> Option<Target> {
+    let inside =
+        |rect: egui::Rect| rect.contains(at) && at.x < rect.right() && at.y < rect.bottom();
+    layout(strip, offer)
+        .targets
         .into_iter()
-        .find_map(|(target, rect)| {
-            (rect.contains(at) && at.x < rect.right() && at.y < rect.bottom()).then_some(target)
-        })
+        .find_map(|(target, rect)| inside(rect).then_some(target))
+}
+
+fn painted_id(name: usize) -> egui::Id {
+    egui::Id::new(("integrated-header-revealed", name))
+}
+
+/// Whether the controls of console `name`'s header were painted in the pass before this one.
+///
+/// **A frame number and not a flag**: a console that stops being painted — a hidden sibling, a tab
+/// in the background, or one the pointer left a moment ago — keeps its last number, which is then
+/// too old to count. A press in the same pass that brought the pointer onto the header finds the
+/// previous pass's number, not its own, because the pointer is handled before the panes are painted;
+/// `a_hidden_close_cannot_be_pressed_until_it_was_painted` fails if that order is ever reversed.
+pub(crate) fn revealed(ctx: &egui::Context, name: usize) -> bool {
+    let now = ctx.cumulative_frame_nr();
+    ctx.data(|data| data.get_temp::<u64>(painted_id(name)))
+        .is_some_and(|painted| painted + 1 == now)
 }
 
 struct Appearance<'a> {
+    /// The console's name, which keys the record of the pass its controls were painted in.
+    name: usize,
     agent: Option<crate::agent_signals::View>,
     label: &'a str,
     title_size: f32,
-    can_close: bool,
+    offer: Offer,
     zoomed: bool,
     folded: bool,
     /// Whether this console is the one the window hands its keys to.
@@ -222,18 +313,13 @@ fn colors(roles: &crate::theme::Roles, ink: Option<Color32>, focused: bool) -> C
     }
 }
 
-fn paint(
-    ui: &egui::Ui,
-    strip: egui::Rect,
-    m: &CellMetrics,
-    theme: &Theme,
-    appearance: Appearance<'_>,
-) {
+fn paint(ui: &egui::Ui, strip: egui::Rect, theme: &Theme, appearance: Appearance<'_>) {
     let Appearance {
+        name,
         agent,
         label,
         title_size,
-        can_close,
+        offer,
         zoomed,
         folded,
         focused,
@@ -262,9 +348,42 @@ fn paint(
     let text = colors.text;
     let font = egui::FontId::proportional(title_size);
     let name_font = egui::FontId::new(title_size, crate::fonts::ui_weight(ui.ctx(), 600));
-    for (target, rect) in targets(strip, m, can_close) {
+    let layout = layout(strip, offer);
+    // Only the focused console shows its controls all the time; another shows them while the
+    // pointer is over its header. Hidden ones keep their cells, so the title never moves (D99).
+    let shown = focused || ui.rect_contains_pointer(strip);
+    if shown {
+        let frame = ui.ctx().cumulative_frame_nr();
+        let previous = ui.ctx().data_mut(|data| {
+            let previous = data.get_temp::<u64>(painted_id(name));
+            data.insert_temp(painted_id(name), frame);
+            previous
+        });
+        // egui hit-tests a pass against the widgets of the one before, where these did not exist:
+        // one more pass gives the control under a still pointer its hover and its tooltip.
+        if previous.is_none_or(|painted| painted + 1 < frame) {
+            ui.ctx().request_repaint();
+        }
+        for x in &layout.separators {
+            painter.line_segment(
+                [
+                    egui::pos2(*x, strip.center().y - 7.0),
+                    egui::pos2(*x, strip.center().y + 7.0),
+                ],
+                // The ink of the title's own « / » separator: the border role the titlebar uses was
+                // reported barely visible on a header's tinted surface (18 November 2026).
+                egui::Stroke::new(1.0, colors.separator),
+            );
+        }
+    }
+    for (target, rect) in layout.targets {
+        if target != Target::Label && !shown {
+            continue;
+        }
         let tooltip = match target {
             Target::Label => "Double-click to rename",
+            Target::SplitRight => "Split right",
+            Target::SplitDown => "Split down",
             Target::Review => "Review changes",
             Target::Panel if folded => "Show information panel",
             Target::Panel => "Hide information panel",
@@ -380,6 +499,8 @@ pub(crate) fn paint_icon(
 ) {
     use crate::ui::icons::{Icon, paint};
     let icon = match target {
+        Target::SplitRight => Icon::SplitRight,
+        Target::SplitDown => Icon::SplitDown,
         Target::Review => Icon::Branch,
         Target::Panel => Icon::Panel,
         Target::Zoom if zoomed => Icon::Collapse,
@@ -393,6 +514,18 @@ pub(crate) fn paint_icon(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A header offering no split: the set every test before D99 was written against.
+    fn no_splits(can_close: bool) -> Offer {
+        Offer {
+            can_close,
+            split: [false; 2],
+        }
+    }
+
+    fn targets(strip: egui::Rect, _m: &CellMetrics, can_close: bool) -> Vec<(Target, egui::Rect)> {
+        layout(strip, no_splits(can_close)).targets
+    }
 
     #[test]
     fn a_console_without_an_agent_is_named_by_its_folder_and_program() {
@@ -521,13 +654,13 @@ mod tests {
             paint(
                 ui,
                 strip,
-                &CellMetrics::of(8.0, 16.0),
                 &Theme::default(),
                 Appearance {
                     agent: None,
                     label: "Review changes",
                     title_size: 32.0,
-                    can_close: true,
+                    name: 0,
+                    offer: no_splits(true),
                     zoomed: false,
                     folded: false,
                     focused: true,
@@ -582,7 +715,8 @@ mod tests {
             agent,
             label: "Fix login",
             title_size: 12.0,
-            can_close: true,
+            name: 0,
+            offer: no_splits(true),
             zoomed: false,
             folded: false,
             focused,
@@ -622,7 +756,6 @@ mod tests {
                 paint(
                     ui,
                     strip,
-                    &metrics,
                     &Theme::default(),
                     appearance(Some(&badge), focused, None),
                 );
@@ -663,13 +796,7 @@ mod tests {
         assert!(badge.painted.load(std::sync::atomic::Ordering::Relaxed));
         // Without a project there is no stripe and the task starts after the same inset.
         let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
-            paint(
-                ui,
-                strip,
-                &metrics,
-                &Theme::default(),
-                appearance(None, true, None),
-            );
+            paint(ui, strip, &Theme::default(), appearance(None, true, None));
         });
         out.textures_delta.clear();
         assert!(
@@ -740,7 +867,6 @@ mod tests {
             paint(
                 ui,
                 strip,
-                &CellMetrics::of(8.0, 16.0),
                 &Theme::default(),
                 appearance(Some(&badge), false, None),
             );
@@ -780,7 +906,6 @@ mod tests {
                         paint(
                             ui,
                             strip,
-                            &metrics,
                             &Theme::default(),
                             appearance(
                                 Some(&badge(rgb(0x43c071))),
@@ -873,7 +998,6 @@ mod tests {
                     paint(
                         ui,
                         egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(500.0, 28.0)),
-                        &CellMetrics::of(8.0, 16.0),
                         &theme,
                         appearance(
                             Some(&badge),
@@ -931,7 +1055,7 @@ mod tests {
                 .filter(|(t, _)| *t == Target::Zoom)
             {
                 assert!(!matches!(
-                    hit(strip, &m, false, rect.center()),
+                    hit(strip, no_splits(false), rect.center()),
                     Some(Target::Zoom)
                 ));
             }
@@ -947,6 +1071,167 @@ mod tests {
         }
     }
 
+    fn kinds(strip: egui::Rect, offer: Offer) -> Vec<Target> {
+        layout(strip, offer)
+            .targets
+            .into_iter()
+            .map(|(t, _)| t)
+            .collect()
+    }
+
+    fn strip_of(width: f32) -> egui::Rect {
+        egui::Rect::from_min_size(egui::pos2(10.0, 0.0), egui::vec2(width, 28.0))
+    }
+
+    /// D99's three groups, in order, with a rule on each boundary between them.
+    #[test]
+    fn a_header_lays_out_its_three_groups_with_a_rule_between_each() {
+        let strip = strip_of(500.0);
+        let both = |can_close| Offer {
+            can_close,
+            split: [true, true],
+        };
+        let full = layout(strip, both(true));
+        assert_eq!(
+            full.targets.iter().map(|(t, _)| *t).collect::<Vec<_>>(),
+            vec![
+                Target::Label,
+                Target::SplitRight,
+                Target::SplitDown,
+                Target::Review,
+                Target::Panel,
+                Target::Zoom,
+                Target::Close
+            ]
+        );
+        let at = |t| full.targets.iter().find(|(x, _)| *x == t).unwrap().1;
+        assert_eq!(
+            full.separators,
+            vec![at(Target::SplitDown).right(), at(Target::Panel).right()]
+        );
+        assert_eq!(at(Target::SplitDown).right(), at(Target::Review).left());
+        assert_eq!(at(Target::Panel).right(), at(Target::Zoom).left());
+        let lone = layout(strip, both(false));
+        assert_eq!(
+            lone.targets.iter().map(|(t, _)| *t).collect::<Vec<_>>(),
+            vec![
+                Target::Label,
+                Target::SplitRight,
+                Target::SplitDown,
+                Target::Review,
+                Target::Panel
+            ]
+        );
+        assert_eq!(lone.separators.len(), 1);
+    }
+
+    /// The title keeps 30 points: the base comes first, a split only after it, and below the base
+    /// the header is the title alone. Strip widths with the 6-point corner, at ±1 point.
+    #[test]
+    fn a_narrow_header_drops_its_splits_before_the_rest() {
+        for (can_close, label_only, base, with_split) in
+            [(true, 135.0, 136.0, 161.0), (false, 85.0, 86.0, 111.0)]
+        {
+            let offer = Offer {
+                can_close,
+                split: [false, true],
+            };
+            assert_eq!(kinds(strip_of(label_only), offer), vec![Target::Label]);
+            let base_set = kinds(strip_of(base), offer);
+            assert!(base_set.contains(&Target::Review) && base_set.contains(&Target::Panel));
+            assert!(!base_set.contains(&Target::SplitDown));
+            assert!(!kinds(strip_of(with_split - 1.0), offer).contains(&Target::SplitDown));
+            assert!(kinds(strip_of(with_split), offer).contains(&Target::SplitDown));
+        }
+    }
+
+    /// The offer is the split's own predicate on the padded rectangle, at its threshold, and a
+    /// maximized console offers none.
+    #[test]
+    fn the_offer_follows_the_split_threshold_and_a_maximized_console_offers_none() {
+        let m = CellMetrics::of(8.0, 16.0);
+        let headers = super::super::Headers::PAINTED.integrated(true);
+        let minimum = 3.0 * 16.0 + 16.0 + 28.0 + 5.0;
+        let threshold = 2.0 * minimum + crate::DIVIDER_THICKNESS;
+        let content = |height| {
+            crate::pane_view::padded_rect(
+                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, height)),
+                true,
+            )
+        };
+        let strip = strip_of(300.0);
+        let below = Offer::of(content(threshold - 1.0), &m, headers, true, false);
+        let at = Offer::of(content(threshold), &m, headers, true, false);
+        assert!(!kinds(strip, below).contains(&Target::SplitDown));
+        assert!(kinds(strip, at).contains(&Target::SplitDown));
+        let zoomed = Offer::of(content(threshold + 400.0), &m, headers, true, true);
+        assert!(
+            !kinds(strip_of(900.0), zoomed)
+                .iter()
+                .any(|t| matches!(t, Target::SplitRight | Target::SplitDown))
+        );
+    }
+
+    /// The pass in which a header's controls first appear asks for exactly one more, so the control
+    /// under a still pointer gets its hover; a header that stays shown asks for none.
+    #[test]
+    fn controls_appearing_ask_for_one_more_pass_and_staying_asks_for_none() {
+        let ctx = egui::Context::default();
+        let strip = strip_of(500.0);
+        let pass = |focused: bool| {
+            let out = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let mut look = appearance(None, focused, None);
+                look.name = 7;
+                paint(ui, strip, &Theme::default(), look);
+            });
+            let asked = out
+                .viewport_output
+                .get(&egui::ViewportId::ROOT)
+                .is_some_and(|v| v.repaint_delay == std::time::Duration::ZERO);
+            out.drop_without_applying_deltas();
+            asked
+        };
+        pass(false);
+        pass(false);
+        assert!(!pass(false), "a hidden header asked for a pass");
+        assert!(
+            pass(true),
+            "controls that just appeared did not ask for one more pass"
+        );
+        // egui answers one request with the pass it asked for, which still reports it; after that
+        // a header that stays shown must leave the window at rest.
+        pass(true);
+        assert!(
+            !pass(true),
+            "a header that stays shown keeps waking the window"
+        );
+        assert!(
+            !pass(true),
+            "a header that stays shown keeps waking the window"
+        );
+    }
+
+    /// Every control cell answers its own target, and nothing outside the cells does.
+    #[test]
+    fn each_control_cell_answers_its_own_target() {
+        let strip = strip_of(500.0);
+        let offer = Offer {
+            can_close: true,
+            split: [true, true],
+        };
+        for (target, rect) in layout(strip, offer).targets {
+            assert_eq!(hit(strip, offer, rect.center()), Some(target));
+        }
+        assert_eq!(
+            hit(
+                strip,
+                offer,
+                egui::pos2(strip.left() - 1.0, strip.center().y)
+            ),
+            None
+        );
+    }
+
     #[test]
     fn narrow_header_keeps_a_reachable_label_without_overflow_buttons() {
         let m = CellMetrics::of(8.0, 16.0);
@@ -954,7 +1239,7 @@ mod tests {
         let items = targets(strip, &m, true);
         assert_eq!(items.len(), 1);
         assert!(matches!(
-            hit(strip, &m, true, items[0].1.center()),
+            hit(strip, no_splits(true), items[0].1.center()),
             Some(Target::Label)
         ));
     }
