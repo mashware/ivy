@@ -874,6 +874,16 @@ const SOURCES: &[(&str, &str, usize)] = &[
         87,
     ),
     (
+        "src/painter/box_drawing.rs",
+        include_str!("../src/painter/box_drawing.rs"),
+        0,
+    ),
+    (
+        "src/painter/box_drawing/tests.rs",
+        include_str!("../src/painter/box_drawing/tests.rs"),
+        0,
+    ),
+    (
         "src/painter/emoji.rs",
         include_str!("../src/painter/emoji.rs"),
         30,
