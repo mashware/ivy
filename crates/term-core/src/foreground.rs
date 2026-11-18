@@ -10,6 +10,12 @@ mod macos;
 #[cfg(all(test, target_os = "linux"))]
 mod tests;
 
+/// Any process's current directory, unattested: the caller owns the liveness guard.
+#[cfg(target_os = "macos")]
+pub(crate) fn current_directory(pid: u32) -> io::Result<PathBuf> {
+    macos::current_directory(pid)
+}
+
 #[cfg(test)]
 mod ancestry_tests {
     use super::{Ancestry, classify_snapshots};
