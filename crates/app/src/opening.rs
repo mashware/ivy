@@ -293,6 +293,7 @@ fn initial_window(
         desktop: crate::links::Desktop::System,
         control,
         reflow: measure::Reflow::default(),
+        launch_cost: Default::default(),
         persistence: session::Persistence::at(None),
         restoring: None,
         reading_settings: measure::ReadingSettings::default(),
@@ -620,17 +621,21 @@ fn launch(
         identity.extend(prepared.env());
     }
     let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
-    let (pty, output) =
-        match Pty::spawn_with_env_in(program, &borrowed, INITIAL_GRID, &identity, directory) {
-            Ok(spawned) => spawned,
-            Err(failure) if fallback => {
-                eprintln!(
-                    "'{program}' could not be launched ({failure}); opening {FALLBACK_SHELL}"
-                );
-                Pty::spawn_with_env_in(FALLBACK_SHELL, &[], INITIAL_GRID, &identity, directory)?
-            }
-            Err(failure) => return Err(failure),
-        };
+    let launch_waker = ctx.clone();
+    let (mut pty, output) = crate::launch::Process::start(
+        std::sync::Arc::new(move || launch_waker.request_repaint()),
+        reads.clone(),
+        crate::launch::Request {
+            program,
+            args: &borrowed,
+            size: INITIAL_GRID,
+            env: &identity,
+            directory,
+            fallback,
+        },
+    )?;
+
+    pty.context = Some(ctx.clone());
 
     #[cfg(test)]
     crate::tests::completed_operation(crate::tests::OperationWork::Launch);
@@ -651,16 +656,20 @@ fn launch(
         .foreground_scope()
         .map(panel::provenance_route::inspector)
         .unwrap_or_else(|_| panel::provenance_route::unavailable());
-    let (panel_state, control) = panel::pane::state_and_control_with_authority(
-        ctx,
-        panel.as_ref(),
-        reads,
-        Some(callback),
-        pty.foreground_scope()
-            .ok()
-            .map(crate::panel::overlay::Authority::new),
-        provenance_inspector,
-    );
+    let (panel_state, control) = if pty.pending() {
+        (panel::PanelState::default(), None)
+    } else {
+        panel::pane::state_and_control_with_authority(
+            ctx,
+            panel.as_ref(),
+            reads,
+            Some(callback),
+            pty.foreground_scope()
+                .ok()
+                .map(crate::panel::overlay::Authority::new),
+            provenance_inspector,
+        )
+    };
 
     Ok(Pane {
         signals: Default::default(),
@@ -849,4 +858,39 @@ mod tests {
             assert_eq!(viewport(false, macos), egui::ViewportBuilder::default());
         }
     }
+}
+
+pub(crate) fn insist_on_size(window: &mut Window, ctx: &egui::Context) {
+    let Some(requested) = &mut window.requested_size else {
+        return;
+    };
+
+    let how_much = requested.how_much;
+    if (window.window_size - how_much).abs().max_elem() <= SIZE_TOLERANCE {
+        return;
+    }
+
+    if requested.attempts == 0 {
+        window.requested_size = None;
+        // **It is said out loud, and on the error output of the process that measures.**
+        // Whoever takes the batch has to know that the size they asked for is not the one there
+        // was; the report publishes the one there was, so between the two things no room is
+        // left to believe a measurement that cannot be reproduced.
+        //
+        // **And it is timed**, even though it happens only once in the session: writing to the
+        // error output costs whatever whoever reads at the other end of the pipe takes, happens
+        // inside the frame's pass and no pane declares it. It is the same as the two warnings
+        // for splitting and closing already do.
+        let before = Instant::now();
+        eprintln!(
+            "the desktop is not honouring the size asked for ({}x{} points): the window stays at {}x{} \
+                 and the batches will not be comparable with other machines",
+            how_much.x, how_much.y, window.window_size.x, window.window_size.y
+        );
+        window.timed_separately += before.elapsed();
+        return;
+    }
+
+    requested.attempts -= 1;
+    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(how_much));
 }

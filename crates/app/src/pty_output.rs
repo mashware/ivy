@@ -521,10 +521,13 @@ impl crate::Pane {
 }
 
 fn pump_pane(pane: &mut crate::Pane, enabled: crate::agent_signals::Enabled) -> bool {
+    crate::launch::refresh(pane);
     pane.received.clear();
-    let pickup = pane
-        .pty_output
-        .pick_up(&mut pane.received, PUMP_BUDGET, Silences::of(&pane.pty));
+    let pickup = pane.pty_output.pick_up(
+        &mut pane.received,
+        PUMP_BUDGET,
+        crate::launch::silences(&pane.pty),
+    );
     // **One clock and not two.** The stamp of when the bytes were collected is also the start of
     // interpreting them: between the two there was nothing, and a second `Instant::now()` only
     // added a reading of its own to the span it was meant to measure.
@@ -591,12 +594,14 @@ pub(crate) fn pump_all(window: &mut crate::Window) -> crate::Pump {
     // recorded **once**: what has to be readable is what attending to a width change cost one
     // frame, and one divider moves two consoles at a time.
     let mut reflowed = std::time::Duration::ZERO;
+    let mut launches = std::time::Duration::ZERO;
 
     let agent_preferences = window.chrome.agent_preferences;
     for pane in window.all_panes_mut() {
         // First what is pending is interpreted and afterwards the size is changed: the program
         // wrote those bytes for the dimensions it does not yet know have changed.
         let queue_left = pane.pump(agent_preferences);
+        launches += crate::launch::take_cost(&mut pane.pty);
         pane.resize();
         reflowed += std::mem::take(&mut pane.reflowed);
 
@@ -606,6 +611,9 @@ pub(crate) fn pump_all(window: &mut crate::Window) -> crate::Pump {
 
     // **Only when there really was a reflow.** Recording a zero on the thousands of still
     // frames would sink the average and make this span say the opposite of what it is worth.
+    window.launch_cost.calls += 1;
+    window.launch_cost.total += launches;
+    window.timed_separately += launches;
     if !reflowed.is_zero() {
         window.reflow.record(reflowed);
         window.timed_separately += reflowed;

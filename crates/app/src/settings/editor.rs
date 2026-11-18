@@ -583,11 +583,8 @@ mod tests {
                 let mut output = Vec::new();
                 let expected = b"downgrade-shell-output";
                 while Instant::now() < deadline {
-                    pane.pty_output.pick_up(
-                        &mut output,
-                        65536,
-                        crate::pty_output::Silences::of(&pane.pty),
-                    );
+                    pane.pty_output
+                        .pick_up(&mut output, 65536, crate::launch::silences(&pane.pty));
                     if output
                         .windows(expected.len())
                         .any(|bytes| bytes == expected)

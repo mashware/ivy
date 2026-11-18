@@ -284,6 +284,11 @@ impl Window {
         // **And of the tab that was being seen, because it is the only one whose divider and focus
         // mean anything**: in one that is not painted the divider is not dragged and nothing is
         // typed.
+        writeln!(
+            to,
+            "console launch/status: {} sweeps, {:?} total",
+            self.launch_cost.calls, self.launch_cost.total
+        )?;
         let visible = self.active();
         // **Every divider and how many there are, not just the first.** Since splitting is
         // possible, three consoles are one gesture away, and a line publishing the first fraction
