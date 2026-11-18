@@ -22,6 +22,8 @@ const GAP: f32 = 2.0;
 const PADDING: f32 = 10.0;
 /// What a card too narrow for [`PADDING`] keeps on each side, and between its pill and label.
 const TIGHT: f32 = 4.0;
+/// The accent line along the open tab's top edge.
+const ACCENT_LINE: f32 = 2.0;
 const DOT: f32 = 6.0;
 const DOT_GAP: f32 = 3.0;
 /// The close target's width at the card's right edge.
@@ -280,6 +282,15 @@ pub(super) fn paint(window: &Window, ui: &egui::Ui, band: Rect, now: SystemTime)
                 0.0,
                 roles.base,
             );
+        } else {
+            // At rest an inactive tab is a card of its own, halfway between the bar and the
+            // console, so a row of them reads as tabs and not as loose labels. The hover and held
+            // feedback below paints over it.
+            painter.rect_filled(
+                Rect::from_min_max(card.min, pos2(card.right(), card.bottom() - 1.0)),
+                top,
+                roles.chrome.lerp_to_gamma(roles.base, 0.5),
+            );
         }
         // The whole card's shape, short of the bar's bottom line, which stays drawn under it.
         let (fill, held) = feedback_fill(ui, feedback::id(ui, tab.name, "body"), &roles);
@@ -290,6 +301,14 @@ pub(super) fn paint(window: &Window, ui: &egui::Ui, band: Rect, now: SystemTime)
                 Rect::from_min_max(card.min, pos2(card.right(), card.bottom() - 1.0)),
                 top,
                 fill,
+            );
+        }
+        // Painted after the feedback, so a held press does not cover which tab is the open one.
+        if active {
+            painter.rect_filled(
+                Rect::from_min_max(card.min, pos2(card.right(), card.top() + ACCENT_LINE)),
+                top,
+                roles.accent,
             );
         }
         let attention = tab.attention(now);

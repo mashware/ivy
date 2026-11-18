@@ -1823,15 +1823,18 @@ mod tests {
                 })
                 .collect::<Vec<_>>()
         };
-        // An inactive tab is transparent until hovered; the hover surface and the held one are
-        // Ivy Night's `hover` and `line2`, written out.
-        assert!(
-            fills(&baseline).is_empty(),
-            "an idle inactive tab is filled"
+        // An idle inactive tab is a card of its own, halfway between Ivy Night's chrome #0F1315
+        // and its console #13181B; the hover surface and the held one are its `hover` and
+        // `line2`, painted over that card. All written out.
+        let resting = egui::Color32::from_rgb(0x11, 0x16, 0x18);
+        assert_eq!(
+            fills(&baseline),
+            vec![resting],
+            "an idle inactive tab has no card of its own"
         );
         assert_eq!(
             fills(&hover),
-            vec![egui::Color32::from_rgb(0x26, 0x2b, 0x2d)]
+            vec![resting, egui::Color32::from_rgb(0x26, 0x2b, 0x2d)]
         );
         // The whole card, cross included, short of the bar's bottom line.
         let card = title_card(&window, &ctx, area, 1);
@@ -1840,15 +1843,31 @@ mod tests {
                 && r.rect == egui::Rect::from_min_max(card.min, egui::pos2(card.right(), card.bottom() - 1.0)))));
         assert_eq!(
             fills(&held),
-            vec![egui::Color32::from_rgb(0x37, 0x3b, 0x3d)]
+            vec![resting, egui::Color32::from_rgb(0x37, 0x3b, 0x3d)]
         );
         assert_eq!(window.active, 0);
+        // Ivy Night's accent, written out: the open tab's line along its top edge.
+        let accent = egui::Color32::from_rgb(0x3c, 0xc3, 0x84);
+        let open = title_card(&window, &ctx, area, 0);
         for shapes in [&baseline, &hover, &held] {
             assert!(
                 shapes.iter().any(|s| matches!(&s.shape,
                     egui::Shape::Rect(r) if r.fill == ACTIVE_TAB && r.rect.height() == 34.0
                 )),
                 "the selected tab lost its surface"
+            );
+            assert!(
+                shapes.iter().any(|s| matches!(&s.shape,
+                    egui::Shape::Rect(r) if r.fill == accent
+                        && r.rect == egui::Rect::from_min_max(open.min, egui::pos2(open.right(), open.top() + 2.0))
+                )),
+                "the open tab has no accent line along its top edge"
+            );
+            assert!(
+                !shapes.iter().any(|s| matches!(&s.shape,
+                    egui::Shape::Rect(r) if r.fill == accent && r.rect.intersects(card)
+                )),
+                "an inactive tab carries the accent line"
             );
         }
     }
