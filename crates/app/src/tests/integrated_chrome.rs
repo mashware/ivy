@@ -2043,10 +2043,7 @@ mod tests {
         let area = area_of(1400.0);
         frame(&mut window, &ctx, area, vec![]);
         let shapes = frame(&mut window, &ctx, area, vec![]);
-        for (which, expected) in [
-            (0, vec![(0, WAIT)]),
-            (1, vec![(0, BLOCK), (1, DONE)]),
-        ] {
+        for (which, expected) in [(0, vec![(0, WAIT)]), (1, vec![(0, BLOCK), (1, DONE)])] {
             let card = title_card(&window, &ctx, area, which);
             // Laid out with the cross's room whether or not it shows, as every card with a sibling.
             let (label, dots) = tab_bar::title_label_and_dots(card, 2, true);
@@ -2062,19 +2059,21 @@ mod tests {
                     "tab {which}: the ring is not on dot {n}"
                 );
             }
-            // No pill and no muted dot where the summary used to be: the label starts at the
-            // card's padding and nothing is painted between the card's edge and it.
+            // No pill and no muted dot where the summary used to be — the card's first 36 points,
+            // its padding, the 18-point pill and its gap — and the label starts at the padding.
+            // Only the label's text and the card-wide surfaces (fill, hover, accent) may touch it.
             assert_eq!(label.left(), card.left() + 10.0, "tab {which}");
-            let left_of_label = egui::Rect::from_min_max(card.min, egui::pos2(label.left(), card.bottom()));
+            let old_slot =
+                egui::Rect::from_min_max(card.min, egui::pos2(card.left() + 36.0, card.bottom()));
+            let stray: Vec<_> = shapes
+                .iter()
+                .filter(|s| !matches!(s.shape, egui::Shape::Text(_)))
+                .map(|s| s.shape.visual_bounding_rect())
+                .filter(|r| r.width() <= 18.0 && r.intersects(old_slot))
+                .collect();
             assert!(
-                !shapes.iter().any(|s| match &s.shape {
-                    egui::Shape::Rect(r) =>
-                        r.rect.width() <= 18.0 && left_of_label.contains_rect(r.rect),
-                    egui::Shape::Circle(c) => left_of_label.contains(c.center),
-                    egui::Shape::Vec(_) => left_of_label.contains_rect(s.clip_rect),
-                    _ => false,
-                }),
-                "tab {which}: something is still painted left of the label"
+                stray.is_empty(),
+                "tab {which}: painted in the old pill's slot: {stray:?}"
             );
         }
         assert_eq!(window.tab_bar_cost.marked_tabs, 2);
@@ -2094,9 +2093,14 @@ mod tests {
         frame(&mut window, &ctx, area, vec![]);
         let shapes = frame(&mut window, &ctx, area, vec![]);
         let rings = rings_in(&shapes, title_card(&window, &ctx, area, 1));
-        let dimmed = window.theme.attention_color(panel_contract::Attention::Block, false);
+        let dimmed = window
+            .theme
+            .attention_color(panel_contract::Attention::Block, false);
         assert_ne!(dimmed, BLOCK);
         assert_eq!(rings.iter().map(|r| r.2).collect::<Vec<_>>(), vec![dimmed]);
+        // The control inside: the first card paints its dots and claims nothing, so it is not marked.
+        assert!(rings_in(&shapes, title_card(&window, &ctx, area, 0)).is_empty());
+        assert_eq!(window.tab_bar_cost.marked_tabs, 1);
     }
 
     /// A card too narrow for its dots shows no claim at all (the owner's choice, D96 amended): no

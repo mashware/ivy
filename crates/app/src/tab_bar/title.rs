@@ -147,7 +147,12 @@ pub(super) fn cards<'a>(
 
 impl Layout {
     pub fn new(card: Rect, dots: usize, close: bool) -> Self {
-        let padding = if card.width() >= ROOMY { PADDING } else { TIGHT }.min(card.width() / 2.0);
+        let padding = if card.width() >= ROOMY {
+            PADDING
+        } else {
+            TIGHT
+        }
+        .min(card.width() / 2.0);
         let close = (close && card.width() >= CLOSE_MIN_WIDTH).then(|| {
             Rect::from_min_max(
                 pos2(card.right() - CLOSE_WIDTH, card.top()),
@@ -476,7 +481,9 @@ mod tests {
     #[test]
     fn four_dots_with_their_rings_fit_down_to_a_119_point_card() {
         let at = |width: f32| Rect::from_min_size(pos2(0.0, 6.0), vec2(width, 34.0));
-        let fits = Layout::new(at(119.0), 4, true).dots.expect("119 points hold four dots");
+        let fits = Layout::new(at(119.0), 4, true)
+            .dots
+            .expect("119 points hold four dots");
         assert_eq!(fits.width(), 51.0);
         assert_eq!(dot_center(fits, 1).x - dot_center(fits, 0).x, 13.0);
         assert!(Layout::new(at(118.0), 4, true).dots.is_none());
