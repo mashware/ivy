@@ -1063,6 +1063,24 @@ mod tests {
                 if closes { 1 } else { 2 },
                 "{case}"
             );
+            if before == 0 {
+                // The second click of a double click aimed at what looked like the title: the
+                // first one focused the console and its controls are painted now, close included.
+                assert!(
+                    strokes_in(
+                        &frame(&mut window, &ctx, area, vec![]),
+                        control_cells(&window, &ctx, area, 1)
+                    ) > 0,
+                    "the controls are not shown after the first press"
+                );
+                frame(&mut window, &ctx, area, click_at(close));
+                frame(&mut window, &ctx, area, vec![]);
+                assert_eq!(
+                    window.active().panes().len(),
+                    2,
+                    "the second click of a double click closed the console"
+                );
+            }
         }
     }
 

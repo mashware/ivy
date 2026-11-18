@@ -125,8 +125,9 @@ pub(crate) enum Target {
     Close,
 }
 
-/// Which controls a header carries. **Painting and pressing build it with this one constructor**,
-/// so a split cannot be drawn where a press would be refused, or the other way round (D99).
+/// Which controls a header carries. Painting and pressing build it with this one constructor
+/// (D99), each from its own inputs; `a_split_that_cannot_fit_is_not_offered…` presses where a
+/// split is and is not painted.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) struct Offer {
     can_close: bool,
@@ -218,22 +219,15 @@ fn layout(strip: egui::Rect, offer: Offer) -> Layout {
     }
 }
 
-/// What a press at `at` reaches. `revealed` is whether this header's controls were painted in the
-/// previous pass ([`revealed`]): where they were not, their cells are the title's, so a press cannot
-/// act on a control nobody saw — D96's rule for the tab close, applied here by D99.
-pub(crate) fn hit(
-    strip: egui::Rect,
-    offer: Offer,
-    revealed: bool,
-    at: egui::Pos2,
-) -> Option<Target> {
+/// Which cell of the header lies under `at`. Whether a control there may be pressed is the
+/// caller's question ([`revealed`]): one that was not seen is the title's (D99).
+pub(crate) fn hit(strip: egui::Rect, offer: Offer, at: egui::Pos2) -> Option<Target> {
     let inside =
         |rect: egui::Rect| rect.contains(at) && at.x < rect.right() && at.y < rect.bottom();
-    let target = layout(strip, offer)
+    layout(strip, offer)
         .targets
         .into_iter()
-        .find_map(|(target, rect)| inside(rect).then_some(target))?;
-    Some(if revealed { target } else { Target::Label })
+        .find_map(|(target, rect)| inside(rect).then_some(target))
 }
 
 fn painted_id(name: usize) -> egui::Id {
@@ -360,8 +354,16 @@ fn paint(ui: &egui::Ui, strip: egui::Rect, theme: &Theme, appearance: Appearance
     let shown = focused || ui.rect_contains_pointer(strip);
     if shown {
         let frame = ui.ctx().cumulative_frame_nr();
-        ui.ctx()
-            .data_mut(|data| data.insert_temp(painted_id(name), frame));
+        let previous = ui.ctx().data_mut(|data| {
+            let previous = data.get_temp::<u64>(painted_id(name));
+            data.insert_temp(painted_id(name), frame);
+            previous
+        });
+        // egui hit-tests a pass against the widgets of the one before, where these did not exist:
+        // one more pass gives the control under a still pointer its hover and its tooltip.
+        if previous.is_none_or(|painted| painted + 1 < frame) {
+            ui.ctx().request_repaint();
+        }
         for x in &layout.separators {
             painter.line_segment(
                 [
@@ -1051,7 +1053,7 @@ mod tests {
                 .filter(|(t, _)| *t == Target::Zoom)
             {
                 assert!(!matches!(
-                    hit(strip, no_splits(false), true, rect.center()),
+                    hit(strip, no_splits(false), rect.center()),
                     Some(Target::Zoom)
                 ));
             }
@@ -1168,18 +1170,25 @@ mod tests {
         );
     }
 
-    /// Controls that were not painted in the previous pass are the title's to a press.
+    /// Every control cell answers its own target, and nothing outside the cells does.
     #[test]
-    fn a_header_not_revealed_gives_its_control_cells_to_the_title() {
+    fn each_control_cell_answers_its_own_target() {
         let strip = strip_of(500.0);
         let offer = Offer {
             can_close: true,
             split: [true, true],
         };
-        for (target, rect) in layout(strip, offer).targets.into_iter().skip(1) {
-            assert_eq!(hit(strip, offer, true, rect.center()), Some(target));
-            assert_eq!(hit(strip, offer, false, rect.center()), Some(Target::Label));
+        for (target, rect) in layout(strip, offer).targets {
+            assert_eq!(hit(strip, offer, rect.center()), Some(target));
         }
+        assert_eq!(
+            hit(
+                strip,
+                offer,
+                egui::pos2(strip.left() - 1.0, strip.center().y)
+            ),
+            None
+        );
     }
 
     #[test]
@@ -1189,7 +1198,7 @@ mod tests {
         let items = targets(strip, &m, true);
         assert_eq!(items.len(), 1);
         assert!(matches!(
-            hit(strip, no_splits(true), true, items[0].1.center()),
+            hit(strip, no_splits(true), items[0].1.center()),
             Some(Target::Label)
         ));
     }

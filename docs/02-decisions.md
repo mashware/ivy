@@ -8111,6 +8111,7 @@ after these runs; it can only shorten the marking, and the load's lines wrap ove
 on the left; close stays on the right and the centred grip keeps its space. The controls act on
 their pane by name. Splitting successfully focuses the newborn; toggling leaves focus where it was.
 An unavailable split is visibly disabled using the same minimum-size rule execution checks.
+(The integrated header omits an unavailable split instead, by **D99**; this strip keeps the rule.)
 
 **Why a press needs an owner until release.** D46 could rely on a closed widget disappearing before
 egui starts its drag. A panel toggle leaves that widget alive, and a held control press would
@@ -8388,7 +8389,7 @@ D64's existing begin-pass boundary without restarting any console.
 
 ## D66 — Integrated, theme-derived window chrome and transient pane maximization
 
-**8 November 2026 — #326.** The user approved the interactive HTML prototype: one global titlebar carries split-right/down, new tab, search and the application menu; tabs sit below; each pane carries an explicit label, information-panel toggle, maximize/restore and close. This approval is the new signal superseding D64's exclusion of custom titlebars.
+**8 November 2026 — #326.** The user approved the interactive HTML prototype: one global titlebar carries split-right/down, new tab, search and the application menu; tabs sit below; each pane carries an explicit label, information-panel toggle, maximize/restore and close. This approval is the new signal superseding D64's exclusion of custom titlebars. (Amended 18 November 2026 by **D99**: each pane also carries split right and split down.)
 
 Every chrome surface and ink derives from the effective configured Theme after named-template selection and explicit overrides. Live Save updates chrome alongside terminal colors. Copied prototype RGB literals and an independent chrome theme are discarded because they would ignore the user's settings.
 
@@ -10217,7 +10218,14 @@ on the focused console, stay. This **amends D66**, whose approved per-pane set h
   that header's controls were painted in the previous pass, the rule D96 gave the tab close. A move
   and a press in one input batch — a fast click, the first click into a window — otherwise reaches a
   close nobody saw. The pass is recorded by frame number, not a flag, so a console that stopped
-  being painted (a hidden sibling, a background tab) cannot come back pressable unseen.
+  being painted (a hidden sibling, a background tab) cannot come back pressable unseen. And a
+  press within a double click of one that fell on hidden controls is the title's too: the first
+  press hands the console the keyboard, which paints its controls at once, and the second click of
+  a double click aimed at the title would otherwise land on whatever appeared under it.
+- **What the strip's span measures.** The integrated strip's timed span now paints icons for the
+  focused console and for any header under the pointer only, so its cost depends on focus and on
+  where the pointer is; a batch that moves the pointer over headers paints more than one that does
+  not, and the two are not the same work.
 - **Unavailable is absent.** A split the console cannot give both halves their minimum is not drawn
   and not pressable. For this header that replaces D62's dimmed control and F2.14's «visibly
   unavailable»; the historical strip keeps both. Painting and pressing read one offer, built with the

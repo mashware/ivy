@@ -87,7 +87,7 @@ fn click_review(window: &mut crate::Window, ctx: &egui::Context, index: usize) {
         .find(|point| {
             let offer =
                 crate::header::integrated::Offer::of(rect, &metrics, window.headers, true, false);
-            crate::header::integrated::hit(strip, offer, true, *point)
+            crate::header::integrated::hit(strip, offer, *point)
                 == Some(crate::header::integrated::Target::Review)
         })
         .unwrap();

@@ -18,6 +18,8 @@ pub(crate) struct Input {
     last_frame: Option<u64>,
     pub(super) blocked_frame: Option<u64>,
     pub(super) pending: Option<(usize, Action)>,
+    /// The console whose hidden control cell was last pressed, and when (egui's input time).
+    unseen: Option<(usize, f64)>,
 }
 
 impl Input {
@@ -51,27 +53,57 @@ pub(crate) fn enabled(
     ]
 }
 
-/// What a press reaches on an integrated header, with the offer the painting built for it.
-#[allow(clippy::too_many_arguments)]
+/// What a press at `at` reaches on one of the active tab's integrated headers: the console, the
+/// target, and whether that target is a control the press may not use because it was not seen.
+///
+/// **Not seen** is D99's rule — the header's controls were not painted in the previous pass — and
+/// one more case: a press within a double click of a press that already fell on this console's
+/// hidden controls. That first press is the title's and hands the console the keyboard, which
+/// paints its controls at once; without this, the second click of a double click aimed at the
+/// title would land on whatever control appeared under it, a close included.
 fn integrated_hit(
     window: &Window,
     ctx: &egui::Context,
-    name: usize,
-    rect: egui::Rect,
-    strip: egui::Rect,
     rects: &[egui::Rect],
     metrics: &CellMetrics,
     at: egui::Pos2,
-) -> Option<super::integrated::Target> {
-    let zoomed = window.pane_view.zoomed(window.active().name) == Some(name);
-    let offer = super::integrated::Offer::of(
-        rect,
-        metrics,
-        window.headers,
-        super::Button::in_a_tab_of(rects).is_drawn(),
-        zoomed,
-    );
-    super::integrated::hit(strip, offer, super::integrated::revealed(ctx, name), at)
+) -> Option<(usize, super::integrated::Target, bool)> {
+    use super::integrated::{Offer, Target, hit, revealed};
+    let can_close = super::Button::in_a_tab_of(rects).is_drawn();
+    let zoomed = window.pane_view.zoomed(window.active().name);
+    let now = ctx.input(|i| i.time);
+    let delay = ctx.options(|o| o.input_options.max_double_click_delay);
+    window
+        .active()
+        .panes()
+        .into_iter()
+        .zip(rects)
+        .find_map(|(pane, rect)| {
+            if *rect == egui::Rect::NOTHING {
+                return None;
+            }
+            let strip = pane
+                .chrome_within(*rect, metrics, SystemTime::now(), window.headers)
+                .header()?;
+            let offer = Offer::of(
+                *rect,
+                metrics,
+                window.headers,
+                can_close,
+                zoomed == Some(pane.name),
+            );
+            let target = hit(strip, offer, at)?;
+            let just_unseen = window
+                .header_input
+                .unseen
+                .is_some_and(|(name, when)| name == pane.name && now - when <= delay);
+            let hidden = target != Target::Label && (!revealed(ctx, pane.name) || just_unseen);
+            Some((
+                pane.name,
+                if hidden { Target::Label } else { target },
+                hidden,
+            ))
+        })
 }
 
 /// Called inside the mouse stopwatch; splitting must not subtract its work a second time.
@@ -124,30 +156,9 @@ pub(crate) fn pointer(
             _ => None,
         })
     {
-        let owner = window
-            .active()
-            .panes()
-            .into_iter()
-            .zip(rects)
-            .find_map(|(pane, rect)| {
-                if *rect == egui::Rect::NOTHING {
-                    return None;
-                }
-                let strip = pane
-                    .chrome_within(*rect, metrics, SystemTime::now(), window.headers)
-                    .header()?;
-                (integrated_hit(
-                    window,
-                    ui.ctx(),
-                    pane.name,
-                    *rect,
-                    strip,
-                    rects,
-                    metrics,
-                    pos,
-                ) == Some(super::integrated::Target::Label))
-                .then_some(pane.name)
-            });
+        let owner = integrated_hit(window, ui.ctx(), rects, metrics, pos)
+            .filter(|(_, target, _)| *target == super::integrated::Target::Label)
+            .map(|(name, _, _)| name);
         if let Some(name) = owner {
             let tab = window.active().name;
             let initial = window
@@ -217,88 +228,69 @@ pub(crate) fn pointer(
         if !modifiers.is_none() {
             continue;
         }
-        if window.chrome.enabled() && *button == egui::PointerButton::Primary {
-            let hit = window
-                .active()
-                .panes()
-                .into_iter()
-                .zip(rects)
-                .find_map(|(pane, rect)| {
-                    if *rect == egui::Rect::NOTHING {
-                        return None;
-                    }
-                    let strip = pane
-                        .chrome_within(*rect, metrics, SystemTime::now(), window.headers)
-                        .header()?;
-                    integrated_hit(
-                        window,
-                        ui.ctx(),
-                        pane.name,
-                        *rect,
-                        strip,
-                        rects,
-                        metrics,
-                        *pos,
-                    )
-                    .map(|target| (pane.name, target))
-                });
-            if let Some((name, target)) = hit {
-                if target == super::integrated::Target::Label {
-                    continue;
-                }
-                window.header_input.held = ui
-                    .ctx()
-                    .input(|input| input.pointer.button_down(*button))
-                    .then_some(*button);
-                window.header_input.blocked_frame = Some(frame);
-                window.drag_in_progress = None;
-                let tab = window.active().name;
-                let changed = match target {
-                    super::integrated::Target::Label => {
-                        let initial = window
-                            .pane_called(name)
-                            .map(|p| crate::pane_view::display_label(p).into_owned())
-                            .unwrap_or_else(|| format!("Console {}", name + 1));
-                        window.pane_view.begin_rename(tab, name, initial);
-                        false
-                    }
-                    super::integrated::Target::SplitRight => {
-                        apply(window, name, Action::SplitRight, ui.ctx(), metrics)
-                    }
-                    super::integrated::Target::SplitDown => {
-                        apply(window, name, Action::SplitDown, ui.ctx(), metrics)
-                    }
-                    super::integrated::Target::Review => {
-                        crate::viewer::open_diff_for_pane(window, name);
-                        ui.ctx().request_repaint();
-                        false
-                    }
-                    super::integrated::Target::Panel => {
-                        if let Some(pane) = window.pane_called(name)
-                            && pane.panel_state.is_visible(SystemTime::now())
-                        {
-                            pane.folded = !pane.folded;
-                        }
-                        false
-                    }
-                    super::integrated::Target::Zoom => {
-                        window.active_mut().focus = name;
-                        window.pane_view.toggle(tab, name, rects.len());
-                        true
-                    }
-                    super::integrated::Target::Close => {
-                        window.pane_view.clear(tab);
-                        if let Err(error) = window.close_a_pane_called(name, ui.ctx()) {
-                            eprintln!("the button could not close its console: {error}");
-                        }
-                        true
-                    }
-                };
-                return Some(MouseOutcome {
-                    target: None,
-                    the_tree_changed: changed,
-                });
+        if window.chrome.enabled()
+            && *button == egui::PointerButton::Primary
+            && let Some((name, target, hidden)) =
+                integrated_hit(window, ui.ctx(), rects, metrics, *pos)
+        {
+            if hidden {
+                window.header_input.unseen = Some((name, ui.ctx().input(|i| i.time)));
             }
+            if target == super::integrated::Target::Label {
+                continue;
+            }
+            window.header_input.held = ui
+                .ctx()
+                .input(|input| input.pointer.button_down(*button))
+                .then_some(*button);
+            window.header_input.blocked_frame = Some(frame);
+            window.drag_in_progress = None;
+            let tab = window.active().name;
+            let changed = match target {
+                super::integrated::Target::Label => {
+                    let initial = window
+                        .pane_called(name)
+                        .map(|p| crate::pane_view::display_label(p).into_owned())
+                        .unwrap_or_else(|| format!("Console {}", name + 1));
+                    window.pane_view.begin_rename(tab, name, initial);
+                    false
+                }
+                super::integrated::Target::SplitRight => {
+                    apply(window, name, Action::SplitRight, ui.ctx(), metrics)
+                }
+                super::integrated::Target::SplitDown => {
+                    apply(window, name, Action::SplitDown, ui.ctx(), metrics)
+                }
+                super::integrated::Target::Review => {
+                    crate::viewer::open_diff_for_pane(window, name);
+                    ui.ctx().request_repaint();
+                    false
+                }
+                super::integrated::Target::Panel => {
+                    if let Some(pane) = window.pane_called(name)
+                        && pane.panel_state.is_visible(SystemTime::now())
+                    {
+                        pane.folded = !pane.folded;
+                    }
+                    false
+                }
+                super::integrated::Target::Zoom => {
+                    window.active_mut().focus = name;
+                    window.pane_view.toggle(tab, name, rects.len());
+                    true
+                }
+                super::integrated::Target::Close => {
+                    window.pane_view.clear(tab);
+                    if let Err(error) = window.close_a_pane_called(name, ui.ctx()) {
+                        eprintln!("the button could not close its console: {error}");
+                    }
+                    true
+                }
+            };
+            return Some(MouseOutcome {
+                target: None,
+                the_tree_changed: changed,
+            });
         }
         let close = super::Button::in_a_tab_of(rects);
         let hit = window
