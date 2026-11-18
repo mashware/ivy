@@ -1,0 +1,7 @@
+# Reframe: let systemd-run own the launch boundary
+
+Treat a per-console scope as an optional launch backend, not a new responsibility inside `term-core` for D-Bus orchestration. On Linux, invoke `systemd-run --user --scope --quiet --wait -- <program> ...` as the PTY slave command; when the user manager or command is unavailable, fall back to the existing direct `spawn_command`. This challenges the premise that Ivy must implement `StartTransientUnit` itself, while keeping each console's descendants in one systemd scope and leaving the GUI outside it.
+
+The repository already centralizes PTY creation, cwd, and environment in `spawn_with_env_in`, and retains a child handle for exit status. A wrapper must therefore preserve the PTY descriptors, cwd, and the fully resolved environment, and its own exit status must reach the existing ending path. The tradeoff is extra `systemd-run` CLI dependency and more wrapper semantics; direct D-Bus `StartTransientUnit` avoids that dependency but requires explicit job completion/error handling and a pre-exec placement barrier to prevent the child running in Ivy's cgroup first. Attaching an already-running PID is racy.
+
+Neither backend can identify oomd from `SIGKILL` alone. A truthful OOM notice requires evidence tied to that scope (for example, its cgroup `memory.events` before cleanup); otherwise retain an unknown-kill ending. Scope lifecycle must preserve that evidence long enough to read it.

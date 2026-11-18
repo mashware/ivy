@@ -1,0 +1,11 @@
+{
+  "number": 124,
+  "ref": "#124",
+  "title": "Put each console in its own systemd scope so the OOM killer does not take down the whole window",
+  "body": "## What happened\n\nOn Linux, `systemd-oomd` killed the whole Ivy window, and every console inside it, because two of those consoles were compiling at the same time:\n\n```\nKilled .../app.slice/app-gnome-Ivy-3640011.scope due to memory pressure for\n/user.slice/user-1000.slice/user@1000.service being 84.10% > 50.00% for > 20s\nCurrent Memory Usage: 16.1G   (memory peak 17.6G)\n```\n\nEvery process a console starts lives in Ivy's single `app-gnome-Ivy-*.scope`. oomd picks its victim per cgroup, so the cgroup it picks is the entire window: the agent sessions that were only waiting die along with the build that caused the pressure. Nothing is saved, and nothing says why except a desktop notification (\"Ivy was using a large amount of memory\").\n\n## How others solve it\n\nVTE (GNOME Terminal, Ptyxis) moves each spawned child into its own transient scope (`vte-spawn-<uuid>.scope`) under the app's slice, through systemd's `StartTransientUnit` over D-Bus. oomd then sees each tab as a separate candidate and kills only the one that is using the memory. The window and the other tabs survive.\n\n## Proposal\n\n- On Linux, when systemd's user manager is available, put each console's child process into its own transient scope (one per pane), named so the pane can be told apart.\n- If systemd is not available (other init systems, containers), keep today's behaviour without failing.\n- When a console's program is killed this way, the console's ending notice should say so, instead of looking like an ordinary exit.\n\nOut of scope: macOS and Windows have no equivalent killer acting on the whole app, so nothing changes there.\n",
+  "url": "https://github.com/mashware/ivy/issues/124",
+  "base": "main",
+  "kind": null,
+  "comments": [],
+  "stack": true
+}

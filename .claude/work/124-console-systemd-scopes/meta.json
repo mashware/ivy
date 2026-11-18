@@ -1,0 +1,66 @@
+{
+  "ticket": "124",
+  "slug": "console-systemd-scopes",
+  "type": "feat",
+  "title": "Put each console in its own systemd scope so the OOM killer does not take down the whole window",
+  "branch": "124-console-systemd-scopes",
+  "base": "main",
+  "stacked_on": null,
+  "worktree": null,
+  "size": "M",
+  "phase": "plan",
+  "phases_done": [
+    "context",
+    "design",
+    "plan"
+  ],
+  "draft_from_conversation": false,
+  "tracker_issue": null,
+  "related_repos": [],
+  "roadmap": null,
+  "started_at": "2026-11-18T20:55:21.998602+00:00",
+  "updated_at": "2026-11-18T21:04:12.565947+00:00",
+  "notes": "Chosen gated launcher and Linux-only user-manager D-Bus. All three medium challenges addressed: minimal private IPC, asynchronous app startup, and 500 ms final-result observation. One coherent PR preferred. Study completed at build pre-flight (why=study). No implementation or runtime validation; suitable Rust/systemd host needed for build validation.",
+  "pending": null,
+  "defaults_used": [
+    {
+      "key": "unattended:branch",
+      "default": "Create from main, in place",
+      "phase": "context"
+    },
+    {
+      "key": "unattended:approach",
+      "default": "Parent-controlled gated helper; CLI alternative rejected for exactly-once fallback and status semantics",
+      "phase": "design"
+    },
+    {
+      "key": "models.workers",
+      "default": "gpt-6-luna (FLOW.codex.md), two approach lenses",
+      "phase": "design"
+    },
+    {
+      "key": "unattended:design-review",
+      "default": "Accepted study draft; independent challenger found no high findings; medium responses recorded",
+      "phase": "design"
+    },
+    {
+      "key": "unattended:plan-review",
+      "default": "One PR; backend/notice split merged to avoid an extra wave without required early release",
+      "phase": "plan"
+    }
+  ],
+  "ticket_deps": [],
+  "mrs": [
+    {
+      "n": 1,
+      "title": "Isolate Linux consoles in systemd scopes and explain OOM exits",
+      "size": "M",
+      "status": "pending",
+      "phases_done": [],
+      "wave": 1,
+      "depends_on": [],
+      "lines_est": 1200,
+      "files_est": 18
+    }
+  ]
+}
