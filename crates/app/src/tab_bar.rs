@@ -2,8 +2,9 @@
 //!
 //! **One strip, coupled to nothing else.** It decides where the bar sits, what each card's rectangle
 //! is, which card a click landed on, and what the pass cost. Everything a card *says* comes from
-//! elsewhere — the claim a tab carries is its panes' ([`crate::tree::Tab::attention`]), and the
-//! symbols and colors are the panel's.
+//! elsewhere. The historical strip shows a tab's loudest claim ([`crate::tree::Tab::attention`])
+//! with the panel's symbols; the integrated title bar rings each console's dot with that console's
+//! own claim, and falls back to the loudest one on a single dot where they do not fit (D96).
 //!
 //! The interactive strip includes a Settings gear even with one tab. Historical measurement
 //! mode retains the old single-tab geometry through [`set_the_tab_bar_aside`]. The shared
@@ -26,7 +27,9 @@ mod title;
 pub(crate) use chrome::{geometry, partition};
 pub(crate) use title::{MIN_BAND, occupied};
 #[cfg(test)]
-pub(crate) use title::{add_target, card as title_card, pill_and_label as title_pill_and_label};
+pub(crate) use title::{
+    add_target, card as title_card, label_dots_summary as title_label_dots_summary,
+};
 
 use crate::painter::CellMetrics;
 use crate::{Window, WindowRequest};
@@ -44,7 +47,8 @@ use std::time::{Instant, SystemTime};
               invalidates a whole run over a bar that marked none"]
 pub(crate) struct TabBarOutcome {
     pub(crate) cost: std::time::Duration,
-    /// How many cards carried a symbol in this pass.
+    /// How many cards showed a claim in this pass: the symbol on a historical card, at least one
+    /// ringed dot on an integrated one.
     pub(crate) marked: usize,
 }
 
@@ -187,7 +191,8 @@ impl Window {
     /// The clip to the card is what holds up the equal-shares tiling with no scrolling: when the
     /// number stops fitting it is cut off inside its own card instead of invading the neighbor's.
     ///
-    /// Status marks are drawn independently of the text font, with their own slot and gap.
+    /// On the historical strip, status marks are drawn independently of the text font, with their
+    /// own slot and gap.
     ///
     /// **A single clock for all the cards**, passed in from outside. It is not the same one as the
     /// panels' —each pane takes its own when it is painted, and the background ones share another—,

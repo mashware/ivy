@@ -9,7 +9,7 @@ status: active
 superseded_by: null
 confidence: 80
 created_at: '2026-11-16T18:09:53.042Z'
-updated_at: '2026-11-16T18:09:53.042Z'
+updated_at: '2026-11-18T19:20:00.000Z'
 last_verified: '2026-11-16T18:09:53.042Z'
 file_paths:
   - crates/app/src/startup.rs
@@ -44,8 +44,17 @@ found it false. The true statement names the batches, says their series are not 
 the decision, that nothing invalidates older runs on its own, and what those batches do and do not
 exercise (no integrated batch publishes actions, so button frames are never measured).
 
+**The other direction (#113, November 2026).** The two-tab batches `F` and `G` do **not** measure
+the integrated tab cards: they run without `MEASURE_CHROME`, so `tab_bar.rs` `paint_cards` takes
+the historical numbered strip and never reaches `tab_bar/title.rs::paint`. #113's ticket assumed
+F/G read the integrated claim indicator. Since #93 the integrated cards are measured by `chrome`,
+`chrome-zoom` and `dock-v2-4-*` (two tabs, so the «tabs marked» guard applies) and `projects` (one
+tab, guard skipped). Evidence: the batch `case` table of `measure-frame.sh`, where
+`INTEGRATED_CHROME` is set only for those, and its `export MEASURE_CHROME` under that variable.
+
 > **Rule:** before writing what a restyle does to measurement, list the batches that export
-> `MEASURE_CHROME` and walk what their panels publish — never infer it from «chrome is opt-in».
+> `MEASURE_CHROME` and walk what their panels publish — never infer it from «chrome is opt-in»,
+> nor from a batch's tab count.
 
 ## Where it lives
 

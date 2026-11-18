@@ -2,9 +2,8 @@
 //!
 //! Wait and block are solid because they ask for action; done is soft because it does not urge; a
 //! claim nobody is holding up is a dashed outline, so a stale claim never reads as a live one. The
-//! glyph is the application's own drawing, not a font character (D9). A tab with no claim asks for
-//! a muted dot instead ([`paint_unclaimed`]), which keeps its column occupied so eight tabs still
-//! scan as one vertical line.
+//! glyph is the application's own drawing, not a font character (D9). A tab card carries no pill:
+//! its consoles' dots carry their own claims (D96, amended for #113).
 
 pub(crate) mod glyph;
 
@@ -18,7 +17,6 @@ pub(crate) const SIZE: f32 = 18.0;
 const RADIUS: f32 = 5.0;
 /// The glyph's box inside a full-size pill, leaving four points of pill around it.
 const GLYPH: f32 = 10.0;
-const NONE_DOT: f32 = 6.0;
 
 /// The pill centred in `slot`, shrunk to the slot when the slot is smaller than [`SIZE`].
 fn pill_in(slot: Rect) -> Rect {
@@ -45,12 +43,6 @@ pub(crate) fn paint(painter: &egui::Painter, slot: Rect, claim: AttentionState, 
     };
     let mark = Rect::from_center_size(pill.center(), egui::Vec2::splat(GLYPH * scale));
     glyph::paint(painter, mark, claim.class, glyph);
-}
-
-/// The tab strip's mark for a tab with no claim: a muted dot where the pill would be.
-pub(crate) fn paint_unclaimed(painter: &egui::Painter, slot: Rect, roles: &Roles) {
-    let side = pill_in(slot).width();
-    painter.circle_filled(slot.center(), NONE_DOT.min(side) / 2.0, roles.tx3);
 }
 
 /// A rounded outline cannot be dashed by egui, so the dashes run along the four straight sides
@@ -90,7 +82,7 @@ mod tests {
         Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
     }
 
-    fn painted(theme: &Theme, claim: Option<AttentionState>) -> Vec<Shape> {
+    fn painted(theme: &Theme, claim: AttentionState) -> Vec<Shape> {
         painted_in(
             theme,
             claim,
@@ -98,19 +90,18 @@ mod tests {
         )
     }
 
-    fn painted_in(theme: &Theme, claim: Option<AttentionState>, slot: Rect) -> Vec<Shape> {
+    fn painted_in(theme: &Theme, claim: AttentionState, slot: Rect) -> Vec<Shape> {
         let ctx = egui::Context::default();
-        let output = ctx.run_ui(Default::default(), |ui| match claim {
-            Some(claim) => paint(ui.painter(), slot, claim, &Roles::of(theme)),
-            None => paint_unclaimed(ui.painter(), slot, &Roles::of(theme)),
+        let output = ctx.run_ui(Default::default(), |ui| {
+            paint(ui.painter(), slot, claim, &Roles::of(theme))
         });
         let shapes = output.shapes.iter().map(|s| s.shape.clone()).collect();
         output.drop_without_applying_deltas();
         shapes
     }
 
-    fn claim(class: Attention, backed: bool) -> Option<AttentionState> {
-        Some(AttentionState { class, backed })
+    fn claim(class: Attention, backed: bool) -> AttentionState {
+        AttentionState { class, backed }
     }
 
     /// The colour of every stroke and fill in the glyph: the one grouped shape the mark is.
@@ -149,7 +140,7 @@ mod tests {
     /// **Literal colours, written out**: Ivy Night's wait, block and done slots, its chrome role
     /// for the glyph on a solid pill, and done's 15 % tint.
     #[test]
-    fn solid_soft_dashed_and_dot_pills_paint_the_kits_colors() {
+    fn solid_soft_and_dashed_pills_paint_the_kits_colors() {
         let night = Theme::default();
         let pill = Rect::from_min_size(egui::pos2(10.0, 18.0), egui::vec2(18.0, 18.0));
         for (class, fill, ink) in [
@@ -189,12 +180,6 @@ mod tests {
             assert!(!glyph.is_empty(), "{class:?}: no glyph");
             assert!(glyph.iter().all(|c| *c == rgb(0x8e9390)), "{class:?}");
         }
-        // No claim: one 6-point muted dot at the slot's centre and nothing else.
-        let shapes = painted(&night, None);
-        assert!(matches!(
-            shapes.as_slice(),
-            [Shape::Circle(c)] if c.radius == 3.0 && c.fill == rgb(0x8e9390) && c.center == egui::pos2(19.0, 27.0)
-        ));
     }
 
     /// A slot narrower than the pill gets a pill of its own width, never one that spills over the
