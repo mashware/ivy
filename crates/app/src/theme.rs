@@ -164,7 +164,7 @@ impl NamedTheme {
             Self::IvyNight => (
                 [
                     0x1c2327, 0xf27a66, 0x3cc384, 0xf2b84b, 0x72b7f2, 0xb49af0, 0x4fc1b0, 0xa4aea9,
-                    0x5c6863, 0xf59a89, 0x6bd6a2, 0xf6cb78, 0x9acbf5, 0xe59bc0, 0x7dd3c6, 0xf4f6f2,
+                    0x5c6863, 0xd77757, 0x6bd6a2, 0xf6cb78, 0x9acbf5, 0xe59bc0, 0x7dd3c6, 0xf4f6f2,
                 ],
                 0x13181b,
                 0xe4e8e2,
@@ -717,7 +717,7 @@ mod tests {
                 NamedTheme::IvyNight,
                 [
                     0x1c2327, 0xf27a66, 0x3cc384, 0xf2b84b, 0x72b7f2, 0xb49af0, 0x4fc1b0, 0xa4aea9,
-                    0x5c6863, 0xf59a89, 0x6bd6a2, 0xf6cb78, 0x9acbf5, 0xe59bc0, 0x7dd3c6, 0xf4f6f2,
+                    0x5c6863, 0xd77757, 0x6bd6a2, 0xf6cb78, 0x9acbf5, 0xe59bc0, 0x7dd3c6, 0xf4f6f2,
                 ],
                 [0x13181b, 0xe4e8e2, 0xe4e8e2, 0x252e33, 0x3cc384, 0x171d21],
             ),
@@ -952,7 +952,7 @@ mod tests {
         );
         assert_eq!(
             t.with_attributes(red, true, false),
-            Color32::from_rgb(0xF5, 0x9A, 0x89)
+            Color32::from_rgb(0xD7, 0x77, 0x57)
         );
         assert_eq!(
             t.with_attributes(red, true, false),
@@ -1076,7 +1076,7 @@ mod tests {
         // The order matters and is fixed: first it rises to bright, then it is muted. The other way around
         // would give another color, and two layers that did it in a different order would not match.
         let expected = mix(
-            Color32::from_rgb(0xF5, 0x9A, 0x89),
+            Color32::from_rgb(0xD7, 0x77, 0x57),
             Color32::from_rgb(0x13, 0x18, 0x1B),
             DIM_FACTOR,
         );

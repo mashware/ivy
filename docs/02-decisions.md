@@ -9953,6 +9953,21 @@ named theme (no published users rely on it).
 ten per channel of the design's hand-tuned CSS, not exactly; the slot-backed roles are exact. The
 style install runs inside the existing theme-derived refresh and compares one theme per frame.
 
+**Factory bright red, 18 November 2026 — #107.** With the owner's actual Claude Code settings,
+the `dark-ansi` theme requests ANSI bright red (`ESC[91m`), rather than an exact RGB value.
+Ivy Night's former slot 9, `#f59a89`, therefore made its mascot salmon. A controlled RGB-theme
+comparison alone missed that difference. The owner asked for a shared default rather than a
+personal configuration change, using the orange seen on another computer as the reference.
+Slot 9 is now `#d77757`, the exact RGB `(215,119,87)` measured from Claude Code's RGB theme.
+This also changes other bright-red output and the normal red that bold raises to slot 9.
+The other palette entries, named themes and explicit color overrides keep their values.
+
+**Discarded:** editing the owner's configuration (does not reach other installations); matching
+Tilix's darker `#cf6a4c` (the owner's final reference is the RGB-theme orange); identifying Claude's
+mascot in the buffer (D6, and terminal colors describe output rather than the program drawing it);
+rewriting explicit RGB or other themes' reds (breaks the program's or the person's color choice).
+This is a palette preference, not a rasterizer correction, and makes no claim about text sharpness.
+
 ## D95 — Geist and Geist Mono ship inside Ivy; Geist Mono is the terminal's default font
 
 **New signal, 15 November 2026 — #93.** The design kit sets the interface in Geist and the terminal
