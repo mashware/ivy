@@ -382,18 +382,7 @@ fn paint(ui: &egui::Ui, strip: egui::Rect, theme: &Theme, appearance: Appearance
         if target != Target::Label && !shown {
             continue;
         }
-        let tooltip = match target {
-            Target::Label => "Double-click to rename",
-            Target::SplitRight => "Split right",
-            Target::SplitDown => "Split down",
-            Target::Review => "Review changes",
-            Target::Panel if folded => "Show information panel",
-            Target::Panel => "Hide information panel",
-            Target::Zoom if zoomed => "Restore console",
-            Target::Zoom => "Maximize console",
-            Target::Close => "Close console",
-            Target::Search => "Search this console",
-        };
+        let tooltip = tooltip(target, folded, zoomed);
         let response = ui.interact(
             rect,
             ui.id().with((
@@ -487,6 +476,22 @@ fn paint(ui: &egui::Ui, strip: egui::Rect, theme: &Theme, appearance: Appearance
             font.clone(),
             text,
         );
+    }
+}
+
+/// What a header target says under the pointer.
+fn tooltip(target: Target, folded: bool, zoomed: bool) -> &'static str {
+    match target {
+        Target::Label => "Double-click to rename",
+        Target::SplitRight => "Split right",
+        Target::SplitDown => "Split down",
+        Target::Review => "Review changes",
+        Target::Panel if folded => "Show information panel",
+        Target::Panel => "Hide information panel",
+        Target::Zoom if zoomed => "Restore console",
+        Target::Zoom => "Maximize console",
+        Target::Close => "Close console",
+        Target::Search => "Search this console",
     }
 }
 
@@ -614,6 +619,12 @@ mod tests {
                 Target::Close as u8
             ]
         );
+    }
+
+    /// AC1 (#120): the search control names the console it searches.
+    #[test]
+    fn the_search_control_says_it_searches_this_console() {
+        assert_eq!(tooltip(Target::Search, false, false), "Search this console");
     }
 
     #[test]
