@@ -397,17 +397,29 @@ fn every_dashed_line_is_cut_into_its_dashes_or_as_many_as_fit() {
         let shape = shape_of(c).unwrap();
         for (w, h) in [(5, 5), (7, 7), (7, 17), (8, 17), (16, 34)] {
             let span = if horizontal { w } else { h };
-            let expected = dashes.min(span / 2).max(1) as usize;
             let rects = runs(shape, w, h, 1);
-            assert_eq!(
-                rects.len(),
-                expected,
-                "{c} at {w}×{h} came out as {rects:?}"
-            );
-            assert!(
-                rects.iter().all(|r| r.2 > r.0 && r.3 > r.1),
-                "{c} at {w}×{h} has an empty dash: {rects:?}"
-            );
+            // Each dash's start and length along the line, in drawing order.
+            let mut dashes_drawn: Vec<(i32, i32)> = rects
+                .iter()
+                .map(|r| {
+                    if horizontal {
+                        (r.0, r.2 - r.0)
+                    } else {
+                        (r.1, r.3 - r.1)
+                    }
+                })
+                .collect();
+            dashes_drawn.sort();
+            if span >= dashes * 2 {
+                assert_eq!(rects.len(), dashes as usize, "{c} at {w}×{h}: {rects:?}");
+                let lengths = dashes_drawn.iter().map(|d| d.1);
+                let spread = lengths.clone().max().unwrap() - lengths.min().unwrap();
+                assert!(spread <= 1, "{c} at {w}×{h}: uneven dashes {rects:?}");
+            } else {
+                // No room for every dash: one-pixel dashes, one pixel apart, as many as fit.
+                let expected: Vec<(i32, i32)> = (0..span / 2).map(|i| (i * 2, 1)).collect();
+                assert_eq!(dashes_drawn, expected, "{c} at {w}×{h}: {rects:?}");
+            }
         }
     }
 }

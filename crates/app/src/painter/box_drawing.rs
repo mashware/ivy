@@ -288,9 +288,10 @@ impl Mask {
     /// **A single arm runs through the joint**, to the far edge of the perpendicular band, so two
     /// arms of one axis overlap there and an arm always meets the other axis; the union makes the
     /// overlap harmless. The one exception is a single arm meeting a double at a tee (`╟` `╤`),
-    /// which stops at the double's near line so the channel between its lines stays open. **A double arm is two light lines a light line apart**, and each of its
-    /// lines ends against the line of the perpendicular arm it would otherwise cross: that is what
-    /// leaves `╬` its four corners and `╦` its gap underneath.
+    /// which stops at the double's near line so the channel between its lines stays open. **A
+    /// double arm is two light lines a light line apart**, and each of its lines ends against the
+    /// line of the perpendicular arm it would otherwise cross: that is what leaves `╬` its four
+    /// corners and `╦` its gap underneath.
     fn lines(&mut self, shape: Shape, light: i32) {
         let [left, right, up, down] = shape.arms;
         let (w, h) = (self.width, self.height);
@@ -523,14 +524,20 @@ impl Mask {
 /// The pieces of `from..to` a line cut into `dashes` dashes keeps, each followed by its gap.
 ///
 /// **The gap goes at the end of each piece, not around it**, so a cell's last gap sits at its
-/// seam and the next cell starts on a dash. **A span with no room for every dash and its gap gets
-/// as many as fit, a pixel each with a pixel between**: dropping a gap here and there merged two
-/// dashes into one longer one, and drawing it solid made it read as the plain line. Both were tried.
+/// seam and the next cell starts on a dash. **A span with no room for every dash and its gap is
+/// drawn as one-pixel dashes one pixel apart, as many as fit**: dropping a gap here and there gave
+/// dashes of uneven length, and drawing it solid made it read as the plain line. Both were tried.
+/// What that costs is said rather than hidden: in such a cell `┄` and `┈` draw the same thing.
 fn dashes_of(from: i32, to: i32, dashes: u8) -> Vec<(i32, i32)> {
-    let n = i32::from(dashes).min((to - from) / 2);
+    let n = i32::from(dashes);
     let span = to - from;
-    if n == 0 {
+    if dashes == 0 || span < 2 {
         return vec![(from, to)];
+    }
+    if span < n * 2 {
+        return (0..span / 2)
+            .map(|i| (from + i * 2, from + i * 2 + 1))
+            .collect();
     }
     let gap = (span / (n * 3)).max(1);
     // Every piece is at least two pixels wide here, so a dash keeps at least one.
@@ -578,12 +585,13 @@ pub(super) fn paint(
         let mut drawn = drawn.borrow_mut();
         // A change of cell size or scale leaves the old entries behind; the ceiling keeps them from
         // piling up, and is only paid when a shape that is not there has to go in.
-        if drawn.len() >= 1024 && !drawn.contains_key(&key) {
-            drawn.clear();
+        if !drawn.contains_key(&key) {
+            if drawn.len() >= 1024 {
+                drawn.clear();
+            }
+            drawn.insert(key, runs(shape, key.1, key.2, light));
         }
-        let pieces = drawn
-            .entry(key)
-            .or_insert_with(|| runs(shape, key.1, key.2, light));
+        let pieces = &drawn[&key];
         for &(x0, y0, x1, y1) in pieces.iter() {
             let rect = Rect::from_min_max(
                 pos2(
