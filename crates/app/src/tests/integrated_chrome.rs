@@ -3243,7 +3243,7 @@ mod tests {
                 if width < 1400.0 {
                     assert!((100.0..=150.0).contains(&card.width()), "{width}: {card:?}");
                 }
-                let (_, label) = tab_bar::title_pill_and_label(card, 2, true);
+                let (label, _) = tab_bar::title_label_and_dots(card, 2, true);
                 let texts: Vec<_> = shapes
                     .iter()
                     .filter_map(|s| match &s.shape {

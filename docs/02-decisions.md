@@ -10108,6 +10108,33 @@ back on it.
 the numbered tab cards and their single-tab rule — keeps its geometry and painting, so the measured
 series stay comparable (D13); the new tab painting runs under the same tab-bar stopwatch.
 
+**Amended 18 November 2026 — #113: a tab shows each console's claim on that console's dot.** One
+pill per tab showed only the most urgent claim among its consoles, so with several of them it kept
+switching and said neither which console was asking nor how many were. The pill and the muted
+"no claim" dot left of the name are gone; the label starts at the card's padding. Each console's dot
+keeps its fill — the project ink, or the hollow muted outline of a console with no project — and,
+while that console claims, gets a ring 1.5 points wide, 1.5 points off the dot's edge, in that
+claim's color as `attention_color` gives it: wait and block as before, **done blue** and not green
+(D94: green is the accent and focus; the owner confirmed it against the mock that drew it green),
+and a claim nobody holds up dimmed toward the background, as everywhere else (D18). Dots are 13
+points apart whether or not anything claims, so a claim arriving never moves the label. **A card too
+narrow for its dots shows no claim at all** — the owner's choice over a summary ring for that case
+and over shrinking the label to keep the dots; four consoles stop fitting below about 119 points of
+card with the cross shown (127 before). The Board is where a narrow tab's claims are read. The
+compact threshold does not move: the narrowest card keeps its old width, written without the pill.
+
+*Discarded:* a summary ring only when the dots do not fit; the label giving way to the dots; a
+green done ring; a dashed, thinner or gapless ring for an unheld claim (the dimmed class color is the
+rule every other claim surface follows).
+
+*Measurement:* a card counts as marked when it painted at least one ring, so «tabs marked» still
+counts what was drawn and not what was claimed (a narrow card that claims but paints nothing is not
+marked). The batches that paint this bar — `chrome`, `chrome-zoom`, `projects`, `dock-v2-4-*` — paint
+rings instead of pills from this change on, and their reports from before it are not averaged with
+later ones. The two-tab ones need their two-console cards to keep their dots (about 93 points) or
+their run is invalidated by the «tabs marked» guard. `F` and `G` paint the historical strip and do
+not change.
+
 ## D97 — A panel's claim is a strip across its top, and its controls look like controls
 
 **New signal, 16 November 2026 — #93.** The redesign D94 started draws the status panel with a band

@@ -26,7 +26,7 @@ mod title;
 pub(crate) use chrome::{geometry, partition};
 pub(crate) use title::{MIN_BAND, occupied};
 #[cfg(test)]
-pub(crate) use title::{add_target, card as title_card, pill_and_label as title_pill_and_label};
+pub(crate) use title::{add_target, card as title_card, label_and_dots as title_label_and_dots};
 
 use crate::painter::CellMetrics;
 use crate::{Window, WindowRequest};
@@ -44,7 +44,8 @@ use std::time::{Instant, SystemTime};
               invalidates a whole run over a bar that marked none"]
 pub(crate) struct TabBarOutcome {
     pub(crate) cost: std::time::Duration,
-    /// How many cards carried a symbol in this pass.
+    /// How many cards showed a claim in this pass: the symbol on a historical card, at least one
+    /// ringed dot on an integrated one.
     pub(crate) marked: usize,
 }
 
