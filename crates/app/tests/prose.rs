@@ -942,6 +942,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         include_str!("../examples/sweep.rs"),
         134,
     ),
+    (
+        "examples/hinting.rs",
+        include_str!("../examples/hinting.rs"),
+        4,
+    ),
     ("examples/leak.rs", include_str!("../examples/leak.rs"), 59),
     (
         "examples/screen_demo.rs",
@@ -1828,6 +1833,10 @@ fn no_comment_in_the_translated_files_reads_as_spanish() {
 /// The two READMEs are here for the same reason and by the same milestone: they were translated in
 /// the same delivery and nothing was left watching them either.
 const DOCUMENTS: &[(&str, &str)] = &[
+    (
+        "docs/console-glyph-hinting.md",
+        include_str!("../../../docs/console-glyph-hinting.md"),
+    ),
     (
         "docs/09-releases.md",
         include_str!("../../../docs/09-releases.md"),
