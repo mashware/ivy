@@ -4,6 +4,9 @@ use crate::{Window, panel};
 use eframe::egui::{self, Color32, Rect};
 use std::{path::PathBuf, time::Instant};
 
+// Recovery setup is deferred; retain the renderer for later reactivation.
+const SHOW_SESSION_RECOVERY: bool = false;
+
 const APPLYING_PREFERENCES: &str = "Saved. Applying settings...";
 const BRIDGE_KEY: &str = "ivy-mcp-bridge-location";
 const CODEX_ENV: &str = "env_vars = [\"PANEL_ID\", \"PANEL_DIR\"]";
@@ -448,7 +451,9 @@ fn body(guide: &mut Guide, ui: &mut egui::Ui) {
         );
         manual(published, &mut guide.copied, ui);
     }
-    recovery::show(guide.recovery, &mut guide.copied, ui);
+    if SHOW_SESSION_RECOVERY {
+        recovery::show(guide.recovery, &mut guide.copied, ui);
+    }
     egui::CollapsingHeader::new("Agent activity and input signals")
         .default_open(false)
         .show(ui, |ui| {

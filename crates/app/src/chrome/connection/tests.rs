@@ -117,9 +117,25 @@ fn initial_help_explains_saved_setup_and_discloses_first_time_installation_only_
         "If Ivy is absent from this running session, restart Claude in this same Ivy console and resume your conversation. You do not need to close the terminal.",
     );
     assert!(!initial.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.text() == "Copy first-time setup prompt")));
+    for text in ["Recover AI sessions", "Copy recovery setup instructions"] {
+        assert!(
+            !initial
+                .shapes
+                .iter()
+                .any(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.text() == text))
+        );
+    }
     let at = center(&initial, "Manual setup and diagnostics");
     click(&ctx, &mut guide, at);
     let manual = frame(&ctx, &mut guide, vec![]);
     center(&manual, "First-time setup");
     center(&manual, "Copy first-time setup prompt");
+    for text in ["Recover AI sessions", "Copy recovery setup instructions"] {
+        assert!(
+            !manual
+                .shapes
+                .iter()
+                .any(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.text() == text))
+        );
+    }
 }
