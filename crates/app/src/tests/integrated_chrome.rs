@@ -1787,6 +1787,9 @@ mod tests {
         let area = area_of(800.0);
         ui_pass(&mut window, &ctx, area, Default::default());
         let at = tab_target(&window, &ctx, area, 1, "body");
+        let card = title_card(&window, &ctx, area, 1);
+        let open = title_card(&window, &ctx, area, 0);
+        let open_at = tab_target(&window, &ctx, area, 0, "body");
         let mut pass = |time, events| {
             ui_pass(
                 &mut window,
@@ -1823,34 +1826,94 @@ mod tests {
                 })
                 .collect::<Vec<_>>()
         };
-        // An inactive tab is transparent until hovered; the hover surface and the held one are
-        // Ivy Night's `hover` and `line2`, written out.
-        assert!(
-            fills(&baseline).is_empty(),
-            "an idle inactive tab is filled"
+        // An idle inactive tab is a card of its own, Ivy Night's `tab`; the hover surface and the
+        // held one are its `hover` and `line2`, painted over that card. All written out.
+        let resting = egui::Color32::from_rgb(0x0b, 0x0d, 0x0f);
+        assert_eq!(
+            fills(&baseline),
+            vec![resting],
+            "an idle inactive tab has no card of its own"
         );
         assert_eq!(
             fills(&hover),
-            vec![egui::Color32::from_rgb(0x26, 0x2b, 0x2d)]
+            vec![resting, egui::Color32::from_rgb(0x26, 0x2b, 0x2d)]
         );
         // The whole card, cross included, short of the bar's bottom line.
-        let card = title_card(&window, &ctx, area, 1);
         assert!(hover.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r)
             if r.fill == egui::Color32::from_rgb(0x26, 0x2b, 0x2d)
                 && r.rect == egui::Rect::from_min_max(card.min, egui::pos2(card.right(), card.bottom() - 1.0)))));
         assert_eq!(
             fills(&held),
-            vec![egui::Color32::from_rgb(0x37, 0x3b, 0x3d)]
+            vec![resting, egui::Color32::from_rgb(0x37, 0x3b, 0x3d)]
         );
-        assert_eq!(window.active, 0);
-        for shapes in [&baseline, &hover, &held] {
+        // A press held on the open tab itself: its `line2` surface must not cover the accent. The
+        // earlier press is let go over the consoles, where releasing it is no click on a tab.
+        let away = area.center();
+        pass(
+            0.3,
+            vec![
+                egui::Event::PointerMoved(away),
+                egui::Event::PointerButton {
+                    pos: away,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        let held_open = pass(
+            0.45,
+            vec![
+                egui::Event::PointerMoved(open_at),
+                egui::Event::PointerButton {
+                    pos: open_at,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        // Ivy Night's accent, written out: the open card's own rounded shape, clipped to a
+        // 2-point band along its top edge, so the line follows the card's corners.
+        let accent = egui::Color32::from_rgb(0x3c, 0xc3, 0x84);
+        let band = egui::Rect::from_min_max(open.min, egui::pos2(open.right(), open.top() + 2.0));
+        let accent_line = |shapes: &[egui::epaint::ClippedShape]| {
+            shapes.iter().position(|s| {
+                matches!(&s.shape, egui::Shape::Rect(r) if r.fill == accent && r.rect == open)
+                    && s.clip_rect == band
+            })
+        };
+        let held_on_open = held_open.iter().position(|s| {
+            matches!(&s.shape, egui::Shape::Rect(r)
+                if r.fill == egui::Color32::from_rgb(0x37, 0x3b, 0x3d) && r.rect.intersects(open))
+        });
+        assert!(
+            held_on_open.is_some(),
+            "the press on the open tab painted no held surface"
+        );
+        assert!(
+            accent_line(&held_open) > held_on_open,
+            "the held surface covers the open tab's accent line"
+        );
+        for shapes in [&baseline, &hover, &held, &held_open] {
             assert!(
                 shapes.iter().any(|s| matches!(&s.shape,
                     egui::Shape::Rect(r) if r.fill == ACTIVE_TAB && r.rect.height() == 34.0
                 )),
                 "the selected tab lost its surface"
             );
+            assert!(
+                accent_line(shapes).is_some(),
+                "the open tab has no accent line along its top edge"
+            );
+            assert!(
+                !shapes.iter().any(|s| matches!(&s.shape,
+                    egui::Shape::Rect(r) if r.fill == accent && r.rect.intersects(card)
+                )),
+                "an inactive tab carries the accent line"
+            );
         }
+        assert_eq!(window.active, 0);
     }
 
     #[test]
