@@ -323,7 +323,7 @@ fn every_arm_reaches_its_edge_on_the_rows_the_neighbouring_line_uses() {
         ] {
             {
                 let mut mask = vec![false; (w * h) as usize];
-                for (x0, y0, x1, y1) in runs(shape, w, h, light) {
+                for (x0, y0, x1, y1, _) in runs(shape, w, h, light) {
                     for y in y0..y1 {
                         for x in x0..x1 {
                             let cell = &mut mask[(y * w + x) as usize];

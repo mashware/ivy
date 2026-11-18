@@ -211,8 +211,9 @@ pub(crate) fn shape_of(c: char) -> Option<Shape> {
     TABLE.get(index as usize).copied().flatten()
 }
 
-/// A rectangle in whole device pixels, relative to the cell: left, top, right, bottom.
-pub(crate) type Run = (i32, i32, i32, i32);
+/// A rectangle in whole device pixels, relative to the cell — left, top, right, bottom — and how
+/// much of the ink it takes, out of 255. Only an arc's edge takes less than all of it.
+pub(crate) type Run = (i32, i32, i32, i32, u8);
 
 /// How thick a light line is, in device pixels.
 ///
@@ -245,7 +246,8 @@ fn centred(span: i32, thick: i32) -> i32 {
 struct Mask {
     width: i32,
     height: i32,
-    covered: Vec<bool>,
+    /// How much of each pixel is inked, out of 255.
+    covered: Vec<u8>,
 }
 
 impl Mask {
@@ -254,17 +256,24 @@ impl Mask {
         Self {
             width,
             height,
-            covered: vec![false; (width * height) as usize],
+            covered: vec![0; (width * height) as usize],
         }
     }
 
     /// Covers `left..right` × `top..bottom`, clipped to the cell.
     fn fill(&mut self, left: i32, top: i32, right: i32, bottom: i32) {
+        self.ink(left, top, right, bottom, u8::MAX);
+    }
+
+    /// Inks `left..right` × `top..bottom` with `amount`, clipped to the cell. A pixel keeps the most
+    /// it was given, never the sum: that is what makes the mask a union.
+    fn ink(&mut self, left: i32, top: i32, right: i32, bottom: i32, amount: u8) {
         let (left, right) = (left.max(0), right.min(self.width));
         let (top, bottom) = (top.max(0), bottom.min(self.height));
         for y in top..bottom {
             for x in left..right {
-                self.covered[(y * self.width + x) as usize] = true;
+                let pixel = &mut self.covered[(y * self.width + x) as usize];
+                *pixel = (*pixel).max(amount);
             }
         }
     }
@@ -427,6 +436,11 @@ impl Mask {
     ///
     /// **The circle is centred off the bands' own centre lines**, so where it leaves the arc it
     /// is on exactly the rows and columns a straight line in the next cell uses.
+    ///
+    /// **Its edge is antialiased, and only its edge.** The radius is half a cell, so with hard
+    /// pixels a one-pixel arc was two pixels on a diagonal and read as a gap in the corner of the
+    /// box — seen on the desktop, not in a test. Each pixel takes the part of the ink the stroke
+    /// covers at its centre.
     fn arc(&mut self, shape: Shape, light: i32) {
         let [left, _, up, _] = shape.arms;
         let (w, h) = (self.width, self.height);
@@ -437,15 +451,18 @@ impl Mask {
         let toward_y = if up != N { -1.0 } else { 1.0 };
         let room_x = if toward_x > 0.0 { w as f32 - cx } else { cx };
         let room_y = if toward_y > 0.0 { h as f32 - cy } else { cy };
-        let radius = room_x.min(room_y);
+        // A pixel short of the room, so the curve ends inside the cell and its antialiased edge
+        // never reaches the seam: what crosses into the next cell is only the straight band.
+        let radius = (room_x.min(room_y) - 1.0).max(half);
         let (ox, oy) = (cx + toward_x * radius, cy + toward_y * radius);
         for y in 0..h {
             for x in 0..w {
                 let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
                 let in_quarter = (px - ox) * toward_x <= 0.0 && (py - oy) * toward_y <= 0.0;
                 let distance = ((px - ox).powi(2) + (py - oy).powi(2)).sqrt();
-                if in_quarter && (distance - radius).abs() <= half {
-                    self.fill(x, y, x + 1, y + 1);
+                let coverage = (half + 0.5 - (distance - radius).abs()).clamp(0.0, 1.0);
+                if in_quarter && coverage > 0.0 {
+                    self.ink(x, y, x + 1, y + 1, (coverage * 255.0).round() as u8);
                 }
             }
         }
@@ -464,8 +481,8 @@ impl Mask {
         }
     }
 
-    /// The covered pixels as rectangles that never overlap: runs per row, and a run carried down
-    /// while the next row has exactly the same one.
+    /// The covered pixels as rectangles that never overlap: runs of one amount of ink per row, and
+    /// a run carried down while the next row has exactly the same one.
     fn into_runs(self) -> Vec<Run> {
         let mut done: Vec<Run> = Vec::new();
         let mut open: Vec<Run> = Vec::new();
@@ -474,25 +491,29 @@ impl Mask {
             let mut here = Vec::new();
             let mut x = 0;
             while x < self.width {
-                if row[x as usize] {
+                let amount = row[x as usize];
+                if amount > 0 {
                     let start = x;
-                    while x < self.width && row[x as usize] {
+                    while x < self.width && row[x as usize] == amount {
                         x += 1;
                     }
-                    here.push((start, x));
+                    here.push((start, x, amount));
                 } else {
                     x += 1;
                 }
             }
             let mut next = Vec::with_capacity(here.len());
-            for (start, end) in here {
-                match open.iter().position(|r| r.0 == start && r.2 == end) {
+            for (start, end, amount) in here {
+                match open
+                    .iter()
+                    .position(|r| r.0 == start && r.2 == end && r.4 == amount)
+                {
                     Some(at) => {
                         let mut run = open.swap_remove(at);
                         run.3 = y + 1;
                         next.push(run);
                     }
-                    None => next.push((start, y, end, y + 1)),
+                    None => next.push((start, y, end, y + 1, amount)),
                 }
             }
             done.append(&mut open);
@@ -549,7 +570,7 @@ pub(super) fn paint(
     let width = (slot.right() * per_point).round() - left;
     let height = (slot.bottom() * per_point).round() - top;
     let light = light_thickness(font_points, per_point);
-    for (x0, y0, x1, y1) in runs(shape, width as i32, height as i32, light) {
+    for (x0, y0, x1, y1, amount) in runs(shape, width as i32, height as i32, light) {
         let rect = Rect::from_min_max(
             pos2(
                 (left + x0 as f32) / per_point,
@@ -560,7 +581,12 @@ pub(super) fn paint(
                 (top + y1 as f32) / per_point,
             ),
         );
-        painter.rect_filled(rect, 0.0, color);
+        let ink = if amount == u8::MAX {
+            color
+        } else {
+            color.gamma_multiply(f32::from(amount) / 255.0)
+        };
+        painter.rect_filled(rect, 0.0, ink);
     }
 }
 
