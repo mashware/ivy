@@ -3538,7 +3538,7 @@ mod tests {
     }
 
     /// The application menu floats on the theme's `raised` role with a control border, and the
-    /// console's search row is laid on the same surface (D98).
+    /// console's search box is laid on the same surface (D98).
     #[test]
     fn the_application_menu_and_the_search_row_float_on_raised() {
         fn rects(shape: &egui::Shape, out: &mut Vec<egui::epaint::RectShape>) {
@@ -3567,14 +3567,14 @@ mod tests {
                 .iter()
                 .any(|r| r.fill == raised && r.rect.height() < 40.0 && r.rect.width() > 200.0)
         };
-        // The control: no such row before the search opens.
+        // The control: no such box before the search opens.
         assert!(!search_row(&frame(&mut window, &ctx, area, vec![])));
         let search = control(&window, &ctx, area, 0, 112.5);
         frame(&mut window, &ctx, area, click_at(search));
         // Read before the menu opens: an open menu dims the consoles beneath it.
         assert!(
             search_row(&frame(&mut window, &ctx, area, vec![])),
-            "the search row is not on raised"
+            "the search box is not on raised"
         );
         let menu = slots(area).menu.center();
         frame(&mut window, &ctx, area, click_at(menu));
@@ -3854,6 +3854,15 @@ mod tests {
         let whole_word = search_target(&window, 0, Target::Choice(search::Choice::WholeWord));
         frame(&mut window, &ctx, area, click_at(whole_word));
         assert!(pane_of(&window, names[0]).search.options().whole_word);
+        assert!(
+            pane_of(&window, names[0])
+                .search
+                .open
+                .as_ref()
+                .unwrap()
+                .list(),
+            "choosing an option folded the list it was chosen in"
+        );
         assert_eq!(
             pane_of(&window, names[0]).screen.selected_text().as_deref(),
             Some("needle"),
@@ -3947,7 +3956,12 @@ mod tests {
             .advance(b"one needle\r\ntwo needle\r\n");
         let at = control(&window, &ctx, area, 0, 112.5);
         frame(&mut window, &ctx, area, click_at(at));
-        frame(&mut window, &ctx, area, vec![egui::Event::Text("needle".into())]);
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::Text("needle".into())],
+        );
         let shapes = frame(&mut window, &ctx, area, vec![]);
         let painted = pane_of(&window, names[0])
             .search
@@ -3983,7 +3997,11 @@ mod tests {
         let at = search_target(&window, 0, Target::Next);
         frame(&mut window, &ctx, area, click_at(at));
         let first = selected_row(&window).expect("next selected a match on its own console");
-        assert_eq!(window.active().focus, names[0], "the keys stayed on the other console");
+        assert_eq!(
+            window.active().focus,
+            names[0],
+            "the keys stayed on the other console"
+        );
         assert!(!pane_of(&window, names[1]).search.is_open());
 
         window.active_mut().focus = names[1];

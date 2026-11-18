@@ -8171,18 +8171,26 @@ searched, and the one-row line took no clicks, so pressing the button seemed to 
   button is gone; `key.search` and the application menu's «Search console» still act on the
   focused console. Leaving the bar moves D96's compact boundary down by the button and its gap:
   **570 points on Linux and Windows, 533 on macOS**.
-- **The line becomes a box at the console's top-right**: the query, previous (`Shift+Enter`), next
-  (`Enter`), an options button and close (`Escape`), **painted over the console and never cut
-  out of it**, as the line was. It moves to the bottom-right when the current match lies under it;
-  its place comes from the console and the selection on screen only, never from whether the
-  options list is unfolded, so unfolding it cannot move a button a second press is aimed at. The
-  keep-off-the-last-row scroll that served the line is gone with it.
+- **The line becomes a box at the console's top-right**: the query, next (`Enter`, an up arrow,
+  since it walks toward older lines), previous (`Shift+Enter`, a down arrow), an options button and
+  close (`Escape`), **painted over the console and never cut out of it**, as the line was, and with
+  every part kept inside the console — a part clipped away would still take presses there. **A
+  step keeps its match below the rows the box takes** wherever the view can still scroll toward
+  the history, which replaces the keep-off-the-last-row scroll that served the line: walking older
+  the engine lands a match on the top row, and a box that moved there would leave the next click on
+  «next» to fall on the console. Where the view cannot scroll — the oldest line, a match on the live
+  screen — **the box moves to the bottom-right** when the selection on screen lies under it, and it
+  does the same for the held paste's question and the «stopped receiving» sentence, which keep the
+  console's top (D41). Its place comes from the console, the selection and those notices only,
+  never from whether the options list is unfolded, so unfolding it cannot move a button a second
+  press is aimed at.
 - **The box takes presses, and what lies under it hears none.** A press on it is claimed before
   the console's own routing — no selection, no mouse report to a program that asked for the mouse,
   no context menu or paste from the hidden text — and a press on its field hands that console the
   keyboard. As with D99's header controls, **only a box painted in the pass before answers**, so one
   recorded on a console that stopped being painted cannot take a press unseen. A press anywhere
-  else folds an unfolded options list and goes on to what it was aimed at.
+  else — a header control included — folds every unfolded options list it did not land on, before
+  any other surface takes it, and goes on to what it was aimed at.
 - **The field is painted, not egui's text field**, and that keeps every key rule above: a text
   field takes every key it is given, and this decision gives every key that is not the search's to
   the program, which closes the search. So the query is still edited with the keys listed above;
@@ -8191,13 +8199,17 @@ searched, and the one-row line took no clicks, so pressing the button seemed to 
   **Match case** — off by default, and **off means case is ignored always**: the engine's own rule,
   case-sensitive the moment the query holds an uppercase letter, is retired, because a checkbox
   that says «off» must not be overruled by what was typed. It is set with an inline flag ahead of
-  the escaped literal. **Whole word only** — a match counts only when neither end touches a
-  letter, digit or `_` of its logical line, in any script; checked on each match the engine
+  the escaped literal. **Whole word only** — a match counts only when each end that is itself a
+  letter, digit or `_` (in any script) does not touch another one on its logical line — the
+  boundary rule of `\b` and of the reference editors, so `foo(` is a whole word in `foo(bar)`;
+  checked on each match the engine
   returns rather than with `\b`, because an ASCII boundary takes every non-ASCII character for a
   non-word one and the engine's lazy automata do not take a Unicode one. The check steps over
   wide-character spacers and follows wraps, since the engine's two walks leave a match's ends on
   different halves of a wide character. Stepping past rejected candidates stops when it comes back
-  to the first, as the engine's walk always wraps. **Wrap around** — on by default, which is what
+  to the first, as the engine's walk always wraps — it offers the same disjoint matches in the
+  same cyclic order from any start, so the first comes round again. Whole word is judged before
+  wrapping, so «no more matches» is only said of a match that counts. **Wrap around** — on by default, which is what
   the search did; off, a step past the last match says «no more matches» and moves nothing.
   Changing an option re-marks the screen and takes back what the box said, as editing the query
   does.
@@ -8212,7 +8224,8 @@ searched, and the one-row line took no clicks, so pressing the button seemed to 
 | The field inside the console header | The ticket asked for a floating box; the header keeps 30 points of title and hides its controls on an unfocused console |
 | Keeping the smart case as the unchecked state | Tilix, GNOME Terminal and VS Code's find read an unchecked box as insensitive; under the smart rule «Needle» would be case-sensitive with the box saying otherwise |
 | `\b` or `(?-u:\b)` in the pattern for whole word | ASCII boundaries match `日本` inside `日本語`; Unicode boundaries are not available to the engine's lazy automata over non-ASCII text |
-| Scrolling the match clear of the box instead of moving the box | At the oldest line, or with the match on the live screen's top rows, nothing can be scrolled |
+| Only moving the box, never scrolling | Walking older the engine lands a match on the top row, so the box would jump on nearly every press and the next click on «next» would fall on the console |
+| Only scrolling, never moving the box | At the oldest line, or with the match on the live screen's top rows, nothing can be scrolled |
 | Dropping «Wrap around» because the engine always wraps | The ticket asks for it; off is decided after the engine answers, by where the match lies against the step's start |
 
 
@@ -8500,7 +8513,7 @@ D64's existing begin-pass boundary without restarting any console.
 
 ## D66 — Integrated, theme-derived window chrome and transient pane maximization
 
-**8 November 2026 — #326.** The user approved the interactive HTML prototype: one global titlebar carries split-right/down, new tab, search and the application menu; tabs sit below; each pane carries an explicit label, information-panel toggle, maximize/restore and close. This approval is the new signal superseding D64's exclusion of custom titlebars. (Amended 18 November 2026 by **D99**: each pane also carries split right and split down.)
+**8 November 2026 — #326.** The user approved the interactive HTML prototype: one global titlebar carries split-right/down, new tab, search and the application menu; tabs sit below; each pane carries an explicit label, information-panel toggle, maximize/restore and close. This approval is the new signal superseding D64's exclusion of custom titlebars. (Amended 18 November 2026 by **D99**: each pane also carries split right and split down. Amended 18 November 2026 by **D61**, #120: search moved from the titlebar to each pane's header.)
 
 Every chrome surface and ink derives from the effective configured Theme after named-template selection and explicit overrides. Live Save updates chrome alongside terminal colors. Copied prototype RGB literals and an independent chrome theme are discarded because they would ignore the user's settings.
 
@@ -10138,7 +10151,8 @@ up to about 456 one too narrow for a pill, so cards, pills and the add button va
 the kit's buttons in the kit's order (`Window.dc.html`), with one change the owner asked for at the
 desktop check: the logo opens the bar and Files stands a little apart after it. Right of the tabs
 come the Board as a framed button with its name, split right and split down, a separator, Markdown,
-search (each console's own header since #120, D61), connect and the menu, a separator, and the window's own buttons. Buttons are the kit's
+connect and the menu (search sat between Markdown and connect until #120 moved it to each console's
+header, D61), a separator, and the window's own buttons. Buttons are the kit's
 28 points (32 for the window's), drawn from its 16-unit line icons in one module (`ui::icons`) that
 the console headers and the drawer use too. Since **D103** that module draws Phosphor glyphs rather
 than the kit's paths; the buttons, their sizes and their order are unchanged. This reverses the earlier choice not to put a Board
@@ -10328,7 +10342,8 @@ selected row on `sel`, its primary action on `accent` with `on_accent` ink, its 
 theme picker is a floating menu: a search field, a segmented All / Dark / Light, and each theme with
 a four-colour sample — background, accent, waiting, finished — and a check on the selected one. The
 docked viewer keeps its header and footer on `panel` and lays the document on `base`. The console's
-search row is laid on `raised`, and the console header's actions menu floats like the others.
+search box (a one-row line until #120, D61) is laid on `raised`, and the console header's actions
+menu floats like the others.
 Surfaces that show a theme of their own derive roles for it as well, so one frame may ask about
 several themes; the memo of derived roles keeps the last four.
 
@@ -10396,7 +10411,7 @@ on the focused console, stay. This **amends D66**, whose approved per-pane set h
 - **Shown where wanted.** The focused console shows its controls all the time. Any other console
   shows them while the pointer is over its header. Hidden controls keep their place, so the title is
   laid out the same either way and never moves. With four consoles, six icons are in view instead of
-  twenty-four.
+  twenty-four (seven and twenty-eight since #120 added search, D61).
 - **A control exists where it was painted.** A non-title target of a header is pressable only if
   that header's controls were painted in the previous pass, the rule D96 gave the tab close. A move
   and a press in one input batch — a fast click, the first click into a window — otherwise reaches a

@@ -428,12 +428,12 @@ impl Mode {
         // its matches are not lit, and the box is the only place that can say why.
         let refused_while_typing = matches!(self.compiled, Some(Err(Refused::TooLarge)));
         match self.outcome {
-        Outcome::Typing if refused_while_typing => "too long to search",
-        Outcome::Typing | Outcome::Found => "",
-        Outcome::NotFound => "no match",
-        Outcome::NoMore => "no more matches",
-        Outcome::Refused(Refused::Empty) => "type what to look for",
-        Outcome::Refused(Refused::TooLarge) => "too long to search",
+            Outcome::Typing if refused_while_typing => "too long to search",
+            Outcome::Typing | Outcome::Found => "",
+            Outcome::NotFound => "no match",
+            Outcome::NoMore => "no more matches",
+            Outcome::Refused(Refused::Empty) => "type what to look for",
+            Outcome::Refused(Refused::TooLarge) => "too long to search",
         }
     }
 }

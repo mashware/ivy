@@ -119,7 +119,7 @@ pub enum Toward {
 pub(crate) fn is_whole_word<T>(term: &Term<T>, found: &Match) -> bool {
     let word = |c: char| c.is_alphanumeric() || c == '_';
     // **Only an end that is itself a word character has to stand apart**, the boundary rule of
-    // `\b` and of the reference editors: `foo(` is a whole word in `foo(bar)`, its own `(` being
+    // `\b` and of the reference editors: «foo(» is a whole word in «foo(bar)», its own «(» being
     // the boundary.
     let stands_apart = |at: Point, inward: Direction, outward: Direction| {
         !own(term, at, inward).is_some_and(word) || !neighbour(term, at, outward).is_some_and(word)
@@ -607,7 +607,11 @@ mod tests {
 
     #[test]
     fn whole_word_asks_only_an_end_that_is_a_word_character_to_stand_apart() {
-        for (line, query) in [("foo(bar)", "foo("), ("a /path/x", "/path/"), ("say hi", " hi")] {
+        for (line, query) in [
+            ("foo(bar)", "foo("),
+            ("a /path/x", "/path/"),
+            ("say hi", " hi"),
+        ] {
             let mut screen = screen_with(4, &[line]);
             assert_eq!(
                 screen.find(&mut with(query, whole_word()), Toward::Older, 0),
@@ -651,7 +655,13 @@ mod tests {
     #[test]
     fn a_step_keeps_its_match_below_the_rows_it_is_asked_to_keep_clear() {
         let lines: Vec<String> = (0..40)
-            .map(|n| if n % 10 == 3 { "needle".to_owned() } else { format!("line {n}") })
+            .map(|n| {
+                if n % 10 == 3 {
+                    "needle".to_owned()
+                } else {
+                    format!("line {n}")
+                }
+            })
             .collect();
         let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
         let row = |screen: &Screen| selected_row(screen).map(|(row, _)| row);
@@ -667,11 +677,21 @@ mod tests {
         assert_eq!(screen.find(&mut search, Toward::Older, 3), Found::Match);
         let oldest = screen.view().scroll();
         screen.scroll_by(Scroll::ToTop);
-        assert_eq!(screen.view().scroll(), oldest, "the premise: the oldest line is in view");
+        assert_eq!(
+            screen.view().scroll(),
+            oldest,
+            "the premise: the oldest line is in view"
+        );
         // Without rows to keep clear, the step leaves the match where the engine put it.
         let mut screen = screen_with(8, &lines);
-        assert_eq!(screen.find(&mut literal("needle"), Toward::Older, 0), Found::Match);
-        assert_eq!(screen.find(&mut literal("needle"), Toward::Older, 0), Found::Match);
+        assert_eq!(
+            screen.find(&mut literal("needle"), Toward::Older, 0),
+            Found::Match
+        );
+        assert_eq!(
+            screen.find(&mut literal("needle"), Toward::Older, 0),
+            Found::Match
+        );
         assert_eq!(row(&screen), Some(0));
     }
 

@@ -62,7 +62,8 @@ pub(super) fn fold_the_lists(window: &mut Window, ui: &egui::Ui) {
         }
         let kept = box_under(window, frame, button.at).map(|(name, _)| name);
         for pane in window.active_mut().panes_mut() {
-            if Some(pane.name) != kept && pane.search.open.as_ref().is_some_and(|open| open.list()) {
+            if Some(pane.name) != kept && pane.search.open.as_ref().is_some_and(|open| open.list())
+            {
                 crate::search::press(
                     &mut pane.search,
                     &mut pane.screen,
@@ -79,8 +80,18 @@ fn box_under(
     frame: u64,
     at: egui::Pos2,
 ) -> Option<(usize, crate::search::floating::Target)> {
-    window.active_mut().panes_mut().into_iter().find_map(|pane| {
-        let target = pane.search.open.as_ref()?.painted.as_ref()?.hit(frame, at)?;
-        Some((pane.name, target))
-    })
+    window
+        .active_mut()
+        .panes_mut()
+        .into_iter()
+        .find_map(|pane| {
+            let target = pane
+                .search
+                .open
+                .as_ref()?
+                .painted
+                .as_ref()?
+                .hit(frame, at)?;
+            Some((pane.name, target))
+        })
 }

@@ -143,7 +143,12 @@ pub(crate) fn layout(
     let mut right = row.right();
     // Right to left: close, options, then the two steps — down for newer, and up for older, which
     // is where `Enter` walks.
-    for target in [Target::Close, Target::Options, Target::Previous, Target::Next] {
+    for target in [
+        Target::Close,
+        Target::Options,
+        Target::Previous,
+        Target::Next,
+    ] {
         let left = right - button;
         if left < row.left() {
             break;
@@ -258,7 +263,7 @@ pub(crate) fn paint(
                 index,
             ));
             ui.interact(*rect, id, egui::Sense::hover())
-            .on_hover_text(target.hint());
+                .on_hover_text(target.hint());
         }
         match target {
             Target::Field => paint_the_field(painter, mode, *rect, &roles, metrics),
@@ -416,13 +421,25 @@ mod tests {
 
     #[test]
     fn the_box_moves_to_the_bottom_when_the_match_lies_under_it_and_only_then() {
-        let under = layout(console(), &metrics(), &with_the_match_on(0).view(), false, &[]);
+        let under = layout(
+            console(),
+            &metrics(),
+            &with_the_match_on(0).view(),
+            false,
+            &[],
+        );
         assert_eq!(
             under.frame.bottom(),
             console().bottom() - MARGIN,
             "the box stayed over the match it found"
         );
-        let clear = layout(console(), &metrics(), &with_the_match_on(5).view(), false, &[]);
+        let clear = layout(
+            console(),
+            &metrics(),
+            &with_the_match_on(5).view(),
+            false,
+            &[],
+        );
         assert_eq!(clear.frame.top(), console().top() + MARGIN);
     }
 
@@ -485,7 +502,10 @@ mod tests {
 
     #[test]
     fn a_match_on_the_top_row_but_clear_of_the_box_leaves_it_at_the_top() {
-        let mut screen = Screen::new(Size { rows: ROWS, cols: 80 });
+        let mut screen = Screen::new(Size {
+            rows: ROWS,
+            cols: 80,
+        });
         screen.advance(b"needle");
         let mut search = Search::literal("needle", Options::default()).unwrap();
         assert_eq!(
@@ -498,7 +518,10 @@ mod tests {
 
     #[test]
     fn a_notice_at_the_top_sends_the_box_to_the_bottom() {
-        let screen = Screen::new(Size { rows: ROWS, cols: 80 });
+        let screen = Screen::new(Size {
+            rows: ROWS,
+            cols: 80,
+        });
         let notice = Rect::from_min_size(console().min, vec2(console().width(), 60.0));
         let layout = layout(console(), &metrics(), &screen.view(), false, &[notice]);
         assert!(
@@ -527,9 +550,15 @@ mod tests {
             let layout = layout(short, &metrics(), &screen.view(), true, &notices);
             assert!(short.contains_rect(layout.frame), "{layout:?}");
             let list = layout.list.expect("the list is laid out");
-            assert!(short.contains_rect(list), "the list left its console: {list:?}");
+            assert!(
+                short.contains_rect(list),
+                "the list left its console: {list:?}"
+            );
             for (target, rect) in &layout.targets {
-                assert!(short.contains_rect(*rect), "{target:?} outside the console: {rect:?}");
+                assert!(
+                    short.contains_rect(*rect),
+                    "{target:?} outside the console: {rect:?}"
+                );
             }
             assert!(
                 layout
