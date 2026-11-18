@@ -1,16 +1,17 @@
 //! The tabs as the title bar paints them (D96): cards on the bar's bottom edge, the active one
 //! opening onto the consoles below, each with its label and one project dot per console, ringed in
-//! the colour of that console's claim.
+//! the colour of that console's claim — or, where the dots do not fit, one muted dot ringed with the
+//! tab's loudest claim.
 //!
 //! Painting and pointer routing read the same rectangles from here, so a card never paints one
 //! target and answers another.
 
 use super::{CLOSE_MIN_WIDTH, feedback};
 use crate::Window;
-use crate::panel::AttentionState;
 use crate::theme::{Roles, Theme, metrics};
 use crate::tree::Tab;
 use eframe::egui::{self, Color32, CornerRadius, Rect, Stroke, pos2, vec2};
+use panel_contract::Attention;
 use std::time::SystemTime;
 
 const ADD_WIDTH: f32 = 28.0;
@@ -33,17 +34,30 @@ const DOT: f32 = 6.0;
 /// A claiming console's ring, always in its class's full colour: 1.5 points read too heavy at the
 /// desktop check (D96).
 const RING_WIDTH: f32 = 1.0;
-/// The band a ring is laid out in, wider than the stroke, so the geometry does not move with it.
+/// The band a ring is laid out in, wider than the stroke and centred on it, so the geometry does
+/// not move with the stroke.
 const RING_BAND: f32 = 1.5;
+const _: () = assert!(
+    RING_WIDTH <= RING_BAND,
+    "the ring's stroke would leave its band"
+);
+/// From the dot's edge to the ring's band.
 const RING_GAP: f32 = 1.5;
-/// How far a ring reaches from its dot's centre.
+/// How far a ring's band reaches from its dot's centre.
 const RING_REACH: f32 = DOT / 2.0 + RING_GAP + RING_BAND;
-/// The space left between two neighbouring rings: at 1 point they read as touching (D96).
+/// From one ring's band to the next; the painted strokes, thinner than their bands, end up half a
+/// point further apart. At 1 point the owner read the rings as touching (D96).
 const RING_SPACING: f32 = 4.0;
 /// From one dot's centre to the next. Fixed whether or not anything claims, so a claim arriving
 /// never moves the label.
 const DOT_STEP: f32 = 2.0 * RING_REACH + RING_SPACING;
-const _: () = assert!(RING_SPACING > 0.0, "neighbouring rings would touch");
+/// The room a label keeps beside every console's dot; below it the dots give way to one summary dot.
+const LABEL_FLOOR: f32 = 24.0;
+/// The room a label keeps beside the summary dot: the tab's number. The summary outranks the label,
+/// so every card the bar keeps (down to [`MIN_CARD`]) can still say that something claims (D96).
+const SUMMARY_LABEL_FLOOR: f32 = 8.0;
+/// The air between the label and the dots.
+const LABEL_AIR: f32 = 8.0;
 /// The close target's width at the card's right edge.
 const CLOSE_WIDTH: f32 = 26.0;
 /// The narrowest card the title bar keeps before turning compact. The value is the pill era's
@@ -112,6 +126,16 @@ pub(super) struct Layout {
     pub summary: Option<Rect>,
 }
 
+/// The air a card keeps on each side: the kit's on a roomy card, less on a narrow one.
+fn padding(card: Rect) -> f32 {
+    if card.width() >= ROOMY {
+        PADDING
+    } else {
+        TIGHT
+    }
+    .min(card.width() / 2.0)
+}
+
 /// Whether the cross shows: on the active tab, and on the one under the pointer.
 ///
 /// Its target exists exactly where the cross shows, so a press on an inactive tab's right edge
@@ -156,12 +180,7 @@ pub(super) fn cards<'a>(
 
 impl Layout {
     pub fn new(card: Rect, dots: usize, close: bool) -> Self {
-        let padding = if card.width() >= ROOMY {
-            PADDING
-        } else {
-            TIGHT
-        }
-        .min(card.width() / 2.0);
+        let padding = padding(card);
         let close = (close && card.width() >= CLOSE_MIN_WIDTH).then(|| {
             Rect::from_min_max(
                 pos2(card.right() - CLOSE_WIDTH, card.top()),
@@ -178,16 +197,16 @@ impl Layout {
         } else {
             (body.right() - padding).max(label_left)
         };
-        // `n` dots, right-aligned, where the label keeps at least 24 points and 8 of air before them.
-        let fit = |n: usize| {
+        // `n` dots, right-aligned, where the label keeps `floor` points and its air before them.
+        let fit = |n: usize, floor: f32| {
             let width = n as f32 * DOT_STEP - RING_SPACING;
-            (n > 0 && end - label_left - width - 8.0 >= 24.0).then(|| {
+            (n > 0 && end - label_left - width - LABEL_AIR >= floor).then(|| {
                 Rect::from_min_max(pos2(end - width, body.top()), pos2(end, body.bottom()))
             })
         };
-        let all = fit(dots);
+        let all = fit(dots, LABEL_FLOOR);
         let summary = if all.is_none() {
-            fit(dots.min(1))
+            fit(dots.min(1), SUMMARY_LABEL_FLOOR)
         } else {
             None
         };
@@ -195,7 +214,7 @@ impl Layout {
             pos2(label_left, body.top()),
             pos2(
                 all.or(summary)
-                    .map_or(end, |d| d.left() - 8.0)
+                    .map_or(end, |d| d.left() - LABEL_AIR)
                     .max(label_left),
                 body.bottom(),
             ),
@@ -221,14 +240,13 @@ pub(crate) fn label_dots_summary(
     (layout.label, layout.dots, layout.summary)
 }
 
-/// A dot's ring for `claim`: one whole ring in its class's full colour, held or not. Whether
-/// somebody holds the claim up is the console's panel's to say; on the tab the owner wanted every
-/// ring the same at the desktop check (D96).
-fn ring(painter: &egui::Painter, center: egui::Pos2, claim: AttentionState, theme: &Theme) {
+/// A dot's ring for a claim of `class`: one whole ring in its full colour, whether or not anybody
+/// holds the claim up — the owner wanted every ring the same at the desktop check (D96).
+fn ring(painter: &egui::Painter, center: egui::Pos2, class: Attention, theme: &Theme) {
     painter.circle_stroke(
         center,
         RING_REACH - RING_BAND / 2.0,
-        Stroke::new(RING_WIDTH, theme.attention_color(claim.class, true)),
+        Stroke::new(RING_WIDTH, theme.attention_color(class, true)),
     );
 }
 
@@ -407,19 +425,23 @@ pub(super) fn paint(window: &Window, ui: &egui::Ui, band: Rect, now: SystemTime)
                 // The claim is the console's own, as its producer declared it (D18), and it is
                 // drawn around the dot, not on it.
                 if let Some(claim) = pane.effective_attention(now) {
-                    ring(&painter, center, claim, &window.theme);
+                    ring(&painter, center, claim.class, &window.theme);
                     ringed = true;
                 }
             });
             marked += usize::from(ringed);
-        } else if let Some(summary) = layout.summary
-            && let Some(claim) = tab.attention(now)
-        {
-            // No room for every console's dot: one muted dot carries the loudest claim of them all.
-            let center = dot_center(summary, 0);
-            painter.circle_filled(center, DOT / 2.0, roles.tx3);
-            ring(&painter, center, claim, &window.theme);
-            marked += 1;
+        } else if let Some(summary) = layout.summary {
+            // No room for every console's dot: one muted dot carries the loudest claim of them all,
+            // by the same order `Tab::attention` uses, walked without collecting the panes.
+            let mut loudest = None;
+            tab.root
+                .walk(&mut |pane| loudest = loudest.max(pane.effective_attention(now)));
+            if let Some(claim) = loudest {
+                let center = dot_center(summary, 0);
+                painter.circle_filled(center, DOT / 2.0, roles.tx3);
+                ring(&painter, center, claim.class, &window.theme);
+                marked += 1;
+            }
         }
         // Advanced every pass, shown or not, so a pointer that leaves from the cross does not leave
         // its hover at full strength for the next time the cross appears.
@@ -480,17 +502,19 @@ mod tests {
                             let layout = Layout::new(card, n, close);
                             assert!(card.contains_rect(layout.body));
                             // The label starts at the padding the card's width earns.
-                            let padding = if card.width() >= ROOMY {
-                                PADDING
-                            } else {
-                                TIGHT
-                            };
                             assert_eq!(
                                 layout.label.left(),
-                                (card.left() + padding.min(card.width() / 2.0))
-                                    .min(layout.body.right()),
+                                (card.left() + padding(card)).min(layout.body.right()),
                                 "{width} {count} {n}"
                             );
+                            // Every card the bar keeps can say that something claims: all its
+                            // dots, or the summary dot — at no width does it lose both.
+                            if n > 0 && card.width() >= MIN_CARD {
+                                assert!(
+                                    layout.dots.is_some() || layout.summary.is_some(),
+                                    "{width} {count} {n}: no room for any claim"
+                                );
+                            }
                             assert!(layout.label.right() <= layout.body.right());
                             if let Some(close) = layout.close {
                                 assert_eq!(layout.body.right(), close.left());
@@ -499,13 +523,12 @@ mod tests {
                             if let Some(dots) = layout.dots {
                                 assert!(dots.left() >= layout.label.right() + 8.0);
                                 assert!(dots.right() <= layout.body.right());
-                                // The last of the `n` rings ends inside the dots' rect.
-                                assert!(
-                                    dot_center(dots, n - 1).x + RING_REACH <= dots.right() + 1e-3
-                                );
+                                // The last of the `n` painted rings, stroke included, ends inside
+                                // the dots' rect.
+                                let painted = RING_REACH - RING_BAND / 2.0 + RING_WIDTH / 2.0;
+                                assert!(dot_center(dots, n - 1).x + painted <= dots.right() + 1e-3);
                             }
                             if let Some(summary) = layout.summary {
-                                assert!(n > 1, "one dot that fits is a dot, not a summary");
                                 assert!(summary.left() >= layout.label.right() + 8.0);
                                 assert_eq!(summary.right(), dots_end(&layout));
                                 assert_eq!(summary.width(), 2.0 * RING_REACH);
@@ -524,25 +547,22 @@ mod tests {
         assert_eq!(layout.label.left(), PADDING);
     }
 
-    /// Where the dots end: the body's right edge with the cross, its padding short of it without.
+    /// Where the dots end: the body's right edge with the cross, its padding short of it without
+    /// (the body is the whole card then).
     fn dots_end(layout: &Layout) -> f32 {
         if layout.close.is_some() {
             layout.body.right()
         } else {
-            layout.body.right()
-                - if layout.body.width() >= ROOMY {
-                    PADDING
-                } else {
-                    TIGHT
-                }
+            layout.body.right() - padding(layout.body)
         }
     }
 
     /// Four consoles keep their dots, rings included, down to a 128-point card with the cross
     /// shown; the dots are 16 points apart and their rect is 60 wide. Below that the card keeps one
-    /// 12-point summary slot down to 80 points, and below 80 it has neither.
+    /// 12-point summary slot at every width down to the narrowest card the bar keeps, through the
+    /// two places the card's air and its cross change, so the claim never blinks while resizing.
     #[test]
-    fn four_dots_fit_down_to_128_points_and_one_summary_slot_down_to_80() {
+    fn four_dots_fit_down_to_128_points_and_one_summary_slot_down_to_the_narrowest_card() {
         let at = |width: f32| Rect::from_min_size(pos2(0.0, 6.0), vec2(width, 34.0));
         let fits = Layout::new(at(128.0), 4, true);
         let dots = fits.dots.expect("128 points hold four dots");
@@ -554,8 +574,9 @@ mod tests {
         let summary = short.summary.expect("127 points hold one summary slot");
         assert_eq!(summary.right(), 127.0 - CLOSE_WIDTH);
         assert_eq!(summary.width(), 12.0);
-        assert!(Layout::new(at(80.0), 4, true).summary.is_some());
-        let none = Layout::new(at(79.0), 4, true);
-        assert_eq!((none.dots, none.summary), (None, None));
+        for tenth in (MIN_CARD * 10.0) as u32..1270 {
+            let layout = Layout::new(at(tenth as f32 / 10.0), 4, true);
+            assert!(layout.dots.is_none() && layout.summary.is_some(), "{tenth}");
+        }
     }
 }

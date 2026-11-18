@@ -2003,8 +2003,8 @@ mod tests {
     /// A tab dot's own radius: a ring is anything drawn beyond it.
     const DOT_RADIUS: f32 = 3.0;
 
-    /// The whole rings a tab card painted around its dots (a claim nobody holds is dashed, not
-    /// here): 1-point strokes with no fill, centred in the card — centre, radius, colour, width.
+    /// The rings a tab card painted around its dots, held or not: 1-point strokes with no fill,
+    /// wider than a dot, centred in the card — centre, radius, colour, width.
     fn rings_in(
         shapes: &[egui::epaint::ClippedShape],
         card: egui::Rect,
@@ -2045,12 +2045,28 @@ mod tests {
         }
     }
 
-    /// Whether a dot of radius 3 filled with `ink`, or a 1-point outline in `ink`, sits at `at`.
-    fn dot_at(shapes: &[egui::epaint::ClippedShape], at: egui::Pos2, ink: egui::Color32) -> bool {
+    /// Whether a dot of radius 3 filled with `ink` sits at `at`.
+    fn filled_dot_at(
+        shapes: &[egui::epaint::ClippedShape],
+        at: egui::Pos2,
+        ink: egui::Color32,
+    ) -> bool {
         shapes.iter().any(|s| {
             matches!(&s.shape, egui::Shape::Circle(c) if c.center == at
-                && ((c.radius == 3.0 && c.fill == ink)
-                    || (c.stroke.width == 1.0 && c.stroke.color == ink)))
+                && c.radius == DOT_RADIUS && c.fill == ink)
+        })
+    }
+
+    /// Whether the hollow 1-point outline in `ink` of a console with no project sits at `at`.
+    fn hollow_dot_at(
+        shapes: &[egui::epaint::ClippedShape],
+        at: egui::Pos2,
+        ink: egui::Color32,
+    ) -> bool {
+        shapes.iter().any(|s| {
+            matches!(&s.shape, egui::Shape::Circle(c) if c.center == at
+                && c.radius < DOT_RADIUS && c.fill == egui::Color32::TRANSPARENT
+                && c.stroke.width == 1.0 && c.stroke.color == ink)
         })
     }
 
@@ -2075,9 +2091,9 @@ mod tests {
         let area = area_of(1400.0);
         frame(&mut window, &ctx, area, vec![]);
         let shapes = frame(&mut window, &ctx, area, vec![]);
-        for (which, fill, expected) in [
-            (0, ink, vec![(0, WAIT)]),
-            (1, MUTED, vec![(0, BLOCK), (1, DONE)]),
+        for (which, project, expected) in [
+            (0, Some(ink), vec![(0, WAIT)]),
+            (1, None, vec![(0, BLOCK), (1, DONE)]),
         ] {
             let card = title_card(&window, &ctx, area, which);
             // Laid out with the cross's room whether or not it shows, as every card with a sibling.
@@ -2087,10 +2103,11 @@ mod tests {
             let center =
                 |n: usize| egui::pos2(dots.left() + 6.0 + 16.0 * n as f32, dots.center().y);
             for n in 0..2 {
-                assert!(
-                    dot_at(&shapes, center(n), fill),
-                    "tab {which}: dot {n} lost its own fill"
-                );
+                let kept = match project {
+                    Some(ink) => filled_dot_at(&shapes, center(n), ink),
+                    None => hollow_dot_at(&shapes, center(n), MUTED),
+                };
+                assert!(kept, "tab {which}: dot {n} lost its own fill");
             }
             let rings = rings_in(&shapes, card);
             assert_eq!(rings.len(), expected.len(), "tab {which}: {rings:?}");
@@ -2100,7 +2117,7 @@ mod tests {
                 assert_eq!(width, 1.0, "tab {which}, dot {n}: a held claim's ring");
                 assert_eq!(at, center(n), "tab {which}: the ring is not on dot {n}");
             }
-            // No pill and no muted dot where the summary used to be — the card's first 36 points,
+            // No pill and no muted dot where the pill used to be — the card's first 36 points,
             // its padding, the 18-point pill and its gap — and the painted label starts at the
             // padding. Only the label's text and the card-wide surfaces may touch that slot.
             assert_eq!(label.left(), card.left() + 10.0, "tab {which}");
@@ -2159,81 +2176,56 @@ mod tests {
         assert_eq!(window.tab_bar_cost.marked_tabs, 1);
     }
 
-    /// A card with room for one dot but not for both of its consoles' shows a single muted dot
-    /// ringed with the loudest claim of the two — wait over block — and counts as marked (the
-    /// owner's choice after the review, D96 amended). The other cards claim nothing and show none.
+    /// A card without room for both of its consoles' dots shows a single muted dot ringed with the
+    /// loudest claim of the two — wait over block — and counts as marked; the cards that claim
+    /// nothing show neither the ring nor the muted dot (D96 amended). Run at a card of 80–96 points
+    /// and at the narrowest window, where the card is under the cross's threshold: the summary is
+    /// there at both, so a claim never blinks out while the window narrows.
     #[test]
     fn a_tab_without_room_for_its_dots_rings_one_dot_with_its_loudest_claim() {
         let ctx = egui::Context::default();
-        let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 3]);
-        window.chrome.enable();
-        window.headers = window.headers.integrated(true);
-        publish_in_the_tab(&mut window, 0, 0, r#"{"attention":"block","lines":["x"]}"#);
-        publish_in_the_tab(&mut window, 0, 1, r#"{"attention":"wait","lines":["x"]}"#);
+        let mut probe = window_of_tabs([["sleep 30", "sleep 30"]; 3]);
+        probe.chrome.enable();
+        probe.headers = probe.headers.integrated(true);
         // The fonts the geometry measures with exist after a first pass.
-        frame(&mut window, &ctx, area_of(1400.0), vec![]);
-        // The narrowest window whose cards hold one dot (80 points) but not two (96).
-        let area = (500..1400)
+        frame(&mut probe, &ctx, area_of(1400.0), vec![]);
+        let between = (500..1400)
             .map(|w| area_of(w as f32))
-            .find(|area| (80.0..96.0).contains(&title_card(&window, &ctx, *area, 0).width()))
+            .find(|area| (80.0..96.0).contains(&title_card(&probe, &ctx, *area, 0).width()))
             .expect("some window width gives a card between 80 and 96 points");
-        frame(&mut window, &ctx, area, vec![]);
-        let shapes = frame(&mut window, &ctx, area, vec![]);
-        let card = title_card(&window, &ctx, area, 0);
-        let (_, dots, summary) = tab_bar::title_label_dots_summary(card, 2, true);
-        assert_eq!(dots, None);
-        let summary = summary.expect("the card keeps one dot's slot");
-        let center = egui::pos2(summary.left() + 6.0, summary.center().y);
-        assert!(
-            dot_at(&shapes, center, MUTED),
-            "the summary dot is not the muted one"
-        );
-        assert_eq!(rings_in(&shapes, card), vec![(center, 5.25, WAIT, 1.0)]);
-        for other in 1..3 {
-            assert!(rings_in(&shapes, title_card(&window, &ctx, area, other)).is_empty());
+        for area in [between, area_of(240.0)] {
+            // A window that has only ever been this narrow: the bar's count is a running maximum,
+            // and a wide frame first would have marked the card before the summary had to.
+            let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 3]);
+            window.chrome.enable();
+            window.headers = window.headers.integrated(true);
+            publish_in_the_tab(&mut window, 0, 0, r#"{"attention":"block","lines":["x"]}"#);
+            publish_in_the_tab(&mut window, 0, 1, r#"{"attention":"wait","lines":["x"]}"#);
+            frame(&mut window, &ctx, area, vec![]);
+            let shapes = frame(&mut window, &ctx, area, vec![]);
+            let card = title_card(&window, &ctx, area, 0);
+            let (_, dots, summary) = tab_bar::title_label_dots_summary(card, 2, true);
+            assert_eq!(dots, None, "{card:?}");
+            let summary = summary.expect("the card keeps one dot's slot");
+            let center = egui::pos2(summary.left() + 6.0, summary.center().y);
+            assert!(
+                filled_dot_at(&shapes, center, MUTED),
+                "{card:?}: the summary dot is not the muted one"
+            );
+            assert_eq!(rings_in(&shapes, card), vec![(center, 5.25, WAIT, 1.0)]);
+            for other in 1..3 {
+                let card = title_card(&window, &ctx, area, other);
+                assert!(rings_in(&shapes, card).is_empty());
+                let (_, _, slot) = tab_bar::title_label_dots_summary(card, 2, true);
+                let slot = slot.expect("the same width keeps the same slot");
+                let at = egui::pos2(slot.left() + 6.0, slot.center().y);
+                assert!(
+                    !filled_dot_at(&shapes, at, MUTED),
+                    "a card that claims nothing painted the summary dot"
+                );
+            }
+            assert_eq!(window.tab_bar_cost.marked_tabs, 1, "{card:?}");
         }
-        assert_eq!(window.tab_bar_cost.marked_tabs, 1);
-    }
-
-    /// A card with no room even for one dot shows no claim: no ring, no pill, no glyph, nothing but
-    /// its label and its cross — and the bar does not count it, although its console does claim.
-    #[test]
-    fn a_tab_too_narrow_for_one_dot_shows_no_claim() {
-        let ctx = egui::Context::default();
-        let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 3]);
-        window.chrome.enable();
-        window.headers = window.headers.integrated(true);
-        publish_in_the_tab(&mut window, 0, 0, r#"{"attention":"wait","lines":["x"]}"#);
-        let area = area_of(240.0);
-        frame(&mut window, &ctx, area, vec![]);
-        let shapes = frame(&mut window, &ctx, area, vec![]);
-        // The positive control: the claim did arrive, so what follows is about painting it.
-        assert!(
-            window.tabs[0]
-                .attention(std::time::SystemTime::now())
-                .is_some()
-        );
-        let card = title_card(&window, &ctx, area, 0);
-        assert!(
-            card.width() < 80.0,
-            "the case is a card under one dot: {card:?}"
-        );
-        assert_eq!(tab_bar::title_label_dots_summary(card, 2, true).1, None);
-        let marks: Vec<_> = shapes
-            .iter()
-            .filter(|s| match &s.shape {
-                egui::Shape::Text(_) => false,
-                egui::Shape::LineSegment { stroke, .. } => stroke.width != 1.2,
-                _ => true,
-            })
-            .map(|s| s.shape.visual_bounding_rect())
-            .filter(|r| r.width() <= 18.0 && card.intersects(*r) && r.top() < card.bottom())
-            .collect();
-        assert!(
-            marks.is_empty(),
-            "a claim mark on the narrow card: {marks:?}"
-        );
-        assert_eq!(window.tab_bar_cost.marked_tabs, 0);
     }
 
     /// The tabs share the title bar's row, so the consoles start 40 points down instead of the
