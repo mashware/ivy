@@ -1,9 +1,7 @@
 use std::env;
-use std::ffi::{OsStr, OsString};
-use std::io::{Read, Write};
-use std::process::{Command, Stdio};
-use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::ffi::OsString;
+use std::io::Write;
+use std::process::Command;
 
 #[derive(Debug, PartialEq)]
 enum Kind {
@@ -134,79 +132,6 @@ fn classify(args: &[OsString]) -> Kind {
     Kind::Interactive { already }
 }
 
-fn supports(exe: &OsStr) -> bool {
-    let Ok(mut child) = Command::new(exe)
-        .arg("--help")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-    else {
-        return false;
-    };
-    let (tx, rx) = mpsc::channel();
-    for mut stream in [
-        child
-            .stdout
-            .take()
-            .map(|s| Box::new(s) as Box<dyn Read + Send>),
-        child
-            .stderr
-            .take()
-            .map(|s| Box::new(s) as Box<dyn Read + Send>),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        let tx = tx.clone();
-        std::thread::spawn(move || {
-            let mut output = Vec::new();
-            let mut buf = [0; 4096];
-            while let Ok(n) = stream.read(&mut buf) {
-                if n == 0 {
-                    break;
-                }
-                let room = 65536usize.saturating_sub(output.len());
-                output.extend_from_slice(&buf[..n.min(room)]);
-            }
-            let _ = tx.send(output);
-        });
-    }
-    drop(tx);
-    let deadline = Instant::now() + Duration::from_secs(2);
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(s)) => break Some(s),
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
-            _ => {
-                let _ = child.kill();
-                // Reap only within a bounded grace period. A probe that cannot be
-                // terminated may be abandoned; exec/exit ends our reader threads.
-                let grace = Instant::now() + Duration::from_millis(200);
-                while Instant::now() < grace {
-                    match child.try_wait() {
-                        Ok(Some(_)) | Err(_) => break,
-                        Ok(None) => std::thread::sleep(Duration::from_millis(10)),
-                    }
-                }
-                break None;
-            }
-        }
-    };
-    if !status.is_some_and(|s| s.success()) {
-        return false;
-    }
-    let mut found = false;
-    for _ in 0..2 {
-        if let Ok(bytes) = rx.recv_timeout(Duration::from_millis(100)) {
-            found |= bytes
-                .windows(b"--no-daemon".len())
-                .any(|w| w == b"--no-daemon");
-        }
-    }
-    found
-}
-
 fn main() {
     let mut args = env::args_os().skip(1);
     let Some(exe) = args.next() else {
@@ -223,7 +148,7 @@ fn main() {
     }
     let original: Vec<_> = args.collect();
     if matches!(classify(&original), Kind::Interactive { already: false })
-        && panel_control::codex_relay::supported(&exe, &original)
+        && panel_control::codex_relay::supported(&original)
     {
         match panel_control::codex_relay::run(&exe, &original) {
             Ok(status) => {
@@ -247,18 +172,11 @@ fn main() {
             }
         }
     }
-    let mut inject = false;
     match classify(&original) {
         Kind::Interactive { already: false } => {
             eprintln!(
-                "ivy-codex: this version or invocation has no verified shared-panel bridge; using independent mode without live mobile access"
+                "ivy-codex: this platform or invocation cannot use Ivy's shared-panel bridge; preserving the original Codex command without adding --no-daemon; local panel routing is unverified"
             );
-            inject = supports(&exe);
-            if !inject {
-                eprintln!(
-                    "ivy-codex: client does not advertise --no-daemon or its capability probe failed; independent panel routing is unverified"
-                );
-            }
         }
         Kind::Interactive { already: true } | Kind::Pass => {}
         Kind::Remote => {
@@ -269,9 +187,6 @@ fn main() {
         ),
     }
     let mut command = Command::new(exe);
-    if inject {
-        command.arg("--no-daemon");
-    }
     command.args(original);
     let _ = std::io::stderr().flush();
     #[cfg(unix)]

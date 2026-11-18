@@ -142,9 +142,11 @@ See the [official Codex MCP configuration](https://learn.chatgpt.com/docs/extend
 
 In a newly opened ordinary Bash, Zsh or Fish console, type `codex`, `codex resume <session-id>`
 or `codex fork <session-id>`. Ivy installs a console-local function after your shell startup and
-uses the external client on your current PATH. For local interactive sessions it checks client help
-and adds `--no-daemon` when supported. Codex 0.167.0 advertises this option; earlier clients without
-it run unchanged with a diagnostic. Ivy changes neither shell startup files nor Codex configuration.
+uses the external client on your current PATH. On Linux, supported interactive sessions use the shared daemon after a bounded check for the remote
+client options. The daemon/proxy protocol and the running MCP bridge's proof establish compatibility;
+CLI and server versions do not control eligibility. Ivy never adds `--no-daemon` automatically.
+Missing capabilities or failed shared setup stop the launch with a diagnostic. Other platforms and
+advanced invocations preserve the original command with a panel-routing diagnostic. Ivy changes neither shell startup files nor Codex configuration.
 
 Existing `codex` aliases or functions take precedence and produce a diagnostic. Explicit
 `command codex`, absolute paths, unsupported shells and shells started with custom arguments bypass

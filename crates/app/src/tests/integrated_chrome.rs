@@ -710,7 +710,8 @@ mod tests {
             && text.contains("Tool discovery alone does not prove a connection")
             && text.contains("shared background server lacks that console identity")
             && text.contains("do not assume the client is outside Ivy")
-            && text.contains("0.167.2 or 0.169.0 use the shared daemon")
+            && text.contains("Client capabilities and the live protocol establish compatibility, not version numbers")
+            && text.contains("Ivy never adds --no-daemon automatically")
             && text.contains("A connected host does not prove")
             && text.contains("phone history, input and panel publication were verified")
             && text.contains("does not edit global shell or Codex configuration")
@@ -786,7 +787,7 @@ mod tests {
             "Tool discovery alone does not prove a connection",
             "type codex normally",
             "Existing codex aliases or functions take precedence",
-            "unsupported versions and advanced options",
+            "Other platforms and advanced options preserve",
             "A connected host does not prove",
             "A successful tool call proves a usable connection.",
         ];
