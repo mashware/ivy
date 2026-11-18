@@ -10334,7 +10334,11 @@ button over a rule, Settings' measures and inks through its palette, and a foote
 Save right-most on `accent` with `on_accent` ink, Cancel beside it without a frame, and the console's
 Use terminal title frameless at the left edge, where Settings keeps Restore defaults. Save is
 disabled while the name is invalid, as Settings disables its own primary. The close button cancels.
-The header is one helper that Connect agents also uses. Connect agents gets no footer, because it
+The header is one helper that Connect agents also uses. Its title takes the kit's 20-point floating
+heading, not Settings' 25: these dialogs hold one field or one guide, and at 25 the title outweighed
+them on a real desktop. The close cross is painted on the centre of a square as tall as the
+controls, because laid out as button text it sat on the text baseline, visibly above the centre of
+its box; that button is shared, so What's new gets the centred cross too. Connect agents gets no footer, because it
 has no Save and Cancel pair, and its instructions keep full contrast instead of the muted note ink.
 
 | Discarded | Why |
