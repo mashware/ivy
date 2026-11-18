@@ -188,15 +188,16 @@ from the launching environment; never save a console's actual `PANEL_ID` or `PAN
 See the [official Codex MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
 
 In a newly opened ordinary Bash, Zsh or Fish console, type `codex`, `codex resume <session-id>`
-or `codex fork <session-id>`. On Linux, with Codex CLI 0.167.2 and its running daemon at 0.167.2 or 0.169.0, supported
-ordinary launches use the shared daemon and keep each conversation's panel connected to its console.
+or `codex fork <session-id>`. On Linux, supported ordinary launches use the shared daemon and keep each conversation's panel
+connected to its console. Eligibility depends on advertised client capabilities and the live protocol,
+not on CLI or server version numbers.
 The same live conversation can therefore be used for remote control. Ivy leaves your Codex and shell
 configuration unchanged, and preserves the daemon's remote-control preference. If you want remote
 control, start it explicitly with `codex remote-control start`.
 
-Other platforms, versions and advanced options, including custom configuration, profiles and security flags,
-use an independent session with a diagnostic when supported. An independent session does not provide
-live mobile access to that same desktop conversation. Explicit `--no-daemon`, remote launches and
+Ivy never adds `--no-daemon` automatically. Missing capabilities or a failed shared connection stop
+the launch with a diagnostic. Other platforms and advanced options, including custom configuration,
+profiles and security flags, run the original command with a panel-routing diagnostic. Explicit `--no-daemon`, remote launches and
 administrative commands retain their own behavior. Existing aliases and functions take precedence;
 `command codex`, absolute paths, custom shell arguments and unsupported shells bypass integration.
 If automatic integration is unavailable, check the client's help before using `--no-daemon` in the

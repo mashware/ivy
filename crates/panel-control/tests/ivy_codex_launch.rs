@@ -1,209 +1,289 @@
 #![cfg(unix)]
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::process::Command;
+use std::path::PathBuf;
+use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
-fn run(args: &[&str], help: &str) -> (Vec<String>, String, i32) {
-    let dir = std::env::temp_dir().join(format!(
-        "ivy-codex-test-{}-{}",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    ));
-    fs::create_dir(&dir).unwrap();
-    let client = dir.join("client");
-    fs::write(&client, "#!/bin/sh\nif [ \"$1\" = --help ]; then printf '%s' \"$HELP_TEXT\"; exit \"${HELP_STATUS:-0}\"; fi\nprintf '%s\\0' \"$PANEL_ID\" \"$PANEL_DIR\" \"$CONFIG_SENTINEL\" \"$PWD\" \"$@\" > \"$RECORD\"\nexit 37\n").unwrap();
-    fs::set_permissions(&client, fs::Permissions::from_mode(0o755)).unwrap();
-    let record = dir.join("record");
-    let output = Command::new(env!("CARGO_BIN_EXE_ivy-codex"))
-        .arg(&client)
-        .args(args)
-        .env("PANEL_ID", "pane one")
-        .env("PANEL_DIR", "pane directory")
-        .env("CONFIG_SENTINEL", "inherited value")
-        .env("RECORD", &record)
-        .env("HELP_TEXT", help)
-        .current_dir(&dir)
-        .output()
-        .unwrap();
-    let result = (
-        fs::read(record)
-            .unwrap_or_default()
+const REMOTE_HELP: &str = "Options:\n  --remote <ADDR>\n  --remote-auth-token-env <ENV>\n";
+
+struct Client {
+    dir: PathBuf,
+    executable: PathBuf,
+}
+impl Client {
+    fn new() -> Self {
+        let dir = std::env::temp_dir().join(format!(
+            "ivy-codex-test-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&dir).unwrap();
+        let executable = dir.join("client");
+        fs::write(&executable, r#"#!/bin/sh
+if [ "$1" = --version ]; then
+    echo version >> "$CALLS"
+    exit 91
+fi
+if [ "$1" = --help ]; then
+    echo help >> "$CALLS"
+    if [ "$STALL_HELP" = yes ]; then exec sleep 10; fi
+    printf '%s' "$HELP_TEXT"
+    exit 0
+fi
+if [ "$1 $2 $3" = 'app-server daemon start' ]; then
+    echo daemon >> "$CALLS"
+    printf '%s\0' "${PANEL_ID-unset}" "${PANEL_DIR-unset}" > "$DAEMON_ENV"
+    printf '%s' "$DAEMON_JSON"
+    exit 0
+fi
+printf '%s\0' "$PANEL_ID" "$PANEL_DIR" "$CONFIG_SENTINEL" "$PWD" "$CODEX_HOME" "$MCP_AUTH_SENTINEL" "$SUBSCRIPTION_SENTINEL" "${OPENAI_API_KEY-unset}" "${ANTHROPIC_API_KEY-unset}" "${IVY_CODEX_RELAY_AUTH-unset}" "$@" > "$RECORD"
+if [ -f "$CODEX_HOME/config.toml" ]; then
+    cat "$CODEX_HOME/config.toml" "$CODEX_HOME/auth.json" > "$READ_CONFIG"
+fi
+exit 37
+"#).unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+        Self { dir, executable }
+    }
+    fn command(&self, args: &[&str], help: &str) -> Command {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_ivy-codex"));
+        command
+            .arg(&self.executable)
+            .args(args)
+            .env("PANEL_ID", "pane one")
+            .env("PANEL_DIR", self.dir.join("pane directory"))
+            .env("CONFIG_SENTINEL", "inherited value")
+            .env("CODEX_HOME", &self.dir)
+            .env("MCP_AUTH_SENTINEL", "existing MCP authentication")
+            .env("SUBSCRIPTION_SENTINEL", "existing subscription")
+            .env_remove("OPENAI_API_KEY")
+            .env_remove("ANTHROPIC_API_KEY")
+            .env_remove("IVY_CODEX_RELAY_AUTH")
+            .env_remove("STALL_HELP")
+            .env("RECORD", self.dir.join("record"))
+            .env("CALLS", self.dir.join("calls"))
+            .env("DAEMON_ENV", self.dir.join("daemon-env"))
+            .env("READ_CONFIG", self.dir.join("read-config"))
+            .env("HELP_TEXT", help)
+            .env("DAEMON_JSON", r#"{"socketPath":"/unused-test-socket"}"#)
+            .current_dir(&self.dir);
+        command
+    }
+    fn fields(&self, name: &str) -> Vec<String> {
+        let data = fs::read(self.dir.join(name)).unwrap();
+        let mut fields: Vec<_> = data
             .split(|b| *b == 0)
             .map(|v| String::from_utf8(v.to_vec()).unwrap())
-            .collect(),
-        String::from_utf8_lossy(&output.stderr).into_owned(),
-        output.status.code().unwrap(),
-    );
-    fs::remove_dir_all(dir).unwrap();
-    let (mut values, diagnostic, status): (Vec<String>, _, _) = result;
-    assert_eq!(values.pop().as_deref(), Some(""));
-    (values, diagnostic, status)
-}
-#[test]
-fn interactive_inserts_and_preserves_arguments_environment_and_status() {
-    for args in [
-        &[][..],
-        &["resume", "session one"][..],
-        &["-m", "exec", "prompt"][..],
-        &["--", "--remote"][..],
-        &["fork", "id", "", "line one\nline two"][..],
-        &["-c", "model=exec", "prompt"][..],
-        &["--config=model=exec", "prompt"][..],
-        &["-mexec", "prompt", "login"][..],
-        &["--model=--remote", "prompt"][..],
-    ] {
-        let (record, _, status) = run(args, "  --no-daemon  run locally");
+            .collect();
+        assert_eq!(fields.pop().as_deref(), Some(""));
+        fields
+    }
+    fn calls(&self) -> String {
+        fs::read_to_string(self.dir.join("calls")).unwrap_or_default()
+    }
+    fn assert_environment(&self, record: &[String]) {
+        assert_eq!(record[0], "pane one");
+        assert_eq!(record[1], self.dir.join("pane directory").to_str().unwrap());
+        assert_eq!(record[2], "inherited value");
+        assert_eq!(record[3], self.dir.to_str().unwrap());
+        assert_eq!(record[4], self.dir.to_str().unwrap());
         assert_eq!(
-            &record[..3],
-            &["pane one", "pane directory", "inherited value"]
+            &record[5..9],
+            &[
+                "existing MCP authentication",
+                "existing subscription",
+                "unset",
+                "unset"
+            ]
         );
-        assert_eq!(record[4], "--no-daemon");
-        assert_eq!(&record[5..], args);
-        assert_eq!(status, 37);
     }
 }
+impl Drop for Client {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.dir);
+    }
+}
+fn diagnostic(output: &Output) -> String {
+    String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
 #[test]
-fn passes_through_existing_admin_remote_and_unknown() {
+fn explicit_independent_admin_remote_and_unknown_preserve_arguments_environment_and_status() {
     for args in [
-        &["--no-daemon", "resume", "id"][..],
+        &["--no-daemon", "resume", "session one"][..],
         &["exec", "hello"][..],
+        &["login"][..],
+        &["mcp", "list"][..],
+        &["app-server", "daemon", "status"][..],
         &["resume", "id", "--remote", "ws://host"][..],
         &["--future-flag"][..],
         &["--model", "--remote", "ws://host"][..],
         &["do work", "--remote", "ws://host"][..],
-        &["do work", "--help"][..],
+        &["-c", "model=exec", "prompt"][..],
+        &["--config=model=exec", "prompt"][..],
     ] {
-        let (record, diagnostic, _) = run(args, "--no-daemon");
-        assert_eq!(&record[4..], args);
-        if args.contains(&"--remote") || args.contains(&"--future-flag") {
-            assert!(!diagnostic.is_empty());
+        let client = Client::new();
+        let output = client.command(args, REMOTE_HELP).output().unwrap();
+        let record = client.fields("record");
+        client.assert_environment(&record);
+        assert_eq!(&record[10..], args);
+        assert_eq!(output.status.code(), Some(37));
+        assert!(
+            client.calls().is_empty(),
+            "passthrough must not probe or start a daemon"
+        );
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn shared_launch_uses_capabilities_with_arbitrary_cli_and_server_version_labels() {
+    // Representative labels establish version independence, not a compatibility whitelist.
+    for (cli_version, server_version) in [
+        ("0.170.0", Some("0.170.0")),
+        ("9999.42.0-future", Some("future-managed-server")),
+        ("unversioned-build", None),
+    ] {
+        for args in [
+            &[][..],
+            &["resume", "session one"][..],
+            &["-m", "exec", "prompt"][..],
+            &["--", "--remote"][..],
+            &["fork", "id", "", "line one\nline two"][..],
+            &["-mexec", "prompt", "login"][..],
+            &["--model=--remote", "prompt"][..],
+        ] {
+            let client = Client::new();
+            let help = format!("Codex {cli_version}\n{REMOTE_HELP}");
+            let mut daemon = serde_json::json!({"socketPath":"/unused-test-socket"});
+            if let Some(version) = server_version {
+                daemon["appServerVersion"] = version.into();
+            }
+            let output = client
+                .command(args, &help)
+                .env("DAEMON_JSON", daemon.to_string())
+                .output()
+                .unwrap();
+            assert_eq!(output.status.code(), Some(37), "{}", diagnostic(&output));
+            let record = client.fields("record");
+            client.assert_environment(&record);
+            assert_eq!(record[10], "--remote");
+            assert!(record[11].starts_with("ws://127.0.0.1:"));
+            assert_eq!(record[12], "--remote-auth-token-env");
+            assert_eq!(record[13], "IVY_CODEX_RELAY_AUTH");
+            assert_ne!(record[9], "unset");
+            assert!(!record[9].is_empty());
+            assert_eq!(&record[14..], args);
+            assert!(!record[10..].iter().any(|arg| arg == "--no-daemon"));
+            assert_eq!(client.calls(), "help\ndaemon\n");
+            assert_eq!(client.fields("daemon-env"), ["unset", "unset"]);
         }
     }
 }
+
+#[cfg(target_os = "linux")]
 #[test]
-fn unsupported_client_preserves_arguments_and_reports_limitation() {
-    let (record, diagnostic, _) = run(&["fork", "id"], "old client");
-    assert_eq!(&record[4..], &["fork", "id"]);
-    assert!(diagnostic.contains("unverified"));
+fn missing_remote_capabilities_never_start_an_independent_session() {
+    for help in [
+        "old client --no-daemon",
+        "--remote <ADDR>",
+        "--remote-auth-token-env <ENV>",
+        "--remote-future --remote-auth-token-env",
+    ] {
+        let client = Client::new();
+        let output = client.command(&["fork", "id"], help).output().unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        assert!(diagnostic(&output).contains("does not advertise"));
+        assert!(!client.dir.join("record").exists());
+        assert_eq!(client.calls(), "help\n");
+    }
 }
 
+#[cfg(target_os = "linux")]
 #[test]
-fn stalled_probe_falls_back_in_bounded_time() {
-    let dir = std::env::temp_dir().join(format!("ivy-codex-timeout-{}", std::process::id()));
-    fs::create_dir_all(&dir).unwrap();
-    let client = dir.join("client");
-    fs::write(
-        &client,
-        "#!/bin/sh\nif [ \"$1\" = --help ]; then sleep 10; fi\nprintf '%s' \"$*\" > \"$RECORD\"\n",
-    )
-    .unwrap();
-    fs::set_permissions(&client, fs::Permissions::from_mode(0o755)).unwrap();
-    let record = dir.join("record");
+fn failed_shared_setup_never_starts_an_independent_session() {
+    for response in ["not-json", "{}", r#"{"socketPath":null}"#] {
+        let client = Client::new();
+        let output = client
+            .command(&[], REMOTE_HELP)
+            .env("DAEMON_JSON", response)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        assert!(diagnostic(&output).contains("shared panel connection could not start"));
+        assert!(!client.dir.join("record").exists());
+        assert_eq!(client.calls(), "help\ndaemon\n");
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn stalled_capability_probe_fails_in_bounded_time_without_starting_a_session() {
+    let client = Client::new();
     let start = std::time::Instant::now();
-    let output = Command::new(env!("CARGO_BIN_EXE_ivy-codex"))
-        .arg(&client)
-        .arg("resume")
-        .env("RECORD", &record)
+    let output = client
+        .command(&["resume"], REMOTE_HELP)
+        .env("STALL_HELP", "yes")
         .output()
         .unwrap();
     assert!(start.elapsed() < std::time::Duration::from_secs(4));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("unverified"));
-    assert_eq!(fs::read_to_string(record).unwrap(), "resume");
-    fs::remove_dir_all(dir).unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(diagnostic(&output).contains("timed out"));
+    assert!(!client.dir.join("record").exists());
+    assert_eq!(client.calls(), "help\n");
 }
 
 #[test]
 fn refuses_recursive_executable() {
     let launcher = env!("CARGO_BIN_EXE_ivy-codex");
-    let output = Command::new(launcher).arg(launcher).output().unwrap();
+    let client = Client::new();
+    let output = Command::new(launcher)
+        .arg(launcher)
+        .env("CODEX_HOME", &client.dir)
+        .output()
+        .unwrap();
     assert_eq!(output.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("itself"));
+    assert!(diagnostic(&output).contains("itself"));
 }
 
 #[test]
 fn preserves_client_signal() {
     use std::os::unix::process::ExitStatusExt;
-    let dir = std::env::temp_dir().join(format!("ivy-codex-signal-{}", std::process::id()));
-    fs::create_dir_all(&dir).unwrap();
-    let client = dir.join("client");
-    fs::write(&client, "#!/bin/sh\nkill -TERM $$\n").unwrap();
-    fs::set_permissions(&client, fs::Permissions::from_mode(0o755)).unwrap();
-    let status = Command::new(env!("CARGO_BIN_EXE_ivy-codex"))
-        .arg(&client)
-        .arg("exec")
-        .status()
-        .unwrap();
+    let client = Client::new();
+    fs::write(&client.executable, "#!/bin/sh\nkill -TERM $$\n").unwrap();
+    let status = client.command(&["exec"], REMOTE_HELP).status().unwrap();
     assert_eq!(status.signal(), Some(15));
-    fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
 fn inherits_auth_and_mcp_environment_without_changing_configuration_or_adding_api_keys() {
-    let dir = std::env::temp_dir().join(format!(
-        "ivy-codex-config-{}-{}",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    ));
-    fs::create_dir(&dir).unwrap();
-    let config = dir.join("config.toml");
-    let auth = dir.join("auth.json");
+    let client = Client::new();
+    let config = client.dir.join("config.toml");
+    let auth = client.dir.join("auth.json");
     let config_bytes =
         b"# existing user settings\n[mcp_servers.ivy]\nenv_vars = ['PANEL_ID', 'PANEL_DIR']\n";
     let auth_bytes = b"{\"session\":\"inherited subscription sentinel\"}\n";
     fs::write(&config, config_bytes).unwrap();
     fs::write(&auth, auth_bytes).unwrap();
-    let client = dir.join("client");
-    fs::write(&client, "#!/bin/sh\nif [ \"$1\" = --help ]; then echo --no-daemon; exit 0; fi\ncat \"$CODEX_HOME/config.toml\" \"$CODEX_HOME/auth.json\" > \"$READ_CONFIG\"\nprintf '%s\\0' \"$CODEX_HOME\" \"$MCP_AUTH_SENTINEL\" \"$SUBSCRIPTION_SENTINEL\" \"${OPENAI_API_KEY-unset}\" \"${ANTHROPIC_API_KEY-unset}\" \"$@\" > \"$RECORD\"\n").unwrap();
-    fs::set_permissions(&client, fs::Permissions::from_mode(0o755)).unwrap();
-    let record = dir.join("record");
-    let read_config = dir.join("read-config");
-    let output = Command::new(env!("CARGO_BIN_EXE_ivy-codex"))
-        .arg(&client)
-        .args([
-            "-c",
-            "mcp_servers.other.command='existing command'",
-            "resume",
-            "session one",
-        ])
-        .env("CODEX_HOME", &dir)
-        .env("MCP_AUTH_SENTINEL", "existing MCP authentication")
-        .env("SUBSCRIPTION_SENTINEL", "existing subscription")
-        .env_remove("OPENAI_API_KEY")
-        .env_remove("ANTHROPIC_API_KEY")
-        .env("RECORD", &record)
-        .env("READ_CONFIG", &read_config)
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let fields = fs::read(record).unwrap();
-    let fields: Vec<&[u8]> = fields.split(|b| *b == 0).collect();
-    assert_eq!(fields[0], dir.as_os_str().as_encoded_bytes());
-    assert_eq!(
-        &fields[1..],
-        &[
-            b"existing MCP authentication".as_slice(),
-            b"existing subscription",
-            b"unset",
-            b"unset",
-            b"--no-daemon",
-            b"-c",
-            b"mcp_servers.other.command='existing command'",
-            b"resume",
-            b"session one",
-            b"",
-        ]
-    );
+    let args = [
+        "--no-daemon",
+        "-c",
+        "mcp_servers.other.command='existing command'",
+        "resume",
+        "session one",
+    ];
+    let output = client.command(&args, REMOTE_HELP).output().unwrap();
+    assert_eq!(output.status.code(), Some(37), "{}", diagnostic(&output));
+    let record = client.fields("record");
+    client.assert_environment(&record);
+    assert_eq!(&record[10..], args);
     assert_eq!(fs::read(&config).unwrap(), config_bytes);
     assert_eq!(fs::read(&auth).unwrap(), auth_bytes);
     assert_eq!(
-        fs::read(read_config).unwrap(),
+        fs::read(client.dir.join("read-config")).unwrap(),
         [config_bytes.as_slice(), auth_bytes.as_slice()].concat()
     );
-    fs::remove_dir_all(dir).unwrap();
+    assert!(client.calls().is_empty());
 }
