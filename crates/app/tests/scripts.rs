@@ -955,6 +955,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../../term-core/examples/throughput.rs"),
     ),
     (
+        "app/examples/hinting.rs",
+        include_str!("../examples/hinting.rs"),
+    ),
+    (
         "app/examples/fonts.rs",
         include_str!("../examples/fonts.rs"),
     ),
