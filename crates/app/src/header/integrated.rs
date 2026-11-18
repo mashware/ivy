@@ -243,13 +243,14 @@ fn painted_id(name: usize) -> egui::Id {
 /// Whether the controls of console `name`'s header were painted in the pass before this one.
 ///
 /// **A frame number and not a flag**: a console that stops being painted — a hidden sibling, a tab
-/// in the background — keeps its last number, which is then too old to count. And **strictly the
-/// previous pass**: the pointer is handled before the panes are painted, so a pass whose own input
-/// brought the pointer onto the header has not painted its controls yet when its press arrives.
+/// in the background, or one the pointer left a moment ago — keeps its last number, which is then
+/// too old to count. A press in the same pass that brought the pointer onto the header finds the
+/// previous pass's number, not its own, because the pointer is handled before the panes are painted;
+/// `a_hidden_close_cannot_be_pressed_until_it_was_painted` fails if that order is ever reversed.
 pub(crate) fn revealed(ctx: &egui::Context, name: usize) -> bool {
     let now = ctx.cumulative_frame_nr();
     ctx.data(|data| data.get_temp::<u64>(painted_id(name)))
-        .is_some_and(|painted| painted < now && painted + 1 >= now)
+        .is_some_and(|painted| painted + 1 == now)
 }
 
 struct Appearance<'a> {

@@ -985,6 +985,16 @@ mod tests {
             strokes_in(&away, focused_cells) > 0,
             "the focused console hid its controls"
         );
+        // The icons are paths and the two rules between the three groups are the only segments.
+        let rules = away
+            .iter()
+            .filter(|s| {
+                matches!(&s.shape, egui::Shape::LineSegment { points, .. }
+                    if focused_cells.contains(points[0])
+                        && (points[0].x - points[1].x).abs() < 0.01)
+            })
+            .count();
+        assert_eq!(rules, 2, "the groups are not separated by two rules");
         let title = egui::pos2(cells.left() - 40.0, cells.center().y);
         let over = frame(
             &mut window,
@@ -1020,34 +1030,40 @@ mod tests {
     }
 
     /// D99 after D96: a move and a press in one batch on an unfocused console's close cannot close
-    /// it, because nothing was painted there; the same press after a pass under the pointer does.
+    /// it, because nothing was painted there — nor can one whose controls were painted passes ago
+    /// and left; the same press right after a pass under the pointer does. Each case starts from a
+    /// fresh window, because a press on a header hands that console the keyboard, and a focused
+    /// console's controls are always shown.
     #[test]
     fn a_hidden_close_cannot_be_pressed_until_it_was_painted() {
-        let ctx = egui::Context::default();
-        let mut window = integrated_pair();
-        let area = tall_area();
-        frame(&mut window, &ctx, area, vec![]);
-        let close = control(&window, &ctx, area, 1, 12.5);
-        frame(&mut window, &ctx, area, click_at(close));
-        frame(&mut window, &ctx, area, vec![]);
-        assert_eq!(
-            window.active().panes().len(),
-            2,
-            "an unseen close closed its console"
-        );
-        frame(
-            &mut window,
-            &ctx,
-            area,
-            vec![egui::Event::PointerMoved(close)],
-        );
-        frame(&mut window, &ctx, area, click_at(close));
-        frame(&mut window, &ctx, area, vec![]);
-        assert_eq!(
-            window.active().panes().len(),
-            1,
-            "a painted close did not close"
-        );
+        for (case, before, closes) in [
+            ("never painted", 0, false),
+            ("painted, then left for two passes", 3, false),
+            ("painted in the previous pass", 1, true),
+        ] {
+            let ctx = egui::Context::default();
+            let mut window = integrated_pair();
+            let area = tall_area();
+            frame(&mut window, &ctx, area, vec![]);
+            let names = names_in_order(&window);
+            let close = control(&window, &ctx, area, 1, 12.5);
+            let body = pane_rect(&window, &ctx, area, names[1]).center();
+            for at in [close, body, body].into_iter().take(before) {
+                frame(&mut window, &ctx, area, vec![egui::Event::PointerMoved(at)]);
+            }
+            assert_eq!(
+                window.active().focus,
+                names[0],
+                "{case}: the console is focused"
+            );
+            frame(&mut window, &ctx, area, click_at(close));
+            frame(&mut window, &ctx, area, vec![]);
+            assert_eq!(
+                window.active().panes().len(),
+                if closes { 1 } else { 2 },
+                "{case}"
+            );
+        }
     }
 
     /// A console too short to split below offers only the split beside it, in the cell next to
