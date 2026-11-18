@@ -60,6 +60,10 @@ const FINISHED_CRATES: &[&str] = &["panel-contract", "host-load", "term-core", "
 /// A crate whose every file ends up here is **not** thereby ready for [`FINISHED_CRATES`]: that list
 /// is the stronger claim, and this one cannot add up to it.
 const GLOSSARY_CLEAN_FILES: &[&str] = &[
+    "app/tests/scope_launch.rs",
+    "term-core/src/scope.rs",
+    "term-core/src/scope_gate.rs",
+    "term-core/src/termination.rs",
     "app/src/painter/box_drawing.rs",
     "app/src/painter/box_drawing/tests.rs",
     "app/src/sidebar.rs",
@@ -131,6 +135,8 @@ const GLOSSARY_CLEAN_FILES: &[&str] = &[
     "app/src/viewer/view.rs",
     "app/src/viewer/interaction_tests.rs",
     "app/src/painter/pane.rs",
+    "app/src/launch/tests.rs",
+    "app/src/launch.rs",
     "app/src/ligatures.rs",
     "app/src/ligature_tests.rs",
     "app/src/fonts/ligatures.rs",
@@ -336,6 +342,10 @@ const GLOSSARY_PENDING_FILES: &[&str] = &[
 /// What *can* be enforced here is a **file** name, and [`no_retired_file_name_is_still_cited`] reads
 /// this file for exactly that — it found two.
 const CITATIONS_CHECKED: &[(&str, &str)] = &[
+    ("app/tests/scope_launch.rs", "app"),
+    ("term-core/src/scope.rs", "term-core"),
+    ("term-core/src/scope_gate.rs", "term-core"),
+    ("term-core/src/termination.rs", "term-core"),
     ("app/src/sidebar.rs", "app"),
     ("app/src/sidebar/probe.rs", "app"),
     ("app/src/sidebar/layout.rs", "app"),
@@ -405,6 +415,8 @@ const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/src/viewer/view.rs", "app"),
     ("app/src/viewer/interaction_tests.rs", "app"),
     ("app/src/painter/pane.rs", "app"),
+    ("app/src/launch/tests.rs", "app"),
+    ("app/src/launch.rs", "app"),
     ("app/src/ligatures.rs", "app"),
     ("app/src/ligature_tests.rs", "app"),
     ("app/src/fonts/ligatures.rs", "app"),

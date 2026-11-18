@@ -10513,3 +10513,49 @@ nothing the ticket asks.
 **Measurement.** The chrome is painted in every batch of `scripts/measure-frame.sh`, so the series
 after this compares like with like; a batch measured before it and one after paint different glyphs
 and are not a delta. The face adds 489 KB to the binary.
+
+---
+
+## D104 — Linux console processes have optional, separate systemd scopes
+
+**New signal, 18 November 2026 — #124.** systemd-oomd selected Ivy's application cgroup while
+consoles were compiling; the GUI and unrelated agent sessions died together.
+
+**Decision.** On Linux the Ivy executable explicitly enables a private re-exec launcher. The
+launcher waits in the PTY before any user program executes; a worker places its PID in a distinct
+`ivy-console-*.scope` in the session user's `app.slice`, then releases an in-place exec. The GUI
+stays outside those scopes. Original argv, environment, working directory, controlling terminal
+and process-group shutdown remain the launch contract. There is no extra installed executable.
+
+**Compatibility.** Scope creation is optional and bounded by one second. A missing user manager,
+denial or setup failure preserves ordinary startup. Unknown optional `OOMPolicy` support retries
+a basic scope rather than throwing away isolation. A failed gate is killed before direct fallback,
+so an uncertain late manager operation cannot move the requested program after it starts. After
+exec release an unknown outcome never triggers a second execution. macOS and Windows keep their
+direct launch and have no systemd dependencies.
+
+**Responsiveness.** Linux opening, restoration, fallback and fresh-shell takeover reserve their
+console identity and placement while a launch worker completes. Pending input and the latest grid
+size reach the launched program in order. Closing drops the pending result; a late child is shut
+down on its worker rather than installed. D16's published synchronous restoration timings describe
+the previous launch path; they do not measure the completion latency of these asynchronous launches.
+The frame report names console launch/status work and subtracts it separately from framework cost.
+No new performance figure is claimed here.
+
+**Truthful endings.** The process's cached wait status and the reader's ending remain distinct.
+Retain the scope result through an observation window of 500 ms from confirmed root exit. Only
+`Scope.Result=oom-kill` earns “This console was stopped because of memory pressure.” A confirmed
+signal without OOM evidence earns a generic signal notice. Late or unavailable evidence stays
+unknown; neither code 137 nor SIGKILL proves memory pressure. The existing dismissible notice keeps
+the output copyable and prevents automatic window closure. Older managers may isolate without
+providing reliable oomd attribution.
+
+**Limits.** Separate leaf scopes improve victim selection; a policy targeting their common
+ancestor or a global kernel OOM may still kill more than one console. Controlled kernel OOM and
+systemd-oomd tests require a disposable environment; stressing the person's desktop is not a
+substitute for that proof.
+
+**Discarded.** Moving a root after user exec loses immediate descendants. A `systemd-run` wrapper
+blurs exactly-once fallback and the owned PTY PID. OOM-score adjustments do not separate cgroup
+victims. Kernel counters alone do not establish userspace systemd-oomd attribution. Changing global
+OOM policy or introducing resource limits is outside this repair.
