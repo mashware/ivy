@@ -10113,6 +10113,50 @@ back on it.
 the numbered tab cards and their single-tab rule — keeps its geometry and painting, so the measured
 series stay comparable (D13); the new tab painting runs under the same tab-bar stopwatch.
 
+**Amended 18 November 2026 — #113: a tab shows each console's claim on that console's dot.** One
+pill per tab showed only the most urgent claim among its consoles, so with several of them it kept
+switching and said neither which console was asking nor how many were. The pill and the muted
+"no claim" dot left of the name are gone; the label starts at the card's padding. Each console's dot
+keeps its fill — the project ink, or the hollow muted outline of a console with no project — and,
+while that console claims, gets one whole ring 1 point wide around it, in its class's full colour:
+wait and block as before, **done blue** and not green (D94: green is the accent and focus; the owner
+confirmed it against the mock that drew it green). **Every ring is the same, held or not**: the tab
+says which console claims and what; whether anybody still holds the claim up is said by that
+console's own panel, whose strip keeps the dashed pill and the dimmed words. The owner settled it at
+the desktop check after seeing three ways to mark an unheld claim on the ring — the dimmed colour
+`attention_color` gives it turned the red into a brown, and a thinner or a dashed ring read as
+noise — and asked for every ring thin, vivid and continuous. The price is stated: on a tab you are
+not looking at, nothing on the card says a claim has gone stale; the pill used to dash it there.
+Dots are 16 points apart — 4 points from one ring's band to the next, 4.5 between the painted
+strokes — whether or not anything claims, so a claim arriving never moves the label; at 1 point
+apart the owner read the rings as touching. **A card without room for all its dots keeps one dot's
+slot**: a muted dot ringed with the tab's loudest claim, wait over block over done — chosen by the
+owner at review, once it was measured that «show nothing» left no claim on the bar with eight
+two-console tabs in a 1280-point window. That slot outranks the label, which keeps only the room
+for the tab's number beside it, so **every card the bar keeps — down to the narrowest, before the
+bar turns compact — can show a claim**; a first version that let the label win made the claim blink
+on and off as the window narrowed, through the widths where the card's air and its cross change. The
+slot is reserved whether or not anything claims, so the label does not move when a claim arrives.
+With the cross's room (two tabs or more), four consoles keep their dots down to 128 points of card
+and two down to 96; a tab of eight consoles or more never shows them all, at any width, and gives
+up its project dots for the summary dot. The compact threshold does not move: the narrowest card
+keeps its old width, written without the pill.
+
+*Discarded:* nothing at all when the dots do not fit (the owner's first choice, reversed at review on
+the numbers above); the label outranking the summary dot (the claim blinked while resizing); the
+label giving way to all the dots (a tab of many consoles still had nothing); a green done ring; a
+1.5-point ring (too heavy); for an unheld claim on the tab, the dimmed colour (brown red), a grey
+ring (loses the class), a thinner ring and a dashed one; 1, 3 and 6 points between rings. The class
+reads by colour alone: the pill's glyph does not fit a 6-point dot, and the console's own claim
+strip still carries it.
+
+*Measurement:* a card counts as marked when it painted at least one ring, so «tabs marked» still
+counts what was drawn and not what was claimed. The batches that paint this bar — `chrome`,
+`chrome-zoom`, `projects`, `dock-v2-4-*` — paint rings instead of pills from this change on, and
+their reports from before it are not averaged with later ones; `measure-frame.sh compare` cannot
+tell the two apart on its own, so that line is the record. `F` and `G` paint the historical strip
+and do not change.
+
 ## D97 — A panel's claim is a strip across its top, and its controls look like controls
 
 **New signal, 16 November 2026 — #93.** The redesign D94 started draws the status panel with a band

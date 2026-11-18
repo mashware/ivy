@@ -1,15 +1,17 @@
 //! The tabs as the title bar paints them (D96): cards on the bar's bottom edge, the active one
-//! opening onto the consoles below, each with its claim pill and its consoles' project dots.
+//! opening onto the consoles below, each with its label and one project dot per console, ringed in
+//! the colour of that console's claim — or, where the dots do not fit, one muted dot ringed with the
+//! tab's loudest claim.
 //!
 //! Painting and pointer routing read the same rectangles from here, so a card never paints one
 //! target and answers another.
 
 use super::{CLOSE_MIN_WIDTH, feedback};
 use crate::Window;
-use crate::theme::{Roles, metrics};
+use crate::theme::{Roles, Theme, metrics};
 use crate::tree::Tab;
-use crate::ui::claim_pill;
 use eframe::egui::{self, Color32, CornerRadius, Rect, Stroke, pos2};
+use panel_contract::Attention;
 use std::time::SystemTime;
 
 const ADD_WIDTH: f32 = 28.0;
@@ -20,16 +22,48 @@ const ADD_MIN_WIDTH: f32 = 20.0;
 const MAX_WIDTH: f32 = 190.0;
 const GAP: f32 = 2.0;
 const PADDING: f32 = 10.0;
-/// What a card too narrow for [`PADDING`] keeps on each side, and between its pill and label.
+/// What a card too narrow for [`PADDING`] keeps on each side.
 const TIGHT: f32 = 4.0;
+/// Below this width a card takes [`TIGHT`] instead of [`PADDING`]. The value is the one the claim
+/// pill's slot set (D96); the pill left the card, the threshold did not, so cards keep their air at
+/// the same widths.
+const ROOMY: f32 = 58.0;
 /// The accent line along the open tab's top edge.
 const ACCENT_LINE: f32 = 2.0;
 const DOT: f32 = 6.0;
-const DOT_GAP: f32 = 3.0;
+/// A claiming console's ring, always in its class's full colour: 1.5 points read too heavy at the
+/// desktop check (D96).
+const RING_WIDTH: f32 = 1.0;
+/// The band a ring is laid out in, wider than the stroke and centred on it, so the geometry does
+/// not move with the stroke.
+const RING_BAND: f32 = 1.5;
+const _: () = assert!(
+    RING_WIDTH <= RING_BAND,
+    "the ring's stroke would leave its band"
+);
+/// From the dot's edge to the ring's band.
+const RING_GAP: f32 = 1.5;
+/// How far a ring's band reaches from its dot's centre.
+const RING_REACH: f32 = DOT / 2.0 + RING_GAP + RING_BAND;
+/// From one ring's band to the next; the painted strokes, thinner than their bands, end up half a
+/// point further apart. At 1 point the owner read the rings as touching (D96).
+const RING_SPACING: f32 = 4.0;
+/// From one dot's centre to the next. Fixed whether or not anything claims, so a claim arriving
+/// never moves the label.
+const DOT_STEP: f32 = 2.0 * RING_REACH + RING_SPACING;
+/// The room a label keeps beside every console's dot; below it the dots give way to one summary dot.
+const LABEL_FLOOR: f32 = 24.0;
+/// The room a label keeps beside the summary dot: the tab's number. The summary outranks the label,
+/// so every card the bar keeps (down to [`MIN_CARD`]) can still say that something claims (D96).
+const SUMMARY_LABEL_FLOOR: f32 = 8.0;
+/// The air between the label and the dots.
+const LABEL_AIR: f32 = 8.0;
 /// The close target's width at the card's right edge.
 const CLOSE_WIDTH: f32 = 26.0;
-/// The narrowest card that keeps its pill whole and room for one character of its label.
-const MIN_CARD: f32 = 2.0 * TIGHT + claim_pill::SIZE + TIGHT + 12.0;
+/// The narrowest card the title bar keeps before turning compact. The value is the pill era's
+/// (a whole pill and one character of label); it was kept when the pill left so the compact
+/// threshold D96 publishes did not move.
+const MIN_CARD: f32 = 42.0;
 /// The narrowest band that holds one such card, its gap and the add button; the title bar turns
 /// compact rather than give the tabs less.
 pub(crate) const MIN_BAND: f32 = MIN_CARD + GAP + ADD_GAP + ADD_WIDTH;
@@ -84,9 +118,22 @@ pub(crate) fn occupied(band: Rect, count: usize) -> Option<Rect> {
 pub(super) struct Layout {
     pub body: Rect,
     pub close: Option<Rect>,
-    pub pill: Rect,
     pub label: Rect,
+    /// The dots and their rings' reach. Absent when the card cannot hold them all.
     pub dots: Option<Rect>,
+    /// One dot's slot, only where the dots did not fit: the tab's loudest claim, ringed (D96,
+    /// amended for #113). Reserved whether or not anything claims, so a claim never moves the label.
+    pub summary: Option<Rect>,
+}
+
+/// The air a card keeps on each side: the kit's on a roomy card, less on a narrow one.
+fn padding(card: Rect) -> f32 {
+    if card.width() >= ROOMY {
+        PADDING
+    } else {
+        TIGHT
+    }
+    .min(card.width() / 2.0)
 }
 
 /// Whether the cross shows: on the active tab, and on the one under the pointer.
@@ -133,10 +180,7 @@ pub(super) fn cards<'a>(
 
 impl Layout {
     pub fn new(card: Rect, dots: usize, close: bool) -> Self {
-        // A card too narrow for the kit's air keeps the pill whole and gives the label what is left.
-        let roomy = card.width() >= 2.0 * PADDING + claim_pill::SIZE + 20.0;
-        let padding = if roomy { PADDING } else { TIGHT }.min(card.width() / 2.0);
-        let gap = if roomy { 8.0 } else { TIGHT };
+        let padding = padding(card);
         let close = (close && card.width() >= CLOSE_MIN_WIDTH).then(|| {
             Rect::from_min_max(
                 pos2(card.right() - CLOSE_WIDTH, card.top()),
@@ -147,43 +191,71 @@ impl Layout {
             card.min,
             pos2(close.map_or(card.right(), |c| c.left()), card.bottom()),
         );
-        let pill_width = claim_pill::SIZE.min((body.width() - 2.0 * padding).max(0.0));
-        let pill = Rect::from_min_max(
-            pos2(body.left() + padding, body.top()),
-            pos2(body.left() + padding + pill_width, body.bottom()),
-        );
-        let label_left = (pill.right() + gap).min(body.right());
+        let label_left = (body.left() + padding).min(body.right());
         let end = if close.is_some() {
             body.right()
         } else {
             (body.right() - padding).max(label_left)
         };
-        let dots_width = dots as f32 * (DOT + DOT_GAP) - DOT_GAP;
-        let dots = (dots > 0 && end - label_left - dots_width - 8.0 >= 24.0).then(|| {
-            Rect::from_min_max(pos2(end - dots_width, body.top()), pos2(end, body.bottom()))
-        });
+        // `n` dots, right-aligned, where the label keeps `floor` points and its air before them.
+        let fit = |n: usize, floor: f32| {
+            let width = n as f32 * DOT_STEP - RING_SPACING;
+            (n > 0 && end - label_left - width - LABEL_AIR >= floor).then(|| {
+                Rect::from_min_max(pos2(end - width, body.top()), pos2(end, body.bottom()))
+            })
+        };
+        let all = fit(dots, LABEL_FLOOR);
+        let summary = if all.is_none() {
+            fit(dots.min(1), SUMMARY_LABEL_FLOOR)
+        } else {
+            None
+        };
         let label = Rect::from_min_max(
             pos2(label_left, body.top()),
             pos2(
-                dots.map_or(end, |d| d.left() - 8.0).max(label_left),
+                all.or(summary)
+                    .map_or(end, |d| d.left() - LABEL_AIR)
+                    .max(label_left),
                 body.bottom(),
             ),
         );
         Self {
             body,
             close,
-            pill,
             label,
-            dots,
+            dots: all,
+            summary,
         }
     }
 }
 
-/// The pill and the label of a card, for tests outside this module.
+/// The label, the dots and the summary slot of a card, for tests outside this module.
 #[cfg(test)]
-pub(crate) fn pill_and_label(card: Rect, dots: usize, close: bool) -> (Rect, Rect) {
+pub(crate) fn label_dots_summary(
+    card: Rect,
+    dots: usize,
+    close: bool,
+) -> (Rect, Option<Rect>, Option<Rect>) {
     let layout = Layout::new(card, dots, close);
-    (layout.pill, layout.label)
+    (layout.label, layout.dots, layout.summary)
+}
+
+/// A dot's ring for a claim of `class`: one whole ring in its full colour, whether or not anybody
+/// holds the claim up — the owner wanted every ring the same at the desktop check (D96).
+fn ring(painter: &egui::Painter, center: egui::Pos2, class: Attention, theme: &Theme) {
+    painter.circle_stroke(
+        center,
+        RING_REACH - RING_BAND / 2.0,
+        Stroke::new(RING_WIDTH, theme.attention_color(class, true)),
+    );
+}
+
+/// Where the `n`th dot of a card's dots sits.
+fn dot_center(dots: Rect, n: usize) -> egui::Pos2 {
+    pos2(
+        dots.left() + RING_REACH + n as f32 * DOT_STEP,
+        dots.center().y,
+    )
 }
 
 /// The fill a target takes under the pointer — the hover surface fading in, a step further when
@@ -236,7 +308,8 @@ fn fitted(
     Fitted::Cut(painter.layout_job(job))
 }
 
-/// Paints every card and the add button; returns how many cards carried a claim.
+/// Paints every card and the add button; returns how many cards painted at least one ring — what
+/// was drawn, not what was claimed, so a claiming card too narrow even for one dot does not count.
 pub(super) fn paint(window: &Window, ui: &egui::Ui, band: Rect, now: SystemTime) -> usize {
     let roles = crate::ui::style::roles(ui.ctx(), &window.theme);
     let count = window.tabs.len();
@@ -301,12 +374,6 @@ pub(super) fn paint(window: &Window, ui: &egui::Ui, band: Rect, now: SystemTime)
                 ))
                 .rect_filled(card, top, roles.accent);
         }
-        let attention = tab.attention(now);
-        marked += usize::from(attention.is_some());
-        match attention {
-            Some(claim) => claim_pill::paint(&painter, layout.pill, claim, &roles),
-            None => claim_pill::paint_unclaimed(&painter, layout.pill, &roles),
-        }
         let ink = if active { roles.tx } else { roles.tx2 };
         let clip = painter.with_clip_rect(layout.label.intersect(card));
         match fitted(&painter, tab, layout.label.width(), &font, ink) {
@@ -330,11 +397,9 @@ pub(super) fn paint(window: &Window, ui: &egui::Ui, band: Rect, now: SystemTime)
         }
         if let Some(dots) = layout.dots {
             let mut n = 0;
+            let mut ringed = false;
             tab.root.walk(&mut |pane| {
-                let center = pos2(
-                    dots.left() + DOT / 2.0 + n as f32 * (DOT + DOT_GAP),
-                    dots.center().y,
-                );
+                let center = dot_center(dots, n);
                 n += 1;
                 match &pane.project {
                     Some(project) => {
@@ -344,7 +409,26 @@ pub(super) fn paint(window: &Window, ui: &egui::Ui, band: Rect, now: SystemTime)
                         painter.circle_stroke(center, DOT / 2.0 - 0.5, Stroke::new(1.0, roles.tx3));
                     }
                 }
+                // The claim is the console's own, as its producer declared it (D18), and it is
+                // drawn around the dot, not on it.
+                if let Some(claim) = pane.effective_attention(now) {
+                    ring(&painter, center, claim.class, &window.theme);
+                    ringed = true;
+                }
             });
+            marked += usize::from(ringed);
+        } else if let Some(summary) = layout.summary {
+            // No room for every console's dot: one muted dot carries the loudest claim of them all,
+            // by the same order `Tab::attention` uses, walked without collecting the panes.
+            let mut loudest = None;
+            tab.root
+                .walk(&mut |pane| loudest = loudest.max(pane.effective_attention(now)));
+            if let Some(claim) = loudest {
+                let center = dot_center(summary, 0);
+                painter.circle_filled(center, DOT / 2.0, roles.tx3);
+                ring(&painter, center, claim.class, &window.theme);
+                marked += 1;
+            }
         }
         // Advanced every pass, shown or not, so a pointer that leaves from the cross does not leave
         // its hover at full strength for the next time the cross appears.
@@ -413,17 +497,40 @@ mod tests {
                         assert!(card.right() <= super::card(band, which + 1, count).left());
                     }
                     for close in [false, true] {
-                        for dots in [0, 1, 4] {
-                            let layout = Layout::new(card, dots, close);
+                        for n in [0, 1, 4] {
+                            let layout = Layout::new(card, n, close);
                             assert!(card.contains_rect(layout.body));
-                            assert!(layout.label.left() >= layout.pill.right());
+                            // The label starts at the padding the card's width earns.
+                            assert_eq!(
+                                layout.label.left(),
+                                (card.left() + padding(card)).min(layout.body.right()),
+                                "{width} {count} {n}"
+                            );
+                            // Every card the bar keeps can say that something claims: all its
+                            // dots, or the summary dot — at no width does it lose both.
+                            if n > 0 && card.width() >= MIN_CARD {
+                                assert!(
+                                    layout.dots.is_some() || layout.summary.is_some(),
+                                    "{width} {count} {n}: no room for any claim"
+                                );
+                            }
                             assert!(layout.label.right() <= layout.body.right());
                             if let Some(close) = layout.close {
                                 assert_eq!(layout.body.right(), close.left());
                             }
+                            assert!(layout.dots.is_none() || layout.summary.is_none());
                             if let Some(dots) = layout.dots {
                                 assert!(dots.left() >= layout.label.right() + 8.0);
                                 assert!(dots.right() <= layout.body.right());
+                                // The last of the `n` painted rings, stroke included, ends inside
+                                // the dots' rect.
+                                let painted = RING_REACH - RING_BAND / 2.0 + RING_WIDTH / 2.0;
+                                assert!(dot_center(dots, n - 1).x + painted <= dots.right() + 1e-3);
+                            }
+                            if let Some(summary) = layout.summary {
+                                assert!(summary.left() >= layout.label.right() + 8.0);
+                                assert_eq!(summary.right(), dots_end(&layout));
+                                assert_eq!(summary.width(), 2.0 * RING_REACH);
                             }
                         }
                     }
@@ -433,10 +540,42 @@ mod tests {
                 assert_eq!(occupied(band, count).map(|r| r.right()), Some(end));
             }
         }
+        // No slot is left of the label: it starts at the card's padding.
         let wide = Rect::from_min_size(pos2(0.0, 6.0), vec2(1200.0, 34.0));
         let layout = Layout::new(card(wide, 0, 1), 0, false);
-        assert_eq!(layout.pill.width(), claim_pill::SIZE);
-        assert_eq!(layout.pill.left(), PADDING);
-        assert_eq!(layout.label.left(), PADDING + claim_pill::SIZE + 8.0);
+        assert_eq!(layout.label.left(), PADDING);
+    }
+
+    /// Where the dots end: the body's right edge with the cross, its padding short of it without
+    /// (the body is the whole card then).
+    fn dots_end(layout: &Layout) -> f32 {
+        if layout.close.is_some() {
+            layout.body.right()
+        } else {
+            layout.body.right() - padding(layout.body)
+        }
+    }
+
+    /// Four consoles keep their dots, rings included, down to a 128-point card with the cross
+    /// shown; the dots are 16 points apart and their rect is 60 wide. Below that the card keeps one
+    /// 12-point summary slot at every width down to the narrowest card the bar keeps, through the
+    /// two places the card's air and its cross change, so the claim never blinks while resizing.
+    #[test]
+    fn four_dots_fit_down_to_128_points_and_one_summary_slot_down_to_the_narrowest_card() {
+        let at = |width: f32| Rect::from_min_size(pos2(0.0, 6.0), vec2(width, 34.0));
+        let fits = Layout::new(at(128.0), 4, true);
+        let dots = fits.dots.expect("128 points hold four dots");
+        assert_eq!(fits.summary, None);
+        assert_eq!(dots.width(), 60.0);
+        assert_eq!(dot_center(dots, 1).x - dot_center(dots, 0).x, 16.0);
+        let short = Layout::new(at(127.0), 4, true);
+        assert_eq!(short.dots, None);
+        let summary = short.summary.expect("127 points hold one summary slot");
+        assert_eq!(summary.right(), 127.0 - CLOSE_WIDTH);
+        assert_eq!(summary.width(), 12.0);
+        for tenth in (MIN_CARD * 10.0) as u32..1270 {
+            let layout = Layout::new(at(tenth as f32 / 10.0), 4, true);
+            assert!(layout.dots.is_none() && layout.summary.is_some(), "{tenth}");
+        }
     }
 }

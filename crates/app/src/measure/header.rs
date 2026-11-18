@@ -312,9 +312,11 @@ pub struct TabBar {
     pub total: Duration,
     /// The most tabs that got marked at once.
     ///
-    /// **Zero means the bar walked and marked nothing.** The walk happens whether there is a claim or
-    /// not, so without this number a batch whose producers did not publish the field would publish the
+    /// **Zero means the bar painted no claim.** The cards are painted whether there is a claim or not,
+    /// so without this number a batch whose producers did not publish the field would publish the
     /// bar's cost **without the half that has to be measured**, and it would read just like a good one.
+    /// On the integrated bar a card counts when it drew a ring — on its own dots, or on the one
+    /// summary dot every card the bar keeps has room for (D96).
     pub marked_tabs: usize,
 }
 
@@ -989,7 +991,7 @@ pub fn header(
         writeln!(
             a,
             "tab bar:      {} frames · {:?} in total · {mean:?} per frame · {} tabs marked at \
-             once at most (accumulating the claims and painting the tabs; subtracted from its \
+             once at most (reading the claims and painting the tabs; subtracted from its \
              frame)",
             tab_bar.frames, tab_bar.total, tab_bar.marked_tabs
         )?;
