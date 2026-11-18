@@ -1,0 +1,38 @@
+--- a/src/text/font.rs
++++ b/src/text/font.rs
+@@ -248,16 +248,24 @@
+                 {
+                     hinting_instance
+                         .reconfigure(&font_data.outline_glyphs, size, location, hinting_target)
++                        .inspect(|_| eprintln!("HINT_RECONFIG Ok ppem={size:?} target={hinting_target:?}"))
++                        .inspect_err(|err| eprintln!("HINT_RECONFIG Err {err:?}"))
+                         .ok()?;
+                 }
+                 let draw_settings = skrifa::outline::DrawSettings::hinted(hinting_instance, false);
+-                outline.draw(draw_settings, &mut pen).ok()?;
++                outline.draw(draw_settings, &mut pen)
++                    .inspect(|_| eprintln!("HINT_DRAW hinted Ok glyph={glyph_id:?} bin={bin:?} enabled={}", hinting_instance.is_enabled()))
++                    .inspect_err(|err| eprintln!("HINT_DRAW hinted Err {err:?}"))
++                    .ok()?;
+             } else {
+                 let draw_settings = skrifa::outline::DrawSettings::unhinted(
+                     skrifa::instance::Size::new(metrics.scale),
+                     location,
+                 );
+-                outline.draw(draw_settings, &mut pen).ok()?;
++                outline.draw(draw_settings, &mut pen)
++                    .inspect(|_| eprintln!("HINT_DRAW unhinted Ok glyph={glyph_id:?} bin={bin:?}"))
++                    .inspect_err(|err| eprintln!("HINT_DRAW unhinted Err {err:?}"))
++                    .ok()?;
+             }
+ 
+             Some(())
+@@ -410,6 +418,8 @@
+                         skrifa::instance::LocationRef::default(),
+                         skrifa::outline::Target::default(),
+                     )
++                    .inspect(|instance| eprintln!("HINT_CREATE Ok enabled={}", instance.is_enabled()))
++                    .inspect_err(|err| eprintln!("HINT_CREATE Err {err:?}"))
+                     .ok()
+                 })
+                 .flatten();
