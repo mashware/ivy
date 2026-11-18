@@ -4044,7 +4044,12 @@ mod tests {
             .advance(text.as_bytes());
         let at = control(&window, &ctx, area, 0, 112.5);
         frame(&mut window, &ctx, area, click_at(at));
-        frame(&mut window, &ctx, area, vec![egui::Event::Text("needle".into())]);
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::Text("needle".into())],
+        );
         frame(&mut window, &ctx, area, vec![]);
         let painted = |window: &Window| {
             pane_of(window, names[0])
@@ -4074,7 +4079,10 @@ mod tests {
                 .chunks_exact(cols)
                 .position(|row| row.iter().any(|cell| cell.selected))
                 .expect("the match is on screen");
-            assert!(row >= clear, "press {press}: the match was left under the box, row {row}");
+            assert!(
+                row >= clear,
+                "press {press}: the match was left under the box, row {row}"
+            );
             assert_eq!(
                 painted(&window).layout.frame,
                 top,
@@ -4104,13 +4112,30 @@ mod tests {
         let at = search_target(&window, 0, Target::Options);
         frame(&mut window, &ctx, area, click_at(at));
         frame(&mut window, &ctx, area, vec![]);
-        assert!(pane_of(&window, names[0]).search.open.as_ref().unwrap().list());
+        assert!(
+            pane_of(&window, names[0])
+                .search
+                .open
+                .as_ref()
+                .unwrap()
+                .list()
+        );
         // The other console's review control: revealed by hovering, then pressed.
         let review = control(&window, &ctx, area, 1, 87.5);
-        frame(&mut window, &ctx, area, vec![egui::Event::PointerMoved(review)]);
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::PointerMoved(review)],
+        );
         frame(&mut window, &ctx, area, click_at(review));
         assert!(
-            !pane_of(&window, names[0]).search.open.as_ref().unwrap().list(),
+            !pane_of(&window, names[0])
+                .search
+                .open
+                .as_ref()
+                .unwrap()
+                .list(),
             "a press a header control took left the list unfolded"
         );
     }

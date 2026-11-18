@@ -387,7 +387,9 @@ pub(crate) fn apply(console: &mut OnThisConsole, screen: &mut Screen, steps: Ste
                 let keep_clear = open
                     .painted
                     .as_ref()
-                    .map_or(term_core::KeepClear::NONE, |painted| painted.layout.keep_clear);
+                    .map_or(term_core::KeepClear::NONE, |painted| {
+                        painted.layout.keep_clear
+                    });
                 let compiled = open
                     .compiled
                     .get_or_insert_with(|| Search::literal(&open.query, *options));

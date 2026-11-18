@@ -676,10 +676,14 @@ pub(crate) fn paint_them_over_it(
         paint_the_silence_over_it(painter, console, theme, metrics, area, silence);
     }
     let question = boxes.question.filter(|_| console.held.is_some());
-    [question, question.and(boxes.slot), silence.map(|(rect, _)| rect)]
-        .into_iter()
-        .flatten()
-        .collect()
+    [
+        question,
+        question.and(boxes.slot),
+        silence.map(|(rect, _)| rect),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
 }
 
 /// Paints the button that sends a held paste.

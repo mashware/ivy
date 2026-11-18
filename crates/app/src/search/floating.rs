@@ -194,13 +194,16 @@ pub(crate) fn layout(
         // hidden by it and give way: a press on a choice must reach the choice.
         targets.retain(|(_, rect)| !rect.intersects(list));
         for (index, choice) in Choice::ALL.into_iter().enumerate() {
-            targets.insert(index, (
-                Target::Choice(choice),
-                Rect::from_min_size(
-                    pos2(list.left() + PAD, list.top() + PAD + index as f32 * button),
-                    vec2(list.width() - 2.0 * PAD, button),
+            targets.insert(
+                index,
+                (
+                    Target::Choice(choice),
+                    Rect::from_min_size(
+                        pos2(list.left() + PAD, list.top() + PAD + index as f32 * button),
+                        vec2(list.width() - 2.0 * PAD, button),
+                    ),
                 ),
-            ));
+            );
         }
         list.intersect(console)
     });
@@ -606,7 +609,16 @@ mod tests {
         let screen = Screen::new(Size { rows: 5, cols: 80 });
         let layout = layout(short, &metrics(), &screen.view(), true, &[]);
         let list = layout.list.expect("the list is laid out");
-        assert!(list.intersects(layout.frame), "the premise: the list falls over the box");
+        assert!(
+            list.intersects(layout.frame),
+            "the premise: the list falls over the box"
+        );
+        for (target, rect) in &layout.targets {
+            assert!(
+                matches!(target, Target::Choice(_)) || !rect.intersects(list),
+                "{target:?} is still laid out — and painted — under the list"
+            );
+        }
         let painted = Painted { frame: 1, layout };
         for choice in Choice::ALL {
             let (_, rect) = painted
@@ -641,17 +653,26 @@ mod tests {
 
     #[test]
     fn the_rows_kept_clear_are_the_ones_the_box_covers_at_its_edge() {
-        let screen = Screen::new(Size { rows: ROWS, cols: 80 });
+        let screen = Screen::new(Size {
+            rows: ROWS,
+            cols: 80,
+        });
         let top = layout(console(), &metrics(), &screen.view(), false, &[]);
         let KeepClear::Top(rows) = top.keep_clear else {
-            panic!("a box at the top keeps rows at the top: {:?}", top.keep_clear);
+            panic!(
+                "a box at the top keeps rows at the top: {:?}",
+                top.keep_clear
+            );
         };
         assert!(rows as f32 * metrics().height() >= top.frame.bottom() - console().top());
         assert!((rows - 1) as f32 * metrics().height() < top.frame.bottom() - console().top());
         let notice = Rect::from_min_size(console().min, vec2(console().width(), 60.0));
         let bottom = layout(console(), &metrics(), &screen.view(), false, &[notice]);
         let KeepClear::Bottom(rows) = bottom.keep_clear else {
-            panic!("a box at the bottom keeps rows at the bottom: {:?}", bottom.keep_clear);
+            panic!(
+                "a box at the bottom keeps rows at the bottom: {:?}",
+                bottom.keep_clear
+            );
         };
         assert!(rows as f32 * metrics().height() >= console().bottom() - bottom.frame.top());
     }

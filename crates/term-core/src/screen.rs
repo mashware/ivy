@@ -853,12 +853,15 @@ impl Screen {
             KeepClear::Top(clear) => clear
                 .saturating_sub(top_row)
                 .min(grid.history_size() - offset)
-                .min(rows.saturating_sub(1 + bottom_row)) as i32,
+                .min(rows.saturating_sub(1 + bottom_row))
+                as i32,
             // Toward the live screen, never so far that the match's start leaves the top.
-            KeepClear::Bottom(clear) => -((bottom_row + clear + 1)
-                .saturating_sub(rows)
-                .min(offset)
-                .min(top_row) as i32),
+            KeepClear::Bottom(clear) => {
+                -((bottom_row + clear + 1)
+                    .saturating_sub(rows)
+                    .min(offset)
+                    .min(top_row) as i32)
+            }
         };
         if scroll != 0 {
             self.term.scroll_display(GridScroll::Delta(scroll));
