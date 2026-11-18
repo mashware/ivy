@@ -5946,9 +5946,11 @@ bands, rasterized hard-edged.
   corner from the font would meet the painter's lines on other rows.
 - **One rectangle per arm, painted directly.** Arms meet at the joint, and with an ink that is not
   opaque the joint would be painted twice — the same bead, drawn by us.
-- **Antialiased arcs.** epaint would feather them, and the arc's ends would then not match the
-  hard-edged bands they continue. At a light line of one or two pixels the hard edge reads as a
-  pixel-art curve.
+- **Antialiased arcs.** Tried and seen on the desktop: at a radius of a few pixels the curve's
+  pixels came out at half ink beside lines at full ink, and the corner read as a gap. So did the
+  first hard-edged version, which inked only the pixels the centre line crosses: two pixels touching
+  at a corner. The arc now inks whole any pixel the stroke covers at least a third of, which makes
+  every step share an edge with the next, and ends a pixel inside the cell.
 - **The diagonals.** A diagonal on a pixel grid is a staircase whichever way it is drawn, and
   nothing in a box has to meet it on a shared row.
 

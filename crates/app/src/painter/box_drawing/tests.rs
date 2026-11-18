@@ -323,7 +323,7 @@ fn every_arm_reaches_its_edge_on_the_rows_the_neighbouring_line_uses() {
         ] {
             {
                 let mut mask = vec![false; (w * h) as usize];
-                for (x0, y0, x1, y1, _) in runs(shape, w, h, light) {
+                for (x0, y0, x1, y1) in runs(shape, w, h, light) {
                     for y in y0..y1 {
                         for x in x0..x1 {
                             let cell = &mut mask[(y * w + x) as usize];
@@ -408,4 +408,47 @@ fn a_light_line_follows_the_scale_and_is_never_thinner_than_a_pixel() {
     assert_eq!(light_thickness(14.0, 5.0 / 3.0), 2);
     assert_eq!(light_thickness(14.0, 2.0), 2);
     assert_eq!(light_thickness(4.0, 1.0), 1);
+}
+
+#[test]
+fn a_rounded_corner_is_one_piece_whose_every_step_shares_an_edge() {
+    // **Seen on the desktop, not in a test**: a one-pixel arc made of the pixels its centre line
+    // crosses was two pixels touching only at a corner, and it read as a gap in the box. Asserted
+    // as the reason — the stroke is one 4-connected piece — at the cell sizes light lines come with.
+    for c in ['╭', '╮', '╯', '╰'] {
+        for (w, h, light) in [(7, 16, 1), (7, 17, 1), (8, 17, 1), (11, 27, 2), (12, 29, 2)] {
+            let mut mask = vec![false; (w * h) as usize];
+            for (x0, y0, x1, y1) in runs(shape_of(c).unwrap(), w, h, light) {
+                for y in y0..y1 {
+                    for x in x0..x1 {
+                        mask[(y * w + x) as usize] = true;
+                    }
+                }
+            }
+            let start = mask
+                .iter()
+                .position(|&inked| inked)
+                .expect("the arc drew nothing");
+            let mut seen = vec![false; mask.len()];
+            let mut stack = vec![start];
+            seen[start] = true;
+            while let Some(at) = stack.pop() {
+                let (x, y) = (at as i32 % w, at as i32 / w);
+                for (nx, ny) in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] {
+                    if (0..w).contains(&nx) && (0..h).contains(&ny) {
+                        let next = (ny * w + nx) as usize;
+                        if mask[next] && !seen[next] {
+                            seen[next] = true;
+                            stack.push(next);
+                        }
+                    }
+                }
+            }
+            assert_eq!(
+                seen.iter().filter(|&&s| s).count(),
+                mask.iter().filter(|&&m| m).count(),
+                "{c} at {w}×{h}, light {light}: a step of the curve only touches the next at a corner"
+            );
+        }
+    }
 }
