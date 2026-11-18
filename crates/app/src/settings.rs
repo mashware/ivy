@@ -58,15 +58,45 @@ const MAX_WARNINGS: usize = 20;
 
 /// The format version this reader understands.
 ///
-/// **It is optional, unlike in the layout, and the reason is the one D16 gives for requiring it there.**
-/// There the file **freezes the shape of a tree**, so an old reader would misinterpret a new
-/// file. Here the format is flat: a key a reader does not know **is ignored and said**, and one that
-/// is missing takes its factory value. There is no shape to freeze, so requiring a ritual line from whoever
-/// writes the file would protect from nothing.
-///
-/// What is needed is the half that does protect: **a version GREATER than this one is not applied**, in case one
-/// day the format changes incompatibly. With no file in the way there is nothing to decide.
-const VERSION: u64 = 1;
+/// Version 2 uses typographic points for configurable font sizes. An absent version
+/// or version 1 keeps legacy logical sizes; future versions reject the whole file.
+const VERSION: u64 = 2;
+
+/// Typographic points use 72 units per inch; desktop logical coordinates use 96.
+pub(crate) fn points_to_logical(points: f32) -> f32 {
+    points * (4.0 / 3.0)
+}
+pub(crate) fn logical_to_points(logical: f32) -> f32 {
+    logical * 0.75
+}
+pub(crate) fn is_font_size(key: &str) -> bool {
+    matches!(key, "size" | "pane.title_size" | "tab.label_size")
+}
+
+/// Version 2 changes size units globally, even when declared after the size.
+/// Repeated declarations select the highest version; future versions still veto the file.
+pub(crate) fn uses_typographic_points(text: &str) -> bool {
+    text.strip_prefix('\u{feff}').unwrap_or(text).lines().any(|line| {
+        matches!(classify(line), ConfigLine::Pair("version", value) if value.parse::<u64>().is_ok_and(|version| version >= 2))
+    })
+}
+
+pub(crate) fn apply_points(settings: &mut Settings, key: &str, value: &str) -> Result<(), Missing> {
+    if !is_font_size(key) {
+        return apply(settings, key, value);
+    }
+    let logical = value.parse::<f32>().ok().map(points_to_logical);
+    if let Some(logical) = logical {
+        return apply(settings, key, &logical.to_string()).map_err(|_| Missing::InvalidValue {
+            key: key.to_owned(),
+            value: value.to_owned(),
+        });
+    }
+    Err(Missing::InvalidValue {
+        key: key.to_owned(),
+        value: value.to_owned(),
+    })
+}
 
 /// What happens to the **whole** file, when there is nothing to apply.
 ///
@@ -267,15 +297,15 @@ pub struct Settings {
     /// would move that cost into reading the file, where nobody asked for it, and would pay it for
     /// **any** value, including the ones nothing will ever be painted with.
     pub font: Option<String>,
-    /// The font body, in points. `None` if the file does not request it.
+    /// The font body in renderer logical units, converted from typographic points at parsing.
     ///
     /// **It is named the same as in the window and different from in the file, on purpose.** `size` is the key
     /// people type and is published contract; `font_size` is what the rest of the code calls this
     /// number. The translation happens **once**, where the key is parsed, and not on every jump.
     pub font_size: Option<f32>,
-    /// Pane title size in points; absent uses 12.
+    /// Pane title size in renderer logical units; absent uses 12 (9 pt).
     pub pane_title_size: Option<f32>,
-    /// Tab label size in points; absent uses 12.
+    /// Tab label size in renderer logical units; absent uses 12 (9 pt).
     pub tab_label_size: Option<f32>,
     /// Use the selected compatible font's programming ligatures; absent means off.
     pub ligatures: Option<bool>,
@@ -522,6 +552,7 @@ enum ConfigLine<'a> {
 
 /// Parses the text line by line.
 pub fn interpret(text: &str) -> Result<(Settings, Warnings), ConfigProblem> {
+    let points = uses_typographic_points(text);
     let mut settings = Settings::default();
     let mut warnings = Warnings::default();
     let mut already_set: Vec<String> = Vec::new();
@@ -544,12 +575,8 @@ pub fn interpret(text: &str) -> Result<(Settings, Warnings), ConfigProblem> {
             ConfigLine::Pair(key, value) => (key, value),
         };
 
-        // **The version is looked at here and not earlier**, because it is one more key: it can go on any line, and
-        // that it is missing is the normal thing.
-        // **The version does not enter the repeated accounting, and it is not an oversight.** «This one wins» means
-        // that this line stepped over another's value; the version **stores no value**, it is a veto that is
-        // checked and forgotten. Saying that something wins would be lying twice when its value is also not
-        // understood, which is what the first version of this fix did. A review caught it.
+        // Versions may appear anywhere. Size units were selected before this pass;
+        // malformed declarations warn here, and any future version vetoes the whole file.
         if key == "version" {
             match value.parse::<u64>() {
                 Ok(which) if which > VERSION => return Err(ConfigProblem::Version(which)),
@@ -564,7 +591,12 @@ pub fn interpret(text: &str) -> Result<(Settings, Warnings), ConfigProblem> {
             }
             continue;
         }
-        if let Err(missing) = apply(&mut settings, key, value) {
+        let applied = if points {
+            apply_points(&mut settings, key, value)
+        } else {
+            apply(&mut settings, key, value)
+        };
+        if let Err(missing) = applied {
             warnings.push(Warning { line, missing });
             // **A line that does not apply does not count as set**, so it is not warned as repeated for
             // it: saying «this one wins» of a line that wins nothing is a warning that lies, and on top of that
@@ -1180,6 +1212,43 @@ mod tests {
             );
             assert_eq!(warnings.total(), 1, "«{value}» gave no warning");
         }
+    }
+
+    #[test]
+    fn typographic_points_convert_all_sizes_independent_of_version_position() {
+        for text in [
+            "version=2\nsize=11\npane.title_size=9\ntab.label_size=12",
+            "size=11\npane.title_size=9\ntab.label_size=12\nversion=2\nversion=1",
+        ] {
+            let (settings, warnings) = parsed(text);
+            assert_eq!(warnings.total(), 0);
+            assert!((settings.font_size.unwrap() - 14.666667).abs() < 0.00001);
+            assert_eq!(settings.pane_title_size, Some(12.0));
+            assert_eq!(settings.tab_label_size, Some(16.0));
+        }
+        for version in ["", "version=1\n"] {
+            let (settings, _) = parsed(&format!("{version}size=14\npane.title_size=12"));
+            assert_eq!(settings.font_size, Some(14.0));
+            assert_eq!(settings.pane_title_size, Some(12.0));
+        }
+        assert_eq!(
+            interpret("size=11\nversion=2\nversion=99"),
+            Err(ConfigProblem::Version(99))
+        );
+    }
+
+    #[test]
+    fn typographic_point_bounds_and_warnings_use_public_values() {
+        let (settings, warnings) =
+            parsed("version=2\nsize=3\npane.title_size=6\ntab.label_size=24");
+        assert_eq!(warnings.total(), 0);
+        assert_eq!(settings.font_size, Some(4.0));
+        assert_eq!(settings.pane_title_size, Some(8.0));
+        assert_eq!(settings.tab_label_size, Some(32.0));
+        let (settings, warnings) = parsed("version=2\nsize=72\nsize=72.1\npane.title_size=5.9");
+        assert_eq!(settings.font_size, Some(96.0));
+        assert_eq!(warnings.total(), 2);
+        assert!(warnings.kept()[0].to_string().contains("72.1"));
     }
 
     #[test]
@@ -1978,15 +2047,22 @@ mod tests {
         // blocks, this test passes by being empty.
         assert_eq!(
             examples.len(),
-            21,
+            23,
             "the document's example blocks gave {} configuration lines: either the document \
              changed shape, or this walk stopped finding them — {examples:?}",
             examples.len()
         );
 
         for example in examples {
+            // Examples use the documented current format; a standalone size must not be
+            // mistaken for an unversioned legacy setting when walking individual lines.
+            let source = if example.starts_with("version") {
+                example.to_owned()
+            } else {
+                format!("version={VERSION}\n{example}")
+            };
             let (settings, warnings) =
-                interpret(example).expect("a single line cannot bring down the whole file");
+                interpret(&source).expect("a single line cannot bring down the whole file");
             assert_eq!(
                 warnings.total(),
                 0,

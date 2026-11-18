@@ -45,7 +45,10 @@ impl PreviewState {
             self.queued_pass
                 .is_some_and(|pass| pass < ctx.cumulative_pass_nr())
         });
-        egui::FontId::new(size, family.cloned().unwrap_or(egui::FontFamily::Monospace))
+        egui::FontId::new(
+            crate::settings::points_to_logical(size),
+            family.cloned().unwrap_or(egui::FontFamily::Monospace),
+        )
     }
 }
 
@@ -146,7 +149,7 @@ pub(super) fn show(
         let size = draft.fields.iter_mut().find(|f| f.key == "size").unwrap();
         ui.vertical(|ui| {
             ui.weak("Size");
-            point_field(ui, "settings-font-size", &mut size.value, "14");
+            point_field(ui, "settings-font-size", &mut size.value, "10.5");
         });
         if ui
             .vertical(|ui| {
@@ -198,8 +201,8 @@ pub(super) fn show(
         .value
         .parse::<f32>()
         .ok()
-        .filter(|size| size.is_finite() && (4.0..=96.0).contains(size))
-        .unwrap_or(14.0);
+        .filter(|size| size.is_finite() && (3.0..=72.0).contains(size))
+        .unwrap_or(10.5);
     let attempts = editor.preview.attempts;
     let started = Instant::now();
     editor.preview.update(&name, explicit, fonts, ui.ctx());
@@ -235,8 +238,8 @@ pub(super) fn show(
             .unwrap();
         ui.horizontal_wrapped(|ui| {
             ui.label(label);
-            point_field(ui, key, &mut field.value, "12");
-            ui.weak("8–32");
+            point_field(ui, key, &mut field.value, "9");
+            ui.weak("6–24");
             if ui
                 .add_sized(
                     [52.0, 40.0],
@@ -250,9 +253,9 @@ pub(super) fn show(
                 .value
                 .parse::<f32>()
                 .ok()
-                .filter(|size| size.is_finite() && (8.0..=32.0).contains(size))
-                .unwrap_or(12.0);
-            ui.label(egui::RichText::new(sample).size(size));
+                .filter(|size| size.is_finite() && (6.0..=24.0).contains(size))
+                .unwrap_or(9.0);
+            ui.label(egui::RichText::new(sample).size(crate::settings::points_to_logical(size)));
         });
         field_errors(ui, key, errors);
     }
@@ -322,18 +325,19 @@ mod tests {
         let mut preview = PreviewState::default();
         preview.update("Ubuntu", true, &mut fonts, &ctx);
         // Named families are not used in the registration pass.
-        assert_eq!(preview.font(&ctx, 14.0).family, egui::FontFamily::Monospace);
+        assert_eq!(preview.font(&ctx, 10.5).family, egui::FontFamily::Monospace);
         pass(&ctx);
-        let chosen = metrics(&ctx, preview.font(&ctx, 14.0));
+        assert_eq!(preview.font(&ctx, 10.5).size, 14.0);
+        let chosen = metrics(&ctx, preview.font(&ctx, 10.5));
         assert_ne!(chosen, baseline);
         assert_eq!(metrics(&ctx, egui::FontId::monospace(14.0)), baseline);
-        assert!(metrics(&ctx, preview.font(&ctx, 49.0)).x > chosen.x);
+        assert!(metrics(&ctx, preview.font(&ctx, 36.75)).x > chosen.x);
         for _ in 0..3 {
             preview.update("Ubuntu", false, &mut fonts, &ctx);
             pass(&ctx);
         }
         assert_eq!(preview.attempts, 1);
-        assert_eq!(metrics(&ctx, preview.font(&ctx, 14.0)), chosen);
+        assert_eq!(metrics(&ctx, preview.font(&ctx, 10.5)), chosen);
     }
     #[test]
     fn merely_opening_and_reopening_font_preview_never_searches_the_machine() {

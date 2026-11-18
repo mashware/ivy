@@ -272,6 +272,7 @@ const GLOSSARY_CLEAN_FILES: &[&str] = &[
     "app/examples/screen_demo.rs",
     "app/tests/waits.rs",
     "app/tests/decisions.rs",
+    "app/tests/font_rasterization.rs",
     "app/tests/common/mod.rs",
     "app/src/tests/markdown.rs",
 ];
@@ -552,6 +553,7 @@ const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/tests/vendor_patch.rs", "app"),
     ("app/tests/waits.rs", "app"),
     ("app/tests/decisions.rs", "app"),
+    ("app/tests/font_rasterization.rs", "app"),
     ("app/tests/common/mod.rs", "app"),
     ("app/src/tests/markdown.rs", "app"),
 ];

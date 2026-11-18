@@ -10320,3 +10320,35 @@ on the focused console, stay. This **amends D66**, whose approved per-pane set h
 | A `\|` glyph or gap cells between groups | A glyph depends on the font; extra cells move every offset and threshold. |
 | An overflow menu when narrow | One more gesture for every control, to save two cells. |
 | Removing the titlebar's split buttons | Kept by the owner's decision. |
+
+
+## D100 — Configurable font sizes use typographic points (version 2)
+
+Configurable font sizes are typographic points, converted once at the settings boundary using
+96/72 logical units per point. Previously the UI and documentation said points while passing
+values directly to egui, whose points are logical screen coordinates. This made equal numeric
+sizes incomparable with desktop terminals such as Tilix.
+
+Version 2 makes the new interpretation explicit. Legacy files retain their visual size; the
+editor displays converted point values and upgrades on edited save. The default remains visually
+unchanged (14 logical units = 10.5 pt; title 12 logical units = 9 pt). Renderer cell rounding and
+benchmark geometry remain unchanged. Changing all old sizes in place without a format marker
+was rejected because existing users would see their text grow by one third.
+
+
+## D101 — Instructionless fonts get automatic fitting; text keeps its raw coverage
+
+A native11pt comparison with Tilix exposed two effects: a prep-only TrueType font selected the
+interpreter without glyph instructions to execute, and egui's coverage transfer made partial
+edge pixels heavier. The owner accepted the combined automatic-fitting/raw-coverage preview.
+
+Choose automatic fitting only for fonts that prefer the interpreter yet contain no glyph hint
+instructions. Cache that decision once per loaded face and reuse it during hinter reconfiguration.
+Native-instruction fonts and CFF/unknown outlines keep their previous selection.
+Set raw coverage once for both UI themes at font installation, retaining it across theme switches.
+
+The dependency patch is local, licensed and described in vendor/epaint/IVY-PATCH.md. Actual bitmap
+regressions preserve the original native Geist masks and distinguish fitted from unfitted Ubuntu.
+Forcing the automatic hinter for every font was used to diagnose but rejected for delivery: a
+font with deliberate native instructions should not silently lose them. Configurable sizes use
+D100's true points; this does not change placement, cell rounding or DPI/backend selection.

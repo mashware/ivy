@@ -116,7 +116,7 @@ fn expanding_colors_and_reset_clear_only_overrides() {
     for (key, value) in [
         ("theme", "tokyonight"),
         ("font", "Keep Family"),
-        ("size", "18"),
+        ("size", "13.5"),
         ("key.new-tab", "none"),
     ] {
         assert_eq!(

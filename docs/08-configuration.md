@@ -192,7 +192,8 @@ fifteen-second inactivity stop.
 the same save operation and dismisses Settings after success. An invalid value, unavailable font,
 external-file conflict or write failure keeps the dialog and draft open with an explanation.
 
-New or blank files saved through Settings declare `version=1`. Existing version lines are retained.
+New or edited files saved through Settings declare `version=2`, using typographic points.
+Legacy font sizes are converted when saving so their appearance stays the same.
 Save explains invalid values and conflicting bindings before writing. Comments, unrelated entries,
 unchanged supported entries, a byte-order mark and retained line endings survive. Changed keys are
 rewritten consistently, including equivalent spellings; restoring a key removes its earlier
@@ -251,8 +252,8 @@ It is the same thing Kitty and Ghostty do.
 | `panel` | the status panel's background |
 | `theme` | a built-in set of all twenty-two colours; see the catalog below |
 | `size` | the terminal font size, in points |
-| `pane.title_size` | pane-title size in points; 8–32, default 12 |
-| `tab.label_size` | tab-label size in points; 8–32, default 12 |
+| `pane.title_size` | pane-title size in points; 6–24, default 9 |
+| `tab.label_size` | tab-label size in points; 6–24, default 9 |
 | `font` | the font family it paints with, by its name; omitted means the bundled Geist Mono |
 | `font.ligatures` | programming ligatures from the selected compatible font: `on` or `off`; omitted means `off` |
 | `startup.restore` | what the primary window restores on its next launch: `none`, `layout`, `directories`, or `sessions` |
@@ -261,9 +262,14 @@ It is the same thing Kitty and Ghostty do.
 Colours are written **`#rrggbb`**, in hexadecimal, and it makes no difference whether in upper or
 lower case.
 
-**The size goes from 4 to 96 points**, with decimals if you want. The usual one is **14**. Outside
-that range you are told and the usual one is used: at two points nothing is legible and at two
-hundred three columns fit.
+**With `version=2`, size is a typographic point value (1/72 inch).** The range is 3–72 pt,
+with decimals supported; the default is 10.5 pt. At 96 logical units per inch, 11 pt becomes
+14⅔ logical units before the desktop scale is applied. The same conversion applies to Settings
+previews, pane titles and tab labels.
+
+Files without a version, or with `version=1`, keep their original logical-unit interpretation.
+Settings displays those values in typographic points and upgrades the file on an edited save,
+preserving the existing visual sizes. There is no automatic rewrite on startup.
 
 Changing the size **changes how many rows and columns** fit in your window, so the programs running
 inside notice.
@@ -273,11 +279,12 @@ inside notice.
 The two title sizes are independent of the font and size inside a console:
 
 ```
-pane.title_size = 24
-tab.label_size = 10
+version = 2
+pane.title_size = 18
+tab.label_size = 7.5
 ```
 
-Both accept finite point sizes from 8 through 32 and default to 12. Appearance → Typography
+Both accept finite point sizes from 6 through 24 and default to 9. Appearance → Typography
 provides separate fields and samples. Blank fields inherit the defaults. Save applies the sizes
 without restarting consoles and preserves them for the next launch; Cancel applies nothing.
 
@@ -512,15 +519,16 @@ That it **does not exist** is the only case that is not reported: that is the no
 
 ## `version`
 
-It is **optional**. If you set it, it is good for one thing: so that a terminal older than the format
-**does not apply** a file it does not understand, instead of applying half of it.
+Use `version=2` for typographic font sizes:
 
 ```
-version = 1
+version = 2
+size = 11
 ```
 
-You do not have to write it. The format is flat, so a key a terminal does not know is simply ignored
-and it tells you so.
+An absent version or version 1 preserves legacy font-size units. The version may appear anywhere;
+when repeated, the highest declared version selects the format. Any version newer than this reader
+rejects the whole file. Older Ivy builds reject version 2 rather than silently shrinking its text.
 
 If you write something that is not a number, you are warned about that line like any other and the
 file goes on being applied.

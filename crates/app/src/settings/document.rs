@@ -1,5 +1,8 @@
 //! Lossless patches to the shared, hand-edited configuration.
-use super::{ConfigLine, Settings, apply, classify};
+use super::{
+    ConfigLine, Settings, apply, apply_points, classify, is_font_size, logical_to_points,
+    uses_typographic_points,
+};
 use crate::keyboard::{ALL, Action, Chord, Keymap};
 
 #[derive(Clone)]
@@ -118,9 +121,11 @@ impl Document {
                 }
             }
         }
+        let points = uses_typographic_points(&source);
         for line in source.strip_prefix('\u{feff}').unwrap_or(&source).lines() {
             if let ConfigLine::Pair(key, value) = classify(line)
-                && apply(&mut Settings::default(), key, value).is_ok()
+                && (if points { apply_points } else { apply })(&mut Settings::default(), key, value)
+                    .is_ok()
                 && let Some(key) = canonical(key)
                 && let Some(field) = fields.iter_mut().find(|f| f.key == key)
             {
@@ -129,6 +134,8 @@ impl Document {
                         || (key.starts_with("key.") && value.eq_ignore_ascii_case("none"))
                     {
                         value.to_ascii_lowercase()
+                    } else if !points && is_font_size(&key) {
+                        logical_to_points(value.parse().expect("validated size")).to_string()
                     } else {
                         value.to_owned()
                     };
@@ -159,7 +166,7 @@ impl Document {
                 if field.value.contains(['\n', '\r']) {
                     errors.push((field.key.clone(), "Use one line.".into()));
                 } else if let Err(problem) =
-                    apply(&mut Settings::default(), &field.key, &field.value)
+                    apply_points(&mut Settings::default(), &field.key, &field.value)
                 {
                     errors.push((
                         field.key.clone(),
@@ -216,6 +223,16 @@ impl Document {
             .iter()
             .filter(|f| self.defaults || f.value != f.original)
             .collect();
+        let ending = if self.source.contains("\r\n") {
+            "\r\n"
+        } else {
+            "\n"
+        };
+        if dirty.is_empty() && !body.trim().is_empty() {
+            return self.source.clone();
+        }
+        let legacy = !uses_typographic_points(&self.source);
+        let mut has_version = false;
         for line in body.split_inclusive('\n') {
             // Empty values are assignments too: removing an override must not resurrect them.
             let key = line
@@ -228,14 +245,28 @@ impl Document {
             {
                 continue;
             }
+            if let ConfigLine::Pair(key, value) = classify(line) {
+                if key == "version" {
+                    has_version = true;
+                    result.push_str(&replace_value(line, &super::VERSION.to_string()));
+                    continue;
+                }
+                if legacy && is_font_size(key) {
+                    if apply(&mut Settings::default(), key, value).is_ok() {
+                        let points = logical_to_points(value.parse().expect("validated size"));
+                        result.push_str(&replace_value(line, &points.to_string()));
+                    } else {
+                        // A rejected legacy number may be valid in points (e.g. size=3).
+                        // Keep its spelling as a comment so upgrading cannot activate it.
+                        result.push_str("# Ignored invalid legacy font size: ");
+                        result.push_str(line);
+                    }
+                    continue;
+                }
+            }
             result.push_str(line);
         }
-        let ending = if self.source.contains("\r\n") {
-            "\r\n"
-        } else {
-            "\n"
-        };
-        if body.trim().is_empty() {
+        if !has_version {
             if !result.is_empty() && !result.ends_with('\n') && result != "\u{feff}" {
                 result.push_str(ending);
             }
@@ -251,12 +282,55 @@ impl Document {
     }
 }
 
+/// Replace only the value, retaining indentation, spaces, and the original line ending.
+fn replace_value(line: &str, value: &str) -> String {
+    let (key, old) = line.split_once('=').expect("classified assignment");
+    let leading = old.len() - old.trim_start().len();
+    let trailing = old.trim_end().len().max(leading);
+    format!("{key}={}{value}{}", &old[..leading], &old[trailing..])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     fn set(doc: &mut Document, key: &str, value: &str) {
         doc.fields.iter_mut().find(|f| f.key == key).unwrap().value = value.into();
     }
+    #[test]
+    fn legacy_sizes_migrate_together_without_reactivating_invalid_duplicates() {
+        for version in ["", "version=1\r\n"] {
+            let source = format!(
+                "\u{feff}# keep\r\n{version}size = 14\r\nsize=3\r\nsize=18\r\npane.title_size=12\r\npane.title_size=6\r\ntab.label_size=16\r\nfuture=yes"
+            );
+            let before = super::super::interpret(&source).unwrap().0;
+            let mut doc = Document::new(source.clone());
+            for (key, expected) in [
+                ("size", "13.5"),
+                ("pane.title_size", "9"),
+                ("tab.label_size", "12"),
+            ] {
+                assert_eq!(
+                    doc.fields.iter().find(|f| f.key == key).unwrap().value,
+                    expected
+                );
+            }
+            assert_eq!(doc.text(), source);
+            set(&mut doc, "cursor.blink", "off");
+            let migrated = doc.text();
+            assert!(migrated.starts_with("\u{feff}# keep\r\n"));
+            assert!(migrated.contains("size = 10.5\r\n"));
+            assert!(migrated.contains("size=13.5\r\n"));
+            assert!(migrated.contains("# Ignored invalid legacy font size: size=3\r\n"));
+            assert!(migrated.contains("# Ignored invalid legacy font size: pane.title_size=6\r\n"));
+            assert!(migrated.contains("future=yes\r\n"));
+            let after = super::super::interpret(&migrated).unwrap().0;
+            assert_eq!(after.font_size, before.font_size);
+            assert_eq!(after.pane_title_size, before.pane_title_size);
+            assert_eq!(after.tab_label_size, before.tab_label_size);
+            assert_eq!(Document::new(migrated.clone()).text(), migrated);
+        }
+    }
+
     #[test]
     fn configured_roadmap_paths_are_editable_without_losing_names() {
         let mut doc = Document::new("roadmap.backend = docs/old.md\n".into());
@@ -278,10 +352,10 @@ mod tests {
         set(&mut doc, "pane.title_size", "24");
         let text = doc.text();
         assert!(text.contains("# keep\n"));
-        assert!(text.contains("tab.label_size = 10\n"));
+        assert!(text.contains("tab.label_size = 7.5\n"));
         assert!(text.contains("unknown = value\n"));
         let (settings, warnings) = super::super::interpret(&text).unwrap();
-        assert_eq!(settings.pane_title_size, Some(24.0));
+        assert_eq!(settings.pane_title_size, Some(32.0));
         assert_eq!(settings.tab_label_size, Some(10.0));
         assert_eq!(warnings.kept.len(), 1);
         set(&mut doc, "pane.title_size", "");
@@ -308,7 +382,7 @@ mod tests {
         let text = doc.text();
         assert_eq!(
             text,
-            "# keep\r\nfuture=yes\r\nsize=19\r\nfont.ligatures = off\r\n"
+            "# keep\r\nfuture=yes\r\nsize=14.25\r\nversion=2\r\nfont.ligatures = off\r\n"
         );
         assert_eq!(
             super::super::interpret(&text).unwrap().0.ligatures,
@@ -317,7 +391,7 @@ mod tests {
         set(&mut doc, "font.ligatures", "maybe");
         assert!(doc.errors().iter().any(|(key, _)| key == "font.ligatures"));
         doc.defaults();
-        assert_eq!(doc.text(), "# keep\r\nfuture=yes\r\n");
+        assert_eq!(doc.text(), "# keep\r\nfuture=yes\r\nversion=2\r\n");
         assert_eq!(
             super::super::interpret(&doc.text()).unwrap().0.ligatures,
             None
@@ -332,7 +406,7 @@ mod tests {
         assert_eq!(doc.text(), source);
         set(&mut doc, "color.1", "#abcdef");
         let text = doc.text();
-        assert!(text.starts_with("\u{feff}# keep\r\nfuture = yes\r\nsize = 15\r\n"));
+        assert!(text.starts_with("\u{feff}# keep\r\nfuture = yes\r\nsize = 11.25\r\n"));
         assert!(!text.contains("color.01"));
         assert_eq!(
             super::super::interpret(&text).unwrap().0.colors.palette[1],
@@ -346,7 +420,7 @@ mod tests {
                 .into(),
         );
         doc.defaults();
-        assert_eq!(doc.text(), "# keep\nfuture=x\nversion=1\n");
+        assert_eq!(doc.text(), "# keep\nfuture=x\nversion=2\n");
         assert_eq!(
             super::super::interpret(&doc.text()).unwrap().0,
             Settings::default()
@@ -396,7 +470,7 @@ mod tests {
             assert!(
                 text.trim_start_matches('\u{feff}')
                     .lines()
-                    .any(|l| l == "version=1")
+                    .any(|l| l == "version=2")
             );
             assert_eq!(
                 super::super::interpret(&text).unwrap().0,
@@ -445,7 +519,7 @@ mod tests {
             saved.startup_restore,
             super::super::StartupRestore::Directories
         );
-        assert_eq!(saved.font_size, Some(18.0));
+        assert_eq!(saved.font_size, Some(24.0));
         assert_eq!(saved.blink, Some(false));
         assert_eq!(saved.copy, Some(false));
         assert!(saved.theme.is_some());
@@ -560,15 +634,18 @@ mod tests {
                 expected
             );
         }
-        for value in ["4", "96"] {
+        for value in ["3", "72"] {
             set(&mut doc, "size", value);
             assert!(doc.errors().is_empty());
             assert_eq!(
                 super::super::interpret(&doc.text()).unwrap().0.font_size,
-                value.parse().ok()
+                value
+                    .parse::<f32>()
+                    .ok()
+                    .map(super::super::points_to_logical)
             );
         }
-        for value in ["3.99", "96.01", "NaN", "inf"] {
+        for value in ["2.99", "72.01", "NaN", "inf"] {
             set(&mut doc, "size", value);
             assert!(doc.errors().iter().any(|(key, _)| key == "size"));
         }
@@ -580,7 +657,7 @@ mod tests {
         set(&mut doc, "agent.codex.enabled", "true");
         set(&mut doc, "agent.claude.enabled", "false");
         let saved = doc.text();
-        assert!(saved.contains("# keep me\nsize=18\n"));
+        assert!(saved.contains("# keep me\nsize=13.5\n"));
         assert!(saved.contains("unknown.future=value"));
         let settings = super::super::interpret(&saved).unwrap().0;
         assert!(settings.agent_codex);

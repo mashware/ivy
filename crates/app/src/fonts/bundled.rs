@@ -107,12 +107,68 @@ pub(crate) fn ui_weight(ctx: &egui::Context, weight: u16) -> FontFamily {
 /// Installs the base before anything else writes the definitions: start-up calls it first, and a
 /// configured family then queues its own definitions on top of it.
 pub(crate) fn install(ctx: &egui::Context) {
+    // Keep raster coverage intact: egui's dark-mode boost thickens partial edge pixels.
+    // Set both themes once, so changing appearance cannot restore the heavier atlas.
+    ctx.all_styles_mut(|style| {
+        style.visuals.text_options.color_transfer_function =
+            egui::epaint::FontColorTransferFunction::Off;
+    });
     ctx.set_fonts(base_definitions());
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_preserves_raw_glyph_coverage_in_both_themes() {
+        fn mask(ctx: &egui::Context) -> Vec<u8> {
+            pass(ctx);
+            ctx.fonts_mut(|fonts| {
+                let galley = fonts.layout_no_wrap(
+                    "Iwm".into(),
+                    egui::FontId::monospace(14.666667),
+                    egui::Color32::WHITE,
+                );
+                let image = fonts.image();
+                let mut alpha = Vec::new();
+                for row in &galley.rows {
+                    for glyph in &row.glyphs {
+                        for y in glyph.uv_rect.min[1]..glyph.uv_rect.max[1] {
+                            for x in glyph.uv_rect.min[0]..glyph.uv_rect.max[0] {
+                                alpha.push(image[(usize::from(x), usize::from(y))].a());
+                            }
+                        }
+                    }
+                }
+                alpha
+            })
+        }
+        for theme in [egui::Theme::Dark, egui::Theme::Light] {
+            let actual = egui::Context::default();
+            let mut discoverer = super::super::Discoverer::default();
+            super::super::choose_the_font(None, &mut discoverer, &actual);
+            actual.set_theme(theme);
+            let raw = egui::Context::default();
+            raw.set_theme(theme);
+            raw.set_fonts(base_definitions());
+            raw.all_styles_mut(|style| {
+                style.visuals.text_options.color_transfer_function =
+                    egui::epaint::FontColorTransferFunction::Off
+            });
+            let boosted = egui::Context::default();
+            boosted.set_theme(theme);
+            boosted.set_fonts(base_definitions());
+            boosted.all_styles_mut(|style| {
+                style.visuals.text_options.color_transfer_function =
+                    egui::epaint::FontColorTransferFunction::default()
+            });
+            let alpha = mask(&actual);
+            assert!(alpha.iter().any(|a| *a > 0 && *a < 255));
+            assert_eq!(alpha, mask(&raw));
+            assert_ne!(alpha, mask(&boosted));
+        }
+    }
 
     /// The family a design weight is laid out with.
     fn ui_family(weight: u16) -> FontFamily {
