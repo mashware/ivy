@@ -123,6 +123,8 @@ pub(crate) enum Target {
     Panel,
     Zoom,
     Close,
+    /// Opens or closes the search on this console, focused or not, and hands it the keyboard (D61).
+    Search,
 }
 
 /// Which controls a header carries. Painting and pressing build it with this one constructor
@@ -169,7 +171,7 @@ struct Layout {
 
 fn layout(strip: egui::Rect, offer: Offer) -> Layout {
     let right = (strip.right() - super::CORNER_LEFT_TO_THE_GRAB).max(strip.left());
-    let mut base = vec![Target::Review, Target::Panel];
+    let mut base = vec![Target::Search, Target::Review, Target::Panel];
     if offer.can_close {
         base.extend([Target::Zoom, Target::Close]);
     }
@@ -380,17 +382,7 @@ fn paint(ui: &egui::Ui, strip: egui::Rect, theme: &Theme, appearance: Appearance
         if target != Target::Label && !shown {
             continue;
         }
-        let tooltip = match target {
-            Target::Label => "Double-click to rename",
-            Target::SplitRight => "Split right",
-            Target::SplitDown => "Split down",
-            Target::Review => "Review changes",
-            Target::Panel if folded => "Show information panel",
-            Target::Panel => "Hide information panel",
-            Target::Zoom if zoomed => "Restore console",
-            Target::Zoom => "Maximize console",
-            Target::Close => "Close console",
-        };
+        let tooltip = tooltip(target, folded, zoomed);
         let response = ui.interact(
             rect,
             ui.id().with((
@@ -487,6 +479,22 @@ fn paint(ui: &egui::Ui, strip: egui::Rect, theme: &Theme, appearance: Appearance
     }
 }
 
+/// What a header target says under the pointer.
+fn tooltip(target: Target, folded: bool, zoomed: bool) -> &'static str {
+    match target {
+        Target::Label => "Double-click to rename",
+        Target::SplitRight => "Split right",
+        Target::SplitDown => "Split down",
+        Target::Review => "Review changes",
+        Target::Panel if folded => "Show information panel",
+        Target::Panel => "Hide information panel",
+        Target::Zoom if zoomed => "Restore console",
+        Target::Zoom => "Maximize console",
+        Target::Close => "Close console",
+        Target::Search => "Search this console",
+    }
+}
+
 /// The header's icons from the interface's set (D103) in a `size`-point square: the splits, the
 /// branch for the review, the panel, diagonal arrows to maximize and back, and the cross.
 pub(crate) fn paint_icon(
@@ -506,6 +514,7 @@ pub(crate) fn paint_icon(
         Target::Zoom if zoomed => Icon::Collapse,
         Target::Zoom => Icon::Expand,
         Target::Close => Icon::Close,
+        Target::Search => Icon::Search,
         Target::Label => unreachable!(),
     };
     paint(painter, center, icon, size, color);
@@ -565,6 +574,11 @@ mod tests {
             (Target::Zoom, true, egui_phosphor::regular::ARROWS_IN_SIMPLE),
             (Target::Review, false, egui_phosphor::regular::GIT_BRANCH),
             (Target::Panel, false, egui_phosphor::regular::SIDEBAR_SIMPLE),
+            (
+                Target::Search,
+                false,
+                egui_phosphor::regular::MAGNIFYING_GLASS,
+            ),
         ];
         for (target, zoomed, glyph) in painted {
             let out = ctx.run_ui(Default::default(), |ui| {
@@ -598,12 +612,19 @@ mod tests {
             targets.iter().map(|(t, _)| *t as u8).collect::<Vec<_>>(),
             vec![
                 Target::Label as u8,
+                Target::Search as u8,
                 Target::Review as u8,
                 Target::Panel as u8,
                 Target::Zoom as u8,
                 Target::Close as u8
             ]
         );
+    }
+
+    /// AC1 (#120): the search control names the console it searches.
+    #[test]
+    fn the_search_control_says_it_searches_this_console() {
+        assert_eq!(tooltip(Target::Search, false, false), "Search this console");
     }
 
     #[test]
@@ -901,8 +922,15 @@ mod tests {
     fn header_controls_hover_on_the_kit_surface_and_close_stays_quiet_until_reached() {
         let strip = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(500.0, 28.0));
         let metrics = CellMetrics::of(8.0, 16.0);
-        let review = targets(strip, &metrics, true)[1].1;
-        let close = targets(strip, &metrics, true)[4].1;
+        let at = |kind| {
+            targets(strip, &metrics, true)
+                .into_iter()
+                .find(|(target, _)| *target == kind)
+                .unwrap()
+                .1
+        };
+        let review = at(Target::Review);
+        let close = at(Target::Close);
         for backed in [true, false] {
             let ctx = crate::ui::icons::installed_for_tests(1.0);
             let run = |events| {
@@ -1056,8 +1084,8 @@ mod tests {
                     Some(Target::Zoom)
                 ));
             }
-            if width >= 100.0 {
-                assert_eq!(items.len(), 3);
+            if width >= 150.0 {
+                assert_eq!(items.len(), 4);
             }
             if width == 500.0 {
                 assert_eq!(
@@ -1095,6 +1123,7 @@ mod tests {
                 Target::Label,
                 Target::SplitRight,
                 Target::SplitDown,
+                Target::Search,
                 Target::Review,
                 Target::Panel,
                 Target::Zoom,
@@ -1106,7 +1135,7 @@ mod tests {
             full.separators,
             vec![at(Target::SplitDown).right(), at(Target::Panel).right()]
         );
-        assert_eq!(at(Target::SplitDown).right(), at(Target::Review).left());
+        assert_eq!(at(Target::SplitDown).right(), at(Target::Search).left());
         assert_eq!(at(Target::Panel).right(), at(Target::Zoom).left());
         let lone = layout(strip, both(false));
         assert_eq!(
@@ -1115,6 +1144,7 @@ mod tests {
                 Target::Label,
                 Target::SplitRight,
                 Target::SplitDown,
+                Target::Search,
                 Target::Review,
                 Target::Panel
             ]
@@ -1127,7 +1157,7 @@ mod tests {
     #[test]
     fn a_narrow_header_drops_its_splits_before_the_rest() {
         for (can_close, label_only, base, with_split) in
-            [(true, 135.0, 136.0, 161.0), (false, 85.0, 86.0, 111.0)]
+            [(true, 160.0, 161.0, 186.0), (false, 110.0, 111.0, 136.0)]
         {
             let offer = Offer {
                 can_close,
@@ -1135,7 +1165,11 @@ mod tests {
             };
             assert_eq!(kinds(strip_of(label_only), offer), vec![Target::Label]);
             let base_set = kinds(strip_of(base), offer);
-            assert!(base_set.contains(&Target::Review) && base_set.contains(&Target::Panel));
+            assert!(
+                base_set.contains(&Target::Search)
+                    && base_set.contains(&Target::Review)
+                    && base_set.contains(&Target::Panel)
+            );
             assert!(!base_set.contains(&Target::SplitDown));
             assert!(!kinds(strip_of(with_split - 1.0), offer).contains(&Target::SplitDown));
             assert!(kinds(strip_of(with_split), offer).contains(&Target::SplitDown));

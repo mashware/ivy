@@ -211,6 +211,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/pointer/clipboard.rs"),
     ),
     (
+        "app/src/pointer/search.rs",
+        include_str!("../src/pointer/search.rs"),
+    ),
+    (
         "app/src/tests/context_clipboard.rs",
         include_str!("../src/tests/context_clipboard.rs"),
     ),
@@ -856,6 +860,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/ligature_tests.rs"),
     ),
     ("app/src/search.rs", include_str!("../src/search.rs")),
+    (
+        "app/src/search/floating.rs",
+        include_str!("../src/search/floating.rs"),
+    ),
     ("app/src/tab_bar.rs", include_str!("../src/tab_bar.rs")),
     ("app/src/tiling.rs", include_str!("../src/tiling.rs")),
     ("app/src/tree.rs", include_str!("../src/tree.rs")),

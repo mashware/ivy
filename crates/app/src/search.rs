@@ -1,5 +1,6 @@
-//! Searching a console's scrollback: what is typed into the search, what each key does to it, and
-//! the row it is painted on. **D61**.
+//! Searching a console's scrollback: what is typed into the search, what each key and each press
+//! on its box does to it, and the options it is matched with. **D61**. The box itself — where it
+//! sits, how it is painted and what a press on it reaches — is [`floating`].
 //!
 //! **A module of its own and not more of `keyboard.rs`** because the keyboard's walk already
 //! decides, event by event, whether a key is the application's or the program's — and a search is a
@@ -7,11 +8,10 @@
 //! question per event, so `impl Pane` (over its ceiling, D28) grows by the asking and not by the
 //! rules.
 
-use eframe::egui::{self, Key, Painter, Rect, pos2, vec2};
-use term_core::{Refused, Screen, Search, Toward, View};
+use eframe::egui::{self, Key};
+use term_core::{Found, Options, Refused, Screen, Search, Toward, View};
 
-use crate::painter::CellMetrics;
-use crate::theme::Theme;
+pub(crate) mod floating;
 
 /// What one console keeps about searching it: the search open on it, if any, and what its presses
 /// cost since the last time it was painted.
@@ -25,6 +25,11 @@ use crate::theme::Theme;
 #[derive(Default)]
 pub(crate) struct OnThisConsole {
     pub(crate) open: Option<Mode>,
+    /// How the query is matched. **Kept here and not on the open search**, so closing the box and
+    /// opening it again finds the choices where the person left them. **Private, and changed only
+    /// by [`Step::Flip`]**, which also drops the compiled query: a write anywhere else would leave
+    /// the search matching with the old options.
+    options: Options,
     pressed: Presses,
     /// What marking cost on the painting in progress, kept between marking and handing it over so
     /// the painter cannot hand the window another console's.
@@ -38,7 +43,8 @@ pub(crate) struct Marking {
     pub(crate) cells: usize,
 }
 
-/// What a console's presses of `Enter` cost, for the bench (D13). Summed until the painting hands
+/// What a console's steps through its matches cost — `Enter`, `Shift+Enter` and the box's previous
+/// and next — for the bench (D13). Summed until the painting hands
 /// them to the window.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Presses {
@@ -61,7 +67,8 @@ impl Presses {
 #[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct Cost {
     /// The presses since the last painting. **Published, never subtracted here**: they ran in the
-    /// keyboard's pass, which the window times whole and subtracts there.
+    /// keyboard's pass or, from the box's buttons, in the mouse pass, and the window times each of
+    /// those whole and subtracts it there.
     pub(crate) presses: Presses,
     /// What marking the matches cost on this painting, and nothing when no search was open.
     ///
@@ -103,7 +110,11 @@ impl OnThisConsole {
     /// Marks the open search's matches in the snapshot about to be painted, if a search is open,
     /// and says what that cost so the painter can keep it out of its own span.
     pub(crate) fn mark(&mut self, screen: &Screen, view: &mut View) -> Option<std::time::Duration> {
-        self.marking = self.open.as_mut().map(|open| open.mark(screen, view));
+        let options = self.options;
+        self.marking = self
+            .open
+            .as_mut()
+            .map(|open| open.mark(screen, view, options));
         self.marking.map(|marking| marking.spent)
     }
 
@@ -121,12 +132,58 @@ impl OnThisConsole {
 pub(crate) struct Mode {
     query: String,
     /// The query compiled, **kept between presses** so the engine's automata keep what they learnt
-    /// about this grid. Emptied whenever the query changes.
+    /// about this grid. Emptied whenever the query or an option changes.
     compiled: Option<Result<Search, Refused>>,
     outcome: Outcome,
+    /// Whether the options' list is unfolded beside the box. Changed only by the steps.
+    list: bool,
+    /// Whether a step has found a match since the search opened: from then on the selection is
+    /// the match, whoever made it, and the box keeps clear of it; before, a selection made by hand
+    /// does not move it (D61).
+    found_once: bool,
+    /// Where the box was painted, and in which pass: **what a press is judged against**, never a
+    /// layout worked out again by the pointer, which has no snapshot to place the box by.
+    pub(crate) painted: Option<floating::Painted>,
 }
 
-/// What the row says about the last press.
+/// One of the three choices the options' list offers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Choice {
+    MatchCase,
+    WholeWord,
+    Wrap,
+}
+
+impl Choice {
+    pub(crate) const ALL: [Self; 3] = [Self::MatchCase, Self::WholeWord, Self::Wrap];
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::MatchCase => "Match case",
+            Self::WholeWord => "Whole word only",
+            Self::Wrap => "Wrap around",
+        }
+    }
+
+    pub(crate) fn is_on(self, options: Options) -> bool {
+        match self {
+            Self::MatchCase => options.match_case,
+            Self::WholeWord => options.whole_word,
+            Self::Wrap => options.wrap,
+        }
+    }
+
+    fn flip(self, options: &mut Options) {
+        let field = match self {
+            Self::MatchCase => &mut options.match_case,
+            Self::WholeWord => &mut options.whole_word,
+            Self::Wrap => &mut options.wrap,
+        };
+        *field = !*field;
+    }
+}
+
+/// What the box says about the last press.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum Outcome {
     /// Nothing pressed since the query last changed.
@@ -134,10 +191,14 @@ enum Outcome {
     Typing,
     Found,
     NotFound,
+    /// A match that counts lies only past the end the press walked to, and wrapping is off.
+    NoMore,
     Refused(Refused),
 }
 
-/// One thing a key asked of the search, in the order the keys arrived.
+/// One thing a key, a paste or a press — on the box, a console's header or the menu — asked of the
+/// search, in the order they arrived. [`Step::List`], [`Step::FoldList`] and [`Step::Flip`] come
+/// only from the pointer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Step {
     /// The search chord: opens it, or closes it if it was open.
@@ -150,6 +211,11 @@ pub(crate) enum Step {
     Clear,
     Go(Toward),
     Close,
+    /// The box's options button: unfolds the list, or folds it again.
+    List,
+    /// A press anywhere else while the list is unfolded folds it.
+    FoldList,
+    Flip(Choice),
 }
 
 /// What the keyboard's walk records about the search during one pass.
@@ -240,10 +306,13 @@ impl Mode {
     /// worth pressing. A query the engine refuses marks nothing. **Compiling is inside the span**,
     /// and the span is named for the search and not for the walk alone: it is the search's work
     /// either way, and what matters for D13 is that it is declared.
-    pub(crate) fn mark(&mut self, screen: &Screen, view: &mut View) -> Marking {
+    pub(crate) fn mark(&mut self, screen: &Screen, view: &mut View, options: Options) -> Marking {
         let before = std::time::Instant::now();
         let query = &self.query;
-        let cells = match self.compiled.get_or_insert_with(|| Search::literal(query)) {
+        let cells = match self
+            .compiled
+            .get_or_insert_with(|| Search::literal(query, options))
+        {
             Ok(search) => screen.mark_matches(view, search),
             Err(_) => 0,
         };
@@ -258,25 +327,44 @@ impl Mode {
 pub(crate) fn apply(console: &mut OnThisConsole, screen: &mut Screen, steps: Steps) {
     let OnThisConsole {
         open: mode,
+        options,
         pressed,
         ..
     } = console;
     for step in steps.asked {
-        if matches!(step, Step::Toggle) {
-            *mode = match mode.take() {
-                Some(_) => None,
-                None => Some(Mode::default()),
-            };
-            continue;
+        // **An option belongs to the console**, so it flips whether or not the box is open.
+        if let Step::Flip(choice) = step {
+            choice.flip(options);
         }
-        if matches!(step, Step::Close) {
-            *mode = None;
-            continue;
+        match step {
+            Step::Toggle => {
+                *mode = match mode.take() {
+                    Some(_) => None,
+                    None => Some(Mode::default()),
+                };
+                continue;
+            }
+            Step::Close => {
+                *mode = None;
+                continue;
+            }
+            _ => {}
         }
         let Some(open) = mode.as_mut() else {
             continue;
         };
         match step {
+            Step::Toggle | Step::Close => unreachable!("handled above"),
+            Step::List => {
+                open.list = !open.list;
+                continue;
+            }
+            Step::FoldList => {
+                open.list = false;
+                continue;
+            }
+            // Flipped above; what follows is what any change to how the query matches does.
+            Step::Flip(_) => {}
             // **Control characters never reach the query.** The ones a paste ends in — the newline
             // of a copied line above all — are dropped: the engine never matches across a hard line
             // break, so a pasted line would never be found. One inside the text becomes a space,
@@ -298,84 +386,95 @@ pub(crate) fn apply(console: &mut OnThisConsole, screen: &mut Screen, steps: Ste
             }
             Step::Clear => open.query.clear(),
             Step::Go(toward) => {
+                // The rows the box takes, as it was last painted: the step keeps the match off them
+                // while the view is in the history. Before the first painting there is no box yet.
+                let keep_clear = open
+                    .painted
+                    .as_ref()
+                    .map_or(term_core::KeepClear::NONE, |painted| {
+                        painted.layout.keep_clear
+                    });
                 let compiled = open
                     .compiled
-                    .get_or_insert_with(|| Search::literal(&open.query));
+                    .get_or_insert_with(|| Search::literal(&open.query, *options));
                 open.outcome = match compiled {
                     Ok(search) => {
                         let before = std::time::Instant::now();
-                        let found = screen.find(search, toward);
-                        pressed.one(before.elapsed(), found);
-                        if found {
-                            Outcome::Found
-                        } else {
-                            Outcome::NotFound
+                        let found = screen.find(search, toward, keep_clear);
+                        pressed.one(before.elapsed(), found == Found::Match);
+                        open.found_once |= found == Found::Match;
+                        match found {
+                            Found::Match => Outcome::Found,
+                            Found::Nothing => Outcome::NotFound,
+                            Found::NoMore => Outcome::NoMore,
                         }
                     }
                     Err(refused) => Outcome::Refused(*refused),
                 };
                 continue;
             }
-            Step::Toggle | Step::Close => unreachable!("handled above"),
         }
         open.compiled = None;
         open.outcome = Outcome::Typing;
     }
 }
 
-/// What the row reads.
-fn the_row(mode: &Mode) -> String {
-    // A query the engine already refused while marking says so before anybody presses Enter: its
-    // matches are not lit, and the row is the only place that can say why.
-    let refused_while_typing = matches!(mode.compiled, Some(Err(Refused::TooLarge)));
-    let status = match mode.outcome {
-        Outcome::Typing if refused_while_typing => "too long to search  -  Esc: close",
-        Outcome::Typing => "Enter: older  Shift+Enter: newer  Esc: close",
-        Outcome::Found => "found  -  Enter: older  Shift+Enter: newer  Esc: close",
-        Outcome::NotFound => "no match  -  Esc: close",
-        Outcome::Refused(Refused::Empty) => "type what to look for  -  Esc: close",
-        Outcome::Refused(Refused::TooLarge) => "too long to search  -  Esc: close",
-    };
-    format!("search: {}_    {status}", mode.query)
+impl Mode {
+    pub(crate) fn query(&self) -> &str {
+        &self.query
+    }
+
+    pub(crate) fn list(&self) -> bool {
+        self.list
+    }
+
+    pub(crate) fn has_found(&self) -> bool {
+        self.found_once
+    }
+
+    /// What the box says about the last press, beside the query: nothing while typing or after a
+    /// match, and why there is nothing to show otherwise.
+    pub(crate) fn status(&self) -> &'static str {
+        // A query the engine already refused while marking says so before anybody presses Enter:
+        // its matches are not lit, and the box is the only place that can say why.
+        let refused_while_typing = matches!(self.compiled, Some(Err(Refused::TooLarge)));
+        match self.outcome {
+            Outcome::Typing if refused_while_typing => "too long to search",
+            Outcome::Typing | Outcome::Found => "",
+            Outcome::NotFound => "no match",
+            Outcome::NoMore => "no more matches",
+            Outcome::Refused(Refused::Empty) => "type what to look for",
+            Outcome::Refused(Refused::TooLarge) => "too long to search",
+        }
+    }
 }
 
-/// Where the row goes over a console.
-///
-/// **Over its last row, never cut out of the console.** Cutting a row would resize the program
-/// every time the search opens and shift every pointer-to-cell mapping by a row (D61). The search
-/// scrolls a match off that row when the view is not already at the bottom; when it is, and the
-/// match the last press found is on the last line, **the row moves to the top** rather than cover
-/// what it just found. Before any press has found a match, a selection made with the mouse does not
-/// move it; after one, the row reads the selection, whoever made it, as the match.
-pub(crate) fn the_row_over(mode: &Mode, view: &View, metrics: &CellMetrics, area: Rect) -> Rect {
-    let size = view.size();
-    let cols = size.cols as usize;
-    let last = size.rows.saturating_sub(1) as usize;
-    let match_on_the_last_row = mode.outcome == Outcome::Found
-        && view.cells()[last * cols..].iter().any(|cell| cell.selected);
-    let row = if match_on_the_last_row { 0 } else { last };
-    Rect::from_min_size(
-        pos2(area.left(), area.top() + row as f32 * metrics.height()),
-        vec2(area.width(), metrics.height()),
-    )
+impl OnThisConsole {
+    pub(crate) fn options(&self) -> Options {
+        self.options
+    }
 }
 
-/// Paints the search's row over the console.
-pub(crate) fn paint_the_row(
-    painter: &Painter,
-    mode: &Mode,
-    view: &View,
-    theme: &Theme,
-    metrics: &CellMetrics,
-    area: Rect,
-) {
-    let row = the_row_over(mode, view, metrics, area);
-    let clipped = painter.with_clip_rect(row.intersect(painter.clip_rect()));
-    // The kit's floating surface, so the row reads as laid over the console and not part of it.
-    let roles = crate::ui::style::roles(painter.ctx(), theme);
-    clipped.rect_filled(row, 0.0, roles.raised);
-    let text = clipped.layout_no_wrap(the_row(mode), metrics.font(), roles.tx);
-    clipped.galley(row.left_top(), text, roles.tx);
+/// Opens the search on a console, or closes it if it was open: what the chord, the console's
+/// header button and the application menu all do.
+pub(crate) fn toggle_on(console: &mut OnThisConsole, screen: &mut Screen) {
+    let mut steps = Steps::new(console.is_open());
+    steps.toggle();
+    apply(console, screen, steps);
+}
+
+/// Applies one press on the box. Previous, next and close are the steps their keys ask for, so a
+/// click and a key can never do two different things; the options have no key.
+pub(crate) fn press(console: &mut OnThisConsole, screen: &mut Screen, step: Step) {
+    let open = console.is_open();
+    apply(
+        console,
+        screen,
+        Steps {
+            open,
+            asked: vec![step],
+        },
+    );
 }
 
 #[cfg(test)]
@@ -437,38 +536,161 @@ mod tests {
     }
 
     #[test]
-    fn the_row_says_what_the_last_press_found() {
-        let mut screen = a_screen("needle\r\n");
+    fn the_box_says_what_the_last_press_found() {
+        let mut screen = a_screen("needle\r\nneedle\r\n");
         let said = |asked: Vec<Step>, screen: &mut Screen| {
-            the_row(&opened_with(screen, asked).expect("still open"))
+            opened_with(screen, asked).expect("still open").status()
         };
 
-        assert!(
+        assert_eq!(
             said(
                 vec![Step::Type("absent".into()), Step::Go(Toward::Older)],
                 &mut screen
-            )
-            .contains("no match")
+            ),
+            "no match"
         );
-        assert!(said(vec![Step::Go(Toward::Older)], &mut screen).contains("type what to look for"));
-        let found = said(
-            vec![Step::Type("needle".into()), Step::Go(Toward::Older)],
+        assert_eq!(
+            said(vec![Step::Go(Toward::Older)], &mut screen),
+            "type what to look for"
+        );
+        assert_eq!(
+            said(
+                vec![Step::Type("needle".into()), Step::Go(Toward::Older)],
+                &mut screen
+            ),
+            ""
+        );
+        // Changing the query takes back what the box said about the old one.
+        assert_eq!(
+            said(
+                vec![
+                    Step::Type("absent".into()),
+                    Step::Go(Toward::Older),
+                    Step::Backspace,
+                ],
+                &mut screen,
+            ),
+            ""
+        );
+    }
+
+    #[test]
+    fn without_wrap_the_box_says_there_are_no_more_matches() {
+        let mut screen = a_screen("needle\r\n");
+        let mut console = OnThisConsole::default();
+        apply(
+            &mut console,
             &mut screen,
+            steps(
+                false,
+                vec![
+                    Step::Toggle,
+                    Step::Flip(Choice::Wrap),
+                    Step::Type("needle".into()),
+                    Step::Go(Toward::Older),
+                    Step::Go(Toward::Older),
+                ],
+            ),
         );
+        assert_eq!(
+            console.open.as_ref().expect("still open").status(),
+            "no more matches"
+        );
+    }
+
+    #[test]
+    fn an_option_changes_how_the_query_matches_and_takes_back_what_the_box_said() {
+        let mut screen = a_screen("Needle\r\n");
+        let mut console = OnThisConsole::default();
+        apply(
+            &mut console,
+            &mut screen,
+            steps(
+                false,
+                vec![
+                    Step::Toggle,
+                    Step::Type("needle".into()),
+                    Step::Flip(Choice::MatchCase),
+                    Step::Go(Toward::Older),
+                ],
+            ),
+        );
+        let open = console.open.as_ref().expect("still open");
+        assert_eq!(
+            open.status(),
+            "no match",
+            "match case did not reach the engine"
+        );
+
+        let mut view = screen.view();
+        assert_eq!(
+            console
+                .open
+                .as_mut()
+                .unwrap()
+                .mark(&screen, &mut view, console.options)
+                .cells,
+            0,
+            "the marking ignored match case"
+        );
+        apply(
+            &mut console,
+            &mut screen,
+            steps(true, vec![Step::Flip(Choice::MatchCase)]),
+        );
+        assert_eq!(
+            console.open.as_ref().expect("still open").status(),
+            "",
+            "flipping an option left the old answer standing"
+        );
+        let mut view = screen.view();
+        assert_eq!(
+            console
+                .open
+                .as_mut()
+                .unwrap()
+                .mark(&screen, &mut view, console.options)
+                .cells,
+            6,
+            "the marking kept the query compiled with the old option"
+        );
+    }
+
+    #[test]
+    fn the_options_belong_to_the_console_and_outlive_the_box() {
+        let mut screen = a_screen("");
+        let mut one = OnThisConsole::default();
+        apply(
+            &mut one,
+            &mut screen,
+            steps(
+                false,
+                vec![Step::Toggle, Step::Flip(Choice::WholeWord), Step::Close],
+            ),
+        );
+        toggle_on(&mut one, &mut screen);
+        assert!(one.is_open());
+        assert!(one.options.whole_word, "closing the box forgot the option");
+    }
+
+    #[test]
+    fn the_options_button_unfolds_the_list_and_a_press_elsewhere_folds_it() {
+        let mut screen = a_screen("");
+        let mut console = OnThisConsole::default();
+        toggle_on(&mut console, &mut screen);
+        press(&mut console, &mut screen, Step::List);
+        assert!(console.open.as_ref().unwrap().list);
+        press(&mut console, &mut screen, Step::Flip(Choice::Wrap));
         assert!(
-            found.starts_with("search: needle_") && found.contains("found  -"),
-            "{found}"
+            console.open.as_ref().unwrap().list,
+            "choosing an option folded the list"
         );
-        // Changing the query takes back what the row said about the old one.
-        let edited = said(
-            vec![
-                Step::Type("absent".into()),
-                Step::Go(Toward::Older),
-                Step::Backspace,
-            ],
-            &mut screen,
-        );
-        assert!(!edited.contains("no match"), "{edited}");
+        assert!(!console.options.wrap);
+        press(&mut console, &mut screen, Step::List);
+        assert!(!console.open.as_ref().unwrap().list);
+        press(&mut console, &mut screen, Step::List);
+        press(&mut console, &mut screen, Step::FoldList);
+        assert!(!console.open.as_ref().unwrap().list);
     }
 
     #[test]
@@ -578,45 +800,6 @@ mod tests {
         let mut screen = a_screen("");
         let open = opened_with(&mut screen, vec![Step::Type("need\tle\n\u{1b}".into())]);
         assert_eq!(open.expect("still open").query, "need le");
-    }
-
-    #[test]
-    fn the_row_moves_to_the_top_only_for_a_match_on_the_last_row() {
-        let metrics = crate::painter::CellMetrics::of(10.0, 20.0);
-        let area = Rect::from_min_size(pos2(0.0, 0.0), vec2(200.0, 80.0));
-        // Four rows and the view at the bottom: the last row is the line under the cursor.
-        let mut screen = a_screen("one\r\ntwo\r\nthree\r\nneedle");
-        let mut console = OnThisConsole::default();
-        apply(
-            &mut console,
-            &mut screen,
-            steps(
-                false,
-                vec![
-                    Step::Toggle,
-                    Step::Type("needle".into()),
-                    Step::Go(Toward::Older),
-                ],
-            ),
-        );
-        let mode = console.open.as_ref().expect("still open");
-        assert_eq!(
-            mode.outcome,
-            Outcome::Found,
-            "the premise: the match was found"
-        );
-        assert_eq!(
-            the_row_over(mode, &screen.view(), &metrics, area).top(),
-            0.0
-        );
-
-        // The same cells selected, under a search that has not found anything yet: the row stays
-        // at the bottom.
-        let typing = Mode::default();
-        assert_eq!(
-            the_row_over(&typing, &screen.view(), &metrics, area).top(),
-            60.0
-        );
     }
 
     #[test]

@@ -181,7 +181,6 @@ pub(crate) fn paint_button_icon(
     let (icon, size) = match hint {
         "Split right" => (Icon::SplitRight, 15.0),
         "Split down" => (Icon::SplitDown, 15.0),
-        "Search console" => (Icon::Search, 15.0),
         "Menu" => (Icon::Menu, 15.0),
         "Connect agents" => {
             connection::paint_icon(p, rect, fg);
@@ -252,7 +251,6 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
         let mut buttons = vec![
             (slots.split_right, "Split right", Action::SplitRight),
             (slots.split_down, "Split down", Action::SplitDown),
-            (slots.search, "Search console", Action::Search),
             (slots.connect, "Connect agents", Action::Connect),
             (slots.menu, "Menu", Action::Menu),
         ];
@@ -450,9 +448,7 @@ pub(crate) fn before_keys(window: &mut Window, ui: &mut egui::Ui, metrics: &Cell
                 .into_iter()
                 .find(|p| p.name == focus)
             {
-                let mut steps = crate::search::Steps::new(pane.search.is_open());
-                steps.toggle();
-                crate::search::apply(&mut pane.search, &mut pane.screen, steps);
+                crate::search::toggle_on(&mut pane.search, &mut pane.screen);
             }
         }
         Some(Action::Connect) => connection::open(window, &ctx, board_handoff),

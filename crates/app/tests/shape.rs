@@ -665,6 +665,14 @@ const MODULES: &[(&str, &str)] = &[
     ),
     ("src/report.rs", include_str!("../src/report.rs")),
     ("src/search.rs", include_str!("../src/search.rs")),
+    (
+        "src/search/floating.rs",
+        include_str!("../src/search/floating.rs"),
+    ),
+    (
+        "src/pointer/search.rs",
+        include_str!("../src/pointer/search.rs"),
+    ),
     ("src/tab_bar.rs", include_str!("../src/tab_bar.rs")),
     ("src/tiling.rs", include_str!("../src/tiling.rs")),
     ("src/tree.rs", include_str!("../src/tree.rs")),

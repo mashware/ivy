@@ -105,7 +105,7 @@ pub(crate) fn paint_a_console(
     } else {
         Keys::Here
     };
-    notices::paint_them_over_it(painter, console, theme, metrics, area, keys);
+    let _ = notices::paint_them_over_it(painter, console, theme, metrics, area, keys);
     blinking
 }
 
@@ -234,7 +234,8 @@ pub(crate) fn paint_pane(
         blink.ink(pane.screen.cursor_blinks()),
         ligatures,
     );
-    notices::paint_them_over_it(
+    // The notices keep the console's top, so the search's box is laid out around them.
+    let notices = notices::paint_them_over_it(
         &ui.painter_at(panel_split.console),
         pane,
         theme,
@@ -242,16 +243,37 @@ pub(crate) fn paint_pane(
         panel_split.console,
         blink.keys,
     );
-    if let Some(search) = pane.search.open.as_ref() {
-        let painter = ui.painter_at(panel_split.console);
-        crate::search::paint_the_row(&painter, search, &view, theme, metrics, panel_split.console);
+    let options = pane.search.options();
+    let mut over_the_box = false;
+    if let Some(search) = pane.search.open.as_mut() {
+        let painted = crate::search::floating::paint(
+            ui,
+            search,
+            options,
+            &view,
+            theme,
+            metrics,
+            (panel_split.console, &notices),
+        );
+        let pointer = ui.ctx().input(|input| input.pointer.hover_pos());
+        over_the_box = pointer.is_some_and(|at| painted.covers(at));
+        // No room for the box beside the notices: the search closes rather than go on taking keys
+        // nobody can see it take (D61).
+        if painted.layout.is_hidden() {
+            pane.search.open = None;
+        } else {
+            search.painted = Some(painted);
+        }
     }
     let painted = crate::links::PaintedConsole {
         view,
         area: panel_split.console,
         frame: ui.ctx().cumulative_frame_nr(),
     };
-    painted.disclose_hovered_link(ui, metrics);
+    // A link hidden under the box is not offered: the box takes the click.
+    if !over_the_box {
+        painted.disclose_hovered_link(ui, metrics);
+    }
     // **Inside the console's span on purpose**: only batch W walks this, and outside every span it
     // would be published as the framework's cost (**D13**).
     let console_links = measure_links.then(|| painted.a_point_per_source(metrics));

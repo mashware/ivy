@@ -29,6 +29,14 @@ impl Input {
         self.blocked_frame = Some(frame);
     }
 
+    /// Claims this pass's pointer for a press another surface took, and holds the button only
+    /// while it is still down: a click whose release came in the same batch leaves nothing held,
+    /// so the next pass's press is not swallowed as the tail of this one.
+    pub(crate) fn claim_press(&mut self, still_down: Option<egui::PointerButton>, frame: u64) {
+        self.held = still_down;
+        self.blocked_frame = Some(frame);
+    }
+
     pub(crate) fn block_for_settings(&mut self, frame: u64) {
         self.menu = None;
         self.pending = None;
@@ -261,11 +269,10 @@ pub(crate) fn pointer(
             if target == super::integrated::Target::Label {
                 continue;
             }
-            window.header_input.held = ui
-                .ctx()
-                .input(|input| input.pointer.button_down(*button))
-                .then_some(*button);
-            window.header_input.blocked_frame = Some(frame);
+            let down = ui.ctx().input(|input| input.pointer.button_down(*button));
+            window
+                .header_input
+                .claim_press(down.then_some(*button), frame);
             window.drag_in_progress = None;
             let tab = window.active().name;
             let changed = match target {
@@ -293,6 +300,15 @@ pub(crate) fn pointer(
                     window.active_mut().focus = name;
                     window.pane_view.toggle(tab, name, rects.len());
                     true
+                }
+                super::integrated::Target::Search => {
+                    // The keyboard follows the search, so what is typed next lands in its query.
+                    window.active_mut().focus = name;
+                    if let Some(pane) = window.pane_called(name) {
+                        crate::search::toggle_on(&mut pane.search, &mut pane.screen);
+                    }
+                    ui.ctx().request_repaint();
+                    false
                 }
                 super::integrated::Target::Close => {
                     window.pane_view.clear(tab);

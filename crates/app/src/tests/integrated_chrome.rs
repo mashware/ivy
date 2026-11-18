@@ -952,7 +952,7 @@ mod tests {
         pane_view::view_tiling(window, work, &m).parts[at]
     }
 
-    /// The six control cells of console `which`'s header, from the left of split right to close.
+    /// The seven control cells of console `which`'s header, from the left of split right to close.
     fn control_cells(
         window: &Window,
         ctx: &egui::Context,
@@ -963,7 +963,7 @@ mod tests {
         let right = control(window, ctx, area, which, 0.0).x;
         let rect = pane_rect(window, ctx, area, names_in_order(window)[which]);
         egui::Rect::from_min_max(
-            egui::pos2(right - 150.0, rect.top()),
+            egui::pos2(right - 175.0, rect.top()),
             egui::pos2(right, rect.top() + header::height(&m, window.headers)),
         )
     }
@@ -994,7 +994,7 @@ mod tests {
     /// focused console does not move.
     #[test]
     fn an_unfocused_console_splits_from_its_own_header() {
-        for (from_right, beside) in [(137.5, true), (112.5, false)] {
+        for (from_right, beside) in [(162.5, true), (137.5, false)] {
             let ctx = egui::Context::default();
             let mut window = integrated_pair();
             let area = tall_area();
@@ -1275,7 +1275,7 @@ mod tests {
             ),
             "this test needs a console that fits a split beside it and not below it: {short:?}"
         );
-        let next_to_review = control(&window, &ctx, area, 1, 112.5);
+        let next_to_review = control(&window, &ctx, area, 1, 137.5);
         frame(
             &mut window,
             &ctx,
@@ -1316,7 +1316,7 @@ mod tests {
             0,
             "a maximized console painted a split"
         );
-        for from_right in [137.5, 112.5] {
+        for from_right in [162.5, 137.5] {
             let at = control(&window, &ctx, area, 0, from_right);
             frame(&mut window, &ctx, area, click_at(at));
             frame(&mut window, &ctx, area, vec![]);
@@ -1587,14 +1587,14 @@ mod tests {
         assert_eq!(read, document);
     }
     #[test]
-    fn global_search_opens_the_focused_consoles_search_and_menu_escape_is_owned() {
+    fn a_header_search_opens_its_consoles_search_and_menu_escape_is_owned() {
         let ctx = egui::Context::default();
         let mut window = window_with("sleep 30", "sleep 30");
         window.chrome.enable();
         window.headers = window.headers.integrated(true);
         let area = area_of(1400.0);
         frame(&mut window, &ctx, area, vec![]);
-        let search = slots(area).search.center();
+        let search = control(&window, &ctx, area, 0, 112.5);
         frame(&mut window, &ctx, area, click_at(search));
         assert!(window.active().panes()[0].search.is_open());
         assert!(!window.active().panes()[1].search.is_open());
@@ -3405,7 +3405,7 @@ mod tests {
     /// shows its number and the named one its name cut with «…», both inside the label's room.
     #[test]
     fn tab_labels_fit_their_room_whole_cut_or_as_a_number() {
-        for width in [760.0, 794.0, 834.0, 860.0, 1400.0] {
+        for width in [730.0, 764.0, 804.0, 830.0, 1400.0] {
             let ctx = egui::Context::default();
             let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
             window.chrome.enable();
@@ -3539,7 +3539,7 @@ mod tests {
     }
 
     /// The application menu floats on the theme's `raised` role with a control border, and the
-    /// console's search row is laid on the same surface (D98).
+    /// console's search box is laid on the same surface (D98).
     #[test]
     fn the_application_menu_and_the_search_row_float_on_raised() {
         fn rects(shape: &egui::Shape, out: &mut Vec<egui::epaint::RectShape>) {
@@ -3568,14 +3568,14 @@ mod tests {
                 .iter()
                 .any(|r| r.fill == raised && r.rect.height() < 40.0 && r.rect.width() > 200.0)
         };
-        // The control: no such row before the search opens.
+        // The control: no such box before the search opens.
         assert!(!search_row(&frame(&mut window, &ctx, area, vec![])));
-        let search = slots(area).search.center();
+        let search = control(&window, &ctx, area, 0, 112.5);
         frame(&mut window, &ctx, area, click_at(search));
         // Read before the menu opens: an open menu dims the consoles beneath it.
         assert!(
             search_row(&frame(&mut window, &ctx, area, vec![])),
-            "the search row is not on raised"
+            "the search box is not on raised"
         );
         let menu = slots(area).menu.center();
         frame(&mut window, &ctx, area, click_at(menu));
@@ -3647,5 +3647,539 @@ mod tests {
                 assert!(theme::project_ink_contrast(roles.hover, roles.raised) >= 1.03);
             }
         }
+    }
+
+    fn pane_of(window: &Window, name: usize) -> &Pane {
+        window
+            .active()
+            .panes()
+            .into_iter()
+            .find(|pane| pane.name == name)
+            .expect("a console of the active tab")
+    }
+
+    /// Where a part of console `which`'s search box was painted in the last pass.
+    fn search_target(
+        window: &Window,
+        which: usize,
+        target: search::floating::Target,
+    ) -> egui::Pos2 {
+        let painted = window.active().panes()[which]
+            .search
+            .open
+            .as_ref()
+            .and_then(|open| open.painted.as_ref())
+            .expect("the box was painted");
+        painted
+            .layout
+            .targets
+            .iter()
+            .find(|(kind, _)| *kind == target)
+            .map(|(_, rect)| rect.center())
+            .expect("the box lays that part out")
+    }
+
+    /// AC2, AC3: a console's own header button searches that console — not the focused one — and
+    /// hands it the keyboard; pressed again it closes the search.
+    #[test]
+    fn a_header_search_button_searches_its_own_console_and_gives_it_the_keys() {
+        let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
+        let mut window = integrated_pair();
+        let area = tall_area();
+        frame(&mut window, &ctx, area, vec![]);
+        let names = names_in_order(&window);
+        assert_eq!(
+            window.active().focus,
+            names[0],
+            "the premise: the left one has the keys"
+        );
+        let button = control(&window, &ctx, area, 1, 112.5);
+        // The unfocused header shows its controls under the pointer, and a press counts only once
+        // they were painted (D99).
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::PointerMoved(button)],
+        );
+        frame(&mut window, &ctx, area, click_at(button));
+        let open = |window: &Window, name| pane_of(window, name).search.is_open();
+        assert!(
+            open(&window, names[1]),
+            "the pressed console's search did not open"
+        );
+        assert!(
+            !open(&window, names[0]),
+            "the focused console was searched instead"
+        );
+        assert_eq!(
+            window.active().focus,
+            names[1],
+            "the keyboard stayed elsewhere"
+        );
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::Text("needle".into())],
+        );
+        assert_eq!(
+            pane_of(&window, names[1])
+                .search
+                .open
+                .as_ref()
+                .unwrap()
+                .query(),
+            "needle"
+        );
+        frame(&mut window, &ctx, area, click_at(button));
+        assert!(
+            !open(&window, names[1]),
+            "pressed again, the search stayed open"
+        );
+    }
+
+    /// AC5–AC9: the box sits inside its console without resizing it; its buttons do what their keys
+    /// do; its options list toggles; and a press on it reaches nothing underneath.
+    #[test]
+    fn the_search_box_buttons_act_and_nothing_under_the_box_hears_them() {
+        use search::floating::Target;
+        let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
+        let mut window = integrated_pair();
+        let area = tall_area();
+        frame(&mut window, &ctx, area, vec![]);
+        let names = names_in_order(&window);
+        let grid = pane_of(&window, names[0]).screen.size();
+        window
+            .pane_called(names[0])
+            .unwrap()
+            .screen
+            .advance(b"one needle\r\ntwo needle\r\n");
+        let at = control(&window, &ctx, area, 0, 112.5);
+        frame(&mut window, &ctx, area, click_at(at));
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::Text("needle".into())],
+        );
+        let shapes = frame(&mut window, &ctx, area, vec![]);
+        assert!(!shapes.is_empty());
+        let pane = pane_of(&window, names[0]);
+        let console = pane.painted_console.as_ref().unwrap().area;
+        let box_ = pane
+            .search
+            .open
+            .as_ref()
+            .unwrap()
+            .painted
+            .as_ref()
+            .unwrap()
+            .layout
+            .frame;
+        assert!(
+            console.contains_rect(box_),
+            "{box_:?} is not inside {console:?}"
+        );
+        assert_eq!(
+            pane.screen.size(),
+            grid,
+            "opening the search resized the console"
+        );
+
+        // Focus elsewhere, then the field: the console takes the keys back, nothing is selected.
+        window.active_mut().focus = names[1];
+        frame(&mut window, &ctx, area, vec![]);
+        let at = search_target(&window, 0, Target::Field);
+        frame(&mut window, &ctx, area, click_at(at));
+        assert_eq!(
+            window.active().focus,
+            names[0],
+            "a press on the field left the keys elsewhere"
+        );
+        let pane = pane_of(&window, names[0]);
+        assert!(pane.search.is_open());
+        assert_eq!(
+            pane.screen.selected_text(),
+            None,
+            "the press on the box selected underneath"
+        );
+
+        let row_of_selection = |window: &Window| {
+            let view = pane_of(window, names[0]).screen.view();
+            let cols = usize::from(view.size().cols);
+            view.cells()
+                .chunks_exact(cols)
+                .position(|row| row.iter().any(|cell| cell.selected))
+        };
+        frame(&mut window, &ctx, area, vec![]);
+        let at = search_target(&window, 0, Target::Next);
+        frame(&mut window, &ctx, area, click_at(at));
+        assert_eq!(
+            pane_of(&window, names[0]).screen.selected_text().as_deref(),
+            Some("needle"),
+            "next did not step to a match"
+        );
+        let newest = row_of_selection(&window);
+        frame(&mut window, &ctx, area, vec![]);
+        let at = search_target(&window, 0, Target::Next);
+        frame(&mut window, &ctx, area, click_at(at));
+        let older = row_of_selection(&window);
+        assert!(
+            older < newest,
+            "next did not walk older: {older:?} then {newest:?}"
+        );
+        frame(&mut window, &ctx, area, vec![]);
+        let at = search_target(&window, 0, Target::Previous);
+        frame(&mut window, &ctx, area, click_at(at));
+        assert_eq!(
+            row_of_selection(&window),
+            newest,
+            "previous did not walk newer"
+        );
+
+        frame(&mut window, &ctx, area, vec![]);
+        let at = search_target(&window, 0, Target::Options);
+        frame(&mut window, &ctx, area, click_at(at));
+        assert!(
+            pane_of(&window, names[0])
+                .search
+                .open
+                .as_ref()
+                .unwrap()
+                .list()
+        );
+        frame(&mut window, &ctx, area, vec![]);
+        let whole_word = search_target(&window, 0, Target::Choice(search::Choice::WholeWord));
+        frame(&mut window, &ctx, area, click_at(whole_word));
+        assert!(pane_of(&window, names[0]).search.options().whole_word);
+        assert!(
+            pane_of(&window, names[0])
+                .search
+                .open
+                .as_ref()
+                .unwrap()
+                .list(),
+            "choosing an option folded the list it was chosen in"
+        );
+        assert_eq!(
+            pane_of(&window, names[0]).screen.selected_text().as_deref(),
+            Some("needle"),
+            "a press on the list reached the console underneath"
+        );
+        frame(&mut window, &ctx, area, vec![]);
+        let elsewhere = pane_rect(&window, &ctx, area, names[1]).center();
+        frame(&mut window, &ctx, area, click_at(elsewhere));
+        let pane = pane_of(&window, names[0]);
+        assert!(
+            !pane.search.open.as_ref().unwrap().list(),
+            "a press elsewhere left the list open"
+        );
+
+        frame(&mut window, &ctx, area, vec![]);
+        window.active_mut().focus = names[0];
+        frame(&mut window, &ctx, area, vec![]);
+        let at = search_target(&window, 0, Target::Close);
+        frame(&mut window, &ctx, area, click_at(at));
+        assert!(
+            !pane_of(&window, names[0]).search.is_open(),
+            "close did not close"
+        );
+    }
+
+    /// AC8: what lies under the box is out of sight, so a secondary press on the box opens no
+    /// context menu over the console beneath. The control: the same press on the console does.
+    #[test]
+    fn a_secondary_press_on_the_search_box_opens_no_menu_underneath() {
+        let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
+        let mut window = integrated_pair();
+        let area = tall_area();
+        frame(&mut window, &ctx, area, vec![]);
+        let names = names_in_order(&window);
+        let at = control(&window, &ctx, area, 0, 112.5);
+        frame(&mut window, &ctx, area, click_at(at));
+        frame(&mut window, &ctx, area, vec![]);
+        let secondary = |at: egui::Pos2| {
+            vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Secondary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::default(),
+                },
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Secondary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ]
+        };
+        let field = search_target(&window, 0, search::floating::Target::Field);
+        frame(&mut window, &ctx, area, secondary(field));
+        assert!(
+            !window.pane_view.is_modal(),
+            "a press on the box opened the menu of the console under it"
+        );
+        frame(&mut window, &ctx, area, vec![]);
+        let console = pane_of(&window, names[0])
+            .painted_console
+            .as_ref()
+            .unwrap()
+            .area;
+        frame(&mut window, &ctx, area, secondary(console.center()));
+        assert!(
+            window.pane_view.is_modal(),
+            "the premise: the same press on the console opens its menu"
+        );
+    }
+
+    /// AC6, AC7 at window level: a press on a box that is not the focused console's acts on that
+    /// console — the step moves its match, the keys follow — and a press on the field leaves the
+    /// match where it was. The box's surface is painted where its presses are judged.
+    #[test]
+    fn a_press_on_an_unfocused_console_s_box_acts_on_that_console() {
+        use search::floating::Target;
+        let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
+        let mut window = integrated_pair();
+        let area = tall_area();
+        frame(&mut window, &ctx, area, vec![]);
+        let names = names_in_order(&window);
+        window
+            .pane_called(names[0])
+            .unwrap()
+            .screen
+            .advance(b"one needle\r\ntwo needle\r\n");
+        let at = control(&window, &ctx, area, 0, 112.5);
+        frame(&mut window, &ctx, area, click_at(at));
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::Text("needle".into())],
+        );
+        let shapes = frame(&mut window, &ctx, area, vec![]);
+        let painted = pane_of(&window, names[0])
+            .search
+            .open
+            .as_ref()
+            .unwrap()
+            .painted
+            .clone()
+            .unwrap();
+        let raised = crate::ui::style::roles(&ctx, &window.theme).raised;
+        let mut surfaces = Vec::new();
+        for clipped in &shapes {
+            if let egui::Shape::Rect(rect) = &clipped.shape {
+                surfaces.push((rect.rect, rect.fill));
+            }
+        }
+        assert!(
+            surfaces
+                .iter()
+                .any(|(rect, fill)| *rect == painted.layout.frame && *fill == raised),
+            "no surface was painted where the box takes its presses"
+        );
+
+        let selected_row = |window: &Window| {
+            let view = pane_of(window, names[0]).screen.view();
+            let cols = usize::from(view.size().cols);
+            view.cells()
+                .chunks_exact(cols)
+                .position(|row| row.iter().any(|cell| cell.selected))
+        };
+        window.active_mut().focus = names[1];
+        frame(&mut window, &ctx, area, vec![]);
+        let at = search_target(&window, 0, Target::Next);
+        frame(&mut window, &ctx, area, click_at(at));
+        let first = selected_row(&window).expect("next selected a match on its own console");
+        assert_eq!(
+            window.active().focus,
+            names[0],
+            "the keys stayed on the other console"
+        );
+        assert!(!pane_of(&window, names[1]).search.is_open());
+
+        window.active_mut().focus = names[1];
+        frame(&mut window, &ctx, area, vec![]);
+        let at = search_target(&window, 0, Target::Field);
+        frame(&mut window, &ctx, area, click_at(at));
+        assert_eq!(window.active().focus, names[0]);
+        assert_eq!(
+            selected_row(&window),
+            Some(first),
+            "a press on the field moved or cleared the match"
+        );
+    }
+
+    /// AC14 at window level: stepping older through the history keeps the box where it is — the
+    /// step keeps its match off the rows the box was painted over — so the next press on «next»
+    /// lands on «next».
+    #[test]
+    fn stepping_through_the_history_leaves_the_box_where_the_next_press_expects_it() {
+        use search::floating::Target;
+        let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
+        let mut window = integrated_pair();
+        let area = tall_area();
+        frame(&mut window, &ctx, area, vec![]);
+        let names = names_in_order(&window);
+        let text: String = (0..200)
+            .map(|n| {
+                if n % 20 == 0 {
+                    format!("{:>70}\r\n", "needle")
+                } else {
+                    format!("line {n}\r\n")
+                }
+            })
+            .collect();
+        window
+            .pane_called(names[0])
+            .unwrap()
+            .screen
+            .advance(text.as_bytes());
+        let at = control(&window, &ctx, area, 0, 112.5);
+        frame(&mut window, &ctx, area, click_at(at));
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::Text("needle".into())],
+        );
+        frame(&mut window, &ctx, area, vec![]);
+        let painted = |window: &Window| {
+            pane_of(window, names[0])
+                .search
+                .open
+                .as_ref()
+                .unwrap()
+                .painted
+                .clone()
+                .unwrap()
+        };
+        let top = painted(&window).layout.frame;
+        let term_core::KeepClear::Top(clear) = painted(&window).layout.keep_clear else {
+            panic!("the premise: the box starts at the top");
+        };
+        for press in 0..4 {
+            let at = search_target(&window, 0, Target::Next);
+            frame(&mut window, &ctx, area, click_at(at));
+            frame(&mut window, &ctx, area, vec![]);
+            let view = pane_of(&window, names[0]).screen.view();
+            if view.scroll() == 0 {
+                continue;
+            }
+            let cols = usize::from(view.size().cols);
+            let row = view
+                .cells()
+                .chunks_exact(cols)
+                .position(|row| row.iter().any(|cell| cell.selected))
+                .expect("the match is on screen");
+            assert!(
+                row >= clear,
+                "press {press}: the match was left under the box, row {row}"
+            );
+            assert_eq!(
+                painted(&window).layout.frame,
+                top,
+                "press {press}: the box moved away from under the pointer"
+            );
+        }
+        assert!(
+            pane_of(&window, names[0]).screen.view().scroll() > 0,
+            "the premise: the presses walked into the history"
+        );
+    }
+
+    /// A press on another console's header control still folds an unfolded options list: the
+    /// fold runs before the header takes the press.
+    #[test]
+    fn a_press_on_a_header_control_folds_the_options_list() {
+        use search::floating::Target;
+        let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
+        let mut window = integrated_pair();
+        let area = tall_area();
+        frame(&mut window, &ctx, area, vec![]);
+        let names = names_in_order(&window);
+        let at = control(&window, &ctx, area, 0, 112.5);
+        frame(&mut window, &ctx, area, click_at(at));
+        frame(&mut window, &ctx, area, vec![]);
+        let at = search_target(&window, 0, Target::Options);
+        frame(&mut window, &ctx, area, click_at(at));
+        frame(&mut window, &ctx, area, vec![]);
+        assert!(
+            pane_of(&window, names[0])
+                .search
+                .open
+                .as_ref()
+                .unwrap()
+                .list()
+        );
+        // The other console's review control: revealed by hovering, then pressed.
+        let review = control(&window, &ctx, area, 1, 87.5);
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::PointerMoved(review)],
+        );
+        frame(&mut window, &ctx, area, click_at(review));
+        assert!(
+            !pane_of(&window, names[0])
+                .search
+                .open
+                .as_ref()
+                .unwrap()
+                .list(),
+            "a press a header control took left the list unfolded"
+        );
+    }
+
+    /// The search box keeps clear of a held paste's question: it is laid out around the notices
+    /// the painter actually drew, so it neither hides them nor takes their presses.
+    #[test]
+    fn the_search_box_keeps_clear_of_a_held_paste_s_question() {
+        let Some(boundary) = keyboard::the_longest_line_a_reader_keeps() else {
+            return;
+        };
+        let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
+        let mut window = integrated_pair();
+        let area = tall_area();
+        frame(&mut window, &ctx, area, vec![]);
+        let names = names_in_order(&window);
+        {
+            let pane = window.pane_called(names[0]).unwrap();
+            keyboard::paste_or_hold(
+                &"x".repeat(boundary + 1),
+                false,
+                &mut Vec::new(),
+                &mut pane.held,
+            );
+            assert!(pane.held.is_some(), "the premise: the paste is held");
+        }
+        let at = control(&window, &ctx, area, 0, 112.5);
+        frame(&mut window, &ctx, area, click_at(at));
+        frame(&mut window, &ctx, area, vec![]);
+        let pane = pane_of(&window, names[0]);
+        let painted = pane.search.open.as_ref().unwrap().painted.clone().unwrap();
+        let painter = ctx.layer_painter(egui::LayerId::background());
+        let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
+        let console = pane.painted_console.as_ref().unwrap().area;
+        let question =
+            crate::painter::notices::the_boxes(&painter, pane, &window.theme, &metrics, console)
+                .question
+                .expect("the question is laid out");
+        assert!(
+            !painted.layout.frame.intersects(question),
+            "the box covers the held paste's question: {:?} over {question:?}",
+            painted.layout.frame
+        );
     }
 }
