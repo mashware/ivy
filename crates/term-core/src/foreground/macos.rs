@@ -354,8 +354,7 @@ pub(super) fn working_directory(p: &NativeProcess) -> io::Result<PathBuf> {
     };
     Ok(path)
 }
-/// The bare lookup, with no identity check: callers that hold no `NativeProcess` guard liveness
-/// themselves.
+/// The bare lookup, with no identity check on `pid`.
 pub(super) fn current_directory(pid: u32) -> io::Result<PathBuf> {
     let mut info = VnodePathInfo::default();
     let n = unsafe {
