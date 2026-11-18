@@ -25,6 +25,25 @@ use std::time::Instant;
 use portable_pty::{Child, CommandBuilder, MasterPty, native_pty_system};
 
 mod foreground;
+mod termination;
+pub use termination::Termination;
+#[cfg(target_os = "linux")]
+mod scope;
+#[cfg(target_os = "linux")]
+mod scope_gate;
+#[cfg(all(target_os = "linux", any(test, feature = "testing")))]
+pub use scope_gate::TestScopePlacement;
+/// Dispatches the private Linux launcher before the host initializes its UI.
+pub fn dispatch_scope_helper() -> Option<i32> {
+    #[cfg(target_os = "linux")]
+    {
+        scope_gate::dispatch()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
 #[cfg(target_os = "linux")]
 mod nonblocking;
 pub use foreground::{Ancestry, Argument, ForegroundAncestry, ForegroundScope, NativeProcess};
@@ -138,6 +157,9 @@ impl Default for Size {
 /// UTF-8 —an escape sequence may arrive split across two messages—, because interpreting them is the
 /// job of another layer.
 pub struct Pty {
+    termination: termination::CachedChild,
+    #[cfg(target_os = "linux")]
+    scope_stop: Option<Arc<AtomicBool>>,
     /// Always there until closing takes it: a child that refused the hang-up is handed to a thread
     /// of its own to be waited for (**D56**), so closing has to be able to give it away.
     child: Option<Box<dyn Child + Send + Sync>>,
@@ -446,6 +468,11 @@ const RETRY: Duration = Duration::from_millis(1);
 pub const FIXED_ENV: [(&str, &str); 2] = [("TERM", "xterm-256color"), ("COLORTERM", "truecolor")];
 
 impl Pty {
+    /// Reads cached child status and explicit scope evidence without waiting for D-Bus.
+    pub fn termination(&self) -> Termination {
+        self.termination.snapshot()
+    }
+
     /// An owned native scope for verification away from the drawing thread.
     pub fn foreground_scope(&self) -> std::io::Result<ForegroundScope> {
         foreground::scope(self)
@@ -516,6 +543,25 @@ impl Pty {
         env: &[(&str, Option<&OsStr>)],
         directory: Option<&std::path::Path>,
     ) -> Result<(Self, Receiver<Vec<u8>>)> {
+        Self::spawn_os_with_env_in(
+            OsStr::new(program),
+            &args
+                .iter()
+                .map(std::ffi::OsString::from)
+                .collect::<Vec<_>>(),
+            size,
+            env,
+            directory,
+        )
+    }
+
+    fn spawn_os_with_env_in(
+        program: &OsStr,
+        args: &[std::ffi::OsString],
+        size: Size,
+        env: &[(&str, Option<&OsStr>)],
+        directory: Option<&std::path::Path>,
+    ) -> Result<(Self, Receiver<Vec<u8>>)> {
         if let Some(directory) = directory
             && (!directory.is_absolute() || !directory.is_dir())
         {
@@ -528,7 +574,7 @@ impl Pty {
         // that cannot start, and portable-pty's PATH search then reports each PATH entry as «exists
         // but is a directory» — a description of the search, not of the mistake. Whitespace counts
         // as empty: it names no program either.
-        if program.trim().is_empty() {
+        if program.to_string_lossy().trim().is_empty() {
             return Err("no program to launch: the name is empty".into());
         }
 
@@ -577,7 +623,8 @@ impl Pty {
                 None => cmd.env_remove(name),
             }
         }
-        let child = pair.slave.spawn_command(cmd)?;
+        let cached_child = termination::CachedChild::new(pair.slave.spawn_command(cmd)?);
+        let child = Box::new(cached_child.clone());
 
         // The slave end is only needed by the child. Dropping it here is **necessary** for the read
         // of the master to reach end of file when the child dies — keeping it would block the reader
@@ -646,6 +693,9 @@ impl Pty {
         Ok((
             Self {
                 child: Some(child),
+                termination: cached_child,
+                #[cfg(target_os = "linux")]
+                scope_stop: None,
                 // The master is kept so it can be resized.
                 //
                 // **And the sentence that used to be here was false, which is what let a hang live
@@ -1139,6 +1189,10 @@ enum HangUp {
 
 impl Drop for Pty {
     fn drop(&mut self) {
+        #[cfg(target_os = "linux")]
+        if let Some(stop) = self.scope_stop.take() {
+            stop.store(true, Ordering::Relaxed);
+        }
         // First the flag: with the channel full, the thread is not inside `read` but waiting for
         // room, and neither killing the child nor closing the pseudoterminal pulls it out of there.
         // Without this, the `join` below waits forever and **closing the window hangs** — confirmed.
