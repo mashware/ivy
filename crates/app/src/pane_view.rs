@@ -477,20 +477,11 @@ pub(crate) fn before_keys(
         RenameTarget::Pane { .. } => ("Rename console", true),
         RenameTarget::Tab { .. } => ("Rename tab", false),
     };
-    let crate::settings::editor::view::dialog::Rename {
-        save,
-        cancel,
-        follow_title,
-    } = crate::settings::editor::view::dialog::rename(
-        ui.ctx(),
-        &window.theme,
-        title,
-        &mut draft,
-        console,
-    );
-    if follow_title || save && crate::session::valid_label(&draft) {
+    use crate::settings::editor::view::dialog::{self, Outcome};
+    let outcome = dialog::rename(ui.ctx(), &window.theme, title, &mut draft, console);
+    if let Some(applied @ (Outcome::Save | Outcome::FollowTitle)) = outcome {
         let label = draft.trim();
-        let label = (!follow_title && !label.is_empty()).then(|| label.to_owned());
+        let label = (applied == Outcome::Save && !label.is_empty()).then(|| label.to_owned());
         match target {
             RenameTarget::Pane { tab, pane } => {
                 if let Some(pane) = window
@@ -509,7 +500,7 @@ pub(crate) fn before_keys(
             }
         }
         window.pane_view.awaiting_release = ui.ctx().input(|i| i.pointer.any_down());
-    } else if !cancel {
+    } else if outcome.is_none() {
         window.pane_view.rename = Some((target, draft));
     } else {
         window.pane_view.awaiting_release = ui.ctx().input(|i| i.pointer.any_down());

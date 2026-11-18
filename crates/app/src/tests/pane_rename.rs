@@ -502,6 +502,61 @@ mod tests {
     }
 
     #[test]
+    fn a_narrow_window_keeps_the_footer_actions_apart_and_inside_the_dialog() {
+        let ctx = egui::Context::default();
+        ctx.all_styles_mut(|s| s.animation_time = 0.0);
+        let mut window = window_with("sleep 30", "sleep 30");
+        let tab = window.active().name;
+        let pane = window.active().focus;
+        window.pane_view.begin_rename(tab, pane, "Draft".into());
+        // At 320 the three still fit on one row; at 260 they do not.
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(260.0, 700.0));
+        let pass = |window: &mut Window| ui_pass(window, &ctx, area, egui::RawInput::default());
+        pass(&mut window);
+        pass(&mut window);
+        let shapes = pass(&mut window);
+        let texts = texts(&shapes);
+        let fills = fills(&shapes);
+        let dialog = fill_under(&fills, rect_of(&texts, "Rename console").center()).0;
+        assert!(area.contains_rect(dialog), "{dialog:?} leaves the window");
+        // 180 points of content (the window less 80) and 20 of margin on each side: a footer that
+        // does not fit must wrap, not widen the dialog.
+        assert!(
+            dialog.width() <= 225.0,
+            "the footer widened the dialog to {dialog:?}"
+        );
+        let actions = ["Use terminal title", "Cancel", "Save"].map(|label| {
+            let rect = rect_of(&texts, label);
+            assert!(
+                dialog.contains_rect(rect),
+                "{label} {rect:?} outside {dialog:?}"
+            );
+            rect
+        });
+        for (i, a) in actions.iter().enumerate() {
+            for b in &actions[i + 1..] {
+                assert!(!a.intersects(*b), "{a:?} overlaps {b:?}");
+            }
+        }
+        assert!(
+            actions[1].max.x < actions[2].min.x,
+            "Cancel is not left of Save"
+        );
+    }
+
+    #[test]
+    fn the_terminal_title_wins_over_an_enter_in_the_same_pass() {
+        let (mut window, ctx, _, pane) = open_console_rename("Typed");
+        let shapes = draw(&mut window, &ctx, vec![]);
+        let mut events = click_at(text_center(&shapes, "Use terminal title"));
+        events.push(key(egui::Key::Enter));
+        draw(&mut window, &ctx, events);
+        draw(&mut window, &ctx, vec![]);
+        assert!(!window.pane_view.is_renaming());
+        assert_eq!(window.pane_called(pane).unwrap().label, None);
+    }
+
+    #[test]
     fn the_close_button_cancels_the_rename() {
         let (mut window, ctx, _, pane) = open_console_rename("Changed");
         let shapes = draw(&mut window, &ctx, vec![]);

@@ -56,8 +56,7 @@ pub(super) fn show(
     }
 }
 
-/// The console's menu and rename dialog, the Board and the Explorer: the roles of `theme`, at these
-/// measures.
+/// The console's menu, the Board and the Explorer: the roles of `theme`, at these measures.
 pub(crate) fn style(ui: &mut egui::Ui, theme: crate::theme::Theme) {
     crate::ui::floating::style(ui, &theme);
     let style = ui.style_mut();
