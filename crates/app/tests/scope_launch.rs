@@ -208,3 +208,116 @@ fn bounded_kernel_oom_is_attributed_without_touching_other_scopes() {
         "unrelated console was terminated"
     );
 }
+
+#[test]
+#[ignore = "managed pressure is allowed only inside the explicitly marked disposable QEMU guest"]
+fn real_systemd_oomd_kills_only_the_busy_console_in_a_disposable_guest() {
+    let product = std::fs::read_to_string("/sys/class/dmi/id/product_name").unwrap();
+    assert_eq!(
+        product.trim(),
+        "Ivy124Disposable",
+        "never generate managed pressure on the host"
+    );
+    let ctl = |properties: &[&str]| {
+        let result = std::process::Command::new("systemctl")
+            .arg("--user")
+            .args(properties)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    };
+    ctl(&[
+        "set-property",
+        "--runtime",
+        "app.slice",
+        "ManagedOOMMemoryPressure=kill",
+        "ManagedOOMMemoryPressureLimit=10%",
+        "ManagedOOMMemoryPressureDurationSec=2s",
+    ]);
+    let (mut victim, output) = Pty::spawn_with_launcher_in(launcher(), "managed-oom-test", "/usr/bin/python3",
+        &["-c", "import os; print('READY:'+str(os.getpid()), flush=True); input()\nwhile True:\n x=bytearray(96*1024*1024)\n del x"],
+        Size::default(), &[], None).unwrap();
+    let text = read(&output, "\n");
+    let pid: u32 = text.trim().strip_prefix("READY:").unwrap().parse().unwrap();
+    let group = std::fs::read_to_string(format!("/proc/{pid}/cgroup")).unwrap();
+    let path = group.trim().strip_prefix("0::").unwrap();
+    let name = path.rsplit('/').next().unwrap();
+    assert!(
+        name.starts_with("ivy-console-") && name.ends_with(".scope"),
+        "{group}"
+    );
+    ctl(&[
+        "set-property",
+        "--runtime",
+        name,
+        "MemoryHigh=16M",
+        "MemoryMax=160M",
+        "MemorySwapMax=0",
+    ]);
+    let (mut sibling, _) = Pty::spawn_with_launcher_in(
+        launcher(),
+        "managed-oom-sibling",
+        "/bin/sleep",
+        &["90"],
+        Size::default(),
+        &[],
+        None,
+    )
+    .unwrap();
+    let events = format!("/sys/fs/cgroup{path}/memory.events");
+    let mut kernel_kills = 0;
+    victim.write(b"allocate\n").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(50);
+    while victim.termination() != term_core::Termination::Oom && Instant::now() < deadline {
+        if let Ok(text) = std::fs::read_to_string(&events) {
+            if let Some(count) = text.lines().find_map(|line| line.strip_prefix("oom_kill ")) {
+                kernel_kills = kernel_kills.max(count.parse::<u64>().unwrap());
+            }
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let journal = std::process::Command::new("sudo")
+        .args([
+            "-n",
+            "journalctl",
+            "-u",
+            "systemd-oomd",
+            "-b",
+            "--no-pager",
+            "-o",
+            "cat",
+        ])
+        .output()
+        .unwrap();
+    let journal = String::from_utf8_lossy(&journal.stdout);
+    let selected: Vec<_> = journal.lines().filter(|line| line.contains(name)).collect();
+    println!("systemd-oomd evidence: {}", selected.join("\n"));
+    println!(
+        "kernel oom_kill counter: {kernel_kills}; sibling exit: {:?}",
+        sibling.exit_success()
+    );
+    ctl(&[
+        "set-property",
+        "--runtime",
+        "app.slice",
+        "ManagedOOMMemoryPressure=auto",
+    ]);
+    assert_eq!(
+        victim.termination(),
+        term_core::Termination::Oom,
+        "{journal}"
+    );
+    assert_eq!(
+        kernel_kills, 0,
+        "this scenario must prove userspace oomd rather than kernel OOM"
+    );
+    assert!(
+        !selected.is_empty(),
+        "oomd did not identify the test scope: {journal}"
+    );
+    assert_eq!(sibling.exit_success(), None, "unrelated console died");
+}

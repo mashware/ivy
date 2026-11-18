@@ -19,8 +19,8 @@ fn pending() -> (Process, Sender<term_core::Result<Spawned>>) {
             input_since: None,
             refused: false,
             refusals: 0,
-            size: Size::default(),
             failure: None,
+            delivery_failed: false,
             dismissed: false,
         },
         sender,
@@ -44,6 +44,9 @@ fn pending_input_and_latest_geometry_reach_the_real_program_in_order() {
     .unwrap();
     complete.send(Ok(child)).unwrap();
     let (output, _) = process.poll().expect("ready launch");
+    process.resize(Size { rows: 31, cols: 91 }).unwrap();
+    let input = std::mem::take(&mut process.input);
+    process.live.as_mut().unwrap().write(&input).unwrap();
     let deadline = Instant::now() + Duration::from_secs(3);
     let mut text = Vec::new();
     while Instant::now() < deadline {
@@ -132,6 +135,7 @@ fn a_real_signal_retains_output_and_has_a_dismissible_truthful_notice() {
     assert!(!pane.is_finished(false));
     // The backend's OOM evidence uses this same notice path; signal alone above never earns it.
     pane.pty.terminal = term_core::Termination::Oom;
+    pane.pty.delivery_failed = true;
     assert_eq!(
         pane.pty.notice(),
         Some("This console was stopped because of memory pressure.")
@@ -176,9 +180,20 @@ fn the_real_window_accepts_a_new_tab_while_existing_launches_are_stalled() {
         crate::Window::with_tabs(&ctx, 1, crate::OpeningLayout::DEFAULT, None).unwrap();
     let mut keep_pending = Vec::new();
     for pane in window.all_panes_mut() {
-        let (process, sender) = pending();
+        let (release, held) = channel();
+        let waker = ctx.clone();
+        let (process, output) = start_worker(
+            std::sync::Arc::new(move || waker.request_repaint()),
+            Default::default(),
+            move || {
+                held.recv_timeout(Duration::from_secs(2))?;
+                Pty::spawn("/bin/cat", &[], Size::default())
+            },
+        )
+        .unwrap();
         pane.pty = process;
-        keep_pending.push(sender);
+        pane.pty_output = crate::pty_output::PtyOutput::new(output, || {});
+        keep_pending.push(release);
     }
     let mut frame = eframe::Frame::_new_kittest();
     let modifiers = egui::Modifiers::CTRL | egui::Modifiers::SHIFT;
@@ -210,4 +225,117 @@ fn the_real_window_accepts_a_new_tab_while_existing_launches_are_stalled() {
     window.pump_them_all();
     assert!(window.launch_cost.calls > 0);
     assert!(!keep_pending.is_empty());
+}
+
+#[test]
+fn a_failed_launch_stays_idle_after_its_notice_is_dismissed() {
+    let ctx = eframe::egui::Context::default();
+    let mut pane = crate::Pane::with_panel(&Default::default(), "/bin/cat", &[], None, 0).unwrap();
+    let (mut process, done) = pending();
+    process.context = Some(ctx.clone());
+    done.send(Err("fixture launch failure".into())).unwrap();
+    pane.pty = process;
+    let (closed, output) = channel();
+    drop(closed);
+    pane.pty_output = crate::pty_output::PtyOutput::new(output, || {});
+    for _ in 0..4 {
+        ctx.run_ui(Default::default(), |_| {})
+            .drop_without_applying_deltas();
+    }
+    for dismissed in [false, true] {
+        pane.pty.dismissed = dismissed;
+        let output = ctx.run_ui(Default::default(), |_| refresh(&mut pane));
+        let delay = output.viewport_output[&eframe::egui::ViewportId::ROOT].repaint_delay;
+        output.drop_without_applying_deltas();
+        assert_eq!(
+            delay,
+            Duration::MAX,
+            "failed launch armed a repaint: {delay:?}"
+        );
+        assert!(pane.pty.keeps_open());
+    }
+}
+
+#[test]
+fn startup_output_is_interpreted_at_its_original_geometry_before_reflow() {
+    let original = crate::INITIAL_GRID;
+    let narrow = Size {
+        rows: original.rows,
+        cols: original.cols / 2,
+    };
+    let script = format!(
+        "printf 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdef\\033[1;{}H\\033[10DX'; exec /bin/sleep 30",
+        original.cols
+    );
+    let (pty, output) = Pty::spawn("/bin/sh", &["-c", &script], original).unwrap();
+    let bytes = output.recv_timeout(Duration::from_secs(3)).unwrap();
+    let mut expected = term_core::Screen::new(original);
+    expected.advance(&bytes);
+    expected.resize(narrow);
+    let contents = |screen: &term_core::Screen| {
+        screen
+            .view()
+            .cells()
+            .iter()
+            .map(|cell| cell.c)
+            .collect::<Vec<_>>()
+    };
+    let mut wrong_grid = term_core::Screen::new(narrow);
+    wrong_grid.advance(&bytes);
+    assert_ne!(
+        contents(&expected),
+        contents(&wrong_grid),
+        "the fixture must distinguish the wrong startup grid"
+    );
+    let mut pane = crate::Pane::with_panel(&Default::default(), "/bin/cat", &[], None, 0).unwrap();
+    let (process, done) = pending();
+    pane.pty = process;
+    pane.measured = narrow;
+    pane.resize();
+    let (replay, replayed) = channel();
+    replay.send(bytes).unwrap();
+    drop(replay);
+    done.send(Ok((pty, replayed))).unwrap();
+    complete(&mut pane);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while pane.pty_output.is_alive() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    pane.pump(Default::default());
+    pane.resize();
+    finish_input(&mut pane);
+    assert_eq!(
+        contents(&pane.screen),
+        contents(&expected),
+        "startup cursor placement used a different grid from the program"
+    );
+}
+
+#[test]
+fn a_panicked_launch_worker_wakes_the_window_to_report_failure() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    let wakes = Arc::new(AtomicUsize::new(0));
+    let count = wakes.clone();
+    let (mut process, _output) = start_worker(
+        Arc::new(move || {
+            count.fetch_add(1, Ordering::SeqCst);
+        }),
+        Default::default(),
+        || panic!("fixture launch worker panic"),
+    )
+    .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while wakes.load(Ordering::SeqCst) == 0 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(wakes.load(Ordering::SeqCst), 1);
+    assert!(process.poll().is_none());
+    assert!(!process.pending());
+    assert_eq!(
+        process.notice(),
+        Some("This console's program could not be started.")
+    );
 }

@@ -2,7 +2,7 @@
 use portable_pty::{Child, ChildKiller, ExitStatus};
 use std::io;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 /// Confirmed process termination and, where available, scope evidence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,13 +79,20 @@ impl Child for CachedChild {
         collect(&mut self.0.lock().unwrap())
     }
     fn wait(&mut self) -> io::Result<ExitStatus> {
-        loop {
-            if let Some(status) = self.try_wait()? {
-                return Ok(status);
-            }
-            // Bounded polling: the owned child's exit ends this reaper wait.
-            std::thread::sleep(Duration::from_millis(1));
+        let mut state = self.0.lock().unwrap();
+        if let Some(status) = &state.status {
+            return Ok(status.clone());
         }
+        // Only Pty's closing paths call wait. The scope stop flag is already raised, and a
+        // refused hang-up hands this handle to its detached reaper before waiting. Holding the
+        // cache lock here parks only that reaper (and a retiring scope observer), never a live UI
+        // accessor. Preserve the native wait instead of waking once per millisecond indefinitely.
+        //
+        // Abandoned on purpose: a refused child belongs to the detached reaper until it exits.
+        let status = state.child.wait()?;
+        state.status = Some(status.clone());
+        state.exited = Some(Instant::now());
+        Ok(status)
     }
     fn process_id(&self) -> Option<u32> {
         self.0.lock().unwrap().child.process_id()
@@ -107,6 +114,47 @@ impl ChildKiller for CachedChild {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    #[derive(Debug)]
+    struct NativeWaitOnly(Arc<AtomicUsize>);
+    impl ChildKiller for NativeWaitOnly {
+        fn kill(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+        fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
+            Box::new(Self(self.0.clone()))
+        }
+    }
+    impl Child for NativeWaitOnly {
+        fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
+            panic!("the detached reaper must use native wait, not status polling");
+        }
+        fn wait(&mut self) -> io::Result<ExitStatus> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(ExitStatus::with_exit_code(7))
+        }
+        fn process_id(&self) -> Option<u32> {
+            None
+        }
+        #[cfg(windows)]
+        fn as_raw_handle(&self) -> Option<std::os::windows::io::RawHandle> {
+            None
+        }
+    }
+    #[test]
+    fn wait_uses_native_blocking_wait_once_and_caches_its_status() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut child = CachedChild::new(Box::new(NativeWaitOnly(calls.clone())));
+        let mut other = child.clone();
+        assert_eq!(child.wait().unwrap().exit_code(), 7);
+        assert_eq!(other.wait().unwrap().exit_code(), 7);
+        assert_eq!(other.try_wait().unwrap().unwrap().exit_code(), 7);
+        assert_eq!(other.snapshot(), Termination::Ordinary);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
     #[derive(Debug)]
     struct Finished(ExitStatus);
     impl ChildKiller for Finished {

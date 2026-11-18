@@ -25,8 +25,8 @@ pub(crate) struct Process {
     input_since: Option<std::time::Instant>,
     refused: bool,
     refusals: u64,
-    size: Size,
     pub(crate) failure: Option<String>,
+    delivery_failed: bool,
     pub(crate) dismissed: bool,
 }
 
@@ -48,8 +48,8 @@ impl From<Pty> for Process {
             input_since: None,
             refused: false,
             refusals: 0,
-            size: crate::INITIAL_GRID,
             failure: None,
+            delivery_failed: false,
             dismissed: false,
         }
     }
@@ -83,68 +83,40 @@ impl Process {
             let directory = request.directory.map(Path::to_owned);
             let size = request.size;
             let fallback = request.fallback;
-            let (sender, result) = channel();
-            let (output_open, output) = channel();
-            std::thread::Builder::new()
-                .name("console-launch".into())
-                .spawn(move || {
-                    let args: Vec<&str> = args.iter().map(String::as_str).collect();
-                    let borrowed: Vec<(&str, Option<&OsStr>)> = env
-                        .iter()
-                        .map(|(key, value)| (key.as_str(), value.as_deref()))
-                        .collect();
-                    let identity = env
-                        .iter()
-                        .find(|(key, _)| key == "PANEL_ID")
-                        .and_then(|(_, value)| value.as_ref())
-                        .map(|v| v.to_string_lossy())
-                        .unwrap_or_else(|| "console".into());
-                    let spawn = |program, args: &[&str]| {
-                        Pty::spawn_with_launcher_in(
-                            &launcher,
-                            &identity,
-                            program,
-                            args,
-                            size,
-                            &borrowed,
-                            directory.as_deref(),
-                        )
-                    };
-                    let spawned = match spawn(&program, &args) {
-                        Err(error) if fallback => {
-                            eprintln!(
-                                "'{program}' could not be launched ({error}); opening {}",
-                                crate::FALLBACK_SHELL
-                            );
-                            spawn(crate::FALLBACK_SHELL, &[])
-                        }
-                        result => result,
-                    };
-                    // A dropped pane owns no receiver: the undelivered child is shut down here.
-                    let _ = sender.send(spawned);
-                    wake();
-                })?;
-            return Ok((
-                Self {
-                    live: None,
-                    terminal: term_core::Termination::Pending,
-                    cost: std::time::Duration::ZERO,
-                    context: None,
-                    pending: Some(Pending {
-                        result,
-                        _output_open: output_open,
-                        reads,
-                    }),
-                    input: Vec::new(),
-                    input_since: None,
-                    refused: false,
-                    refusals: 0,
-                    size,
-                    failure: None,
-                    dismissed: false,
-                },
-                output,
-            ));
+            return start_worker(wake, reads, move || {
+                let args: Vec<&str> = args.iter().map(String::as_str).collect();
+                let borrowed: Vec<(&str, Option<&OsStr>)> = env
+                    .iter()
+                    .map(|(key, value)| (key.as_str(), value.as_deref()))
+                    .collect();
+                let identity = env
+                    .iter()
+                    .find(|(key, _)| key == "PANEL_ID")
+                    .and_then(|(_, value)| value.as_ref())
+                    .map(|v| v.to_string_lossy())
+                    .unwrap_or_else(|| "console".into());
+                let spawn = |program, args: &[&str]| {
+                    Pty::spawn_with_launcher_in(
+                        &launcher,
+                        &identity,
+                        program,
+                        args,
+                        size,
+                        &borrowed,
+                        directory.as_deref(),
+                    )
+                };
+                match spawn(&program, &args) {
+                    Err(error) if fallback => {
+                        eprintln!(
+                            "'{program}' could not be launched ({error}); opening {}",
+                            crate::FALLBACK_SHELL
+                        );
+                        spawn(crate::FALLBACK_SHELL, &[])
+                    }
+                    result => result,
+                }
+            });
         }
         let _ = (wake, reads);
         let spawn = |program, args: &[&str]| {
@@ -175,6 +147,7 @@ impl Process {
     }
     pub(crate) fn keeps_open(&self) -> bool {
         self.failure.is_some()
+            || self.delivery_failed
             || self.pending()
             || self.termination() != term_core::Termination::Ordinary
     }
@@ -190,6 +163,9 @@ impl Process {
                 Some("This console was stopped because of memory pressure.")
             }
             term_core::Termination::Signal => Some("This console was terminated by a signal."),
+            _ if self.delivery_failed => {
+                Some("What you typed while this console was starting did not reach the program.")
+            }
             _ => None,
         }
     }
@@ -224,17 +200,18 @@ impl Process {
         })
     }
     pub(crate) fn resize(&mut self, size: Size) -> term_core::Result<()> {
-        self.size = size;
         if let Some(live) = &mut self.live {
             live.resize(size)?;
         }
         Ok(())
     }
     pub(crate) fn write(&mut self, bytes: &[u8]) -> term_core::Result<()> {
-        if let Some(live) = &mut self.live {
+        if self.input.is_empty()
+            && let Some(live) = &mut self.live
+        {
             return live.write(bytes);
         }
-        if self.pending.is_none() {
+        if self.pending.is_none() && self.live.is_none() {
             return Err("the console could not be started".into());
         }
         // Match D60: accept one paste whole, refuse subsequent input while the queue is full.
@@ -261,18 +238,7 @@ impl Process {
         };
         let pending = self.pending.take()?;
         match result {
-            Ok((mut pty, output)) => {
-                let install = pty.resize(self.size).and_then(|()| {
-                    if self.input.is_empty() {
-                        Ok(())
-                    } else {
-                        pty.write(&self.input)
-                    }
-                });
-                self.input.clear();
-                if let Err(error) = install {
-                    self.failure = Some(error.to_string());
-                }
+            Ok((pty, output)) => {
                 self.live = Some(pty);
                 Some((output, pending.reads))
             }
@@ -373,12 +339,18 @@ pub(crate) struct Cost {
 pub(crate) fn refresh(pane: &mut crate::Pane) {
     let before = std::time::Instant::now();
     complete(pane);
-    pane.pty.terminal = pane
-        .pty
-        .live
-        .as_ref()
-        .map_or(term_core::Termination::Pending, Pty::termination);
-    if !pane.pty_output.is_alive()
+    pane.pty.terminal = pane.pty.live.as_ref().map_or_else(
+        || {
+            if pane.pty.pending() {
+                term_core::Termination::Pending
+            } else {
+                term_core::Termination::Ordinary
+            }
+        },
+        Pty::termination,
+    );
+    if pane.pty.live.is_some()
+        && !pane.pty_output.is_alive()
         && pane.pty.termination() == term_core::Termination::Pending
         && let Some(ctx) = &pane.pty.context
     {
@@ -389,6 +361,74 @@ pub(crate) fn refresh(pane: &mut crate::Pane) {
 
 pub(crate) fn take_cost(process: &mut Process) -> std::time::Duration {
     std::mem::take(&mut process.cost)
+}
+
+pub(crate) fn finish_input(pane: &mut crate::Pane) {
+    if pane.pty.live.is_none() || pane.pty.input.is_empty() {
+        return;
+    }
+    let before = std::time::Instant::now();
+    let input = std::mem::take(&mut pane.pty.input);
+    if let Err(error) = pane
+        .pty
+        .live
+        .as_mut()
+        .expect("installed console")
+        .write(&input)
+    {
+        pane.pty.delivery_failed = true;
+        eprintln!("pending console input could not be delivered: {error}");
+    }
+    pane.pty.input_since = None;
+    pane.pty.cost += before.elapsed();
+}
+
+#[cfg(any(target_os = "linux", test))]
+struct CompletionWake(std::sync::Arc<dyn Fn() + Send + Sync>);
+#[cfg(any(target_os = "linux", test))]
+impl Drop for CompletionWake {
+    fn drop(&mut self) {
+        (self.0)();
+    }
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn start_worker(
+    wake: std::sync::Arc<dyn Fn() + Send + Sync>,
+    reads: crate::control::ReadActivity,
+    operation: impl FnOnce() -> term_core::Result<Spawned> + Send + 'static,
+) -> term_core::Result<(Process, Receiver<Vec<u8>>)> {
+    let (sender, result) = channel();
+    let (output_open, output) = channel();
+    std::thread::Builder::new()
+        .name("console-launch".into())
+        .spawn(move || {
+            let _completed = CompletionWake(wake);
+            // On receiver cancellation the undelivered child is shut down on this worker.
+            let deliver = sender;
+            let _ = deliver.send(operation());
+        })?;
+    Ok((
+        Process {
+            live: None,
+            terminal: term_core::Termination::Pending,
+            cost: std::time::Duration::ZERO,
+            context: None,
+            pending: Some(Pending {
+                result,
+                _output_open: output_open,
+                reads,
+            }),
+            input: Vec::new(),
+            input_since: None,
+            refused: false,
+            refusals: 0,
+            failure: None,
+            delivery_failed: false,
+            dismissed: false,
+        },
+        output,
+    ))
 }
 
 #[cfg(test)]

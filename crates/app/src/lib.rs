@@ -11932,7 +11932,7 @@ mod tests {
         // inventing a threshold—, only that it is not zero.
         let requested = egui::vec2(800.0, 600.0);
         let mut window = a_window_that_asks(requested);
-        // Isolate warning attribution from independently measured Board observation.
+        // Exclude independently measured launch/status work and Board observation from this warning.
         window.board.enabled = false;
         let ctx = egui::Context::default();
         let stubborn = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1126.0, 661.0));
@@ -11941,7 +11941,7 @@ mod tests {
             requests_of_one_logical_pass(&mut window, &ctx, stubborn);
         }
         assert!(
-            window.timed_separately.is_zero(),
+            window.timed_separately == window.launch_cost.total,
             "insisting on the size declared {:?}, so the later jump would not say where it comes from",
             window.timed_separately
         );
@@ -11949,7 +11949,7 @@ mod tests {
         requests_of_one_logical_pass(&mut window, &ctx, stubborn);
 
         assert!(
-            !window.timed_separately.is_zero(),
+            window.timed_separately > window.launch_cost.total,
             "the frame in which the desktop is reported not to give way declared nothing: what writing \
              the warning costs is published as the interface framework's cost"
         );

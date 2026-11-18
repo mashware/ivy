@@ -557,6 +557,9 @@ fn pump_pane(pane: &mut crate::Pane, enabled: crate::agent_signals::Enabled) -> 
 }
 
 pub(crate) fn resize(pane: &mut crate::Pane) {
+    if pane.pty.pending() {
+        return;
+    }
     if pane.measured == pane.screen.size() {
         return;
     }
@@ -601,8 +604,9 @@ pub(crate) fn pump_all(window: &mut crate::Window) -> crate::Pump {
         // First what is pending is interpreted and afterwards the size is changed: the program
         // wrote those bytes for the dimensions it does not yet know have changed.
         let queue_left = pane.pump(agent_preferences);
-        launches += crate::launch::take_cost(&mut pane.pty);
         pane.resize();
+        crate::launch::finish_input(pane);
+        launches += crate::launch::take_cost(&mut pane.pty);
         reflowed += std::mem::take(&mut pane.reflowed);
 
         pump.some_left_a_queue |= queue_left;
