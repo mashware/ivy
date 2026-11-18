@@ -10115,24 +10115,28 @@ switching and said neither which console was asking nor how many were. The pill 
 keeps its fill — the project ink, or the hollow muted outline of a console with no project — and,
 while that console claims, gets a ring 1.5 points wide, 1.5 points off the dot's edge, in that
 claim's color as `attention_color` gives it: wait and block as before, **done blue** and not green
-(D94: green is the accent and focus; the owner confirmed it against the mock that drew it green),
-and a claim nobody holds up dimmed toward the background, as `attention_color` gives it (D18) — the
-same rule the historical strip's glyph follows; the pill keeps its dashed outline on the panel and
-the Board. Dots are 13 points apart whether or not anything claims, so a claim arriving never moves
-the label. **A card without room for all its dots keeps one dot's slot**: a muted dot ringed with
+(D94: green is the accent and focus; the owner confirmed it against the mock that drew it green).
+**A claim nobody holds up keeps its class's full colour on a ring half as thick** (0.75 points, same
+centre line): the owner chose it at the desktop check, where the dimmed colour `attention_color`
+gives an unheld claim — the rule of the panel's words and the historical strip's glyph — turned the
+red into a brown. The pill keeps its dashed outline on the panel and the Board. Dots are 16 points
+apart, 4 points between neighbouring rings, whether or not anything claims, so a claim arriving
+never moves the label; at 1 point apart the owner read the rings as touching. **A card without room
+for all its dots keeps one dot's slot**: a muted dot ringed with
 the tab's loudest claim, wait over block over done — chosen by the owner at review, once it was
 measured that «show nothing» left no claim on the bar with eight two-console tabs in a 1280-point
 window, and none ever on a tab of ten consoles or more. The slot is reserved whether or not anything
-claims, so the label does not move when a claim arrives. Four consoles keep their dots down to about
-119 points of card with the cross shown, one dot fits down to 80, and below 80 a card shows no claim
-at all. The compact threshold does not move: the narrowest card keeps its old width, written without
+claims, so the label does not move when a claim arrives. Four consoles keep their dots down to 128
+points of card with the cross shown, two down to 96, one dot fits down to 80, and below 80 a card
+shows no claim at all. The compact threshold does not move: the narrowest card keeps its old width, written without
 the pill.
 
 *Discarded:* nothing at all when the dots do not fit (the owner's first choice, reversed at review on
 the numbers above); the label giving way to the dots (still leaves ten consoles with nothing); a
-green done ring; a dashed, thinner or gapless ring for an unheld claim. The class and whether it is
-held now read by colour alone on the ring: the pill's glyph does not fit a 6-point dot, and the
-console's own claim strip still carries it.
+green done ring; for an unheld claim, the dimmed colour (brown red), a grey ring (loses the class)
+and a dashed one; 1, 3 and 6 points between rings. The class reads by colour and whether it is held
+by thickness: the pill's glyph does not fit a 6-point dot, and the console's own claim strip still
+carries it.
 
 *Measurement:* a card counts as marked when it painted at least one ring, so «tabs marked» still
 counts what was drawn and not what was claimed (a card under 80 points that claims but paints
