@@ -1146,8 +1146,10 @@ mod tests {
         // has to come out with unequal steps — otherwise this machine's font or this version of the
         // engine does not have the defect at all, and the assertion below would hold with the fix
         // deleted.
+        // A row of letters, not of `─`: the box drawing range is no longer a glyph (`box_drawing`),
+        // and what this guards is the step between any two glyphs.
         let steps = |cell: fn(&Context) -> CellMetrics| {
-            glyph_edges(cell, "──────")
+            glyph_edges(cell, "MMMMMM")
                 .windows(2)
                 .map(|pair| pair[1] - pair[0])
                 .collect::<Vec<f32>>()

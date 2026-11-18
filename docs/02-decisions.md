@@ -5836,13 +5836,14 @@ measures, so there is no undeclared path for **D13**'s rule to leak into the fra
 the grid itself changed size, so the control batches published before this are **not** comparable
 number for number with the ones after.
 
-## D35 — The block elements are drawn by the painter, and the box drawing block is not
+## D35 — The block elements are drawn by the painter, and since #103 the box drawing block too
 
 **Decided.** The thirty-two characters of Block Elements — `U+2580`–`U+259F`: the full block, the
 halves, the eighths, the quadrants and the three shades — are drawn as rectangles measured against
 the cell, in `painter::blocks`. **In the console's grid** they are never asked of the font — the
 status panel is not the grid and still lays its rows out as text, which is written down further
-below. **`U+2500`–`U+257F`, the box drawing lines and corners, deliberately stay with the font.**
+below. **`U+2500`–`U+257F`, the box drawing lines and corners, deliberately stayed with the font
+until the amendment at the end of this decision.**
 
 **Why a block is not a letter.** Its whole job is to fill its cell exactly and to meet its neighbour
 with no seam. What a font ships is a glyph drawn for one nominal size, rasterized with antialiasing
@@ -5907,6 +5908,53 @@ the hottest path in the project.
 **What is not measured.** These characters change from a text shape to one or two rectangles per
 cell, and **no batch of `scripts/measure-frame.sh` puts a block element on screen**, so the bench
 cannot see the difference in either direction. That is a gap in the bench, not a number.
+
+### Amended in November 2026 (#103): the box drawing block is drawn by the painter too
+
+**Decided.** `U+2500`–`U+257F` are drawn against the cell in `painter::box_drawing`, all of them
+except the three diagonals `╱ ╲ ╳`: light and heavy lines, corners, tees and crosses, the double
+lines, the dashed ones, the half lines and the four rounded corners. The discarded alternative
+above, «extending it to the box drawing block», is reversed.
+
+**The new signal, measured and not inferred.** A screenshot showed Claude Code's input-box border
+dotted and blurred. A probe painted a run of `─` through the production painter at scales 1, 1.25,
+1.5, 5/3 and 2, with the built-in font and with Ubuntu Sans Mono, and rasterized the tessellation.
+Two defects showed at every scale and with both fonts:
+
+- **A bead at every seam.** The overlap the paragraph above counted on is real, and it is the
+  defect: the glyph's raster is 1 px (Ubuntu Sans Mono) or 2 px (Hack) wider than its cell, and the
+  overlapping pixels are antialiased ends composited twice — `0.24 → 0.34` at a seam in an edge row.
+  **D34**'s floor is what puts the next glyph on them; with no overlap they would be a dim end
+  pixel instead. Either way the line does not read as continuous.
+- **A stroke that straddles rows.** The stroke's height and thickness are the font's, so it lands on
+  two or three partly covered rows (`0.64 / 1.00 / 0.74` at 1.25). The bitmap sits on whole pixels,
+  so the blur is inside the raster, and no rounding of the origin can remove it.
+
+**How it is drawn.** The cell is taken to device pixels by rounding its two corners, which the next
+cell shares. Every thickness and band position is a whole number of pixels, centred by rounding
+down from the cell's own size, so a band leaves one cell on exactly the rows the next one enters on.
+The shape is rasterized into a mask and the mask is cut into disjoint rectangles. Two rectangles over
+the same pixel of a translucent ink would paint the bead again. A light line is
+`round(points × scale / 12)` pixels, never fewer than one: one at the default size at 100 %, two at
+166 % and 200 %. Heavy is twice that. A double is two light lines a light line apart, and each of
+its lines stops against the line it would otherwise cross. Arcs are a quarter circle tangent to both
+bands, rasterized hard-edged.
+
+**What was discarded.**
+
+- **Only `─` and `│`, the two the report showed.** A box drawn from two sources does not close: a
+  corner from the font would meet the painter's lines on other rows.
+- **One rectangle per arm, painted directly.** Arms meet at the joint, and with an ink that is not
+  opaque the joint would be painted twice — the same bead, drawn by us.
+- **Antialiased arcs.** epaint would feather them, and the arc's ends would then not match the
+  hard-edged bands they continue. At a light line of one or two pixels the hard edge reads as a
+  pixel-art curve.
+- **The diagonals.** A diagonal on a pixel grid is a staircase whichever way it is drawn, and
+  nothing in a box has to meet it on a shared row.
+
+**What is not measured.** Like the blocks, no batch of `scripts/measure-frame.sh` puts a box drawing
+character on screen. A box character now costs a small mask and a few rectangles instead of a text
+shape, and that is a gap in the bench, not a number.
 
 ## D36 — Only the console being typed into fills its cursor, and none of them does it when the window is not
 
