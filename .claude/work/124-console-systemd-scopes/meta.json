@@ -19,8 +19,8 @@
   "related_repos": [],
   "roadmap": null,
   "started_at": "2026-11-18T20:55:21.998602+00:00",
-  "updated_at": "2026-11-18T21:04:12.565947+00:00",
-  "notes": "Chosen gated launcher and Linux-only user-manager D-Bus. All three medium challenges addressed: minimal private IPC, asynchronous app startup, and 500 ms final-result observation. One coherent PR preferred. Study completed at build pre-flight (why=study). No implementation or runtime validation; suitable Rust/systemd host needed for build validation.",
+  "updated_at": "2026-11-18T21:07:11.760Z",
+  "notes": "Chosen gated launcher and Linux-only user-manager D-Bus. All three medium challenges addressed: minimal private IPC, asynchronous app startup, and 500 ms final-result observation. One coherent PR preferred. Study completed at build pre-flight (why=study). No implementation or runtime validation; suitable Rust/systemd host needed for build validation. Approved start resumed on 2026-11-18; re-created recorded branch from main. Build pre-flight blocked: cargo, rustc and systemctl absent; PID 1 docker-init. No implementation brief or code written; phase remains plan for safe resumption.",
   "pending": null,
   "defaults_used": [
     {
@@ -47,6 +47,11 @@
       "key": "unattended:plan-review",
       "default": "One PR; backend/notice split merged to avoid an extra wave without required early release",
       "phase": "plan"
+    },
+    {
+      "key": "unattended:rehomed",
+      "default": "124-console-systemd-scopes → 124-console-systemd-scopes from main (161c80fdef8a2cbc0868a3b7948e809f1097d979)",
+      "phase": "run"
     }
   ],
   "ticket_deps": [],

@@ -1,1 +1,11 @@
-{"phase": "plan", "now": "Study complete: design and one-PR plan ready for approval", "next": "Approve study, then build", "attention": "done"}
+{
+  "phase": "build",
+  "now": "Build pre-flight found missing Rust and systemd tools",
+  "next": "Resume implementation on a suitable Linux worker",
+  "attention": "block",
+  "blocks": [
+    {
+      "text": "Relaunch with Rust 1.97.1 and a disposable systemd user session"
+    }
+  ]
+}

@@ -1,15 +1,17 @@
 {
-  "updated_at": "2026-11-18T21:04:13.173Z",
-  "phase": "plan",
+  "updated_at": "2026-11-18T21:07:13.104Z",
+  "phase": "build",
   "header": true,
-  "attention": "done",
+  "attention": "block",
   "lines": [
     {"key":"title","text":"Put each console in its own systemd scope so the OOM killer does not take down the whole window","style":"title"},
     "",
     {"key":"mrs","text":"PRs","style":"section","summary":"0/1 merged","collapsed":true},
     {"key":"mr-1","ref":"#1","text":"Isolate Linux consoles in systemd scopes and explain OOM exits","mark":"pending"},
     "",
-    {"key":"now","ref":"Now","text":"Study complete: design and one-PR plan ready for approval","mark":"info"},
-    {"key":"next","ref":"Next","text":"Approve study, then build","mark":"info"}
+    {"key":"now","ref":"Now","text":"Build pre-flight found missing Rust and systemd tools","mark":"info"},
+    {"key":"next","ref":"Next","text":"Resume implementation on a suitable Linux worker","mark":"info"},
+    "",
+    {"key":"block-1","text":"Relaunch with Rust 1.97.1 and a disposable systemd user session","mark":"block"}
   ]
 }
