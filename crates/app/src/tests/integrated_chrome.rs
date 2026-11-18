@@ -2000,21 +2000,21 @@ mod tests {
         assert!(window.all_panes_mut().all(|p| p.keystrokes.is_empty()));
     }
 
-    /// The rings a tab card painted around its dots: 1.5-point strokes with no fill, centred inside
-    /// the card, with their centre, radius and colour.
+    /// The rings a tab card painted around its dots: 1.5-point strokes (0.75 for a claim nobody
+    /// holds) with no fill, centred inside the card, with their centre, radius, colour and width.
     fn rings_in(
         shapes: &[egui::epaint::ClippedShape],
         card: egui::Rect,
-    ) -> Vec<(egui::Pos2, f32, egui::Color32)> {
+    ) -> Vec<(egui::Pos2, f32, egui::Color32, f32)> {
         shapes
             .iter()
             .filter_map(|s| match &s.shape {
                 egui::Shape::Circle(c)
-                    if c.stroke.width == 1.5
+                    if (c.stroke.width == 1.5 || c.stroke.width == 0.75)
                         && c.fill == egui::Color32::TRANSPARENT
                         && card.contains(c.center) =>
                 {
-                    Some((c.center, c.radius, c.stroke.color))
+                    Some((c.center, c.radius, c.stroke.color, c.stroke.width))
                 }
                 _ => None,
             })
@@ -2081,7 +2081,7 @@ mod tests {
             assert_eq!(summary, None);
             let dots = dots.expect("a full-width card holds two dots");
             let center =
-                |n: usize| egui::pos2(dots.left() + 6.0 + 13.0 * n as f32, dots.center().y);
+                |n: usize| egui::pos2(dots.left() + 6.0 + 16.0 * n as f32, dots.center().y);
             for n in 0..2 {
                 assert!(
                     dot_at(&shapes, center(n), fill),
@@ -2090,9 +2090,10 @@ mod tests {
             }
             let rings = rings_in(&shapes, card);
             assert_eq!(rings.len(), expected.len(), "tab {which}: {rings:?}");
-            for ((at, radius, color), (n, class)) in rings.into_iter().zip(expected) {
+            for ((at, radius, color, width), (n, class)) in rings.into_iter().zip(expected) {
                 assert_eq!(color, class, "tab {which}, dot {n}");
                 assert_eq!(radius, 5.25, "tab {which}, dot {n}");
+                assert_eq!(width, 1.5, "tab {which}, dot {n}: a held claim's ring");
                 assert_eq!(at, center(n), "tab {which}: the ring is not on dot {n}");
             }
             // No pill and no muted dot where the summary used to be — the card's first 36 points,
@@ -2123,10 +2124,11 @@ mod tests {
         assert_eq!(window.tab_bar_cost.marked_tabs, 2);
     }
 
-    /// A claim nobody holds up keeps its class's colour, dimmed toward the background as
-    /// `attention_color` gives it (D18) — not the held colour. Ivy Night's literal, written out.
+    /// A claim nobody holds up keeps its class's full colour on a thinner ring — 0.75 points
+    /// instead of 1.5 — on the same centre line. Dimming the colour turned the red brown at the
+    /// owner's desktop check (D96).
     #[test]
-    fn an_unheld_claims_ring_is_its_colour_dimmed() {
+    fn an_unheld_claims_ring_is_thinner_in_its_full_colour() {
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
         window.chrome.enable();
@@ -2137,8 +2139,10 @@ mod tests {
         frame(&mut window, &ctx, area, vec![]);
         let shapes = frame(&mut window, &ctx, area, vec![]);
         let rings = rings_in(&shapes, title_card(&window, &ctx, area, 1));
-        let dimmed = egui::Color32::from_rgb(0x83, 0x49, 0x41);
-        assert_eq!(rings.iter().map(|r| r.2).collect::<Vec<_>>(), vec![dimmed]);
+        assert_eq!(
+            rings.iter().map(|r| (r.1, r.2, r.3)).collect::<Vec<_>>(),
+            vec![(5.25, BLOCK, 0.75)]
+        );
         // The control inside: the first card paints its dots and claims nothing, so it is not marked.
         assert!(rings_in(&shapes, title_card(&window, &ctx, area, 0)).is_empty());
         assert_eq!(window.tab_bar_cost.marked_tabs, 1);
@@ -2157,11 +2161,11 @@ mod tests {
         publish_in_the_tab(&mut window, 0, 1, r#"{"attention":"wait","lines":["x"]}"#);
         // The fonts the geometry measures with exist after a first pass.
         frame(&mut window, &ctx, area_of(1400.0), vec![]);
-        // The narrowest window whose cards hold one dot (80 points) but not two (93).
+        // The narrowest window whose cards hold one dot (80 points) but not two (96).
         let area = (500..1400)
             .map(|w| area_of(w as f32))
-            .find(|area| (80.0..93.0).contains(&title_card(&window, &ctx, *area, 0).width()))
-            .expect("some window width gives a card between 80 and 93 points");
+            .find(|area| (80.0..96.0).contains(&title_card(&window, &ctx, *area, 0).width()))
+            .expect("some window width gives a card between 80 and 96 points");
         frame(&mut window, &ctx, area, vec![]);
         let shapes = frame(&mut window, &ctx, area, vec![]);
         let card = title_card(&window, &ctx, area, 0);
@@ -2173,7 +2177,7 @@ mod tests {
             dot_at(&shapes, center, MUTED),
             "the summary dot is not the muted one"
         );
-        assert_eq!(rings_in(&shapes, card), vec![(center, 5.25, WAIT)]);
+        assert_eq!(rings_in(&shapes, card), vec![(center, 5.25, WAIT, 1.5)]);
         for other in 1..3 {
             assert!(rings_in(&shapes, title_card(&window, &ctx, area, other)).is_empty());
         }

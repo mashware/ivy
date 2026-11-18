@@ -7,7 +7,8 @@
 
 use super::{CLOSE_MIN_WIDTH, feedback};
 use crate::Window;
-use crate::theme::{Roles, metrics};
+use crate::panel::AttentionState;
+use crate::theme::{Roles, Theme, metrics};
 use crate::tree::Tab;
 use eframe::egui::{self, Color32, CornerRadius, Rect, Stroke, pos2, vec2};
 use std::time::SystemTime;
@@ -31,11 +32,14 @@ const ACCENT_LINE: f32 = 2.0;
 const DOT: f32 = 6.0;
 /// A claiming console's ring: its width, and the gap between the dot and the ring.
 const RING_WIDTH: f32 = 1.5;
+/// The ring of a claim nobody holds up: the class's own colour, thinner. Dimming the colour instead
+/// — the rule of the panel's text — turned the red into a brown at the desktop check (D96).
+const UNHELD_RING_WIDTH: f32 = 0.75;
 const RING_GAP: f32 = 1.5;
 /// How far a ring reaches from its dot's centre.
 const RING_REACH: f32 = DOT / 2.0 + RING_GAP + RING_WIDTH;
-/// The space left between two neighbouring rings, so they never touch.
-const RING_SPACING: f32 = 1.0;
+/// The space left between two neighbouring rings: at 1 point they read as touching (D96).
+const RING_SPACING: f32 = 4.0;
 /// From one dot's centre to the next. Fixed whether or not anything claims, so a claim arriving
 /// never moves the label.
 const DOT_STEP: f32 = 2.0 * RING_REACH + RING_SPACING;
@@ -217,12 +221,18 @@ pub(crate) fn label_dots_summary(
     (layout.label, layout.dots, layout.summary)
 }
 
-/// A dot's ring, in the colour `attention_color` gives its claim.
-fn ring(painter: &egui::Painter, center: egui::Pos2, color: Color32) {
+/// A dot's ring for `claim`: always in its class's full colour, and thinner when nobody holds the
+/// claim up. Both widths share one centre line, so an unheld ring sits where a held one would.
+fn ring(painter: &egui::Painter, center: egui::Pos2, claim: AttentionState, theme: &Theme) {
+    let width = if claim.backed {
+        RING_WIDTH
+    } else {
+        UNHELD_RING_WIDTH
+    };
     painter.circle_stroke(
         center,
         RING_REACH - RING_WIDTH / 2.0,
-        Stroke::new(RING_WIDTH, color),
+        Stroke::new(width, theme.attention_color(claim.class, true)),
     );
 }
 
@@ -401,11 +411,7 @@ pub(super) fn paint(window: &Window, ui: &egui::Ui, band: Rect, now: SystemTime)
                 // The claim is the console's own, as its producer declared it (D18), and it is
                 // drawn around the dot, not on it.
                 if let Some(claim) = pane.effective_attention(now) {
-                    ring(
-                        &painter,
-                        center,
-                        window.theme.attention_color(claim.class, claim.backed),
-                    );
+                    ring(&painter, center, claim, &window.theme);
                     ringed = true;
                 }
             });
@@ -416,11 +422,7 @@ pub(super) fn paint(window: &Window, ui: &egui::Ui, band: Rect, now: SystemTime)
             // No room for every console's dot: one muted dot carries the loudest claim of them all.
             let center = dot_center(summary, 0);
             painter.circle_filled(center, DOT / 2.0, roles.tx3);
-            ring(
-                &painter,
-                center,
-                window.theme.attention_color(claim.class, claim.backed),
-            );
+            ring(&painter, center, claim, &window.theme);
             marked += 1;
         }
         // Advanced every pass, shown or not, so a pointer that leaves from the cross does not leave
@@ -540,21 +542,21 @@ mod tests {
         }
     }
 
-    /// Four consoles keep their dots, rings included, down to a 119-point card with the cross
-    /// shown; the dots are 13 points apart and their rect is 51 wide. Below that the card keeps one
+    /// Four consoles keep their dots, rings included, down to a 128-point card with the cross
+    /// shown; the dots are 16 points apart and their rect is 60 wide. Below that the card keeps one
     /// 12-point summary slot down to 80 points, and below 80 it has neither.
     #[test]
-    fn four_dots_fit_down_to_119_points_and_one_summary_slot_down_to_80() {
+    fn four_dots_fit_down_to_128_points_and_one_summary_slot_down_to_80() {
         let at = |width: f32| Rect::from_min_size(pos2(0.0, 6.0), vec2(width, 34.0));
-        let fits = Layout::new(at(119.0), 4, true);
-        let dots = fits.dots.expect("119 points hold four dots");
+        let fits = Layout::new(at(128.0), 4, true);
+        let dots = fits.dots.expect("128 points hold four dots");
         assert_eq!(fits.summary, None);
-        assert_eq!(dots.width(), 51.0);
-        assert_eq!(dot_center(dots, 1).x - dot_center(dots, 0).x, 13.0);
-        let short = Layout::new(at(118.0), 4, true);
+        assert_eq!(dots.width(), 60.0);
+        assert_eq!(dot_center(dots, 1).x - dot_center(dots, 0).x, 16.0);
+        let short = Layout::new(at(127.0), 4, true);
         assert_eq!(short.dots, None);
-        let summary = short.summary.expect("118 points hold one summary slot");
-        assert_eq!(summary.right(), 118.0 - CLOSE_WIDTH);
+        let summary = short.summary.expect("127 points hold one summary slot");
+        assert_eq!(summary.right(), 127.0 - CLOSE_WIDTH);
         assert_eq!(summary.width(), 12.0);
         assert!(Layout::new(at(80.0), 4, true).summary.is_some());
         let none = Layout::new(at(79.0), 4, true);
