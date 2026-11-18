@@ -8866,7 +8866,8 @@ Discarded: a generic docking framework or document workspace model, because only
 Files is requested; maximizing the whole sidebar, because Files must remain lateral; zero-sized
 hidden PTYs, because the programs remain alive; keeping the duplicate path picker, because Files
 already supplies explicit document selection; Unicode icon mixtures or another icon dependency,
-because the existing vector style can represent these actions deterministically. No frame-cost
+because the existing vector style can represent these actions deterministically (reversed by
+**D103**: the owner judged the hand-drawn set amateurish, and an icon font is as deterministic). No frame-cost
 improvement is claimed; host, viewer and explorer work retain their named spans.
 
 
@@ -10076,7 +10077,8 @@ desktop check: the logo opens the bar and Files stands a little apart after it. 
 come the Board as a framed button with its name, split right and split down, a separator, Markdown,
 search, connect and the menu, a separator, and the window's own buttons. Buttons are the kit's
 28 points (32 for the window's), drawn from its 16-unit line icons in one module (`ui::icons`) that
-the console headers and the drawer use too. This reverses the earlier choice not to put a Board
+the console headers and the drawer use too. Since **D103** that module draws Phosphor glyphs rather
+than the kit's paths; the buttons, their sizes and their order are unchanged. This reverses the earlier choice not to put a Board
 button in the title bar, and moves the splits from the left group to the right — the rail that held
 the tools no longer exists. The compact boundary moves from about 456 to **600 points on Linux and
 Windows and 563 on macOS**; a compact bar lists Files, Markdown and Board in its menu, before
@@ -10377,3 +10379,50 @@ payload with current main and verified publication/readback under a fresh consol
 proves that controlled replacement; it does not prove hot reload in a running Claude conversation
 or identify the exact cause of the owner's earlier incident. Debian upgrade tests additionally
 preserve Claude/Codex registration fixtures alongside Ivy's own data.
+
+## D103 — The interface's icons are Phosphor glyphs, and Files shows each file by its type
+
+**New signal, 18 November 2026 — #114.** The owner judged the hand-drawn icons amateurish next to any
+modern editor, worst in Files, where the folder's stroke was heavy for its size and every file was
+the same blank page. The ticket offered Phosphor or Lucide; the owner chose **Phosphor** in its
+thread. Asked while the design was open, the owner chose to **tint each file type with a colour of
+the theme**, as an editor's file-icon theme does.
+
+**Decision — one set.** Every icon of the window's chrome — title bar, tabs, console headers, the
+sidebar, Files, the Board and Settings — is one glyph of **Phosphor Regular**, from the
+`egui-phosphor` 0.14.0 crate pinned exactly, and painted through `ui::icons`. The face is registered
+in the bundled definitions (D95) as a named family holding **that face and nothing else**: Phosphor
+maps the lowercase letters to blank glyphs and its codepoints sit in the private-use area the
+terminal's icon family serves (F2.9), so it is never a member of a family that lays out text, and
+`egui-phosphor`'s own installer, which puts it second in the proportional chain, is not used. An
+icon is centred by its **em square**, the square every Phosphor glyph is drawn on: laid out at the
+icon's size the galley is that square, to within a device pixel of row rounding, so an open folder
+and a closed one, or a caret that turns, never move. Licence: MIT, notices in
+`resources/fonts/Phosphor-MIT.txt` and `THIRD-PARTY.md`.
+
+**Decision — Files.** A file's glyph and colour come from its name alone (`FileKind::of`; the tree
+never opens a file to decide): Rust, Markdown, JSON, TOML/YAML/INI, images, SVG, the common code
+types, PDF, archives, text, lock files and dotfiles, first match winning so `package-lock.json` is a
+lock file. Folders show closed or open as they are expanded, with Phosphor's carets. A type's colour
+is a **terminal palette slot**, so every theme and every settings file carries it (D94); where it
+would keep less than **3:1** — WCAG's figure for non-text marks, the same the focus border uses —
+against the panel, or against a hovered or chosen row **as that translucent row lands on the panel**,
+the file falls back to the secondary text colour it had before. Search results show the type's
+glyph in that secondary colour: their rows sit on other surfaces.
+
+**Out, on purpose.** The status panel's line marks and the claim pill keep their own drawing: they
+are D9's measured vocabulary and D97's, and the ticket named the chrome, not the panel. Agent and
+brand logos are identities, not icons. Status dots are markers.
+
+**Discarded:** Lucide (the owner's choice); rasterizing Phosphor's outlines into the colour-emoji
+atlas (D25) — that atlas exists because epaint cannot paint colour glyphs, and Phosphor is monochrome
+outlines epaint already rasterizes; vendoring the TTF with a hand-copied table of codepoints — the
+crate's constants are generated from the face upstream, and its egui 0.36 unifies with eframe's;
+centring each glyph's ink or its line box — the first moves paired glyphs and loses Phosphor's optical
+centre, the second carries ascent padding; `Roles::stands_apart` as the colour check — its 1.03
+separates surfaces, not ink, and passes a yellow at 1.2:1; shipping other weights — about 2 MB for
+nothing the ticket asks.
+
+**Measurement.** The chrome is painted in every batch of `scripts/measure-frame.sh`, so the series
+after this compares like with like; a batch measured before it and one after paint different glyphs
+and are not a delta. Binary: +489 KB.
