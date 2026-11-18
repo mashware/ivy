@@ -756,11 +756,10 @@ impl Screen {
     /// every press, for ever. With nothing selected it starts at the edge of what is being looked
     /// at, so the first press finds what is nearest to the person's eyes.
     ///
-    /// **Whole word and no wrap are decided here, after the engine answers**, because the engine
-    /// knows neither: a candidate whose ends touch a word character is stepped past, and with
-    /// wrapping off a candidate on the far side of where the step started ends it. The engine's
-    /// own walk always wraps, so stepping past rejected candidates **stops when it comes back to
-    /// the first one** — with only rejected candidates in the history it would otherwise never end.
+    /// **Whole word and no wrap are decided here**, because the engine knows neither: a candidate
+    /// whose ends touch a word character is skipped inside the walk
+    /// ([`next_match_that_counts`](Self::next_match_that_counts)), and with wrapping off a match on
+    /// the far side of where the step started ends it.
     ///
     /// **When nothing is found nothing moves**: neither the selection somebody had nor where they
     /// were looking.
@@ -817,34 +816,14 @@ impl Screen {
                 }
         };
 
-        let mut from = origin;
-        let mut first = None;
-        let found = loop {
-            let Some(found) = self
-                .term
-                .search_next(&mut search.regex, from, direction, side, None)
-            else {
-                return Found::Nothing;
-            };
-            // **Whole word is judged before wrapping**, so «no more matches» is only said of a
-            // match that counts: a rejected candidate past the end is not one.
-            let counts = !search.whole_word || crate::search::is_whole_word(&self.term, &found);
-            if counts && !search.wrap && wrapped(&found) {
-                return Found::NoMore;
-            }
-            if counts {
-                break found;
-            }
-            match first {
-                Some(start) if start == *found.start() => return Found::Nothing,
-                None => first = Some(*found.start()),
-                Some(_) => {}
-            }
-            from = match toward {
-                Toward::Older => found.start().sub(&self.term, Boundary::None, 1),
-                Toward::Newer => found.end().add(&self.term, Boundary::None, 1),
-            };
+        let Some(found) = self.next_match_that_counts(search, origin, direction, side) else {
+            return Found::Nothing;
         };
+        // **Whole word is judged before wrapping**, so «no more matches» is only said of a match
+        // that counts: a rejected candidate past the end is not one.
+        if !search.wrap && wrapped(&found) {
+            return Found::NoMore;
+        }
         let (start, end) = (*found.start(), *found.end());
         let mut selection = Selection::new(SelectionType::Simple, start, Side::Left);
         selection.update(end, Side::Right);
@@ -867,6 +846,62 @@ impl Screen {
             self.term.scroll_display(GridScroll::Delta(by as i32));
         }
         Found::Match
+    }
+
+    /// The engine's own next-match step, walked here so whole word can be judged inside the walk.
+    ///
+    /// **One pass, whatever is rejected.** The engine's step rescans from the start of the
+    /// origin's logical line on every call, so stepping past each rejected candidate with a fresh
+    /// call was quadratic: over a history that is one wrapped line, measured at minutes for a
+    /// single press. Here the same iterator, the same start, the same «past the origin» test and
+    /// the same wrap to the first match are kept, and a candidate that does not count is skipped
+    /// in place.
+    fn next_match_that_counts(
+        &self,
+        search: &mut Search,
+        origin: Point,
+        direction: Direction,
+        side: Side,
+    ) -> Option<alacritty_terminal::term::search::Match> {
+        let whole_word = search.whole_word;
+        let origin = self.term.expand_wide(origin, direction);
+        let (start, end) = match direction {
+            Direction::Right => {
+                let start = self.term.line_search_left(origin);
+                (start, start.sub(&self.term, Boundary::None, 1))
+            }
+            Direction::Left => {
+                let start = self.term.line_search_right(origin);
+                (start, start.add(&self.term, Boundary::None, 1))
+            }
+        };
+        let mut first = None;
+        for found in RegexIter::new(start, end, direction, &self.term, &mut search.regex) {
+            if whole_word && !crate::search::is_whole_word(&self.term, &found) {
+                continue;
+            }
+            let at = match side {
+                Side::Right => *found.end(),
+                Side::Left => *found.start(),
+            };
+            let past_the_origin = match direction {
+                Direction::Right => {
+                    at.line < start.line
+                        || at.line > origin.line
+                        || (at.line == origin.line && at.column >= origin.column)
+                }
+                Direction::Left => {
+                    at.line > start.line
+                        || at.line < origin.line
+                        || (at.line == origin.line && at.column <= origin.column)
+                }
+            };
+            if past_the_origin {
+                return Some(found);
+            }
+            first.get_or_insert(found);
+        }
+        first
     }
 
     /// Brings a visible cell into the engine's coordinate system.

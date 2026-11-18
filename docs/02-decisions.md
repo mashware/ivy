@@ -8206,17 +8206,22 @@ searched, and the one-row line took no clicks, so pressing the button seemed to 
   returns rather than with `\b`, because an ASCII boundary takes every non-ASCII character for a
   non-word one and the engine's lazy automata do not take a Unicode one. The check steps over
   wide-character spacers and follows wraps, since the engine's two walks leave a match's ends on
-  different halves of a wide character. Stepping past rejected candidates stops when it comes back
-  to the first, as the engine's walk always wraps — it offers the same disjoint matches in the
-  same cyclic order from any start, so the first comes round again. Whole word is judged before
-  wrapping, so «no more matches» is only said of a match that counts. **Wrap around** — on by default, which is what
+  different halves of a wide character. A rejected candidate is skipped **inside the engine's own
+  walk**, not by asking the engine again past it: the engine's step rescans from the start of the
+  origin's logical line every time, and stepping past rejections that way was quadratic — over a
+  history that is one wrapped line, minutes for one press. Whole word is judged before wrapping, so
+  «no more matches» is only said of a match that counts. **Wrap around** — on by default, which is what
   the search did; off, a step past the last match says «no more matches» and moves nothing.
   Changing an option re-marks the screen and takes back what the box said, as editing the query
   does.
-- **Whole word adds a worst case to the one above**: a query that sits inside a word on every line
-  is found and rejected once per line, each rejection a fresh call into the engine, and over one
-  line wrapped across the whole history each call walks that line again. `cargo run --release
-  --example search -p term-core` measures both; a press over a frame reopens it, as above.
+- **Whole word costs one walk, like a query that is not there.** Measured with `cargo run --release
+  --example search -p term-core` (3 549 rows of 180 columns, two runs of twenty presses each way,
+  19 November 2026): a press that finds nothing **11.4–12.2 ms** at its median as before; a
+  whole-word query rejected on every line **14.2–14.9 ms**, slowest 16.1; the same over one line
+  wrapped across the whole history **14.1–14.5 ms**, slowest 16.4. One frame at 60 Hz once per
+  press, never per frame — the trade above, unchanged in kind. The first version stepped past each
+  rejection with a fresh engine call: **33–42 ms** a press over lines, and over the wrapped line a
+  run of twenty presses did not finish in ten minutes.
 
 | Discarded (#120) | Why |
 |---|---|
