@@ -1,3 +1,4 @@
+#![cfg(test)]
 //! A private message bus exercises the production manager transaction and observer.
 use super::*;
 use std::collections::HashMap;

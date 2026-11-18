@@ -124,7 +124,24 @@ impl PtyOutput {
     /// not find out about either of the two things. Even so it is worth keeping it next to the
     /// `Pty`: separating them leaves a queue without an owner.
     pub fn new(output: Receiver<Vec<u8>>, wake: impl Fn() + Send + 'static) -> Self {
-        let queue = Arc::new(Mutex::new(Queue::default()));
+        Self::seeded(output, Vec::new(), wake)
+    }
+
+    pub(crate) fn seeded(
+        output: Receiver<Vec<u8>>,
+        startup: Vec<u8>,
+        wake: impl Fn() + Send + 'static,
+    ) -> Self {
+        let length = startup.len();
+        let queue = Arc::new(Mutex::new(Queue {
+            bytes: startup.into(),
+            arrivals: if length == 0 {
+                VecDeque::new()
+            } else {
+                VecDeque::from([(length as u64, Instant::now())])
+            },
+            bytes_picked_up: 0,
+        }));
         let thread_queue = Arc::clone(&queue);
         let room = Arc::new(Condvar::new());
         let thread_room = Arc::clone(&room);
@@ -132,7 +149,13 @@ impl PtyOutput {
         let thread_stop = Arc::clone(&stop);
         let (death_sender, death) = channel();
 
+        #[cfg(test)]
+        let before_bridge = tests::BEFORE_BRIDGE.with(|hook| hook.borrow_mut().take());
         std::thread::spawn(move || {
+            #[cfg(test)]
+            if let Some(hook) = before_bridge {
+                hook();
+            }
             // The sender travels to the thread without being used: dropping it **is** the signal
             // that the program has died. It is dropped by hand further below, and the order with
             // the final notification is not a detail: see the comment there.
@@ -539,6 +562,7 @@ fn pump_pane(pane: &mut crate::Pane, enabled: crate::agent_signals::Enabled) -> 
     {
         say_query_error(&error);
     }
+    pane.pty.interpreted(pane.received.len());
     let queried = pane.signals.sync_native(&mut pane.screen, collected_at);
     // Automatic replies must not consume the backlog reserved for the person's input.
     if pane
@@ -557,7 +581,7 @@ fn pump_pane(pane: &mut crate::Pane, enabled: crate::agent_signals::Enabled) -> 
 }
 
 pub(crate) fn resize(pane: &mut crate::Pane) {
-    if pane.pty.pending() {
+    if pane.pty.pending() || pane.pty.startup_pending() {
         return;
     }
     if pane.measured == pane.screen.size() {
@@ -627,11 +651,31 @@ pub(crate) fn pump_all(window: &mut crate::Window) -> crate::Pump {
 }
 
 #[cfg(test)]
+pub(crate) fn hold_next_bridge() -> (Receiver<()>, std::sync::mpsc::Sender<()>) {
+    tests::hold_next_bridge()
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{Duration, Instant};
     use term_core::{Pty, Size};
+
+    thread_local! {
+        pub(crate) static BEFORE_BRIDGE: std::cell::RefCell<Option<Box<dyn FnOnce() + Send>>> = const { std::cell::RefCell::new(None) };
+    }
+    pub(crate) fn hold_next_bridge() -> (Receiver<()>, std::sync::mpsc::Sender<()>) {
+        let (entered, parked) = channel();
+        let (release, resume) = channel();
+        BEFORE_BRIDGE.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move || {
+                entered.send(()).unwrap();
+                resume.recv_timeout(Duration::from_secs(3)).unwrap();
+            }))
+        });
+        (parked, release)
+    }
 
     #[test]
     fn pump_diagnostics_do_not_wait_for_a_full_stderr_pipe() {

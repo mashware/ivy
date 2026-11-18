@@ -91,6 +91,26 @@ fn remaining(deadline: Instant) -> io::Result<Duration> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "launcher deadline expired"))
 }
 
+fn report_unavailable(sentence: String) {
+    static REPORTER: std::sync::OnceLock<Option<std::sync::mpsc::SyncSender<String>>> =
+        std::sync::OnceLock::new();
+    if let Some(sender) = REPORTER.get_or_init(|| {
+        let (sender, receiver) = std::sync::mpsc::sync_channel::<String>(1);
+        std::thread::Builder::new()
+            .name("console-isolation-errors".into())
+            .spawn(move || {
+                for sentence in receiver {
+                    let _ = writeln!(std::io::stderr().lock(), "{sentence}");
+                }
+            })
+            .ok()
+            .map(|_| sender)
+    }) {
+        // Diagnostics never hold the fallback behind a full pipe or a prior diagnostic.
+        let _ = sender.try_send(sentence);
+    }
+}
+
 impl Pty {
     /// Opts into Linux isolation using a host executable supporting [`crate::dispatch_scope_helper`].
     /// Run this complete operation on a launch worker; manager setup shares a one-second deadline.
@@ -228,7 +248,7 @@ impl Pty {
             }
             Err(error) => {
                 if !released {
-                    eprintln!("Ivy console isolation unavailable: {error}");
+                    report_unavailable(format!("Ivy console isolation unavailable: {error}"));
                 }
                 // Before release a failed manager transaction cannot have run user code. Kill this
                 // gated PID before direct fallback, so delayed manager work can never move user work.

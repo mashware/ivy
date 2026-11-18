@@ -10533,12 +10533,17 @@ a basic scope rather than throwing away isolation. A failed gate is killed befor
 so an uncertain late manager operation cannot move the requested program after it starts. After
 exec release an unknown outcome never triggers a second execution. macOS and Windows keep their
 direct launch and have no systemd dependencies.
+Compatibility diagnostics use a bounded, non-panicking reporter: a closed or undrained standard
+error stream must never prevent the requested program from starting.
 
 **Responsiveness.** Linux opening, restoration, fallback and fresh-shell takeover reserve their
 console identity and placement while a launch worker completes. Pending input and the latest grid
 size reach the launched program in order. Closing drops the pending result; a late child is shut
 down on its worker rather than installed. D16's published synchronous restoration timings describe
 the previous launch path; they do not measure the completion latency of these asynchronous launches.
+The worker transfers a finite prefix of already-queued output with its byte watermark. The normal
+frame budget interprets that prefix at the original geometry before resizing or delivering input;
+an empty bridge followed by an immediate resize loses this ordering when its reader starts late.
 The frame report names console launch/status work and subtracts it separately from framework cost.
 No new performance figure is claimed here.
 
@@ -10549,6 +10554,9 @@ signal without OOM evidence earns a generic signal notice. Late or unavailable e
 unknown; neither code 137 nor SIGKILL proves memory pressure. The existing dismissible notice keeps
 the output copyable and prevents automatic window closure. Older managers may isolate without
 providing reliable oomd attribution.
+Before closing checks the child and sends signals, it retires observer reaping under the same
+cache mutex. A stop flag alone cannot exclude an in-flight observer releasing the PID for reuse
+between the last status check and a signal.
 
 **Limits.** Separate leaf scopes improve victim selection; a policy targeting their common
 ancestor or a global kernel OOM may still kill more than one console. Controlled kernel OOM and

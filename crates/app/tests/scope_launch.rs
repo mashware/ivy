@@ -370,3 +370,94 @@ fn real_helper_preserves_resize_input_session_and_root_close() {
         "closing left the root alive"
     );
 }
+
+#[test]
+fn denied_scope_fallback_runs_once_with_closed_or_stalled_stderr() {
+    use std::io::{Read, Write};
+    const CHILD: &str = "IVY_SCOPE_STDERR_FIXTURE";
+    if let Ok(mode) = std::env::var(CHILD) {
+        // The parent settles the pipe state before allowing the launch to reach its diagnostic.
+        let mut release = [0];
+        std::io::stdin().read_exact(&mut release).unwrap();
+        if mode == "stalled" {
+            let flags = unsafe { libc::fcntl(2, libc::F_GETFL) };
+            assert!(flags >= 0);
+            assert_eq!(
+                unsafe { libc::fcntl(2, libc::F_SETFL, flags | libc::O_NONBLOCK) },
+                0
+            );
+            let filler = [b'x'; 8192];
+            loop {
+                let written = unsafe { libc::write(2, filler.as_ptr().cast(), filler.len()) };
+                if written < 0 {
+                    assert_eq!(
+                        std::io::Error::last_os_error().kind(),
+                        std::io::ErrorKind::WouldBlock
+                    );
+                    break;
+                }
+            }
+            assert_eq!(unsafe { libc::fcntl(2, libc::F_SETFL, flags) }, 0);
+        }
+        // The first report may occupy the writer and the second its one queue slot.
+        // A third fallback must also finish without waiting for either.
+        for _ in 0..3 {
+            let (mut pty, output) = Pty::spawn_with_test_launcher_in(
+                launcher(),
+                "stderr-fixture",
+                "/bin/sh",
+                &["-c", "printf 'ONLY-ONCE:END'"],
+                Size::default(),
+                &[],
+                None,
+                TestScopePlacement::Denied,
+            )
+            .unwrap();
+            let mut text = read(&output, ":END");
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while pty.exit_success().is_none() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            while let Ok(bytes) = output.try_recv() {
+                text.push_str(&String::from_utf8_lossy(&bytes));
+            }
+            assert_eq!(pty.exit_success(), Some(true));
+            assert_eq!(text.matches("ONLY-ONCE").count(), 1, "{text}");
+        }
+        return;
+    }
+    for mode in ["closed", "stalled"] {
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "denied_scope_fallback_runs_once_with_closed_or_stalled_stderr",
+                "--nocapture",
+            ])
+            .env(CHILD, mode)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        if mode == "closed" {
+            drop(child.stderr.take());
+        }
+        child.stdin.take().unwrap().write_all(&[1]).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                assert!(
+                    status.success(),
+                    "{mode} stderr prevented fallback: {status}"
+                );
+                break;
+            }
+            if Instant::now() >= deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!("{mode} stderr stalled the scope fallback");
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+}

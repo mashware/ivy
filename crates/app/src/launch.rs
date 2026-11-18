@@ -10,6 +10,22 @@ use term_core::{Backlog, Ending, ForegroundScope, Pty, Size};
 static LAUNCHER: OnceLock<PathBuf> = OnceLock::new();
 type Spawned = (Pty, Receiver<Vec<u8>>);
 
+struct Ready {
+    spawned: Spawned,
+    startup: Vec<u8>,
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn prepare(spawned: Spawned) -> Ready {
+    let mut startup = Vec::new();
+    // term-core holds at most eight 8192-byte reads. Capture that finite FIFO prefix on the
+    // worker, never drain a growing producer or copy its prefix on the drawing thread.
+    for chunk in spawned.1.try_iter().take(8) {
+        startup.extend(chunk);
+    }
+    Ready { spawned, startup }
+}
+
 #[cfg(test)]
 thread_local! {
     static TEST_LAUNCHER: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
@@ -36,6 +52,7 @@ pub(crate) struct Process {
     pub(crate) context: Option<eframe::egui::Context>,
     pending: Option<Pending>,
     input: Vec<u8>,
+    startup: usize,
     input_since: Option<std::time::Instant>,
     refused: bool,
     refusals: u64,
@@ -45,7 +62,7 @@ pub(crate) struct Process {
 }
 
 struct Pending {
-    result: Receiver<term_core::Result<Spawned>>,
+    result: Receiver<term_core::Result<Ready>>,
     _output_open: Sender<Vec<u8>>,
     reads: crate::control::ReadActivity,
 }
@@ -59,6 +76,7 @@ impl From<Pty> for Process {
             context: None,
             pending: None,
             input: Vec::new(),
+            startup: 0,
             input_since: None,
             refused: false,
             refusals: 0,
@@ -121,10 +139,10 @@ impl Process {
                 };
                 match spawn(&program, &args) {
                     Err(error) if fallback => {
-                        eprintln!(
+                        crate::pty_output::say(&format!(
                             "'{program}' could not be launched ({error}); opening {}",
                             crate::FALLBACK_SHELL
-                        );
+                        ));
                         spawn(crate::FALLBACK_SHELL, &[])
                     }
                     result => result,
@@ -137,11 +155,11 @@ impl Process {
         };
         let (pty, output) = match spawn(request.program, request.args) {
             Err(error) if request.fallback => {
-                eprintln!(
+                crate::pty_output::say(&format!(
                     "'{}' could not be launched ({error}); opening {}",
                     request.program,
                     crate::FALLBACK_SHELL
-                );
+                ));
                 spawn(crate::FALLBACK_SHELL, &[])?
             }
             result => result?,
@@ -154,6 +172,12 @@ impl Process {
     }
     pub(crate) fn pending(&self) -> bool {
         self.pending.is_some()
+    }
+    pub(crate) fn startup_pending(&self) -> bool {
+        self.startup != 0
+    }
+    pub(crate) fn interpreted(&mut self, bytes: usize) {
+        self.startup = self.startup.saturating_sub(bytes);
     }
     pub(crate) fn termination(&self) -> term_core::Termination {
         self.terminal
@@ -213,13 +237,16 @@ impl Process {
         })
     }
     pub(crate) fn resize(&mut self, size: Size) -> term_core::Result<()> {
-        if let Some(live) = &mut self.live {
+        if !self.startup_pending()
+            && let Some(live) = &mut self.live
+        {
             live.resize(size)?;
         }
         Ok(())
     }
     pub(crate) fn write(&mut self, bytes: &[u8]) -> term_core::Result<()> {
-        if self.input.is_empty()
+        if !self.startup_pending()
+            && self.input.is_empty()
             && let Some(live) = &mut self.live
         {
             return live.write(bytes);
@@ -243,7 +270,7 @@ impl Process {
         Ok(())
     }
 
-    fn poll(&mut self) -> Option<(Receiver<Vec<u8>>, crate::control::ReadActivity)> {
+    fn poll(&mut self) -> Option<(Receiver<Vec<u8>>, Vec<u8>, crate::control::ReadActivity)> {
         let result = match self.pending.as_ref()?.result.try_recv() {
             Ok(result) => result,
             Err(TryRecvError::Empty) => return None,
@@ -251,9 +278,13 @@ impl Process {
         };
         let pending = self.pending.take()?;
         match result {
-            Ok((pty, output)) => {
+            Ok(Ready {
+                spawned: (pty, output),
+                startup,
+            }) => {
                 self.live = Some(pty);
-                Some((output, pending.reads))
+                self.startup = startup.len();
+                Some((output, startup, pending.reads))
             }
             Err(error) => {
                 self.failure = Some(error.to_string());
@@ -265,7 +296,7 @@ impl Process {
 }
 
 pub(crate) fn complete(pane: &mut crate::Pane) {
-    let Some((output, reads)) = pane.pty.poll() else {
+    let Some((output, startup, reads)) = pane.pty.poll() else {
         if pane.pty.failure.is_some() && pane.restoration.resuming {
             pane.restoration.failed = true;
             pane.restoration.resuming = false;
@@ -274,7 +305,7 @@ pub(crate) fn complete(pane: &mut crate::Pane) {
         return;
     };
     let wake = pane.restoration.wake.clone();
-    pane.pty_output = crate::pty_output::PtyOutput::new(output, move || {
+    pane.pty_output = crate::pty_output::PtyOutput::seeded(output, startup, move || {
         if let Some(wake) = &wake {
             wake();
         }
@@ -377,7 +408,7 @@ pub(crate) fn take_cost(process: &mut Process) -> std::time::Duration {
 }
 
 pub(crate) fn finish_input(pane: &mut crate::Pane) {
-    if pane.pty.live.is_none() || pane.pty.input.is_empty() {
+    if pane.pty.startup_pending() || pane.pty.live.is_none() || pane.pty.input.is_empty() {
         return;
     }
     let before = std::time::Instant::now();
@@ -421,7 +452,7 @@ fn start_worker(
             let _completed = CompletionWake(wake);
             // On receiver cancellation the undelivered child is shut down on this worker.
             let deliver = sender;
-            let _ = deliver.send(operation());
+            let _ = deliver.send(operation().map(prepare));
         })?;
     Ok((
         Process {
@@ -435,6 +466,7 @@ fn start_worker(
                 reads,
             }),
             input: Vec::new(),
+            startup: 0,
             input_since: None,
             refused: false,
             refusals: 0,

@@ -1,7 +1,7 @@
 use super::*;
 use std::time::{Duration, Instant};
 
-fn pending() -> (Process, Sender<term_core::Result<Spawned>>) {
+fn pending() -> (Process, Sender<term_core::Result<Ready>>) {
     let (sender, result) = channel();
     let (output_open, _) = channel();
     (
@@ -16,6 +16,7 @@ fn pending() -> (Process, Sender<term_core::Result<Spawned>>) {
                 reads: Default::default(),
             }),
             input: vec![],
+            startup: 0,
             input_since: None,
             refused: false,
             refusals: 0,
@@ -42,8 +43,8 @@ fn pending_input_and_latest_geometry_reach_the_real_program_in_order() {
         Size::default(),
     )
     .unwrap();
-    complete.send(Ok(child)).unwrap();
-    let (output, _) = process.poll().expect("ready launch");
+    complete.send(Ok(prepare(child))).unwrap();
+    let (output, _, _) = process.poll().expect("ready launch");
     process.resize(Size { rows: 31, cols: 91 }).unwrap();
     let input = std::mem::take(&mut process.input);
     process.live.as_mut().unwrap().write(&input).unwrap();
@@ -75,7 +76,7 @@ fn closing_a_pending_launch_drops_the_late_child_without_resurrecting_the_consol
     .unwrap();
     let bytes = output.recv_timeout(Duration::from_secs(3)).unwrap();
     let pid: i32 = String::from_utf8_lossy(&bytes).trim().parse().unwrap();
-    drop(complete.send(Ok((pty, output))));
+    drop(complete.send(Ok(prepare((pty, output)))));
     let deadline = Instant::now() + Duration::from_secs(3);
     while unsafe { libc::kill(pid, 0) } == 0 && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(2));
@@ -257,58 +258,135 @@ fn a_failed_launch_stays_idle_after_its_notice_is_dismissed() {
 }
 
 #[test]
-fn startup_output_is_interpreted_at_its_original_geometry_before_reflow() {
-    let original = crate::INITIAL_GRID;
-    let narrow = Size {
-        rows: original.rows,
-        cols: original.cols / 2,
-    };
-    let script = format!(
-        "printf 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdef\\033[1;{}H\\033[10DX'; exec /bin/sleep 30",
-        original.cols
-    );
-    let (pty, output) = Pty::spawn("/bin/sh", &["-c", &script], original).unwrap();
-    let bytes = output.recv_timeout(Duration::from_secs(3)).unwrap();
-    let mut expected = term_core::Screen::new(original);
-    expected.advance(&bytes);
-    expected.resize(narrow);
-    let contents = |screen: &term_core::Screen| {
-        screen
-            .view()
-            .cells()
-            .iter()
-            .map(|cell| cell.c)
-            .collect::<Vec<_>>()
-    };
-    let mut wrong_grid = term_core::Screen::new(narrow);
-    wrong_grid.advance(&bytes);
-    assert_ne!(
-        contents(&expected),
-        contents(&wrong_grid),
-        "the fixture must distinguish the wrong startup grid"
-    );
-    let mut pane = crate::Pane::with_panel(&Default::default(), "/bin/cat", &[], None, 0).unwrap();
-    let (process, done) = pending();
-    pane.pty = process;
-    pane.measured = narrow;
-    pane.resize();
-    let (replay, replayed) = channel();
-    replay.send(bytes).unwrap();
-    drop(replay);
-    done.send(Ok((pty, replayed))).unwrap();
-    complete(&mut pane);
-    let deadline = Instant::now() + Duration::from_secs(3);
-    while pane.pty_output.is_alive() && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(2));
+fn startup_prefix_is_interpreted_before_resize_even_with_the_bridge_parked() {
+    for padding in [0, crate::PUMP_BUDGET + 7] {
+        let original = crate::INITIAL_GRID;
+        let narrow = Size {
+            rows: original.rows,
+            cols: original.cols / 2,
+        };
+        let mut prefix = vec![b' '; padding];
+        prefix.extend(format!("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdef\x1b[1;{}H\x1b[10DX", original.cols).bytes());
+        let mut expected = term_core::Screen::new(original);
+        expected.advance(&prefix);
+        expected.resize(narrow);
+        let contents = |screen: &term_core::Screen| {
+            screen
+                .view()
+                .cells()
+                .iter()
+                .map(|cell| cell.c)
+                .collect::<Vec<_>>()
+        };
+        let mut wrong_grid = term_core::Screen::new(narrow);
+        wrong_grid.advance(&prefix);
+        assert_ne!(
+            contents(&expected),
+            contents(&wrong_grid),
+            "fixture must distinguish the wrong grid"
+        );
+        let path =
+            std::env::temp_dir().join(format!("ivy-startup-{}-{padding}", std::process::id()));
+        let script = format!(
+            "read -r line; printf '%s ' \"$line\" > '{}'; stty size >> '{}'; exec /bin/cat",
+            path.display(),
+            path.display()
+        );
+        let child = Pty::spawn("/bin/sh", &["-c", &script], original).unwrap();
+        let (raw, output) = channel();
+        raw.send(prefix.clone()).unwrap();
+        let (woke, ready) = channel();
+        let (mut process, held) = start_worker(
+            std::sync::Arc::new(move || {
+                let _ = woke.send(());
+            }),
+            Default::default(),
+            move || Ok((child.0, output)),
+        )
+        .unwrap();
+        if padding == 0 {
+            process.write(b"first second\n").unwrap();
+        }
+        ready.recv_timeout(Duration::from_secs(3)).unwrap();
+        let mut pane =
+            crate::Pane::with_panel(&Default::default(), "/bin/cat", &[], None, 0).unwrap();
+        pane.pty = process;
+        pane.pty_output = crate::pty_output::PtyOutput::new(held, || {});
+        pane.measured = narrow;
+        let (parked, release) = crate::pty_output::hold_next_bridge();
+        pane.pump(Default::default());
+        parked.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert!(
+            pane.pty_output.is_alive(),
+            "bridge was allowed to finish instead of being parked"
+        );
+        pane.resize();
+        finish_input(&mut pane);
+        if prefix.len() > crate::PUMP_BUDGET {
+            assert_eq!(
+                pane.received.len(),
+                crate::PUMP_BUDGET,
+                "startup bypassed normal frame budget"
+            );
+            assert_eq!(
+                pane.screen.size(),
+                original,
+                "resized with startup bytes outstanding"
+            );
+            assert!(pane.pty.startup_pending());
+            pane.pty.write(b"first second\n").unwrap();
+            pane.pty.write(b"tail").unwrap();
+            finish_input(&mut pane);
+            assert_eq!(
+                pane.pty.input, b"first second\ntail",
+                "live input bypassed startup ordering"
+            );
+            assert!(
+                !path.exists(),
+                "pending input reached the program before reflow"
+            );
+        }
+        for _ in 0..prefix.len().div_ceil(crate::PUMP_BUDGET) {
+            if !pane.pty.startup_pending() {
+                break;
+            }
+            pane.pump(Default::default());
+        }
+        assert!(
+            !pane.pty.startup_pending(),
+            "captured startup bytes never reached the grid"
+        );
+        pane.resize();
+        finish_input(&mut pane);
+        assert_eq!(contents(&pane.screen), contents(&expected));
+        let expected_input = format!("first second {} {}\n", narrow.rows, narrow.cols);
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while std::fs::read_to_string(&path).ok().as_deref() != Some(expected_input.as_str())
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            format!("first second {} {}\n", narrow.rows, narrow.cols)
+        );
+        release.send(()).unwrap();
+        drop(raw);
+        drop(pane);
+        std::fs::remove_file(path).unwrap();
     }
-    pane.pump(Default::default());
-    pane.resize();
-    finish_input(&mut pane);
-    assert_eq!(
-        contents(&pane.screen),
-        contents(&expected),
-        "startup cursor placement used a different grid from the program"
-    );
+}
+
+#[test]
+fn startup_snapshot_has_a_finite_chunk_bound_and_preserves_the_remaining_stream() {
+    let (pty, _output) = Pty::spawn("/bin/cat", &[], Size::default()).unwrap();
+    let (source, output) = channel();
+    for value in 0..9 {
+        source.send(vec![value; 8192]).unwrap();
+    }
+    let ready = prepare((pty, output));
+    assert_eq!(ready.startup.len(), 8 * 8192);
+    assert_eq!(ready.spawned.1.try_recv().unwrap(), vec![8; 8192]);
 }
 
 #[test]
