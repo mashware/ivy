@@ -927,6 +927,16 @@ const SOURCES: &[(&str, &str, usize)] = &[
     ),
     ("src/report.rs", include_str!("../src/report.rs"), 238),
     ("src/search.rs", include_str!("../src/search.rs"), 48),
+    (
+        "src/search/floating.rs",
+        include_str!("../src/search/floating.rs"),
+        15,
+    ),
+    (
+        "src/pointer/search.rs",
+        include_str!("../src/pointer/search.rs"),
+        7,
+    ),
     // Three comment lines moved with the tab interaction to its own module.
     ("src/tab_bar.rs", include_str!("../src/tab_bar.rs"), 162),
     (

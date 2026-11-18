@@ -244,10 +244,8 @@ pub(crate) fn paint_pane(
     );
     let options = pane.search.options;
     if let Some(search) = pane.search.open.as_mut() {
-        let painter = ui.painter_at(panel_split.console);
         search.painted = Some(crate::search::floating::paint(
             ui,
-            &painter,
             search,
             options,
             &view,

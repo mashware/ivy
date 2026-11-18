@@ -8161,6 +8161,60 @@ after these runs; it can only shorten the marking, and the load's lines wrap ove
 | A cap on the query's length | A literal's automaton grows with its length far below the engine's limit, and the only way in is typing or a paste; the engine's own refusal is said instead |
 | Stepping to a match as you type | Each keystroke would pay the walk over the history — up to the figures above — while typing. Marking the matches on screen as you type is kept: it walks the screen and at most `MARKING_REACH` lines beyond it |
 
+**Amended 18 November 2026 — #120: a search button per console, a box, and three options.** With
+several consoles the one search button at the top of the window did not say which console it
+searched, and the one-row line took no clicks, so pressing the button seemed to do nothing.
+
+- **Each console header carries the search button** (magnifier, «Search this console»), in the
+  base group beside review and the panel (D99). It opens or closes the search **on that console**,
+  focused or not, and hands it the keyboard so what is typed next lands in its query. The titlebar
+  button is gone; `key.search` and the application menu's «Search console» still act on the
+  focused console. Leaving the bar moves D96's compact boundary down by the button and its gap:
+  **570 points on Linux and Windows, 533 on macOS**.
+- **The line becomes a box at the console's top-right**: the query, previous (`Shift+Enter`), next
+  (`Enter`), an options button and close (`Escape`), **painted over the console and never cut
+  out of it**, as the line was. It moves to the bottom-right when the current match lies under it;
+  its place comes from the console and the selection on screen only, never from whether the
+  options list is unfolded, so unfolding it cannot move a button a second press is aimed at. The
+  keep-off-the-last-row scroll that served the line is gone with it.
+- **The box takes presses, and what lies under it hears none.** A press on it is claimed before
+  the console's own routing — no selection, no mouse report to a program that asked for the mouse,
+  no context menu or paste from the hidden text — and a press on its field hands that console the
+  keyboard. As with D99's header controls, **only a box painted in the pass before answers**, so one
+  recorded on a console that stopped being painted cannot take a press unseen. A press anywhere
+  else folds an unfolded options list and goes on to what it was aimed at.
+- **The field is painted, not egui's text field**, and that keeps every key rule above: a text
+  field takes every key it is given, and this decision gives every key that is not the search's to
+  the program, which closes the search. So the query is still edited with the keys listed above;
+  clicking inside it does not move a caret, and input-method composition is not offered.
+- **Three options, belonging to the console** and kept while it lives (not across a restart):
+  **Match case** — off by default, and **off means case is ignored always**: the engine's own rule,
+  case-sensitive the moment the query holds an uppercase letter, is retired, because a checkbox
+  that says «off» must not be overruled by what was typed. It is set with an inline flag ahead of
+  the escaped literal. **Whole word only** — a match counts only when neither end touches a
+  letter, digit or `_` of its logical line, in any script; checked on each match the engine
+  returns rather than with `\b`, because an ASCII boundary takes every non-ASCII character for a
+  non-word one and the engine's lazy automata do not take a Unicode one. The check steps over
+  wide-character spacers and follows wraps, since the engine's two walks leave a match's ends on
+  different halves of a wide character. Stepping past rejected candidates stops when it comes back
+  to the first, as the engine's walk always wraps. **Wrap around** — on by default, which is what
+  the search did; off, a step past the last match says «no more matches» and moves nothing.
+  Changing an option re-marks the screen and takes back what the box said, as editing the query
+  does.
+- **Whole word adds a worst case to the one above**: a query that sits inside a word on every line
+  is found and rejected once per line, each rejection a fresh call into the engine, and over one
+  line wrapped across the whole history each call walks that line again. `cargo run --release
+  --example search -p term-core` measures both; a press over a frame reopens it, as above.
+
+| Discarded (#120) | Why |
+|---|---|
+| egui's text field inside a floating area | It takes every key, so arrows, `Ctrl+C` and the rest would edit the query instead of reaching the program and closing the search |
+| The field inside the console header | The ticket asked for a floating box; the header keeps 30 points of title and hides its controls on an unfocused console |
+| Keeping the smart case as the unchecked state | Tilix, GNOME Terminal and VS Code's find read an unchecked box as insensitive; under the smart rule «Needle» would be case-sensitive with the box saying otherwise |
+| `\b` or `(?-u:\b)` in the pattern for whole word | ASCII boundaries match `日本` inside `日本語`; Unicode boundaries are not available to the engine's lazy automata over non-ASCII text |
+| Scrolling the match clear of the box instead of moving the box | At the oldest line, or with the match on the live screen's top rows, nothing can be scrolled |
+| Dropping «Wrap around» because the engine always wraps | The ticket asks for it; off is decided after the engine answers, by where the match lies against the step's start |
+
 
 ## D62 — Pane controls share the strip's geometry and own their entire gesture
 
@@ -10084,13 +10138,13 @@ up to about 456 one too narrow for a pill, so cards, pills and the add button va
 the kit's buttons in the kit's order (`Window.dc.html`), with one change the owner asked for at the
 desktop check: the logo opens the bar and Files stands a little apart after it. Right of the tabs
 come the Board as a framed button with its name, split right and split down, a separator, Markdown,
-search, connect and the menu, a separator, and the window's own buttons. Buttons are the kit's
+search (each console's own header since #120, D61), connect and the menu, a separator, and the window's own buttons. Buttons are the kit's
 28 points (32 for the window's), drawn from its 16-unit line icons in one module (`ui::icons`) that
 the console headers and the drawer use too. Since **D103** that module draws Phosphor glyphs rather
 than the kit's paths; the buttons, their sizes and their order are unchanged. This reverses the earlier choice not to put a Board
 button in the title bar, and moves the splits from the left group to the right — the rail that held
 the tools no longer exists. The compact boundary moves from about 456 to **600 points on Linux and
-Windows and 563 on macOS**; a compact bar lists Files, Markdown and Board in its menu, before
+Windows and 563 on macOS** (570 and 533 since the search button left the bar, D61 amended); a compact bar lists Files, Markdown and Board in its menu, before
 «Connect agents», so a short menu never pushes that entry out. A tool that is on but suppressed says
 on its button's hover how to bring it back.
 
@@ -10376,6 +10430,12 @@ on the focused console, stay. This **amends D66**, whose approved per-pane set h
 | An overflow menu when narrow | One more gesture for every control, to save two cells. |
 | Removing the titlebar's split buttons | Kept by the owner's decision. |
 
+
+**Amended 18 November 2026 — #120.** The base group gains **search** to the left of review: after
+the title, right to left, maximize and close; review, the panel and search; split right and split
+down. It is the console's only search button now that the titlebar's is gone (D61), so it is part
+of the base and not dropped before the title when narrow — the label-only threshold moves up by one
+25-point cell, and the splits still go first.
 
 ## D100 — Configurable font sizes use typographic points (version 2)
 

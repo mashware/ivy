@@ -3658,7 +3658,11 @@ mod tests {
     }
 
     /// Where a part of console `which`'s search box was painted in the last pass.
-    fn search_target(window: &Window, which: usize, target: search::floating::Target) -> egui::Pos2 {
+    fn search_target(
+        window: &Window,
+        which: usize,
+        target: search::floating::Target,
+    ) -> egui::Pos2 {
         let painted = window.active().panes()[which]
             .search
             .open
@@ -3684,16 +3688,35 @@ mod tests {
         let area = tall_area();
         frame(&mut window, &ctx, area, vec![]);
         let names = names_in_order(&window);
-        assert_eq!(window.active().focus, names[0], "the premise: the left one has the keys");
+        assert_eq!(
+            window.active().focus,
+            names[0],
+            "the premise: the left one has the keys"
+        );
         let button = control(&window, &ctx, area, 1, 112.5);
         // The unfocused header shows its controls under the pointer, and a press counts only once
         // they were painted (D99).
-        frame(&mut window, &ctx, area, vec![egui::Event::PointerMoved(button)]);
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::PointerMoved(button)],
+        );
         frame(&mut window, &ctx, area, click_at(button));
         let open = |window: &Window, name| pane_of(window, name).search.is_open();
-        assert!(open(&window, names[1]), "the pressed console's search did not open");
-        assert!(!open(&window, names[0]), "the focused console was searched instead");
-        assert_eq!(window.active().focus, names[1], "the keyboard stayed elsewhere");
+        assert!(
+            open(&window, names[1]),
+            "the pressed console's search did not open"
+        );
+        assert!(
+            !open(&window, names[0]),
+            "the focused console was searched instead"
+        );
+        assert_eq!(
+            window.active().focus,
+            names[1],
+            "the keyboard stayed elsewhere"
+        );
         frame(
             &mut window,
             &ctx,
@@ -3701,11 +3724,19 @@ mod tests {
             vec![egui::Event::Text("needle".into())],
         );
         assert_eq!(
-            pane_of(&window, names[1]).search.open.as_ref().unwrap().query(),
+            pane_of(&window, names[1])
+                .search
+                .open
+                .as_ref()
+                .unwrap()
+                .query(),
             "needle"
         );
         frame(&mut window, &ctx, area, click_at(button));
-        assert!(!open(&window, names[1]), "pressed again, the search stayed open");
+        assert!(
+            !open(&window, names[1]),
+            "pressed again, the search stayed open"
+        );
     }
 
     /// AC5–AC9: the box sits inside its console without resizing it; its buttons do what their keys
@@ -3727,24 +3758,53 @@ mod tests {
             .advance(b"one needle\r\ntwo needle\r\n");
         let at = control(&window, &ctx, area, 0, 112.5);
         frame(&mut window, &ctx, area, click_at(at));
-        frame(&mut window, &ctx, area, vec![egui::Event::Text("needle".into())]);
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::Text("needle".into())],
+        );
         let shapes = frame(&mut window, &ctx, area, vec![]);
         assert!(!shapes.is_empty());
         let pane = pane_of(&window, names[0]);
         let console = pane.painted_console.as_ref().unwrap().area;
-        let box_ = pane.search.open.as_ref().unwrap().painted.as_ref().unwrap().layout.frame;
-        assert!(console.contains_rect(box_), "{box_:?} is not inside {console:?}");
-        assert_eq!(pane.screen.size(), grid, "opening the search resized the console");
+        let box_ = pane
+            .search
+            .open
+            .as_ref()
+            .unwrap()
+            .painted
+            .as_ref()
+            .unwrap()
+            .layout
+            .frame;
+        assert!(
+            console.contains_rect(box_),
+            "{box_:?} is not inside {console:?}"
+        );
+        assert_eq!(
+            pane.screen.size(),
+            grid,
+            "opening the search resized the console"
+        );
 
         // Focus elsewhere, then the field: the console takes the keys back, nothing is selected.
         window.active_mut().focus = names[1];
         frame(&mut window, &ctx, area, vec![]);
         let at = search_target(&window, 0, Target::Field);
         frame(&mut window, &ctx, area, click_at(at));
-        assert_eq!(window.active().focus, names[0], "a press on the field left the keys elsewhere");
+        assert_eq!(
+            window.active().focus,
+            names[0],
+            "a press on the field left the keys elsewhere"
+        );
         let pane = pane_of(&window, names[0]);
         assert!(pane.search.is_open());
-        assert_eq!(pane.screen.selected_text(), None, "the press on the box selected underneath");
+        assert_eq!(
+            pane.screen.selected_text(),
+            None,
+            "the press on the box selected underneath"
+        );
 
         let row_of_selection = |window: &Window| {
             let view = pane_of(window, names[0]).screen.view();
@@ -3766,16 +3826,30 @@ mod tests {
         let at = search_target(&window, 0, Target::Next);
         frame(&mut window, &ctx, area, click_at(at));
         let older = row_of_selection(&window);
-        assert!(older < newest, "next did not walk older: {older:?} then {newest:?}");
+        assert!(
+            older < newest,
+            "next did not walk older: {older:?} then {newest:?}"
+        );
         frame(&mut window, &ctx, area, vec![]);
         let at = search_target(&window, 0, Target::Previous);
         frame(&mut window, &ctx, area, click_at(at));
-        assert_eq!(row_of_selection(&window), newest, "previous did not walk newer");
+        assert_eq!(
+            row_of_selection(&window),
+            newest,
+            "previous did not walk newer"
+        );
 
         frame(&mut window, &ctx, area, vec![]);
         let at = search_target(&window, 0, Target::Options);
         frame(&mut window, &ctx, area, click_at(at));
-        assert!(pane_of(&window, names[0]).search.open.as_ref().unwrap().list);
+        assert!(
+            pane_of(&window, names[0])
+                .search
+                .open
+                .as_ref()
+                .unwrap()
+                .list
+        );
         frame(&mut window, &ctx, area, vec![]);
         let whole_word = search_target(&window, 0, Target::Choice(search::Choice::WholeWord));
         frame(&mut window, &ctx, area, click_at(whole_word));
@@ -3789,14 +3863,20 @@ mod tests {
         let elsewhere = pane_rect(&window, &ctx, area, names[1]).center();
         frame(&mut window, &ctx, area, click_at(elsewhere));
         let pane = pane_of(&window, names[0]);
-        assert!(!pane.search.open.as_ref().unwrap().list, "a press elsewhere left the list open");
+        assert!(
+            !pane.search.open.as_ref().unwrap().list,
+            "a press elsewhere left the list open"
+        );
 
         frame(&mut window, &ctx, area, vec![]);
         window.active_mut().focus = names[0];
         frame(&mut window, &ctx, area, vec![]);
         let at = search_target(&window, 0, Target::Close);
         frame(&mut window, &ctx, area, click_at(at));
-        assert!(!pane_of(&window, names[0]).search.is_open(), "close did not close");
+        assert!(
+            !pane_of(&window, names[0]).search.is_open(),
+            "close did not close"
+        );
     }
 
     /// AC8: what lies under the box is out of sight, so a secondary press on the box opens no
@@ -3836,7 +3916,11 @@ mod tests {
             "a press on the box opened the menu of the console under it"
         );
         frame(&mut window, &ctx, area, vec![]);
-        let console = pane_of(&window, names[0]).painted_console.as_ref().unwrap().area;
+        let console = pane_of(&window, names[0])
+            .painted_console
+            .as_ref()
+            .unwrap()
+            .area;
         frame(&mut window, &ctx, area, secondary(console.center()));
         assert!(
             window.pane_view.is_modal(),

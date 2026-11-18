@@ -204,7 +204,10 @@ mod tests {
         );
         assert!(selected_row(&screen).is_none());
 
-        assert_eq!(screen.find(&mut literal("needle"), Toward::Older), Found::Match);
+        assert_eq!(
+            screen.find(&mut literal("needle"), Toward::Older),
+            Found::Match
+        );
 
         assert_eq!(screen.selected_text().as_deref(), Some("needle"));
         assert!(
@@ -224,7 +227,10 @@ mod tests {
         // literal search can come back with «a.c».
         let mut screen = screen_with(4, &["a.c abc"]);
 
-        assert_eq!(screen.find(&mut literal("a.c"), Toward::Older), Found::Match);
+        assert_eq!(
+            screen.find(&mut literal("a.c"), Toward::Older),
+            Found::Match
+        );
 
         assert_eq!(screen.selected_text().as_deref(), Some("a.c"));
     }
@@ -282,11 +288,17 @@ mod tests {
             .collect();
         let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
         let mut screen = screen_with(4, &lines);
-        assert_eq!(screen.find(&mut literal("item"), Toward::Older), Found::Match);
+        assert_eq!(
+            screen.find(&mut literal("item"), Toward::Older),
+            Found::Match
+        );
         let scroll = screen.view().scroll();
         assert!(scroll > 0, "the premise: the view moved to the match");
 
-        assert_eq!(screen.find(&mut literal("absent"), Toward::Older), Found::Nothing);
+        assert_eq!(
+            screen.find(&mut literal("absent"), Toward::Older),
+            Found::Nothing
+        );
 
         assert_eq!(screen.selected_text().as_deref(), Some("item"));
         assert_eq!(screen.view().scroll(), scroll);
@@ -306,7 +318,10 @@ mod tests {
             screen.advance(format!("filler {n}\r\n").as_bytes());
         }
 
-        assert_eq!(screen.find(&mut literal("needle"), Toward::Older), Found::Nothing);
+        assert_eq!(
+            screen.find(&mut literal("needle"), Toward::Older),
+            Found::Nothing
+        );
         assert_eq!(screen.selected_text(), None);
     }
 
@@ -572,6 +587,9 @@ mod tests {
 
     #[test]
     fn nothing_typed_is_not_a_search() {
-        assert_eq!(Search::literal("", Options::default()).err(), Some(Refused::Empty));
+        assert_eq!(
+            Search::literal("", Options::default()).err(),
+            Some(Refused::Empty)
+        );
     }
 }

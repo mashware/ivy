@@ -107,7 +107,10 @@ impl OnThisConsole {
     /// and says what that cost so the painter can keep it out of its own span.
     pub(crate) fn mark(&mut self, screen: &Screen, view: &mut View) -> Option<std::time::Duration> {
         let options = self.options;
-        self.marking = self.open.as_mut().map(|open| open.mark(screen, view, options));
+        self.marking = self
+            .open
+            .as_mut()
+            .map(|open| open.mark(screen, view, options));
         self.marking.map(|marking| marking.spent)
     }
 
@@ -576,11 +579,20 @@ mod tests {
             ),
         );
         let open = console.open.as_ref().expect("still open");
-        assert_eq!(status(open), "no match", "match case did not reach the engine");
+        assert_eq!(
+            status(open),
+            "no match",
+            "match case did not reach the engine"
+        );
 
         let mut view = screen.view();
         assert_eq!(
-            console.open.as_mut().unwrap().mark(&screen, &mut view, console.options).cells,
+            console
+                .open
+                .as_mut()
+                .unwrap()
+                .mark(&screen, &mut view, console.options)
+                .cells,
             0,
             "the marking ignored match case"
         );
@@ -596,7 +608,12 @@ mod tests {
         );
         let mut view = screen.view();
         assert_eq!(
-            console.open.as_mut().unwrap().mark(&screen, &mut view, console.options).cells,
+            console
+                .open
+                .as_mut()
+                .unwrap()
+                .mark(&screen, &mut view, console.options)
+                .cells,
             6,
             "the marking kept the query compiled with the old option"
         );

@@ -30,7 +30,11 @@ pub(super) fn intercept(window: &mut Window, ui: &egui::Ui) -> bool {
             let Some(open) = pane.search.open.as_ref() else {
                 continue;
             };
-            match open.painted.as_ref().and_then(|box_| box_.hit(frame, button.at)) {
+            match open
+                .painted
+                .as_ref()
+                .and_then(|box_| box_.hit(frame, button.at))
+            {
                 Some(target) => {
                     aimed = Some((pane.name, target));
                     break;

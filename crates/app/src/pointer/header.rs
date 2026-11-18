@@ -18,9 +18,7 @@ pub(super) fn intercept(
     // so a press on it must not open a menu or paste into what lies hidden under it.
     let outcome = crate::header::actions::pointer(window, ui, rects, metrics)
         .or_else(|| search::intercept(window, ui).then(quiet))
-        .or_else(|| {
-            clipboard::intercept(window, ui, rects, metrics, names, now).then(quiet)
-        })?;
+        .or_else(|| clipboard::intercept(window, ui, rects, metrics, names, now).then(quiet))?;
     let releases = Window::collect_the_buttons(ui)
         .into_iter()
         .filter(|button| !button.pressed)
