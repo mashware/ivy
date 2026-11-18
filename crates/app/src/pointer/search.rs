@@ -5,7 +5,7 @@ use super::*;
 /// Takes this pass's first press that fell on a search box painted in the previous pass, and
 /// does what that part of the box does.
 ///
-/// **The press is claimed the way a context-menu press is** (`clipboard::intercept`): held, so
+/// **The press is claimed the way a header control's is**: held while the button stays down, so
 /// the release and any drag after it are nobody else's, and returned before the console loop —
 /// which would otherwise start a selection from it or report it to a program that asked for the
 /// mouse. Taking it out of the queue alone, as the notices do, still lets that loop focus, clear
@@ -48,7 +48,12 @@ pub(super) fn intercept(window: &mut Window, ui: &egui::Ui) -> bool {
         let Some((name, target)) = aimed else {
             continue;
         };
-        window.header_input.hold_context(button.button, frame);
+        let down = ui
+            .ctx()
+            .input(|input| input.pointer.button_down(button.button));
+        window
+            .header_input
+            .claim_press(down.then_some(button.button), frame);
         window.active_mut().focus = name;
         window.drag_in_progress = None;
         if button.button == egui::PointerButton::Primary

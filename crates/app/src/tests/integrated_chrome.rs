@@ -3798,4 +3798,49 @@ mod tests {
         frame(&mut window, &ctx, area, click_at(at));
         assert!(!pane_of(&window, names[0]).search.is_open(), "close did not close");
     }
+
+    /// AC8: what lies under the box is out of sight, so a secondary press on the box opens no
+    /// context menu over the console beneath. The control: the same press on the console does.
+    #[test]
+    fn a_secondary_press_on_the_search_box_opens_no_menu_underneath() {
+        let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
+        let mut window = integrated_pair();
+        let area = tall_area();
+        frame(&mut window, &ctx, area, vec![]);
+        let names = names_in_order(&window);
+        let at = control(&window, &ctx, area, 0, 112.5);
+        frame(&mut window, &ctx, area, click_at(at));
+        frame(&mut window, &ctx, area, vec![]);
+        let secondary = |at: egui::Pos2| {
+            vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Secondary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::default(),
+                },
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Secondary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ]
+        };
+        let field = search_target(&window, 0, search::floating::Target::Field);
+        frame(&mut window, &ctx, area, secondary(field));
+        assert!(
+            !window.pane_view.is_modal(),
+            "a press on the box opened the menu of the console under it"
+        );
+        frame(&mut window, &ctx, area, vec![]);
+        let console = pane_of(&window, names[0]).painted_console.as_ref().unwrap().area;
+        frame(&mut window, &ctx, area, secondary(console.center()));
+        assert!(
+            window.pane_view.is_modal(),
+            "the premise: the same press on the console opens its menu"
+        );
+    }
 }

@@ -29,6 +29,14 @@ impl Input {
         self.blocked_frame = Some(frame);
     }
 
+    /// Claims this pass's pointer for a press another surface took, and holds the button only
+    /// while it is still down: a click whose release came in the same batch leaves nothing held,
+    /// so the next pass's press is not swallowed as the tail of this one.
+    pub(crate) fn claim_press(&mut self, still_down: Option<egui::PointerButton>, frame: u64) {
+        self.held = still_down;
+        self.blocked_frame = Some(frame);
+    }
+
     pub(crate) fn block_for_settings(&mut self, frame: u64) {
         self.menu = None;
         self.pending = None;
