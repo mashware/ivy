@@ -315,8 +315,8 @@ pub struct TabBar {
     /// **Zero means the bar painted no claim.** The cards are painted whether there is a claim or not,
     /// so without this number a batch whose producers did not publish the field would publish the
     /// bar's cost **without the half that has to be measured**, and it would read just like a good one.
-    /// On the integrated bar a card counts only when it drew a ring, so a card with no room even for
-    /// one dot does not count however loudly its consoles claim (D96).
+    /// On the integrated bar a card counts when it drew a ring — on its own dots, or on the one
+    /// summary dot every card the bar keeps has room for (D96).
     pub marked_tabs: usize,
 }
 

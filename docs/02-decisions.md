@@ -10120,32 +10120,37 @@ says which console claims and what; whether anybody still holds the claim up is 
 console's own panel, whose strip keeps the dashed pill and the dimmed words. The owner settled it at
 the desktop check after seeing three ways to mark an unheld claim on the ring — the dimmed colour
 `attention_color` gives it turned the red into a brown, and a thinner or a dashed ring read as
-noise — and asked for every ring thin, vivid and continuous. Dots are 16 points apart, 4 points
-between neighbouring rings, whether or not anything claims, so a claim arriving never moves the
-label; at 1 point apart the owner read the rings as touching. **A card without room for all its
-dots keeps one dot's slot**: a muted dot ringed with
-the tab's loudest claim, wait over block over done — chosen by the owner at review, once it was
-measured that «show nothing» left no claim on the bar with eight two-console tabs in a 1280-point
-window, and none ever on a tab of ten consoles or more. The slot is reserved whether or not anything
-claims, so the label does not move when a claim arrives. Four consoles keep their dots down to 128
-points of card with the cross shown, two down to 96, one dot fits down to 80, and below 80 a card
-shows no claim at all. The compact threshold does not move: the narrowest card keeps its old width, written without
-the pill.
+noise — and asked for every ring thin, vivid and continuous. The price is stated: on a tab you are
+not looking at, nothing on the card says a claim has gone stale; the pill used to dash it there.
+Dots are 16 points apart — 4 points from one ring's band to the next, 4.5 between the painted
+strokes — whether or not anything claims, so a claim arriving never moves the label; at 1 point
+apart the owner read the rings as touching. **A card without room for all its dots keeps one dot's
+slot**: a muted dot ringed with the tab's loudest claim, wait over block over done — chosen by the
+owner at review, once it was measured that «show nothing» left no claim on the bar with eight
+two-console tabs in a 1280-point window. That slot outranks the label, which keeps only the room
+for the tab's number beside it, so **every card the bar keeps — down to the narrowest, before the
+bar turns compact — can show a claim**; a first version that let the label win made the claim blink
+on and off as the window narrowed, through the widths where the card's air and its cross change. The
+slot is reserved whether or not anything claims, so the label does not move when a claim arrives.
+With the cross's room (two tabs or more), four consoles keep their dots down to 128 points of card
+and two down to 96; a tab of eight consoles or more never shows them all, at any width, and gives
+up its project dots for the summary dot. The compact threshold does not move: the narrowest card
+keeps its old width, written without the pill.
 
 *Discarded:* nothing at all when the dots do not fit (the owner's first choice, reversed at review on
-the numbers above); the label giving way to the dots (still leaves ten consoles with nothing); a
-green done ring; a 1.5-point ring (too heavy); for an unheld claim on the tab, the dimmed colour
-(brown red), a grey ring (loses the class), a thinner ring and a dashed one; 1, 3 and 6 points
-between rings. The class reads by colour alone: the pill's glyph does not fit a 6-point dot, and the
-console's own claim strip still carries it.
+the numbers above); the label outranking the summary dot (the claim blinked while resizing); the
+label giving way to all the dots (a tab of many consoles still had nothing); a green done ring; a
+1.5-point ring (too heavy); for an unheld claim on the tab, the dimmed colour (brown red), a grey
+ring (loses the class), a thinner ring and a dashed one; 1, 3 and 6 points between rings. The class
+reads by colour alone: the pill's glyph does not fit a 6-point dot, and the console's own claim
+strip still carries it.
 
 *Measurement:* a card counts as marked when it painted at least one ring, so «tabs marked» still
-counts what was drawn and not what was claimed (a card under 80 points that claims but paints
-nothing is not marked). The batches that paint this bar — `chrome`, `chrome-zoom`, `projects`,
-`dock-v2-4-*` — paint rings instead of pills from this change on, and their reports from before it
-are not averaged with later ones. The two-tab ones need cards of at least 80 points or their run is
-invalidated by the «tabs marked» guard, whose message now names that cause too. `F` and `G` paint the
-historical strip and do not change.
+counts what was drawn and not what was claimed. The batches that paint this bar — `chrome`,
+`chrome-zoom`, `projects`, `dock-v2-4-*` — paint rings instead of pills from this change on, and
+their reports from before it are not averaged with later ones; `measure-frame.sh compare` cannot
+tell the two apart on its own, so that line is the record. `F` and `G` paint the historical strip
+and do not change.
 
 ## D97 — A panel's claim is a strip across its top, and its controls look like controls
 

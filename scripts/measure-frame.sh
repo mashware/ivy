@@ -1976,13 +1976,9 @@ work would be published as framework cost"
     # milestone added to it** and would read exactly like a good one. It is the same deceit the
     # witness prevents with the panels and the effect count with the gestures.
     MARKED_TABS=$(sed -n 's/^tab bar: .* · \([0-9]*\) tabs marked at once at most .*$/\1/p' "$REPORT" | head -1)
-    # On the integrated title bar a card marks only when it drew a ring, so a zero there can also be
-    # a window too narrow for one dot per card (about 80 points of card, D96) — not only a claim
-    # that never arrived.
     if [ "${MARKED_TABS:-0}" = 0 ]; then
         invalidate "the bar was painted $FRAMES_WITH_BAR times and did not mark a single tab: this \
-batch measures the walk without what gets walked (the claim never arrived, or the integrated \
-cards had no room for a ringed dot)"
+batch measures the walk without what gets walked"
     fi
     echo "frames with the bar painted: $FRAMES_WITH_BAR · tabs marked at once: $MARKED_TABS" >&2
 fi
