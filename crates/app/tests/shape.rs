@@ -336,6 +336,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/settings/editor/view/footer.rs"),
     ),
     (
+        "src/settings/editor/view/dialog.rs",
+        include_str!("../src/settings/editor/view/dialog.rs"),
+    ),
+    (
         "src/settings/editor/view/typography.rs",
         include_str!("../src/settings/editor/view/typography.rs"),
     ),

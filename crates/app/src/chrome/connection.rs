@@ -288,15 +288,7 @@ fn show(guide: &mut Guide, ctx: &egui::Context, theme: &crate::theme::Theme) {
             // The chrome's dialogs read at Settings' measures (D67's native review).
             crate::settings::editor::view::settings_geometry(ui.style_mut());
             ui.set_width((available.x - 64.0).clamp(80.0, 560.0));
-            ui.horizontal_top(|ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                    close |= crate::ui::icons::close_button(ui).clicked();
-                    ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                        ui.heading("Connect agents");
-                    });
-                });
-            });
-            ui.separator();
+            close |= crate::settings::editor::view::dialog::header(ui, "Connect agents");
             egui::ScrollArea::vertical()
                 .id_salt("agent-setup-scroll")
                 .max_height((available.y - 150.0).max(40.0))

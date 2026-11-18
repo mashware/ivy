@@ -4,6 +4,7 @@ use eframe::egui;
 use std::time::Instant;
 mod appearance;
 mod colors;
+pub(crate) mod dialog;
 mod footer;
 mod palette;
 pub(super) mod typography;
