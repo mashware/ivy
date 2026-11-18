@@ -838,6 +838,13 @@ mod tests {
         let original = window.active().root.describe();
         let names = names_in_order(&window);
         let zoom = control(&window, &ctx, area, 1, 37.5);
+        // An unfocused header's controls are pressable once a pass has painted them (D99).
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::PointerMoved(zoom)],
+        );
         let shapes = frame(&mut window, &ctx, area, click_at(zoom));
         assert_eq!(window.active().focus, names[1]);
         assert_eq!(
@@ -853,6 +860,271 @@ mod tests {
         assert!(the_text_queued_up(&shapes, "Console 1"));
         assert!(the_text_queued_up(&shapes, "Console 2"));
         assert_eq!(window.active().root.describe(), original);
+    }
+
+    fn tall_area() -> egui::Rect {
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 800.0))
+    }
+
+    fn pane_rect(
+        window: &Window,
+        ctx: &egui::Context,
+        area: egui::Rect,
+        name: usize,
+    ) -> egui::Rect {
+        let m = CellMetrics::measure(ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
+        let work = tab_bar::geometry(window, area, &m).consoles;
+        let at = names_in_order(window)
+            .iter()
+            .position(|n| *n == name)
+            .unwrap();
+        pane_view::view_tiling(window, work, &m).parts[at]
+    }
+
+    /// The six control cells of console `which`'s header, from the left of split right to close.
+    fn control_cells(
+        window: &Window,
+        ctx: &egui::Context,
+        area: egui::Rect,
+        which: usize,
+    ) -> egui::Rect {
+        let m = CellMetrics::measure(ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
+        let right = control(window, ctx, area, which, 0.0).x;
+        let rect = pane_rect(window, ctx, area, names_in_order(window)[which]);
+        egui::Rect::from_min_max(
+            egui::pos2(right - 150.0, rect.top()),
+            egui::pos2(right, rect.top() + header::height(&m, window.headers)),
+        )
+    }
+
+    /// Strokes of icons and rules painted inside `cells`.
+    fn strokes_in(shapes: &[egui::epaint::ClippedShape], cells: egui::Rect) -> usize {
+        shapes
+            .iter()
+            .filter(|s| match &s.shape {
+                egui::Shape::Path(path) => path.points.first().is_some_and(|p| cells.contains(*p)),
+                egui::Shape::LineSegment { points, .. } => cells.contains(points[0]),
+                _ => false,
+            })
+            .count()
+    }
+
+    fn integrated_pair() -> Window {
+        let mut window = window_with("sleep 30", "sleep 30");
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        window
+    }
+
+    /// D99: an unfocused console is split from its own header, beside it or below it, and the
+    /// focused console does not move.
+    #[test]
+    fn an_unfocused_console_splits_from_its_own_header() {
+        for (from_right, beside) in [(137.5, true), (112.5, false)] {
+            let ctx = egui::Context::default();
+            let mut window = integrated_pair();
+            let area = tall_area();
+            frame(&mut window, &ctx, area, vec![]);
+            let names = names_in_order(&window);
+            assert_eq!(
+                window.active().focus,
+                names[0],
+                "the right console must be unfocused"
+            );
+            let left_before = pane_rect(&window, &ctx, area, names[0]);
+            let owner_before = pane_rect(&window, &ctx, area, names[1]);
+            let at = control(&window, &ctx, area, 1, from_right);
+            frame(&mut window, &ctx, area, vec![egui::Event::PointerMoved(at)]);
+            frame(&mut window, &ctx, area, click_at(at));
+            frame(&mut window, &ctx, area, vec![]);
+            let after = names_in_order(&window);
+            assert_eq!(after.len(), 3, "from_right={from_right}: nothing was split");
+            let newborn = *after.iter().find(|n| !names.contains(n)).unwrap();
+            let born = pane_rect(&window, &ctx, area, newborn);
+            let owner = pane_rect(&window, &ctx, area, names[1]);
+            let left = pane_rect(&window, &ctx, area, names[0]);
+            // Re-tiling three siblings rounds each edge to a whole point, no more.
+            assert!(
+                (left.min - left_before.min).length() <= 1.0
+                    && (left.max - left_before.max).length() <= 1.0,
+                "the focused console moved: {left_before:?} -> {left:?}"
+            );
+            assert!(owner_before.expand(1.0).contains_rect(born));
+            if beside {
+                assert!(
+                    born.left() > owner.right() - 1.0 && (born.top() - owner.top()).abs() < 1.0
+                );
+            } else {
+                assert!(
+                    born.top() > owner.bottom() - 1.0 && (born.left() - owner.left()).abs() < 1.0
+                );
+            }
+        }
+    }
+
+    /// D99: only the focused console shows its controls with the pointer elsewhere; another shows
+    /// them while the pointer is over its header, and its title stays where it was.
+    #[test]
+    fn an_unfocused_header_shows_its_controls_only_under_the_pointer() {
+        let ctx = egui::Context::default();
+        let mut window = integrated_pair();
+        let area = tall_area();
+        frame(&mut window, &ctx, area, vec![]);
+        let names = names_in_order(&window);
+        let focused_cells = control_cells(&window, &ctx, area, 0);
+        let cells = control_cells(&window, &ctx, area, 1);
+        let body = pane_rect(&window, &ctx, area, names[1]).center();
+        let away = frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::PointerMoved(body)],
+        );
+        assert_eq!(strokes_in(&away, cells), 0, "hidden controls were painted");
+        assert!(
+            strokes_in(&away, focused_cells) > 0,
+            "the focused console hid its controls"
+        );
+        let title = egui::pos2(cells.left() - 40.0, cells.center().y);
+        let over = frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::PointerMoved(title)],
+        );
+        assert!(
+            strokes_in(&over, cells) > 0,
+            "the controls did not appear under the pointer"
+        );
+        let header = egui::Rect::from_min_max(
+            egui::pos2(pane_rect(&window, &ctx, area, names[1]).left(), cells.top()),
+            egui::pos2(cells.left(), cells.bottom()),
+        );
+        let titles = |shapes: &[egui::epaint::ClippedShape]| -> Vec<(String, egui::Pos2)> {
+            shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Text(t) if header.contains(t.pos) => {
+                        Some((t.galley.text().to_owned(), t.pos))
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        assert!(!titles(&away).is_empty(), "the title was not found");
+        assert_eq!(
+            titles(&away),
+            titles(&over),
+            "the title moved when the controls appeared"
+        );
+    }
+
+    /// D99 after D96: a move and a press in one batch on an unfocused console's close cannot close
+    /// it, because nothing was painted there; the same press after a pass under the pointer does.
+    #[test]
+    fn a_hidden_close_cannot_be_pressed_until_it_was_painted() {
+        let ctx = egui::Context::default();
+        let mut window = integrated_pair();
+        let area = tall_area();
+        frame(&mut window, &ctx, area, vec![]);
+        let close = control(&window, &ctx, area, 1, 12.5);
+        frame(&mut window, &ctx, area, click_at(close));
+        frame(&mut window, &ctx, area, vec![]);
+        assert_eq!(
+            window.active().panes().len(),
+            2,
+            "an unseen close closed its console"
+        );
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::PointerMoved(close)],
+        );
+        frame(&mut window, &ctx, area, click_at(close));
+        frame(&mut window, &ctx, area, vec![]);
+        assert_eq!(
+            window.active().panes().len(),
+            1,
+            "a painted close did not close"
+        );
+    }
+
+    /// A console too short to split below offers only the split beside it, in the cell next to
+    /// the review; a maximized console offers neither.
+    #[test]
+    fn a_split_that_cannot_fit_is_not_offered_and_a_maximized_console_offers_none() {
+        let ctx = egui::Context::default();
+        let mut window = integrated_pair();
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 200.0));
+        frame(&mut window, &ctx, area, vec![]);
+        let names = names_in_order(&window);
+        let m = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
+        let short = pane_rect(&window, &ctx, area, names[1]);
+        assert!(
+            !crate::tiling::can_split_content(
+                short,
+                crate::tiling::Orientation::Rows,
+                &m,
+                window.headers
+            ) && crate::tiling::can_split_content(
+                short,
+                crate::tiling::Orientation::Columns,
+                &m,
+                window.headers
+            ),
+            "this test needs a console that fits a split beside it and not below it: {short:?}"
+        );
+        let next_to_review = control(&window, &ctx, area, 1, 112.5);
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::PointerMoved(next_to_review)],
+        );
+        frame(&mut window, &ctx, area, click_at(next_to_review));
+        frame(&mut window, &ctx, area, vec![]);
+        let after = names_in_order(&window);
+        assert_eq!(after.len(), 3);
+        let newborn = *after.iter().find(|n| !names.contains(n)).unwrap();
+        let born = pane_rect(&window, &ctx, area, newborn);
+        let owner = pane_rect(&window, &ctx, area, names[1]);
+        assert!(
+            (born.top() - owner.top()).abs() < 1.0,
+            "a console too short to split below was split below"
+        );
+
+        let ctx = egui::Context::default();
+        let mut window = integrated_pair();
+        let area = tall_area();
+        frame(&mut window, &ctx, area, vec![]);
+        let zoom = control(&window, &ctx, area, 0, 37.5);
+        frame(&mut window, &ctx, area, click_at(zoom));
+        assert!(window.pane_view.zoomed(window.active().name).is_some());
+        let cells = control_cells(&window, &ctx, area, 0);
+        let splits =
+            egui::Rect::from_min_max(cells.min, egui::pos2(cells.left() + 50.0, cells.bottom()));
+        let shapes = frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::PointerMoved(splits.center())],
+        );
+        assert_eq!(
+            strokes_in(&shapes, splits),
+            0,
+            "a maximized console painted a split"
+        );
+        for from_right in [137.5, 112.5] {
+            let at = control(&window, &ctx, area, 0, from_right);
+            frame(&mut window, &ctx, area, click_at(at));
+            frame(&mut window, &ctx, area, vec![]);
+        }
+        assert_eq!(
+            window.active().panes().len(),
+            2,
+            "a maximized console was split"
+        );
     }
 
     #[test]

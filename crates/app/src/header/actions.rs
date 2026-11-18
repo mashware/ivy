@@ -51,6 +51,29 @@ pub(crate) fn enabled(
     ]
 }
 
+/// What a press reaches on an integrated header, with the offer the painting built for it.
+#[allow(clippy::too_many_arguments)]
+fn integrated_hit(
+    window: &Window,
+    ctx: &egui::Context,
+    name: usize,
+    rect: egui::Rect,
+    strip: egui::Rect,
+    rects: &[egui::Rect],
+    metrics: &CellMetrics,
+    at: egui::Pos2,
+) -> Option<super::integrated::Target> {
+    let zoomed = window.pane_view.zoomed(window.active().name) == Some(name);
+    let offer = super::integrated::Offer::of(
+        rect,
+        metrics,
+        window.headers,
+        super::Button::in_a_tab_of(rects).is_drawn(),
+        zoomed,
+    );
+    super::integrated::hit(strip, offer, super::integrated::revealed(ctx, name), at)
+}
+
 /// Called inside the mouse stopwatch; splitting must not subtract its work a second time.
 pub(crate) fn pointer(
     window: &mut Window,
@@ -113,8 +136,16 @@ pub(crate) fn pointer(
                 let strip = pane
                     .chrome_within(*rect, metrics, SystemTime::now(), window.headers)
                     .header()?;
-                (super::integrated::hit(strip, metrics, rects.len() > 1, pos)
-                    == Some(super::integrated::Target::Label))
+                (integrated_hit(
+                    window,
+                    ui.ctx(),
+                    pane.name,
+                    *rect,
+                    strip,
+                    rects,
+                    metrics,
+                    pos,
+                ) == Some(super::integrated::Target::Label))
                 .then_some(pane.name)
             });
         if let Some(name) = owner {
@@ -199,8 +230,17 @@ pub(crate) fn pointer(
                     let strip = pane
                         .chrome_within(*rect, metrics, SystemTime::now(), window.headers)
                         .header()?;
-                    super::integrated::hit(strip, metrics, rects.len() > 1, *pos)
-                        .map(|target| (pane.name, target))
+                    integrated_hit(
+                        window,
+                        ui.ctx(),
+                        pane.name,
+                        *rect,
+                        strip,
+                        rects,
+                        metrics,
+                        *pos,
+                    )
+                    .map(|target| (pane.name, target))
                 });
             if let Some((name, target)) = hit {
                 if target == super::integrated::Target::Label {
@@ -221,6 +261,12 @@ pub(crate) fn pointer(
                             .unwrap_or_else(|| format!("Console {}", name + 1));
                         window.pane_view.begin_rename(tab, name, initial);
                         false
+                    }
+                    super::integrated::Target::SplitRight => {
+                        apply(window, name, Action::SplitRight, ui.ctx(), metrics)
+                    }
+                    super::integrated::Target::SplitDown => {
+                        apply(window, name, Action::SplitDown, ui.ctx(), metrics)
                     }
                     super::integrated::Target::Review => {
                         crate::viewer::open_diff_for_pane(window, name);
