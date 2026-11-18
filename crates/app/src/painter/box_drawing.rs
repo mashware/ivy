@@ -5,12 +5,12 @@
 //! floored to whole pixels (**D34**), so neighbours overlap and their antialiased ends composite
 //! twice into a bright bead at every seam. And its stroke sits at the font's fractional height and
 //! thickness, so it is spread over two or three partly covered rows. Both were measured, at five
-//! scales and with two fonts, in issue #103.
+//! scales and with two fonts; the figures are in **D35**'s amendment.
 //!
 //! **So the shape is computed in device pixels and painted as disjoint rectangles.** Every
-//! thickness and every band position is a whole number of pixels taken from the cell's own pixel
-//! size, which every cell of a grid shares, so a band leaves one cell at exactly the rows the next
-//! one enters at. Kitty, WezTerm, Ghostty and VTE all draw this range themselves.
+//! thickness is a whole number of pixels, taken from the font's size and the screen's scale, and
+//! every band position is taken from the cell's own pixel size, which every cell of a grid shares,
+//! so a band leaves one cell at exactly the rows the next one enters at. Kitty, WezTerm, Ghostty and VTE all draw this range themselves.
 //!
 //! **The cell is rasterized into a mask first and the mask is cut into rectangles**, rather than
 //! one rectangle per arm. Arms meet at the joint, and two translucent rectangles over the same
@@ -18,7 +18,7 @@
 //! it is also what draws the arcs.
 
 /// How heavy an arm is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Weight {
     None,
     Light,
@@ -29,7 +29,7 @@ pub(crate) enum Weight {
 use Weight::{Double as D, Heavy as H, Light as L, None as N};
 
 /// What one character draws: its four arms, whether it is dashed and whether its corner is round.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct Shape {
     /// Left, right, up, down.
     arms: [Weight; 4],
@@ -284,10 +284,11 @@ impl Mask {
 
     /// Straight arms, single or double, meeting at the joint.
     ///
-    /// **A single arm stops where the perpendicular one starts**, which a union makes harmless.
-    /// **A double arm is two light lines a light line apart**, and each of its lines ends against
-    /// the line of the perpendicular arm it would otherwise cross: that is what leaves `╬` its
-    /// four corners and `╦` its gap underneath.
+    /// **A single arm runs through the joint**, to the far edge of the perpendicular band, so two
+    /// arms of one axis overlap there and an arm always meets the other axis; the union makes the
+    /// overlap harmless. **A double arm is two light lines a light line apart**, and each of its
+    /// lines ends against the line of the perpendicular arm it would otherwise cross: that is what
+    /// leaves `╬` its four corners and `╦` its gap underneath.
     fn lines(&mut self, shape: Shape, light: i32) {
         let [left, right, up, down] = shape.arms;
         let (w, h) = (self.width, self.height);
@@ -315,10 +316,14 @@ impl Mask {
         let (row_two, column_two) = (row_one + light * 2, column_one + light * 2);
         let horizontal_double = left == D || right == D;
         let vertical_double = up == D || down == D;
-        // A single arm meeting a double axis: across the gap where the double passes through,
-        // against its near line where the double turns a corner.
+        // A single arm meeting a double axis stops at the double's near line only where the double
+        // passes through and the single does not — a tee, `╟` `╤`. Where the double turns a
+        // corner (`╓`) it reaches the far line, and where the single crosses too (`╪` `╫`) it
+        // runs through both lines unbroken.
         let both_vertical = up != N && down != N;
         let both_horizontal = left != N && right != N;
+        let tee_on_vertical_double = both_vertical && !both_horizontal;
+        let tee_on_horizontal_double = both_horizontal && !both_vertical;
 
         for (weight, is_right) in [(left, false), (right, true)] {
             match weight {
@@ -352,7 +357,7 @@ impl Mask {
                 _ => {
                     let thick = single(weight);
                     let (start, end) = if vertical_double {
-                        let near = if both_vertical == is_right {
+                        let near = if tee_on_vertical_double == is_right {
                             column_two
                         } else {
                             column_one
@@ -402,7 +407,7 @@ impl Mask {
                 _ => {
                     let thick = single(weight);
                     let (start, end) = if horizontal_double {
-                        let near = if both_horizontal == is_down {
+                        let near = if tee_on_horizontal_double == is_down {
                             row_two
                         } else {
                             row_one
@@ -432,7 +437,7 @@ impl Mask {
     /// a few pixels. Taking only the pixels the stroke's centre line passes through left two pixels
     /// touching at a corner, and antialiasing them left them at half ink beside lines at full ink.
     /// Both read as a gap in the corner of the box on the desktop. A pixel the stroke covers at
-    /// least a third of is inked whole, which makes each step share an edge with the next.
+    /// least a third of — by an estimate from its distance to the curve, not its area — is inked whole, which makes each step share an edge with the next.
     fn arc(&mut self, shape: Shape, light: i32) {
         let [left, _, up, _] = shape.arms;
         let (w, h) = (self.width, self.height);
@@ -514,28 +519,32 @@ impl Mask {
 
 /// The pieces of `from..to` a line cut into `dashes` dashes keeps, each followed by its gap.
 ///
-/// **The gap goes at the end of each piece, not around it**, so the last gap of one cell and the
-/// first dash of the next keep the same rhythm across the seam.
+/// **The gap goes at the end of each piece, not around it**, so a cell's last gap sits at its
+/// seam and the next cell starts on a dash. **A span with no room for every dash and its gap is
+/// drawn solid**: dropping one gap would merge two dashes into one and draw a different character,
+/// with nothing to say so.
 fn dashes_of(from: i32, to: i32, dashes: u8) -> Vec<(i32, i32)> {
-    if dashes == 0 {
-        return vec![(from, to)];
-    }
     let n = i32::from(dashes);
     let span = to - from;
+    if dashes == 0 || span < n * 2 {
+        return vec![(from, to)];
+    }
     let gap = (span / (n * 3)).max(1);
+    // Every piece is at least two pixels wide here, so a dash keeps at least one.
     (0..n)
-        .map(|i| {
-            let start = from + span * i / n;
-            let end = from + span * (i + 1) / n;
-            // Where a piece is too short to hold both, the dash wins: a line with no gaps is a
-            // line, a dash of nothing is not there.
-            if end - start > gap {
-                (start, end - gap)
-            } else {
-                (start, end)
-            }
-        })
+        .map(|i| (from + span * i / n, from + span * (i + 1) / n - gap))
         .collect()
+}
+
+thread_local! {
+    /// What each shape comes out as at a cell size and a thickness, kept across frames.
+    ///
+    /// **The painter runs on every frame and a TUI's borders put hundreds of these on screen**, while
+    /// the drawing depends on nothing but the shape and those three numbers. Rasterizing each cell
+    /// again was a mask allocation and a pass over its pixels per cell per frame, where the font path
+    /// it replaced reused the engine's laid-out glyph.
+    static DRAWN: std::cell::RefCell<std::collections::HashMap<(Shape, i32, i32, i32), Vec<Run>>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
 /// Paints a box drawing character over its cell.
@@ -558,19 +567,31 @@ pub(super) fn paint(
     let width = (slot.right() * per_point).round() - left;
     let height = (slot.bottom() * per_point).round() - top;
     let light = light_thickness(font_points, per_point);
-    for (x0, y0, x1, y1) in runs(shape, width as i32, height as i32, light) {
-        let rect = Rect::from_min_max(
-            pos2(
-                (left + x0 as f32) / per_point,
-                (top + y0 as f32) / per_point,
-            ),
-            pos2(
-                (left + x1 as f32) / per_point,
-                (top + y1 as f32) / per_point,
-            ),
-        );
-        painter.rect_filled(rect, 0.0, color);
-    }
+    let key = (shape, width as i32, height as i32, light);
+    DRAWN.with(|drawn| {
+        let mut drawn = drawn.borrow_mut();
+        // One cell size per font and scale, so this holds a handful of sizes; a change of size
+        // leaves old entries behind, and the ceiling keeps them from piling up.
+        if drawn.len() >= 1024 {
+            drawn.clear();
+        }
+        let pieces = drawn
+            .entry(key)
+            .or_insert_with(|| runs(shape, key.1, key.2, light));
+        for &(x0, y0, x1, y1) in pieces.iter() {
+            let rect = Rect::from_min_max(
+                pos2(
+                    (left + x0 as f32) / per_point,
+                    (top + y0 as f32) / per_point,
+                ),
+                pos2(
+                    (left + x1 as f32) / per_point,
+                    (top + y1 as f32) / per_point,
+                ),
+            );
+            painter.rect_filled(rect, 0.0, color);
+        }
+    });
 }
 
 #[cfg(test)]

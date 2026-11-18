@@ -4,9 +4,9 @@ use crate::theme::Theme;
 use eframe::egui::{Context, FontId, Id, LayerId, Order, Pos2, Shape as Drawn, epaint::RectShape};
 use term_core::{Screen, Size};
 
-/// The scales the defect was measured at in #103, a fractional font size among them so the cell
-/// comes out odd on some axis.
+/// The scales the defect was measured at (D35's amendment).
 const SCALES: [f32; 5] = [1.0, 1.25, 1.5, 5.0 / 3.0, 2.0];
+/// A fractional font size among them, so the cell comes out odd on some axis.
 const BODIES: [f32; 2] = [14.0, 14.7];
 
 /// Paints `bytes` with the production painter and returns what it drew: rectangles, and how many
@@ -66,7 +66,7 @@ fn coverage(rects: &[RectShape], per_point: f32) -> std::collections::BTreeMap<(
 
 #[test]
 fn a_run_of_lines_is_a_band_of_whole_rows_each_pixel_painted_once() {
-    // **The two defects of #103, asserted where a person sees them**: on the pixels. Painted
+    // **The two defects of D35's amendment, asserted where a person sees them**: on the pixels. Painted
     // from the font, a run of `─` overlaps at every seam — a pixel covered twice — and its stroke
     // straddles rows, so a row is covered under one cell and not under the next, or not to the
     // end. A band is the same set of rows at every column from the first cell to the last.
@@ -233,17 +233,24 @@ fn a_box_drawn_by_the_painter_closes_at_every_corner_and_seam() {
     // inked twice. Asserted on the device pixels of the whole frame, with topology instead of a
     // shape: the strokes are four-connected rings — one, or two for a double line — and the empty
     // pixels around them split into the outside plus one hole per ring, eight-connected, so a
-    // corner that only touches its neighbour diagonally lets the hole leak out and fails.
+    // corner that only touches its neighbour diagonally lets the hole leak out and fails. A rounded
+    // corner is held to the same pairing: its staircase shares an edge from step to step.
     //
-    // A rounded corner is the exception and the pairing flips: a light arc is a staircase of
-    // whole pixels that steps diagonally by design, so its ink is joined eight ways and the holes
-    // are counted four ways — still the pairing in which a one-pixel gap splits the stroke and
-    // lets the inside out.
-    for (frame, rings, curved) in [
-        ("┌──┐\r\n│  │\r\n└──┘", 1, false),
-        ("┏━━┓\r\n┃  ┃\r\n┗━━┛", 1, false),
-        ("╔══╗\r\n║  ║\r\n╚══╝", 2, false),
-        ("╭──╮\r\n│  │\r\n╰──╯", 1, true),
+    // **The grids are where the joints inside a cell are asserted**, which the edges of a single
+    // cell cannot see: a tee or a cross that leaves a gap, or a double whose lines run through
+    // where they should stop, changes the number of holes. The channel between the two lines of
+    // a double is a hole of its own, closed at each end by the line that crosses it, so a single
+    // line that breaks where it crosses a double (`╪` `╫`) merges two channels into one.
+    for (frame, rings, holes) in [
+        ("┌──┐\r\n│  │\r\n└──┘", 1, 1),
+        ("┏━━┓\r\n┃  ┃\r\n┗━━┛", 1, 1),
+        ("╔══╗\r\n║  ║\r\n╚══╝", 2, 2),
+        ("╭──╮\r\n│  │\r\n╰──╯", 1, 1),
+        ("┌─┬─┐\r\n│ │ │\r\n├─┼─┤\r\n│ │ │\r\n└─┴─┘", 1, 4),
+        ("┏━┳━┓\r\n┃ ┃ ┃\r\n┣━╋━┫\r\n┃ ┃ ┃\r\n┗━┻━┛", 1, 4),
+        ("╔═╦═╗\r\n║ ║ ║\r\n╠═╬═╣\r\n║ ║ ║\r\n╚═╩═╝", 5, 5),
+        ("╒═╤═╕\r\n│ │ │\r\n╞═╪═╡\r\n│ │ │\r\n╘═╧═╛", 1, 8),
+        ("╓─╥─╖\r\n║ ║ ║\r\n╟─╫─╢\r\n║ ║ ║\r\n╙─╨─╜", 1, 8),
     ] {
         for per_point in SCALES {
             for body in BODIES {
@@ -261,7 +268,7 @@ fn a_box_drawn_by_the_painter_closes_at_every_corner_and_seam() {
                 );
                 let ink: std::collections::BTreeSet<(i32, i32)> = covered.keys().copied().collect();
                 assert_eq!(
-                    pieces(&ink, curved),
+                    pieces(&ink, false),
                     rings,
                     "{at}: the strokes break into pieces, a gap at a corner or a seam"
                 );
@@ -275,8 +282,8 @@ fn a_box_drawn_by_the_painter_closes_at_every_corner_and_seam() {
                     .filter(|pixel| !ink.contains(pixel))
                     .collect();
                 assert_eq!(
-                    pieces(&empty, !curved),
-                    1 + rings,
+                    pieces(&empty, true),
+                    1 + holes,
                     "{at}: the inside leaks to the outside, the frame does not close"
                 );
             }
@@ -369,24 +376,90 @@ fn every_arm_reaches_its_edge_on_the_rows_the_neighbouring_line_uses() {
 }
 
 #[test]
-fn every_dashed_line_is_cut_into_its_number_of_dashes() {
-    for (c, expected) in [
-        ('┄', 3),
-        ('┅', 3),
-        ('┆', 3),
-        ('┈', 4),
-        ('┋', 4),
-        ('╌', 2),
-        ('╏', 2),
+fn every_dashed_line_is_cut_into_its_number_of_dashes_or_drawn_solid() {
+    // A cell too short for every dash and its gap is drawn solid: dropping one gap would merge two
+    // dashes and draw a different character — `┈` as three uneven dashes at seven pixels.
+    for (c, dashes, horizontal) in [
+        ('┄', 3, true),
+        ('┅', 3, true),
+        ('┆', 3, false),
+        ('┈', 4, true),
+        ('┋', 4, false),
+        ('╌', 2, true),
+        ('╏', 2, false),
     ] {
         let shape = shape_of(c).unwrap();
-        for (w, h) in [(8, 17), (16, 34)] {
+        for (w, h) in [(7, 17), (8, 17), (16, 34)] {
+            let span = if horizontal { w } else { h };
+            let expected = if span < dashes * 2 {
+                1
+            } else {
+                dashes as usize
+            };
             let rects = runs(shape, w, h, 1);
             assert_eq!(
                 rects.len(),
                 expected,
                 "{c} at {w}×{h} came out as {rects:?}"
             );
+        }
+    }
+}
+
+#[test]
+fn an_arm_that_is_not_there_leaves_nothing_past_the_joint_on_its_side() {
+    // **The other half of a joint**: an arm reaching its edge proves the box closes, and an arm
+    // that is absent must not poke out of the joint either — `┍` with its heavy line starting
+    // left of the light one is a tick nobody asked for. The joint's extent on a side is where the
+    // nearest band of the other axis starts, or the arm's own band where nothing crosses it.
+    for c in (0x2500..=0x257F).filter_map(char::from_u32) {
+        let Some(shape) = shape_of(c) else { continue };
+        if shape.dashes > 0 || shape.arc {
+            continue;
+        }
+        let [left, right, up, down] = shape.arms;
+        for (w, h, light) in [(7, 17, 1), (8, 17, 1), (11, 29, 2), (16, 34, 2)] {
+            let mut ink = Vec::new();
+            for (x0, y0, x1, y1) in runs(shape, w, h, light) {
+                for y in y0..y1 {
+                    for x in x0..x1 {
+                        ink.push((x, y));
+                    }
+                }
+            }
+            let bands = |arms: [Weight; 2], span: i32| {
+                arms.iter()
+                    .flat_map(|&weight| band(weight, span, light))
+                    .collect::<Vec<_>>()
+            };
+            let (across, along) = (bands([up, down], w), bands([left, right], h));
+            let (own_x, own_y) = (bands([left, right], w), bands([up, down], h));
+            let (xs, ys): (Vec<i32>, Vec<i32>) = ink.iter().copied().unzip();
+            let reach = |pixels: &[i32], low: bool| {
+                if low {
+                    *pixels.iter().min().unwrap()
+                } else {
+                    *pixels.iter().max().unwrap()
+                }
+            };
+            // Where a crossing band exists, the joint ends at it; otherwise at the arm's own band.
+            let limit = |crossing: &[i32], own: &[i32], low: bool| {
+                reach(if crossing.is_empty() { own } else { crossing }, low)
+            };
+            for (absent, pixels, crossing, own, low, side) in [
+                (left == N, &xs, &across, &own_x, true, "left"),
+                (right == N, &xs, &across, &own_x, false, "right"),
+                (up == N, &ys, &along, &own_y, true, "above"),
+                (down == N, &ys, &along, &own_y, false, "below"),
+            ] {
+                if absent {
+                    assert_eq!(
+                        reach(pixels, low),
+                        limit(crossing, own, low),
+                        "{c} reaches {side} of its joint at {w}×{h}, light {light}"
+                    );
+                }
+            }
         }
     }
 }
@@ -405,6 +478,8 @@ fn the_range_is_drawn_whole_except_the_three_diagonals() {
 #[test]
 fn a_light_line_follows_the_scale_and_is_never_thinner_than_a_pixel() {
     assert_eq!(light_thickness(14.0, 1.0), 1);
+    assert_eq!(light_thickness(14.0, 1.25), 1);
+    assert_eq!(light_thickness(16.0, 1.5), 2);
     assert_eq!(light_thickness(14.0, 5.0 / 3.0), 2);
     assert_eq!(light_thickness(14.0, 2.0), 2);
     assert_eq!(light_thickness(4.0, 1.0), 1);
