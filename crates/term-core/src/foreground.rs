@@ -10,6 +10,13 @@ mod macos;
 #[cfg(all(test, target_os = "linux"))]
 mod tests;
 
+/// Any process's current directory, unattested: nothing here checks that `pid` is still the process
+/// the caller meant, unlike [`NativeProcess::working_directory`].
+#[cfg(target_os = "macos")]
+pub(crate) fn current_directory(pid: u32) -> io::Result<PathBuf> {
+    macos::current_directory(pid)
+}
+
 #[cfg(test)]
 mod ancestry_tests {
     use super::{Ancestry, classify_snapshots};

@@ -14,6 +14,7 @@ use std::{
 // private/versioned details cannot leak into the cross-platform policy layer.
 const PROC_PIDTBSDINFO: i32 = 3;
 const PROC_PIDUNIQIDENTIFIERINFO: i32 = 17;
+const PROC_PIDVNODEPATHINFO: i32 = 9;
 const PROC_PIDPATHINFO_MAXSIZE: usize = 4096;
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -347,11 +348,19 @@ pub(super) fn working_directory(p: &NativeProcess) -> io::Result<PathBuf> {
     if before.birth != p.birth || executable(p.pid)? != p.executable {
         return Err(denied());
     };
+    let path = current_directory(p.pid)?;
+    if stat(p.pid)? != before || executable(p.pid)? != p.executable {
+        return Err(denied());
+    };
+    Ok(path)
+}
+/// The bare lookup, with no identity check on `pid`.
+pub(super) fn current_directory(pid: u32) -> io::Result<PathBuf> {
     let mut info = VnodePathInfo::default();
     let n = unsafe {
         proc_pidinfo(
-            p.pid as i32,
-            9,
+            pid as i32,
+            PROC_PIDVNODEPATHINFO,
             0,
             (&mut info as *mut VnodePathInfo).cast(),
             std::mem::size_of::<VnodePathInfo>() as i32,
@@ -360,11 +369,7 @@ pub(super) fn working_directory(p: &NativeProcess) -> io::Result<PathBuf> {
     if n != std::mem::size_of::<VnodePathInfo>() as i32 {
         return Err(denied());
     };
-    let path = c_path(&info.cdir.vip_path)?;
-    if stat(p.pid)? != before || executable(p.pid)? != p.executable {
-        return Err(denied());
-    };
-    Ok(path)
+    c_path(&info.cdir.vip_path)
 }
 #[repr(C)]
 struct VnodeInfoPath {

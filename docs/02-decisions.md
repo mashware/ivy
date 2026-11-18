@@ -8739,9 +8739,15 @@ section). The
 console tree and its running programs retain their identity; while open, Files reserves width from
 them and the drawer height. The sidebar is closed on restart and its width and tool state are not persisted.
 The user chooses the source explicitly: a local Markdown path, or the review control of a console.
-Git opens that console's working directory without a path form. On Linux, the live foreground
-process directory takes precedence over a previous local OSC 7 report, which may predate a `cd`.
-Local OSC 7 metadata remains the fallback when native discovery is unavailable. An
+Git opens that console's working directory without a path form. On Linux and macOS, the live
+foreground process directory takes precedence over a previous local OSC 7 report, which may predate a
+`cd`. Local OSC 7 metadata remains the fallback when native discovery is unavailable, which today is
+Windows. Native discovery reports the resolved path (macOS `/tmp` is `/private/tmp`), so a console
+inside a symbolic link is shown under its target rather than the name the shell printed.
+*Amended for #116, 18 November 2026:* macOS was added because its default zsh sends no OSC 7 outside
+Terminal.app, so with OSC 7 as its only source no macOS console had a directory, and Files and project
+colours never worked there. Discarded: asking users to enable OSC 7 in their shell, which leaves
+the default install broken. An
 explicit unusable/remote directory is never replaced with another console's or the app's directory.
 The terminal does not infer task state. The viewer has no PTY, producer identity, attention claim or MCP endpoint.
 It is not persisted. The view owns its gestures and keyboard input until focus returns to a console;

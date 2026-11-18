@@ -672,9 +672,9 @@ impl Pty {
         ))
     }
 
-    /// The foreground program's current directory on Linux, while the owned child is alive.
+    /// The foreground program's current directory on Linux and macOS, while the owned child is alive.
     pub fn working_directory(&mut self) -> Option<std::path::PathBuf> {
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             let child = self.child.as_mut()?;
             if !matches!(child.try_wait(), Ok(None)) {
@@ -690,13 +690,18 @@ impl Pty {
                         .and_then(|pid| libc::pid_t::try_from(pid).ok())
                         .filter(|pid| *pid > 0)
                 })?;
+            #[cfg(target_os = "linux")]
             let path = std::fs::read_link(format!("/proc/{pid}/cwd")).ok();
+            // macOS has no /proc; its default zsh sends no OSC 7 outside Terminal.app either, so
+            // without this every console there had no directory at all.
+            #[cfg(target_os = "macos")]
+            let path = foreground::current_directory(pid as u32).ok();
             if !matches!(child.try_wait(), Ok(None)) {
                 return None;
             }
             path
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         {
             None
         }
@@ -1286,9 +1291,11 @@ mod tests {
         }
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn working_directory_follows_live_pty_child_and_stops_after_exit() {
+        // macOS reports the resolved path: its /tmp is a link to /private/tmp.
+        let tmp = std::fs::canonicalize("/tmp").unwrap();
         let (mut pty, output) = Pty::spawn(
             "sh",
             &["-c", "cd /tmp && printf READY && read line"],
@@ -1305,10 +1312,7 @@ mod tests {
                     .unwrap_or_default(),
             );
         }
-        assert_eq!(
-            pty.working_directory().as_deref(),
-            Some(std::path::Path::new("/tmp"))
-        );
+        assert_eq!(pty.working_directory(), Some(tmp));
         pty.write(b"\n").unwrap();
         while pty.working_directory().is_some() {
             assert!(Instant::now() < deadline);
