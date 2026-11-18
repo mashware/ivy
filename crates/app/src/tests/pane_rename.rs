@@ -557,6 +557,50 @@ mod tests {
     }
 
     #[test]
+    fn the_close_cross_is_centred_in_its_box_and_on_the_titles_line() {
+        let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
+        ctx.all_styles_mut(|s| s.animation_time = 0.0);
+        let mut window = window_with("sleep 30", "sleep 30");
+        let tab = window.active().name;
+        let pane = window.active().focus;
+        window.pane_view.begin_rename(tab, pane, "Draft".into());
+        draw(&mut window, &ctx, vec![]);
+        draw(&mut window, &ctx, vec![]);
+        let shapes = draw(&mut window, &ctx, vec![]);
+        let texts = texts(&shapes);
+        let title = rect_of(&texts, "Rename console");
+        let cross = shapes
+            .iter()
+            .filter_map(|s| crate::ui::icons::painted_icon(&s.shape))
+            .filter(|(glyph, ..)| glyph == egui_phosphor::regular::X)
+            .map(|(.., square)| square)
+            // The consoles' own headers carry crosses too: the dialog's is right of its title.
+            .filter(|square| square.min.x > title.max.x)
+            .min_by(|a, b| {
+                (a.center().y - title.center().y)
+                    .abs()
+                    .total_cmp(&(b.center().y - title.center().y).abs())
+            })
+            .expect("the close cross is painted");
+        let close = fill_under(&fills(&shapes), cross.center()).0;
+        assert!(
+            close.width() < 60.0,
+            "the cross has no box of its own: {close:?}"
+        );
+        assert!(
+            (close.center() - cross.center()).length() < 1.0,
+            "cross {cross:?} is off its box's centre {close:?}"
+        );
+        assert!(
+            (close.center().y - title.center().y).abs() < 1.5,
+            "box {close:?} and title {title:?} are not on one line"
+        );
+        // The kit's floating heading, not Settings' 25-point one.
+        assert!(title.height() < 28.0, "the title is {title:?}");
+    }
+
+    #[test]
     fn the_close_button_cancels_the_rename() {
         let (mut window, ctx, _, pane) = open_console_rename("Changed");
         let shapes = draw(&mut window, &ctx, vec![]);

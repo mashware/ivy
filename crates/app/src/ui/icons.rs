@@ -111,16 +111,15 @@ pub(crate) fn paint(painter: &egui::Painter, center: Pos2, icon: Icon, size: f32
 
 /// A floating surface's close button: egui's own button, so it keeps the surface's spacing, hover
 /// and keyboard focus, holding the set's cross instead of a text one.
+///
+/// A square as tall as the surface's controls with the cross painted on its centre (`paint`): laid
+/// out as the button's text, the glyph sat on the text row's baseline and showed above the box's
+/// centre (#119).
 pub(crate) fn close_button(ui: &mut egui::Ui) -> egui::Response {
-    let family = crate::fonts::ui_icon_family(ui.ctx());
-    debug_assert!(
-        cfg!(test) || family.is_some(),
-        "the interface's icon family is not installed"
-    );
-    let response = match family {
-        Some(family) => ui.button(egui::RichText::new(Icon::Close.glyph()).family(family)),
-        None => ui.button("×"),
-    };
+    let side = ui.spacing().interact_size.y;
+    let response = ui.add(egui::Button::new("").min_size(egui::vec2(side, side)));
+    let ink = ui.style().interact(&response).fg_stroke.color;
+    paint(ui.painter(), response.rect.center(), Icon::Close, 16.0, ink);
     // The glyph is a private-use codepoint: the button is named for what it does instead.
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Close"));
     response.on_hover_text("Close")

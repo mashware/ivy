@@ -3,14 +3,16 @@
 use super::palette::{Palette, primary_style};
 use eframe::egui;
 
-/// The title and the close button over a rule. True when the close button was clicked.
+/// The title and the close button over a rule, centred on one line. True when the close button
+/// was clicked. The title takes the kit's floating heading (20 points, `ui/floating.rs`), not
+/// Settings' 25: these dialogs are a single field or a guide, not a page of sections (#119).
 pub(crate) fn header(ui: &mut egui::Ui, title: &str) -> bool {
     let mut close = false;
-    ui.horizontal_top(|ui| {
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             close = crate::ui::icons::close_button(ui).clicked();
-            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                ui.heading(title);
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.label(egui::RichText::new(title).size(20.0));
             });
         });
     });
