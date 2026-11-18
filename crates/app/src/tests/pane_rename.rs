@@ -503,45 +503,80 @@ mod tests {
 
     #[test]
     fn a_narrow_window_keeps_the_footer_actions_apart_and_inside_the_dialog() {
-        let ctx = egui::Context::default();
-        ctx.all_styles_mut(|s| s.animation_time = 0.0);
-        let mut window = window_with("sleep 30", "sleep 30");
-        let tab = window.active().name;
-        let pane = window.active().focus;
-        window.pane_view.begin_rename(tab, pane, "Draft".into());
-        // At 320 the three still fit on one row; at 260 they do not.
-        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(260.0, 700.0));
-        let pass = |window: &mut Window| ui_pass(window, &ctx, area, egui::RawInput::default());
-        pass(&mut window);
-        pass(&mut window);
-        let shapes = pass(&mut window);
-        let texts = texts(&shapes);
-        let fills = fills(&shapes);
-        let dialog = fill_under(&fills, rect_of(&texts, "Rename console").center()).0;
-        assert!(area.contains_rect(dialog), "{dialog:?} leaves the window");
-        // 180 points of content (the window less 80) and 20 of margin on each side: a footer that
-        // does not fit must wrap, not widen the dialog.
-        assert!(
-            dialog.width() <= 225.0,
-            "the footer widened the dialog to {dialog:?}"
-        );
-        let actions = ["Use terminal title", "Cancel", "Save"].map(|label| {
-            let rect = rect_of(&texts, label);
+        // 320 leaves 240 points of content and the three actions fit on one row; 240 leaves 160
+        // and the quiet one takes its own row.
+        for (width, one_row) in [(320.0, true), (240.0, false)] {
+            let ctx = egui::Context::default();
+            crate::fonts::install_icons_only(&ctx);
+            ctx.all_styles_mut(|s| s.animation_time = 0.0);
+            let mut window = window_with("sleep 30", "sleep 30");
+            let tab = window.active().name;
+            let pane = window.active().focus;
+            window.pane_view.begin_rename(tab, pane, "Draft".into());
+            let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 700.0));
+            let pass = |window: &mut Window| ui_pass(window, &ctx, area, egui::RawInput::default());
+            pass(&mut window);
+            pass(&mut window);
+            let shapes = pass(&mut window);
+            let texts = texts(&shapes);
+            let fills = fills(&shapes);
+            let field = fill_under(&fills, rect_of(&texts, "Draft").center()).0;
+            let dialog = fill_under(&fills, field.left_top() - egui::vec2(4.0, 4.0)).0;
             assert!(
-                dialog.contains_rect(rect),
-                "{label} {rect:?} outside {dialog:?}"
+                area.contains_rect(dialog),
+                "{width}: {dialog:?} leaves the window"
             );
-            rect
-        });
-        for (i, a) in actions.iter().enumerate() {
-            for b in &actions[i + 1..] {
-                assert!(!a.intersects(*b), "{a:?} overlaps {b:?}");
+            // The content (the window less 80) and 20 of margin on each side: a footer that does
+            // not fit must wrap, not widen the dialog.
+            assert!(
+                dialog.width() <= width - 80.0 + 45.0,
+                "{width}: the footer widened the dialog to {dialog:?}"
+            );
+            let actions = ["Use terminal title", "Cancel", "Save"].map(|label| {
+                let rect = rect_of(&texts, label);
+                assert!(
+                    dialog.contains_rect(rect),
+                    "{width}: {label} {rect:?} outside {dialog:?}"
+                );
+                rect
+            });
+            for (i, a) in actions.iter().enumerate() {
+                for b in &actions[i + 1..] {
+                    assert!(!a.intersects(*b), "{width}: {a:?} overlaps {b:?}");
+                }
             }
+            assert!(
+                actions[1].max.x < actions[2].min.x,
+                "{width}: Cancel is not left of Save"
+            );
+            assert_eq!(
+                (actions[0].center().y - actions[2].center().y).abs() < 1.0,
+                one_row,
+                "{width}: Use terminal title {:?}, Save {:?}",
+                actions[0],
+                actions[2]
+            );
+            // The title is cut short before the close button rather than run under it.
+            let close = shapes
+                .iter()
+                .filter_map(|s| crate::ui::icons::painted_icon(&s.shape))
+                .filter(|(glyph, _, square)| {
+                    glyph == egui_phosphor::regular::X && dialog.contains(square.center())
+                })
+                .map(|(.., square)| fill_under(&fills, square.center()).0)
+                .next()
+                .expect("the dialog's close box");
+            let title = texts
+                .iter()
+                .filter(|(s, r, _)| s.starts_with("Rename") && dialog.contains_rect(*r))
+                .map(|(_, r, _)| *r)
+                .next()
+                .expect("the dialog's title");
+            assert!(
+                title.max.x <= close.min.x,
+                "{width}: title {title:?} runs under the close box {close:?}"
+            );
         }
-        assert!(
-            actions[1].max.x < actions[2].min.x,
-            "Cancel is not left of Save"
-        );
     }
 
     #[test]
@@ -647,7 +682,7 @@ mod tests {
         let (mut window, ctx, ..) = open_console_rename(&"x".repeat(129));
         let shapes = draw(&mut window, &ctx, vec![]);
         let texts = texts(&shapes);
-        let (note, error) = crate::settings::editor::view::dialog::inks(&ctx, &window.theme);
+        let (note, error) = crate::settings::editor::view::dialog::tests::inks(&ctx, &window.theme);
         let ink = |says: &str| texts.iter().find(|(s, ..)| s.starts_with(says)).unwrap().2;
         assert_eq!(ink("A manual name overrides"), note);
         assert_eq!(ink("Use at most 128 characters"), error);
