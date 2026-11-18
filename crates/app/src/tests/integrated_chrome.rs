@@ -2000,46 +2000,127 @@ mod tests {
         assert!(window.all_panes_mut().all(|p| p.keystrokes.is_empty()));
     }
 
+    /// The rings a tab card painted around its dots: 1.5-point strokes with no fill, centred inside
+    /// the card, with their centre, radius and colour.
+    fn rings_in(
+        shapes: &[egui::epaint::ClippedShape],
+        card: egui::Rect,
+    ) -> Vec<(egui::Pos2, f32, egui::Color32)> {
+        shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Circle(c)
+                    if c.stroke.width == 1.5
+                        && c.fill == egui::Color32::TRANSPARENT
+                        && card.contains(c.center) =>
+                {
+                    Some((c.center, c.radius, c.stroke.color))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Ivy Night's three claim colours, written out: yellow wait, red block, and done **blue** —
+    /// green is the accent (D94), and the owner kept done blue against the mock (D96 amended).
+    const WAIT: egui::Color32 = egui::Color32::from_rgb(0xf2, 0xb8, 0x4b);
+    const BLOCK: egui::Color32 = egui::Color32::from_rgb(0xf2, 0x7a, 0x66);
+    const DONE: egui::Color32 = egui::Color32::from_rgb(0x72, 0xb7, 0xf2);
+
+    /// Each console's claim rides on its own dot, in tree order, and nothing is painted left of the
+    /// label: the first tab's first console waits and its second claims nothing; the second tab's
+    /// consoles are blocked and done. A ring is centred on its dot, 5.25 points out, and the bar
+    /// counts the two cards that painted one.
     #[test]
-    fn narrow_tab_keeps_its_claim_pill_whole_and_clear_of_its_number() {
+    fn each_consoles_claim_is_a_ring_on_its_own_dot() {
+        let ctx = egui::Context::default();
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        publish_in_the_tab(&mut window, 0, 0, r#"{"attention":"wait","lines":["x"]}"#);
+        publish_in_the_tab(&mut window, 1, 0, r#"{"attention":"block","lines":["x"]}"#);
+        publish_in_the_tab(&mut window, 1, 1, r#"{"attention":"done","lines":["x"]}"#);
+        let area = area_of(1400.0);
+        frame(&mut window, &ctx, area, vec![]);
+        let shapes = frame(&mut window, &ctx, area, vec![]);
+        for (which, expected) in [
+            (0, vec![(0, WAIT)]),
+            (1, vec![(0, BLOCK), (1, DONE)]),
+        ] {
+            let card = title_card(&window, &ctx, area, which);
+            // Laid out with the cross's room whether or not it shows, as every card with a sibling.
+            let (label, dots) = tab_bar::title_label_and_dots(card, 2, true);
+            let dots = dots.expect("a 190-point card holds two dots");
+            let rings = rings_in(&shapes, card);
+            assert_eq!(rings.len(), expected.len(), "tab {which}: {rings:?}");
+            for ((center, radius, color), (n, class)) in rings.into_iter().zip(expected) {
+                assert_eq!(color, class, "tab {which}, dot {n}");
+                assert_eq!(radius, 5.25, "tab {which}, dot {n}");
+                assert_eq!(
+                    center,
+                    egui::pos2(dots.left() + 6.0 + 13.0 * n as f32, dots.center().y),
+                    "tab {which}: the ring is not on dot {n}"
+                );
+            }
+            // No pill and no muted dot where the summary used to be: the label starts at the
+            // card's padding and nothing is painted between the card's edge and it.
+            assert_eq!(label.left(), card.left() + 10.0, "tab {which}");
+            let left_of_label = egui::Rect::from_min_max(card.min, egui::pos2(label.left(), card.bottom()));
+            assert!(
+                !shapes.iter().any(|s| match &s.shape {
+                    egui::Shape::Rect(r) =>
+                        r.rect.width() <= 18.0 && left_of_label.contains_rect(r.rect),
+                    egui::Shape::Circle(c) => left_of_label.contains(c.center),
+                    egui::Shape::Vec(_) => left_of_label.contains_rect(s.clip_rect),
+                    _ => false,
+                }),
+                "tab {which}: something is still painted left of the label"
+            );
+        }
+        assert_eq!(window.tab_bar_cost.marked_tabs, 2);
+    }
+
+    /// A claim nobody holds up keeps its class's colour, dimmed toward the background as every other
+    /// claim surface paints it (D18) — not the held colour.
+    #[test]
+    fn an_unheld_claims_ring_is_its_colour_dimmed() {
+        let ctx = egui::Context::default();
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        publish_in_the_tab(&mut window, 1, 0, r#"{"attention":"block","lines":["x"]}"#);
+        age_the_panel(&mut window, 1, 0);
+        let area = area_of(1400.0);
+        frame(&mut window, &ctx, area, vec![]);
+        let shapes = frame(&mut window, &ctx, area, vec![]);
+        let rings = rings_in(&shapes, title_card(&window, &ctx, area, 1));
+        let dimmed = window.theme.attention_color(panel_contract::Attention::Block, false);
+        assert_ne!(dimmed, BLOCK);
+        assert_eq!(rings.iter().map(|r| r.2).collect::<Vec<_>>(), vec![dimmed]);
+    }
+
+    /// A card too narrow for its dots shows no claim at all (the owner's choice, D96 amended): no
+    /// ring, no pill, and the bar does not count it as marked even though its console claims.
+    #[test]
+    fn a_tab_too_narrow_for_its_dots_shows_no_claim() {
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 3]);
         window.chrome.enable();
         window.headers = window.headers.integrated(true);
-        *window.active_mut().panes_mut()[0] =
-            pane_with_panel(r#"{"attention":"wait","lines":["Waiting"]}"#);
+        publish_in_the_tab(&mut window, 0, 0, r#"{"attention":"wait","lines":["x"]}"#);
         let area = area_of(240.0);
+        frame(&mut window, &ctx, area, vec![]);
         let shapes = frame(&mut window, &ctx, area, vec![]);
-        let m = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
-        let card = tab_bar::title_card(tab_bar::geometry(&window, area, &m).cards.unwrap(), 0, 3);
+        let card = title_card(&window, &ctx, area, 0);
         assert!(card.width() < 65.0, "the case is a narrow card: {card:?}");
-        let label = shapes
-            .iter()
-            .find_map(|s| match &s.shape {
-                egui::Shape::Text(t) if t.galley.text() == "1" && t.pos.y < 40.0 => Some(t),
-                _ => None,
-            })
-            .expect("narrow tab number painted");
-        // Ivy Night's wait slot, filling the whole 18-point pill inside the card. The console's own
-        // panel paints the same pill in its claim strip, below the title bar.
-        let pill = shapes
-            .iter()
-            .find_map(|s| match &s.shape {
-                egui::Shape::Rect(r)
-                    if r.fill == egui::Color32::from_rgb(0xf2, 0xb8, 0x4b)
-                        && r.rect.top() < 40.0 =>
-                {
-                    Some(r.rect)
-                }
-                _ => None,
-            })
-            .expect("the claim pill is painted");
-        assert_eq!(pill.size(), egui::Vec2::splat(18.0));
-        assert!(card.contains_rect(pill), "{pill:?} spills out of {card:?}");
+        assert_eq!(tab_bar::title_label_and_dots(card, 2, true).1, None);
+        assert!(rings_in(&shapes, card).is_empty());
         assert!(
-            label.pos.x >= pill.right() + 4.0,
-            "the pill overlaps the tab number or loses its gap"
+            !shapes.iter().any(|s| matches!(&s.shape,
+                egui::Shape::Rect(r) if r.fill == WAIT && card.contains_rect(r.rect))),
+            "a pill came back on the narrow card"
         );
+        assert_eq!(window.tab_bar_cost.marked_tabs, 0);
     }
 
     /// The tabs share the title bar's row, so the consoles start 40 points down instead of the
