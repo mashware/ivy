@@ -1,5 +1,7 @@
 //! A console reserves its place immediately; slow Linux scope setup finishes off the frame thread.
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
+#[cfg(target_os = "linux")]
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};

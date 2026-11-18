@@ -826,40 +826,6 @@ pub(crate) fn watch_panes<'a>(
     Watcher::new(move || waker.request_repaint(), &consoles)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn viewport(enabled: bool, macos: bool) -> egui::ViewportBuilder {
-        chrome_viewport_on(egui::ViewportBuilder::default(), enabled, macos)
-    }
-
-    #[test]
-    fn the_mac_window_hides_its_own_title_under_the_integrated_header() {
-        let mac = viewport(true, true);
-        assert_eq!(mac.title_shown, Some(false));
-        assert_eq!(mac.titlebar_shown, Some(false));
-        assert_eq!(mac.fullsize_content_view, Some(true));
-        assert_eq!(mac.decorations, None);
-    }
-
-    #[test]
-    fn other_platforms_drop_the_decorations_and_leave_the_mac_titlebar_alone() {
-        let other = viewport(true, false);
-        assert_eq!(other.decorations, Some(false));
-        assert_eq!(other.title_shown, None);
-        assert_eq!(other.titlebar_shown, None);
-        assert_eq!(other.fullsize_content_view, None);
-    }
-
-    #[test]
-    fn without_the_integrated_header_the_window_keeps_its_native_frame() {
-        for macos in [false, true] {
-            assert_eq!(viewport(false, macos), egui::ViewportBuilder::default());
-        }
-    }
-}
-
 pub(crate) fn insist_on_size(window: &mut Window, ctx: &egui::Context) {
     let Some(requested) = &mut window.requested_size else {
         return;
@@ -893,4 +859,38 @@ pub(crate) fn insist_on_size(window: &mut Window, ctx: &egui::Context) {
 
     requested.attempts -= 1;
     ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(how_much));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn viewport(enabled: bool, macos: bool) -> egui::ViewportBuilder {
+        chrome_viewport_on(egui::ViewportBuilder::default(), enabled, macos)
+    }
+
+    #[test]
+    fn the_mac_window_hides_its_own_title_under_the_integrated_header() {
+        let mac = viewport(true, true);
+        assert_eq!(mac.title_shown, Some(false));
+        assert_eq!(mac.titlebar_shown, Some(false));
+        assert_eq!(mac.fullsize_content_view, Some(true));
+        assert_eq!(mac.decorations, None);
+    }
+
+    #[test]
+    fn other_platforms_drop_the_decorations_and_leave_the_mac_titlebar_alone() {
+        let other = viewport(true, false);
+        assert_eq!(other.decorations, Some(false));
+        assert_eq!(other.title_shown, None);
+        assert_eq!(other.titlebar_shown, None);
+        assert_eq!(other.fullsize_content_view, None);
+    }
+
+    #[test]
+    fn without_the_integrated_header_the_window_keeps_its_native_frame() {
+        for macos in [false, true] {
+            assert_eq!(viewport(false, macos), egui::ViewportBuilder::default());
+        }
+    }
 }
