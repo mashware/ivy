@@ -540,6 +540,7 @@ mod tests {
 
     #[test]
     fn lowering_recovery_after_a_wrong_live_session_still_replaces_it_before_input() {
+        let _shell = crate::shell_integration::TestShell::use_program("/bin/sh");
         use panel_control::session::{Client, Identity};
         for mode in ["directories", "layout", "none"] {
             for clipboard in [false, true] {

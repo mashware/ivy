@@ -592,6 +592,7 @@ mod tests {
 
     #[test]
     fn a_wrong_live_session_is_replaced_before_notice_keyboard_clipboard_or_mouse_input() {
+        let _shell = crate::shell_integration::TestShell::use_program("/bin/sh");
         for input in ["notice", "keyboard", "clipboard", "mouse"] {
             let mut pane = crate::Pane::launching(&Default::default(), "/bin/cat", 0).unwrap();
             pane.restoration.resume = saved(Client::Claude, std::env::temp_dir()).resume;
