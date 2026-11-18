@@ -507,7 +507,8 @@ mod tests {
         // and the quiet one takes its own row.
         for (width, one_row) in [(320.0, true), (240.0, false)] {
             let ctx = egui::Context::default();
-            crate::fonts::install_icons_only(&ctx);
+            // The fonts the app ships, so the one-row threshold is measured with the face people see.
+            crate::fonts::install_bundled(&ctx);
             ctx.all_styles_mut(|s| s.animation_time = 0.0);
             let mut window = window_with("sleep 30", "sleep 30");
             let tab = window.active().name;

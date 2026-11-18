@@ -43,8 +43,9 @@ fn action(label: &str, framed: bool) -> egui::Button<'_> {
         .min_size(egui::vec2(0.0, 40.0))
 }
 
-/// The width a footer action takes: its label, plus the button's padding when it has a frame
-/// (egui gives a frameless button none).
+/// The width a footer action takes: its label, plus the button's padding when it has a frame. Only
+/// framed buttons are padded here because egui 0.36 lays a frameless one out with no margin; the
+/// 320-point case of the narrow-window test (`tests/pane_rename.rs`) goes red if that changes.
 fn action_width(ui: &egui::Ui, label: &str, framed: bool) -> f32 {
     let text = ui
         .painter()
@@ -110,13 +111,16 @@ pub(crate) fn rename(
                 );
             }
             ui.add_space(12.0);
-            let fits = action_width(ui, "Use terminal title", false)
-                + action_width(ui, "Cancel", false)
-                + action_width(ui, "Save", true)
-                + 2.0 * ui.spacing().item_spacing.x
-                <= ui.available_width();
-            let (own_row, inline) = (console && !fits, console && fits);
-            if own_row {
+            // Two points of slack: egui rounds each widget's rect on its own, so a sum that lands
+            // exactly on the width can still overflow by a fraction once laid out.
+            let inline = console
+                && action_width(ui, "Use terminal title", false)
+                    + action_width(ui, "Cancel", false)
+                    + action_width(ui, "Save", true)
+                    + 2.0 * ui.spacing().item_spacing.x
+                    + 2.0
+                    <= ui.available_width();
+            if console && !inline {
                 // Too narrow for the three: the quiet one takes its own row, as Settings' footer
                 // puts Restore defaults on its own (footer.rs).
                 follow_title = ui.add(action("Use terminal title", false)).clicked();

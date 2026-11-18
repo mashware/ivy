@@ -8,8 +8,9 @@
 use crate::theme::{Roles, Theme, metrics};
 use eframe::egui::{self, CornerRadius, FontId, Stroke, TextStyle};
 
-/// A floating surface's heading, in points. The chrome's small dialogs take it too, under
-/// Settings' measures, which set their own 25 (`settings/editor/view/dialog.rs`).
+/// A floating surface's heading, in points. The chrome's small dialogs take it too
+/// (`settings/editor/view/dialog.rs`), although they run at Settings' measures, whose own heading
+/// is 25 (`settings_geometry` in `settings/editor/view.rs`).
 pub(crate) const HEADING: f32 = 20.0;
 
 /// Writes `theme`'s roles and the floating surfaces' spacing into `ui`'s own style.
