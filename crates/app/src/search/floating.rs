@@ -248,13 +248,7 @@ fn overlaps(a: Rect, b: Rect) -> bool {
 
 /// Where the options list goes: on the far side of the box from the console's edge, then to the
 /// box's left, and over the box only when the console has room for neither.
-fn the_list(
-    console: Rect,
-    frame: Rect,
-    covered: bool,
-    metrics: &CellMetrics,
-    room: f32,
-) -> Rect {
+fn the_list(console: Rect, frame: Rect, covered: bool, metrics: &CellMetrics, room: f32) -> Rect {
     let button = metrics.height() + 2.0 * PAD;
     let width = (LIST_CELLS * metrics.width() + 2.0 * PAD).min(room);
     let height = Choice::ALL.len() as f32 * button + 2.0 * PAD;
@@ -264,12 +258,19 @@ fn the_list(
         frame.bottom()
     };
     let fits = |rect: Rect| console.contains_rect(rect);
-    let below_or_above = Rect::from_min_size(pos2(frame.right() - width, beside), vec2(width, height));
+    let below_or_above =
+        Rect::from_min_size(pos2(frame.right() - width, beside), vec2(width, height));
     if fits(below_or_above) {
         return below_or_above;
     }
-    let top = frame.top().min(console.bottom() - height).max(console.top());
-    let to_the_left = Rect::from_min_size(pos2(frame.left() - MARGIN - width, top), vec2(width, height));
+    let top = frame
+        .top()
+        .min(console.bottom() - height)
+        .max(console.top());
+    let to_the_left = Rect::from_min_size(
+        pos2(frame.left() - MARGIN - width, top),
+        vec2(width, height),
+    );
     if fits(to_the_left) {
         return to_the_left;
     }
@@ -628,7 +629,14 @@ mod tests {
             cols: 80,
         });
         let notice = Rect::from_min_size(console().min, vec2(console().width(), 60.0));
-        let layout = layout(console(), &metrics(), &screen.view(), false, &[notice], true);
+        let layout = layout(
+            console(),
+            &metrics(),
+            &screen.view(),
+            false,
+            &[notice],
+            true,
+        );
         assert!(
             !layout.frame.intersects(notice),
             "the box covers the notice: {layout:?}"
@@ -747,14 +755,20 @@ mod tests {
 
     #[test]
     fn a_list_that_would_cover_a_notice_is_not_shown() {
-        let screen = Screen::new(Size { rows: ROWS, cols: 80 });
+        let screen = Screen::new(Size {
+            rows: ROWS,
+            cols: 80,
+        });
         // A notice down the console's right side, where the list would unfold under the box.
         let notice = Rect::from_min_max(
             pos2(console().right() - 300.0, console().top() + 60.0),
             console().max,
         );
         let layout = layout(console(), &metrics(), &screen.view(), true, &[notice], true);
-        assert!(layout.frame.is_positive(), "the premise: the box itself has room");
+        assert!(
+            layout.frame.is_positive(),
+            "the premise: the box itself has room"
+        );
         assert_eq!(layout.list, None);
         assert!(
             layout
@@ -774,7 +788,10 @@ mod tests {
 
     #[test]
     fn an_unfolded_list_widens_the_rows_a_step_keeps_clear() {
-        let screen = Screen::new(Size { rows: ROWS, cols: 80 });
+        let screen = Screen::new(Size {
+            rows: ROWS,
+            cols: 80,
+        });
         let folded = layout(console(), &metrics(), &screen.view(), false, &[], true);
         let unfolded = layout(console(), &metrics(), &screen.view(), true, &[], true);
         let (KeepClear::Top(folded), KeepClear::Top(unfolded_rows)) =
@@ -814,7 +831,14 @@ mod tests {
         assert!(rows as f32 * metrics().height() >= top.frame.bottom() - console().top());
         assert!((rows - 1) as f32 * metrics().height() < top.frame.bottom() - console().top());
         let notice = Rect::from_min_size(console().min, vec2(console().width(), 60.0));
-        let bottom = layout(console(), &metrics(), &screen.view(), false, &[notice], true);
+        let bottom = layout(
+            console(),
+            &metrics(),
+            &screen.view(),
+            false,
+            &[notice],
+            true,
+        );
         let KeepClear::Bottom(rows) = bottom.keep_clear else {
             panic!(
                 "a box at the bottom keeps rows at the bottom: {:?}",

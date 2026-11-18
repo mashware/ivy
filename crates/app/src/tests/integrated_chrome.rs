@@ -4171,15 +4171,10 @@ mod tests {
         let painter = ctx.layer_painter(egui::LayerId::background());
         let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
         let console = pane.painted_console.as_ref().unwrap().area;
-        let question = crate::painter::notices::the_boxes(
-            &painter,
-            pane,
-            &window.theme,
-            &metrics,
-            console,
-        )
-        .question
-        .expect("the question is laid out");
+        let question =
+            crate::painter::notices::the_boxes(&painter, pane, &window.theme, &metrics, console)
+                .question
+                .expect("the question is laid out");
         assert!(
             !painted.layout.frame.intersects(question),
             "the box covers the held paste's question: {:?} over {question:?}",
