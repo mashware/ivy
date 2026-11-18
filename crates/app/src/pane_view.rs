@@ -473,62 +473,15 @@ pub(crate) fn before_keys(
         window.timed_separately += window.chrome.take_cost();
         return true;
     };
-    let mut save = false;
-    let mut cancel = false;
-    let mut follow_title = false;
-    let theme = window.theme;
-    let title = match target {
-        RenameTarget::Pane { .. } => "Rename console",
-        RenameTarget::Tab { .. } => "Rename tab",
+    let (title, console) = match target {
+        RenameTarget::Pane { .. } => ("Rename console", true),
+        RenameTarget::Tab { .. } => ("Rename tab", false),
     };
-    egui::Window::new(title)
-        .title_bar(false)
-        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-        .constrain_to(ui.ctx().viewport_rect())
-        .movable(false)
-        .default_width(380.0)
-        .frame(
-            crate::ui::floating::dialog_frame(&crate::ui::style::roles(ui.ctx(), &theme))
-                .inner_margin(20.0),
-        )
-        .collapsible(false)
-        .resizable(false)
-        .show(ui.ctx(), |ui| {
-            crate::settings::editor::view::style(ui, theme);
-            ui.spacing_mut().button_padding = egui::vec2(12.0, 7.0);
-            ui.style_mut()
-                .text_styles
-                .insert(egui::TextStyle::Button, egui::FontId::proportional(12.0));
-            ui.label(egui::RichText::new(title).size(16.0));
-            ui.add_space(12.0);
-            if matches!(target, RenameTarget::Pane { .. }) {
-                ui.label("A manual name overrides the terminal title. Leave empty to follow it.");
-            }
-            let response = ui.add(
-                egui::TextEdit::singleline(&mut draft)
-                    .font(egui::FontId::proportional(13.0))
-                    .margin(egui::Margin::symmetric(10, 9))
-                    .min_size(egui::vec2(0.0, 36.0))
-                    .desired_width(ui.available_width()),
-            );
-            response.request_focus();
-            if !crate::session::valid_label(&draft) {
-                ui.label("Use at most 128 characters, without control characters.");
-            }
-            ui.add_space(16.0);
-            ui.horizontal(|ui| {
-                save = ui.button("Save").clicked();
-                cancel = ui.button("Cancel").clicked();
-                if matches!(target, RenameTarget::Pane { .. }) {
-                    follow_title = ui.button("Use terminal title").clicked();
-                }
-            });
-            save |= ui.input(|i| i.key_pressed(egui::Key::Enter));
-            cancel |= ui.input(|i| i.key_pressed(egui::Key::Escape));
-        });
-    if follow_title || save && crate::session::valid_label(&draft) {
+    use crate::settings::editor::view::dialog::{self, Outcome};
+    let outcome = dialog::rename(ui.ctx(), &window.theme, title, &mut draft, console);
+    if let Some(applied @ (Outcome::Save | Outcome::FollowTitle)) = outcome {
         let label = draft.trim();
-        let label = (!follow_title && !label.is_empty()).then(|| label.to_owned());
+        let label = (applied == Outcome::Save && !label.is_empty()).then(|| label.to_owned());
         match target {
             RenameTarget::Pane { tab, pane } => {
                 if let Some(pane) = window
@@ -547,7 +500,7 @@ pub(crate) fn before_keys(
             }
         }
         window.pane_view.awaiting_release = ui.ctx().input(|i| i.pointer.any_down());
-    } else if !cancel {
+    } else if outcome.is_none() {
         window.pane_view.rename = Some((target, draft));
     } else {
         window.pane_view.awaiting_release = ui.ctx().input(|i| i.pointer.any_down());

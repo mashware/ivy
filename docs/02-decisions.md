@@ -10327,6 +10327,27 @@ composites clear 1.03:1; otherwise they use corrected shared fills, selection al
 final displayed hover. Configured background, panel and focus remain verbatim. Settings no longer
 floors these fills locally, and still re-inks controls and selected text and protects the caret.
 
+**The small dialogs take Settings' anatomy, 18 November 2026 — #119.** Rename tab and Rename console
+had the kit's colours but stock egui's layout: two identical grey buttons in the order they were
+added, a 16-point title and no close control. They now have a header with the title and a close
+button over a rule, Settings' measures and inks through its palette, and a footer like Settings':
+Save right-most on `accent` with `on_accent` ink, Cancel beside it without a frame, and the console's
+Use terminal title frameless at the left edge, where Settings keeps Restore defaults. Save is
+disabled while the name is invalid, as Settings disables its own primary. The close button cancels.
+The header is one helper that Connect agents also uses. Its title takes the kit's 20-point floating
+heading, not Settings' 25: these dialogs hold one field or one guide, and at 25 the title outweighed
+them on a real desktop. The close cross is painted on the centre of a square as tall as the
+controls, because laid out as button text it sat on the text baseline, visibly above the centre of
+its box; that button is shared, so What's new gets the centred cross too. Connect agents gets no footer, because it
+has no Save and Cancel pair, and its instructions keep full contrast instead of the muted note ink.
+
+| Discarded | Why |
+|---|---|
+| Put the header and footer in `ui/`, the kit | `ui/` has no dependency on `settings`, and the readable muted and error inks the rename needs are the Settings palette's. |
+| Make the rename an `egui::Modal` like Settings | Its dimming and input gating already run through the console's own rename state. A Modal would add a second backdrop and a second input block. |
+| A footer with a Done button, or Save agent preferences moved there, in Connect agents | The owner chose no footer, because nothing in that dialog pairs Save with Cancel. |
+| Cap the name field at 128 characters | It would cut a paste without saying so, and control characters would still need the disabled Save. |
+
 ## D99 — A console header splits its own console, groups its controls, and shows them where they are wanted
 
 **18 November 2026 — #104.** The integrated header gains split right and split down, so a console is
