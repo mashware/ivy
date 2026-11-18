@@ -275,13 +275,14 @@ mod tests {
             }
         }
         // Both sides of the boundary are reached by the sweep, and the boundary is the one D96
-        // publishes: 600 points where the window draws its own buttons, 563 on macOS.
+        // publishes, 30 points lower since the search button left the bar (D61): 570 points where
+        // the window draws its own buttons, 533 on macOS.
         assert!(is_compact(300.0));
         assert!(!is_compact(640.0));
         let boundary = if cfg!(target_os = "macos") {
-            563.0
+            533.0
         } else {
-            600.0
+            570.0
         };
         assert!(is_compact(boundary - 1.0), "{boundary}");
         assert!(!is_compact(boundary), "{boundary}");

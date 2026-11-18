@@ -3404,7 +3404,7 @@ mod tests {
     /// shows its number and the named one its name cut with «…», both inside the label's room.
     #[test]
     fn tab_labels_fit_their_room_whole_cut_or_as_a_number() {
-        for width in [760.0, 794.0, 834.0, 860.0, 1400.0] {
+        for width in [730.0, 764.0, 804.0, 830.0, 1400.0] {
             let ctx = egui::Context::default();
             let mut window = window_of_tabs([["sleep 30", "sleep 30"]; 2]);
             window.chrome.enable();
