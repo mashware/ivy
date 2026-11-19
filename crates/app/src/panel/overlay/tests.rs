@@ -53,6 +53,10 @@ struct ClientFixture {
 
 impl ClientFixture {
     fn new() -> Self {
+        Self::build(false)
+    }
+
+    fn build(discover: bool) -> Self {
         let directory = PanelDir::create().unwrap();
         let executable = directory.path().join("fixture-claude");
         std::fs::copy("/usr/bin/python3", &executable).unwrap();
@@ -67,11 +71,21 @@ impl ClientFixture {
         let authority = Authority::new(pty.foreground_scope().unwrap());
         // The fixture executable is the only recognized client in these isolated process trees.
         let mut authority = authority;
-        Arc::get_mut(&mut authority).unwrap().programs =
-            OnceLock::from(crate::client_attestation::Programs::supplied(vec![(
+        let programs = if discover {
+            let bin = directory.path().join(".local/bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            std::os::unix::fs::symlink(&executable, bin.join("claude")).unwrap();
+            crate::client_attestation::Programs::discovered(
+                std::ffi::OsStr::new(""),
+                directory.path(),
+            )
+        } else {
+            crate::client_attestation::Programs::supplied(vec![(
                 Client::Claude,
                 executable.clone(),
-            )]));
+            )])
+        };
+        Arc::get_mut(&mut authority).unwrap().programs = OnceLock::from(programs);
         let state = super::super::PanelState::default();
         let (sender, inbox) = sync_channel(8);
         let service = service(
@@ -163,6 +177,7 @@ impl Drop for ClientFixture {
         let _ = self.pty.write(b"{\"exit\":true}\n");
         let _ = &self.channel;
         let _ = std::fs::remove_file(&self.executable);
+        let _ = std::fs::remove_dir_all(self.directory.path().join(".local"));
     }
 }
 
@@ -180,6 +195,35 @@ fn read(output: &Receiver<Vec<u8>>, buffered: &mut Vec<u8>) -> Value {
             buffered.extend(output.recv_timeout(remaining).expect("fixture output"));
         }
     }
+}
+
+#[test]
+fn native_claude_outside_desktop_path_admits_hook_and_clears_wait() {
+    let mut fixture = ClientFixture::build(true);
+    fixture.hold("flow");
+    assert!(fixture.state.attention(SystemTime::now()).is_some());
+    assert_eq!(fixture.publish("helper")["ok"], true);
+    let delivery = fixture.overlay();
+    let What::Overlay {
+        panel,
+        holder,
+        incarnation,
+        authority,
+    } = delivery.what
+    else {
+        panic!("accepted publication is an overlay")
+    };
+    assert!(fixture.state.accepts_overlay(holder, incarnation));
+    assert!(authority.current());
+    fixture
+        .state
+        .apply_overlay(panel, SystemTime::now())
+        .unwrap();
+    assert!(fixture.state.attention(SystemTime::now()).is_none());
+    assert_eq!(fixture.state.held_by(), Some("flow"));
+    assert_eq!(fixture.state.displayed_source(), Some("flow · hook"));
+    assert!(fixture.state.document().unwrap().contains("hook"));
+    assert_eq!(fixture.publish("nested")["ok"], false);
 }
 
 #[test]

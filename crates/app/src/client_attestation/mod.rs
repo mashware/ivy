@@ -36,6 +36,11 @@ impl Programs {
     }
 
     #[cfg(test)]
+    pub(crate) fn discovered(path: &std::ffi::OsStr, home: &std::path::Path) -> Self {
+        Self(programs::discover_in(path, Some(home)))
+    }
+
+    #[cfg(test)]
     pub(crate) fn supplied(programs: Vec<(Client, PathBuf)>) -> Self {
         Self(programs::supplied(programs))
     }

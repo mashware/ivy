@@ -37,37 +37,27 @@ pub(crate) struct Program {
     pub(super) fixture: bool,
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) fn resolve_launch(client: Client) -> io::Result<ResolvedLaunch> {
-    let path = trusted_path(std::env::var_os("PATH").as_deref().unwrap_or_default())?;
-    let entry = resolve(client.name(), &path)?;
-    if is_native(&entry)? {
-        return Ok(ResolvedLaunch {
-            program: entry,
-            prefix_args: Vec::new(),
-            path,
-        });
-    }
-    if client != Client::Codex || !is_codex_script(&entry) {
-        return Err(unsupported());
-    }
-    let node = resolve("node", &path)?;
-    if !is_native(&node)? {
-        return Err(unsupported());
-    }
-    Ok(ResolvedLaunch {
-        program: node,
-        prefix_args: vec![entry.to_str().ok_or_else(unsupported)?.to_owned()],
-        path,
-    })
+    resolve_launch_in(
+        client,
+        std::env::var_os("PATH").as_deref().unwrap_or_default(),
+        std::env::var_os("HOME").as_deref().map(Path::new),
+    )
 }
 
-#[cfg(target_os = "macos")]
-pub(crate) fn resolve_launch(client: Client) -> io::Result<ResolvedLaunch> {
-    // macOS recognition is limited to absolute PATH entries and the official Codex
-    // package's documented wrapper topology. Volta shims are refused here.
-    let path = trusted_path(std::env::var_os("PATH").as_deref().unwrap_or_default())?;
-    let entry = resolve(client.name(), &path)?;
+fn resolve_launch_in(
+    client: Client,
+    path: &OsStr,
+    home: Option<&Path>,
+) -> io::Result<ResolvedLaunch> {
+    let path = trusted_path(path)?;
+    // Desktop startup PATH can omit the directory a login shell adds for native Claude.
+    // Add only that client's official location, after PATH; recognition stays exact.
+    let fallback = home
+        .filter(|home| client == Client::Claude && home.is_absolute())
+        .map(|home| home.join(".local/bin/claude"));
+    let entry = resolve_with_fallback(client.name(), &path, fallback)?;
     if is_native(&entry)? {
         return Ok(ResolvedLaunch {
             program: entry,
@@ -90,10 +80,17 @@ pub(crate) fn resolve_launch(client: Client) -> io::Result<ResolvedLaunch> {
 }
 
 pub(crate) fn discover() -> Vec<Program> {
+    discover_in(
+        std::env::var_os("PATH").as_deref().unwrap_or_default(),
+        std::env::var_os("HOME").as_deref().map(Path::new),
+    )
+}
+
+pub(super) fn discover_in(path: &OsStr, home: Option<&Path>) -> Vec<Program> {
     [Client::Codex, Client::Claude, Client::Opencode]
         .into_iter()
         .filter_map(|client| {
-            let launch = resolve_launch(client).ok()?;
+            let launch = resolve_launch_in(client, path, home).ok()?;
             if launch.prefix_args.is_empty() {
                 Some(Program {
                     client,
@@ -138,9 +135,18 @@ fn trusted_path(path: &OsStr) -> io::Result<OsString> {
 }
 
 fn resolve(name: &str, path: &OsStr) -> io::Result<PathBuf> {
+    resolve_with_fallback(name, path, None)
+}
+
+fn resolve_with_fallback(
+    name: &str,
+    path: &OsStr,
+    fallback: Option<PathBuf>,
+) -> io::Result<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
     let candidate = std::env::split_paths(path)
         .map(|directory| directory.join(name))
+        .chain(fallback)
         .find(|candidate| {
             candidate
                 .metadata()
@@ -382,6 +388,125 @@ fn unsupported() -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use panel_contract::PanelDir;
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
+    struct Installation(PanelDir);
+
+    impl Installation {
+        fn path(&self) -> &Path {
+            self.0.path()
+        }
+    }
+
+    impl Drop for Installation {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(self.0.path());
+        }
+    }
+
+    fn native_claude() -> (Installation, PathBuf) {
+        let directory = Installation(PanelDir::create().unwrap());
+        let home = directory.path().join("home");
+        let bin = home.join(".local/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        symlink(std::env::current_exe().unwrap(), bin.join("claude")).unwrap();
+        (directory, home)
+    }
+
+    #[test]
+    fn desktop_path_discovers_native_claude_in_its_user_installation() {
+        let (_directory, home) = native_claude();
+        let launch = resolve_launch_in(Client::Claude, OsStr::new(""), Some(&home)).unwrap();
+        assert_eq!(launch.program, std::env::current_exe().unwrap());
+        assert!(launch.prefix_args.is_empty());
+        assert!(
+            launch.path.is_empty(),
+            "discovery must not rewrite the launch PATH"
+        );
+    }
+
+    #[test]
+    fn native_claude_version_symlink_is_discovered_with_colon_in_home() {
+        let directory = Installation(PanelDir::create().unwrap());
+        let home = directory.path().join("home:with-colon");
+        assert!(home.is_absolute());
+        let bin = home.join(".local/bin");
+        let versions = home.join(".local/share/claude/versions");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(&versions).unwrap();
+        let native_target = std::fs::canonicalize(std::env::current_exe().unwrap()).unwrap();
+        symlink(&native_target, versions.join("2.1.fixture")).unwrap();
+        symlink("../share/claude/versions/2.1.fixture", bin.join("claude")).unwrap();
+
+        let programs = discover_in(OsStr::new(""), Some(&home));
+        let claude = programs
+            .iter()
+            .find(|program| program.client == Client::Claude)
+            .expect("the native installation path must not be parsed as PATH entries");
+        assert_eq!(claude.native, native_target);
+        assert!(claude.wrapper.is_none());
+    }
+
+    #[test]
+    fn explicit_path_keeps_precedence_over_native_claude_installation() {
+        let (directory, home) = native_claude();
+        let bin = directory.path().join("preferred");
+        std::fs::create_dir(&bin).unwrap();
+        symlink("/bin/sh", bin.join("claude")).unwrap();
+        let launch = resolve_launch_in(Client::Claude, bin.as_os_str(), Some(&home)).unwrap();
+        assert_eq!(launch.program, std::fs::canonicalize("/bin/sh").unwrap());
+    }
+
+    #[test]
+    fn unsupported_path_client_does_not_fall_back_to_another_installation() {
+        let (directory, home) = native_claude();
+        let bin = directory.path().join("unsupported");
+        std::fs::create_dir(&bin).unwrap();
+        let script = bin.join("claude");
+        std::fs::write(&script, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(
+            resolve_launch_in(Client::Claude, bin.as_os_str(), Some(&home))
+                .err()
+                .unwrap()
+                .kind(),
+            io::ErrorKind::Unsupported
+        );
+    }
+
+    #[test]
+    fn native_claude_fallback_refuses_scripts_missing_or_relative_home() {
+        let (_directory, home) = native_claude();
+        let executable = home.join(".local/bin/claude");
+        std::fs::remove_file(&executable).unwrap();
+        std::fs::write(&executable, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(resolve_launch_in(Client::Claude, OsStr::new(""), Some(&home)).is_err());
+        assert!(resolve_launch_in(Client::Claude, OsStr::new(""), None).is_err());
+        assert!(
+            resolve_launch_in(Client::Claude, OsStr::new(""), Some(Path::new("relative"))).is_err()
+        );
+    }
+
+    #[test]
+    fn native_fallback_does_not_discover_other_clients_or_nonexecutables() {
+        let (_directory, home) = native_claude();
+        for client in [Client::Codex, Client::Opencode] {
+            symlink(
+                std::env::current_exe().unwrap(),
+                home.join(".local/bin").join(client.name()),
+            )
+            .unwrap();
+            assert!(resolve_launch_in(client, OsStr::new(""), Some(&home)).is_err());
+        }
+        let executable = home.join(".local/bin/claude");
+        std::fs::remove_file(&executable).unwrap();
+        std::fs::write(&executable, b"\x7fELFcontent").unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(resolve_launch_in(Client::Claude, OsStr::new(""), Some(&home)).is_err());
+    }
+
     #[test]
     fn trusted_path_discards_empty_and_relative_entries() {
         assert_eq!(
