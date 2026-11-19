@@ -78,28 +78,37 @@ fn system() -> Option<(String, Option<String>)> {
     Some((locale.languageCode().to_string(), region))
 }
 
-/// What [`lang_to_set`] decides for this process, read from its real environment once.
+/// [`lang_to_set`] over an environment read through `variable`, by name.
+///
+/// The names are read here and not by the caller so a test can hand in an environment of its own:
+/// the suite must not write the real one (`std::env::set_var` is undefined behaviour while consoles
+/// are launched in parallel).
+fn from_environment(
+    variable: impl Fn(&str) -> Option<std::ffi::OsString>,
+    system: Option<(String, Option<String>)>,
+    exists: impl Fn(&str) -> bool,
+) -> Option<String> {
+    let inherited = ["LC_ALL", "LC_CTYPE", "LANG"].map(variable);
+    lang_to_set(
+        [0, 1, 2].map(|index| inherited[index].as_deref()),
+        system
+            .as_ref()
+            .map(|(language, region)| (language.as_str(), region.as_deref())),
+        exists,
+    )
+}
+
+/// What [`from_environment`] decides for this process, from its real environment, once (**D105**).
 ///
 /// Only macOS: a Linux or Windows session always carries its locale, and the reference terminals
-/// leave it alone there too. Not covered by a test — it reads the process environment, which the
-/// suite must not write (`std::env::set_var` is undefined behaviour while consoles are launched in
-/// parallel); the decision it hands over is what the tests cover.
+/// leave it alone there too. The one line that reads the real environment and the Mac's settings is
+/// not covered by a test, for the reason [`from_environment`] gives.
 pub(crate) fn for_consoles() -> Option<&'static str> {
     #[cfg(target_os = "macos")]
     {
         static DECIDED: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
         DECIDED
-            .get_or_init(|| {
-                let inherited = ["LC_ALL", "LC_CTYPE", "LANG"].map(std::env::var_os);
-                let system = system();
-                lang_to_set(
-                    [0, 1, 2].map(|index| inherited[index].as_deref()),
-                    system
-                        .as_ref()
-                        .map(|(language, region)| (language.as_str(), region.as_deref())),
-                    exists,
-                )
-            })
+            .get_or_init(|| from_environment(std::env::var_os, system(), exists))
             .as_deref()
     }
     #[cfg(not(target_os = "macos"))]
@@ -187,6 +196,26 @@ mod tests {
                 "{language:?}_{region:?} was used"
             );
         }
+    }
+
+    /// Each name is read for what it is: one variable set on its own leaves the console alone, and
+    /// an environment with none of the three gets the system's locale.
+    #[test]
+    fn the_environment_is_read_by_name() {
+        let spanish = || Some(("es".to_owned(), Some("ES".to_owned())));
+        for name in ["LC_ALL", "LC_CTYPE", "LANG"] {
+            let only = |asked: &str| (asked == name).then(|| "C".into());
+            assert_eq!(
+                from_environment(only, spanish(), installed),
+                None,
+                "{name} on its own was overridden"
+            );
+        }
+        let unrelated = |asked: &str| (asked == "LC_TIME").then(|| "C".into());
+        assert_eq!(
+            from_environment(unrelated, spanish(), installed).as_deref(),
+            Some("es_ES.UTF-8")
+        );
     }
 
     #[cfg(unix)]

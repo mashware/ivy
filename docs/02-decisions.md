@@ -10711,3 +10711,38 @@ substitute for that proof.
 blurs exactly-once fallback and the owned PTY PID. OOM-score adjustments do not separate cgroup
 victims. Kernel counters alone do not establish userspace systemd-oomd attribution. Changing global
 OOM policy or introducing resource limits is outside this repair.
+
+## D105 — A macOS console that inherited no locale gets the Mac's own, as `LANG`
+
+**Decided.** On macOS only, when the application inherited none of `LC_ALL`, `LC_CTYPE` or `LANG`
+with a value, every console is launched with `LANG=<language>_<REGION>.UTF-8` from the Mac's
+`NSLocale`, checked with `newlocale`, and `en_US.UTF-8` when that name is not installed. A value the
+user inherited — `C` included — is never replaced, and a caller's own `LANG` still wins.
+
+**Why.** An app opened from the Dock or Finder inherits launchd's environment, which has no locale,
+so every console ran in C. There zsh counts each byte of a UTF-8 glyph as a column: starship's `❯`
+(three bytes, one cell) made the prompt two columns wider than painted, and typing `cd ` left a
+`cdcd` that Backspace could not reach (#117). Setting `LANG=en_US.UTF-8` in the console removed it on
+the reporter's Mac. Every reference terminal sets a locale on macOS from `NSLocale`: WezTerm, kitty
+and Ghostty only when `LANG` is missing, with `en_US.UTF-8` behind it; iTerm2 and Terminal.app by a
+default-on setting. Ivy was the outlier.
+
+**Full `LANG`, decided by the owner on 19 November 2026.** It changes every category, not only the
+encoding: numbers, sorting, dates and messages follow the region, so a script printing `1.5` with a
+Spanish region may see `1,5`. That is what Terminal.app does, which is what a Mac user's scripts
+already meet.
+
+**Discarded.**
+- **Only `LC_CTYPE=UTF-8`**, as Alacritty does when `setlocale` fails: enough for the width bug and
+  leaves numbers in C, but a console that behaves differently from Terminal.app.
+- **Always overriding**, as iTerm2's default does: replaces what a user set on purpose.
+- **`setlocale` to validate**: it changes the process's own locale, which other threads read;
+  `newlocale` does not.
+- **`std::env::set_var` in the app**: undefined behaviour while consoles are launched in parallel.
+  The value is set on each child's command instead.
+
+**Open.** Measured only on Linux (the decision and its wiring are tested there; the `NSLocale` read
+type-checks for `aarch64-apple-darwin`). Two things only a Mac settles: whether `cdcd` is gone in a
+console of this build — the reporter's test also made zsh a login shell, so a co-factor may remain —
+and whether `NSLocale.currentLocale` reports the system language or the app's own (English) one on
+macOS 14 and later, which would turn a Spanish user's `es_ES.UTF-8` into `en_US.UTF-8`.

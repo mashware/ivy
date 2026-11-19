@@ -7426,10 +7426,20 @@ mod tests {
             std::ffi::OsStr::new(&format!("ivy-{}", of_the_child["PANEL_ID"]))
         );
 
+        // The locale term-core gives a console that inherited none, only ever on macOS: declared by
+        // its value, so a different one is as undeclared as a new variable.
+        let lang = term_core::console_lang();
+        assert_eq!(
+            lang.and(of_the_child.get("LANG").copied()),
+            lang,
+            "the program did not see the locale it is launched with"
+        );
+
         // And nothing else changes with respect to what this process already had. The comparison is
         // by the complete pair, so it catches both a new variable and one whose value was trampled.
         let expected = ["TERM", "COLORTERM", "SHELL"]
             .into_iter()
+            .chain(lang.map(|_| "LANG"))
             .chain(panel_contract::ENV_NAMES);
         let expected: std::collections::HashSet<&str> = expected.collect();
         let of_the_parent: std::collections::HashMap<String, String> = std::env::vars().collect();

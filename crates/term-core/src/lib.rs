@@ -467,7 +467,8 @@ const READ_SIZE: usize = 8192;
 /// delay.
 const RETRY: Duration = Duration::from_millis(1);
 
-/// What this crate sets in the child's environment on its own, on top of what it is passed.
+/// What this crate sets in the child's environment on its own and unconditionally, on top of what it
+/// is passed. The one conditional addition is [`console_lang`].
 ///
 /// It is a value and not spread across calls so it can be **read at a glance and asserted on in a
 /// test**: whoever injects environment into a user's program has to be able to show the complete list
@@ -476,6 +477,14 @@ const RETRY: Duration = Duration::from_millis(1);
 /// Without the terminal type and the truecolor hint, a full-screen program believes it is in a dumb
 /// terminal and emits neither color nor the sequences the grid needs to interpret.
 pub const FIXED_ENV: [(&str, &str); 2] = [("TERM", "xterm-256color"), ("COLORTERM", "truecolor")];
+
+/// The `LANG` this process gives every console besides [`FIXED_ENV`], or `None` when it gives none.
+///
+/// Public so a host can declare it in the complete list of what its programs are given. Only ever
+/// `Some` on macOS, for an application that inherited no locale (**D105**).
+pub fn console_lang() -> Option<&'static str> {
+    locale::for_consoles()
+}
 
 impl Pty {
     /// Reads cached child status and explicit scope evidence without waiting for D-Bus.
@@ -505,7 +514,7 @@ impl Pty {
     /// moved one does. Handing it out through the constructor also avoids there being two ways to reach
     /// it.
     ///
-    /// The child is set what [`FIXED_ENV`] says.
+    /// The child is set what [`FIXED_ENV`] says, plus [`console_lang`] when it is `Some`.
     ///
     /// **The channel has a ceiling, and that is what brakes the program inside.** See
     /// [`READS_IN_FLIGHT`]. Whoever drains the channel without ever stopping —a `for` over it, with no
@@ -572,7 +581,7 @@ impl Pty {
         env: &[(&str, Option<&OsStr>)],
         directory: Option<&std::path::Path>,
     ) -> Result<(Self, Receiver<Vec<u8>>)> {
-        Self::spawn_with_lang(program, args, size, env, directory, locale::for_consoles())
+        Self::spawn_with_lang(program, args, size, env, directory, console_lang())
     }
 
     /// The launch itself, with the `LANG` decided for consoles handed in rather than read here.
