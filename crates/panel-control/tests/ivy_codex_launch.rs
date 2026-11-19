@@ -20,6 +20,7 @@ impl Client {
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir(&dir).unwrap();
+        let dir = fs::canonicalize(dir).unwrap();
         let executable = dir.join("client");
         fs::write(&executable, r#"#!/bin/sh
 if [ "$1" = --version ]; then
