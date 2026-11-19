@@ -468,7 +468,7 @@ const READ_SIZE: usize = 8192;
 const RETRY: Duration = Duration::from_millis(1);
 
 /// What this crate sets in the child's environment on its own and unconditionally, on top of what it
-/// is passed. The one conditional addition is [`console_lang`].
+/// is passed. **D105** adds a conditional `LANG` on macOS, decided by [`console_lang`].
 ///
 /// It is a value and not spread across calls so it can be **read at a glance and asserted on in a
 /// test**: whoever injects environment into a user's program has to be able to show the complete list

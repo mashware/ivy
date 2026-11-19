@@ -7378,14 +7378,15 @@ mod tests {
     /// whole suite green — that is, the test did not protect the one rule of the project that
     /// exists for that.
     ///
-    /// It fails the day somebody adds a fifth variable, whichever it is, which is exactly what is
-    /// wanted: the danger is not a concrete name, it is «one more variable that nobody reviewed».
+    /// It fails the day somebody adds a variable that is not declared here, whichever it is, which
+    /// is exactly what is wanted: the danger is not a concrete name, it is «one more variable that
+    /// nobody reviewed». The four are always declared; `LANG` only when term-core decides one (D105).
     ///
     /// It launches `env` and not a shell **on purpose**: a shell adds its own —`PWD`, `SHLVL`, `_`—
     /// and the difference would stop being the application's. `SHELL` is discounted because
     /// `portable-pty` sets it on its own, read from the user database, not this application.
     #[test]
-    fn the_program_sees_no_variable_other_than_the_four() {
+    fn the_program_sees_no_variable_that_is_not_declared() {
         let panel = PanelDir::create().expect("create a panel directory");
         let (_pty, channel) =
             Pty::spawn_with_env("env", &[], INITIAL_GRID, &identity_of(Some(&panel)))
@@ -7427,7 +7428,8 @@ mod tests {
         );
 
         // The locale term-core gives a console that inherited none, only ever on macOS: declared by
-        // its value, so a different one is as undeclared as a new variable.
+        // its value, so a different one is as undeclared as a new variable. Only a Mac test process
+        // launched with no locale exercises this branch; everywhere else both sides are `None`.
         let lang = term_core::console_lang();
         assert_eq!(
             lang.and(of_the_child.get("LANG").copied()),

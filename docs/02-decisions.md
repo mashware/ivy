@@ -10741,8 +10741,10 @@ already meet.
 - **`std::env::set_var` in the app**: undefined behaviour while consoles are launched in parallel.
   The value is set on each child's command instead.
 
-**Open.** Measured only on Linux (the decision and its wiring are tested there; the `NSLocale` read
-type-checks for `aarch64-apple-darwin`). Two things only a Mac settles: whether `cdcd` is gone in a
+**Open.** Measured only on Linux: the decision, and a decided `LANG` reaching the program, are tested
+there. Unbound: the one call that hands `console_lang()` to the launch, which is `None` off macOS, and
+the `NSLocale` read, which only type-checks for `aarch64-apple-darwin`. Two things only a Mac
+settles: whether `cdcd` is gone in a
 console of this build — the reporter's test also made zsh a login shell, so a co-factor may remain —
 and whether `NSLocale.currentLocale` reports the system language or the app's own (English) one on
 macOS 14 and later, which would turn a Spanish user's `es_ES.UTF-8` into `en_US.UTF-8`.

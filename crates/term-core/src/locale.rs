@@ -25,10 +25,7 @@ pub(crate) fn lang_to_set(
     system: Option<(&str, Option<&str>)>,
     exists: impl Fn(&str) -> bool,
 ) -> Option<String> {
-    if inherited
-        .iter()
-        .any(|value| value.is_some_and(|value| !value.is_empty()))
-    {
+    if inherits_a_locale(&inherited) {
         return None;
     }
     let candidate = system.and_then(|(language, region)| {
@@ -44,6 +41,13 @@ pub(crate) fn lang_to_set(
             .filter(|name| exists(name))
             .unwrap_or_else(|| FALLBACK.to_owned()),
     )
+}
+
+/// Whether any of `LC_ALL`, `LC_CTYPE` and `LANG` came with a value.
+fn inherits_a_locale(inherited: &[Option<&OsStr>; 3]) -> bool {
+    inherited
+        .iter()
+        .any(|value| value.is_some_and(|value| !value.is_empty()))
 }
 
 /// Whether the C library can open `name` as a locale.
@@ -82,15 +86,21 @@ fn system() -> Option<(String, Option<String>)> {
 ///
 /// The names are read here and not by the caller so a test can hand in an environment of its own:
 /// the suite must not write the real one (`std::env::set_var` is undefined behaviour while consoles
-/// are launched in parallel).
+/// are launched in parallel). The platform is only asked for its language when nothing was
+/// inherited, which is not the case of an app started from a shell.
 fn from_environment(
     variable: impl Fn(&str) -> Option<std::ffi::OsString>,
-    system: Option<(String, Option<String>)>,
+    system: impl FnOnce() -> Option<(String, Option<String>)>,
     exists: impl Fn(&str) -> bool,
 ) -> Option<String> {
     let inherited = ["LC_ALL", "LC_CTYPE", "LANG"].map(variable);
+    let inherited = [0, 1, 2].map(|index| inherited[index].as_deref());
+    if inherits_a_locale(&inherited) {
+        return None;
+    }
+    let system = system();
     lang_to_set(
-        [0, 1, 2].map(|index| inherited[index].as_deref()),
+        inherited,
         system
             .as_ref()
             .map(|(language, region)| (language.as_str(), region.as_deref())),
@@ -108,7 +118,7 @@ pub(crate) fn for_consoles() -> Option<&'static str> {
     {
         static DECIDED: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
         DECIDED
-            .get_or_init(|| from_environment(|name| std::env::var_os(name), system(), exists))
+            .get_or_init(|| from_environment(|name| std::env::var_os(name), system, exists))
             .as_deref()
     }
     #[cfg(not(target_os = "macos"))]
@@ -205,15 +215,19 @@ mod tests {
         let spanish = || Some(("es".to_owned(), Some("ES".to_owned())));
         for name in ["LC_ALL", "LC_CTYPE", "LANG"] {
             let only = |asked: &str| (asked == name).then(|| "C".into());
+            // The platform is not asked when a locale was inherited.
+            let not_asked = || -> Option<(String, Option<String>)> {
+                panic!("the system was asked although {name} was inherited")
+            };
             assert_eq!(
-                from_environment(only, spanish(), installed),
+                from_environment(only, not_asked, installed),
                 None,
                 "{name} on its own was overridden"
             );
         }
         let unrelated = |asked: &str| (asked == "LC_TIME").then(|| "C".into());
         assert_eq!(
-            from_environment(unrelated, spanish(), installed).as_deref(),
+            from_environment(unrelated, spanish, installed).as_deref(),
             Some("es_ES.UTF-8")
         );
     }
