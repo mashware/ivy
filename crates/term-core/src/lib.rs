@@ -421,6 +421,17 @@ const HANGUP_GRACE: Duration = Duration::from_millis(200);
 #[cfg(unix)]
 const HANGUP_CHECK_EVERY: Duration = Duration::from_millis(1);
 
+/// How long closing waits, after its last signal, for the program to become reapable before it
+/// leaves it to a thread of its own (D56, amended).
+///
+/// **A signal accepted is not a program gone.** On Linux a killed program is reapable a millisecond
+/// later, so this bound is never reached there. On macOS a shell already exiting can stay unreapable
+/// for good — the most probable reason being the kernel draining its terminal's unread output at
+/// exit, with no timeout, while this console no longer reads it — and waiting without a bound froze
+/// the window for good. The same tenth of a second as [`READER_GIVE_UP`], for the same reason: plainly
+/// a delay, plainly not a threshold anybody measured.
+const REAP_GIVE_UP: Duration = Duration::from_millis(100);
+
 /// How many reads fit in the channel before the reader thread stops reading.
 ///
 /// **This number is the terminal's brake, not a performance tuning knob.** While the channel has
@@ -1178,6 +1189,20 @@ fn hang_up(child: &mut (dyn Child + Send + Sync)) -> HangUp {
     HangUp::Waitable
 }
 
+/// Hands a closed console's program to a thread that waits for it, so it is reaped whenever it ends
+/// and the close does not wait with it (D56).
+fn leave_running(mut child: Box<dyn Child + Send + Sync>) {
+    // Named so a leak audit can tell these apart; `wait` needs no stack to speak of.
+    let _ = thread::Builder::new()
+        .name("left-running".to_owned())
+        .stack_size(64 * 1024)
+        .spawn(move || {
+            // Abandoned on purpose: this thread is never joined, and it waits for as long as the
+            // program chooses to live (D56).
+            let _ = child.wait();
+        });
+}
+
 /// What hanging a program up left behind.
 enum HangUp {
     /// Gone, sure to go at once, or a refusal this crate cannot see (the library's `kill`, and
@@ -1231,16 +1256,35 @@ impl Drop for Pty {
             #[cfg(not(unix))]
             let left = hang_up(child.as_mut());
             match left {
+                // **Waited for with a bound, never without one** (D56, amended): a signal the system
+                // accepted does not make the program reapable on every platform — on macOS a shell
+                // caught exiting stays unreapable after its kill, and the unbounded wait that used
+                // to be here froze the window for good. An error from `try_wait` counts as gone,
+                // as in `hang_up`: there is no child of ours left to wait for.
                 HangUp::Waitable => {
-                    // Bounded: on Unix, after its grace the hang-up falls through to a real
-                    // `SIGKILL`, which nobody holds — not even a stopped process, the shape that
-                    // would otherwise never be reaped. A program in uninterruptible sleep (a hung
-                    // network mount) dies only when its system call returns, and until then this
-                    // waits with it. When `try_wait` failed instead, there is no
-                    // child of ours left to wait for and this fails at once. **Not on Windows**,
-                    // nor on the Unix path with no pid, reasoned unreachable: there a refused kill
-                    // is not seen, and this waits for as long as the program lives (#273).
-                    let _ = child.wait();
+                    let deadline = Instant::now() + REAP_GIVE_UP;
+                    let reaped = loop {
+                        match child.try_wait() {
+                            Ok(None) if Instant::now() < deadline => {
+                                thread::sleep(Duration::from_millis(1));
+                            }
+                            Ok(None) => break false,
+                            _ => break true,
+                        }
+                    };
+                    if !reaped {
+                        use std::io::Write;
+
+                        let pid = child.process_id();
+                        leave_running(child);
+                        // Not `eprintln!`, for the reason the refused arm below gives.
+                        let _ = writeln!(
+                            std::io::stderr().lock(),
+                            "a console was closed and its program had not finished after being told \
+                             to end (pid {}). It may keep running",
+                            pid.map_or_else(|| "unknown".to_owned(), |pid| pid.to_string())
+                        );
+                    }
                 }
                 // **Left running, and waited for somewhere that paints nothing** (D56). Measured:
                 // waiting here froze the window for the program's whole life, and nothing this
@@ -1252,15 +1296,7 @@ impl Drop for Pty {
                     use std::io::Write;
 
                     let pid = child.process_id();
-                    // Named so a leak audit can tell these apart; `wait` needs no stack to speak of.
-                    let _ = thread::Builder::new()
-                        .name("left-running".to_owned())
-                        .stack_size(64 * 1024)
-                        .spawn(move || {
-                            // Abandoned on purpose: this thread is never joined, and it waits for
-                            // as long as a program nothing here can end chooses to live (D56).
-                            let _ = child.wait();
-                        });
+                    leave_running(child);
                     // **Not `eprintln!`**, which panics when standard error is a closed pipe
                     // (`ivy | head`) — and a panic here is inside the interface pass,
                     // or an abort if this drop runs while unwinding.
