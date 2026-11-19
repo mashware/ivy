@@ -137,7 +137,11 @@ fn nonce() -> io::Result<String> {
 /// Select the invocations this relay can preserve; compatibility is checked by
 /// advertised CLI capabilities and the live protocol, never a version number.
 pub fn supported(args: &[OsString]) -> bool {
-    cfg!(target_os = "linux") && supported_args(args)
+    supported_on(std::env::consts::OS, args)
+}
+
+fn supported_on(platform: &str, args: &[OsString]) -> bool {
+    matches!(platform, "linux" | "macos") && supported_args(args)
 }
 
 fn remote_capabilities(help: &str) -> bool {
@@ -1653,6 +1657,27 @@ mod tests {
         assert!(join_if_finished(handle, Duration::from_millis(20)).is_none());
         assert!(start.elapsed() < Duration::from_secs(1));
         drop(tx);
+    }
+
+    #[test]
+    fn local_launches_require_shared_routing_on_linux_and_macos() {
+        for platform in ["linux", "macos"] {
+            for args in [vec![], vec!["resume", "--last"], vec!["fork", "--last"]] {
+                let args: Vec<_> = args.into_iter().map(OsString::from).collect();
+                assert!(supported_on(platform, &args), "{platform}: {args:?}");
+            }
+            assert!(!supported_on(platform, &["--no-daemon".into()]));
+            assert!(!supported_on(
+                platform,
+                &["--remote".into(), "ws://host".into()]
+            ));
+        }
+        assert!(!supported_on("windows", &[]));
+        assert!(!supported_on("unknown", &[]));
+        assert_eq!(
+            supported(&[]),
+            matches!(std::env::consts::OS, "linux" | "macos")
+        );
     }
 
     #[test]

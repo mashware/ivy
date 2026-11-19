@@ -137,7 +137,7 @@ fn explicit_independent_admin_remote_and_unknown_preserve_arguments_environment_
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn shared_launch_uses_capabilities_with_arbitrary_cli_and_server_version_labels() {
     // Representative labels establish version independence, not a compatibility whitelist.
@@ -183,7 +183,7 @@ fn shared_launch_uses_capabilities_with_arbitrary_cli_and_server_version_labels(
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn missing_remote_capabilities_never_start_an_independent_session() {
     for help in [
@@ -201,7 +201,7 @@ fn missing_remote_capabilities_never_start_an_independent_session() {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn failed_shared_setup_never_starts_an_independent_session() {
     for response in ["not-json", "{}", r#"{"socketPath":null}"#] {
@@ -218,7 +218,7 @@ fn failed_shared_setup_never_starts_an_independent_session() {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn stalled_capability_probe_fails_in_bounded_time_without_starting_a_session() {
     let client = Client::new();
