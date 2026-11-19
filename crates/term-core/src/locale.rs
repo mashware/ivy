@@ -108,7 +108,7 @@ pub(crate) fn for_consoles() -> Option<&'static str> {
     {
         static DECIDED: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
         DECIDED
-            .get_or_init(|| from_environment(std::env::var_os, system(), exists))
+            .get_or_init(|| from_environment(|name| std::env::var_os(name), system(), exists))
             .as_deref()
     }
     #[cfg(not(target_os = "macos"))]
