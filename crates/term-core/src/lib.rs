@@ -1181,7 +1181,8 @@ fn send_signal(pid: libc::pid_t, number: libc::c_int) -> std::io::Result<()> {
 /// Elsewhere the library's `kill` has no grid to pay: on Windows it is `TerminateProcess`, at once.
 /// Whether it can be refused there — an elevated program — and what that leaves is not known yet:
 /// its failure is not looked at, so a refusal goes down the waitable path, which waits at most
-/// [`REAP_GIVE_UP`] before leaving the program running (D56, amended). Not compiled or run here.
+/// [`REAP_GIVE_UP`] before leaving the program running (D56, amended). Type-checked for Windows,
+/// never run on it.
 #[cfg(not(unix))]
 fn hang_up(child: &mut (dyn Child + Send + Sync)) -> HangUp {
     let _ = child.kill();
@@ -3342,7 +3343,7 @@ mod tests {
         );
     }
 
-    /// A child that becomes reapable on a given look, never on a `wait`.
+    /// A child that becomes reapable on a given look, never on a `wait`; `0` makes every look fail.
     #[derive(Debug)]
     struct ReapableOnLook(usize);
     impl portable_pty::ChildKiller for ReapableOnLook {
@@ -3355,7 +3356,10 @@ mod tests {
     }
     impl Child for ReapableOnLook {
         fn try_wait(&mut self) -> std::io::Result<Option<portable_pty::ExitStatus>> {
-            if self.0 <= 1 {
+            if self.0 == 0 {
+                return Err(std::io::Error::from_raw_os_error(10));
+            }
+            if self.0 == 1 {
                 return Ok(Some(portable_pty::ExitStatus::with_exit_code(0)));
             }
             self.0 -= 1;
@@ -3382,6 +3386,10 @@ mod tests {
         assert!(
             !reaped_within(&mut ReapableOnLook(usize::MAX), Duration::from_millis(5)),
             "a program never reapable was reported reaped"
+        );
+        assert!(
+            reaped_within(&mut ReapableOnLook(0), Duration::from_millis(5)),
+            "a look that failed was not taken as gone: there is no child of ours left to wait for"
         );
     }
 }

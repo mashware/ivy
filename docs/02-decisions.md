@@ -7856,8 +7856,8 @@ child unreapable, the window no longer waits with it.
 **On Linux nothing measurable changes**: a killed program is reapable about a millisecond later
 (D55), well inside the bound, and a unit test pins that a program reapable a few looks later is
 reaped inline. **On Windows** a refused `TerminateProcess` takes the same path, so the freeze of
-[#273](https://github.com/mashware/ivy-history-private/issues/273) is bounded too. Windows is not
-compiled or run here. The program that is left over on macOS is reaped by its thread once
+[#273](https://github.com/mashware/ivy-history-private/issues/273) is bounded too. That path was
+type-checked for Windows and never run there. The program that is left over on macOS is reaped by its thread once
 the close drops the last copy of the master, if the explanation above is right. If it is wrong, the
 thread waits for as long as the program lives, which is the cost declared above, now for one more
 case.
