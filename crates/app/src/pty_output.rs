@@ -124,7 +124,24 @@ impl PtyOutput {
     /// not find out about either of the two things. Even so it is worth keeping it next to the
     /// `Pty`: separating them leaves a queue without an owner.
     pub fn new(output: Receiver<Vec<u8>>, wake: impl Fn() + Send + 'static) -> Self {
-        let queue = Arc::new(Mutex::new(Queue::default()));
+        Self::seeded(output, Vec::new(), wake)
+    }
+
+    pub(crate) fn seeded(
+        output: Receiver<Vec<u8>>,
+        startup: Vec<u8>,
+        wake: impl Fn() + Send + 'static,
+    ) -> Self {
+        let length = startup.len();
+        let queue = Arc::new(Mutex::new(Queue {
+            bytes: startup.into(),
+            arrivals: if length == 0 {
+                VecDeque::new()
+            } else {
+                VecDeque::from([(length as u64, Instant::now())])
+            },
+            bytes_picked_up: 0,
+        }));
         let thread_queue = Arc::clone(&queue);
         let room = Arc::new(Condvar::new());
         let thread_room = Arc::clone(&room);
@@ -132,7 +149,13 @@ impl PtyOutput {
         let thread_stop = Arc::clone(&stop);
         let (death_sender, death) = channel();
 
+        #[cfg(test)]
+        let before_bridge = tests::BEFORE_BRIDGE.with(|hook| hook.borrow_mut().take());
         std::thread::spawn(move || {
+            #[cfg(test)]
+            if let Some(hook) = before_bridge {
+                hook();
+            }
             // The sender travels to the thread without being used: dropping it **is** the signal
             // that the program has died. It is dropped by hand further below, and the order with
             // the final notification is not a detail: see the comment there.
@@ -389,7 +412,7 @@ impl Silences {
 /// `ivy | head` takes — and a window that dies because it had something to say is worse
 /// than the silence the sentence was written against. What cannot be delivered is dropped: there is
 /// no third channel to complain on.
-fn say(sentence: &str) {
+pub(crate) fn say(sentence: &str) {
     static REPORTER: std::sync::OnceLock<Option<std::sync::mpsc::SyncSender<String>>> =
         std::sync::OnceLock::new();
     if let Some(sender) = REPORTER.get_or_init(|| query_reporter(write_diagnostic)) {
@@ -521,10 +544,13 @@ impl crate::Pane {
 }
 
 fn pump_pane(pane: &mut crate::Pane, enabled: crate::agent_signals::Enabled) -> bool {
+    crate::launch::refresh(pane);
     pane.received.clear();
-    let pickup = pane
-        .pty_output
-        .pick_up(&mut pane.received, PUMP_BUDGET, Silences::of(&pane.pty));
+    let pickup = pane.pty_output.pick_up(
+        &mut pane.received,
+        PUMP_BUDGET,
+        crate::launch::silences(&pane.pty),
+    );
     // **One clock and not two.** The stamp of when the bytes were collected is also the start of
     // interpreting them: between the two there was nothing, and a second `Instant::now()` only
     // added a reading of its own to the span it was meant to measure.
@@ -536,6 +562,7 @@ fn pump_pane(pane: &mut crate::Pane, enabled: crate::agent_signals::Enabled) -> 
     {
         say_query_error(&error);
     }
+    pane.pty.interpreted(pane.received.len());
     let queried = pane.signals.sync_native(&mut pane.screen, collected_at);
     // Automatic replies must not consume the backlog reserved for the person's input.
     if pane
@@ -554,6 +581,9 @@ fn pump_pane(pane: &mut crate::Pane, enabled: crate::agent_signals::Enabled) -> 
 }
 
 pub(crate) fn resize(pane: &mut crate::Pane) {
+    if pane.pty.pending() || pane.pty.startup_pending() {
+        return;
+    }
     if pane.measured == pane.screen.size() {
         return;
     }
@@ -591,6 +621,7 @@ pub(crate) fn pump_all(window: &mut crate::Window) -> crate::Pump {
     // recorded **once**: what has to be readable is what attending to a width change cost one
     // frame, and one divider moves two consoles at a time.
     let mut reflowed = std::time::Duration::ZERO;
+    let mut launches = std::time::Duration::ZERO;
 
     let agent_preferences = window.chrome.agent_preferences;
     for pane in window.all_panes_mut() {
@@ -598,6 +629,8 @@ pub(crate) fn pump_all(window: &mut crate::Window) -> crate::Pump {
         // wrote those bytes for the dimensions it does not yet know have changed.
         let queue_left = pane.pump(agent_preferences);
         pane.resize();
+        crate::launch::finish_input(pane);
+        launches += crate::launch::take_cost(&mut pane.pty);
         reflowed += std::mem::take(&mut pane.reflowed);
 
         pump.some_left_a_queue |= queue_left;
@@ -606,6 +639,9 @@ pub(crate) fn pump_all(window: &mut crate::Window) -> crate::Pump {
 
     // **Only when there really was a reflow.** Recording a zero on the thousands of still
     // frames would sink the average and make this span say the opposite of what it is worth.
+    window.launch_cost.calls += 1;
+    window.launch_cost.total += launches;
+    window.timed_separately += launches;
     if !reflowed.is_zero() {
         window.reflow.record(reflowed);
         window.timed_separately += reflowed;
@@ -615,11 +651,31 @@ pub(crate) fn pump_all(window: &mut crate::Window) -> crate::Pump {
 }
 
 #[cfg(test)]
+pub(crate) fn hold_next_bridge() -> (Receiver<()>, std::sync::mpsc::Sender<()>) {
+    tests::hold_next_bridge()
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{Duration, Instant};
     use term_core::{Pty, Size};
+
+    thread_local! {
+        pub(crate) static BEFORE_BRIDGE: std::cell::RefCell<Option<Box<dyn FnOnce() + Send>>> = const { std::cell::RefCell::new(None) };
+    }
+    pub(crate) fn hold_next_bridge() -> (Receiver<()>, std::sync::mpsc::Sender<()>) {
+        let (entered, parked) = channel();
+        let (release, resume) = channel();
+        BEFORE_BRIDGE.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move || {
+                entered.send(()).unwrap();
+                resume.recv_timeout(Duration::from_secs(3)).unwrap();
+            }))
+        });
+        (parked, release)
+    }
 
     #[test]
     fn pump_diagnostics_do_not_wait_for_a_full_stderr_pipe() {

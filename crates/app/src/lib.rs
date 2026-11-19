@@ -53,7 +53,9 @@ mod git_process;
 mod header;
 mod injected;
 pub mod keyboard;
+mod launch;
 mod ligatures;
+pub use launch::enable as enable_scope_launcher;
 mod links;
 pub mod measure;
 pub mod mouse;
@@ -117,7 +119,9 @@ use painter::CellMetrics;
 use panel_contract::PanelDir;
 use pty_output::PtyOutput;
 use std::time::{Instant, SystemTime};
-use term_core::{Cell, Pty, Screen, Scroll, Size};
+#[cfg(test)]
+use term_core::Pty;
+use term_core::{Cell, Screen, Scroll, Size};
 use theme::Theme;
 use watcher::{Flag, Watcher};
 
@@ -575,7 +579,7 @@ struct Pane {
     /// The pseudoterminal and its queue go together on purpose. The bridge's thread lives as long
     /// as the pseudoterminal lives, not as long as the bridge does: separating them would leave a
     /// thread and a queue with no owner, growing.
-    pty: Pty,
+    pty: launch::Process,
     pty_output: PtyOutput,
     /// Startup assets stay alive until the console's shell no longer needs them.
     _shell_integration: Option<shell_integration::Prepared>,
@@ -716,31 +720,6 @@ pub(crate) enum WheelOwner {
     ArrowKeys,
 }
 
-impl Pane {
-    /// Applies the size the last UI pass measured.
-    ///
-    /// **The order between the two halves is not indifferent: the grid first and the program
-    /// after.** As soon as the program knows the new size it starts sending bytes meant for it, and
-    /// if the grid were still the old one they would be interpreted against the wrong dimensions.
-    fn resize(&mut self) {
-        pty_output::resize(self);
-    }
-
-    /// Whether the program finished **well** and nothing of its own is left to show.
-    ///
-    /// **It waits for the queue to be empty**: dying does not erase what the program wrote before
-    /// doing so, and giving the pane up for finished with a queue pending would eat precisely the
-    /// end, which is the part that was being looked at.
-    ///
-    /// **What «finished» means is a decision and it lives outside this file**, in the module that
-    /// owns the signal it rests on: see [`pty_output::is_finished`]. **The ending is asked of the
-    /// pseudoterminal** and not of anything the bridge keeps, so it does not depend on the pump
-    /// having run this frame — which the queue, the other half of the question, does by definition.
-    fn is_finished(&self, queue_left: bool) -> bool {
-        crate::resume::finished(self, queue_left)
-    }
-}
-
 /// The root window: the tabs, and what belongs to the program and not to any layout.
 struct Window {
     /// Who gives notice that a producer has published, over the paths of the open consoles.
@@ -875,6 +854,7 @@ struct Window {
     /// much each time cost: a mean per console spread over its thousands of still frames would say
     /// it costs nothing.
     reflow: measure::Reflow,
+    launch_cost: launch::Cost,
     /// Where the layout goes, and what this session already knows about that file.
     ///
     /// **It is the same one that loaded on starting, and that is a rule and not a coincidence**:
@@ -1145,38 +1125,7 @@ impl Window {
     /// they run out it is said out loud and it stops looking.
     ///
     fn insist_on_the_size(&mut self, ctx: &egui::Context) {
-        let Some(requested) = &mut self.requested_size else {
-            return;
-        };
-
-        let how_much = requested.how_much;
-        if (self.window_size - how_much).abs().max_elem() <= SIZE_TOLERANCE {
-            return;
-        }
-
-        if requested.attempts == 0 {
-            self.requested_size = None;
-            // **It is said out loud, and on the error output of the process that measures.**
-            // Whoever takes the batch has to know that the size they asked for is not the one there
-            // was; the report publishes the one there was, so between the two things no room is
-            // left to believe a measurement that cannot be reproduced.
-            //
-            // **And it is timed**, even though it happens only once in the session: writing to the
-            // error output costs whatever whoever reads at the other end of the pipe takes, happens
-            // inside the frame's pass and no pane declares it. It is the same as the two warnings
-            // for splitting and closing already do.
-            let before = Instant::now();
-            eprintln!(
-                "the desktop is not honouring the size asked for ({}x{} points): the window stays at {}x{} \
-                 and the batches will not be comparable with other machines",
-                how_much.x, how_much.y, self.window_size.x, self.window_size.y
-            );
-            self.timed_separately += before.elapsed();
-            return;
-        }
-
-        requested.attempts -= 1;
-        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(how_much));
+        opening::insist_on_size(self, ctx);
     }
 
     /// Pumps **every** console of **every** tab and resizes them, and sums up what the frame has to
@@ -6788,7 +6737,7 @@ mod tests {
             program: None,
             restoration: restoration::PaneState::default(),
             signals: Default::default(),
-            pty,
+            pty: pty.into(),
             pty_output: PtyOutput::new(output, || {}),
             _shell_integration: None,
             panel: None,
@@ -6928,6 +6877,7 @@ mod tests {
             tab_bar_cost: measure::TabBar::default(),
             strips: report::Strips::default(),
             reflow: measure::Reflow::default(),
+            launch_cost: Default::default(),
             persistence: session::Persistence::at(None),
             restoring: None,
             reading_settings: measure::ReadingSettings::default(),
@@ -11982,7 +11932,7 @@ mod tests {
         // inventing a threshold—, only that it is not zero.
         let requested = egui::vec2(800.0, 600.0);
         let mut window = a_window_that_asks(requested);
-        // Isolate warning attribution from independently measured Board observation.
+        // Exclude independently measured launch/status work and Board observation from this warning.
         window.board.enabled = false;
         let ctx = egui::Context::default();
         let stubborn = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1126.0, 661.0));
@@ -11991,7 +11941,7 @@ mod tests {
             requests_of_one_logical_pass(&mut window, &ctx, stubborn);
         }
         assert!(
-            window.timed_separately.is_zero(),
+            window.timed_separately == window.launch_cost.total,
             "insisting on the size declared {:?}, so the later jump would not say where it comes from",
             window.timed_separately
         );
@@ -11999,7 +11949,7 @@ mod tests {
         requests_of_one_logical_pass(&mut window, &ctx, stubborn);
 
         assert!(
-            !window.timed_separately.is_zero(),
+            window.timed_separately > window.launch_cost.total,
             "the frame in which the desktop is reported not to give way declared nothing: what writing \
              the warning costs is published as the interface framework's cost"
         );

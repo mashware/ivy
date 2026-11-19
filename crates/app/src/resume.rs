@@ -130,6 +130,9 @@ fn try_open_with(
 }
 
 pub(crate) fn set_capture(pane: &mut crate::Pane, enabled: bool) {
+    if pane.pty.pending() {
+        return;
+    }
     if !enabled {
         if pane.restoration.sessions.take().is_some() || pane.restoration.scope_unavailable {
             pane.restoration.route.set(None);
@@ -204,7 +207,8 @@ pub(crate) fn capture(
 }
 
 pub(crate) fn finished(pane: &crate::Pane, queue_left: bool) -> bool {
-    !pane.restoration.failed
+    !pane.pty.keeps_open()
+        && !pane.restoration.failed
         && !pane.restoration.resuming
         && crate::pty_output::is_finished(pane.pty_output.is_alive(), queue_left, pane.pty.ending())
 }
@@ -225,9 +229,9 @@ pub(crate) fn inspect_restored_exit(pane: &mut crate::Pane) {
         return;
     }
     let mut nothing = Vec::new();
-    let pickup =
-        pane.pty_output
-            .pick_up(&mut nothing, 0, crate::pty_output::Silences::of(&pane.pty));
+    let pickup = pane
+        .pty_output
+        .pick_up(&mut nothing, 0, crate::launch::silences(&pane.pty));
     if pane.pty_output.is_alive() || pickup.left_a_queue {
         return;
     }
@@ -268,13 +272,25 @@ pub(crate) fn take_over(pane: &mut crate::Pane) -> term_core::Result<()> {
             .as_ref()
             .map(|prepared| prepared.args().iter().map(String::as_str).collect())
             .unwrap_or_default();
-        let (pty, output) =
-            term_core::Pty::spawn_with_env_in(&shell, &args, size, &identity, directory)?;
+        let launch_wake = wake.clone().unwrap_or_else(|| Arc::new(|| {}));
+        let (mut pty, output) = crate::launch::Process::start(
+            launch_wake,
+            Default::default(),
+            crate::launch::Request {
+                program: &shell,
+                args: &args,
+                size,
+                env: &identity,
+                directory,
+                fallback: false,
+            },
+        )?;
         pane.restoration.route.set(None);
         pane.restoration.sessions = None;
         pane.restoration.session_revision = 0;
         pane.restoration.session_status = None;
         pane.restoration.scope_unavailable = false;
+        pty.context = pane.pty.context.clone();
         pane.pty = pty;
         pane.pty_output = crate::pty_output::PtyOutput::new(output, move || {
             if let Some(wake) = &wake {
@@ -360,6 +376,55 @@ mod tests {
                 .unwrap(),
             ),
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "requires the built target/debug/app and a real systemd user manager"]
+    fn restored_client_fixed_arguments_and_directory_reach_a_real_isolated_scope() {
+        use std::os::unix::fs::PermissionsExt;
+        let _launcher = crate::launch::tests::explicit_ivy_launcher();
+        let root = std::env::temp_dir().join(format!("ivy-scoped-resume-{}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let output = root.join("proof");
+        let program = root.join("client");
+        std::fs::write(
+            &program,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$$\" \"$PWD\" \"$@\" > '{}'\nexec /bin/cat\n",
+                output.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let leaf = saved(Client::Codex, root.clone());
+        let mut pane = try_open_with(&Default::default(), &leaf, 0, Default::default(), |_| {
+            Ok(crate::ai_sessions::ResolvedLaunch {
+                program,
+                prefix_args: vec![],
+                path: "/usr/bin:/bin".into(),
+            })
+        })
+        .unwrap();
+        assert!(pane.pty.pending());
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while (!output.exists() || pane.pty.pending()) && Instant::now() < deadline {
+            crate::launch::refresh(&mut pane);
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        let proof = std::fs::read_to_string(output).unwrap();
+        let mut lines = proof.lines();
+        let pid: u32 = lines.next().unwrap().parse().unwrap();
+        assert_eq!(
+            lines.collect::<Vec<_>>(),
+            [root.to_str().unwrap(), "resume", "--no-daemon", ID]
+        );
+        let group = std::fs::read_to_string(format!("/proc/{pid}/cgroup")).unwrap();
+        assert!(group.contains("/app.slice/ivy-console-"), "{group}");
+        assert_ne!(group, std::fs::read_to_string("/proc/self/cgroup").unwrap());
+        assert_eq!(pane.restoration.resume, leaf.resume);
+        drop(pane);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -478,11 +543,8 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(2);
         let mut output = Vec::new();
         while Instant::now() < deadline {
-            pane.pty_output.pick_up(
-                &mut output,
-                65536,
-                crate::pty_output::Silences::of(&pane.pty),
-            );
+            pane.pty_output
+                .pick_up(&mut output, 65536, crate::launch::silences(&pane.pty));
             inspect_restored_exit(&mut pane);
             if pane.restoration.failed {
                 break;
@@ -515,11 +577,8 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(2);
         let mut output = Vec::new();
         while Instant::now() < deadline {
-            pane.pty_output.pick_up(
-                &mut output,
-                65536,
-                crate::pty_output::Silences::of(&pane.pty),
-            );
+            pane.pty_output
+                .pick_up(&mut output, 65536, crate::launch::silences(&pane.pty));
             if output
                 .windows(b"fresh-shell-output".len())
                 .any(|bytes| bytes == b"fresh-shell-output")
@@ -533,6 +592,7 @@ mod tests {
 
     #[test]
     fn a_wrong_live_session_is_replaced_before_notice_keyboard_clipboard_or_mouse_input() {
+        let _shell = crate::shell_integration::TestShell::use_program("/bin/sh");
         for input in ["notice", "keyboard", "clipboard", "mouse"] {
             let mut pane = crate::Pane::launching(&Default::default(), "/bin/cat", 0).unwrap();
             pane.restoration.resume = saved(Client::Claude, std::env::temp_dir()).resume;

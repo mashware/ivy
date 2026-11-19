@@ -965,6 +965,9 @@ impl Window {
                 // ended-output sentence is shown, and a press on it silenced a refusal nobody had
                 // seen — the failure D31 exists against.
                 match silence {
+                    Some(crate::painter::notices::Silence::Termination) => {
+                        pane.pty.dismissed = true;
+                    }
                     Some(crate::painter::notices::Silence::WentQuiet) => {
                         pane.pty_output.dismiss_the_silence(pane.pty.ending());
                     }

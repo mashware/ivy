@@ -20,7 +20,32 @@ const FISH: &str = include_str!("../../../resources/agent-integrations/codex/she
 /// opens N consoles at once, and reading the environment inside each one would read it a hundred
 /// and twenty-eight times in the worst case.
 pub(crate) fn the_users_shell() -> String {
+    #[cfg(test)]
+    if let Some(shell) = TEST_SHELL.with(|shell| shell.borrow().clone()) {
+        return shell;
+    }
     std::env::var("SHELL").unwrap_or_else(|_| crate::FALLBACK_SHELL.to_owned())
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_SHELL: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Keeps input-routing fixtures independent of user startup files without changing process env.
+#[cfg(test)]
+pub(crate) struct TestShell(Option<String>);
+#[cfg(test)]
+impl TestShell {
+    pub(crate) fn use_program(program: &str) -> Self {
+        Self(TEST_SHELL.with(|shell| shell.replace(Some(program.to_owned()))))
+    }
+}
+#[cfg(test)]
+impl Drop for TestShell {
+    fn drop(&mut self) {
+        TEST_SHELL.with(|shell| *shell.borrow_mut() = self.0.take());
+    }
 }
 
 pub(crate) fn helper_path() -> Option<PathBuf> {

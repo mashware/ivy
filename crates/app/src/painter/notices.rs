@@ -322,6 +322,7 @@ pub(crate) enum Silence {
     /// The input queue refused what was just typed (**D60**).
     Refused,
     RestoreDirectory,
+    Termination,
 }
 
 /// What the box under the held paste's question is about, or nothing if it has nothing to say.
@@ -331,7 +332,9 @@ pub(crate) enum Silence {
 /// both into one sentence is out of this ticket's scope (`03-design.md`'s `## Identified risks`,
 /// F2) — the existing, more severe claim about the program being gone is the one kept.
 pub(crate) fn what_the_silence_is(console: &crate::Pane) -> Option<Silence> {
-    if still_says_it_went_quiet(console) {
+    if console.pty.notice().is_some() {
+        Some(Silence::Termination)
+    } else if still_says_it_went_quiet(console) {
         Some(Silence::WentQuiet)
     } else if still_says_a_write_was_refused(console) {
         Some(Silence::Refused)
@@ -346,6 +349,7 @@ pub(crate) fn what_the_silence_is(console: &crate::Pane) -> Option<Silence> {
 fn what_the_silence_says(console: &crate::Pane, silence: Silence) -> String {
     match silence {
         Silence::WentQuiet => what_it_says(is_deaf(console)),
+        Silence::Termination => console.pty.notice().unwrap_or_default().to_owned(),
         Silence::Refused => INPUT_QUEUE_FULL.to_owned(),
         Silence::RestoreDirectory => {
             if let Some(identity) = &console.restoration.resume {
