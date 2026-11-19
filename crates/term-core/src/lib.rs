@@ -572,6 +572,21 @@ impl Pty {
         env: &[(&str, Option<&OsStr>)],
         directory: Option<&std::path::Path>,
     ) -> Result<(Self, Receiver<Vec<u8>>)> {
+        Self::spawn_with_lang(program, args, size, env, directory, locale::for_consoles())
+    }
+
+    /// The launch itself, with the `LANG` decided for consoles handed in rather than read here.
+    ///
+    /// Separate because the decision only exists on macOS: a test on any platform passes one in and
+    /// sees whether it reaches the program, and whether a caller's own `LANG` still beats it.
+    fn spawn_with_lang(
+        program: &OsStr,
+        args: &[std::ffi::OsString],
+        size: Size,
+        env: &[(&str, Option<&OsStr>)],
+        directory: Option<&std::path::Path>,
+        lang: Option<&str>,
+    ) -> Result<(Self, Receiver<Vec<u8>>)> {
         if let Some(directory) = directory
             && (!directory.is_absolute() || !directory.is_dir())
         {
@@ -628,7 +643,7 @@ impl Pty {
             cmd.env(name, value);
         }
         // Before the caller's own variables, so one that names `LANG` still decides it.
-        if let Some(lang) = locale::for_consoles() {
+        if let Some(lang) = lang {
             cmd.env("LANG", lang);
         }
         for (name, value) in env {
@@ -1978,6 +1993,52 @@ mod tests {
         assert!(
             contains(&output, "3f2a9c14"),
             "the child did not see the variable: {:?}",
+            String::from_utf8_lossy(&output)
+        );
+    }
+
+    /// The decided `LANG` has to **reach** the program: a decision that is right and never set leaves
+    /// the Mac's consoles in the C locale, where zsh miscounts a UTF-8 prompt and a redraw leaves text
+    /// Backspace cannot erase. The decision is forced here because on this platform there is none.
+    #[test]
+    fn the_decided_lang_reaches_the_program() {
+        let (_pty, channel) = Pty::spawn_with_lang(
+            OsStr::new("sh"),
+            &["-c".into(), "printf '[%s]' \"$LANG\"".into()],
+            Size::default(),
+            &[],
+            None,
+            Some("xx_DECIDED.UTF-8"),
+        )
+        .expect("launch sh");
+
+        let output = drain_until_closed(&channel);
+
+        assert!(
+            contains(&output, "[xx_DECIDED.UTF-8]"),
+            "the child did not see the decided LANG: {:?}",
+            String::from_utf8_lossy(&output)
+        );
+    }
+
+    /// A caller that names `LANG` itself still decides it: the console's decision only fills a gap.
+    #[test]
+    fn a_lang_passed_by_the_caller_beats_the_decided_one() {
+        let (_pty, channel) = Pty::spawn_with_lang(
+            OsStr::new("sh"),
+            &["-c".into(), "printf '[%s]' \"$LANG\"".into()],
+            Size::default(),
+            &[("LANG", Some(OsStr::new("yy_CALLER.UTF-8")))],
+            None,
+            Some("xx_DECIDED.UTF-8"),
+        )
+        .expect("launch sh");
+
+        let output = drain_until_closed(&channel);
+
+        assert!(
+            contains(&output, "[yy_CALLER.UTF-8]"),
+            "the caller's LANG was overridden: {:?}",
             String::from_utf8_lossy(&output)
         );
     }
