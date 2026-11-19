@@ -859,3 +859,10 @@ Linux and macOS process backends use native birth/lifetime and foreground eviden
 recovery remains Linux-only. Native Mac AC1/AC2 checks for each supported client require real
 hardware verification; compile checks are not runtime evidence. Exact executable recognition
 fails closed for unsupported installations and updated paths.
+
+
+Native Claude discovery searches absolute PATH entries first, then `$HOME/.local/bin/claude`
+when HOME is absolute. This covers desktop launches whose shell adds that directory later.
+An executable selected from PATH keeps precedence; unsupported scripts still refuse rather than
+falling through to another installation. The native candidate is canonicalized and all existing
+ancestry, foreground, lifetime and same-invocation checks still apply. No launch PATH is rewritten.

@@ -9814,6 +9814,20 @@ peer and bounded process ancestry evidence identify the same live native client 
 the holder. Source names and PANEL_ID/PANEL_DIR select or label; they never authenticate.
 A script can still hold the panel with ordinary tools, but its hold cannot receive hook updates.
 
+**Native Claude discovery amendment (19 November 2026, #142).** A desktop launch may lack
+`~/.local/bin` even though its console shell adds it. Discovery and fixed launches therefore
+search the absolute PATH entries first, then `$HOME/.local/bin/claude` for Claude only when HOME
+is absolute. The first executable candidate keeps precedence, including refusal of unsupported
+scripts; the fallback is canonicalized and must pass the same native-executable check. The
+launch PATH is unchanged. This recognizes an installation candidate, not vendor authenticity:
+exact executable, native peer ancestry, foreground, lifetime and same-invocation checks remain.
+Custom install locations and running older versions after an update are not covered by this rule.
+
+Discarded: adding a directory to the application's global PATH (changes unrelated launches),
+accepting any process named Claude (weakens recognition), and retrying another installation after
+an unsupported PATH candidate (silently changes the invocation the user selected).
+
+
 The connection thread admits into the same bounded control queue as holder publications and
 patches, wakes the window and replies immediately. This promises admission, not painting.
 Application rechecks the live root and hold incarnation. Root death, foreground takeover,
