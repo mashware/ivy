@@ -1,8 +1,17 @@
-# Ivy 0.1.0-alpha.11
+# Ivy 0.1.0-alpha.12
 
 ## New in this alpha
 
-- Codex upgrades no longer force independent sessions: shared panel routing checks capabilities instead of exact client/server versions, preserving live mobile access when the protocol is compatible.
+- Linux consoles start in separate systemd user scopes when available, improving isolation when memory pressure selects one console. Confirmed memory-pressure exits keep their output visible with an explanation; startup still works without a user manager.
+- Search terminal history from each console's header, with match-case, whole-word and wrap options in its own search box.
+- Tabs read as separate cards, the active one carries an accent line, and each console's attention state appears as a ring around its tab dot.
+- Interface controls use one consistent icon set, and Files shows icons for each file type.
+- On macOS, Files discovers the console's current folder without shell setup, restoring file browsing, project colours and folder-aware splits. Native desktop validation remains pending.
+- Rename, Connect agents and What's new use consistent themed dialog headers.
+- Deferred session-recovery setup is hidden from Connect agents until it is ready.
+- Codex upgrades preserve live mobile access when client and server capabilities remain compatible, instead of requiring exact version equality.
+
+## Previously in 0.1.0-alpha.11
 
 - Console text keeps its original edge coverage, with automatic fitting for fonts that have no native glyph instructions. Fonts with their own instructions keep their existing fitting.
 - Font sizes in Settings and new version 2 configuration files use true typographic points for console text, pane titles and tab labels. Existing configurations retain their visual sizes; edited saves upgrade to version 2, which older Ivy versions do not read.
@@ -105,12 +114,12 @@
 
 ## Choose a download
 
-- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.10_amd64.deb`.
-- Arch Linux x86_64: `ivy-terminal-0.1.0alpha10-1-x86_64.pkg.tar.zst`.
-- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.10-macos-arm64.dmg`.
-- macOS 15+ Intel: `Ivy-0.1.0-alpha.10-macos-x86_64.dmg`.
-- Windows 11 x64: `Ivy-0.1.0-alpha.10-windows-x86_64-setup.exe`.
+- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.12_amd64.deb`.
+- Arch Linux x86_64: `ivy-terminal-0.1.0alpha12-1-x86_64.pkg.tar.zst`.
+- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.12-macos-arm64.dmg`.
+- macOS 15+ Intel: `Ivy-0.1.0-alpha.12-macos-x86_64.dmg`.
+- Windows 11 x64: `Ivy-0.1.0-alpha.12-windows-x86_64-setup.exe`.
 
 Download `release-manifest.json` and `SHA256SUMS` with the chosen package and verify its SHA-256
-before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.10/docs/10-installation.md)
+before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.12/docs/10-installation.md)
 for verification, installation, upgrade and removal commands. No Rust toolchain is needed.
