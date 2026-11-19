@@ -7776,8 +7776,9 @@ When closing a console, the hang-up (D55) is **refused** by the system — any f
 «no such process» — `Drop for Pty` no longer waits for the child inline. It hands the child to a
 thread that does nothing but `wait` for it, writes **one line to standard error** naming its pid and
 the operating system's refusal, and carries on with the rest of the close: the reader's deadline
-(D32), the panel directory. Nothing else changes: a program that accepts the signals is waited for
-where it always was, with the same grace.
+(D32), the panel directory. ~~Nothing else changes: a program that accepts the signals is waited for
+where it always was, with the same grace.~~ Since the amendment of 19 November 2026 (below), a
+program that accepts the signals is waited for at most 100 ms, then left running the same way.
 
 **Why.** Measured on 25 September 2026, on this machine: a console whose shell was replaced by
 `exec pkexec sleep 60` became a program with every user identity root, `kill(pid, 0)` from the
@@ -7833,6 +7834,40 @@ against a real program. The real window was checked by hand on the same day, wit
 and the build after: the one before froze until the program's minute ran out, the one after closed
 the console at once, kept answering, and printed the line.
 
+**Amended on 19 November 2026** ([#138](https://github.com/mashware/ivy/issues/138)): **a program
+whose signals were accepted is waited for with a bound too.** After the hang-up and its kill,
+`Drop for Pty` now looks whether the child is reapable every millisecond for at most 100 ms
+(`REAP_GIVE_UP`), and if it is not, hands it to the same `left-running` thread and writes one line
+to standard error with its pid. Until then that wait had no bound, on the claim that a kill always
+makes a program reapable.
+
+**Why.** On macOS that claim is false, and closing froze the window for good. Reported on
+19 November 2026 from macOS 27.2.1 (ARM64, 0.1.0-alpha.12): a `sample` of the frozen app showed every
+main-thread sample in `wait4` under `Drop for Pty`, with every other thread idle. The waited pid was a
+live, unreaped child of ours (`wait4` on anything else fails at once), so the signals had reached it
+and it still did not become reapable. **The most probable reason, not reproduced**: XNU's
+`proc_exit` calls `ttywait` on a session leader's controlling terminal, which sleeps with no timeout
+while the terminal holds output nobody has read. The close stops reading the master before it hangs
+up, and keeps the master open while it waits. A kill arriving after the program is already exiting
+cannot interrupt that sleep. Linux has no such drain at exit, which is why every closing measurement
+(D32, D55, this decision) missed it. The fix does not rest on that explanation: whatever keeps the
+child unreapable, the window no longer waits with it.
+
+**On Linux nothing measurable changes**: a killed program is reapable about a millisecond later
+(D55), well inside the bound, and a unit test pins that a program reapable a few looks later is
+reaped inline. **On Windows** a refused `TerminateProcess` takes the same path, so the freeze of
+[#273](https://github.com/mashware/ivy-history-private/issues/273) is bounded too. That path was
+type-checked for Windows and never run there. The program that is left over on macOS is reaped by its thread once
+the close drops the last copy of the master, if the explanation above is right. If it is wrong, the
+thread waits for as long as the program lives, which is the cost declared above, now for one more
+case.
+
+| Discarded | Why |
+|---|---|
+| **Keeping the master read until the child is reaped**, so the drain at exit can finish | It fixes only the explanation above, which is not reproduced, and it keeps the wait on the interface pass |
+| **Waiting with no bound and relying on the kill** | That is the defect. A kill accepted by the system is not a program gone |
+| **A longer bound** | Only time the window is frozen for. A program that is not reapable a tenth of a second after a kill is not going to become reapable by waiting more |
+
 ## D57 — Every blocking wait in production code is bounded or declared abandoned, and a test enforces it
 
 **Decided on 25 September 2026** ([#190](https://github.com/mashware/ivy-history-private/issues/190)).
@@ -7886,12 +7921,13 @@ declared one counts toward the pinned number. Nor does it see whether
 a declaration is true. It checks that a reason is written, and the pinned count is what makes every
 new declaration an edit that a reviewer reads.
 
-**One declaration is true only in part, and says so.** The close's `child.wait()` is bounded on Unix
-by the kill a hang-up falls through to, except for a program in uninterruptible sleep, which dies
-only when its system call returns. On Windows, and on the Unix path with no pid (reasoned
-unreachable), a refused kill is not seen and that wait lasts as long as the program lives. Its
-declaration states each case and points at
-[#273](https://github.com/mashware/ivy-history-private/issues/273), which is the Windows one.
+**One declaration was true only in part, and is gone.** The close's `child.wait()` used to be
+declared «Bounded:» by the kill a hang-up falls through to. That was false for a program in
+uninterruptible sleep, for a refused kill on Windows
+([#273](https://github.com/mashware/ivy-history-private/issues/273)), and for a shell exiting on
+macOS ([#138](https://github.com/mashware/ivy/issues/138)). It is now a `try_wait` loop with a
+deadline, and anything left over goes to the abandoned `left-running` thread (D56, amended), so the
+pinned count fell from 16 to 15.
 
 ## D58 — A publication over the channel that lost a word is still taken, and its reply says which
 
