@@ -3259,4 +3259,48 @@ mod tests {
             "the program left behind ended and stayed a zombie: nobody is waiting for it"
         );
     }
+
+    /// Stands in for a kill the system accepts and that still does not make the program reapable —
+    /// what a program caught exiting on macOS looks like (D56, amended): the hang-up is real, the
+    /// kill reports success and sends nothing.
+    #[cfg(unix)]
+    fn pretend_the_kill_landed(pid: libc::pid_t, number: libc::c_int) -> std::io::Result<()> {
+        if number == libc::SIGKILL {
+            Ok(())
+        } else {
+            send_signal(pid, number)
+        }
+    }
+
+    /// **A program still not reapable after its kill was accepted is left running, not waited
+    /// for.** Nothing refused anything here, so this is the path the close calls waitable — and it
+    /// used to wait with no bound, inside the interface pass: on macOS that froze the window for
+    /// good. A second is three times what the close is owed: the grace, the bound on that wait and
+    /// the reader's deadline.
+    #[cfg(unix)]
+    #[test]
+    fn a_program_not_reapable_after_an_accepted_kill_is_left_running_and_reaped() {
+        const MARKER: &str = "stuck";
+
+        let (took, alive, reaped) = close_one_that_refuses(
+            &format!("trap '' HUP && printf {MARKER} && exec sleep 30"),
+            MARKER,
+            pretend_the_kill_landed,
+        );
+
+        assert!(
+            took < Duration::from_secs(1),
+            "closing a console whose program outlived an accepted kill took {took:?}: it waited \
+             for the program instead of leaving it"
+        );
+        assert!(
+            alive,
+            "the program was gone right after the close although its hang-up is ignored and its kill \
+             never sent — this test no longer exercises an unreapable program"
+        );
+        assert!(
+            reaped,
+            "the program left behind ended and stayed a zombie: nobody is waiting for it"
+        );
+    }
 }
