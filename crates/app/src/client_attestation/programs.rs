@@ -478,6 +478,15 @@ mod tests {
     #[test]
     fn native_claude_fallback_refuses_scripts_missing_or_relative_home() {
         let (_directory, home) = native_claude();
+        let mut relative_home = PathBuf::new();
+        for component in std::env::current_dir().unwrap().components() {
+            if matches!(component, std::path::Component::Normal(_)) {
+                relative_home.push("..");
+            }
+        }
+        relative_home.push(home.strip_prefix("/").unwrap());
+        assert!(relative_home.join(".local/bin/claude").is_file());
+        assert!(resolve_launch_in(Client::Claude, OsStr::new(""), Some(&relative_home)).is_err());
         let executable = home.join(".local/bin/claude");
         std::fs::remove_file(&executable).unwrap();
         std::fs::write(&executable, "#!/bin/sh\nexit 0\n").unwrap();
