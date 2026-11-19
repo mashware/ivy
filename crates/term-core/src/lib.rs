@@ -23,6 +23,7 @@ use std::time::{Duration, Instant};
 use portable_pty::{Child, CommandBuilder, MasterPty, native_pty_system};
 
 mod foreground;
+mod locale;
 mod termination;
 pub use termination::Termination;
 #[cfg(target_os = "linux")]
@@ -625,6 +626,10 @@ impl Pty {
         }
         for (name, value) in FIXED_ENV {
             cmd.env(name, value);
+        }
+        // Before the caller's own variables, so one that names `LANG` still decides it.
+        if let Some(lang) = locale::for_consoles() {
+            cmd.env("LANG", lang);
         }
         for (name, value) in env {
             match value {
