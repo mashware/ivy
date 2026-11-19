@@ -224,14 +224,18 @@ pub(crate) fn paint_pane(
     // the program wants, never what gets drawn: `paint_cursor` answers that.
     let mut view = pane.screen.view();
     let marking = pane.search.mark(&pane.screen, &mut view);
-    let blinking = paint_a_console_view(
+    let mut blinking = paint_a_console_view(
         &ui.painter_at(panel_split.console),
         &view,
         theme,
         metrics,
         panel_split.console,
         discoverer,
-        blink.ink(pane.screen.cursor_blinks()),
+        if pane.search.is_open() {
+            CursorInk::Outline
+        } else {
+            blink.ink(pane.screen.cursor_blinks())
+        },
         ligatures,
     );
     // The notices keep the console's top, so the search's box is laid out around them.
@@ -246,15 +250,16 @@ pub(crate) fn paint_pane(
     let options = pane.search.options();
     let mut over_the_box = false;
     if let Some(search) = pane.search.open.as_mut() {
-        let painted = crate::search::floating::paint(
+        let (painted, search_blinking) = crate::search::floating::paint(
             ui,
             search,
             options,
             &view,
             theme,
             metrics,
-            (panel_split.console, &notices),
+            (panel_split.console, &notices, blink),
         );
+        blinking |= search_blinking;
         let pointer = ui.ctx().input(|input| input.pointer.hover_pos());
         over_the_box = pointer.is_some_and(|at| painted.covers(at));
         // No room for the box beside the notices: the search closes rather than go on taking keys

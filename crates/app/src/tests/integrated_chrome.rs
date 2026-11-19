@@ -4182,4 +4182,77 @@ mod tests {
             painted.layout.frame
         );
     }
+    #[test]
+    fn search_navigation_edits_the_query_without_reaching_the_program() {
+        let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
+        let received = term_core::received::Received::new("search-navigation");
+        let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        received.wait_until_ready(Duration::from_secs(5));
+        let area = tall_area();
+        frame(&mut window, &ctx, area, vec![]);
+        let at = control(&window, &ctx, area, 0, 112.5);
+        window.blink.typed_at = Instant::now() - Duration::from_secs(20);
+        frame(&mut window, &ctx, area, click_at(at));
+        assert!(window.blink.typed_at.elapsed() < Duration::from_secs(1));
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::Text("Ask".into())],
+        );
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![key(egui::Key::ArrowLeft), egui::Event::Text("!".into())],
+        );
+        assert_eq!(
+            window.active().panes()[0]
+                .search
+                .open
+                .as_ref()
+                .unwrap()
+                .query(),
+            "As!k"
+        );
+        for navigation in [
+            egui::Key::Home,
+            egui::Key::End,
+            egui::Key::ArrowUp,
+            egui::Key::ArrowDown,
+            egui::Key::ArrowRight,
+            egui::Key::PageUp,
+            egui::Key::PageDown,
+        ] {
+            frame(&mut window, &ctx, area, vec![key(navigation)]);
+            assert!(
+                window.active().panes()[0].search.is_open(),
+                "{navigation:?} closed search"
+            );
+        }
+        let shapes = frame(&mut window, &ctx, area, vec![]);
+        assert!(has_text(&shapes, "As!k"));
+        assert!(!has_text(&shapes, "As!k_"));
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![key(egui::Key::Escape), egui::Event::Text("Q".into())],
+        );
+        assert_eq!(
+            received.wait_for(1, Duration::from_secs(5)),
+            b"Q",
+            "navigation/editing leaked to the program before the sentinel"
+        );
+    }
 }

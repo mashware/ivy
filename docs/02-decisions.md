@@ -8280,6 +8280,33 @@ searched, and the one-row line took no clicks, so pressing the button seemed to 
 | Dropping «Wrap around» because the engine always wraps | The ticket asks for it; off is decided after the engine answers, by where the match lies against the step's start |
 
 
+### Amended 19 November 2026 — query navigation and insertion caret (#149)
+
+The floating search looked like an editable field, but arrows were deliberately handed to the
+program and closed search. The user's report supersedes that part of D61: while search owns input,
+Left/Right move the insertion point, Home/Up and End/Down reach the ends, Ctrl/Alt+Left/Right move
+by whitespace-delimited words, and Delete removes ahead of the insertion point. On macOS,
+Command+Left/Right reach the ends. PageUp/PageDown are consumed by the single-line field. Global
+configured shortcuts retain precedence; Enter/Shift+Enter still step matches and unrelated program
+keys still close search and reach the program. Shift movement moves the insertion point without
+adding text selection; mouse caret placement and text selection are outside this change.
+
+Typing and paste insert at a UTF-8 boundary; Backspace and the existing word deletion act before
+that position. Pure navigation keeps the compiled search and result. The query is painted without
+synthetic text and a separate vertical caret follows galley geometry, staying visible when clipped.
+It uses the existing focus-aware blink and its 600 ms halves, 15-second idle stop and measurement
+ceiling. The terminal cursor is an outline while search owns input. The pane's existing blink
+outcome includes the visible focused search caret in both blink halves, so no new alarm is needed;
+opening or focusing search by mouse resets the same anchor. Existing keyboard and console paint
+spans account for this work; no new frame-cost figure is claimed.
+
+Discarded: suppressing arrows without moving an insertion point cannot deliver query editing;
+a general TextEdit would also change interrupt and global-shortcut ownership; an independent timer
+would duplicate the existing focus, idle and measurement gates. The earlier exclusions above
+remain historical rationale and are superseded only by this amendment.
+
+---
+
 ## D62 — Pane controls share the strip's geometry and own their entire gesture
 
 **Decision.** The existing strip gains Split right, Split down and Show/Hide information panel

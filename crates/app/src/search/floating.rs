@@ -3,15 +3,15 @@
 //!
 //! **Painted over the console and never cut out of it**, like the line it replaced: cutting room
 //! for it would resize the program every time a search opens. **And painted, not built from egui's
-//! text field**, because a text field takes every key it is given, and D61 hands every key that is
-//! not the search's to the program — which closes the search. The query is edited by the keys
-//! [`super::Steps`] already takes; the box adds what a mouse can do to it.
+//! text field**, so D61's explicit search key ownership and program interrupts stay with
+//! [`super::Steps`].
 
 use eframe::egui::{self, Painter, Pos2, Rect, pos2, vec2};
 use term_core::{KeepClear, Options, View};
 
 use super::{Choice, Mode, Step};
 use crate::painter::CellMetrics;
+use crate::painter::{Blink, CursorInk, Keys};
 use crate::theme::Theme;
 use crate::ui::icons::{Icon, paint as paint_icon};
 
@@ -311,8 +311,8 @@ pub(crate) fn paint(
     view: &View,
     theme: &Theme,
     metrics: &CellMetrics,
-    (console, notices): (Rect, &[Rect]),
-) -> Painted {
+    (console, notices, blink): (Rect, &[Rect], Blink),
+) -> (Painted, bool) {
     let layout = layout(
         console,
         metrics,
@@ -340,6 +340,7 @@ pub(crate) fn paint(
     }
     let pointer = ui.ctx().input(|input| input.pointer.hover_pos());
     let icon = metrics.height() * 0.85;
+    let mut blinking = false;
     for (index, (target, rect)) in layout.targets.iter().enumerate() {
         let hovered = pointer.is_some_and(|at| rect.contains(at));
         if *target != Target::Field {
@@ -355,7 +356,16 @@ pub(crate) fn paint(
                 .on_hover_text(target.hint());
         }
         match target {
-            Target::Field => paint_the_field(painter, mode, *rect, &roles, metrics),
+            Target::Field => {
+                blinking = paint_the_field(
+                    painter,
+                    mode,
+                    *rect,
+                    &roles,
+                    metrics,
+                    ui.is_enabled().then_some(blink),
+                );
+            }
             Target::Choice(choice) => {
                 if hovered {
                     painter.rect_filled(*rect, 4.0, roles.hover);
@@ -385,10 +395,13 @@ pub(crate) fn paint(
             }
         }
     }
-    Painted {
-        frame: ui.ctx().cumulative_frame_nr(),
-        layout,
-    }
+    (
+        Painted {
+            frame: ui.ctx().cumulative_frame_nr(),
+            layout,
+        },
+        blinking,
+    )
 }
 
 /// The icon a button of the box shows. `Enter` walks toward older lines, which are up the screen,
@@ -408,7 +421,8 @@ fn paint_the_field(
     rect: Rect,
     roles: &crate::theme::Roles,
     metrics: &CellMetrics,
-) {
+    blink: Option<Blink>,
+) -> bool {
     painter.rect(
         rect,
         4.0,
@@ -435,18 +449,32 @@ fn paint_the_field(
         said,
         roles.tx2,
     );
-    // The query keeps its end in view: what was typed last is what a person checks.
-    let query = clipped.layout_no_wrap(format!("{}_", mode.query()), metrics.font(), roles.tx);
+    let query = clipped.layout_no_wrap(mode.query().to_owned(), metrics.font(), roles.tx);
     let room = (status_left - inner.left() - PAD).max(0.0);
-    let left = inner.left() - (query.size().x - room).max(0.0);
+    let cursor = query.pos_from_cursor(egui::text::CCursor::new(
+        mode.query()[..mode.caret].chars().count(),
+    ));
+    let offset = (cursor.left() + 1.0 - room).max(0.0);
+    let left = inner.left() - offset;
     let query_clip = Rect::from_min_max(inner.min, pos2(inner.left() + room, inner.bottom()));
-    painter
-        .with_clip_rect(query_clip.intersect(painter.clip_rect()))
-        .galley(
-            pos2(left, inner.center().y - query.size().y / 2.0),
-            query,
-            roles.tx,
-        );
+    let painter = painter.with_clip_rect(query_clip.intersect(painter.clip_rect()));
+    let top = inner.center().y - query.size().y / 2.0;
+    painter.galley(pos2(left, top), query, roles.tx);
+    let Some(blink) = blink.filter(|blink| blink.keys == Keys::Here) else {
+        return false;
+    };
+    let caret = Rect::from_min_max(
+        pos2(left + cursor.left(), top + cursor.top()),
+        pos2(left + cursor.left() + 1.0, top + cursor.bottom()),
+    );
+    if !painter.clip_rect().intersects(caret) || room <= 1.0 {
+        return false;
+    }
+    let ink = blink.ink(true);
+    if !matches!(ink, CursorInk::Blinking { lit: false }) {
+        painter.rect_filled(caret, 0.0, roles.tx);
+    }
+    matches!(ink, CursorInk::Blinking { .. })
 }
 
 #[cfg(test)]
@@ -888,5 +916,108 @@ mod tests {
             Some(Step::Flip(Choice::Wrap))
         );
         assert_eq!(Target::Field.step(), None);
+    }
+    fn field_frame(mode: &Mode, blink: Blink) -> (Vec<egui::epaint::ClippedShape>, bool) {
+        let ctx = egui::Context::default();
+        let mut blinking = false;
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let roles = crate::theme::Roles::of(&Theme::default());
+            blinking = paint_the_field(
+                ui.painter(),
+                mode,
+                Rect::from_min_size(pos2(10.0, 10.0), vec2(100.0, 30.0)),
+                &roles,
+                &metrics(),
+                Some(blink),
+            );
+        });
+        output.textures_delta.clear();
+        (output.shapes, blinking)
+    }
+
+    fn caret_in(shapes: &[egui::epaint::ClippedShape]) -> Option<Rect> {
+        shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Rect(rect) if rect.rect.width() == 1.0 && rect.rect.height() > 5.0 => {
+                Some(rect.rect)
+            }
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn the_query_has_a_separate_vertical_caret_and_both_blink_halves_stay_armed() {
+        let mut mode = Mode::default();
+        mode.insert("Ask");
+        let blink = Blink {
+            ceiling: None,
+            since_a_key: std::time::Duration::ZERO,
+            keys: Keys::Here,
+        };
+        for (millis, lit, active) in [
+            (0, true, true),
+            (600, false, true),
+            (1200, true, true),
+            (15000, true, false),
+        ] {
+            let (shapes, blinking) = field_frame(
+                &mode,
+                Blink {
+                    since_a_key: std::time::Duration::from_millis(millis),
+                    ..blink
+                },
+            );
+            assert_eq!(caret_in(&shapes).is_some(), lit, "at {millis} ms");
+            assert_eq!(blinking, active, "at {millis} ms");
+            assert!(
+                shapes
+                    .iter()
+                    .any(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.text() == "Ask"))
+            );
+            assert!(
+                !shapes
+                    .iter()
+                    .any(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.text() == "Ask_"))
+            );
+        }
+        for keys in [Keys::Elsewhere, Keys::OnceTheWindowIsBack] {
+            let (shapes, blinking) = field_frame(&mode, Blink { keys, ..blink });
+            assert!(!blinking);
+            assert!(caret_in(&shapes).is_none());
+        }
+        let (shapes, blinking) = field_frame(
+            &mode,
+            Blink {
+                ceiling: Some(false),
+                ..blink
+            },
+        );
+        assert!(!blinking, "measurement ceiling must suppress caret blink");
+        assert!(caret_in(&shapes).is_some());
+    }
+
+    #[test]
+    fn the_caret_tracks_insertion_and_stays_visible_in_a_long_unicode_query() {
+        let mut mode = Mode::default();
+        let blink = Blink {
+            ceiling: Some(false),
+            since_a_key: std::time::Duration::ZERO,
+            keys: Keys::Here,
+        };
+        mode.insert("Ask");
+        let (shapes, _) = field_frame(&mode, blink);
+        let end = caret_in(&shapes).unwrap();
+        mode.move_caret(super::super::editing::Motion::Left);
+        let (shapes, _) = field_frame(&mode, blink);
+        assert!(caret_in(&shapes).unwrap().left() < end.left());
+        mode.insert(&"日本🙂".repeat(30));
+        for motion in [
+            super::super::editing::Motion::End,
+            super::super::editing::Motion::Start,
+        ] {
+            mode.move_caret(motion);
+            let (shapes, _) = field_frame(&mode, blink);
+            let caret = caret_in(&shapes).unwrap();
+            assert!(caret.left() >= 14.0 && caret.right() <= 106.0, "{caret:?}");
+        }
     }
 }
