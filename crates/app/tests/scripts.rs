@@ -921,6 +921,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/pointer/links.rs"),
     ),
     (
+        "term-core/src/locale.rs",
+        include_str!("../../term-core/src/locale.rs"),
+    ),
+    (
         "term-core/src/nonblocking.rs",
         include_str!("../../term-core/src/nonblocking.rs"),
     ),
