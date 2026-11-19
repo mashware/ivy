@@ -1478,6 +1478,13 @@ fn no_file_of_a_finished_crate_is_still_named_in_spanish() {
 /// it closed is what makes the guard below safe to break the build with — and the failure message
 /// says so, because the fix for a genuine foreign name is to add it here, not to widen the rule.
 const NOT_OURS: &[&str] = &[
+    // **Locale variables, the C library call and the `NSLocale` method the console's locale is
+    // decided against.** `term-core`'s locale module names the ones it reads and the ones it avoids.
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "setlocale",
+    "regionCode",
     // **An Electron option.** The macOS window-button module cites the one whose approach it follows.
     "trafficLightPosition",
     // **Standard-library waits, not names of this tree.** `waits.rs` cites the ones it judges and the
