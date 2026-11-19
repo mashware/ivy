@@ -36,6 +36,19 @@ jobs:
       - name: Test portable packaging logic
         run: python3 -m unittest scripts/test_release.py scripts/test_macos.py scripts/test_windows.py -v
 
+  macos-panel-checks:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - name: Test native panel routing and Codex launcher
+        run: cargo test --locked -p panel-control
+
   build:
     if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-24.04
