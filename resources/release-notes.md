@@ -1,6 +1,10 @@
-# Ivy 0.1.0-alpha.12
+# Ivy 0.1.0-alpha.13
 
 ## New in this alpha
+
+- Claude Code hooks can clear an answered question's waiting claim when Ivy was launched from the desktop without Claude's native installation on PATH. Hooks still have to belong to the same running client.
+
+## Previously in 0.1.0-alpha.12
 
 - Linux consoles start in separate systemd user scopes when available, improving isolation when memory pressure selects one console. Confirmed memory-pressure exits keep their output visible with an explanation; startup still works without a user manager.
 - Search terminal history from each console's header, with match-case, whole-word and wrap options in its own search box.
@@ -114,12 +118,12 @@
 
 ## Choose a download
 
-- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.12_amd64.deb`.
-- Arch Linux x86_64: `ivy-terminal-0.1.0alpha12-1-x86_64.pkg.tar.zst`.
-- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.12-macos-arm64.dmg`.
-- macOS 15+ Intel: `Ivy-0.1.0-alpha.12-macos-x86_64.dmg`.
-- Windows 11 x64: `Ivy-0.1.0-alpha.12-windows-x86_64-setup.exe`.
+- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.13_amd64.deb`.
+- Arch Linux x86_64: `ivy-terminal-0.1.0alpha13-1-x86_64.pkg.tar.zst`.
+- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.13-macos-arm64.dmg`.
+- macOS 15+ Intel: `Ivy-0.1.0-alpha.13-macos-x86_64.dmg`.
+- Windows 11 x64: `Ivy-0.1.0-alpha.13-windows-x86_64-setup.exe`.
 
 Download `release-manifest.json` and `SHA256SUMS` with the chosen package and verify its SHA-256
-before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.12/docs/10-installation.md)
+before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.13/docs/10-installation.md)
 for verification, installation, upgrade and removal commands. No Rust toolchain is needed.
