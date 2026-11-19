@@ -93,11 +93,11 @@ impl Child for CachedChild {
             return Ok(status.clone());
         }
         // Only Pty's closing paths call wait. The scope stop flag is already raised, and a
-        // refused hang-up hands this handle to its detached reaper before waiting. Holding the
+        // program left running hands this handle to its detached reaper before waiting. Holding the
         // cache lock here parks only that reaper (and a retiring scope observer), never a live UI
         // accessor. Preserve the native wait instead of waking once per millisecond indefinitely.
         //
-        // Abandoned on purpose: a refused child belongs to the detached reaper until it exits.
+        // Abandoned on purpose: a child left running belongs to the detached reaper until it exits.
         let status = state.child.wait()?;
         state.status = Some(status.clone());
         state.exited = Some(Instant::now());

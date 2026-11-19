@@ -18,9 +18,7 @@ use std::sync::mpsc::{
 };
 use std::sync::{Arc, OnceLock};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
-#[cfg(unix)]
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use portable_pty::{Child, CommandBuilder, MasterPty, native_pty_system};
 
@@ -1182,11 +1180,25 @@ fn send_signal(pid: libc::pid_t, number: libc::c_int) -> std::io::Result<()> {
 
 /// Elsewhere the library's `kill` has no grid to pay: on Windows it is `TerminateProcess`, at once.
 /// Whether it can be refused there — an elevated program — and what that leaves is not known yet:
-/// its failure is not looked at, so a refusal would be waited for as Unix's was before D56.
+/// its failure is not looked at, so a refusal goes down the waitable path, which waits at most
+/// [`REAP_GIVE_UP`] before leaving the program running (D56, amended). Not compiled or run here.
 #[cfg(not(unix))]
 fn hang_up(child: &mut (dyn Child + Send + Sync)) -> HangUp {
     let _ = child.kill();
     HangUp::Waitable
+}
+
+/// Whether the program became reapable within `bound`, looking every millisecond. An error from
+/// `try_wait` counts as gone, as in `hang_up`: there is no child of ours left to wait for.
+fn reaped_within(child: &mut (dyn Child + Send + Sync), bound: Duration) -> bool {
+    let deadline = Instant::now() + bound;
+    loop {
+        match child.try_wait() {
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(1)),
+            Ok(None) => return false,
+            _ => return true,
+        }
+    }
 }
 
 /// Hands a closed console's program to a thread that waits for it, so it is reaped whenever it ends
@@ -1205,8 +1217,8 @@ fn leave_running(mut child: Box<dyn Child + Send + Sync>) {
 
 /// What hanging a program up left behind.
 enum HangUp {
-    /// Gone, sure to go at once, or a refusal this crate cannot see (the library's `kill`, and
-    /// Windows): waiting for it is bounded as far as this knows.
+    /// Gone, signalled with the system's consent, or a refusal this crate cannot see (the library's
+    /// `kill`, and Windows). The close waits for it at most [`REAP_GIVE_UP`], then leaves it running.
     Waitable,
     /// The system refused the signal and the program is still running. Nothing this process can
     /// send will end it, so waiting for it is waiting for as long as it chooses to live.
@@ -1262,17 +1274,7 @@ impl Drop for Pty {
                 // to be here froze the window for good. An error from `try_wait` counts as gone,
                 // as in `hang_up`: there is no child of ours left to wait for.
                 HangUp::Waitable => {
-                    let deadline = Instant::now() + REAP_GIVE_UP;
-                    let reaped = loop {
-                        match child.try_wait() {
-                            Ok(None) if Instant::now() < deadline => {
-                                thread::sleep(Duration::from_millis(1));
-                            }
-                            Ok(None) => break false,
-                            _ => break true,
-                        }
-                    };
-                    if !reaped {
+                    if !reaped_within(child.as_mut(), REAP_GIVE_UP) {
                         use std::io::Write;
 
                         let pid = child.process_id();
@@ -3311,8 +3313,8 @@ mod tests {
     /// **A program still not reapable after its kill was accepted is left running, not waited
     /// for.** Nothing refused anything here, so this is the path the close calls waitable — and it
     /// used to wait with no bound, inside the interface pass: on macOS that froze the window for
-    /// good. A second is three times what the close is owed: the grace, the bound on that wait and
-    /// the reader's deadline.
+    /// good. A second is two and a half times what the close is owed: the grace, the bound on that
+    /// wait and the reader's deadline.
     #[cfg(unix)]
     #[test]
     fn a_program_not_reapable_after_an_accepted_kill_is_left_running_and_reaped() {
@@ -3337,6 +3339,49 @@ mod tests {
         assert!(
             reaped,
             "the program left behind ended and stayed a zombie: nobody is waiting for it"
+        );
+    }
+
+    /// A child that becomes reapable on a given look, never on a `wait`.
+    #[derive(Debug)]
+    struct ReapableOnLook(usize);
+    impl portable_pty::ChildKiller for ReapableOnLook {
+        fn kill(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn clone_killer(&self) -> Box<dyn portable_pty::ChildKiller + Send + Sync> {
+            Box::new(ReapableOnLook(self.0))
+        }
+    }
+    impl Child for ReapableOnLook {
+        fn try_wait(&mut self) -> std::io::Result<Option<portable_pty::ExitStatus>> {
+            if self.0 <= 1 {
+                return Ok(Some(portable_pty::ExitStatus::with_exit_code(0)));
+            }
+            self.0 -= 1;
+            Ok(None)
+        }
+        fn wait(&mut self) -> std::io::Result<portable_pty::ExitStatus> {
+            unreachable!("the bounded wait only looks")
+        }
+        fn process_id(&self) -> Option<u32> {
+            None
+        }
+        #[cfg(windows)]
+        fn as_raw_handle(&self) -> Option<std::os::windows::io::RawHandle> {
+            None
+        }
+    }
+
+    /// **A program that becomes reapable a few looks after its kill is reaped inline.** That is a
+    /// killed program on Linux, about a millisecond later (D55): it must not be handed to a thread
+    /// with a line saying it had not finished. Without this, a bound of zero passed every other test.
+    #[test]
+    fn a_program_reapable_a_few_looks_later_is_reaped_inside_the_bound() {
+        assert!(reaped_within(&mut ReapableOnLook(5), REAP_GIVE_UP));
+        assert!(
+            !reaped_within(&mut ReapableOnLook(usize::MAX), Duration::from_millis(5)),
+            "a program never reapable was reported reaped"
         );
     }
 }
