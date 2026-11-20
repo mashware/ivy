@@ -4494,4 +4494,173 @@ mod tests {
             "measurement search still wakes the window"
         );
     }
+
+    /// One pass at an input time: what it painted and how soon it asked to be woken.
+    fn timed_pass(
+        window: &mut Window,
+        ctx: &egui::Context,
+        area: egui::Rect,
+        time: f64,
+        events: Vec<egui::Event>,
+    ) -> (Vec<egui::epaint::ClippedShape>, Duration) {
+        let mut frame = eframe::Frame::_new_kittest();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(area),
+                time: Some(time),
+                events,
+                ..Default::default()
+            },
+            |ui| eframe::App::ui(window, ui, &mut frame),
+        );
+        let delay = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+        let shapes = std::mem::take(&mut output.shapes);
+        output.drop_without_applying_deltas();
+        (shapes, delay)
+    }
+
+    /// The alpha of every header icon painted inside `cells`.
+    fn icon_alphas(shapes: &[egui::epaint::ClippedShape], cells: egui::Rect) -> Vec<u8> {
+        shapes
+            .iter()
+            .filter_map(|s| crate::ui::icons::painted_icon(&s.shape))
+            .filter(|(_, _, square)| cells.contains(square.center()))
+            .map(|(_, color, _)| color.a())
+            .collect()
+    }
+
+    fn whole(alphas: &[u8]) -> bool {
+        !alphas.is_empty() && alphas.iter().all(|a| *a == 255)
+    }
+
+    fn fading(alphas: &[u8]) -> bool {
+        !alphas.is_empty() && alphas.iter().all(|a| *a > 0 && *a < 255)
+    }
+
+    /// A window where fades are allowed, the blink is off so it cannot wake anything, and the
+    /// right-hand console (unfocused) has its header under the pointer from the start.
+    fn lingering_pair(fades: bool) -> (egui::Context, Window, egui::Rect) {
+        let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
+        crate::pane_view::allow_focus_fades(&ctx, fades);
+        let mut window = integrated_pair();
+        window.blink.ceiling = Some(false);
+        let area = tall_area();
+        timed_pass(&mut window, &ctx, area, 0.0, vec![]);
+        (ctx, window, area)
+    }
+
+    /// Leaving a header after the window slept: the controls stay whole for 3 s, fade for 0.5 s, then
+    /// go and stop waking the window; appearing is immediate, and coming back mid-fade is whole again.
+    #[test]
+    fn unwanted_header_controls_linger_then_fade_and_come_back_whole() {
+        let (ctx, mut window, area) = lingering_pair(true);
+        let title = control(&window, &ctx, area, 1, 300.0);
+        let body = pane_rect(&window, &ctx, area, names_in_order(&window)[1]).center();
+        let cells = control_cells(&window, &ctx, area, 1);
+        let at = |window: &mut Window, time, events| {
+            let (shapes, delay) = timed_pass(window, &ctx, area, time, events);
+            (icon_alphas(&shapes, cells), delay)
+        };
+        let (entered, _) = at(&mut window, 0.1, vec![egui::Event::PointerMoved(title)]);
+        assert!(whole(&entered), "appearing is not immediate: {entered:?}");
+        at(&mut window, 0.2, vec![]);
+        at(&mut window, 0.3, vec![]);
+        // Nothing paints for ten seconds, then the pointer leaves in one jump.
+        let (left, _) = at(&mut window, 10.0, vec![egui::Event::PointerMoved(body)]);
+        assert!(whole(&left), "the controls vanished on the leave: {left:?}");
+        // egui answers a pointer move with one more pass of its own; the wait is measured after it.
+        at(&mut window, 10.1, vec![]);
+        let (waiting, delay) = at(&mut window, 10.5, vec![]);
+        assert!(whole(&waiting), "{waiting:?}");
+        assert!(
+            delay > Duration::from_secs(1) && delay <= Duration::from_millis(2500),
+            "the wait should wake once, at its end: {delay:?}"
+        );
+        let (late, _) = at(&mut window, 12.9, vec![]);
+        assert!(whole(&late), "gone before the 3 s were up: {late:?}");
+        let (half, delay) = at(&mut window, 13.25, vec![]);
+        assert!(fading(&half), "not fading half-way: {half:?}");
+        assert!(
+            delay < Duration::from_millis(100),
+            "the fade asked for no frame: {delay:?}"
+        );
+        let (gone, _) = at(&mut window, 13.6, vec![]);
+        assert!(gone.is_empty(), "still painted after the fade: {gone:?}");
+        let (_, rest) = at(&mut window, 13.7, vec![]);
+        assert!(
+            rest > Duration::from_secs(5),
+            "a finished fade still wakes: {rest:?}"
+        );
+
+        // Leave again, and come back half-way through the fade.
+        at(&mut window, 20.0, vec![egui::Event::PointerMoved(title)]);
+        at(&mut window, 20.1, vec![egui::Event::PointerMoved(body)]);
+        let (half, _) = at(&mut window, 23.35, vec![]);
+        assert!(fading(&half), "{half:?}");
+        let (back, _) = at(&mut window, 23.36, vec![egui::Event::PointerMoved(title)]);
+        assert!(whole(&back), "coming back did not restore them: {back:?}");
+        for time in [23.7, 30.0] {
+            let (kept, _) = at(&mut window, time, vec![]);
+            assert!(whole(&kept), "wanted controls faded at {time}: {kept:?}");
+        }
+    }
+
+    /// Focus moving away after the window slept starts the same countdown, and a control pressed
+    /// while it fades still acts.
+    #[test]
+    fn a_console_that_loses_focus_keeps_pressable_controls_while_they_fade() {
+        let (ctx, mut window, area) = lingering_pair(true);
+        let names = names_in_order(&window);
+        assert_eq!(window.active().focus, names[0]);
+        let cells = control_cells(&window, &ctx, area, 0);
+        let split_right = control(&window, &ctx, area, 0, 162.5);
+        let other = pane_rect(&window, &ctx, area, names[1]).center();
+        let at = |window: &mut Window, time, events| {
+            icon_alphas(&timed_pass(window, &ctx, area, time, events).0, cells)
+        };
+        at(&mut window, 10.0, click_at(other));
+        assert_eq!(
+            window.active().focus,
+            names[1],
+            "the click did not move focus"
+        );
+        assert!(whole(&at(&mut window, 12.9, vec![])));
+        assert!(fading(&at(&mut window, 13.25, vec![])));
+        at(&mut window, 13.26, click_at(split_right));
+        at(&mut window, 13.27, vec![]);
+        assert_eq!(
+            window.active().panes().len(),
+            3,
+            "a fading split did not split its console"
+        );
+    }
+
+    /// Where fades are off — every measured run — the controls go on the pass that stops wanting them.
+    #[test]
+    fn without_fades_unwanted_controls_go_at_once() {
+        let (ctx, mut window, area) = lingering_pair(false);
+        let title = control(&window, &ctx, area, 1, 300.0);
+        let body = pane_rect(&window, &ctx, area, names_in_order(&window)[1]).center();
+        let cells = control_cells(&window, &ctx, area, 1);
+        let (shown, _) = timed_pass(
+            &mut window,
+            &ctx,
+            area,
+            0.1,
+            vec![egui::Event::PointerMoved(title)],
+        );
+        assert!(whole(&icon_alphas(&shown, cells)));
+        let (left, _) = timed_pass(
+            &mut window,
+            &ctx,
+            area,
+            0.2,
+            vec![egui::Event::PointerMoved(body)],
+        );
+        assert!(
+            icon_alphas(&left, cells).is_empty(),
+            "a run without fades lingered"
+        );
+    }
 }

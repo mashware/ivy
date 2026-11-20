@@ -28,7 +28,12 @@ enum Wake {
 /// **The countdown starts on the first pass that finds the controls unwanted**, never at the last
 /// pass that found them wanted: a window at rest paints nothing, so «last wanted» can be seconds old
 /// when the pointer finally leaves, and the controls would vanish on the spot.
-fn step(previous: Option<State>, wanted: bool, now: f64, fades: bool) -> (Option<State>, f32, Wake) {
+fn step(
+    previous: Option<State>,
+    wanted: bool,
+    now: f64,
+    fades: bool,
+) -> (Option<State>, f32, Wake) {
     if wanted {
         return (Some(State::Wanted), 1.0, Wake::Not);
     }
@@ -40,7 +45,11 @@ fn step(previous: Option<State>, wanted: bool, now: f64, fades: bool) -> (Option
     };
     let elapsed = (now - left).max(0.0);
     if elapsed < LINGER {
-        (Some(State::LeftAt(left)), 1.0, Wake::After(LINGER - elapsed))
+        (
+            Some(State::LeftAt(left)),
+            1.0,
+            Wake::After(LINGER - elapsed),
+        )
     } else if elapsed < LINGER + FADE {
         let opacity = 1.0 - (elapsed - LINGER) / FADE;
         (Some(State::LeftAt(left)), opacity as f32, Wake::Next)
@@ -69,7 +78,9 @@ pub(crate) fn controls_opacity(ctx: &egui::Context, name: usize, wanted: bool) -
     }
     match wake {
         Wake::Not => {}
-        Wake::After(seconds) => ctx.request_repaint_after(std::time::Duration::from_secs_f64(seconds)),
+        Wake::After(seconds) => {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(seconds))
+        }
         Wake::Next => ctx.request_repaint(),
     }
     opacity
