@@ -398,6 +398,7 @@ mod tests {
         #[derive(Debug)]
         struct Current(bool);
         impl panel_control::OverlayAuthority for Current {
+            #[cfg(unix)]
             fn current(&self) -> bool {
                 self.0
             }

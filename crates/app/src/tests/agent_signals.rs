@@ -194,6 +194,7 @@ fn disabled_malformed_unknown_and_child_signals_cannot_replace_a_root_wait() {
 }
 
 #[test]
+#[cfg(unix)]
 fn opencode_socket_takeover_is_ordered_and_does_not_acquire_flow_authority() {
     let mut window = window_with("sleep 8", "sleep 8");
     attach_a_channel(&mut window, 0);
@@ -277,6 +278,7 @@ fn opencode_socket_takeover_is_ordered_and_does_not_acquire_flow_authority() {
 }
 
 #[test]
+#[cfg(unix)]
 fn unexpected_opencode_close_retains_unconfirmed_wait_until_complete_replacement() {
     let mut window = window_with("sleep 8", "sleep 8");
     attach_a_channel(&mut window, 0);
@@ -523,6 +525,7 @@ fn actual_headers_paint_only_declared_logos_preserve_manual_names_and_gate_anima
 }
 
 #[test]
+#[cfg(unix)]
 fn incomplete_opencode_refresh_cannot_take_over_or_resolve_a_known_wait() {
     let mut window = window_with("sleep 8", "sleep 8");
     attach_a_channel(&mut window, 0);

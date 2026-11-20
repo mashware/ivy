@@ -619,6 +619,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    #[cfg(unix)]
     fn a_hidden_panel_keeps_its_live_producer_and_shows_its_next_publication() {
         let ctx = egui::Context::default();
         let mut window = window_with("sleep 30", "sleep 30");

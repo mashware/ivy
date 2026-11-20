@@ -1070,6 +1070,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn project_plan_calls_refuse_unknown_and_folder_projects_without_changing_a_plan() {
         let mut window = window_with("sleep 30", "sleep 30");
         let ctx = egui::Context::default();
@@ -1100,6 +1101,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn project_plan_is_shared_by_panes_and_painted_with_source_and_progress() {
         let mut window = window_with("sleep 30", "sleep 30");
         integrated(&mut window);
@@ -1210,6 +1212,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn published_project_plan_hides_roadmap_file_until_retired() {
         use std::{fs, process::Command, time::Instant};
         let root = std::env::temp_dir().join(format!(
@@ -1394,6 +1397,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn by_milestone_places_each_card_under_its_declared_deliverable_and_the_rest_off_the_plan() {
         let mut window = window_with("sleep 30", "sleep 30");
         integrated(&mut window);
@@ -1519,6 +1523,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn the_filter_field_takes_typing_and_escape_leaves_it_before_closing_the_board() {
         let mut window = window_with("sleep 30", "sleep 30");
         integrated(&mut window);

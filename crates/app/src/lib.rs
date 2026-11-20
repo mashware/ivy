@@ -5433,6 +5433,7 @@ mod tests {
     /// alone can only watch the value the refusal returns — a proxy that stays green with the
     /// hand-back deleted.
     #[test]
+    #[cfg(unix)]
     fn a_file_published_while_the_channel_holds_the_panel_is_read_when_the_hold_ends() {
         let dir = PanelDir::create().expect("create the panel directory");
         let mut pane = pane_with("sleep 30", 0);
@@ -5590,6 +5591,7 @@ mod tests {
     }
 
     /// Binds a control channel to the console called `name`, so a request can reach the window.
+    #[cfg(unix)]
     fn attach_a_channel(window: &mut Window, name: usize) {
         let dir = PanelDir::create().expect("a panel directory");
         let reads = window.control.read_activity();
@@ -5763,6 +5765,7 @@ mod tests {
     /// **AC13**: a console that cannot give both children their minimum is told so, and **nothing is
     /// spent** — not a console, and not even a name.
     #[test]
+    #[cfg(unix)]
     fn a_split_that_does_not_fit_is_refused_and_spends_nothing() {
         let ctx = egui::Context::default();
         let mut window = window_with("sleep 8", "sleep 8");
@@ -5859,6 +5862,7 @@ mod tests {
     /// that handle; and the moment the person's input reaches the console, a read with the handle is
     /// refused **with the reason** and not with a bare error.
     #[test]
+    #[cfg(unix)]
     fn an_agent_opens_a_console_without_moving_the_focus_and_loses_it_when_somebody_types() {
         let ctx = egui::Context::default();
         let mut window = window_with("sleep 8", "sleep 8");
@@ -5985,6 +5989,7 @@ mod tests {
         check_session_retirement(Some(true));
     }
 
+    #[cfg(unix)]
     fn check_session_retirement(file_takeover: Option<bool>) {
         let ctx = egui::Context::default();
         let mut window = window_with("sleep 8", "sleep 8");
@@ -6233,6 +6238,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn a_disconnect_after_an_admitted_retirement_does_not_release_its_authority_early() {
         let ctx = egui::Context::default();
         let mut window = window_with("sleep 8", "sleep 8");
@@ -6322,6 +6328,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn a_publication_after_a_queued_retirement_cannot_overtake_it() {
         let ctx = egui::Context::default();
         let mut window = window_with("sleep 8", "sleep 8");
@@ -6420,6 +6427,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn an_ordinary_disconnect_preserves_the_panel_and_every_auxiliary_console() {
         let ctx = egui::Context::default();
         let mut window = window_with("sleep 8", "sleep 8");
@@ -6541,6 +6549,7 @@ mod tests {
     /// all. And the assertion is on the panel **being visible**, not on the field where the sentence
     /// is recorded: what the person meets is the panel appearing.
     #[test]
+    #[cfg(unix)]
     fn only_a_console_an_agent_opened_says_on_its_panel_that_it_went_back() {
         let ctx = egui::Context::default();
         let mut window = window_with("sleep 8", "sleep 8");
@@ -6624,6 +6633,7 @@ mod tests {
     /// is unreachable from here and is defended anyway: the origin pane has to stay alive for the
     /// handle to be usable at all, and opening a console always leaves at least two in that tab.
     #[test]
+    #[cfg(unix)]
     fn a_console_the_agent_opened_is_closed_by_its_handle_and_the_handle_is_forgotten() {
         let ctx = egui::Context::default();
         let mut window = window_with("sleep 8", "sleep 8");
@@ -6681,6 +6691,7 @@ mod tests {
     /// too** — the scope is the connection and not the name, which is the whole of what the handle is
     /// for.
     #[test]
+    #[cfg(unix)]
     fn a_close_is_refused_for_a_handle_this_connection_does_not_own() {
         let ctx = egui::Context::default();
         let mut window = window_with("sleep 8", "sleep 8");

@@ -1,7 +1,7 @@
 //! Optional off-frame services share the pane endpoint without changing panel ownership.
 use super::*;
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn open_with_sessions(
     dir: &PanelDir,
     reader: crate::panel::DocumentReader,
