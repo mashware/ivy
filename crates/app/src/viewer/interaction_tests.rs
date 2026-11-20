@@ -376,22 +376,42 @@ fn control_click_on_an_image_path_opens_it_pinned_to_its_console() {
         ctrl: true,
         ..Default::default()
     };
-    for pressed in [true, false] {
-        frame(
-            &mut window,
-            &ctx,
-            vec![
-                egui::Event::PointerMoved(pos),
-                egui::Event::ModifiersChanged(chord),
-                egui::Event::PointerButton {
-                    pos,
-                    button: egui::PointerButton::Primary,
-                    pressed,
-                    modifiers: chord,
-                },
-            ],
-        );
+    let control_click = |window: &mut crate::Window| {
+        for pressed in [true, false] {
+            frame(
+                window,
+                &ctx,
+                vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::ModifiersChanged(chord),
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: chord,
+                    },
+                ],
+            );
+        }
+    };
+    // A decode that has not finished refuses the click, and the drawer says which file it reads.
+    let other = path.join("other.png");
+    open_image_target(&mut window, names[0], other.clone()).unwrap();
+    let stalled = window.image.stall();
+    frame(&mut window, &ctx, vec![]);
+    control_click(&mut window);
+    assert_eq!(shown_image(&window), Some((names[1], shot.clone())));
+    let still = format!("Still reading {}…", other.display());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !frame(&mut window, &ctx, vec![])
+        .iter()
+        .any(|(text, _)| *text == still)
+    {
+        assert!(Instant::now() < deadline, "{:?}", window.image.message());
+        std::thread::sleep(Duration::from_millis(10));
     }
+    drop(stalled);
+    control_click(&mut window);
     assert_eq!(
         crate::sidebar::active(&window),
         Some(crate::sidebar::Tool::Document)
@@ -402,12 +422,12 @@ fn control_click_on_an_image_path_opens_it_pinned_to_its_console() {
     while !frame(&mut window, &ctx, vec![])
         .iter()
         .any(|(text, _)| text == "Screen Shot.PNG")
-        || window.image.message.is_empty() && !window.image.loaded()
+        || window.image.message().is_none() && !window.image.loaded()
     {
-        assert!(Instant::now() < deadline, "{}", window.image.message);
+        assert!(Instant::now() < deadline, "{:?}", window.image.message());
         std::thread::sleep(Duration::from_millis(10));
     }
-    assert!(window.image.message.is_empty(), "{}", window.image.message);
+    assert_eq!(window.image.message(), None);
 }
 
 #[cfg(target_os = "linux")]

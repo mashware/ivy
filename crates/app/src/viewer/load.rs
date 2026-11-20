@@ -59,10 +59,17 @@ pub(super) struct Job<T = Loaded> {
     finished: Cell<bool>,
 }
 
-/// What the image viewer shows: the decoded file, and the copy the GPU can take.
+/// What decoding an image yields: the original at full resolution, and a copy no side of which
+/// exceeds the GPU's largest texture, which the viewer hands over once and does not keep.
 pub(crate) struct Picture {
-    pub(super) original: Arc<image::RgbaImage>,
-    pub(super) display: egui::ColorImage,
+    original: Arc<image::RgbaImage>,
+    display: egui::ColorImage,
+}
+
+impl Picture {
+    pub(super) fn into_parts(self) -> (Arc<image::RgbaImage>, egui::ColorImage) {
+        (self.original, self.display)
+    }
 }
 
 impl Job {
@@ -121,6 +128,18 @@ impl Job<Picture> {
     pub(super) fn poll(&self) -> Option<Result<Picture, String>> {
         take(self)
     }
+
+    /// A decode that has not finished, for as long as the returned sender lives and says nothing:
+    /// what a read stuck on an unresponsive filesystem looks like to the viewer.
+    #[cfg(test)]
+    pub(super) fn stalled() -> (Self, mpsc::Sender<Result<Picture, String>>) {
+        let (sender, receiver) = mpsc::channel();
+        let job = Job {
+            receiver,
+            finished: Cell::new(false),
+        };
+        (job, sender)
+    }
 }
 
 fn take<T>(job: &Job<T>) -> Option<Result<T, String>> {
@@ -167,16 +186,16 @@ fn open_regular(path: &Path) -> Result<std::fs::File, String> {
     }
     let file = options
         .open(path)
-        .map_err(|e| format!("Cannot open file: {e}"))?;
+        .map_err(|e| format!("Cannot open {}: {e}", path.display()))?;
     let metadata = file
         .metadata()
-        .map_err(|e| format!("Cannot inspect file: {e}"))?;
+        .map_err(|e| format!("Cannot inspect {}: {e}", path.display()))?;
     if metadata.is_dir() {
         // Files lists a link to a folder as a link and does not follow it (#88).
         return Err("This is a folder, not a file".into());
     }
     if !metadata.is_file() {
-        return Err("The selected path is not a regular file".into());
+        return Err(format!("{} is not a regular file", path.display()));
     }
     Ok(file)
 }
@@ -205,15 +224,15 @@ fn read_text(path: &Path) -> Result<String, String> {
         .unwrap_or(text))
 }
 
-/// Decodes a PNG or JPEG once, keeping the original and a copy no side of which exceeds
-/// `max_side`, the largest texture the GPU takes.
+/// Decodes a PNG or JPEG, keeping the original and a copy no side of which exceeds `max_side`,
+/// the largest texture the GPU takes.
 fn decode_image(path: &Path, max_side: usize) -> Result<Picture, String> {
     use image::{ImageDecoder, ImageFormat, ImageReader};
-    let bytes = read_bounded(open_regular(path)?, IMAGE_LIMIT)
-        .map_err(|e| format!("Cannot read image: {e}"))?;
+    let unreadable = |e: std::io::Error| format!("Cannot read {}: {e}", path.display());
+    let bytes = read_bounded(open_regular(path)?, IMAGE_LIMIT).map_err(unreadable)?;
     let mut reader = ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()
-        .map_err(|e| format!("Cannot read image: {e}"))?;
+        .map_err(unreadable)?;
     if !matches!(reader.format(), Some(ImageFormat::Png | ImageFormat::Jpeg)) {
         return Err("This file is not a PNG or JPEG image".into());
     }
@@ -851,23 +870,25 @@ mod tests {
     #[test]
     fn an_image_that_is_not_a_regular_png_or_jpeg_within_the_size_cap_says_why() {
         let temp = Temp::new();
+        let folder = decode_image(&temp.0, 4096).err().unwrap();
+        assert_eq!(folder, "This is a folder, not a file");
+        let missing = temp.0.join("missing.png");
+        let error = decode_image(&missing, 4096).err().unwrap();
         assert!(
-            decode_image(&temp.0, 4096)
-                .err()
-                .unwrap()
-                .contains("not a regular file")
+            error.starts_with(&format!("Cannot open {}: ", missing.display())),
+            "{error}"
         );
         let large = temp.0.join("large.png");
         fs::File::create(&large)
             .unwrap()
             .set_len(IMAGE_LIMIT as u64 + 1)
             .unwrap();
+        let error = decode_image(&large, 4096).err().unwrap();
         assert!(
-            decode_image(&large, 4096)
-                .err()
-                .unwrap()
-                .contains("size limit")
+            error.starts_with(&format!("Cannot read {}: ", large.display())),
+            "{error}"
         );
+        assert!(error.contains("size limit"), "{error}");
         for (name, bytes) in [
             ("text.png", b"not an image at all".to_vec()),
             ("anim.png", b"GIF89a\x01\x00\x01\x00\x00\x00\x00;".to_vec()),
@@ -917,13 +938,16 @@ mod tests {
     fn the_display_copy_fits_the_texture_side_and_the_original_keeps_its_size() {
         let temp = Temp::new();
         let png = temp.0.join("shot.png");
-        image::RgbaImage::from_pixel(300, 120, image::Rgba([10, 20, 30, 255]))
+        image::RgbaImage::from_fn(300, 120, |x, y| image::Rgba([x as u8, y as u8, 30, 255]))
             .save_with_format(&png, image::ImageFormat::Png)
             .unwrap();
         let picture = decode_image(&png, 100).unwrap();
         assert_eq!(picture.original.dimensions(), (300, 120));
         assert_eq!(picture.display.size, [100, 40]);
-        assert_eq!(decode_image(&png, 300).unwrap().display.size, [300, 120]);
+        assert_eq!(decode_image(&png, 299).unwrap().display.size, [299, 119]);
+        let exact = decode_image(&png, 300).unwrap();
+        assert_eq!(exact.display.size, [300, 120]);
+        assert_eq!(exact.display.as_raw(), exact.original.as_raw().as_slice());
         let jpeg = temp.0.join("photo.JPG");
         image::RgbImage::from_pixel(64, 32, image::Rgb([200, 100, 50]))
             .save_with_format(&jpeg, image::ImageFormat::Jpeg)

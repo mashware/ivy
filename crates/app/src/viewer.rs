@@ -375,9 +375,10 @@ fn close_tab(window: &mut crate::Window, markdown: bool, ctx: &egui::Context) {
         state.message = "Send or clear the review comments before closing the review.".into();
         return;
     }
-    state.forget();
     if markdown {
-        window.image = image::Viewer::default();
+        origin::replace_document(window, origin::Keep::Neither);
+    } else {
+        state.forget();
     }
     let active = crate::sidebar::active(window);
     let closed = if markdown {
@@ -599,7 +600,7 @@ fn showing_image(window: &crate::Window) -> bool {
 /// The console the shown document was opened from.
 fn origin(window: &crate::Window) -> Option<&Source> {
     if showing_image(window) {
-        window.image.origin.as_ref()
+        window.image.origin()
     } else {
         window.viewer.origin.as_ref()
     }
@@ -651,7 +652,7 @@ pub(crate) fn hide(window: &mut crate::Window) {
 #[cfg(test)]
 pub(crate) fn shown_image(window: &crate::Window) -> Option<(usize, PathBuf)> {
     let image = &window.image;
-    image.shown().then_some((image.origin.as_ref()?.pane, image.path.clone()?))
+    Some((image.origin()?.pane, image.path()?.to_owned()))
 }
 #[cfg(test)]
 pub(crate) fn is_open(window: &crate::Window) -> bool {

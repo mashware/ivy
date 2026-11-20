@@ -55,9 +55,12 @@ fn open_local_press(
     let Some((pane, target)) = local else {
         return false;
     };
-    // An image has nothing to reveal in Files that the drawer does not show better (D72).
+    // An image has nothing to reveal in Files that the drawer does not show better (D72). Its
+    // refusals are painted in the drawer; one for a console gone leaves the press to routing.
     if crate::viewer::is_image(&target.path) {
-        crate::viewer::open_image_target(window, pane, target.path);
+        if crate::viewer::open_image_target(window, pane, target.path).is_err() {
+            return false;
+        }
     } else {
         crate::explorer::open_path(window, pane, target.path);
     }

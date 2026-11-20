@@ -5,19 +5,12 @@ use super::Source;
 use super::load::{Job, Picture};
 use eframe::egui;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// How far the zoom goes, in screen points per pixel of the original.
 const SMALLEST: f32 = 0.01;
 const LARGEST: f32 = 32.0;
-
-/// Which document the drawer's document tab paints.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum Document {
-    #[default]
-    Markdown,
-    Image,
-}
 
 /// Whether a path names a file this viewer opens, by its extension in any letter case.
 pub(crate) fn is_image(path: &Path) -> bool {
@@ -32,120 +25,208 @@ pub(crate) fn is_image(path: &Path) -> bool {
 
 #[derive(Default)]
 pub(crate) struct Viewer {
-    pub(super) document: Document,
-    pub(super) origin: Option<Source>,
-    pub(super) path: Option<PathBuf>,
-    started: bool,
-    job: Option<Job<Picture>>,
-    picture: Option<Picture>,
-    texture: Option<egui::TextureHandle>,
+    document: Option<Opened>,
+    /// A decode whose image was replaced or closed before it finished. A read stuck on an
+    /// unresponsive filesystem cannot be cancelled, so its handle is kept and no other decode
+    /// starts until it ends: repeated opens cannot pile up readers.
+    abandoned: Option<(PathBuf, Job<Picture>)>,
+}
+
+struct Opened {
+    origin: Source,
+    path: PathBuf,
+    load: Load,
     /// Screen points per pixel of the original; `None` fits the drawer's width.
     scale: Option<f32>,
     offset: egui::Vec2,
-    pub(super) message: String,
+}
+
+enum Load {
+    /// Waiting for a frame to say how large a texture the GPU takes.
+    Pending,
+    Decoding(Job<Picture>),
+    Ready {
+        original: Arc<image::RgbaImage>,
+        gpu: Gpu,
+    },
+    Failed(String),
+}
+
+/// The display copy until the first frame that shows it hands it to the GPU, then the texture.
+enum Gpu {
+    Waiting(egui::ColorImage),
+    Uploaded(egui::TextureHandle),
 }
 
 impl Viewer {
-    /// Replaces whatever image was shown with `path`, read from `origin`'s console.
+    /// Replaces whatever image was shown with `path`, read from `origin`'s console. A relative
+    /// path is one whose console's directory is unknown: it is refused and says so.
     pub(super) fn open(&mut self, origin: Source, path: PathBuf) {
-        let relative = path.is_relative();
-        *self = Self {
-            document: Document::Image,
-            origin: Some(origin),
-            path: Some(path),
-            ..Self::default()
+        self.clear();
+        let load = if path.is_relative() {
+            Load::Failed("This console has not published its working directory. Open an absolute image path or enable OSC 7 in the shell.".into())
+        } else {
+            Load::Pending
         };
-        if relative {
-            self.started = true;
-            self.message = "This console has not published its working directory. Open an absolute image path or enable OSC 7 in the shell.".into();
+        self.document = Some(Opened {
+            origin,
+            path,
+            load,
+            scale: None,
+            offset: egui::Vec2::ZERO,
+        });
+    }
+
+    /// Forgets the image, keeping an unfinished decode's handle.
+    pub(super) fn clear(&mut self) {
+        if let Some(Opened {
+            path,
+            load: Load::Decoding(job),
+            ..
+        }) = self.document.take()
+        {
+            self.abandoned = Some((path, job));
         }
     }
 
     /// Whether the document tab paints this image.
     pub(super) fn shown(&self) -> bool {
-        self.document == Document::Image
+        self.document.is_some()
+    }
+
+    pub(super) fn origin(&self) -> Option<&Source> {
+        Some(&self.document.as_ref()?.origin)
+    }
+
+    pub(super) fn path(&self) -> Option<&Path> {
+        Some(&self.document.as_ref()?.path)
     }
 
     pub(super) fn file_name(&self) -> Option<String> {
-        self.path
-            .as_ref()?
+        self.path()?
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
     }
 
-    #[cfg(test)]
-    pub(super) fn loaded(&self) -> bool {
-        self.picture.is_some()
+    /// Why the image is not shown, when it cannot be.
+    pub(crate) fn message(&self) -> Option<&str> {
+        match &self.document.as_ref()?.load {
+            Load::Failed(why) => Some(why),
+            _ => None,
+        }
     }
 
-    /// Starts the one decode this open gets, and takes its result when it arrives.
+    /// The decoded image at full resolution, once it has arrived.
+    pub(super) fn original(&self) -> Option<&Arc<image::RgbaImage>> {
+        match &self.document.as_ref()?.load {
+            Load::Ready { original, .. } => Some(original),
+            _ => None,
+        }
+    }
+
+    /// The original's size in pixels.
+    pub(super) fn size(&self) -> Option<egui::Vec2> {
+        let original = self.original()?;
+        Some(egui::vec2(
+            original.width() as f32,
+            original.height() as f32,
+        ))
+    }
+
+    /// Starts the one decode this open gets, unless another is still running, and takes its result
+    /// when it arrives.
     pub(super) fn poll(&mut self, ctx: &egui::Context) {
-        if !self.started
-            && let Some(path) = &self.path
+        if let Some((_, job)) = &self.abandoned
+            && job.poll().is_some()
         {
-            self.started = true;
-            match Job::image(path.clone(), ctx.input(|i| i.max_texture_side), ctx.clone()) {
-                Ok(job) => self.job = Some(job),
-                Err(why) => self.message = why,
-            }
+            self.abandoned = None;
         }
-        if let Some(result) = self.job.as_ref().and_then(|job| job.poll()) {
-            self.job = None;
-            match result {
-                Ok(picture) => self.picture = Some(picture),
-                Err(why) => self.message = why,
-            }
+        let Some(document) = self.document.as_mut() else {
+            return;
+        };
+        if matches!(document.load, Load::Pending) {
+            document.load = match &self.abandoned {
+                Some((busy, _)) => Load::Failed(format!("Still reading {}…", busy.display())),
+                None => {
+                    let side = ctx.input(|i| i.max_texture_side);
+                    match Job::image(document.path.clone(), side, ctx.clone()) {
+                        Ok(job) => Load::Decoding(job),
+                        Err(why) => Load::Failed(why),
+                    }
+                }
+            };
         }
-        if self.job.is_some() {
-            ctx.request_repaint_after(Duration::from_millis(100));
+        if let Load::Decoding(job) = &document.load {
+            match job.poll() {
+                Some(Ok(picture)) => {
+                    let (original, display) = picture.into_parts();
+                    document.load = Load::Ready {
+                        original,
+                        gpu: Gpu::Waiting(display),
+                    };
+                }
+                Some(Err(why)) => document.load = Load::Failed(why),
+                None => ctx.request_repaint_after(Duration::from_millis(100)),
+            }
         }
     }
 
     /// Paints the image over the drawer's body: fitted to its width until the person zooms, and
     /// scrolled with the wheel or the scroll bars.
     pub(super) fn show(&mut self, ui: &mut egui::Ui, theme: crate::theme::Theme) {
-        if !self.message.is_empty() {
-            egui::Frame::new().inner_margin(14).show(ui, |ui| {
-                ui.colored_label(
-                    theme.panel_color(Some(panel_contract::Mark::Block), None),
-                    &self.message,
-                );
-            });
-            return;
-        }
-        let Some(picture) = self.picture.as_mut() else {
-            egui::Frame::new().inner_margin(14).show(ui, |ui| {
-                ui.label("Loading…");
-            });
+        let Some(size) = self.size() else {
+            let message = self.message();
+            egui::Frame::new()
+                .inner_margin(14)
+                .show(ui, |ui| match message {
+                    Some(why) => {
+                        ui.colored_label(
+                            theme.panel_color(Some(panel_contract::Mark::Block), None),
+                            why,
+                        );
+                    }
+                    None => {
+                        ui.label("Loading…");
+                    }
+                });
             return;
         };
-        // The GPU copy is uploaded on the first frame that shows the image and kept from then on.
-        let texture = self.texture.get_or_insert_with(|| {
-            ui.ctx().load_texture(
+        let Some(Opened {
+            load: Load::Ready { gpu, .. },
+            scale: chosen,
+            offset,
+            ..
+        }) = self.document.as_mut()
+        else {
+            return;
+        };
+        if let Gpu::Waiting(display) = gpu {
+            let display = std::mem::take(display);
+            *gpu = Gpu::Uploaded(ui.ctx().load_texture(
                 "drawer-image",
-                std::mem::take(&mut picture.display),
+                display,
                 egui::TextureOptions::LINEAR,
-            )
-        });
+            ));
+        }
+        let Gpu::Uploaded(texture) = gpu else {
+            return;
+        };
         let body = ui.max_rect();
-        let size = egui::vec2(
-            picture.original.width() as f32,
-            picture.original.height() as f32,
-        );
-        let mut scale = self.scale.unwrap_or_else(|| fit(body.width(), size.x));
+        let mut scale =
+            chosen.unwrap_or_else(|| fit(body.width(), size.x, ui.ctx().pixels_per_point()));
         let zoom = ui.input(|i| i.zoom_delta());
         if zoom != 1.0
             && let Some(at) = ui
                 .input(|i| i.pointer.hover_pos())
                 .filter(|at| body.contains(*at))
         {
-            (scale, self.offset) = zoom_around(scale, self.offset, at - body.min, zoom);
-            self.scale = Some(scale);
+            (scale, *offset) = zoom_around(scale, *offset, at - body.min, zoom);
+            *chosen = Some(scale);
         }
         let output = egui::ScrollArea::both()
             .id_salt("drawer-image")
             .auto_shrink(false)
-            .scroll_offset(self.offset)
+            .scroll_offset(*offset)
             .show(ui, |ui| {
                 let (rect, _) = ui.allocate_exact_size(size * scale, egui::Sense::hover());
                 ui.painter().image(
@@ -155,7 +236,21 @@ impl Viewer {
                     egui::Color32::WHITE,
                 );
             });
-        self.offset = output.state.offset;
+        *offset = output.state.offset;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn loaded(&self) -> bool {
+        self.original().is_some()
+    }
+
+    /// Makes the shown image's decode one that has not finished, for as long as the returned
+    /// sender lives.
+    #[cfg(test)]
+    pub(crate) fn stall(&mut self) -> std::sync::mpsc::Sender<Result<Picture, String>> {
+        let (job, sender) = Job::stalled();
+        self.document.as_mut().unwrap().load = Load::Decoding(job);
+        sender
     }
 }
 
@@ -167,9 +262,10 @@ fn zoom_around(scale: f32, offset: egui::Vec2, at: egui::Vec2, factor: f32) -> (
     (zoomed, (point * zoomed - at).max(egui::Vec2::ZERO))
 }
 
-/// The scale that fits an image `width` pixels wide into `room` points, never enlarging it.
-fn fit(room: f32, width: f32) -> f32 {
-    (room / width.max(1.0)).min(1.0)
+/// The scale that fits an image `width` pixels wide into `room` points, never enlarging it past
+/// one physical pixel per pixel: a screenshot shown larger than it was taken only blurs.
+fn fit(room: f32, width: f32, pixels_per_point: f32) -> f32 {
+    (room / width.max(1.0)).min(1.0 / pixels_per_point)
 }
 
 #[cfg(test)]
@@ -235,16 +331,16 @@ mod tests {
         let mut viewer = Viewer::default();
         viewer.open(source(), path.clone());
         let started = Instant::now();
-        while viewer.picture.is_none() {
+        while !viewer.loaded() {
             viewer.poll(&ctx);
             assert!(
                 started.elapsed() < Duration::from_secs(5),
-                "{}",
-                viewer.message
+                "{:?}",
+                viewer.message()
             );
             std::thread::sleep(Duration::from_millis(5));
         }
-        let first = std::sync::Arc::clone(&viewer.picture.as_ref().unwrap().original);
+        let first = Arc::clone(viewer.original().unwrap());
         let took = started.elapsed();
         write_png(&path, 80, 10);
         let until = Instant::now() + (took * 5).max(Duration::from_millis(300));
@@ -252,10 +348,13 @@ mod tests {
             viewer.poll(&ctx);
             std::thread::sleep(Duration::from_millis(5));
         }
-        let now = &viewer.picture.as_ref().unwrap().original;
-        assert!(std::sync::Arc::ptr_eq(&first, now));
+        let now = viewer.original().unwrap();
+        assert!(Arc::ptr_eq(&first, now));
         assert_eq!(now.dimensions(), (40, 20));
     }
+
+    /// The largest texture the test GPU takes, smaller than the wide fixtures' 2400 pixels.
+    const MAX_SIDE: usize = 2048;
 
     fn area() -> egui::Rect {
         egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0))
@@ -272,6 +371,7 @@ mod tests {
         let mut output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(area()),
+                max_texture_side: Some(MAX_SIDE),
                 events,
                 ..Default::default()
             },
@@ -314,6 +414,39 @@ mod tests {
         inks
     }
 
+    /// The text painted inside `within`.
+    fn texts(shapes: &[egui::epaint::ClippedShape], within: egui::Rect) -> Vec<String> {
+        fn walk(shape: &egui::Shape, within: egui::Rect, found: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Text(text) if within.contains(text.pos) => {
+                    found.push(text.galley.text().to_owned());
+                }
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        walk(shape, within, found);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut found = Vec::new();
+        for clipped in shapes {
+            walk(&clipped.shape, within, &mut found);
+        }
+        found
+    }
+
+    /// The size of the texture the GPU was handed, once the image has been shown.
+    fn texture_size(viewer: &Viewer) -> Option<[usize; 2]> {
+        match &viewer.document.as_ref()?.load {
+            Load::Ready {
+                gpu: Gpu::Uploaded(texture),
+                ..
+            } => Some(texture.size()),
+            _ => None,
+        }
+    }
+
     /// A window with an image open in the drawer, pinned to its second console, once decoded.
     fn window_with_image(path: &Path) -> (crate::Window, egui::Context, Duration) {
         let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
@@ -321,19 +454,22 @@ mod tests {
         painted(&mut window, &ctx, vec![]);
         let name = window.active().panes()[1].name;
         crate::viewer::open_diff_for_pane(&mut window, name);
-        assert!(crate::viewer::open_image_target(
-            &mut window,
-            name,
-            path.to_owned()
-        ));
+        crate::viewer::open_image_target(&mut window, name, path.to_owned()).unwrap();
         let started = Instant::now();
         while image_rect(&painted(&mut window, &ctx, vec![])).is_none() {
             assert!(
                 started.elapsed() < Duration::from_secs(5),
-                "{}",
-                window.image.message
+                "{:?}",
+                window.image.message()
             );
             std::thread::sleep(Duration::from_millis(5));
+        }
+        let [width, height] = texture_size(&window.image).unwrap();
+        let (wide, high) = window.image.original().unwrap().dimensions();
+        if wide.max(high) as usize > MAX_SIDE {
+            assert_eq!(width.max(height), MAX_SIDE, "{width}x{height}");
+        } else {
+            assert_eq!([width, height], [wide as usize, high as usize]);
         }
         (window, ctx, started.elapsed())
     }
@@ -366,7 +502,7 @@ mod tests {
         let path = folder.0.join("shot.png");
         write_png(&path, 640, 400);
         let (mut window, ctx, took) = window_with_image(&path);
-        let first = std::sync::Arc::clone(&window.image.picture.as_ref().unwrap().original);
+        let first = Arc::clone(window.image.original().unwrap());
         write_png(&path, 64, 32);
         let dock = window.sidebar.last_dock.unwrap();
         for (action, tool) in [
@@ -387,8 +523,8 @@ mod tests {
             shapes = painted(&mut window, &ctx, vec![]);
             std::thread::sleep(Duration::from_millis(5));
         }
-        let now = &window.image.picture.as_ref().unwrap().original;
-        assert!(std::sync::Arc::ptr_eq(&first, now));
+        let now = window.image.original().unwrap();
+        assert!(Arc::ptr_eq(&first, now));
         assert_eq!(now.dimensions(), (640, 400));
         assert!(
             image_rect(&shapes).is_some(),
@@ -404,12 +540,18 @@ mod tests {
         let path = folder.0.join("wide.png");
         write_png(&path, 2400, 1600);
         let (mut window, ctx, _) = window_with_image(&path);
+        for pane in window.active_mut().panes_mut() {
+            pane.screen.advance(b"\x1b[31mred\x1b[0m plain text\r\n");
+        }
         let shapes = painted(&mut window, &ctx, vec![]);
         let metrics =
             crate::painter::CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
         let consoles = crate::tab_bar::geometry(&window, area(), &metrics).consoles;
+        assert!(
+            texts(&shapes, consoles).concat().contains("redplaintext"),
+            "the consoles painted no text for a dim to change"
+        );
         let plain = inks(&shapes, consoles);
-        assert!(!plain.is_empty());
         let before = image_rect(&shapes).unwrap();
         let body = window.sidebar.last_dock.unwrap();
         let at = egui::pos2(body.center().x, body.bottom() - 60.0);
@@ -508,30 +650,53 @@ mod tests {
         assert_eq!(zoom_around(0.5, offset, at, 0.0001).0, SMALLEST);
     }
 
-    /// An image wider than the drawer fits its width; a narrower one is shown at one point per
-    /// pixel rather than enlarged.
+    /// A viewer holding `original`, decoded and not yet shown.
+    fn ready(original: image::RgbaImage) -> Viewer {
+        let mut viewer = Viewer::default();
+        viewer.open(source(), PathBuf::from("/shot.png"));
+        viewer.document.as_mut().unwrap().load = Load::Ready {
+            original: Arc::new(original),
+            gpu: Gpu::Waiting(egui::ColorImage::filled([4, 2], egui::Color32::RED)),
+        };
+        viewer
+    }
+
+    /// An image wider than the drawer fits its width; a narrower one is shown at one physical
+    /// pixel per pixel rather than enlarged, which on a display of two pixels per point is half a
+    /// point.
     #[test]
     fn an_image_is_fitted_to_the_drawer_width_and_never_enlarged() {
         let body = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(500.0, 400.0));
-        for (width, height, shown) in [(2000, 1000, 500.0), (300, 100, 300.0)] {
+        for (width, height, pixels_per_point, shown) in [
+            (2000, 1000, 1.0, 500.0),
+            (300, 100, 1.0, 300.0),
+            (300, 100, 2.0, 150.0),
+            (2000, 1000, 2.0, 500.0),
+        ] {
             let ctx = egui::Context::default();
-            let mut viewer = Viewer {
-                picture: Some(Picture {
-                    original: std::sync::Arc::new(image::RgbaImage::new(width, height)),
-                    display: egui::ColorImage::filled([4, 2], egui::Color32::RED),
-                }),
-                ..Viewer::default()
+            let mut viewer = ready(image::RgbaImage::new(width, height));
+            let display = egui::ViewportInfo {
+                native_pixels_per_point: Some(pixels_per_point),
+                ..Default::default()
             };
             let output = ctx.run_ui(
                 egui::RawInput {
                     screen_rect: Some(body),
+                    viewports: [(egui::ViewportId::ROOT, display)].into_iter().collect(),
                     ..Default::default()
                 },
-                |ui| viewer.show(ui, crate::theme::Theme::default()),
+                |ui| {
+                    assert_eq!(ui.ctx().pixels_per_point(), pixels_per_point);
+                    viewer.show(ui, crate::theme::Theme::default());
+                },
             );
             let rect = image_rect(&output.shapes).unwrap();
             output.drop_without_applying_deltas();
-            assert_eq!(rect.width(), shown, "{width}x{height}");
+            assert_eq!(
+                rect.width(),
+                shown,
+                "{width}x{height} at {pixels_per_point}"
+            );
             assert_eq!(rect.height(), shown * height as f32 / width as f32);
         }
     }
@@ -542,8 +707,175 @@ mod tests {
         let mut viewer = Viewer::default();
         viewer.open(source(), PathBuf::from("shot.png"));
         viewer.poll(&ctx);
-        assert!(viewer.job.is_none() && viewer.picture.is_none());
-        assert!(viewer.message.contains("working directory"));
+        assert!(!viewer.loaded());
+        assert!(matches!(
+            viewer.document.as_ref().unwrap().load,
+            Load::Failed(_)
+        ));
+        assert!(viewer.message().unwrap().contains("working directory"));
         assert!(viewer.shown());
+    }
+
+    /// Polls until the drawer paints `wanted`, returning everything it painted as text.
+    fn wait_for_text(window: &mut crate::Window, ctx: &egui::Context, wanted: &str) -> String {
+        let started = Instant::now();
+        loop {
+            let shapes = painted(window, ctx, vec![]);
+            let dock = window.sidebar.last_dock.unwrap();
+            let text = texts(&shapes, dock).join("\n");
+            if text.contains(wanted) {
+                return text;
+            }
+            assert!(started.elapsed() < Duration::from_secs(5), "{text}");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// A file named like a PNG that is not one says so in the drawer instead of loading forever.
+    #[test]
+    fn a_file_that_does_not_decode_says_why_in_the_drawer() {
+        let folder = Folder::new();
+        let path = folder.0.join("anim.png");
+        std::fs::write(&path, b"GIF89a\x01\x00\x01\x00\x00\x00\x00;").unwrap();
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        let ctx = egui::Context::default();
+        painted(&mut window, &ctx, vec![]);
+        let name = window.active().panes()[1].name;
+        crate::viewer::open_image_target(&mut window, name, path).unwrap();
+        wait_for_text(&mut window, &ctx, "This file is not a PNG or JPEG image");
+        assert!(!window.image.loaded());
+    }
+
+    /// While a decode has not finished, a second open starts no reader of its own: it says which
+    /// file is still being read, also when the tab that started that read was closed. Once the read
+    /// ends, opening again decodes.
+    #[test]
+    fn a_second_open_waits_for_the_decode_still_running() {
+        use crate::viewer::StripAction;
+        let folder = Folder::new();
+        let (first, second) = (folder.0.join("first.png"), folder.0.join("second.png"));
+        write_png(&first, 32, 16);
+        write_png(&second, 48, 16);
+        let (mut window, ctx, _) = window_with_image(&first);
+        let name = window.active().panes()[1].name;
+        let finish = window.image.stall();
+        crate::viewer::open_image_target(&mut window, name, second.clone()).unwrap();
+        let still = format!("Still reading {}…", first.display());
+        wait_for_text(&mut window, &ctx, &still);
+        let dock = window.sidebar.last_dock.unwrap();
+        let close = crate::viewer::strip_place(&window, dock, StripAction::CloseDocument).unwrap();
+        click(&mut window, &ctx, close);
+        assert!(!window.image.shown());
+        crate::viewer::open_image_target(&mut window, name, second.clone()).unwrap();
+        wait_for_text(&mut window, &ctx, &still);
+        assert!(window.image.abandoned.is_some());
+        drop(finish);
+        crate::viewer::open_image_target(&mut window, name, second).unwrap();
+        let started = Instant::now();
+        while !window.image.loaded() {
+            painted(&mut window, &ctx, vec![]);
+            assert!(
+                started.elapsed() < Duration::from_secs(5),
+                "{:?}",
+                window.image.message()
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(window.image.original().unwrap().dimensions(), (48, 16));
+        assert!(window.image.abandoned.is_none());
+    }
+
+    /// Closing the document tab forgets the image, and the next document tab is Markdown's again.
+    #[test]
+    fn closing_the_document_tab_forgets_the_image() {
+        use crate::viewer::StripAction;
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 64, 32);
+        let (mut window, ctx, _) = window_with_image(&path);
+        let dock = window.sidebar.last_dock.unwrap();
+        let close = crate::viewer::strip_place(&window, dock, StripAction::CloseDocument).unwrap();
+        click(&mut window, &ctx, close);
+        assert!(!window.image.shown());
+        assert_eq!(crate::viewer::shown_image(&window), None);
+        crate::sidebar::toggle(&mut window, crate::sidebar::Tool::Document, &ctx);
+        let shapes = painted(&mut window, &ctx, vec![]);
+        assert!(image_rect(&shapes).is_none());
+    }
+
+    /// The wheel over the image pans it and Ctrl+wheel zooms it, and neither reaches a console,
+    /// which the same wheel scrolls back through its history when the pointer is over it.
+    #[test]
+    fn gestures_over_the_image_move_it_and_never_scroll_a_console() {
+        let folder = Folder::new();
+        let path = folder.0.join("wide.png");
+        write_png(&path, 2400, 1600);
+        let (mut window, ctx, _) = window_with_image(&path);
+        let history: String = (0..400).map(|n| format!("line {n}\r\n")).collect();
+        for pane in window.active_mut().panes_mut() {
+            pane.screen.advance(history.as_bytes());
+        }
+        let scrolls = |window: &crate::Window| -> Vec<usize> {
+            window
+                .active()
+                .panes()
+                .iter()
+                .map(|pane| pane.screen.view().scroll())
+                .collect()
+        };
+        // As when Files takes the keys: the drawer then keeps only what happens over it.
+        crate::viewer::blur(&mut window);
+        let before = image_rect(&painted(&mut window, &ctx, vec![])).unwrap();
+        assert_eq!(scrolls(&window), [0, 0]);
+        let body = window.sidebar.last_dock.unwrap();
+        let at = egui::pos2(body.center().x, body.bottom() - 60.0);
+        let wheel = |at: egui::Pos2, dy: f32, modifiers: egui::Modifiers| {
+            vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::ModifiersChanged(modifiers),
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Line,
+                    delta: egui::vec2(0.0, dy),
+                    phase: egui::TouchPhase::Move,
+                    modifiers,
+                },
+            ]
+        };
+        let settle = |window: &mut crate::Window, events| {
+            let mut shapes = painted(window, &ctx, events);
+            for _ in 0..30 {
+                shapes = painted(window, &ctx, vec![]);
+            }
+            image_rect(&shapes).unwrap()
+        };
+        let panned = settle(&mut window, wheel(at, -3.0, egui::Modifiers::NONE));
+        assert!(panned.top() < before.top(), "{before:?} -> {panned:?}");
+        assert_eq!(panned.width(), before.width());
+        let chord = egui::Modifiers {
+            ctrl: true,
+            command: true,
+            ..Default::default()
+        };
+        let zoomed = settle(&mut window, wheel(at, 3.0, chord));
+        assert!(
+            zoomed.width() > panned.width() * 1.2,
+            "{panned:?} -> {zoomed:?}"
+        );
+        assert_eq!(
+            scrolls(&window),
+            [0, 0],
+            "a gesture over the image scrolled a console"
+        );
+        let console = window.active().panes()[0]
+            .painted_console
+            .as_ref()
+            .unwrap()
+            .area
+            .center();
+        settle(&mut window, wheel(console, 3.0, egui::Modifiers::NONE));
+        assert!(
+            scrolls(&window)[0] > 0,
+            "the wheel over a console did not scroll it"
+        );
     }
 }
