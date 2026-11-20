@@ -11088,9 +11088,9 @@ work). The owner asked for a read-only viewer with simple colouring (#159).
 - No measured batch loads or paints a document in the drawer. The code view's painting is inside the
   declared «document viewers» span, but it has no published figure.
 - A selection is made by dragging within the visible rows. Dragging past the edge does not scroll.
-- The header with the breadcrumb, Open and its menu came with #159's second pull request (D109).
+- The header with the breadcrumb, Open and its menu came with #159's second pull request (D110).
 
-## D109 — Open hands the desktop only documents, judged where the link leads, and never through a shell
+## D110 — Open hands the desktop only documents, judged where the link leads, and never through a shell
 
 **Decided.** The code view has a header row above the file:
 

@@ -1,5 +1,5 @@
 //! Handing a file to the desktop: the application its type opens with, or the file manager with
-//! the file shown selected (D109).
+//! the file shown selected (D110).
 //!
 //! **Opening a file is running whatever the desktop associates with its type**, and a repository
 //! is somebody else's text: its names and its links. So what may be opened is an allow-list of

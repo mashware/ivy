@@ -151,7 +151,7 @@ arboard = { version = "3.6.1", default-features = false }
 # unsupported compositors can use arboard's X11/XWayland fallback.
 arboard = { version = "3.6.1", default-features = false, features = ["wayland-data-control"] }
 # Showing a file selected in the desktop's file manager: the `FileManager1` bus service, called
-# without starting a process whose arguments would need quoting (D109). The same three crates, at the
+# without starting a process whose arguments would need quoting (D110). The same three crates, at the
 # same versions and features, that `term-core` already compiles for its scope placement.
 zbus = { version = "5.13", default-features = false, features = ["async-io"] }
 async-io = "2"
@@ -160,7 +160,7 @@ futures-lite = "2"
 # Two uses, one table. A file's identity (volume serial number and file index), which std's Windows
 # `MetadataExt` keeps behind an unstable feature, and the flag that opens a link instead of its
 # target (D108). And opening a file with its default application and showing it in Explorer,
-# through the shell's own calls rather than a command line `cmd` would read (D109). 0.61 is already
+# through the shell's own calls rather than a command line `cmd` would read (D110). 0.61 is already
 # in the lock; only its features are named.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [
