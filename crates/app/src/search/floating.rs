@@ -21,8 +21,6 @@ const MARGIN: f32 = 6.0;
 const PAD: f32 = 4.0;
 /// How many cells the query field asks for when the console has room for them.
 const FIELD_CELLS: f32 = 26.0;
-/// How many cells an option's row asks for, its label and its box included.
-const LIST_CELLS: f32 = 18.0;
 
 /// What a press on the box can reach.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -240,6 +238,13 @@ impl Layout {
     }
 }
 
+/// Where an option's label starts, counted from the list's left edge: the list's padding, then the
+/// tick's square — as tall as the row — then a gap. The painter and the list's width both read it,
+/// so the room asked for is the room the label is drawn in.
+fn row_label_left(button: f32) -> f32 {
+    PAD + button + PAD
+}
+
 /// Whether two rectangles share area — not merely an edge, which `Rect::intersects` counts, so a
 /// match a step left right under the box's bottom edge does not send the box away.
 fn overlaps(a: Rect, b: Rect) -> bool {
@@ -250,7 +255,15 @@ fn overlaps(a: Rect, b: Rect) -> bool {
 /// box's left, and over the box only when the console has room for neither.
 fn the_list(console: Rect, frame: Rect, covered: bool, metrics: &CellMetrics, room: f32) -> Rect {
     let button = metrics.height() + 2.0 * PAD;
-    let width = (LIST_CELLS * metrics.width() + 2.0 * PAD).min(room);
+    // Sized from the longest label rather than a fixed count of cells: a fixed eighteen clipped
+    // «Whole word only», because the tick takes a whole row-height square before the label.
+    // The labels are ASCII, so one character is one cell of the monospace font they are painted in.
+    let longest = Choice::ALL
+        .iter()
+        .map(|choice| choice.label().chars().count())
+        .max()
+        .unwrap_or(0) as f32;
+    let width = (row_label_left(button) + longest * metrics.width() + 2.0 * PAD).min(room);
     let height = Choice::ALL.len() as f32 * button + 2.0 * PAD;
     let beside = if covered {
         frame.top() - height
@@ -379,7 +392,10 @@ pub(crate) fn paint(
                     paint_icon(painter, tick.center(), Icon::Check, icon * 0.8, roles.tx);
                 }
                 painter.text(
-                    pos2(rect.left() + rect.height() + PAD, rect.center().y),
+                    pos2(
+                        rect.left() - PAD + row_label_left(rect.height()),
+                        rect.center().y,
+                    ),
                     egui::Align2::LEFT_CENTER,
                     choice.label(),
                     metrics.font(),
@@ -676,6 +692,30 @@ mod tests {
             console().top() + MARGIN,
             "a notice clear of the box moved it"
         );
+    }
+
+    #[test]
+    fn every_option_label_fits_inside_the_list() {
+        let screen = Screen::new(Size {
+            rows: ROWS,
+            cols: 80,
+        });
+        let layout = layout(console(), &metrics(), &screen.view(), true, &[], true);
+        let list = layout.list.expect("the list is laid out");
+        for (target, rect) in &layout.targets {
+            let Target::Choice(choice) = target else {
+                continue;
+            };
+            // Where the painter starts the label, plus its cells in the monospace font.
+            let label_right = rect.left() - PAD
+                + row_label_left(rect.height())
+                + choice.label().chars().count() as f32 * metrics().width();
+            assert!(
+                label_right <= list.right() - PAD,
+                "{choice:?}'s label ends at {label_right}, past the list's inner edge {}",
+                list.right() - PAD
+            );
+        }
     }
 
     fn layout_with(screen: &Screen, notices: &[Rect]) -> Layout {
