@@ -659,9 +659,11 @@ position. A usable change to that console's local working directory follows auto
 a shell's startup directory change. Remote/unavailable sources suspend local browsing.
 
 Click a small folder chevron to expand/collapse it; double-clicking its name or pressing Enter
-also toggles it without leaving the normal tree root. Single-click `.md`, including a file symlink,
-to open the existing Markdown viewer. Its reader validates regular UTF-8 files and applies its
-normal limits. Other files select quietly and their paths can be copied; nothing executes.
+also toggles it without leaving the normal tree root. Folders show only their chevron; files show
+their type's icon. Single-click a file, including a file symlink, to open it in the **File** tab of
+the drawer: `.md` in the Markdown reader, any other file as read-only code with line numbers and
+colours from the theme. A binary, non-UTF-8 or larger-than-1 MiB file says so instead. Nothing
+executes.
 
 Type into **Search files and folders** to match names below the displayed folder, including
 collapsed directories. Results show relative paths and match case-insensitively; contents are not
@@ -673,7 +675,7 @@ The top-right **Refresh** icon reloads listings while preserving same-directory 
 When expanded folders fill the initial 8192-row budget, **Show more** reveals the next portion
 without changing root or selection; a new directory resets the budget. Files has no pin, up, reset,
 source-console line, changed-directory notice or local close button. Scrolling its body does not
-dim the consoles. General text viewing is not included.
+dim the consoles.
 
 Ctrl-click a local path printed in a console to reveal its directory in Files. A file is selected
 in its parent and scrolled into view; directories open directly. Local `file://` links use the same
@@ -682,10 +684,11 @@ never fall back to the application's directory. Unknown/remote sources and missi
 unavailability. The clicked console becomes the active Files source. Web links still use their
 existing Ctrl-click behavior; ordinary mouse gestures still select terminal text.
 
-## Markdown and Git diff viewers
+## File and Git diff viewers
 
-Open a Markdown file from Files with one click. The viewer retains its source console and updates
-saved content. Console path gestures reveal files in Files
+Open a file from Files with one click. The **File** tab shows Markdown formatted and any other file
+as read-only, coloured code; select text with the mouse or `Ctrl+A` and copy it without the line
+numbers. The viewer retains its source console and updates saved content. Console path gestures reveal files in Files
 as described above. Only empty authorities, localhost and the verified local hostname are accepted
 as local file links.
 
@@ -698,10 +701,10 @@ remote OSC 7 directory does not fall back to an unrelated local directory. On ot
 console must publish a usable local OSC 7 directory. If its directory cannot be read, the review
 shows that fact instead of choosing another console's repository.
 
-**Files** opens on the left of the consoles from its title-bar button; **Markdown** and **Git**
-share a drawer below them, as two tabs. Open Files and Markdown from the title bar (from its menu
+**Files** opens on the left of the consoles from its title-bar button; **File** and **Git**
+share a drawer below them, as two tabs. Open Files and File from the title bar (from its menu
 when the bar is narrow), and Git from a console's review control. On first use, Git uses the focused console;
-changing focus alone never retargets an open view. Choose a Markdown document in **Files**.
+changing focus alone never retargets an open view. Choose a file in **Files**.
 Ctrl-click a local console path to reveal its location in Files before opening the document. Drag
 the divider beside Files or above the drawer to resize them, or dismiss either with its button,
 the drawer's **Close**, or Escape while it owns keyboard focus. Consoles resize alongside them and
