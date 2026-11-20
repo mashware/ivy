@@ -336,7 +336,25 @@ fn open_untracked(root: &Path, path: &Path) -> std::io::Result<std::fs::File> {
     }
     Ok(dir)
 }
-#[cfg(not(unix))]
+/// The last component is opened on the link itself, never through it, and a link is refused: the
+/// walk in `add_untracked` saw the path before this open, not at it (D108). Intermediate folders
+/// are not held, which is the race D107 leaves open.
+#[cfg(windows)]
+fn open_untracked(root: &Path, path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(root.join(path))?;
+    if crate::windows_fs::is_name_surrogate(&file)? {
+        return Err(std::io::Error::new(
+            ErrorKind::InvalidInput,
+            "a link was not followed",
+        ));
+    }
+    Ok(file)
+}
+#[cfg(not(any(unix, windows)))]
 fn open_untracked(root: &Path, path: &Path) -> std::io::Result<std::fs::File> {
     std::fs::File::open(root.join(path))
 }
@@ -626,5 +644,40 @@ mod tests {
                 .contains("timed out")
         );
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    // A file symlink, not a junction: a junction names a folder, which fails to open as a file
+    // with or without the flag, so it would pass with the fix removed. GitHub's Windows runners
+    // run elevated, so creating one is expected to work.
+    #[cfg(windows)]
+    #[test]
+    fn windows_paths_untracked_file_symlink_is_not_followed() {
+        let temp = Temp::new();
+        fs::write(temp.0.join("outside.txt"), "secret\n").unwrap();
+        std::os::windows::fs::symlink_file(temp.0.join("outside.txt"), temp.0.join("link"))
+            .expect("creating a file symlink (the runner is expected to be elevated)");
+        assert!(open_untracked(&temp.0, Path::new("link")).is_err());
+        let mut plain = String::new();
+        open_untracked(&temp.0, Path::new("outside.txt"))
+            .unwrap()
+            .read_to_string(&mut plain)
+            .unwrap();
+        assert_eq!(plain, "secret\n");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_paths_untracked_listing_runs_git_on_the_verbatim_root() {
+        let temp = Temp::new();
+        git(&temp.0, &["init", "-q"]);
+        fs::write(temp.0.join("note.txt"), "hello\n").unwrap();
+        let (_, doc) = load_diff(&temp.0, Kind::Local, "main").unwrap();
+        let note = doc
+            .files
+            .iter()
+            .find(|f| f.path == Path::new("note.txt"))
+            .expect("the untracked file is listed");
+        assert!(note.notice.is_none(), "{:?}", note.notice);
+        assert_eq!(note.hunks[0].lines[0].text, "hello");
     }
 }

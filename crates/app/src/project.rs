@@ -259,8 +259,8 @@ fn resolve_with_git(
     directory: &std::path::Path,
     git: &std::ffi::OsStr,
 ) -> Result<Identity, String> {
-    let directory = directory
-        .canonicalize()
+    // dunce: never `\\?\C:\…` in a project's key, name or path (D108).
+    let directory = dunce::canonicalize(directory)
         .map_err(|e| format!("Cannot resolve console directory: {e}"))?;
     if !directory.is_dir() {
         return Err("Console directory is not a folder".into());
@@ -318,8 +318,7 @@ fn resolve_with_git(
     if raw.is_empty() {
         return Err("Git returned an empty common directory".into());
     }
-    let path = git_path(raw)?
-        .canonicalize()
+    let path = dunce::canonicalize(git_path(raw)?)
         .map_err(|e| format!("Cannot resolve Git common directory: {e}"))?;
     let naming_path = if bare == b"false" && path.file_name().is_some_and(|name| name == ".git") {
         path.parent().unwrap_or(&path)

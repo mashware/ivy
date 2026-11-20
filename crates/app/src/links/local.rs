@@ -8,6 +8,10 @@ pub(crate) struct LocalTarget {
 }
 impl LocalTarget {
     pub(crate) fn parse(target: &str, cwd: Option<&Path>) -> Option<Self> {
+        // %USERPROFILE% on Windows, which has no HOME variable (D108).
+        Self::parse_with_home(target, cwd, std::env::home_dir().as_deref())
+    }
+    fn parse_with_home(target: &str, cwd: Option<&Path>, home: Option<&Path>) -> Option<Self> {
         if target.len() > 8192
             || target
                 .chars()
@@ -40,7 +44,7 @@ impl LocalTarget {
                 return None;
             }
             if let Some(relative) = target.strip_prefix("~/") {
-                PathBuf::from(std::env::var_os("HOME")?).join(relative)
+                home?.join(relative)
             } else {
                 if !target.contains(['/', '\\'])
                     && Path::new(target)
@@ -107,6 +111,22 @@ mod tests {
         );
         assert!(LocalTarget::parse("file://remote/tmp/a.md", None).is_none());
         assert!(LocalTarget::parse("https://example/a.md", None).is_none());
+    }
+    #[test]
+    fn windows_paths_tilde_expands_from_the_given_home() {
+        let home = if cfg!(windows) {
+            Path::new(r"C:\Users\someone")
+        } else {
+            Path::new("/home/someone")
+        };
+        let cwd = Some(Path::new("/elsewhere"));
+        assert_eq!(
+            LocalTarget::parse_with_home("~/README.md", cwd, Some(home))
+                .unwrap()
+                .path,
+            home.join("README.md")
+        );
+        assert!(LocalTarget::parse_with_home("~/README.md", cwd, None).is_none());
     }
     #[test]
     #[cfg(unix)]
