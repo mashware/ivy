@@ -4,7 +4,6 @@ use super::super::highlight::Line;
 
 /// Unwrapped, every line is one row. Wrapped, a line is as tall as its layout: estimated from
 /// its length until it is painted, then measured.
-#[derive(Default)]
 pub(super) struct Heights {
     /// What these were built for: the wrap width in whole points, if wrapped, and how many lines.
     key: Option<(Option<u32>, usize)>,
@@ -12,6 +11,18 @@ pub(super) struct Heights {
     /// `tops[i]` is where line `i` starts; the last entry is where the file ends.
     tops: Vec<f32>,
     stale: bool,
+}
+
+/// No lines yet: the file ends where it starts, so `top` and `line_at` answer before `prepare`.
+impl Default for Heights {
+    fn default() -> Self {
+        Self {
+            key: None,
+            heights: Vec::new(),
+            tops: vec![0.0],
+            stale: false,
+        }
+    }
 }
 
 impl Heights {

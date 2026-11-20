@@ -4,22 +4,34 @@ use crate::opener;
 use crate::ui::icons::{FileKind, Icon};
 use eframe::egui;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 /// What Open's tooltip says when the file opens with its application, and when it is shown in the
 /// file manager instead.
 const OPENS: &str = "Open with the default application";
 const REVEALS: &str = "Show in the file manager: only documents are opened from here";
 const UNSAFE: &str = "Not copied: the path has characters that do not show as themselves";
+const FINDING: &str = "Still finding where this file lives";
+const NO_FOLDER: &str = "Not opened from a Files folder";
 
 /// The open file once its links are followed, found off the window's thread.
 struct Resolved {
-    /// Where the file really is; nothing when it cannot be found.
-    canonical: Option<PathBuf>,
-    /// The Files folder it was opened from, links followed the same way.
-    root: Option<PathBuf>,
-    /// Whether Open hands it to its application rather than showing it.
+    /// Where the file really is, or why it could not be found.
+    canonical: Result<PathBuf, String>,
+    /// The Files folder it was opened from, links followed the same way, or why that failed;
+    /// nothing when it was not opened from a Files folder.
+    root: Option<Result<PathBuf, String>>,
+    /// Whether Open hands it to its application rather than showing it. Only the tooltip reads
+    /// it: the click decides again.
     launches: bool,
+}
+
+impl Resolved {
+    /// The file as seen from its Files folder, when both were found and it lies inside.
+    fn inside(&self) -> Option<&Path> {
+        let root = self.root.as_ref()?.as_ref().ok()?;
+        relative(self.canonical.as_ref().ok()?, Some(root))
+    }
 }
 
 #[derive(Default)]
@@ -52,30 +64,61 @@ impl Header {
                 });
             match spawned {
                 Ok(_) => self.answer = Some(answer),
-                Err(_) => self.resolved = Some(resolve_nothing()),
+                Err(why) => self.resolved = Some(unresolved(path, &why.to_string())),
             }
         }
-        if let Some(resolved) = self.answer.as_ref().and_then(|a| a.try_recv().ok()) {
-            self.resolved = Some(resolved);
-            self.answer = None;
+        let Some(answer) = &self.answer else {
+            return;
+        };
+        match answer.try_recv() {
+            Ok(resolved) => self.resolved = Some(resolved),
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => {
+                self.resolved = Some(unresolved(path, "the search stopped without an answer"));
+            }
         }
+        self.answer = None;
     }
 }
 
 fn resolve(path: &Path, root: Option<&Path>) -> Resolved {
-    let canonical = opener::canonical(path).ok();
+    let canonical = opener::canonical(path).map_err(|why| why.to_string());
     Resolved {
-        launches: canonical.as_deref().is_some_and(opener::may_launch),
-        root: root.and_then(|root| opener::canonical(root).ok()),
+        launches: canonical.as_deref().is_ok_and(opener::launches),
+        root: root.map(|root| opener::canonical(root).map_err(|why| why.to_string())),
         canonical,
     }
 }
 
-fn resolve_nothing() -> Resolved {
+/// Where the file lives could not be looked for at all: said once on standard error, and by the
+/// items that need it.
+fn unresolved(path: &Path, why: &str) -> Resolved {
+    eprintln!("ivy: could not find where {path:?} lives: {why}");
     Resolved {
-        canonical: None,
+        canonical: Err(why.to_owned()),
         root: None,
         launches: false,
+    }
+}
+
+/// What Copy relative path copies, or why it copies nothing.
+fn relative_copy(resolved: Option<&Resolved>) -> Result<String, String> {
+    let resolved = resolved.ok_or(FINDING)?;
+    if let Err(why) = &resolved.canonical {
+        return Err(format!("Could not find this file: {why}"));
+    }
+    match &resolved.root {
+        None => Err(NO_FOLDER.to_owned()),
+        Some(Err(why)) => Err(format!(
+            "Could not find the Files folder it was opened from: {why}"
+        )),
+        Some(Ok(root)) => match resolved.inside() {
+            Some(inside) => copyable(Some(inside)),
+            None => Err(format!(
+                "Outside the Files folder it was opened from ({})",
+                crate::explorer::display(root)
+            )),
+        },
     }
 }
 
@@ -97,12 +140,13 @@ pub(super) fn show(
     header.refresh(path, ui.ctx());
     let resolved = header.resolved.as_ref();
     let absolute = resolved
-        .and_then(|r| r.canonical.clone())
+        .and_then(|r| r.canonical.clone().ok())
         .unwrap_or_else(|| path.to_owned());
-    let root = resolved.and_then(|r| r.root.clone());
-    let inside = resolved
-        .and_then(|r| relative(r.canonical.as_deref()?, root.as_deref()))
-        .map(Path::to_owned);
+    let inside = resolved.and_then(Resolved::inside).map(Path::to_owned);
+    let relative = relative_copy(resolved);
+    // The crumbs count from the root as Files took it, not as resolved: Files compares a folder
+    // with its own root, so a root reached through a link must stay spelled that way.
+    let base = header.root.clone();
     let launches = resolved.is_some_and(|r| r.launches);
     let roles = crate::ui::style::roles(ui.ctx(), theme);
     egui::Frame::new()
@@ -126,9 +170,7 @@ pub(super) fn show(
                         .show(|ui| {
                             let copy = Copies {
                                 absolute: &absolute,
-                                inside: inside.as_deref(),
-                                root: root.as_deref(),
-                                resolved: resolved.is_some(),
+                                relative: &relative,
                             };
                             menu(ui, &mut header.desktop, &mut code.wrap, path, &copy);
                         });
@@ -141,7 +183,7 @@ pub(super) fn show(
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                         let crumbs = Crumbs {
                             absolute: &absolute,
-                            root: root.as_deref(),
+                            base: base.as_deref(),
                             inside: inside.as_deref(),
                         };
                         if let Some(folder) = crumbs.show(ui, theme, &roles) {
@@ -154,12 +196,10 @@ pub(super) fn show(
     ui.separator();
 }
 
-/// What the two Copy items would copy, and why one of them cannot.
+/// What the two Copy items would copy; the relative one, or why it cannot.
 struct Copies<'a> {
     absolute: &'a Path,
-    inside: Option<&'a Path>,
-    root: Option<&'a Path>,
-    resolved: bool,
+    relative: &'a Result<String, String>,
 }
 
 fn menu(
@@ -181,15 +221,7 @@ fn menu(
     {
         ui.ctx().copy_text(text);
     }
-    let relative = match (copy.inside, copy.root) {
-        (Some(inside), _) => copyable(Some(inside)),
-        _ if !copy.resolved => Err("Still finding where this file lives".to_owned()),
-        (None, Some(root)) => Err(format!(
-            "Outside the Files folder it was opened from ({})",
-            crate::explorer::display(root)
-        )),
-        (None, None) => Err("Not opened from a Files folder".to_owned()),
-    };
+    let relative = copy.relative.clone();
     let item = ui
         .add_enabled(relative.is_ok(), egui::Button::new("Copy relative path"))
         .on_disabled_hover_text(relative.clone().err().unwrap_or_default());
@@ -217,7 +249,8 @@ fn copyable(path: Option<&Path>) -> Result<String, String> {
 /// The path as folders from the Files root down to the file, or whole when it lies outside.
 struct Crumbs<'a> {
     absolute: &'a Path,
-    root: Option<&'a Path>,
+    /// The Files root as Files took it, which each folder is built on.
+    base: Option<&'a Path>,
     inside: Option<&'a Path>,
 }
 
@@ -234,7 +267,7 @@ impl Crumbs<'_> {
         let name = |path: &Path| {
             crate::explorer::display(Path::new(path.file_name().unwrap_or(path.as_os_str())))
         };
-        if let (Some(root), Some(inside)) = (self.root, self.inside) {
+        if let (Some(root), Some(inside)) = (self.base, self.inside) {
             let mut folder = root.to_owned();
             let parents: Vec<_> = inside.parent().into_iter().flat_map(Path::iter).collect();
             for (n, step) in std::iter::once(None)
@@ -297,7 +330,7 @@ pub(super) fn reveal_in_files(window: &mut crate::Window) {
 pub(crate) fn document_relative_path(window: &crate::Window) -> Option<PathBuf> {
     let state = &window.viewer;
     let resolved = resolve(Path::new(&state.path), state.code.header.root.as_deref());
-    relative(resolved.canonical.as_deref()?, resolved.root.as_deref()).map(Path::to_owned)
+    resolved.inside().map(Path::to_owned)
 }
 
 #[cfg(test)]

@@ -206,11 +206,28 @@ impl Drawer {
 
     /// Open the menu and click `item` in it; what that frame and the next ones painted.
     fn menu_item(&mut self, state: &mut State, item: &str) -> Painted {
+        // A fresh context paints nothing on its first pass.
+        self.frame(state, vec![]);
         let painted = self.frame(state, vec![]);
         let more = painted.at(egui_phosphor::regular::CARET_DOWN);
         let menu = self.click(state, more);
         self.click(state, menu.at(item))
     }
+
+    /// Open the menu and rest the pointer on `item`; what that frame painted, its tooltip included.
+    fn menu_hover(&mut self, state: &mut State, item: &str) -> Painted {
+        // A fresh context paints nothing on its first pass.
+        self.frame(state, vec![]);
+        let painted = self.frame(state, vec![]);
+        let more = painted.at(egui_phosphor::regular::CARET_DOWN);
+        let menu = self.click(state, more);
+        self.hover(state, menu.at(item))
+    }
+}
+
+/// Whether a painted text starts with `start`.
+fn says(painted: &Painted, start: &str) -> bool {
+    painted.texts.iter().any(|(t, _)| t.starts_with(start))
 }
 
 fn recorded(state: &State) -> &[Call] {
@@ -301,12 +318,99 @@ fn a_name_that_does_not_show_as_itself_is_never_copied_or_launched() {
         }
         let painted = drawer.click(&mut state, painted.at("Open"));
         assert_eq!(recorded(&state), [Call::Reveal(file)], "{name:?}");
-        // And the refused item says why.
-        let more = painted.at(egui_phosphor::regular::CARET_DOWN);
-        let menu = drawer.click(&mut state, more);
-        let hovered = drawer.hover(&mut state, menu.at("Copy absolute path"));
-        assert!(hovered.has(UNSAFE), "{name:?}: {:?}", hovered.names());
+        drop(painted);
+        // And each refused item says why.
+        for item in ["Copy absolute path", "Copy relative path"] {
+            let hovered = Drawer::new().menu_hover(&mut state, item);
+            assert!(
+                hovered.has(UNSAFE),
+                "{name:?} {item}: {:?}",
+                hovered.names()
+            );
+        }
     }
+}
+
+/// The path is judged whole: a line break in a folder's name refuses both Copy items, and a
+/// plain path beside it copies.
+#[cfg(unix)]
+#[test]
+fn a_folder_that_does_not_show_as_itself_is_never_copied() {
+    let tree = Tree::new(&["r/two\nlines/a.txt", "r/plain/a.txt"]);
+    for (name, copies) in [("r/two\nlines/a.txt", false), ("r/plain/a.txt", true)] {
+        let file = tree.at(name);
+        let mut state = opened(&file, Some(&tree.at("r")));
+        let mut drawer = Drawer::new();
+        drawer.settled(&mut state);
+        for item in ["Copy absolute path", "Copy relative path"] {
+            let clicked = Drawer::new().menu_item(&mut state, item);
+            assert_eq!(clicked.copied.is_empty(), !copies, "{name:?} {item}");
+            if !copies {
+                let hovered = Drawer::new().menu_hover(&mut state, item);
+                assert!(
+                    hovered.has(UNSAFE),
+                    "{name:?} {item}: {:?}",
+                    hovered.names()
+                );
+            }
+        }
+    }
+}
+
+/// Copy relative path says why it is off: while the file is being found, when it was not opened
+/// from a Files folder, and when the file or that folder could not be found.
+#[test]
+fn copy_relative_path_says_why_it_is_off() {
+    let tree = Tree::new(&["r/src/a.ts"]);
+    let file = tree.at("r/src/a.ts");
+    let reason = |state: &mut State| Drawer::new().menu_hover(state, "Copy relative path");
+
+    // Still being found: the answer is held back, then its sender goes away.
+    let mut state = opened(&file, Some(&tree.at("r")));
+    Drawer::new().settled(&mut state);
+    let (sender, answer) = mpsc::channel();
+    state.code.header.resolved = None;
+    state.code.header.answer = Some(answer);
+    assert!(reason(&mut state).has(FINDING));
+    drop(sender);
+    let stopped = reason(&mut state);
+    assert!(
+        says(&stopped, "Could not find this file: the search stopped"),
+        "{:?}",
+        stopped.names()
+    );
+
+    let mut state = opened(&file, None);
+    Drawer::new().settled(&mut state);
+    assert!(reason(&mut state).has(NO_FOLDER));
+
+    let mut state = opened(&tree.at("r/src/gone.ts"), Some(&tree.at("r")));
+    Drawer::new().settled(&mut state);
+    let gone = reason(&mut state);
+    assert!(
+        says(&gone, "Could not find this file: "),
+        "{:?}",
+        gone.names()
+    );
+    assert!(!says(&gone, "Outside the Files folder"));
+
+    let mut state = opened(&file, Some(&tree.at("gone")));
+    Drawer::new().settled(&mut state);
+    let lost = reason(&mut state);
+    assert!(
+        says(
+            &lost,
+            "Could not find the Files folder it was opened from: "
+        ),
+        "{:?}",
+        lost.names()
+    );
+
+    // And with both found it copies, so the reasons above are not what any state says.
+    let mut state = opened(&file, Some(&tree.at("r")));
+    Drawer::new().settled(&mut state);
+    let copied = Drawer::new().menu_item(&mut state, "Copy relative path");
+    assert_eq!(copied.copied, ["src/a.ts"]);
 }
 
 /// Open hands a document to its application and shows anything else in the file manager, and its
@@ -389,182 +493,4 @@ fn a_binary_file_keeps_its_header() {
     assert_eq!(recorded(&state), [Call::Open(file)]);
 }
 
-/// One pass of the whole window: the texts and icons it painted, and what it copied.
-fn window_pass(
-    window: &mut crate::Window,
-    ctx: &egui::Context,
-    time: &mut f64,
-    events: Vec<egui::Event>,
-) -> Painted {
-    *time += 0.05;
-    let mut frame = eframe::Frame::_new_kittest();
-    let input = egui::RawInput {
-        time: Some(*time),
-        screen_rect: Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(1200.0, 700.0),
-        )),
-        events,
-        ..Default::default()
-    };
-    eframe::App::logic(window, ctx, &mut frame);
-    let output = ctx.run_ui(input, |ui| eframe::App::ui(window, ui, &mut frame));
-    let mut texts = Vec::new();
-    for clipped in &output.shapes {
-        if let egui::Shape::Text(text) = &clipped.shape {
-            texts.push((
-                text.galley.text().to_owned(),
-                text.galley.rect.translate(text.pos.to_vec2()),
-            ));
-        }
-        if let Some((glyph, _, rect)) = crate::ui::icons::painted_icon(&clipped.shape) {
-            texts.push((glyph, rect));
-        }
-    }
-    let copied = output
-        .platform_output
-        .commands
-        .iter()
-        .filter_map(|command| match command {
-            egui::OutputCommand::CopyText(text) => Some(text.clone()),
-            _ => None,
-        })
-        .collect();
-    output.drop_without_applying_deltas();
-    Painted { texts, copied }
-}
-
-/// Run window passes until `done` holds, or fail saying `what` never happened.
-fn until(
-    window: &mut crate::Window,
-    ctx: &egui::Context,
-    time: &mut f64,
-    what: &str,
-    mut done: impl FnMut(&crate::Window, &Painted) -> bool,
-) -> Painted {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        let painted = window_pass(window, ctx, time, vec![]);
-        if done(window, &painted) {
-            return painted;
-        }
-        assert!(Instant::now() < deadline, "{what} never happened");
-        std::thread::sleep(Duration::from_millis(10));
-    }
-}
-
-fn window_click(
-    window: &mut crate::Window,
-    ctx: &egui::Context,
-    time: &mut f64,
-    at: egui::Pos2,
-) -> Vec<String> {
-    let button = |pressed| egui::Event::PointerButton {
-        pos: at,
-        button: egui::PointerButton::Primary,
-        pressed,
-        modifiers: egui::Modifiers::NONE,
-    };
-    let mut copied = Vec::new();
-    for events in [
-        vec![egui::Event::PointerMoved(at)],
-        vec![button(true)],
-        vec![button(false)],
-    ] {
-        copied.extend(window_pass(window, ctx, time, events).copied);
-    }
-    copied
-}
-
-/// In the whole window: a folder of the path shows that folder in Files, and the menu, which
-/// floats over the drawer, keeps its clicks — the item acts and no console is focused by it.
-#[cfg(target_os = "linux")]
-#[test]
-fn a_folder_of_the_path_shows_in_files_and_the_menu_keeps_its_clicks() {
-    let tree = Tree::new(&["r/src/a.ts"]);
-    let root = tree.at("r");
-    let script = format!("cd '{}' && exec sleep 30", root.display());
-    let mut window = crate::tests::window_of_tabs([[script.as_str(), "sleep 30"]]);
-    crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
-    let pane = window.active().panes()[0].name;
-    let ctx = crate::ui::icons::installed_for_tests(1.0);
-    ctx.global_style_mut(|style| style.animation_time = 0.0);
-    let mut time = 0.0;
-    crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
-    until(
-        &mut window,
-        &ctx,
-        &mut time,
-        "Files reaching the console's folder",
-        |w, _| crate::explorer::root_of(w, pane).as_ref() == Some(&root),
-    );
-    assert!(crate::viewer::open_document_target(
-        &mut window,
-        pane,
-        tree.at("r/src/a.ts"),
-        None
-    ));
-    let painted = until(&mut window, &ctx, &mut time, "the header", |w, p| {
-        w.sidebar.last_dock.is_some_and(|dock| {
-            p.texts
-                .iter()
-                .any(|(t, r)| t == "›" && dock.contains(r.center()))
-        })
-    });
-    drop(painted);
-    // The drawer at its shortest, where the menu has the least room under the header.
-    window.sidebar.set_height(0.0);
-    window_pass(&mut window, &ctx, &mut time, vec![]);
-    let painted = window_pass(&mut window, &ctx, &mut time, vec![]);
-    let dock = window.sidebar.last_dock.expect("the drawer is placed");
-    assert!(dock.height() <= 170.0, "the drawer stayed tall: {dock:?}");
-
-    // A menu item over the drawer: it copies, and the focus stays where it was.
-    let focused = window.active().focus;
-    let more = painted.at_in(egui_phosphor::regular::CARET_DOWN, dock);
-    window_click(&mut window, &ctx, &mut time, more);
-    let menu = window_pass(&mut window, &ctx, &mut time, vec![]);
-    for item in [
-        "Open in File Manager",
-        "Copy absolute path",
-        "Copy relative path",
-        "Wrap lines",
-    ] {
-        let at = menu.at(item);
-        assert!(
-            dock.contains(at),
-            "{item} at {at:?} is outside the drawer {dock:?}"
-        );
-    }
-    let item = menu.at("Copy relative path");
-    let copied = window_click(&mut window, &ctx, &mut time, item);
-    assert_eq!(copied, ["src/a.ts"]);
-    assert_eq!(window.active().focus, focused);
-
-    // With Files closed, a folder of the path opens Files, shows the folder expanded and
-    // selected inside the tree it already had, and the file stays in the drawer.
-    crate::sidebar::close_files(&mut window);
-    window_pass(&mut window, &ctx, &mut time, vec![]);
-    let painted = window_pass(&mut window, &ctx, &mut time, vec![]);
-    assert!(!crate::sidebar::files_visible(&window));
-    let dock = window.sidebar.last_dock.expect("the drawer is placed");
-    window_click(&mut window, &ctx, &mut time, painted.at_in("src", dock));
-    let painted = until(
-        &mut window,
-        &ctx,
-        &mut time,
-        "Files showing the folder",
-        |w, _| crate::explorer::selected_of(w, pane) == Some((root.join("src"), true)),
-    );
-    assert_eq!(
-        crate::explorer::root_of(&window, pane),
-        Some(root.clone()),
-        "the folder's root moved"
-    );
-    assert!(crate::sidebar::files_visible(&window));
-    let dock = window
-        .sidebar
-        .last_dock
-        .expect("the drawer is still placed");
-    painted.at_in("a.ts", dock);
-}
+mod window;

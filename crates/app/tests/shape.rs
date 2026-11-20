@@ -315,6 +315,10 @@ const MODULES: &[(&str, &str)] = &[
         "src/viewer/code_header/tests.rs",
         include_str!("../src/viewer/code_header/tests.rs"),
     ),
+    (
+        "src/viewer/code_header/tests/window.rs",
+        include_str!("../src/viewer/code_header/tests/window.rs"),
+    ),
     ("src/opener.rs", include_str!("../src/opener.rs")),
     (
         "src/opener/linux.rs",

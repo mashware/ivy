@@ -66,6 +66,25 @@ fn an_opened_file_keeps_the_files_folder_it_was_opened_from() {
     assert_eq!(outside, None);
 }
 
+/// A folder inside the root Files shows is revealed in that tree, expanded and selected, and the
+/// root stays where it was.
+#[test]
+fn a_folder_inside_the_root_is_revealed_without_moving_the_root() {
+    let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+    let pane = window.all_panes().next().unwrap().name;
+    window
+        .explorer
+        .reconcile(&[(pane, Some("/repo/main".into()))]);
+    assert_eq!(selected_of(&window, pane), None);
+    reveal_folder(&mut window, pane, "/repo/main/src/deep".into());
+    assert_eq!(
+        selected_of(&window, pane),
+        Some(("/repo/main/src/deep".into(), true))
+    );
+    assert_eq!(root_of(&window, pane), Some("/repo/main".into()));
+    assert!(window.explorer.visible);
+}
+
 #[test]
 fn files_expansion_and_scroll_survive_shared_sidebar_tool_switches() {
     let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);

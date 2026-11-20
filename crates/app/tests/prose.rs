@@ -442,6 +442,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         include_str!("../src/viewer/code_header/tests.rs"),
         0,
     ),
+    (
+        "src/viewer/code_header/tests/window.rs",
+        include_str!("../src/viewer/code_header/tests/window.rs"),
+        0,
+    ),
     ("src/opener.rs", include_str!("../src/opener.rs"), 0),
     (
         "src/opener/linux.rs",

@@ -488,3 +488,13 @@ fn a_drag_across_a_wrapped_line_copies_what_it_crossed() {
         .count();
     assert!(marked >= 2, "{marked} marked rows");
 }
+
+/// Before any line is placed, the places answer instead of panicking: everything is at the top.
+#[test]
+fn heights_answer_before_anything_is_placed() {
+    let heights = rows::Heights::default();
+    assert_eq!(heights.top(0), 0.0);
+    assert_eq!(heights.top(7), 0.0);
+    assert_eq!(heights.line_at(120.0), 0);
+    assert_eq!(heights.total(), 0.0);
+}
