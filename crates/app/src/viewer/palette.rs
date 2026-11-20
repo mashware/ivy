@@ -147,7 +147,10 @@ mod tests {
         let theme = base.with_colors(&colors);
         let roles = Roles::of(&theme);
         let palette = Palette::of(&theme, &roles);
-        assert_eq!(palette.keyword, keyword, "the fixture must keep the keywords' colour");
+        assert_eq!(
+            palette.keyword, keyword,
+            "the fixture must keep the keywords' colour"
+        );
         assert_ne!(palette.string, palette.keyword);
         assert_eq!(palette.string, roles.tx);
     }
