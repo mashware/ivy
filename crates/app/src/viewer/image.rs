@@ -994,8 +994,12 @@ mod tests {
             pressed,
             modifiers: egui::Modifiers::NONE,
         };
-        pass(window, ctx, vec![egui::Event::PointerMoved(from)]);
-        pass(window, ctx, vec![press(from, true)]);
+        // Arriving and pressing in one pass, as a quick hand does: the travel there is no pan.
+        pass(
+            window,
+            ctx,
+            vec![egui::Event::PointerMoved(from), press(from, true)],
+        );
         let mut cursors = Vec::new();
         for step in 1..=3 {
             let at = from + by * step as f32 / 3.0;
