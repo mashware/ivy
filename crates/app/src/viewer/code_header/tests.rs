@@ -541,7 +541,8 @@ fn a_folder_of_the_path_shows_in_files_and_the_menu_keeps_its_clicks() {
     assert_eq!(copied, ["src/a.ts"]);
     assert_eq!(window.active().focus, focused);
 
-    // With Files closed, a folder of the path opens Files on it and the file stays in the drawer.
+    // With Files closed, a folder of the path opens Files, shows the folder expanded and
+    // selected inside the tree it already had, and the file stays in the drawer.
     crate::sidebar::close_files(&mut window);
     window_pass(&mut window, &ctx, &mut time, vec![]);
     let painted = window_pass(&mut window, &ctx, &mut time, vec![]);
@@ -553,7 +554,12 @@ fn a_folder_of_the_path_shows_in_files_and_the_menu_keeps_its_clicks() {
         &ctx,
         &mut time,
         "Files showing the folder",
-        |w, _| crate::explorer::root_of(w, pane).as_ref() == Some(&root.join("src")),
+        |w, _| crate::explorer::selected_of(w, pane) == Some((root.join("src"), true)),
+    );
+    assert_eq!(
+        crate::explorer::root_of(&window, pane),
+        Some(root.clone()),
+        "the folder's root moved"
     );
     assert!(crate::sidebar::files_visible(&window));
     let dock = window

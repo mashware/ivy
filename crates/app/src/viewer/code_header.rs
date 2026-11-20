@@ -287,7 +287,7 @@ pub(super) fn reveal_in_files(window: &mut crate::Window) {
         return;
     };
     if let Some(pane) = window.viewer.origin.as_ref().map(|origin| origin.pane) {
-        crate::explorer::open_path(window, pane, folder);
+        crate::explorer::reveal_folder(window, pane, folder);
     }
 }
 

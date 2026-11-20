@@ -462,6 +462,15 @@ pub(crate) fn root_of(window: &Window, pane: usize) -> Option<PathBuf> {
     window.explorer.navigation.get(&pane)?.root.clone()
 }
 
+/// The row Files has selected for `pane`, and whether it is an expanded folder.
+#[cfg(test)]
+pub(crate) fn selected_of(window: &Window, pane: usize) -> Option<(PathBuf, bool)> {
+    let nav = window.explorer.navigation.get(&pane)?;
+    let selected = nav.selected.clone()?;
+    let expanded = nav.expanded.contains(&selected);
+    Some((selected, expanded))
+}
+
 pub(crate) fn open_path(window: &mut Window, pane: usize, path: PathBuf) {
     let Some(tab) = window
         .tabs
@@ -500,6 +509,42 @@ pub(crate) fn open_path(window: &mut Window, pane: usize, path: PathBuf) {
     let ctx = state.context.clone().unwrap_or_default();
     state.loader.submit(request, &ctx);
     ctx.request_repaint();
+}
+
+/// Show `folder` in the source console's Files: inside the tree it already shows, expanded,
+/// selected and scrolled into view, keeping its root; a folder outside that root opens as one.
+pub(crate) fn reveal_folder(window: &mut Window, pane: usize, folder: PathBuf) {
+    let inside = window
+        .explorer
+        .navigation
+        .get(&pane)
+        .and_then(|nav| nav.root.as_ref())
+        .is_some_and(|root| folder.starts_with(root));
+    if !inside {
+        open_path(window, pane, folder);
+        return;
+    }
+    let Some(tab) = window
+        .tabs
+        .iter()
+        .position(|tab| tab.panes().iter().any(|p| p.name == pane))
+    else {
+        return;
+    };
+    window.active = tab;
+    window.active_mut().focus = pane;
+    if !crate::sidebar::files_visible(window) {
+        crate::sidebar::select(window, crate::sidebar::Tool::Files);
+    }
+    reveal(window);
+    let state = &mut window.explorer;
+    search::reveal(state, pane, &folder);
+    if let Some(nav) = state.navigation.get_mut(&pane) {
+        nav.expanded.insert(folder);
+    }
+    if let Some(ctx) = &state.context {
+        ctx.request_repaint();
+    }
 }
 
 pub(crate) fn display(path: &Path) -> String {
