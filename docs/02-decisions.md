@@ -8367,7 +8367,15 @@ a check on the match only so that a literal and a pattern follow the same rule.
   as text instead of a byte per cell through the grid. Whole word rejected on every line
   **4.47–4.64 ms** older, **5.60–5.71 ms** newer; over one wrapped line **7.14–8.10 ms**. An ordinary
   pattern that finds nothing (`absent\s+\d+`) **2.69–2.88 ms**. The hostile figures are above.
-  What marking costs per painting in the window is the job of batch `E` against `C`.
+- **Measured in the window** (batch `E` against its control `C`, 20 November 2026, runs interleaved
+  C·E·C·E, 1280×800, both consoles dumping 44 MiB, release; `compare` says each pair can be
+  averaged; a first `E` was thrown away by the script's own guard — no panel was published — and
+  the next run of the same binary was valid). Marking: **44.8–58.9 µs a painting** with a search
+  open, against **55.0 µs** for one run of `E` on `main` the same day and D61's 59.7–64.5 µs — no
+  measurable change. A press: **23.1–35.4 µs** at the mean, slowest 96–189 µs (`main`: 34.6 µs,
+  slowest 396 µs). The left console's enqueueing span reads 270–586 µs in `E` against 552.6 µs in
+  both `C` runs; `E` runs several times more frames, so — as D61 already warned — its per-frame means
+  do not compare with `C`'s.
 
 | Discarded (#121) | Why |
 |---|---|
