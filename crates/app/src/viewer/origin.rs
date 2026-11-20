@@ -116,7 +116,7 @@ pub(crate) fn open_document_target(
     crate::sidebar::select(window, crate::sidebar::Tool::Document);
     // Files follows the focused console, so the folder a relative path is counted from is the
     // one Files showed when the file was opened, not whatever it shows later.
-    window.viewer.code.root = crate::explorer::root_of(window, pane);
+    window.viewer.code.header.root = crate::explorer::root_of(window, pane);
     window.viewer.open(super::Kind::of_document(&path));
     window.viewer.path = path.to_string_lossy().into_owned();
     window.viewer.editing_path = false;

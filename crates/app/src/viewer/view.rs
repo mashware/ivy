@@ -145,6 +145,10 @@ fn body_content(
             .show(ui, |ui| controls(state, ui));
         ui.separator();
     }
+    // The header stands whatever the file turned out to be: a binary still opens and copies.
+    if state.kind == Kind::Code && Path::new(&state.path).is_absolute() {
+        super::code_header::show(&mut state.code, Path::new(&state.path), ui, &theme);
+    }
     if !state.message.is_empty() {
         ui.colored_label(
             theme.panel_color(Some(panel_contract::Mark::Block), None),

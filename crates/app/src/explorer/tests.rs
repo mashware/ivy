@@ -33,28 +33,37 @@ fn panes_and_worktrees_restore_independent_navigation_and_restart_hidden() {
 /// on with the focused console; outside that folder there is no relative path.
 #[test]
 fn an_opened_file_keeps_the_files_folder_it_was_opened_from() {
+    let mut nonce = [0u8; 8];
+    getrandom::fill(&mut nonce).unwrap();
+    let base = std::env::temp_dir().join(format!("files-root-{}", u64::from_ne_bytes(nonce)));
+    let (root, other) = (base.join("r"), base.join("other"));
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::create_dir_all(&other).unwrap();
+    std::fs::write(root.join("src/a.ts"), "a").unwrap();
+    std::fs::write(root.join("src/b.ts"), "b").unwrap();
     let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
     let pane = window.all_panes().next().unwrap().name;
-    window.explorer.reconcile(&[(pane, Some("/r".into()))]);
+    window.explorer.reconcile(&[(pane, Some(root.clone()))]);
     assert!(crate::viewer::open_document_target(
         &mut window,
         pane,
-        PathBuf::from("/r/src/a.ts"),
+        root.join("src/a.ts"),
         None
     ));
-    window.explorer.reconcile(&[(pane, Some("/other".into()))]);
-    assert_eq!(root_of(&window, pane), Some(PathBuf::from("/other")));
-    assert_eq!(
-        crate::viewer::document_relative_path(&window),
-        Some(PathBuf::from("src/a.ts"))
-    );
+    window.explorer.reconcile(&[(pane, Some(other.clone()))]);
+    let relative = crate::viewer::document_relative_path(&window);
+    // Opened again while Files shows another folder, the same tree is outside it.
     assert!(crate::viewer::open_document_target(
         &mut window,
         pane,
-        PathBuf::from("/r/src/b.ts"),
+        root.join("src/b.ts"),
         None
     ));
-    assert_eq!(crate::viewer::document_relative_path(&window), None);
+    let outside = crate::viewer::document_relative_path(&window);
+    let _ = std::fs::remove_dir_all(&base);
+    assert_eq!(root_of(&window, pane), Some(other));
+    assert_eq!(relative, Some(PathBuf::from("src/a.ts")));
+    assert_eq!(outside, None);
 }
 
 #[test]

@@ -502,7 +502,7 @@ pub(crate) fn open_path(window: &mut Window, pane: usize, path: PathBuf) {
     ctx.request_repaint();
 }
 
-fn display(path: &Path) -> String {
+pub(crate) fn display(path: &Path) -> String {
     path.to_string_lossy().chars().flat_map(|c| {
         if c.is_control() || matches!(c, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{206f}' | '\u{feff}') {
             c.escape_unicode().collect::<Vec<_>>()
