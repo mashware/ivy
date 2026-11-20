@@ -547,9 +547,26 @@ pub const FILE: &str = "layout.json";
 /// parallel launching processes, so a test that wanted to set these variables would be undefined
 /// behavior.
 pub fn path() -> Option<PathBuf> {
-    path_from(
-        std::env::var_os("XDG_CONFIG_HOME").as_deref(),
-        std::env::var_os("HOME").as_deref(),
+    Some(directory()?.join(FILE))
+}
+
+/// The dedicated directory, reading the environment of this platform.
+pub fn directory() -> Option<PathBuf> {
+    let config = std::env::var_os("XDG_CONFIG_HOME");
+    #[cfg(windows)]
+    return windows_directory_from(config.as_deref(), std::env::var_os("APPDATA").as_deref());
+    #[cfg(not(windows))]
+    directory_from(config.as_deref(), std::env::var_os("HOME").as_deref())
+}
+
+/// Windows has neither `HOME` nor a `.config` convention: per-user settings belong in the roaming
+/// application-data folder. `XDG_CONFIG_HOME` still rules when it is set, so an isolated directory
+/// (the measurement script's, a manual test's) works the same on every platform.
+pub fn windows_directory_from(config: Option<&OsStr>, appdata: Option<&OsStr>) -> Option<PathBuf> {
+    Some(
+        absolute(config)
+            .or_else(|| absolute(appdata))?
+            .join(DIRECTORY),
     )
 }
 
@@ -1865,6 +1882,40 @@ mod file_tests {
             path_from(Some(OsStr::new("/home/config")), Some(OsStr::new("/home"))),
             Some(PathBuf::from("/home/config/ivy/layout.json"))
         );
+    }
+
+    #[test]
+    fn windows_startup_keeps_the_configuration_in_appdata() {
+        let appdata = std::env::temp_dir().join("Roaming");
+        let config = std::env::temp_dir().join("isolated");
+        assert_eq!(
+            windows_directory_from(None, Some(appdata.as_os_str())),
+            Some(appdata.join("ivy"))
+        );
+        assert_eq!(
+            windows_directory_from(Some(config.as_os_str()), Some(appdata.as_os_str())),
+            Some(config.join("ivy"))
+        );
+        for variable in ["", "config", "./config"] {
+            assert_eq!(
+                windows_directory_from(Some(OsStr::new(variable)), Some(appdata.as_os_str())),
+                Some(appdata.join("ivy")),
+                "with {variable:?} it did not fall back to %APPDATA%"
+            );
+        }
+        assert_eq!(
+            windows_directory_from(None, Some(OsStr::new("Roaming"))),
+            None
+        );
+        assert_eq!(windows_directory_from(None, None), None);
+    }
+
+    /// What the reported launch lacked: on Windows the configuration directory resolves at all.
+    #[cfg(windows)]
+    #[test]
+    fn windows_startup_finds_a_configuration_directory() {
+        let directory = directory().expect("no configuration directory on Windows");
+        assert!(directory.is_absolute() && directory.ends_with("ivy"));
     }
 
     #[test]

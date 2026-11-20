@@ -128,11 +128,6 @@ use watcher::{Flag, Watcher};
 /// The name the window presents itself to the desktop with.
 const APP_NAME: &str = "Ivy";
 
-/// The program that is launched when the environment does not say which.
-///
-/// It exists on every system where this can run, which is what is asked of a fallback.
-const FALLBACK_SHELL: &str = "/bin/sh";
-
 /// The font size, in points.
 const DEFAULT_FONT_SIZE: f32 = 14.0;
 

@@ -141,9 +141,9 @@ impl Process {
                     Err(error) if fallback => {
                         crate::pty_output::say(&format!(
                             "'{program}' could not be launched ({error}); opening {}",
-                            crate::FALLBACK_SHELL
+                            crate::shell_integration::FALLBACK_SHELL
                         ));
-                        spawn(crate::FALLBACK_SHELL, &[])
+                        spawn(crate::shell_integration::FALLBACK_SHELL, &[])
                     }
                     result => result,
                 }
@@ -158,9 +158,9 @@ impl Process {
                 crate::pty_output::say(&format!(
                     "'{}' could not be launched ({error}); opening {}",
                     request.program,
-                    crate::FALLBACK_SHELL
+                    crate::shell_integration::FALLBACK_SHELL
                 ));
-                spawn(crate::FALLBACK_SHELL, &[])?
+                spawn(crate::shell_integration::FALLBACK_SHELL, &[])?
             }
             result => result?,
         };

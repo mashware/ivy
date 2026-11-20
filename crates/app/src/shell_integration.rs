@@ -24,7 +24,43 @@ pub(crate) fn the_users_shell() -> String {
     if let Some(shell) = TEST_SHELL.with(|shell| shell.borrow().clone()) {
         return shell;
     }
-    std::env::var("SHELL").unwrap_or_else(|_| crate::FALLBACK_SHELL.to_owned())
+    std::env::var("SHELL").unwrap_or_else(|_| default_shell())
+}
+
+/// The console program on a session that names none.
+fn default_shell() -> String {
+    #[cfg(windows)]
+    return windows_default(std::env::var_os("PATH").as_deref(), Path::is_file);
+    #[cfg(not(windows))]
+    FALLBACK_SHELL.to_owned()
+}
+
+/// The program that is launched when the first one cannot start. It must exist on every machine of
+/// its platform and differ from what [`default_shell`] tries first, or the retry repeats the failure.
+#[cfg(not(windows))]
+pub(crate) const FALLBACK_SHELL: &str = "/bin/sh";
+#[cfg(windows)]
+pub(crate) const FALLBACK_SHELL: &str = "cmd.exe";
+
+/// Windows has no `SHELL` and no `/bin/sh`. The newer PowerShell when it is installed, else the one
+/// every Windows ships, else `cmd.exe`, as Windows Terminal picks. Looked up on the session's own
+/// `PATH`, never in configuration, and only in absolute directories so the folder a console starts
+/// in cannot plant one.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn windows_default(path: Option<&OsStr>, is_file: impl Fn(&Path) -> bool) -> String {
+    ["pwsh.exe", "powershell.exe"]
+        .into_iter()
+        .find_map(|name| {
+            path.into_iter()
+                .flat_map(std::env::split_paths)
+                .filter(|directory| directory.is_absolute())
+                .map(|directory| directory.join(name))
+                .find(|candidate| is_file(candidate))
+        })
+        .map_or_else(
+            || "cmd.exe".to_owned(),
+            |found| found.to_string_lossy().into_owned(),
+        )
 }
 
 #[cfg(test)]
@@ -146,6 +182,54 @@ impl Drop for Prepared {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.file);
         let _ = std::fs::remove_dir(&self.dir);
+    }
+}
+
+#[cfg(test)]
+mod default_shell_tests {
+    use super::*;
+
+    fn path_of(directories: &[&Path]) -> OsString {
+        std::env::join_paths(directories).unwrap()
+    }
+
+    #[test]
+    fn windows_startup_prefers_pwsh_then_windows_powershell_then_cmd() {
+        let base = std::env::temp_dir();
+        let (first, second) = (base.join("first"), base.join("second"));
+        let path = path_of(&[&first, &second]);
+        let pwsh = second.join("pwsh.exe");
+        let legacy = first.join("powershell.exe");
+        // pwsh wins even when Windows PowerShell sits in an earlier directory.
+        let both = windows_default(Some(&path), |p| p == pwsh || p == legacy);
+        assert_eq!(both, pwsh.to_string_lossy());
+        let only_legacy = windows_default(Some(&path), |p| p == legacy);
+        assert_eq!(only_legacy, legacy.to_string_lossy());
+        assert_eq!(windows_default(Some(&path), |_| false), "cmd.exe");
+        assert_eq!(windows_default(None, |_| true), "cmd.exe");
+    }
+
+    #[test]
+    fn windows_startup_ignores_relative_path_entries() {
+        let relative = Path::new("planted");
+        let path = path_of(&[relative]);
+        assert_eq!(windows_default(Some(&path), |_| true), "cmd.exe");
+    }
+
+    /// The default program really opens a console on Windows: the reported failure was this spawn.
+    #[cfg(windows)]
+    #[test]
+    fn windows_startup_default_starts_a_console() {
+        let program = default_shell();
+        let (pty, output) =
+            term_core::Pty::spawn(&program, &[], term_core::Size::default()).unwrap();
+        let bytes = output
+            .recv_timeout(std::time::Duration::from_secs(20))
+            .expect("the default shell printed nothing");
+        assert!(!bytes.is_empty(), "{program} started but wrote nothing");
+        drop(pty);
+        let (_fallback, _) =
+            term_core::Pty::spawn(FALLBACK_SHELL, &[], term_core::Size::default()).unwrap();
     }
 }
 
