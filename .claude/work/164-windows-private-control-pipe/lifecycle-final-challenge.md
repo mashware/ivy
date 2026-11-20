@@ -1,0 +1,11 @@
+# Lifecycle revision challenge
+
+No remaining high design blocker found. The revision now removes arbitrary closures from Windows worker paths, bounds snapshot access with `try_lock`, keeps reads independent of UI frames, and leaves session/overlay authorization unsupported. The worker-owned data described is concrete and bounded; the existing callback-based constructors are explicitly excluded on Windows. The L estimate matches the app API, snapshot publication and lifecycle changes.
+
+The release ordering is coherent: reserve before admission; count before queueing and undo on failed admission; permit at most one outstanding UI request per connection; release only after closure is observed and pending work is applied or discarded. That prevents a saturated publication inbox from dropping a close or letting close overtake admitted work. Deferred split work is explicitly included in pending accounting. Slot exhaustion produces refusal instead of unbounded retention.
+
+The wake proof remains the one unproven implementation detail, and the design labels it honestly. `PostMessageW` is nonblocking, but the cited `WM_PAINT` to `RedrawRequested` behavior alone does not prove that the pinned eframe/winit path drains this app’s control inbox. The required native resting-window integration test and UI-owned native-hook fallback make this a validation gate, not an unresolved design blocker. Keep the post-failure behavior: an admitted delivery is uncertain, never described as rolled back, and its release accounting remains live.
+
+The shutdown sequence also addresses ownership: stop admissions, cancel and drain overlapped operations, join the acceptor before harvesting and joining connection workers, and hold no registry lock while joining. Callback-bearing session/publisher/inspector paths are not entered on Windows. No supplied closure, trait object or app-owned destructor is captured by a channel worker. Worker panic and spawn-failure paths have explicit completion/accounting requirements. The aggregate deadline is stated as a scheduling bound, not a hard-real-time promise.
+
+**Review result: lifecycle F1 closed at design level.** Native wake-to-control-drain behavior and the specified release interleavings remain required implementation tests; they are not claimed as already proven.

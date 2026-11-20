@@ -1,1 +1,1 @@
-{"phase": "design", "now": "Study found a shutdown lifecycle decision", "next": "Revise design, then delivery plan", "decision": "Approve wider cancellable Windows handler lifecycle or specify shutdown contract"}
+{"phase": "plan", "now": "Revised study complete; shutdown challenge resolved", "next": "Build the single planned PR after study approval", "attention": "done"}

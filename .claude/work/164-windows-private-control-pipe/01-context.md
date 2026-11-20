@@ -29,3 +29,6 @@ No product questions; security and shutdown requirements are explicit.
 
 ## Estimated size: M (Recommended)
 Native transport and security logic spans endpoint, streams, environment propagation and MCP integration; no schema changes.
+
+## Size reassessment after F1 answer
+L (Recommended): the authorized bounded Windows lifecycle requires concrete service capabilities, app snapshot publication, native UI wake and release accounting across modules. Estimates are advisory.

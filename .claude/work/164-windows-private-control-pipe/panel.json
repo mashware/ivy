@@ -1,13 +1,15 @@
 {
-  "updated_at": "2026-11-20T19:23:51.431Z",
-  "phase": "design",
+  "updated_at": "2026-11-20T19:38:29.633Z",
+  "phase": "plan",
   "header": true,
-  "attention": "wait",
+  "attention": "done",
   "lines": [
     {"key":"title","text":"Windows: bind the control channel (MCP) on a user-only named pipe","style":"title"},
     "",
-    {"key":"now","ref":"Now","text":"Study found a shutdown lifecycle decision","mark":"info"},
-    {"key":"next","ref":"Next","text":"Revise design, then delivery plan","mark":"info"},
-    {"key":"decision","ref":"Decision","text":"Approve wider cancellable Windows handler lifecycle or specify shutdown contract","mark":"wait"}
+    {"key":"mrs","text":"PRs","style":"section","summary":"0/1 merged","collapsed":true},
+    {"key":"mr-1","ref":"#1","text":"Enable the private Windows control channel","mark":"pending"},
+    "",
+    {"key":"now","ref":"Now","text":"Revised study complete; shutdown challenge resolved","mark":"info"},
+    {"key":"next","ref":"Next","text":"Build the single planned PR after study approval","mark":"info"}
   ]
 }

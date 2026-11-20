@@ -7,30 +7,21 @@
   "base": "main",
   "stacked_on": null,
   "worktree": null,
-  "size": "M",
-  "phase": "design",
+  "size": "L",
+  "phase": "plan",
   "phases_done": [
-    "context"
+    "context",
+    "design",
+    "plan"
   ],
   "draft_from_conversation": false,
   "tracker_issue": null,
   "related_repos": [],
   "roadmap": null,
   "started_at": "2026-11-20T19:18:21.084909+00:00",
-  "updated_at": "2026-11-20T19:23:50.559144+00:00",
-  "notes": "Recommended native Windows transport selected: explicit security and overlapped cancellation; preserve Unix protocol. Dependency #161 already on base at 8380c4e.",
-  "pending": {
-    "id": "164-windows-private-control-pipe:design:design_challenge:137fd34:ec05b26",
-    "gate": "design_challenge",
-    "phase": "design",
-    "resume": "feat:design",
-    "resume_at": "\u00a77 \u2014 after writing the response to high finding F1 and reopening the affected design as requested",
-    "head": "137fd348165866dcd3382608a811d0c594119f42",
-    "question_file": "ask-question.md",
-    "options_file": "ask-options.md",
-    "why": "study",
-    "free_text": true
-  },
+  "updated_at": "2026-11-20T19:38:28.546459+00:00",
+  "notes": "Answered F1: callback-free Windows capabilities, bounded off-frame snapshots, nonblocking native UI wake, reliable release slots, owned cancellation and joined workers. Reclassified L; source-only study. #161 already on base.",
+  "pending": null,
   "defaults_used": [
     {
       "key": "unattended:create-branch",
@@ -46,7 +37,47 @@
       "key": "unattended:approach",
       "default": "Native Windows adapter; parallel panel 3/3; one shared protocol",
       "phase": "design"
+    },
+    {
+      "key": "unattended:rehomed",
+      "default": "164-windows-private-control-pipe restored from main",
+      "phase": "run"
+    },
+    {
+      "key": "unattended:answer:design_challenge",
+      "default": "Apply the recommended response to each",
+      "id": "164-windows-private-control-pipe:design:design_challenge:137fd34:ec05b26",
+      "phase": "design",
+      "head": "137fd348165866dcd3382608a811d0c594119f42"
+    },
+    {
+      "key": "unattended:size-revised",
+      "default": "M -> L: approved lifecycle redesign crosses Windows service API, app snapshots, UI wake and release accounting",
+      "phase": "design"
+    },
+    {
+      "key": "unattended:design-reviewed",
+      "default": "F1 lifecycle revision specified and independently challenged; no high blocker; study only",
+      "phase": "design"
+    },
+    {
+      "key": "unattended:plan-reviewed",
+      "default": "One atomic delivery; candidate lifecycle/transport cut merged; no exposure window",
+      "phase": "plan"
     }
   ],
-  "ticket_deps": []
+  "ticket_deps": [],
+  "mrs": [
+    {
+      "n": 1,
+      "title": "Enable the private Windows control channel",
+      "size": "L",
+      "status": "pending",
+      "phases_done": [],
+      "wave": 1,
+      "depends_on": [],
+      "lines_est": 2400,
+      "files_est": 32
+    }
+  ]
 }

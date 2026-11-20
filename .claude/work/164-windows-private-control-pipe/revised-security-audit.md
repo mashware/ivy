@@ -1,0 +1,9 @@
+# Revised security audit — ticket 164
+
+No actionable high- or medium-severity findings in the revised lifecycle boundary or one-PR delivery plan.
+
+The original callback hazard is addressed for Windows: `open_windows` accepts a concrete capability bundle, the worker path has no user-supplied closures/destructors, and native workers are tracked and joined after admission stops. The concrete HWND wake uses asynchronous `PostMessageW` with no pane pointer; the design explicitly requires closing channels before HWND destruction and requires a native test of wake delivery into the normal UI drain, with a UI-owned hook if the pinned eframe/winit stack filters the message. This is an implementation gate, not an unresolved security assumption in the plan.
+
+Close delivery preserves ordering under inbox saturation: each accepted UI delivery increments pending before admission; closure is published only on worker exit; UI cleanup waits until pending reaches zero; a slot cannot be reused until closure is consumed and all admitted/deferred work is finished. Pane destruction revokes the registry. The fixed capacity intentionally bounds retained state if UI dispatch stops indefinitely.
+
+The ACL and PID boundary is sufficiently explicit: creation-time protected DACLs grant only current-user/SYSTEM principals, inherited directories are checked by no-follow handle, and clients compare the actual pipe server PID against the separately inherited nonzero PID before sending protocol bytes. Same-user processes remain within the documented trust boundary; PID is described only as a server witness, and Windows session authorization remains disabled. Remote denial, actual descriptor access checks, HWND wake behavior, and interleavings are explicit native proof requirements; the audit does not treat those planned tests as already passed.
