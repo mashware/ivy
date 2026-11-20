@@ -9204,7 +9204,12 @@ for anything else.
   physical pixel per pixel, so on a display of two pixels per point it is shown at half a point per
   pixel rather than blurred; Ctrl+wheel zooms around the pointer and the wheel and the scroll bars pan it. egui
   reports Ctrl+wheel as a zoom and not as a scroll, so the drawer counts the zoom as pointer activity
-  over it to keep the gesture. The drawer stays not modal: nothing dims.
+  over it to keep the gesture. The drawer stays not modal: nothing dims. With a mouse, Space + left
+  drag and a middle-button drag move a zoomed image, with a grab hand while they do, and Shift+wheel
+  moves it sideways through egui's own horizontal scroll modifier. A plain left drag does not pan,
+  because the next step draws marks with it; Space + drag is Figma's convention, the middle button
+  needs no key, and Space is taken only while the drawer holds the keys, so a Space typed into a
+  console still reaches its program.
 - **Cost.** Decoding runs on the worker. The texture is uploaded once per open, by the backend
   after the pass, on the first frame after the decode arrives, so that upload lands in the framework
   remainder, not in the viewer's span. No measurement batch opens an image, so no published figure changes.

@@ -707,7 +707,8 @@ A PNG or JPEG file (`.png`, `.jpg`, `.jpeg`, any letter case) opens in the same 
 Files with one click or by Ctrl-clicking its path in a console. A relative path is read from that
 console's directory. The image is read once when it is opened: a program that later overwrites the
 file does not change what is shown. It fits the drawer's width without being enlarged; Ctrl+wheel
-zooms around the pointer and the wheel scrolls it. While one image is still being read, opening
+zooms around the pointer and the wheel scrolls it; Shift+wheel scrolls it sideways, and a
+middle-button drag, or Space + left drag after clicking the drawer, moves it. While one image is still being read, opening
 another says so instead of starting a second read. Only empty authorities, localhost and the verified local hostname are accepted
 as local file links.
 
