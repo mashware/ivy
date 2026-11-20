@@ -2161,6 +2161,31 @@ mod file_tests {
         );
     }
 
+    // D108 keeps the exclusive create without Windows code of its own: this is what holds it. The
+    // runner is elevated, so the link can be created.
+    #[cfg(windows)]
+    #[test]
+    fn windows_paths_a_link_planted_at_the_temporary_is_not_written_through() {
+        let directory = TestDir::new("planted-link");
+        let path = directory.file();
+        let parent = path.parent().expect("the dedicated directory");
+        std::fs::create_dir_all(parent).expect("create it");
+        let outside = parent.join("outside.txt");
+        std::fs::write(&outside, "someone else's").expect("the link's target");
+        let temp_path = temp_path_for(&path, 1).expect("the temporary has a name");
+        std::os::windows::fs::symlink_file(&outside, &temp_path)
+            .expect("plant a link (the runner is expected to be elevated)");
+
+        let error = save_to(&path, 1, &test_document());
+
+        assert!(matches!(error, Err(SaveFailure::TempFile(_))), "{error:?}");
+        assert_eq!(
+            std::fs::read_to_string(&outside).expect("the target is still there"),
+            "someone else's",
+            "the save wrote through the link"
+        );
+    }
+
     #[test]
     fn if_it_cannot_be_put_in_its_place_the_temporary_is_not_left() {
         // The destination is a directory with something inside, which is a way to make the rename fail

@@ -102,13 +102,16 @@ pub(super) enum FileGeneration {
         modified: SystemTime,
         length: u64,
         bytes: Vec<u8>,
-        #[cfg(unix)]
+        /// Which file: `dev`/`ino` on Unix, volume serial number and file index on Windows (D108).
+        #[cfg(any(unix, windows))]
         device: u64,
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         inode: u64,
     },
 }
 
+/// Left without identity on Windows by decision (D108): a stamp that cannot tell two files apart
+/// costs at most one [`RETIRED_CONTENT_PROBE`] before the whole generation is compared.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum FileStamp {
     Missing,
@@ -651,6 +654,8 @@ fn snapshot(dir: &Path) -> io::Result<FileGeneration> {
             .try_into()
             .expect("the panel ceiling fits in memory"),
     );
+    #[cfg(windows)]
+    let (device, inode) = crate::windows_fs::identity(&file)?;
     file.take(panel_contract::MAX_BYTES + 1)
         .read_to_end(&mut bytes)?;
     Ok(FileGeneration::Present {
@@ -661,6 +666,10 @@ fn snapshot(dir: &Path) -> io::Result<FileGeneration> {
         device: metadata.dev(),
         #[cfg(unix)]
         inode: metadata.ino(),
+        #[cfg(windows)]
+        device,
+        #[cfg(windows)]
+        inode,
     })
 }
 
@@ -882,5 +891,57 @@ mod tests {
             assert!(state.last_understood().is_none());
             assert!(state.channel_publication.is_none());
         }
+    }
+
+    /// The same bytes and the same modification time, renamed over the file: only which file it is
+    /// tells the two apart. Written through a write handle because Windows refuses to change the
+    /// time through the read-only one `file` opens.
+    fn publish_atomically(dir: &PanelDir, text: &str, at: SystemTime) {
+        let staged = dir.path().join("panel.json.staged");
+        std::fs::write(&staged, text).unwrap();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&staged)
+            .unwrap()
+            .set_modified(at)
+            .unwrap();
+        std::fs::rename(staged, dir.path().join(PANEL_FILE)).unwrap();
+    }
+
+    #[test]
+    fn windows_paths_republished_identical_panel_is_a_new_generation() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        let at = now + Duration::from_secs(1);
+        let text = r#"{"lines":["republished"]}"#;
+        let dir = PanelDir::create().unwrap();
+        let mut state = PanelState::default();
+        state.deliver(7, "holder", panel(false), now).unwrap();
+        publish_atomically(&dir, text, at);
+        let baseline = PanelState::retirement_baseline(dir.path()).unwrap();
+        state.retire(7, baseline, Retirement::default()).unwrap();
+        state.refresh(dir.path());
+        assert!(
+            state.last_understood().is_none(),
+            "the retired file painted"
+        );
+
+        publish_atomically(&dir, text, at);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while state.is_retired() {
+            assert!(
+                Instant::now() < deadline,
+                "a re-publication of identical bytes was never seen as a new file"
+            );
+            match state.refresh_after_retirement(dir.path()) {
+                RetirementRefresh::Deferred(delay) => std::thread::sleep(delay),
+                RetirementRefresh::Read | RetirementRefresh::NotRetired => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+            }
+        }
+        assert_eq!(
+            state.last_understood().unwrap().lines[0].text,
+            "republished"
+        );
     }
 }

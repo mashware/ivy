@@ -8,6 +8,14 @@ pub(crate) struct LocalTarget {
 }
 impl LocalTarget {
     pub(crate) fn parse(target: &str, cwd: Option<&Path>) -> Option<Self> {
+        // std reads %USERPROFILE% on Windows, not HOME (D108).
+        Self::parse_with_home(target, cwd, std::env::home_dir)
+    }
+    fn parse_with_home(
+        target: &str,
+        cwd: Option<&Path>,
+        home: impl FnOnce() -> Option<PathBuf>,
+    ) -> Option<Self> {
         if target.len() > 8192
             || target
                 .chars()
@@ -39,8 +47,11 @@ impl LocalTarget {
             if target.contains("://") || (!drive && target.contains(':')) {
                 return None;
             }
-            if let Some(relative) = target.strip_prefix("~/") {
-                PathBuf::from(std::env::var_os("HOME")?).join(relative)
+            let home_relative = target
+                .strip_prefix("~/")
+                .or_else(|| target.strip_prefix("~\\").filter(|_| cfg!(windows)));
+            if let Some(relative) = home_relative {
+                home()?.join(relative)
             } else {
                 if !target.contains(['/', '\\'])
                     && Path::new(target)
@@ -107,6 +118,41 @@ mod tests {
         );
         assert!(LocalTarget::parse("file://remote/tmp/a.md", None).is_none());
         assert!(LocalTarget::parse("https://example/a.md", None).is_none());
+    }
+    #[test]
+    fn windows_paths_tilde_expands_from_the_given_home() {
+        let home = if cfg!(windows) {
+            Path::new(r"C:\Users\someone")
+        } else {
+            Path::new("/home/someone")
+        };
+        let cwd = Some(Path::new("/elsewhere"));
+        let given = || Some(home.to_path_buf());
+        assert_eq!(
+            LocalTarget::parse_with_home("~/README.md", cwd, given)
+                .unwrap()
+                .path,
+            home.join("README.md")
+        );
+        assert!(LocalTarget::parse_with_home("~/README.md", cwd, || None).is_none());
+        // The native separator is Windows' alone; elsewhere a backslash is part of a name.
+        let native = LocalTarget::parse_with_home(r"~\README.md", cwd, given).unwrap();
+        if cfg!(windows) {
+            assert_eq!(native.path, home.join("README.md"));
+        } else {
+            assert_eq!(native.path, Path::new("/elsewhere").join(r"~\README.md"));
+        }
+    }
+    // On the Windows runner HOME is unset or differs from %USERPROFILE%, so reading HOME again in
+    // `parse` sends this link elsewhere.
+    #[cfg(windows)]
+    #[test]
+    fn windows_paths_tilde_follows_home_dir() {
+        let home = std::env::home_dir().expect("Windows always has a profile folder");
+        assert_eq!(
+            LocalTarget::parse("~/README.md", None).unwrap().path,
+            home.join("README.md")
+        );
     }
     #[test]
     #[cfg(unix)]

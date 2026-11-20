@@ -847,6 +847,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/pty_output.rs"),
     ),
     ("app/src/watcher.rs", include_str!("../src/watcher.rs")),
+    (
+        "app/src/windows_fs.rs",
+        include_str!("../src/windows_fs.rs"),
+    ),
     ("app/src/theme.rs", include_str!("../src/theme.rs")),
     (
         "app/src/theme/catalog.rs",

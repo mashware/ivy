@@ -84,6 +84,8 @@ mod ui;
 mod viewer;
 mod visibility;
 pub mod watcher;
+#[cfg(windows)]
+mod windows_fs;
 
 // **Brought back by name, and the names are the point.** The four modules named below came out of
 // this file under **D28** and hold items it still uses. **They are not the whole order**, and the

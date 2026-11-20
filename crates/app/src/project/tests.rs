@@ -98,7 +98,7 @@ fn bare_and_custom_git_directories_name_from_shared_identity() {
     );
     let identity = resolve(&checkout).unwrap();
     assert_eq!(identity.name, "metadata");
-    assert_eq!(identity.path, metadata.canonicalize().unwrap());
+    assert_eq!(identity.path, dunce::canonicalize(&metadata).unwrap());
 }
 #[test]
 fn non_git_is_exact_folder_but_git_failures_stay_neutral() {
@@ -381,10 +381,32 @@ fn non_utf8_repository_paths_group_checkout_subdirectory_and_worktree() {
     let identity = resolve(&main).unwrap();
     assert_eq!(
         identity.key,
-        Key::Repository(main.join(".git").canonicalize().unwrap())
+        Key::Repository(dunce::canonicalize(main.join(".git")).unwrap())
     );
-    assert_eq!(identity.path, main.join(".git").canonicalize().unwrap());
+    assert_eq!(
+        identity.path,
+        dunce::canonicalize(main.join(".git")).unwrap()
+    );
     assert_eq!(identity.name, "project-\u{fffd}");
     assert_eq!(identity, resolve(&nested).unwrap());
     assert_eq!(identity, resolve(&linked).unwrap());
+}
+#[cfg(windows)]
+#[test]
+fn windows_paths_project_identity_has_no_verbatim_prefix() {
+    let temp = Temp::new();
+    let folder = temp.0.join("folder");
+    let repository = temp.0.join("repository");
+    fs::create_dir(&folder).unwrap();
+    fs::create_dir(&repository).unwrap();
+    git(&repository, &["init", "-q"]);
+    for directory in [&folder, &repository] {
+        let identity = resolve(directory).unwrap();
+        let (Key::Folder(key) | Key::Repository(key)) = &identity.key;
+        for shown in [identity.path.as_os_str(), key.as_os_str()] {
+            let shown = shown.to_string_lossy();
+            assert!(!shown.starts_with(r"\\?\"), "{shown}");
+            assert!(shown.as_bytes().get(1) == Some(&b':'), "{shown}");
+        }
+    }
 }

@@ -930,6 +930,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         521,
     ),
     ("src/watcher.rs", include_str!("../src/watcher.rs"), 203),
+    (
+        "src/windows_fs.rs",
+        include_str!("../src/windows_fs.rs"),
+        11,
+    ),
     // Lowered from 202: the old factory palette's per-colour notes and the test of its bright-colour rule left with it (D94).
     ("src/theme.rs", include_str!("../src/theme.rs"), 176),
     (

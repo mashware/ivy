@@ -39,6 +39,10 @@ webbrowser = "1.2"
 # one Unix open flag the standard library deliberately leaves platform-specific.
 libc = "0.2"
 
+# Windows' `canonicalize` returns `\\?\C:\…`, which would become a project's key, name and path.
+# This strips that prefix only where doing so keeps the meaning (D108); it is the identity on Unix.
+dunce = "1.0.5"
+
 # **So that a handle is not guessable, which is the whole of its job.** `PANEL_ID` is in every
 # descendant's environment and any sibling of this user reads it out of `/proc/<pid>/environ`, so a
 # name is not a credential and a small integer is reachable by a typo; a handle is sixteen random
@@ -146,6 +150,12 @@ arboard = { version = "3.6.1", default-features = false }
 # Data-control owns its connection and completes seat setup before accepting operations;
 # unsupported compositors can use arboard's X11/XWayland fallback.
 arboard = { version = "3.6.1", default-features = false, features = ["wayland-data-control"] }
+
+# A file's identity (volume serial number and file index), which std's Windows `MetadataExt` keeps
+# behind an unstable feature, and the flag that opens a link instead of its target (D108). 0.61 is
+# already in the lock.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
 # Centring macOS's own window buttons in the integrated header (`chrome/traffic_lights.rs`). All
 # three are already in the tree through eframe at these versions; only their features are named.
