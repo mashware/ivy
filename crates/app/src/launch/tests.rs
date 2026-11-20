@@ -64,6 +64,8 @@ fn pending_input_and_latest_geometry_reach_the_real_program_in_order() {
     );
 }
 
+// Probes the child with a Unix signal; the Windows suite is #162.
+#[cfg(unix)]
 #[test]
 fn closing_a_pending_launch_drops_the_late_child_without_resurrecting_the_console() {
     let (process, complete) = pending();
