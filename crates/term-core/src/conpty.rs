@@ -66,7 +66,7 @@ impl Slot {
 /// end of file and the console reports an ordinary ending.
 ///
 /// **Its wait has one way out, the program ending**, and every close provides it: closing the
-/// pseudoconsole ends what is attached to it, and the close thread ends the program after
+/// pseudoconsole ends what is attached to it, and closing a console ends the program after
 /// [`CLOSE_GRACE`]. A program that survives both keeps this thread for as long as it lives — the
 /// trade D56 already makes for a program that cannot be ended.
 ///
@@ -104,42 +104,61 @@ fn unwatched(why: &str) {
     );
 }
 
-/// Closes a console: the pseudoconsole first, then, after [`CLOSE_GRACE`], the program if it is
-/// still there — on a thread of its own, so the interface pass never waits for either.
+/// Closes a console: the pseudoconsole first, and the program after [`CLOSE_GRACE`] if it is still
+/// there — each on a thread of its own, so the interface pass never waits for either.
 ///
-/// **If that thread cannot be created, nothing is closed on this thread.** The program is ended at
-/// once, and the master is leaked: closing here could wait for ever when the reader is not draining
-/// (a reader that panicked does not), and a frozen window is the one outcome this must never have.
-/// The reader and the writer then stay parked for the life of the process, which is said once.
+/// **Two threads, because the close may never return.** Before Windows 11 24H2 it waits for its
+/// last frame to be read, and a reader that panicked reads nothing; the grace and the end of the
+/// program must not wait behind it.
+///
+/// **What cannot be handed to a thread is done here, and never the close.** Without a thread for
+/// the grace the program is ended at once; without a thread for the close the master is leaked,
+/// because closing here could freeze the window for good. Either is said once on standard error.
 pub(crate) fn close(slot: &Slot, process: Option<BorrowedHandle<'_>>, pid: Option<u32>) {
-    let owned = process.and_then(|process| process.try_clone_to_owned().ok());
+    end_after_grace(process, pid);
     let closing = slot.clone();
     let spawned = thread::Builder::new()
         .name("conpty-close".to_owned())
         .stack_size(64 * 1024)
-        .spawn(move || {
-            drop(closing.take());
-            if let Some(process) = owned
-                && wait(process.as_handle(), CLOSE_GRACE.as_millis() as u32) != Some(true)
-                && let Err(refused) = terminate(process.as_handle())
-            {
-                refused_to_end(pid, &refused);
-            }
-        });
-    if let Err(failure) = spawned {
-        if let Some(process) = process
-            && let Err(refused) = terminate(process)
-        {
-            refused_to_end(pid, &refused);
-        }
-        // The closure, and the clone of the slot in it, were dropped by `spawn`; the master is
-        // still in the slot.
-        std::mem::forget(slot.take());
+        .spawn(move || drop(closing.take()));
+    // On failure the closure, and the clone of the slot in it, were dropped by `spawn`. The master
+    // may already have been taken by the exit watcher, which closes it on its own thread.
+    if let Err(failure) = spawned
+        && let Some(master) = slot.take()
+    {
+        std::mem::forget(master);
         let _ = writeln!(
             io::stderr().lock(),
             "a console was closed without closing its pseudoconsole ({failure}): its reading and \
              writing threads stay for the life of the app"
         );
+    }
+}
+
+/// Ends the program after [`CLOSE_GRACE`] unless it ended first, on a thread of its own; at once
+/// when there is no thread or no handle of its own to give that thread.
+fn end_after_grace(process: Option<BorrowedHandle<'_>>, pid: Option<u32>) {
+    let Some(process) = process else { return };
+    let owned = match process.try_clone_to_owned() {
+        Ok(owned) => owned,
+        Err(_) => return end_now(process, pid),
+    };
+    let spawned = thread::Builder::new()
+        .name("conpty-grace".to_owned())
+        .stack_size(64 * 1024)
+        .spawn(move || {
+            if wait(owned.as_handle(), CLOSE_GRACE.as_millis() as u32) != Some(true) {
+                end_now(owned.as_handle(), pid);
+            }
+        });
+    if spawned.is_err() {
+        end_now(process, pid);
+    }
+}
+
+fn end_now(process: BorrowedHandle<'_>, pid: Option<u32>) {
+    if let Err(refused) = terminate(process) {
+        refused_to_end(pid, &refused);
     }
 }
 

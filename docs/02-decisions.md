@@ -11194,8 +11194,8 @@ pseudoconsole** (`ClosePseudoConsole`):
   process and, when it ends, closes the pseudoconsole. The output pipe breaks, the reader reads end of
   file, and the console reports an ordinary ending (`Ending::EndedWell`, D38): typing `exit` closes
   the pane, and the last pane closes the window, through the path Linux and macOS already take.
-- **When the console is closed.** `Drop for Pty` hands the master to a thread that drops it, then
-  gives the program 200 ms — the grace D55 gives on Unix — and ends it with `TerminateProcess` if it
+- **When the console is closed.** `Drop for Pty` hands the master to a thread that drops it and,
+  on a second thread, gives the program 200 ms — the grace D55 gives on Unix — and ends it with `TerminateProcess` if it
   is still there, reading the result. Closing first is what tells the program: Windows sends the
   programs attached to the pseudoconsole a close event. The reader then ends with end of file instead
   of being abandoned at `READER_GIVE_UP` (D32), and a writer parked on a program that reads nothing
@@ -11235,12 +11235,13 @@ question; this decision does not answer it beyond what the platform's own close 
 | **`reaped_within` and `left-running` on Windows** | Windows has no zombies to reap, and the exit watcher already waits on the process |
 
 **What it costs, declared.** Each console has one more thread, parked on its process handle, for as
-long as its program lives, and a closed one has a thread for the close and its grace. A program that
-survives both the close and `TerminateProcess` keeps the watcher and the reader for as long as it
-lives, the same trade D56 makes. If the closing thread cannot be created, the program is ended at
-once and the master is leaked rather than closed on the interface pass, where a reader that is not
-draining could freeze the window for good; the reader and the writer then stay for the life of the
-process, and standard error says so.
+long as its program lives, and a closed one has two short-lived threads, the close and the grace —
+two because before 24H2 the close may never return, and the program must still be ended. A program
+that survives both the close and `TerminateProcess` keeps the watcher and the reader for as long as
+it lives, the same trade D56 makes. If the grace thread cannot be created, the program is ended at
+once. If the closing thread cannot, the master is leaked rather than closed on the interface pass,
+where a reader that is not draining could freeze the window for good; the reader and the writer then
+stay for the life of the process, and standard error says so.
 
 **Not verified.** The tests run only in the prerelease workflow's Windows job (prefix `windows_exit`,
 D108). That image is Windows Server 2025, built on the 24H2 codebase, so it may not show the

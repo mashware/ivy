@@ -76,10 +76,10 @@ impl CachedChild {
 }
 fn collect(state: &mut State) -> io::Result<Option<ExitStatus>> {
     if state.status.is_none()
-        && let Some(status) = state
-            .child
-            .try_wait()?
-            .or_else(|| ended_as_259(&*state.child))
+        && let Some(status) = match state.child.try_wait()? {
+            Some(status) => Some(status),
+            None => ended_as_259(&mut *state.child)?,
+        }
     {
         state.status = Some(status);
         state.exited = Some(Instant::now());
@@ -89,19 +89,31 @@ fn collect(state: &mut State) -> io::Result<Option<ExitStatus>> {
 
 /// On Windows `portable-pty` reads the exit code to decide whether a program runs, and 259 is the
 /// code Windows uses for «still running»: a program that exits with it would read as alive for
-/// ever, and its pane would never close. The handle says it ended, and then 259 is what it returned
-/// (D111).
+/// ever, and its pane would never close (D111).
+///
+/// **The code is read again once the handle says the program ended**: the first read may have come
+/// just before an ordinary exit, and caching 259 then would call a clean exit a failure. Only a
+/// program that still reads «running» after its handle was signalled returned 259.
 #[cfg(windows)]
-fn ended_as_259(child: &(dyn Child + Send + Sync)) -> Option<ExitStatus> {
-    let raw = child.as_raw_handle()?;
+fn ended_as_259(child: &mut (dyn Child + Send + Sync)) -> io::Result<Option<ExitStatus>> {
+    let Some(raw) = child.as_raw_handle() else {
+        return Ok(None);
+    };
     // SAFETY: `child` owns the handle and keeps it open for the length of the call.
     let process = unsafe { std::os::windows::io::BorrowedHandle::borrow_raw(raw) };
-    crate::conpty::has_ended(process).then(|| ExitStatus::with_exit_code(259))
+    if !crate::conpty::has_ended(process) {
+        return Ok(None);
+    }
+    Ok(Some(
+        child
+            .try_wait()?
+            .unwrap_or_else(|| ExitStatus::with_exit_code(259)),
+    ))
 }
 
 #[cfg(not(windows))]
-fn ended_as_259(_: &(dyn Child + Send + Sync)) -> Option<ExitStatus> {
-    None
+fn ended_as_259(_: &mut (dyn Child + Send + Sync)) -> io::Result<Option<ExitStatus>> {
+    Ok(None)
 }
 impl Child for CachedChild {
     fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
