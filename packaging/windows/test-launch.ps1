@@ -138,7 +138,9 @@ Set-LaunchEnvironment $Start $Profile $Control
 $Expected = if ($Control -eq 'shell') { $Start.Environment['ComSpec'] } else { Expected-Shell }
 $Process = $null
 $Children = @()
-$Stage = if ($Control -eq 'shell') { 'shell' } else { 'startup' }
+# Every trial starts in 'startup': the shell control only counts once its window exists, so an
+# application that never got that far cannot pass it.
+$Stage = 'startup'
 $Clock = [Diagnostics.Stopwatch]::StartNew()
 function Check-Alive {
     if ($Process.HasExited) { throw "${Stage}: Ivy exited before normal close ($($Process.ExitCode))" }
