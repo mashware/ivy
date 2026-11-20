@@ -2,8 +2,10 @@
 
 use panel_contract::{Attention, Panel};
 use panel_control::{Connection, Delivery, Reply, What, session::Peer};
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use std::sync::OnceLock;
 use std::sync::mpsc::{SyncSender, sync_channel};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use term_core::ForegroundScope;
 

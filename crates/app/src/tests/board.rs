@@ -1105,7 +1105,14 @@ mod tests {
         assert_eq!(window.active().panes().len(), 1);
     }
 
+    crate::windows_unix_omission!(
+        project_plan_calls_refuse_unknown_and_folder_projects_without_changing_a_plan,
+        "unix-only: exercises the Unix panel-control endpoint"
+    );
+
+    #[cfg(unix)]
     #[test]
+
     fn project_plan_calls_refuse_unknown_and_folder_projects_without_changing_a_plan() {
         let mut window = window_with("sleep 30", "sleep 30");
         let ctx = egui::Context::default();
@@ -1135,7 +1142,14 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        project_plan_is_shared_by_panes_and_painted_with_source_and_progress,
+        "unix-only: exercises the Unix panel-control endpoint"
+    );
+
+    #[cfg(unix)]
     #[test]
+
     fn project_plan_is_shared_by_panes_and_painted_with_source_and_progress() {
         let mut window = window_with("sleep 30", "sleep 30");
         integrated(&mut window);
@@ -1245,7 +1259,14 @@ mod tests {
         assert!(report.contains("board plan paint enqueue:"));
     }
 
+    crate::windows_unix_omission!(
+        published_project_plan_hides_roadmap_file_until_retired,
+        "unix-only: exercises the Unix panel-control endpoint"
+    );
+
+    #[cfg(unix)]
     #[test]
+
     fn published_project_plan_hides_roadmap_file_until_retired() {
         use std::{fs, process::Command, time::Instant};
         let root = std::env::temp_dir().join(format!(
@@ -1427,7 +1448,14 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    crate::windows_unix_omission!(
+        by_milestone_places_each_card_under_its_declared_deliverable_and_the_rest_off_the_plan,
+        "unix-only: exercises the Unix panel-control endpoint"
+    );
+
+    #[cfg(unix)]
     #[test]
+
     fn by_milestone_places_each_card_under_its_declared_deliverable_and_the_rest_off_the_plan() {
         let mut window = window_with("sleep 30", "sleep 30");
         integrated(&mut window);
@@ -1552,7 +1580,14 @@ mod tests {
         assert_eq!(window.board.selected(), Some(origins[1]));
     }
 
+    crate::windows_unix_omission!(
+        the_filter_field_takes_typing_and_escape_leaves_it_before_closing_the_board,
+        "unix-only: exercises the Unix panel-control endpoint"
+    );
+
+    #[cfg(unix)]
     #[test]
+
     fn the_filter_field_takes_typing_and_escape_leaves_it_before_closing_the_board() {
         let mut window = window_with("sleep 30", "sleep 30");
         integrated(&mut window);

@@ -7,7 +7,7 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 use std::time::Duration;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use std::time::Instant;
 
 const MARKDOWN_LIMIT: usize = 1024 * 1024;
@@ -726,7 +726,6 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-
     fn git_timeout_does_not_wait_for_child() {
         let mut command = Command::new("sh");
         command

@@ -346,10 +346,11 @@ mod default_shell_tests {
             }
             // ConPTY asks where the cursor is and waits for the answer, which the window's
             // screen gives in the app; here nobody else would.
-            for _ in answered..seen.matches("\x1b[6n").count() {
+            let asked = seen.matches("\x1b[6n").count();
+            for _ in answered..asked {
                 pty.write(b"\x1b[1;1R").unwrap();
-                answered += 1;
             }
+            answered = answered.max(asked);
         }
     }
 

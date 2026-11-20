@@ -135,6 +135,7 @@ fn real_helper_honors_path_override_and_relative_executable() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 #[ignore = "requires a real systemd user manager; run explicitly with the session bus"]
 fn real_systemd_scopes_separate_roots_and_immediate_descendants_from_the_gui() {
@@ -173,6 +174,7 @@ fn real_systemd_scopes_separate_roots_and_immediate_descendants_from_the_gui() {
     assert_ne!(parent, second);
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 #[ignore = "requires an owned systemd test scope with memory-controller delegation"]
 fn bounded_kernel_oom_is_attributed_without_touching_other_scopes() {
@@ -231,6 +233,7 @@ fn bounded_kernel_oom_is_attributed_without_touching_other_scopes() {
     );
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 #[ignore = "managed pressure is allowed only inside the explicitly marked disposable QEMU guest"]
 fn real_systemd_oomd_kills_only_the_busy_console_in_a_disposable_guest() {

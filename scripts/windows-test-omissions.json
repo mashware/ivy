@@ -744,6 +744,11 @@
   },
   {
     "binary": "app/app:lib",
+    "name": "tests::agent_signals::incomplete_opencode_refresh_cannot_take_over_or_resolve_a_known_wait",
+    "reason": "unix-only: exercises the Unix panel-control endpoint"
+  },
+  {
+    "binary": "app/app:lib",
     "name": "tests::agent_signals::native_transport::automatic_capability_does_not_refuse_human_input_when_writer_is_backpressured",
     "reason": "unix-only: requires stty raw mode and sleep to hold a PTY writer backlog"
   },
@@ -751,6 +756,16 @@
     "binary": "app/app:lib",
     "name": "tests::agent_signals::native_transport::healthy_native_client_receives_the_exact_capability_response",
     "reason": "unix-only: requires stty raw mode and dd to capture PTY input bytes"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::agent_signals::opencode_socket_takeover_is_ordered_and_does_not_acquire_flow_authority",
+    "reason": "unix-only: exercises the Unix panel-control endpoint"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::agent_signals::unexpected_opencode_close_retains_unconfirmed_wait_until_complete_replacement",
+    "reason": "unix-only: exercises the Unix panel-control endpoint"
   },
   {
     "binary": "app/app:lib",
@@ -779,6 +794,11 @@
   },
   {
     "binary": "app/app:lib",
+    "name": "tests::board::tests::by_milestone_places_each_card_under_its_declared_deliverable_and_the_rest_off_the_plan",
+    "reason": "unix-only: exercises the Unix panel-control endpoint"
+  },
+  {
+    "binary": "app/app:lib",
     "name": "tests::board::tests::clicking_a_board_card_closes_the_dock_and_never_sends_its_gesture",
     "reason": "unix-only: requires POSIX raw-mode child byte capture to assert keyboard and mouse routing"
   },
@@ -799,8 +819,28 @@
   },
   {
     "binary": "app/app:lib",
+    "name": "tests::board::tests::project_plan_calls_refuse_unknown_and_folder_projects_without_changing_a_plan",
+    "reason": "unix-only: exercises the Unix panel-control endpoint"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::board::tests::project_plan_is_shared_by_panes_and_painted_with_source_and_progress",
+    "reason": "unix-only: exercises the Unix panel-control endpoint"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::board::tests::published_project_plan_hides_roadmap_file_until_retired",
+    "reason": "unix-only: exercises the Unix panel-control endpoint"
+  },
+  {
+    "binary": "app/app:lib",
     "name": "tests::board::tests::repeated_egui_closing_passes_cannot_send_the_frames_input_to_a_program",
     "reason": "unix-only: requires POSIX raw-mode child byte capture to assert keyboard and mouse routing"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::board::tests::the_filter_field_takes_typing_and_escape_leaves_it_before_closing_the_board",
+    "reason": "unix-only: exercises the Unix panel-control endpoint"
   },
   {
     "binary": "app/app:lib",
@@ -1341,6 +1381,11 @@
     "binary": "app/batches:test",
     "name": "the_large_document_lands_between_the_floor_and_the_ceiling",
     "reason": "unix-only: invokes sh with POSIX shell functions extracted from the measurement script"
+  },
+  {
+    "binary": "app/batches:test",
+    "name": "the_large_pair_is_judged_on_the_size_the_pane_wrote_out",
+    "reason": "unix-only: invokes sh to execute the measurement guard script"
   },
   {
     "binary": "app/scope_launch:test",

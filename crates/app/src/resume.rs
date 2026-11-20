@@ -353,6 +353,7 @@ pub(crate) fn write(pane: &mut crate::Pane, bytes: &[u8]) -> term_core::Result<(
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    #[cfg(unix)]
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{Duration, Instant};
 

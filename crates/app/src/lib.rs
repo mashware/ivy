@@ -1,4 +1,8 @@
 #![deny(rustdoc::broken_intra_doc_links)]
+// Test fixtures that only the Unix tests use — omitted on Windows by name in
+// `scripts/windows-test-omissions.json` — would each need their own gate there. Dead code stays an
+// error in every production build and in the Unix test builds, which still use all of them.
+#![cfg_attr(all(test, not(unix)), allow(dead_code, unused_imports))]
 // **A broken rustdoc link is invisible to the compiler, and half the repository is rustdoc.** When
 // this was put in, the tree had **three** of them pointing at names that earlier renames had left
 // behind: nobody noticed because `cargo doc` warns and does not fail. With the `deny` it fails, and

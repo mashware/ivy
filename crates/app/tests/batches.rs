@@ -630,6 +630,7 @@ fn the_large_pair_proves_its_size_before_and_after_the_run() {
 /// The report lines every guard above the documents block reads, all of them satisfied for a batch
 /// that publishes over the channel and declares nothing else, so the guard that speaks is the
 /// documents block's and not an earlier one.
+#[cfg(unix)]
 fn a_channel_report_with(documents: &str) -> String {
     format!(
         "buttons:      0 drawn whole, 0 pressed\n\
@@ -650,6 +651,7 @@ fn a_channel_report_with(documents: &str) -> String {
 /// fixture has no strip line, so the next guard invalidates for that, and its sentence is the proof
 /// the size guards ran and stayed quiet rather than the script dying before them.
 #[test]
+#[cfg(unix)]
 fn the_large_pair_is_judged_on_the_size_the_pane_wrote_out() {
     let floor: u64 = panel_contract::MAX_BYTES / 8 * 7;
     let documents = |size: u64| {
@@ -1484,4 +1486,8 @@ windows_unix_omission!(
 windows_unix_omission!(
     ligature_comparison_requires_matching_mode_font_size_and_scale,
     "unix-only: invokes sh to compare measurement reports"
+);
+windows_unix_omission!(
+    the_large_pair_is_judged_on_the_size_the_pane_wrote_out,
+    "unix-only: invokes sh to execute the measurement guard script"
 );

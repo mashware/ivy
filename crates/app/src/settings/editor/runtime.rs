@@ -493,7 +493,7 @@ fn run_probe(window: &mut Window, ctx: &egui::Context) {
     ctx.request_repaint();
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) use tests::reference_apply_report;
 
 #[cfg(test)]

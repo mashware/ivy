@@ -15,7 +15,9 @@ use panel_control::session::{Identity, SessionHandler};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(target_os = "linux")]
+use std::time::Instant;
 use term_core::ForegroundScope;
 
 #[cfg(target_os = "linux")]
@@ -37,6 +39,8 @@ pub(crate) fn resolve_launch(_: panel_control::session::Client) -> std::io::Resu
 pub(crate) enum Status {
     Disabled,
     Waiting,
+    // Only the Linux session worker registers a client; elsewhere the state is matched, never set.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     Registered,
     Unsupported,
 }
@@ -57,6 +61,7 @@ pub(crate) struct Handle {
 struct Shared {
     scope: ForegroundScope,
     enabled: AtomicBool,
+    #[cfg(target_os = "linux")]
     frozen: AtomicBool,
     close_acknowledged: Arc<AtomicBool>,
     epoch: AtomicU64,
@@ -92,6 +97,7 @@ impl Handle {
             shared: Arc::new(Shared {
                 scope,
                 enabled: AtomicBool::new(false),
+                #[cfg(target_os = "linux")]
                 frozen: AtomicBool::new(false),
                 close_acknowledged: Arc::new(AtomicBool::new(false)),
                 epoch: AtomicU64::new(0),
@@ -174,7 +180,10 @@ impl Drop for Handle {
 }
 
 pub(crate) fn freeze_all(handles: &[&Handle], timeout: Duration) -> Vec<Snapshot> {
+    #[cfg(target_os = "linux")]
     let deadline = Instant::now() + timeout;
+    #[cfg(not(target_os = "linux"))]
+    let _ = timeout;
     for handle in handles {
         handle
             .shared
@@ -432,15 +441,33 @@ mod tests {
             assert!(!own_ok("› OK"));
             assert!(own_ok("• OK"));
         }
+        // Mirrors the readiness check of the Linux probe's own `Screen` fixture.
+        fn composer_ready(terminal: &term_core::Screen) -> bool {
+            let view = terminal.view();
+            let Some(cursor) = view.cursor() else {
+                return false;
+            };
+            if cursor.shape == term_core::CursorShape::Hidden {
+                return false;
+            }
+            let prefix: String = (0..cursor.col)
+                .filter_map(|col| view.cell(cursor.row, col))
+                .map(|cell| cell.c)
+                .collect();
+            prefix.trim_start().starts_with('›')
+        }
         #[test]
         fn codex_probe_readiness_requires_the_live_composer_cursor_not_history() {
-            let mut screen = term_core::Screen::default();
-            screen.push("\x1b[1;1H› old prompt\x1b[40;1H\x1b[?25h".as_bytes());
-            assert!(!screen.composer_ready());
-            screen.push("› ".as_bytes());
-            assert!(screen.composer_ready());
-            screen.push(b"\x1b[?25l");
-            assert!(!screen.composer_ready());
+            let mut screen = term_core::Screen::new(term_core::Size {
+                cols: 160,
+                rows: 44,
+            });
+            screen.advance("\x1b[1;1H› old prompt\x1b[40;1H\x1b[?25h".as_bytes());
+            assert!(!composer_ready(&screen));
+            screen.advance("› ".as_bytes());
+            assert!(composer_ready(&screen));
+            screen.advance(b"\x1b[?25l");
+            assert!(!composer_ready(&screen));
         }
     }
 }
