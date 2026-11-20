@@ -8305,6 +8305,51 @@ a general TextEdit would also change interrupt and global-shortcut ownership; an
 would duplicate the existing focus, idle and measurement gates. The earlier exclusions above
 remain historical rationale and are superseded only by this amendment.
 
+### Amended 20 November 2026 — regular expressions, in the console and in Files (#121)
+
+This supersedes the «Regular expressions» row of the discarded table above, and the «Literal, not
+a pattern» paragraph's reason.
+
+- **A fourth option, Regular expression**, in the console's options list, off by default and kept
+  with the other three. Off, the query is literal exactly as before. **The Files name search gets the
+  same choice** as a `.*` toggle beside its field, matched against each entry's name, case-insensitive
+  as that search always was; an inline `(?-i)` makes it sensitive.
+- **The engine that gave up is no longer used.** `alacritty_terminal`'s search runs a lazy DFA that,
+  on a pattern whose states do not fit its cache, clears it three times and stops, and the crate
+  turns that into «no match» with only a log line — which made «not found» and «gave up»
+  indistinguishable. The search now extracts each **logical line** (rows joined through a wrap) into
+  text with a map back to its cells, and runs `regex-automata`'s meta engine on it, which falls back
+  from its lazy DFA to engines that never give up. **Literal and regex share this one path**; a literal
+  is the escaped query.
+- **What the person is told instead of «no matches»**: a pattern that does not parse shows the
+  parser's message; a pattern too complex to build says so. The build limit is 2 MiB of automaton,
+  the same the old engine used, and it refuses short patterns with large Unicode counts — `\w{50}`
+  (2.8 MB) is refused.
+- **What stays as D61 decided**: the match is the selection, the step starts one cell past it, wraps
+  are followed and hard line breaks are never crossed, wide characters take their two cells, Whole
+  word keeps its rule, and marking walks only `marking_bounds()` — the screen and at most
+  `MARKING_REACH` lines beyond it, one logical line at a time.
+- **What changes, declared**: walking older, a match is now chosen left-to-right inside its line, as
+  marking always chose it — `aa` over `aaa` selects the first two cells where it used to select the
+  last two. The row's padding is still part of the text, so `$` matches after it, as before.
+- **A hostile pattern is accepted as a pause, by the user's decision.** A pattern built to make the
+  engine walk slowly (`\p{L}.{170}~`) costs 0.13–0.16 s a press over a full history and up to 0.6 s
+  over one logical line wrapped across the whole history, and **5–6 ms of marking per frame** for as
+  long as the search stays open — paid while typing and while output streams, not only on `Enter`.
+  Discarded: a per-press deadline and cutting a huge line into chunks — chunks would bring back the
+  silent miss for a match across a cut, which is what this amendment removes; and a per-frame marking
+  budget, for patterns this terminal's users do not type.
+- **Measured**: <filled by the work that ships it — `cargo run --release --example search -p
+  term-core`, two runs, a literal miss, a whole-word miss and the hostile pattern; and batch `E`
+  against `C`>.
+
+| Discarded (#121) | Why |
+|---|---|
+| Keeping the old engine and checking with the meta engine when it says «nothing» | Giving up stops the old walk midway, so a press can also return an earlier, wrapped match or mark half a screen — not only «nothing» |
+| The old engine for literals, the meta engine for patterns | Two walks with two sets of wide-character and wrap rules, so the same text could be found in one mode and not the other |
+| Removing the old engine's give-up limit | Trades a false «no match» for a window frozen for as long as the cache keeps thrashing |
+| Patching `alacritty_terminal` to expose the error | A fork carried until upstream takes it |
+
 ---
 
 ## D62 — Pane controls share the strip's geometry and own their entire gesture

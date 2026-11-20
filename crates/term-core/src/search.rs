@@ -779,6 +779,232 @@ mod tests {
         }
     }
 
+    fn regex() -> Options {
+        Options {
+            regex: true,
+            ..Options::default()
+        }
+    }
+
+    #[test]
+    fn with_regular_expression_on_the_query_is_a_pattern() {
+        // Walking older from the bottom, the pattern meets «abc» first; as text it would be «a.c».
+        let mut screen = screen_with(4, &["a.c abc"]);
+        assert_eq!(
+            screen.find(&with("a.c", regex()), Toward::Older, KeepClear::NONE),
+            Found::Match
+        );
+        assert_eq!(screen.selected_text().as_deref(), Some("abc"));
+        assert_eq!(
+            screen.find(&with("a.c", regex()), Toward::Older, KeepClear::NONE),
+            Found::Match
+        );
+        assert_eq!(screen.selected_text().as_deref(), Some("a.c"));
+    }
+
+    #[test]
+    fn a_pattern_that_does_not_parse_is_said_and_never_searched() {
+        let Err(Refused::Invalid(why)) = Search::new("(", regex()) else {
+            panic!("an unclosed group was not refused as invalid");
+        };
+        assert!(!why.is_empty() && !why.contains('\n'), "{why:?}");
+        assert!(
+            Search::new("(", Options::default()).is_ok(),
+            "as text, «(» is just a character"
+        );
+    }
+
+    #[test]
+    fn a_pattern_too_large_to_build_is_refused_as_such() {
+        // Every `\w` is every word character of Unicode, so fifty of them pass the limit.
+        assert_eq!(
+            Search::new(r"\w{50}", regex()).err(),
+            Some(Refused::TooLarge)
+        );
+        assert!(Search::new(r"\w{5}", regex()).is_ok());
+    }
+
+    #[test]
+    fn a_pattern_the_terminal_engine_gave_up_on_is_found() {
+        use alacritty_terminal::grid::Dimensions;
+        use alacritty_terminal::index::{Column, Direction, Point};
+        use alacritty_terminal::term::search::{RegexIter, RegexSearch};
+
+        const HOSTILE: &str = r"\p{L}.{170}~";
+        let mut screen = Screen::new(Size { rows: 10, cols: 180 });
+        // **Text that varies is what makes the automaton grow**: over a repeated line its states
+        // repeat too and the old engine never gave up. Lines of 170 characters cannot hold a match.
+        let alphabet: Vec<char> = "ab cd1 ü日~".chars().collect();
+        let mut seed: u64 = 7;
+        for _ in 0..400 {
+            let line: String = (0..170)
+                .map(|_| {
+                    seed = seed
+                        .wrapping_mul(6364136223846793005)
+                        .wrapping_add(1442695040888963407);
+                    alphabet[((seed >> 33) % alphabet.len() as u64) as usize]
+                })
+                .collect();
+            screen.advance(format!("{line}\r\n").as_bytes());
+        }
+        let needle = format!("x{}~", "y".repeat(170));
+        screen.advance(format!("{needle}\r\n").as_bytes());
+        for n in 0..5 {
+            screen.advance(format!("tail {n}\r\n").as_bytes());
+        }
+
+        // The premise: the terminal engine's own search, over the same grid, reports nothing.
+        let term = screen.term();
+        let mut old = RegexSearch::new(HOSTILE).expect("the old engine builds it");
+        let start = Point::new(term.grid().topmost_line(), Column(0));
+        let end = Point::new(term.grid().bottommost_line(), term.grid().last_column());
+        assert!(
+            RegexIter::new(start, end, Direction::Right, term, &mut old)
+                .next()
+                .is_none(),
+            "the premise: the terminal engine gives up on this pattern over this history"
+        );
+
+        for toward in [Toward::Older, Toward::Newer] {
+            screen.clear_selection();
+            assert_eq!(
+                screen.find(&with(HOSTILE, regex()), toward, KeepClear::NONE),
+                Found::Match
+            );
+            assert_eq!(screen.selected_text().as_deref(), Some(needle.as_str()));
+        }
+    }
+
+    #[test]
+    fn a_pattern_over_a_wrap_and_wide_characters_selects_and_marks_their_cells() {
+        // Five columns: «本» has no room in the last one, so the row ends in a spacer of its own.
+        let mut screen = Screen::new(Size { rows: 3, cols: 5 });
+        screen.advance("ab日本cd".as_bytes());
+
+        let search = with("b.本c", regex());
+        let mut view = screen.view();
+        screen.mark_matches(&mut view, &search);
+        assert_eq!(marked(&view)[0], vec![1, 2, 3, 4]);
+        assert_eq!(marked(&view)[1], vec![0, 1, 2]);
+
+        assert_eq!(
+            screen.find(&search, Toward::Older, KeepClear::NONE),
+            Found::Match
+        );
+        assert_eq!(screen.selected_text().as_deref(), Some("b日本c"));
+    }
+
+    #[test]
+    fn whole_word_and_wrap_hold_for_patterns_too() {
+        let mut screen = screen_with(4, &["needle need"]);
+        let search = with(
+            "ne+d",
+            Options {
+                whole_word: true,
+                ..regex()
+            },
+        );
+        for toward in [Toward::Older, Toward::Newer] {
+            assert_eq!(
+                screen.find(&search, toward, KeepClear::NONE),
+                Found::Match
+            );
+            assert_eq!(
+                selected_row(&screen).map(|(_, text)| text).as_deref(),
+                Some("needle need")
+            );
+            assert_eq!(screen.selected_text().as_deref(), Some("need"));
+        }
+
+        let mut screen = screen_with(4, &["item 1", "item 2"]);
+        let search = with(
+            r"item \d",
+            Options {
+                wrap: false,
+                ..regex()
+            },
+        );
+        for expected in [Found::Match, Found::Match, Found::NoMore] {
+            assert_eq!(
+                screen.find(&search, Toward::Older, KeepClear::NONE),
+                expected
+            );
+        }
+        assert_eq!(screen.selected_text().as_deref(), Some("item 1"));
+    }
+
+    #[test]
+    fn a_pattern_that_only_matches_nothing_finds_and_marks_nothing() {
+        let mut screen = screen_with(4, &["abc"]);
+        for pattern in ["x*", "^", r"\b"] {
+            let search = with(pattern, regex());
+            let mut view = screen.view();
+            assert_eq!(screen.mark_matches(&mut view, &search), 0, "{pattern}");
+            assert_eq!(
+                screen.find(&search, Toward::Older, KeepClear::NONE),
+                Found::Nothing,
+                "{pattern}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_pattern_s_own_case_flag_wins_over_the_box() {
+        let mut screen = screen_with(4, &["needle"]);
+        assert_eq!(
+            screen.find(&with("NEEDLE", regex()), Toward::Older, KeepClear::NONE),
+            Found::Match
+        );
+        screen.clear_selection();
+        assert_eq!(
+            screen.find(&with("(?-i)NEEDLE", regex()), Toward::Older, KeepClear::NONE),
+            Found::Nothing
+        );
+        let exact = Options {
+            match_case: true,
+            ..regex()
+        };
+        assert_eq!(
+            screen.find(&with("(?i)NEEDLE", exact), Toward::Older, KeepClear::NONE),
+            Found::Match
+        );
+    }
+
+    #[test]
+    fn a_match_never_crosses_a_line_the_program_ended() {
+        let mut screen = screen_with(4, &["foo", "bar"]);
+        for search in [literal("foobar"), with(r"foo\s*bar", regex())] {
+            assert_eq!(
+                screen.find(&search, Toward::Older, KeepClear::NONE),
+                Found::Nothing
+            );
+        }
+    }
+
+    #[test]
+    fn marking_reads_a_long_wrapped_line_only_within_its_reach() {
+        // One logical line, twenty columns a row: «S» far above the screen, then filler, then
+        // «E» on the screen. A pattern from one to the other only matches if marking read the
+        // line past its reach.
+        let rows = 4;
+        let mut screen = Screen::new(Size { rows, cols: 20 });
+        let filler = "y".repeat(20 * (crate::screen::MARKING_REACH + 50));
+        screen.advance(format!("S{filler}E").as_bytes());
+        let search = with("S[^E]*E", regex());
+        let mut view = screen.view();
+
+        assert_eq!(
+            screen.mark_matches(&mut view, &search),
+            0,
+            "marking read the wrapped line beyond its reach"
+        );
+        // The control: the same line inside the reach is marked.
+        let mut near = Screen::new(Size { rows, cols: 20 });
+        near.advance(format!("S{}E", "y".repeat(20 * 3)).as_bytes());
+        let mut view = near.view();
+        assert!(near.mark_matches(&mut view, &search) > 0);
+    }
+
     #[test]
     fn nothing_typed_is_not_a_search() {
         assert_eq!(
