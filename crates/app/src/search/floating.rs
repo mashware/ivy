@@ -722,10 +722,12 @@ mod tests {
             let Target::Choice(choice) = target else {
                 continue;
             };
-            // Where the painter starts the label, plus its cells in the monospace font.
+            // Where the painter starts the label, plus its cells in the monospace font, plus one
+            // cell for the font's advance running wider than the rounded-down cell: the clipping
+            // seen on the desktop came from exactly that difference, which cells alone do not show.
             let label_right = rect.left() - PAD
                 + row_label_left(rect.height())
-                + choice.label().chars().count() as f32 * metrics().width();
+                + (choice.label().chars().count() + 1) as f32 * metrics().width();
             // After the label, at least the room the tick has on its left — the visual padding.
             let edge = list.right() - tick_inset(rect.height(), &metrics());
             assert!(
