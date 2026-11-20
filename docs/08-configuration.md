@@ -706,11 +706,14 @@ as described above.
 A PNG or JPEG file (`.png`, `.jpg`, `.jpeg`, any letter case) opens in the same document tab, from
 Files with one click or by Ctrl-clicking its path in a console. A relative path is read from that
 console's directory. The image is read once when it is opened: a program that later overwrites the
-file does not change what is shown. It fits the drawer's width without being enlarged; Ctrl+wheel
-zooms around the pointer and the wheel scrolls it; Shift+wheel scrolls it sideways, and a
-middle-button drag, or Space + left drag after clicking the drawer, moves it. While one image is still being read, opening
-another says so instead of starting a second read. Only empty authorities, localhost and the verified local hostname are accepted
-as local file links.
+file does not change what is shown. It fits the drawer's width without being enlarged; Ctrl+wheel,
+or Ctrl + two-finger scroll on a touchpad, zooms around the pointer, and the wheel scrolls it;
+Shift+wheel scrolls it sideways, and a middle-button drag, or Space + left drag while the drawer
+holds the keys (as after opening the image or clicking it), moves it. On GNOME with "disable
+touchpad while typing" on, which is the default, holding Space blocks touchpad clicks, so with a
+touchpad the image is moved with two fingers and zoomed with Ctrl + two fingers. While one image is
+still being read, opening another says so instead of starting a second read. Only empty authorities,
+localhost and the verified local hostname are accepted as local file links.
 
 Each console header has a **Review changes** control beside its information-panel and maximize
 controls. Its context menu offers the same action when the header is narrow. It opens the clicked
