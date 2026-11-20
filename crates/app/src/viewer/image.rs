@@ -1282,8 +1282,9 @@ mod tests {
         );
     }
 
-    /// Once egui has seen a touch its own drag-to-scroll would move the image as well: a pan
-    /// still travels exactly as far as the pointer, and a plain left drag leaves the image.
+    /// Once egui has seen a touch it turns on drag-to-scroll for its scroll areas: a pan still
+    /// travels exactly as far as the pointer, and a plain left drag, which is what a one-finger
+    /// touch drag arrives as, leaves the image.
     #[test]
     fn after_a_touch_a_pan_moves_the_image_once_and_a_plain_drag_not_at_all() {
         let folder = Folder::new();

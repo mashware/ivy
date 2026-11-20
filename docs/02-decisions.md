@@ -9202,28 +9202,43 @@ for anything else.
   the decode and outside that cap; the original is kept at full resolution.
 - **Seen as a person reads a screenshot.** It fits the drawer's width and is never enlarged past one
   physical pixel per pixel, so on a display of two pixels per point it is shown at half a point per
-  pixel rather than blurred; Ctrl+wheel, or Ctrl + two-finger scroll on a touchpad, zooms around the
-  pointer, and the wheel and the scroll bars pan it. The point under the pointer stays put also on
-  an axis where the image is smaller than the drawer: egui's scroll area keeps its offset between
-  zero and the content's far edge, which pinned such an image to its top-left corner, so the zoom
-  lays blank space before or after the image instead, and a drag may bring it back but never push it
-  further out. Over the blank beside the image the point kept is the image's nearest one, so a zoom
-  there grows the image from its near edge and never carries it out of sight; anchoring the empty
-  point under the pointer, as a canvas does, was discarded because under a fitted screenshot most of
-  the drawer is blank and four notches there pushed the image out. winit 0.30.13 emits
-  `PinchGesture` only on macOS and iOS, so pinch zoom is a macOS-only behaviour until F2.7 verifies
-  it there. egui reports Ctrl+wheel as a zoom and not as a scroll, so the drawer counts the zoom as
-  pointer activity over it to keep the gesture. The drawer stays not modal: nothing dims. With a
-  mouse, Space + left drag and a middle-button drag move the image, inside the drawer while it is
-  smaller than it, with a grab hand while they do, and Shift+wheel moves it sideways through egui's
-  own horizontal scroll modifier. A plain left drag does not pan, because the next step draws marks
-  with it, and egui's own drag-to-scroll is off, since after any touch it would add its travel to
-  the pan's. Space + drag is Figma's convention and the middle button needs no key. Whether a drag
-  pans is decided when its button goes down, and a drag that starts on a scroll bar is the bar's.
-  Space is the drawer's only when it went down while the drawer held the keys, so a Space typed into
-  a console still reaches its program and does not pan after the click that follows. On GNOME with
-  "disable touchpad while typing" on, which is the default, holding Space blocks touchpad clicks, so
-  with a touchpad the image is moved with two fingers and zoomed with Ctrl + two fingers.
+  pixel rather than blurred. The image has a viewport of its own, a scale and an offset the viewer
+  keeps, painted clipped to the drawer's body with no scroll bars: Ctrl+wheel, or Ctrl + two-finger
+  scroll on a touchpad, zooms around the pointer; the wheel and two-finger scroll pan it on both
+  axes, and Shift+wheel arrives from egui as a horizontal scroll. Over the blank beside the image
+  the point kept is the image's nearest one, so a zoom there grows the image from its near edge and
+  never carries it out of sight; anchoring the empty point under the pointer, as a canvas does, was
+  discarded because under a fitted screenshot most of the drawer is blank and four notches there
+  pushed the image out. Where the image may sit is one rule per axis. Where it is larger than the
+  drawer, no gap opens between its edge and the drawer's, after a zoom, a pan or a resize. Where it
+  is smaller, a zoom never moves it, so the point under the pointer stays there even when the
+  image crosses the drawer's edge; a pan may only bring it back toward whole inside and never push
+  it further out; a resize of the drawer puts it whole inside. When a zoom makes an axis larger
+  than the drawer, the first rule applies from that frame on. Pinning a smaller image inside on
+  every change was discarded: a screenshot fitted to width and shorter than the drawer sits at its
+  top, so every zoom pushed its top edge out, the pin brought it back, and the image grew downward
+  from its top edge instead of around the pointer, the symptom the owner reported. Centring a
+  smaller image on open was discarded too: it moves the screenshot away from where a person starts
+  reading and still pins it once a zoom reaches an edge. winit 0.30.13 emits `PinchGesture` only on
+  macOS and iOS, so pinch zoom is a macOS-only behaviour until F2.7 verifies it there. egui reports
+  Ctrl+wheel as a zoom and not as a scroll, so the drawer counts the zoom as pointer activity over
+  it to keep the gesture. The drawer stays not modal: nothing dims. With a mouse, Space + left drag
+  and a middle-button drag move the image, with a grab hand while they do. A plain left drag does
+  not pan, because the next step draws marks with it. Space + drag is Figma's convention and the
+  middle button needs no key. Whether a drag pans is decided when its button goes down and lasts
+  until that button is released: a press of another button meanwhile neither stops the pan nor
+  takes it over, and a pan is forgotten when another image opens, when the image is closed, and
+  after any frame the image was not painted, so a release that happened while it was hidden cannot
+  leave a pan behind. On a touch screen the image pans with two-finger scroll only: egui reports a
+  one-finger touch drag as the primary button, which is the plain left drag the marks take, so no
+  touch-specific pan exists. Space is the drawer's only when it went down after the drawer held
+  the keys, which is after opening the image or clicking the drawer, or at any time while the
+  drawer is maximized, since a maximized drawer reads every key without a click. It is worked out
+  again every frame and forgotten whenever the drawer does not take the keys, so a Space typed into
+  a console still reaches its program and never pans, also when the drawer comes back with that
+  Space still held. On GNOME with "disable touchpad while typing" on, which is the default, holding
+  Space blocks touchpad clicks, so with a touchpad the image is moved with two fingers and zoomed
+  with Ctrl + two fingers.
 - **Cost.** Decoding runs on the worker. The texture is uploaded once per open, by the backend
   after the pass, on the first frame after the decode arrives, so that upload lands in the framework
   remainder, not in the viewer's span. No measurement batch opens an image, so no published figure changes.
@@ -9235,7 +9250,12 @@ single boolean (the image keeps a state of its own instead); a separate image su
 second set of input rules for what D72 already gives one place; refreshing the image from disk,
 because what was opened would change under the person reading it; a separate side limit, because
 the allocation cap already refuses the headers that would need one; GIF, WebP and SVG, because
-screenshots are PNG or JPEG.
+screenshots are PNG or JPEG; driving the image through an egui `ScrollArea`, which was the first
+version: its offset only runs from zero to the content's far edge, so holding a zoom around the
+pointer meant laying blank space before and after the image, and that broke it four ways — a
+trailing blank left stale when the drawer grew, scroll-bar drags remapped against content that
+shrank every frame so the thumb ran ahead and jumped, guessing where egui puts its bars to keep a
+pan off them, and its own drag-to-scroll joining the pan after a touch.
 
 ## D73 — Connection help is global and reports observed publication
 
