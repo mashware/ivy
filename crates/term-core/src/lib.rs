@@ -10,6 +10,17 @@
 //!
 //! It depends on nothing visual: if the painting layer is rewritten, this crate still serves.
 
+#[cfg(test)]
+#[macro_export]
+macro_rules! windows_unix_omission {
+    ($name:ident, $reason:literal) => {
+        #[cfg(windows)]
+        #[test]
+        #[ignore = $reason]
+        fn $name() {}
+    };
+}
+
 use std::ffi::OsStr;
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -30,6 +41,58 @@ pub use termination::Termination;
 mod scope;
 #[cfg(target_os = "linux")]
 mod scope_gate;
+#[cfg(all(test, windows))]
+mod scope {
+    mod tests {
+        crate::windows_unix_omission!(
+            placement_requires_the_exact_unified_or_systemd_hierarchy,
+            "unix-only: requires Linux systemd user-manager semantics"
+        );
+        crate::windows_unix_omission!(
+            only_unknown_optional_oom_property_permits_a_basic_scope_retry,
+            "unix-only: requires Linux systemd user-manager semantics"
+        );
+        crate::windows_unix_omission!(
+            a_stalled_manager_future_is_cancelled_at_its_owned_deadline,
+            "unix-only: requires Linux systemd user-manager semantics"
+        );
+        crate::windows_unix_omission!(
+            an_expired_deadline_does_not_poll_a_stalled_future_forever,
+            "unix-only: requires Linux systemd user-manager semantics"
+        );
+    }
+    mod protocol_tests {
+        crate::windows_unix_omission!(
+            unknown_oom_policy_retries_the_actual_protocol_and_retains_the_basic_scope,
+            "unix-only: requires Linux systemd user-manager semantics"
+        );
+        crate::windows_unix_omission!(
+            observer_stops_at_the_real_500ms_cutoff_and_ignores_later_oom_evidence,
+            "unix-only: requires Linux systemd user-manager semantics"
+        );
+        crate::windows_unix_omission!(
+            observer_delayed_evidence_and_bus_disconnect_use_actual_manager_results,
+            "unix-only: requires Linux systemd user-manager semantics"
+        );
+    }
+}
+#[cfg(all(test, windows))]
+mod scope_gate {
+    mod tests {
+        crate::windows_unix_omission!(
+            gate_is_private_and_removes_its_endpoint_on_drop,
+            "unix-only: requires Unix socket and permission semantics"
+        );
+        crate::windows_unix_omission!(
+            absent_helper_connection_obeys_startup_deadline,
+            "unix-only: requires Unix socket semantics"
+        );
+        crate::windows_unix_omission!(
+            explicit_executable_resolution_preserves_relative_path_and_refuses_directories,
+            "unix-only: requires Unix executable permission semantics"
+        );
+    }
+}
 #[cfg(all(target_os = "linux", any(test, feature = "testing")))]
 pub use scope_gate::TestScopePlacement;
 /// Dispatches the private Linux launcher before the host initializes its UI.
@@ -1399,6 +1462,23 @@ mod tests {
     use std::sync::mpsc::RecvTimeoutError;
     use std::time::{Duration, Instant};
 
+    fn shell_invocation<'a>(unix: &'a str, windows: &'a str) -> (&'static str, Vec<&'a str>) {
+        if cfg!(windows) {
+            (
+                "powershell.exe",
+                vec![
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    windows,
+                ],
+            )
+        } else {
+            ("sh", vec!["-c", unix])
+        }
+    }
+
     #[test]
     fn child_directory_rejects_relative_or_missing_path() {
         for directory in [
@@ -1416,6 +1496,10 @@ mod tests {
         }
     }
 
+    crate::windows_unix_omission!(
+        working_directory_follows_live_pty_child_and_stops_after_exit,
+        "unix-only: requires Unix process working-directory inspection"
+    );
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn working_directory_follows_live_pty_child_and_stops_after_exit() {
@@ -1468,6 +1552,35 @@ mod tests {
         }
     }
 
+    /// Collects a real PTY's output through the asserted text.
+    ///
+    /// On Windows the ConPTY keeps the output pipe's write end while its master lives, so the
+    /// reader cannot observe EOF before `Pty` is dropped. These behavior tests need the live PTY for
+    /// their assertion; wait for the output they actually assert instead of waiting for EOF.
+    fn output_through(pty_output: &Receiver<Vec<u8>>, expected: &str) -> Vec<u8> {
+        #[cfg(windows)]
+        {
+            let deadline = Instant::now() + DEADLINE;
+            let mut output = Vec::new();
+            while !contains(&output, expected) {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                match pty_output.recv_timeout(remaining) {
+                    Ok(bytes) => output.extend_from_slice(&bytes),
+                    Err(error) => panic!(
+                        "the PTY did not produce {expected:?} before {DEADLINE:?}: {error}; output={:?}",
+                        String::from_utf8_lossy(&output)
+                    ),
+                }
+            }
+            output
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = expected;
+            drain_until_closed(pty_output)
+        }
+    }
+
     fn contains(output: &[u8], text: &str) -> bool {
         String::from_utf8_lossy(output).contains(text)
     }
@@ -1478,6 +1591,7 @@ mod tests {
     /// reproduction blocked at around 13 KiB cumulative. That difference is not explained,
     /// so instead of picking a number next to the boundary these tests write 64 KiB: past it by a
     /// margin wide enough that they do not depend on which side of it this machine falls.
+    #[cfg_attr(windows, allow(dead_code))]
     const PAYLOAD: usize = 64 * 1024;
 
     /// The byte the tests hand over, repeated.
@@ -1766,10 +1880,15 @@ mod tests {
         assert_eq!(how, Ending::EndedWell);
     }
 
+    crate::windows_unix_omission!(
+        the_channel_closes_when_the_program_finishes,
+        "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+    );
+    #[cfg(not(windows))]
     #[test]
     fn the_channel_closes_when_the_program_finishes() {
-        let (_pty, output) =
-            Pty::spawn("sh", &["-c", "exit 0"], Size::default()).expect("launch sh");
+        let (program, args) = shell_invocation("exit 0", "exit 0");
+        let (_pty, output) = Pty::spawn(program, &args, Size::default()).expect("launch shell");
 
         drain_until_closed(&output);
     }
@@ -1855,10 +1974,15 @@ mod tests {
         assert_eq!(feed(Scripted::of(vec![]), &tx, &stop), Ending::EndedWell);
     }
 
+    crate::windows_unix_omission!(
+        a_program_that_exited_is_readable_as_such_through_the_real_path,
+        "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+    );
+    #[cfg(not(windows))]
     #[test]
     fn a_program_that_exited_is_readable_as_such_through_the_real_path() {
-        let (pty, output) =
-            Pty::spawn("sh", &["-c", "exit 0"], Size::default()).expect("launch sh");
+        let (program, args) = shell_invocation("exit 0", "exit 0");
+        let (pty, output) = Pty::spawn(program, &args, Size::default()).expect("launch shell");
 
         // **What this binds and what it does not, said here rather than left to the name.** It binds
         // that after the host has seen the channel close — the only thing that tells it a console is
@@ -1924,8 +2048,11 @@ mod tests {
 
     #[test]
     fn a_console_that_is_still_reading_has_no_ending_to_report() {
-        let (pty, output) = Pty::spawn("sh", &["-c", "printf ready; sleep 30"], Size::default())
-            .expect("launch sh");
+        let (program, args) = shell_invocation(
+            "printf ready; sleep 30",
+            "Write-Output ready; Start-Sleep -Seconds 30",
+        );
+        let (pty, output) = Pty::spawn(program, &args, Size::default()).expect("launch shell");
 
         wait_for_marker(&output, "ready");
 
@@ -1957,10 +2084,10 @@ mod tests {
 
     #[test]
     fn what_the_program_writes_arrives_over_the_channel() {
-        let (_pty, channel) =
-            Pty::spawn("sh", &["-c", "printf good"], Size::default()).expect("launch sh");
+        let (program, args) = shell_invocation("printf good", "Write-Output good");
+        let (_pty, channel) = Pty::spawn(program, &args, Size::default()).expect("launch shell");
 
-        let output = drain_until_closed(&channel);
+        let output = output_through(&channel, "good");
 
         assert!(
             contains(&output, "good"),
@@ -1972,10 +2099,10 @@ mod tests {
     fn the_program_receives_the_terminal_type() {
         // Without this, a full-screen program believes it is in a dumb terminal and emits neither
         // color nor the sequences the grid needs to interpret.
-        let (_pty, channel) =
-            Pty::spawn("sh", &["-c", "printf %s \"$TERM\""], Size::default()).expect("launch sh");
+        let (program, args) = shell_invocation("printf %s \"$TERM\"", "Write-Output $env:TERM");
+        let (_pty, channel) = Pty::spawn(program, &args, Size::default()).expect("launch shell");
 
-        let output = drain_until_closed(&channel);
+        let output = output_through(&channel, "xterm-256color");
 
         assert!(
             contains(&output, "xterm-256color"),
@@ -1989,15 +2116,19 @@ mod tests {
     /// green.
     #[test]
     fn the_program_receives_the_variables_passed_to_it() {
+        let (program, args) = shell_invocation(
+            "printf %s \"$TEST_VARIABLE\"",
+            "Write-Output $env:TEST_VARIABLE",
+        );
         let (_pty, channel) = Pty::spawn_with_env(
-            "sh",
-            &["-c", "printf %s \"$TEST_VARIABLE\""],
+            program,
+            &args,
             Size::default(),
             &[("TEST_VARIABLE", Some(OsStr::new("3f2a9c14")))],
         )
         .expect("launch sh");
 
-        let output = drain_until_closed(&channel);
+        let output = output_through(&channel, "3f2a9c14");
 
         assert!(
             contains(&output, "3f2a9c14"),
@@ -2011,9 +2142,32 @@ mod tests {
     /// Backspace cannot erase. The decision is forced here because on this platform there is none.
     #[test]
     fn the_decided_lang_reaches_the_program() {
+        let (program, args) = if cfg!(windows) {
+            (
+                std::ffi::OsString::from("powershell.exe"),
+                [
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "Write-Output \"[$env:LANG]\"",
+                ]
+                .into_iter()
+                .map(std::ffi::OsString::from)
+                .collect::<Vec<_>>(),
+            )
+        } else {
+            (
+                std::ffi::OsString::from("sh"),
+                ["-c", "printf '[%s]' \"$LANG\""]
+                    .into_iter()
+                    .map(std::ffi::OsString::from)
+                    .collect::<Vec<_>>(),
+            )
+        };
         let (_pty, channel) = Pty::spawn_with_lang(
-            OsStr::new("sh"),
-            &["-c".into(), "printf '[%s]' \"$LANG\"".into()],
+            &program,
+            &args,
             Size::default(),
             &[],
             None,
@@ -2021,7 +2175,7 @@ mod tests {
         )
         .expect("launch sh");
 
-        let output = drain_until_closed(&channel);
+        let output = output_through(&channel, "[xx_DECIDED.UTF-8]");
 
         assert!(
             contains(&output, "[xx_DECIDED.UTF-8]"),
@@ -2033,9 +2187,32 @@ mod tests {
     /// A caller that names `LANG` itself still decides it: the console's decision only fills a gap.
     #[test]
     fn a_lang_passed_by_the_caller_beats_the_decided_one() {
+        let (program, args) = if cfg!(windows) {
+            (
+                std::ffi::OsString::from("powershell.exe"),
+                [
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "Write-Output \"[$env:LANG]\"",
+                ]
+                .into_iter()
+                .map(std::ffi::OsString::from)
+                .collect::<Vec<_>>(),
+            )
+        } else {
+            (
+                std::ffi::OsString::from("sh"),
+                ["-c", "printf '[%s]' \"$LANG\""]
+                    .into_iter()
+                    .map(std::ffi::OsString::from)
+                    .collect::<Vec<_>>(),
+            )
+        };
         let (_pty, channel) = Pty::spawn_with_lang(
-            OsStr::new("sh"),
-            &["-c".into(), "printf '[%s]' \"$LANG\"".into()],
+            &program,
+            &args,
             Size::default(),
             &[("LANG", Some(OsStr::new("yy_CALLER.UTF-8")))],
             None,
@@ -2043,7 +2220,7 @@ mod tests {
         )
         .expect("launch sh");
 
-        let output = drain_until_closed(&channel);
+        let output = output_through(&channel, "[yy_CALLER.UTF-8]");
 
         assert!(
             contains(&output, "[yy_CALLER.UTF-8]"),
@@ -2060,14 +2237,13 @@ mod tests {
     /// this application.
     #[test]
     fn without_passing_anything_the_variable_is_not_defined() {
-        let (_pty, channel) = Pty::spawn(
-            "sh",
-            &["-c", "printf %s \"${TEST_VARIABLE-unset}\""],
-            Size::default(),
-        )
-        .expect("launch sh");
+        let (program, args) = shell_invocation(
+            "printf %s \"${TEST_VARIABLE-unset}\"",
+            "if ($null -eq $env:TEST_VARIABLE) { Write-Output unset } else { Write-Output $env:TEST_VARIABLE }",
+        );
+        let (_pty, channel) = Pty::spawn(program, &args, Size::default()).expect("launch sh");
 
-        let output = drain_until_closed(&channel);
+        let output = output_through(&channel, "unset");
 
         assert!(
             contains(&output, "unset"),
@@ -2084,15 +2260,15 @@ mod tests {
     /// whoever runs it to have anything in particular.
     #[test]
     fn with_none_by_value_the_variable_is_removed_even_though_the_crate_sets_it() {
-        let (_pty, channel) = Pty::spawn_with_env(
-            "sh",
-            &["-c", "printf %s \"${TERM-removed}\""],
-            Size::default(),
-            &[("TERM", None)],
-        )
-        .expect("launch sh");
+        let (program, args) = shell_invocation(
+            "printf %s \"${TERM-removed}\"",
+            "if ($null -eq $env:TERM) { Write-Output removed } else { Write-Output $env:TERM }",
+        );
+        let (_pty, channel) =
+            Pty::spawn_with_env(program, &args, Size::default(), &[("TERM", None)])
+                .expect("launch sh");
 
-        let output = drain_until_closed(&channel);
+        let output = output_through(&channel, "removed");
 
         assert!(
             contains(&output, "removed"),
@@ -2101,6 +2277,10 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        without_consuming_it_what_arrives_is_bounded,
+        "unix-only: requires the Unix /dev/zero byte source"
+    );
     /// Before the fix the channel was `mpsc::channel()`, unbounded: a program that writes without
     /// stopping and no one draining made what accumulated grow without a ceiling for as long as the
     /// wait lasted. This test reproduces exactly that —`cat /dev/zero` without consuming the channel— and
@@ -2115,6 +2295,7 @@ mod tests {
     /// unbounded channel would accumulate in the same wait: `cat /dev/zero` delivers on the order of
     /// hundreds of MiB per second, so in 200 ms an unbounded channel would already have exceeded that
     /// margin several times over. It is exactly that distance the test has to catch.
+    #[cfg(unix)]
     #[test]
     fn without_consuming_it_what_arrives_is_bounded() {
         let (_pty, output) =
@@ -2240,6 +2421,10 @@ mod tests {
         drop(output);
     }
 
+    crate::windows_unix_omission!(
+        the_write_returns_even_though_the_program_never_reads_its_input,
+        "unix-only: requires POSIX terminal raw mode and nonblocking input semantics"
+    );
     /// **The regression test of the blocking write.** `Pty::write` was a `write_all` + `flush` on a blocking
     /// descriptor, run on the caller's thread — which in this application is the thread that paints.
     /// When the program inside stops reading its input, the kernel's buffer fills and that write
@@ -2253,6 +2438,7 @@ mod tests {
     /// along with it — the bug itself, published as an eternal green. The deadline plus the
     /// `recv_timeout` are what turn it into a red test, the same reason `drain_until_closed` carries
     /// one.
+    #[cfg(unix)]
     #[test]
     fn the_write_returns_even_though_the_program_never_reads_its_input() {
         use std::sync::mpsc;
@@ -2297,6 +2483,10 @@ mod tests {
         }
     }
 
+    crate::windows_unix_omission!(
+        nothing_handed_over_is_lost_when_the_program_reads_late,
+        "unix-only: requires POSIX terminal raw mode and line-discipline semantics"
+    );
     /// The other half of the fix: **the write stopped waiting, and it did not start losing.** A
     /// queue that returns straight away and drops what does not fit would pass the test above and
     /// silently swallow what somebody typed — the failure that takes longest to understand from the
@@ -2311,6 +2501,7 @@ mod tests {
     /// discards past 4 095 bytes with no newline** —a separate bug, found on the way and with an
     /// issue of its own— so a 64 KiB payload would come back short for a reason that has nothing to
     /// do with the one this test hunts.
+    #[cfg(unix)]
     #[test]
     fn nothing_handed_over_is_lost_when_the_program_reads_late() {
         use std::sync::mpsc;
@@ -2438,6 +2629,10 @@ mod tests {
         watched.revents & libc::POLLOUT != 0
     }
 
+    crate::windows_unix_omission!(
+        closing_a_console_whose_program_stopped_reading_ends_its_writer,
+        "unix-only: requires Linux nonblocking PTY writer behavior"
+    );
     /// **The regression test of the writer left behind by a close (#159's first half).** With the
     /// program alive and not reading, the writer waits for room in the pseudoterminal. Closing kills
     /// the program — and on Linux a write parked in the kernel does not end with it: measured, the
@@ -2477,6 +2672,10 @@ mod tests {
         drop(output);
     }
 
+    crate::windows_unix_omission!(
+        closing_a_console_whose_buffer_is_exactly_full_ends_its_writer,
+        "unix-only: requires Linux nonblocking PTY writer behavior"
+    );
     /// **#159's second half: the writer that has nothing left to write, over a buffer that is
     /// full.** When the writer's loop ends, `portable-pty`'s own writer is dropped, and its destructor
     /// writes a newline and the terminal's end-of-file character into the pseudoterminal — `stty raw`
@@ -2532,6 +2731,10 @@ mod tests {
         drop(output);
     }
 
+    crate::windows_unix_omission!(
+        a_program_that_dies_with_its_writer_waiting_for_room_makes_the_writer_give_up,
+        "unix-only: requires Linux nonblocking PTY writer behavior"
+    );
     /// **#159's third way out of the writer's wait: the program dies while the console stays
     /// open.** Nobody closes anything here, so no knock arrives; what ends the wait has to be the
     /// master answering a hang-up with no room. Before the fix the writer sat inside the kernel's
@@ -2596,6 +2799,10 @@ mod tests {
         drop(output);
     }
 
+    crate::windows_unix_omission!(
+        a_write_past_the_ceiling_is_refused_and_named_by_its_own_message,
+        "unix-only: requires POSIX terminal raw mode and stopped-reader PTY behavior"
+    );
     /// **#161: the ceiling.** A write attempted once [`MAX_OWED`] is already owed is refused, not
     /// accepted into an unbounded queue — the honest ceiling #50/D29 deferred. The boundary is
     /// inclusive: a write that lands *exactly* on the ceiling is what the next one is refused
@@ -2604,6 +2811,7 @@ mod tests {
     /// **Not `#[cfg(target_os = "linux")]`**: unlike its neighbours above, this does not depend on
     /// the non-blocking write path #159 added — the ceiling check is a plain comparison inside
     /// `Pty::write`, run before any platform-specific write happens at all.
+    #[cfg(unix)]
     #[test]
     fn a_write_past_the_ceiling_is_refused_and_named_by_its_own_message() {
         const MARKER: &str = "raw-and-deaf-for-the-ceiling";
@@ -2643,11 +2851,16 @@ mod tests {
         drop(output);
     }
 
+    crate::windows_unix_omission!(
+        a_refused_write_adds_nothing_to_what_is_owed,
+        "unix-only: requires POSIX terminal raw mode and stopped-reader PTY behavior"
+    );
     /// **#161, AC1's second half: a refused write queues nothing.** The test above proves the
     /// answer is `Err`; this one proves the bytes did not go in anyway — a refusal that still
     /// handed them to the writer would grow the queue it exists to bound while telling the caller
     /// the opposite. Several refusals in a row, one of them far larger than the ceiling, so a
     /// queue that took even one of them cannot land back on the same number by coincidence.
+    #[cfg(unix)]
     #[test]
     fn a_refused_write_adds_nothing_to_what_is_owed() {
         const MARKER: &str = "raw-and-deaf-for-a-refusal-that-queues-nothing";
@@ -2682,10 +2895,15 @@ mod tests {
         drop(output);
     }
 
+    crate::windows_unix_omission!(
+        each_refused_write_is_counted_even_while_the_flag_is_already_up,
+        "unix-only: requires POSIX terminal raw mode and stopped-reader PTY behavior"
+    );
     /// **#161: every refusal is counted, including a retry into a queue that is still full.** The
     /// flag alone cannot tell a second refusal from the first — it is already up — and a dismissal
     /// keyed on the flag would silence the retry. The count is what the notice's dismissal is
     /// keyed on instead.
+    #[cfg(unix)]
     #[test]
     fn each_refused_write_is_counted_even_while_the_flag_is_already_up() {
         const MARKER: &str = "raw-and-deaf-for-counting-refusals";
@@ -2717,9 +2935,14 @@ mod tests {
         drop(output);
     }
 
+    crate::windows_unix_omission!(
+        a_refusal_in_one_console_leaves_another_console_accepting,
+        "unix-only: requires POSIX terminal raw mode and stopped-reader PTY behavior"
+    );
     /// **#161: one console's refusal is its own.** Two consoles, one of them past its ceiling:
     /// the other must still accept what is typed into it and report no refusal — the ceiling and
     /// its flag belong to each pseudoterminal, not to the process.
+    #[cfg(unix)]
     #[test]
     fn a_refusal_in_one_console_leaves_another_console_accepting() {
         const MARKER: &str = "raw-and-deaf-for-a-refusal-of-its-own";
@@ -2754,11 +2977,16 @@ mod tests {
         drop(other_output);
     }
 
+    crate::windows_unix_omission!(
+        an_oversized_write_is_accepted_whole_when_the_queue_is_under_the_ceiling,
+        "unix-only: requires POSIX terminal raw mode and stopped-reader PTY behavior"
+    );
     /// **#161: a single oversized write is never punished for its own size.** The ceiling is
     /// checked against what is *already* owed, before this write's bytes are added — so a queue
     /// with room left always accepts a write whole, however large. This is the held-paste case
     /// the design challenger asked to see covered explicitly: some backlog already present, under
     /// the ceiling, then one write that alone would push past it.
+    #[cfg(unix)]
     #[test]
     fn an_oversized_write_is_accepted_whole_when_the_queue_is_under_the_ceiling() {
         const MARKER: &str = "raw-and-deaf-for-an-oversized-write";
@@ -2797,9 +3025,14 @@ mod tests {
         drop(output);
     }
 
+    crate::windows_unix_omission!(
+        a_refusal_clears_on_the_next_write_the_queue_accepts,
+        "unix-only: requires POSIX terminal raw mode and line-discipline semantics"
+    );
     /// **#161: a refusal is edge-triggered, not sticky.** It is cleared by the next write the
     /// queue *accepts*, not by the backlog draining on its own — a program that stalls, drains and
     /// stalls again has to be able to warn about each stall.
+    #[cfg(unix)]
     #[test]
     fn a_refusal_clears_on_the_next_write_the_queue_accepts() {
         const MARKER: &str = "raw-and-briefly-deaf-for-a-refusal";
@@ -2850,6 +3083,10 @@ mod tests {
         drop(output);
     }
 
+    crate::windows_unix_omission!(
+        closing_a_console_whose_program_left_a_survivor_ends_its_writer_before_the_close_returns,
+        "unix-only: requires Linux nonblocking PTY writer behavior"
+    );
     /// **The knock, on its own.** In the tests above the program dies, and a master whose program
     /// has gone answers a hang-up — which ends the writer's wait whether closing knocked or not, so
     /// none of them can see the knock. Here a survivor keeps the program's side of the pseudoterminal
@@ -2901,6 +3138,10 @@ mod tests {
         drop(output);
     }
 
+    crate::windows_unix_omission!(
+        closing_does_not_hang_when_a_survivor_holds_the_pseudoterminal,
+        "unix-only: requires POSIX terminal raw mode and detached session semantics"
+    );
     /// **The regression test of closing a console whose program left a survivor behind.** `Drop for
     /// Pty` used to join the reader thread with no deadline at all. That thread sits blocked inside
     /// `read` on a descriptor cloned from the master, and the `stop` flag the destructor raises is
@@ -2968,6 +3209,7 @@ mod tests {
     /// The drop itself runs on a thread of its own, answering through a channel, for the same reason
     /// `drain_until_closed` carries a deadline: on a build with the bug a direct `join` would never
     /// return and would take the suite down with it, publishing the hang as an eternal green.
+    #[cfg(unix)]
     #[test]
     fn closing_does_not_hang_when_a_survivor_holds_the_pseudoterminal() {
         use std::sync::mpsc;
@@ -3083,8 +3325,10 @@ mod tests {
         const HOW_LONG_IT_LIVES: u32 = 5;
         const MARKER: &str = "up";
 
-        let script = format!("printf {MARKER} && exec sleep {HOW_LONG_IT_LIVES}");
-        let (pty, output) = Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
+        let unix = format!("printf {MARKER} && exec sleep {HOW_LONG_IT_LIVES}");
+        let windows = format!("Write-Output {MARKER}; Start-Sleep -Seconds {HOW_LONG_IT_LIVES}");
+        let (program, args) = shell_invocation(&unix, &windows);
+        let (pty, output) = Pty::spawn(program, &args, Size::default()).expect("launch shell");
 
         // The same discipline as the test above, and for the same reasons: the program says when it
         // is up, and the channel is drained to empty so the reader is parked inside `read` rather
@@ -3122,6 +3366,7 @@ mod tests {
     /// suite with it: the drop runs on a thread of its own and answers through a channel, so a close
     /// that never comes back is a red test after two seconds rather than a `cargo test` that never
     /// ends. The drain parks the reader inside `read`, for the reasons the tests above give.
+    #[cfg_attr(windows, allow(dead_code))]
     fn time_the_close(pty: Pty, output: Receiver<Vec<u8>>, marker: &str) -> Duration {
         use std::sync::mpsc;
 
@@ -3146,6 +3391,10 @@ mod tests {
         took
     }
 
+    crate::windows_unix_omission!(
+        closing_a_console_does_not_wait_out_the_librarys_poll_step,
+        "unix-only: requires Unix hang-up signal behavior"
+    );
     /// **Closing a console whose program dies on hang-up costs what the dying costs, not a step of
     /// somebody's grid.** `portable-pty`'s own `kill` looks once right after its SIGHUP and then
     /// sleeps 50 ms between looks, so a program that needs any time at all to die —a shell takes one
@@ -3159,6 +3408,7 @@ mod tests {
     ///
     /// `sleep` keeps the default hang-up disposition, which is what a shell or an agent does as far
     /// as this close is concerned: it dies of the signal.
+    #[cfg(unix)]
     #[test]
     fn closing_a_console_does_not_wait_out_the_librarys_poll_step() {
         const LIBRARY_STEP: Duration = Duration::from_millis(50);
@@ -3176,6 +3426,10 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_program_that_ignores_the_hang_up_is_killed_after_its_grace,
+        "unix-only: requires Unix process signaling"
+    );
     /// **The other half: a program still gets its grace after the hang-up.** Killing outright on
     /// close would pass the test above too, and it would take away the time a program that catches
     /// the hang-up has to save its state. So a program that ignores the hang-up must be killed, and
@@ -3202,6 +3456,10 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_program_that_catches_the_hang_up_finishes_saving_before_it_is_killed,
+        "unix-only: requires Unix process signaling"
+    );
     /// **A program that catches the hang-up to save its state gets to finish saving, as long as the
     /// save fits in the library's grace.** The test above measures its floor against
     /// [`HANGUP_GRACE`] itself, so shortening the constant moves the floor with it and nothing goes
@@ -3303,6 +3561,10 @@ mod tests {
         }
     }
 
+    crate::windows_unix_omission!(
+        a_program_that_refuses_the_hang_up_is_left_running_and_reaped_when_it_ends,
+        "unix-only: requires Unix process signaling"
+    );
     /// **A program the system will not let this process signal is left running, not waited for.**
     /// Reached with `exec pkexec <cmd>` in a shell: the console's own child becomes a program with
     /// every user identity root, the hang-up is refused, and closing used to wait for it to leave on
@@ -3343,6 +3605,10 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_program_whose_kill_is_refused_after_its_grace_is_left_running_and_reaped,
+        "unix-only: requires Unix process signaling"
+    );
     /// **The same when only the kill at the end of the grace is refused.** The hang-up is accepted
     /// and ignored — `trap '' HUP`, which survives `exec` — so the close sits out its grace and then
     /// meets the refusal on the one signal left. A second is three times what that costs: the grace
@@ -3386,6 +3652,10 @@ mod tests {
         }
     }
 
+    crate::windows_unix_omission!(
+        a_program_not_reapable_after_an_accepted_kill_is_left_running_and_reaped,
+        "unix-only: requires Unix process signaling"
+    );
     /// **A program still not reapable after its kill was accepted is left running, not waited
     /// for.** Nothing refused anything here, so this is the path the close calls waitable — and it
     /// used to wait with no bound, inside the interface pass: on macOS that froze the window for

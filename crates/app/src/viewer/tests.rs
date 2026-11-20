@@ -170,8 +170,14 @@ fn background_refresh_does_not_move_or_hide_the_markdown() {
     assert_eq!(frame(&mut state, &ctx), before);
 }
 
+crate::windows_unix_omission!(
+    viewer_typing_and_dismissal_never_reach_the_program,
+    "unix-only: uses stty raw mode and cat to inspect bytes delivered to a PTY program"
+);
+
 #[cfg(unix)]
 #[test]
+
 fn viewer_typing_and_dismissal_never_reach_the_program() {
     use crate::tests::{one_frame_in, window_of_tabs};
     for (markdown, maximized) in [(true, false), (false, false), (true, true)] {

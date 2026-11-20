@@ -16,8 +16,10 @@ use std::os::unix::net::UnixStream;
 use interprocess::local_socket::GenericFilePath;
 #[cfg(windows)]
 use interprocess::local_socket::GenericNamespaced;
+#[cfg(not(windows))]
+use interprocess::local_socket::ListenerOptions;
+use interprocess::local_socket::Name;
 use interprocess::local_socket::{Listener, Stream, prelude::*};
-use interprocess::local_socket::{ListenerOptions, Name};
 
 /// The channel-owned end of a private wake pair.
 ///
@@ -36,13 +38,14 @@ pub(crate) struct Acceptor {
 }
 
 /// What woke the acceptor.
+#[cfg_attr(windows, allow(dead_code))]
 pub(crate) enum AcceptorReady {
     Connection,
     Stop,
 }
 
 /// Gives one bound listener the private descriptor pair that stops it.
-pub(crate) fn acceptor(listener: Listener) -> io::Result<(AcceptorStopper, Acceptor)> {
+pub(crate) fn acceptor(_listener: Listener) -> io::Result<(AcceptorStopper, Acceptor)> {
     #[cfg(windows)]
     {
         Err(io::Error::new(
@@ -56,7 +59,7 @@ pub(crate) fn acceptor(listener: Listener) -> io::Result<(AcceptorStopper, Accep
         Ok((
             AcceptorStopper { _signal: stopper },
             Acceptor {
-                listener,
+                listener: _listener,
                 signal: wake,
             },
         ))
@@ -183,11 +186,11 @@ pub fn bind(dir: &Path, id: &str) -> io::Result<Listener> {
     #[cfg(windows)]
     {
         let _ = (dir, id);
-        return Err(io::Error::new(
+        Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "the control channel is not bound on Windows until its security descriptor can be \
              asserted",
-        ));
+        ))
     }
     #[cfg(not(windows))]
     {
@@ -256,8 +259,27 @@ mod tests {
     use super::*;
     use panel_contract::PanelDir;
 
+    crate::windows_unix_omission!(
+        the_endpoint_lives_inside_the_panes_own_directory,
+        "unix-only: requires Unix socket path placement"
+    );
+    crate::windows_unix_omission!(
+        what_was_bound_is_what_gets_connected_to,
+        "unix-only: requires Unix stream socket connection semantics"
+    );
+    crate::windows_unix_omission!(
+        a_pane_cannot_be_reached_through_another_panes_endpoint,
+        "unix-only: requires Unix stream socket routing"
+    );
+
+    crate::windows_unix_omission!(
+        inherited_directory_requires_private_mode_type_and_effective_owner,
+        "unix-only: requires Unix permission bits and ownership metadata"
+    );
+
     #[cfg(unix)]
     #[test]
+
     fn inherited_directory_requires_private_mode_type_and_effective_owner() {
         use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
         let panel = PanelDir::create().unwrap();
@@ -316,6 +338,10 @@ mod tests {
         assert!(socket.exists(), "nothing was bound at {}", socket.display());
     }
 
+    crate::windows_unix_omission!(
+        nothing_outside_this_user_can_reach_the_endpoint,
+        "unix-only: requires Unix socket permissions and ownership metadata"
+    );
     /// The mode is the directory's and is inherited rather than set: this is what fails if somebody
     /// ever moves the endpoint out of the directory, which is the change that would quietly widen it.
     ///

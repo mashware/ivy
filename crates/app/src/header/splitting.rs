@@ -473,3 +473,27 @@ mod windows_tests {
         assert!(path.is_absolute());
     }
 }
+
+#[cfg(all(test, windows))]
+mod tests {
+    macro_rules! windows_unix_omission {
+        ($name:ident) => {
+            #[test]
+            #[ignore = "unix-only: requires Unix shell directory reports and Linux-native split cwd resolution"]
+            fn $name() {}
+        };
+    }
+
+    windows_unix_omission!(split_directory_tracks_cd_for_both_orientations);
+    windows_unix_omission!(split_directory_uses_named_toolbar_target_instead_of_focus);
+    windows_unix_omission!(
+        split_directory_osc_report_survives_source_exit_and_deleted_path_refuses_split
+    );
+    windows_unix_omission!(
+        split_directory_unknown_after_source_exit_uses_ordinary_launch_directory
+    );
+    windows_unix_omission!(split_directory_fallback_shell_receives_the_same_directory);
+    windows_unix_omission!(
+        split_directory_foreign_report_vetoes_native_and_previous_local_directory
+    );
+}

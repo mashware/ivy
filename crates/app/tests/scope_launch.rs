@@ -1,12 +1,17 @@
-#![cfg(target_os = "linux")]
+#[cfg(target_os = "linux")]
 use std::ffi::OsStr;
+#[cfg(target_os = "linux")]
 use std::path::Path;
+#[cfg(target_os = "linux")]
 use std::time::{Duration, Instant};
+#[cfg(target_os = "linux")]
 use term_core::{Pty, Size, TestScopePlacement};
 
+#[cfg(target_os = "linux")]
 fn launcher() -> &'static Path {
     Path::new(env!("CARGO_BIN_EXE_app"))
 }
+#[cfg(target_os = "linux")]
 fn read(output: &std::sync::mpsc::Receiver<Vec<u8>>, marker: &str) -> String {
     let deadline = Instant::now() + Duration::from_secs(4);
     let mut text = Vec::new();
@@ -21,6 +26,7 @@ fn read(output: &std::sync::mpsc::Receiver<Vec<u8>>, marker: &str) -> String {
     panic!("missing {marker:?}: {}", String::from_utf8_lossy(&text));
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn real_ivy_helper_preserves_argv_environment_directory_and_controlling_terminal() {
     let root = std::env::temp_dir();
@@ -42,6 +48,7 @@ fn real_ivy_helper_preserves_argv_environment_directory_and_controlling_terminal
     assert_eq!(pty.exit_success(), Some(true));
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn real_helper_returns_failed_exec_instead_of_reporting_successful_launch() {
     let error = Pty::spawn_with_test_launcher_in(
@@ -59,6 +66,7 @@ fn real_helper_returns_failed_exec_instead_of_reporting_successful_launch() {
     assert!(error.to_string().contains("No such file"), "{error}");
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn failed_and_stalled_manager_preserve_argv_environment_cwd_exactly_once() {
     let root = std::env::temp_dir();
@@ -101,6 +109,7 @@ fn failed_and_stalled_manager_preserve_argv_environment_cwd_exactly_once() {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn real_helper_honors_path_override_and_relative_executable() {
     use std::os::unix::fs::PermissionsExt;
@@ -335,6 +344,7 @@ fn real_systemd_oomd_kills_only_the_busy_console_in_a_disposable_guest() {
     assert_eq!(sibling.exit_success(), None, "unrelated console died");
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn real_helper_preserves_resize_input_session_and_root_close() {
     let (mut pty, output) = Pty::spawn_with_test_launcher_in(
@@ -371,6 +381,7 @@ fn real_helper_preserves_resize_input_session_and_root_close() {
     );
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn denied_scope_fallback_runs_once_with_closed_or_stalled_stderr() {
     use std::io::{Read, Write};
@@ -461,3 +472,50 @@ fn denied_scope_fallback_runs_once_with_closed_or_stalled_stderr() {
         }
     }
 }
+
+macro_rules! windows_unix_omission {
+    ($name:ident, $reason:literal) => {
+        #[cfg(windows)]
+        #[test]
+        #[ignore = $reason]
+        fn $name() {}
+    };
+}
+
+#[cfg(windows)]
+windows_unix_omission!(
+    real_ivy_helper_preserves_argv_environment_directory_and_controlling_terminal,
+    "unix-only: invokes /bin/sh and verifies Unix controlling-terminal behavior"
+);
+windows_unix_omission!(
+    real_helper_returns_failed_exec_instead_of_reporting_successful_launch,
+    "unix-only: requires Unix exec failure and ENOENT reporting from the Linux test launcher"
+);
+windows_unix_omission!(
+    failed_and_stalled_manager_preserve_argv_environment_cwd_exactly_once,
+    "unix-only: invokes /bin/sh and exercises Linux process-manager stderr backpressure"
+);
+windows_unix_omission!(
+    real_helper_honors_path_override_and_relative_executable,
+    "unix-only: creates executable POSIX shell fixtures and verifies Unix PATH lookup"
+);
+windows_unix_omission!(
+    real_systemd_scopes_separate_roots_and_immediate_descendants_from_the_gui,
+    "unix-only: requires Linux systemd user scopes and process ancestry"
+);
+windows_unix_omission!(
+    bounded_kernel_oom_is_attributed_without_touching_other_scopes,
+    "unix-only: requires delegated Linux cgroup memory-controller scopes"
+);
+windows_unix_omission!(
+    real_systemd_oomd_kills_only_the_busy_console_in_a_disposable_guest,
+    "unix-only: requires systemd-oomd and a disposable Linux guest"
+);
+windows_unix_omission!(
+    real_helper_preserves_resize_input_session_and_root_close,
+    "unix-only: verifies Linux process groups, sessions and TIOCGWINSZ terminal ioctl"
+);
+windows_unix_omission!(
+    denied_scope_fallback_runs_once_with_closed_or_stalled_stderr,
+    "unix-only: exercises Linux pipe closure and fcntl nonblocking stderr behavior"
+);

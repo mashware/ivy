@@ -1786,6 +1786,11 @@ mod tests {
         boundary
     }
 
+    crate::windows_unix_omission!(
+        clicking_failed_recovery_does_not_discard_an_unanswered_held_paste,
+        "unix-only: depends on Linux-specific bracketed-paste size boundary and /bin/cat child behavior"
+    );
+
     #[cfg(target_os = "linux")]
     #[test]
     fn clicking_failed_recovery_does_not_discard_an_unanswered_held_paste() {
@@ -1802,6 +1807,11 @@ mod tests {
             "starting fresh does not answer the held paste"
         );
     }
+
+    crate::windows_unix_omission!(
+        clipboard_takeover_uses_the_fresh_shell_gate_instead_of_old_tui_paste_mode,
+        "unix-only: depends on Linux-specific bracketed-paste size boundary and /bin/cat child behavior"
+    );
 
     #[cfg(target_os = "linux")]
     #[test]

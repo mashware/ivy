@@ -129,7 +129,7 @@ fn shell_word(path: &Path) -> String {
     format!("'{path}'")
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use crate::{Pty, Size};
@@ -219,4 +219,20 @@ mod tests {
             "a prelude that failed marked the program ready"
         );
     }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    crate::windows_unix_omission!(
+        it_reports_what_the_program_got_and_not_what_the_echo_showed,
+        "unix-only: requires Unix canonical line discipline and echo semantics"
+    );
+    crate::windows_unix_omission!(
+        a_prelude_with_a_semicolon_of_its_own_is_refused,
+        "unix-only: requires POSIX shell command chaining"
+    );
+    crate::windows_unix_omission!(
+        a_prelude_that_fails_never_marks_the_program_ready,
+        "unix-only: requires POSIX shell exit and EOF semantics"
+    );
 }

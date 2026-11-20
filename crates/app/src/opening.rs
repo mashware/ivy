@@ -17,6 +17,14 @@ use eframe::egui;
 #[cfg(all(test, unix))]
 mod codex_tests;
 
+#[cfg(all(test, windows))]
+mod codex_tests {
+    crate::windows_unix_omission!(
+        launched_shells_keep_their_own_pane_identity_and_survive_repeated_codex_runs,
+        "unix-only: launches POSIX shell wrapper scripts and relies on Unix executable permissions"
+    );
+}
+
 pub(crate) fn native_window(
     cc: &eframe::CreationContext<'_>,
     with_what: OpenWith,

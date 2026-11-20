@@ -719,8 +719,14 @@ mod tests {
         assert!(!Kind::Local.is_document() && !Kind::AgainstBase.is_document());
     }
 
+    crate::windows_unix_omission!(
+        git_timeout_does_not_wait_for_child,
+        "unix-only: sends a Unix signal to stop a timed out Git child"
+    );
+
     #[cfg(unix)]
     #[test]
+
     fn git_timeout_does_not_wait_for_child() {
         let mut command = Command::new("sh");
         command

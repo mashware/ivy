@@ -395,6 +395,7 @@ fn every_declared_knob_is_asked_for_by_some_batch() {
 /// running the bare `grep` instead of the script, which is what the settings guard's comment records.
 /// The launch is replaced by the exit status it would have left; nothing above that function is
 /// needed by what follows it.
+#[cfg(unix)]
 fn run_the_guards(name: &str, report: &str, status: u8) -> (String, bool) {
     run_the_guards_as(name, &[], report, status)
 }
@@ -402,6 +403,7 @@ fn run_the_guards(name: &str, report: &str, status: u8) -> (String, bool) {
 /// [`run_the_guards`], with the knobs a batch's row sets set the way the batch table would have set
 /// them — and **nothing else from this process's environment**, so a knob whoever runs the suite
 /// happens to have exported cannot change which guard a fixture reaches.
+#[cfg(unix)]
 fn run_the_guards_as(name: &str, knobs: &[&str], report: &str, status: u8) -> (String, bool) {
     let guards = &MEASURE[MEASURE
         .find("\ninvalidate() {")
@@ -453,6 +455,7 @@ fn run_the_guards_as(name: &str, knobs: &[&str], report: &str, status: u8) -> (S
 /// of an assignment ending in `grep` ended the script in silence, report unrenamed, and a guard
 /// above the check that did invalidate named a missing line instead of the crash.
 #[test]
+#[cfg(unix)]
 fn a_crashed_run_is_invalidated_for_the_crash_whatever_its_report_lost() {
     let (said, invalid) = run_the_guards("crashed", "", 101);
 
@@ -472,6 +475,7 @@ fn a_crashed_run_is_invalidated_for_the_crash_whatever_its_report_lost() {
 /// the test above cannot see once that check comes first. Each fixture carries every line above the
 /// guard it aims at, so the guard that speaks is the one it names and not a later one.
 #[test]
+#[cfg(unix)]
 fn a_report_missing_the_line_a_guard_reads_is_invalidated_by_that_guard() {
     let links = "links: 0 sources found · 0 plain · 0 OSC 8 · 0 panel activations\n";
     let buttons = "buttons:      0 drawn whole, 0 pressed\n";
@@ -736,6 +740,7 @@ fn the_large_pair_is_judged_on_the_size_the_pane_wrote_out() {
 /// script's own functions can say whether the document it builds lands between the floor and the
 /// ceiling once compacted, and whether the bound it checks really sits under that compact size.
 #[test]
+#[cfg(unix)]
 fn the_large_document_lands_between_the_floor_and_the_ceiling() {
     let from = |start: &str, end: &str| {
         let at = MEASURE
@@ -826,6 +831,7 @@ fn the_batch_with_emoji_in_its_panels_is_held_to_the_colour_guard() {
 
 /// Execute the shipped validator: deleting a direction changes the observed exit status.
 #[test]
+#[cfg(unix)]
 fn graphical_settings_reports_require_the_requested_effects() {
     use std::{
         fs,
@@ -924,6 +930,7 @@ fn graphical_settings_reports_require_the_requested_effects() {
 }
 
 #[test]
+#[cfg(unix)]
 fn settings_variants_are_not_averaged_across_modes() {
     use std::{
         fs,
@@ -1007,6 +1014,7 @@ fn settings_variants_are_not_averaged_across_modes() {
 }
 
 #[test]
+#[cfg(unix)]
 fn integrated_chrome_witness_and_regimes_are_checked() {
     use std::{
         fs,
@@ -1089,6 +1097,7 @@ fn integrated_chrome_witness_and_regimes_are_checked() {
 }
 
 #[test]
+#[cfg(unix)]
 fn integrated_chrome_batches_require_painted_pane_headers() {
     use std::{fs, process::Command};
     let row = MEASURE
@@ -1128,6 +1137,7 @@ fn integrated_chrome_batches_require_painted_pane_headers() {
 }
 
 #[test]
+#[cfg(unix)]
 fn board_guards_require_real_navigation_and_reject_closed_activity() {
     use std::{fs, process::Command};
     let report = std::env::temp_dir().join(format!("board-guards-{}", std::process::id()));
@@ -1202,6 +1212,7 @@ fn board_guards_require_real_navigation_and_reject_closed_activity() {
 }
 
 #[test]
+#[cfg(unix)]
 fn rich_board_guard_requires_observation_and_real_interactions() {
     use std::{fs, process::Command};
     let report = std::env::temp_dir().join(format!("board-rich-{}", std::process::id()));
@@ -1245,6 +1256,7 @@ fn rich_board_guard_requires_observation_and_real_interactions() {
 }
 
 #[test]
+#[cfg(unix)]
 fn board_variants_are_only_averaged_with_their_own_mode() {
     use std::{fs, process::Command};
     let directory = std::env::temp_dir().join(format!("board-compare-{}", std::process::id()));
@@ -1279,6 +1291,7 @@ fn board_variants_are_only_averaged_with_their_own_mode() {
 }
 
 #[test]
+#[cfg(unix)]
 fn board_controls_publish_identical_panel_documents() {
     use std::process::Command;
     let function = MEASURE
@@ -1367,6 +1380,7 @@ for report, mode in mutants:
 }
 
 #[test]
+#[cfg(unix)]
 fn ligature_comparison_requires_matching_mode_font_size_and_scale() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let dir = std::env::temp_dir().join(format!("ligature-compare-{}", std::process::id()));
@@ -1413,3 +1427,61 @@ fn ligature_comparison_requires_matching_mode_font_size_and_scale() {
     }
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+macro_rules! windows_unix_omission {
+    ($name:ident, $reason:literal) => {
+        #[cfg(windows)]
+        #[test]
+        #[ignore = $reason]
+        fn $name() {}
+    };
+}
+
+windows_unix_omission!(
+    a_crashed_run_is_invalidated_for_the_crash_whatever_its_report_lost,
+    "unix-only: invokes sh to execute the measurement guard script"
+);
+windows_unix_omission!(
+    a_report_missing_the_line_a_guard_reads_is_invalidated_by_that_guard,
+    "unix-only: invokes sh to execute the measurement guard script"
+);
+windows_unix_omission!(
+    the_large_document_lands_between_the_floor_and_the_ceiling,
+    "unix-only: invokes sh with POSIX shell functions extracted from the measurement script"
+);
+windows_unix_omission!(
+    graphical_settings_reports_require_the_requested_effects,
+    "unix-only: invokes sh to run POSIX report validation functions"
+);
+windows_unix_omission!(
+    settings_variants_are_not_averaged_across_modes,
+    "unix-only: invokes sh to compare measurement reports"
+);
+windows_unix_omission!(
+    integrated_chrome_witness_and_regimes_are_checked,
+    "unix-only: invokes sh to run POSIX report validation functions"
+);
+windows_unix_omission!(
+    integrated_chrome_batches_require_painted_pane_headers,
+    "unix-only: invokes sh to run POSIX report validation functions"
+);
+windows_unix_omission!(
+    board_guards_require_real_navigation_and_reject_closed_activity,
+    "unix-only: invokes sh to run POSIX report validation functions"
+);
+windows_unix_omission!(
+    rich_board_guard_requires_observation_and_real_interactions,
+    "unix-only: invokes sh to run POSIX report validation functions"
+);
+windows_unix_omission!(
+    board_variants_are_only_averaged_with_their_own_mode,
+    "unix-only: invokes sh to compare measurement reports"
+);
+windows_unix_omission!(
+    board_controls_publish_identical_panel_documents,
+    "unix-only: invokes sh to execute POSIX document builders"
+);
+windows_unix_omission!(
+    ligature_comparison_requires_matching_mode_font_size_and_scale,
+    "unix-only: invokes sh to compare measurement reports"
+);

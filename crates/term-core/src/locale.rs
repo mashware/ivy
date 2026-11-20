@@ -232,8 +232,14 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        the_c_library_is_asked_whether_a_locale_exists,
+        "unix-only: requires the Unix C locale database"
+    );
+
     #[cfg(unix)]
     #[test]
+
     fn the_c_library_is_asked_whether_a_locale_exists() {
         assert!(exists("C"), "the C locale always exists");
         assert!(!exists("zz_QQ.UTF-8"), "an invented locale was accepted");

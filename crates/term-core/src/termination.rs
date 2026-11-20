@@ -124,6 +124,7 @@ impl ChildKiller for CachedChild {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    #[cfg(unix)]
     use std::time::Duration;
 
     #[cfg(target_os = "linux")]
@@ -156,6 +157,10 @@ mod tests {
             Some(123)
         }
     }
+    crate::windows_unix_omission!(
+        observer_cannot_reap_between_the_close_status_check_and_signal,
+        "unix-only: requires Linux observer reaping behavior"
+    );
     #[cfg(target_os = "linux")]
     #[test]
     fn observer_cannot_reap_between_the_close_status_check_and_signal() {
@@ -185,6 +190,10 @@ mod tests {
         assert!(child.try_wait().unwrap().is_some());
         assert_eq!(reaped.load(Ordering::SeqCst), 1);
     }
+    crate::windows_unix_omission!(
+        dropping_a_pty_retires_observer_reaping_before_the_close_signal,
+        "unix-only: requires Linux observer reaping behavior"
+    );
     #[cfg(target_os = "linux")]
     #[test]
     fn dropping_a_pty_retires_observer_reaping_before_the_close_signal() {
@@ -258,6 +267,10 @@ mod tests {
             None
         }
     }
+    crate::windows_unix_omission!(
+        actual_child_status_distinguishes_sigkill_from_exit_137,
+        "unix-only: requires Unix signal exit-status semantics"
+    );
     #[cfg(unix)]
     #[test]
     fn actual_child_status_distinguishes_sigkill_from_exit_137() {

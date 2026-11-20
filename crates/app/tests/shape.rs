@@ -91,6 +91,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/explorer/interaction_tests.rs"),
     ),
     (
+        "src/client_attestation_windows_tests.rs",
+        include_str!("../src/client_attestation_windows_tests.rs"),
+    ),
+    (
         "src/client_attestation/mod.rs",
         include_str!("../src/client_attestation/mod.rs"),
     ),

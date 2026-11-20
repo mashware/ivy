@@ -3,6 +3,18 @@ use super::*;
 
 const UUID: &str = "11111111-1111-4111-8111-111111111111";
 
+#[cfg(windows)]
+mod sockets {
+    crate::windows_unix_omission!(
+        real_session_socket_bypasses_full_ui_inbox_and_cannot_spoof_peer,
+        "unix-only: requires Unix socket peer credentials"
+    );
+    crate::windows_unix_omission!(
+        session_helper_cannot_release_or_replace_existing_panel_connection,
+        "unix-only: requires Unix socket peer credentials"
+    );
+}
+
 #[test]
 fn exact_ids_are_client_typed_and_never_shell_text() {
     for client in [Client::Codex, Client::Claude] {

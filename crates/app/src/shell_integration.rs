@@ -942,3 +942,43 @@ mod tests {
         );
     }
 }
+
+#[cfg(all(test, windows))]
+mod tests {
+    crate::windows_unix_omission!(
+        relative_tmpdir_uses_absolute_shared_base_and_warns_once,
+        "unix-only: requires executable POSIX shell integration with bash and /bin/sh"
+    );
+    crate::windows_unix_omission!(
+        real_shells_use_post_configuration_path_and_remain_alive,
+        "unix-only: starts bash, zsh and fish with POSIX startup files and executable shell hooks"
+    );
+    crate::windows_unix_omission!(
+        zsh_restores_original_directory_and_honors_changes_from_zshenv,
+        "unix-only: invokes zsh and relies on its POSIX startup configuration"
+    );
+    crate::windows_unix_omission!(
+        cleanup_never_removes_unknown_contents,
+        "unix-only: creates an executable POSIX shell helper using Unix permissions"
+    );
+    crate::windows_unix_omission!(
+        user_commands_win_with_diagnostic,
+        "unix-only: creates executable POSIX shell wrappers for command resolution"
+    );
+    crate::windows_unix_omission!(
+        zsh_disabling_rcs_does_not_install_codex_function,
+        "unix-only: invokes zsh and inspects its POSIX startup behavior"
+    );
+    crate::windows_unix_omission!(
+        fish_preserves_newlines_in_executable_path_and_arguments,
+        "unix-only: invokes fish and creates executable POSIX shell wrappers"
+    );
+    crate::windows_unix_omission!(
+        missing_helper_at_preparation_or_runtime_keeps_real_shells_usable,
+        "unix-only: invokes bash, zsh and fish with POSIX helper scripts"
+    );
+    crate::windows_unix_omission!(
+        unsupported_shell_reports_limitation_and_still_runs_commands,
+        "unix-only: invokes /bin/sh with POSIX commands"
+    );
+}

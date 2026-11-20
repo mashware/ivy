@@ -102,8 +102,14 @@ mod tests {
         assert!(!dir.0.join("ivy").exists());
     }
 
+    crate::windows_unix_omission!(
+        dangling_destination_is_not_replaced,
+        "unix-only: requires Unix symlink or permission semantics"
+    );
+
     #[cfg(unix)]
     #[test]
+
     fn dangling_destination_is_not_replaced() {
         let dir = Directory::new();
         dir.seed("agent-terminal/config", b"old");

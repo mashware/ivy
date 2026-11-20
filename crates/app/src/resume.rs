@@ -464,8 +464,14 @@ mod tests {
         }
     }
 
+    crate::windows_unix_omission!(
+        every_client_reaches_the_child_with_only_fixed_arguments_and_a_structured_cwd,
+        "unix-only: runs executable POSIX shell fixtures to inspect child arguments and working directory"
+    );
+
     #[cfg(unix)]
     #[test]
+
     fn every_client_reaches_the_child_with_only_fixed_arguments_and_a_structured_cwd() {
         use std::os::unix::fs::PermissionsExt;
         static NEXT: AtomicUsize = AtomicUsize::new(0);
@@ -524,8 +530,14 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    crate::windows_unix_omission!(
+        failed_resume_retains_output_until_explicit_fresh_shell_takeover,
+        "unix-only: launches /bin/sh with POSIX commands to exercise failed-resume takeover"
+    );
+
     #[cfg(unix)]
     #[test]
+
     fn failed_resume_retains_output_until_explicit_fresh_shell_takeover() {
         let leaf = saved(Client::Claude, std::env::temp_dir());
         let mut pane = try_open_with(&Default::default(), &leaf, 0, Default::default(), |_| {
@@ -590,6 +602,11 @@ mod tests {
         panic!("the first personal input did not reach the replacement shell");
     }
 
+    crate::windows_unix_omission!(
+        a_wrong_live_session_is_replaced_before_notice_keyboard_clipboard_or_mouse_input,
+        "unix-only: uses /bin/cat and a POSIX shell to verify raw input reaches a fresh takeover process"
+    );
+    #[cfg(unix)]
     #[test]
     fn a_wrong_live_session_is_replaced_before_notice_keyboard_clipboard_or_mouse_input() {
         let _shell = crate::shell_integration::TestShell::use_program("/bin/sh");
@@ -683,7 +700,7 @@ mod tests {
         let mut pane = crate::restoration::open_leaf(
             &Default::default(),
             &leaf,
-            "/bin/sh",
+            crate::shell_integration::fallback_shell(),
             0,
             Default::default(),
         )
@@ -698,4 +715,9 @@ mod tests {
         assert!(pane.restoration.resume.is_none());
         assert!(pane.restoration.directory.is_none());
     }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "unix-only: requires the built target/debug/app and a real systemd user manager"]
+    fn restored_client_fixed_arguments_and_directory_reach_a_real_isolated_scope() {}
 }

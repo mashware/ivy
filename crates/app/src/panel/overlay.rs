@@ -471,3 +471,24 @@ mod tests {
         assert!(state.displayed_source().is_none());
     }
 }
+
+#[cfg(all(test, windows))]
+mod native_tests {
+    macro_rules! windows_unix_omission {
+        ($name:ident) => {
+            #[test]
+            #[ignore = "unix-only: requires Linux process ancestry, Unix-domain sockets and POSIX PTY fixtures"]
+            fn $name() {}
+        };
+    }
+
+    windows_unix_omission!(native_claude_outside_desktop_path_admits_hook_and_clears_wait);
+    windows_unix_omission!(same_client_helper_is_admitted_without_waiting_for_window_apply);
+    windows_unix_omission!(nested_client_is_rejected_but_generic_descendant_hook_is_allowed);
+    windows_unix_omission!(unheld_and_script_held_refusals_keep_their_contract);
+    windows_unix_omission!(
+        admitted_proof_survives_helper_exit_but_not_hold_replacement_or_root_death
+    );
+    windows_unix_omission!(foreign_client_root_and_closed_holder_are_refused);
+    windows_unix_omission!(full_admission_queue_refuses_without_changing_the_document);
+}
