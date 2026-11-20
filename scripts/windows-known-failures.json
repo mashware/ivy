@@ -543,8 +543,9 @@
   {
     "binary": "app/app:lib",
     "name": "tests::a_console_click_uses_the_old_pixels_and_does_not_clear_the_selection",
-    "reason": "selection, clipboard, ligature or emoji painting differs on Windows",
-    "issue": "https://github.com/mashware/ivy/issues/188"
+    "reason": "opening a link sometimes clears the console selection",
+    "issue": "https://github.com/mashware/ivy/issues/188",
+    "intermittent": true
   },
   {
     "binary": "app/app:lib",
