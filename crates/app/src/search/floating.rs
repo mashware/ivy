@@ -540,9 +540,9 @@ mod tests {
                 screen.advance(b"\r\n");
             }
         }
-        let mut search = Search::new("needle", Options::default()).unwrap();
+        let search = Search::new("needle", Options::default()).unwrap();
         assert_eq!(
-            screen.find(&mut search, Toward::Older, term_core::KeepClear::NONE),
+            screen.find(&search, Toward::Older, term_core::KeepClear::NONE),
             term_core::Found::Match,
             "the premise: the needle is found"
         );
@@ -672,9 +672,9 @@ mod tests {
             cols: 80,
         });
         screen.advance(b"needle");
-        let mut search = Search::new("needle", Options::default()).unwrap();
+        let search = Search::new("needle", Options::default()).unwrap();
         assert_eq!(
-            screen.find(&mut search, Toward::Older, term_core::KeepClear::NONE),
+            screen.find(&search, Toward::Older, term_core::KeepClear::NONE),
             term_core::Found::Match
         );
         let layout = layout(console(), &metrics(), &screen.view(), false, &[], true);

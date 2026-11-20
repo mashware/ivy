@@ -8332,16 +8332,25 @@ a pattern» paragraph's reason.
 - **What changes, declared**: walking older, a match is now chosen left-to-right inside its line, as
   marking always chose it — `aa` over `aaa` selects the first two cells where it used to select the
   last two. The row's padding is still part of the text, so `$` matches after it, as before.
-- **A hostile pattern is accepted as a pause, by the user's decision.** A pattern built to make the
-  engine walk slowly (`\p{L}.{170}~`) costs 0.13–0.16 s a press over a full history and up to 0.6 s
-  over one logical line wrapped across the whole history, and **5–6 ms of marking per frame** for as
-  long as the search stays open — paid while typing and while output streams, not only on `Enter`.
+- **A hostile pattern is accepted as a pause, by the user's decision — asked twice.** A pattern
+  with a large count over text that varies (`\p{L}.{170}~` over random letters, digits and a wide
+  character) is the engine's slowest case: **0.32–0.33 s a press** at the median over a full history of lines,
+  **3.2–3.4 s** (slowest 4.5 s) over one logical line wrapped across the whole history, and **3–13 ms
+  of marking per frame** over lines, **70–100 ms** over that one line (median to slowest, one run) — for as long as the search stays open, paid
+  while typing and while output streams, not only on `Enter`. The person was asked first with the
+  design's estimate (0.6 s, measured over a synthetic grid) and again with these figures, and kept
+  the answer: a pattern like that is not what this terminal is for. Over repeated text the same
+  pattern costs no more than an ordinary query, which is why the bench draws random text for it.
   Discarded: a per-press deadline and cutting a huge line into chunks — chunks would bring back the
   silent miss for a match across a cut, which is what this amendment removes; and a per-frame marking
-  budget, for patterns this terminal's users do not type.
-- **Measured**: <filled by the work that ships it — `cargo run --release --example search -p
-  term-core`, two runs, a literal miss, a whole-word miss and the hostile pattern; and batch `E`
-  against `C`>.
+  budget, which would also need the huge line cut to bound it.
+- **Measured** with `cargo run --release --example search -p term-core` (3 549 rows of 180 columns,
+  twenty presses each way, two runs, 20 November 2026). A press that finds nothing: **2.82–3.14 ms**
+  walking older, **3.48–3.90 ms** newer — down from 11.4–13.6 ms, because the engine reads each line
+  as text instead of a byte per cell through the grid. Whole word rejected on every line
+  **4.55–4.64 ms** older, **5.60–5.68 ms** newer; over one wrapped line **7.14–7.90 ms**. An ordinary
+  pattern that finds nothing (`absent\s+\d+`) **2.69–2.88 ms**. The hostile figures are above.
+  What marking costs per painting in the window is the job of batch `E` against `C`.
 
 | Discarded (#121) | Why |
 |---|---|
