@@ -138,12 +138,14 @@ impl Process {
                     )
                 };
                 match spawn(&program, &args) {
-                    Err(error) if fallback => {
+                    Err(error)
+                        if fallback && program != crate::shell_integration::fallback_shell() =>
+                    {
+                        let fallback = crate::shell_integration::fallback_shell();
                         crate::pty_output::say(&format!(
-                            "'{program}' could not be launched ({error}); opening {}",
-                            crate::shell_integration::FALLBACK_SHELL
+                            "'{program}' could not be launched ({error}); opening {fallback}"
                         ));
-                        spawn(crate::shell_integration::FALLBACK_SHELL, &[])
+                        spawn(fallback, &[])
                     }
                     result => result,
                 }
@@ -154,13 +156,16 @@ impl Process {
             Pty::spawn_with_env_in(program, args, request.size, request.env, request.directory)
         };
         let (pty, output) = match spawn(request.program, request.args) {
-            Err(error) if request.fallback => {
+            Err(error)
+                if request.fallback
+                    && request.program != crate::shell_integration::fallback_shell() =>
+            {
+                let fallback = crate::shell_integration::fallback_shell();
                 crate::pty_output::say(&format!(
-                    "'{}' could not be launched ({error}); opening {}",
+                    "'{}' could not be launched ({error}); opening {fallback}",
                     request.program,
-                    crate::shell_integration::FALLBACK_SHELL
                 ));
-                spawn(crate::shell_integration::FALLBACK_SHELL, &[])?
+                spawn(fallback, &[])?
             }
             result => result?,
         };

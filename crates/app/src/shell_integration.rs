@@ -24,42 +24,102 @@ pub(crate) fn the_users_shell() -> String {
     if let Some(shell) = TEST_SHELL.with(|shell| shell.borrow().clone()) {
         return shell;
     }
-    std::env::var("SHELL").unwrap_or_else(|_| default_shell())
+    // Resolved once per process: on Windows it searches the disk, and a console opens on the
+    // interface thread.
+    static SHELL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    SHELL
+        .get_or_init(|| {
+            #[cfg(windows)]
+            return windows_shell(&WindowsSession::read(), Path::is_file);
+            #[cfg(not(windows))]
+            std::env::var("SHELL").unwrap_or_else(|_| fallback_shell().to_owned())
+        })
+        .clone()
 }
 
-/// The console program on a session that names none.
-fn default_shell() -> String {
+/// The program that is launched when the first one cannot start: one every machine of the platform
+/// has. Where it is also what was tried first, the launch does not retry it.
+pub(crate) fn fallback_shell() -> &'static str {
     #[cfg(windows)]
-    return windows_default(std::env::var_os("PATH").as_deref(), Path::is_file);
+    {
+        static CMD: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+        CMD.get_or_init(|| windows_cmd(&WindowsSession::read()))
+    }
     #[cfg(not(windows))]
-    FALLBACK_SHELL.to_owned()
+    "/bin/sh"
 }
 
-/// The program that is launched when the first one cannot start. It must exist on every machine of
-/// its platform and differ from what [`default_shell`] tries first, or the retry repeats the failure.
-#[cfg(not(windows))]
-pub(crate) const FALLBACK_SHELL: &str = "/bin/sh";
-#[cfg(windows)]
-pub(crate) const FALLBACK_SHELL: &str = "cmd.exe";
-
-/// Windows has no `SHELL` and no `/bin/sh`. The newer PowerShell when it is installed, else the one
-/// every Windows ships, else `cmd.exe`, as Windows Terminal picks. Looked up on the session's own
-/// search path, never in configuration, and only in absolute directories so the folder a console starts
-/// in cannot plant one.
+/// What a Windows session says about its shells, read from its environment.
 #[cfg_attr(not(windows), allow(dead_code))]
-fn windows_default(path: Option<&OsStr>, is_file: impl Fn(&Path) -> bool) -> String {
-    ["pwsh.exe", "powershell.exe"]
-        .into_iter()
-        .find_map(|name| {
-            path.into_iter()
-                .flat_map(std::env::split_paths)
-                .filter(|directory| directory.is_absolute())
-                .map(|directory| directory.join(name))
-                .find(|candidate| is_file(candidate))
+#[derive(Default)]
+struct WindowsSession {
+    shell: Option<OsString>,
+    path: Option<OsString>,
+    comspec: Option<OsString>,
+    system_root: Option<OsString>,
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+impl WindowsSession {
+    fn read() -> Self {
+        Self {
+            shell: std::env::var_os("SHELL"),
+            path: std::env::var_os("PATH"),
+            comspec: std::env::var_os("ComSpec"),
+            system_root: std::env::var_os("SystemRoot"),
+        }
+    }
+}
+
+/// Windows has no `/bin/sh`, and the shell variable a Git Bash or MSYS session exports is a path in
+/// that environment's own namespace (`/usr/bin/bash`) that Windows cannot launch, so it counts only
+/// as an absolute Windows path to a file. Otherwise the newer PowerShell when it is installed, else
+/// the one every Windows ships, else `cmd.exe`, as Windows Terminal picks. Looked up on the
+/// session's own search path, never in configuration, and only in absolute directories so the
+/// folder a console starts in cannot plant one.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn windows_shell(session: &WindowsSession, is_file: impl Fn(&Path) -> bool) -> String {
+    let chosen = session
+        .shell
+        .as_deref()
+        .map(Path::new)
+        .filter(|shell| shell.is_absolute() && is_file(shell))
+        .map(Path::to_path_buf);
+    chosen
+        .or_else(|| {
+            ["pwsh.exe", "powershell.exe"].into_iter().find_map(|name| {
+                session
+                    .path
+                    .iter()
+                    .flat_map(std::env::split_paths)
+                    .filter(|directory| directory.is_absolute())
+                    .map(|directory| directory.join(name))
+                    .find(|candidate| is_file(candidate))
+            })
         })
         .map_or_else(
-            || "cmd.exe".to_owned(),
+            || windows_cmd(session),
             |found| found.to_string_lossy().into_owned(),
+        )
+}
+
+/// `cmd.exe` by an absolute path: a bare name would be searched for again by the launcher, current
+/// directory and relative entries included.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn windows_cmd(session: &WindowsSession) -> String {
+    let absolute = |value: &Option<OsString>| {
+        value
+            .as_deref()
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
+    };
+    absolute(&session.comspec)
+        .or_else(|| {
+            absolute(&session.system_root).map(|root| root.join("System32").join("cmd.exe"))
+        })
+        .map_or_else(
+            || r"C:\Windows\System32\cmd.exe".to_owned(),
+            |path| path.to_string_lossy().into_owned(),
         )
 }
 
@@ -193,6 +253,24 @@ mod default_shell_tests {
         std::env::join_paths(directories).unwrap()
     }
 
+    fn session(shell: Option<&str>, path: &OsStr) -> WindowsSession {
+        let root = std::env::temp_dir().join("Windows");
+        WindowsSession {
+            shell: shell.map(OsString::from),
+            path: Some(path.to_owned()),
+            comspec: None,
+            system_root: Some(root.into_os_string()),
+        }
+    }
+
+    fn system_cmd() -> String {
+        let root = std::env::temp_dir().join("Windows");
+        root.join("System32")
+            .join("cmd.exe")
+            .to_string_lossy()
+            .into_owned()
+    }
+
     #[test]
     fn windows_startup_prefers_pwsh_then_windows_powershell_then_cmd() {
         let base = std::env::temp_dir();
@@ -200,36 +278,85 @@ mod default_shell_tests {
         let path = path_of(&[&first, &second]);
         let pwsh = second.join("pwsh.exe");
         let legacy = first.join("powershell.exe");
+        let s = session(None, &path);
         // pwsh wins even when Windows PowerShell sits in an earlier directory.
-        let both = windows_default(Some(&path), |p| p == pwsh || p == legacy);
+        let both = windows_shell(&s, |p| p == pwsh || p == legacy);
         assert_eq!(both, pwsh.to_string_lossy());
-        let only_legacy = windows_default(Some(&path), |p| p == legacy);
-        assert_eq!(only_legacy, legacy.to_string_lossy());
-        assert_eq!(windows_default(Some(&path), |_| false), "cmd.exe");
-        assert_eq!(windows_default(None, |_| true), "cmd.exe");
+        assert_eq!(windows_shell(&s, |p| p == legacy), legacy.to_string_lossy());
+        assert_eq!(windows_shell(&s, |_| false), system_cmd());
     }
 
     #[test]
     fn windows_startup_ignores_relative_path_entries() {
-        let relative = Path::new("planted");
-        let path = path_of(&[relative]);
-        assert_eq!(windows_default(Some(&path), |_| true), "cmd.exe");
+        let path = path_of(&[Path::new("planted")]);
+        assert_eq!(windows_shell(&session(None, &path), |_| true), system_cmd());
     }
 
-    /// The default program really opens a console on Windows: the reported failure was this spawn.
+    #[test]
+    fn windows_startup_takes_cmd_by_absolute_path_only() {
+        let path = path_of(&[]);
+        let comspec = std::env::temp_dir().join("cmd.exe");
+        let mut s = session(None, &path);
+        s.comspec = Some(comspec.clone().into_os_string());
+        assert_eq!(windows_cmd(&s), comspec.to_string_lossy());
+        s.comspec = Some("cmd.exe".into());
+        assert_eq!(windows_cmd(&s), system_cmd());
+        s.system_root = Some("Windows".into());
+        assert_eq!(windows_cmd(&s), r"C:\Windows\System32\cmd.exe");
+    }
+
+    #[test]
+    fn windows_startup_keeps_a_launchable_shell_and_skips_a_unix_one() {
+        let pwsh = std::env::temp_dir().join("pwsh.exe");
+        let path = path_of(&[&std::env::temp_dir()]);
+        let bash = std::env::temp_dir().join("bash.exe");
+        let named = session(Some(&bash.to_string_lossy()), &path);
+        assert_eq!(windows_shell(&named, |_| true), bash.to_string_lossy());
+        let msys = session(Some("/usr/bin/bash"), &path);
+        assert_eq!(windows_shell(&msys, |p| p == pwsh), pwsh.to_string_lossy());
+        let missing = session(Some(&bash.to_string_lossy()), &path);
+        assert_eq!(
+            windows_shell(&missing, |p| p == pwsh),
+            pwsh.to_string_lossy()
+        );
+    }
+
+    /// Runs one command in a console of `program` and waits for its result, not its echo: ConPTY
+    /// writes its own sequences before any program does, so bytes alone prove nothing.
+    #[cfg(windows)]
+    fn answers(program: &str) {
+        let (mut pty, output) =
+            term_core::Pty::spawn(program, &[], term_core::Size::default()).unwrap();
+        let name = program.to_ascii_lowercase();
+        let command: &[u8] = if name.ends_with("cmd.exe") {
+            b"echo IVY^_OK\r"
+        } else if name.ends_with("pwsh.exe") || name.ends_with("powershell.exe") {
+            b"Write-Output ('IVY' + '_OK')\r"
+        } else {
+            b"echo IVY\"\"_OK\r"
+        };
+        pty.write(command).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let mut seen = Vec::new();
+        while !String::from_utf8_lossy(&seen).contains("IVY_OK") {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            assert!(
+                !left.is_zero(),
+                "{program} never ran the command: {:?}",
+                String::from_utf8_lossy(&seen)
+            );
+            if let Ok(bytes) = output.recv_timeout(left) {
+                seen.extend(bytes);
+            }
+        }
+    }
+
+    /// The reported failure was this spawn: the default program and the fallback both run.
     #[cfg(windows)]
     #[test]
-    fn windows_startup_default_starts_a_console() {
-        let program = default_shell();
-        let (pty, output) =
-            term_core::Pty::spawn(&program, &[], term_core::Size::default()).unwrap();
-        let bytes = output
-            .recv_timeout(std::time::Duration::from_secs(20))
-            .expect("the default shell printed nothing");
-        assert!(!bytes.is_empty(), "{program} started but wrote nothing");
-        drop(pty);
-        let (_fallback, _) =
-            term_core::Pty::spawn(FALLBACK_SHELL, &[], term_core::Size::default()).unwrap();
+    fn windows_startup_default_and_fallback_run_a_command() {
+        answers(&the_users_shell());
+        answers(fallback_shell());
     }
 }
 

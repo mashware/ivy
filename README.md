@@ -319,7 +319,8 @@ Open **Preferences** from the application menu to choose a theme, font, size, cu
 shortcuts. Saved changes apply to the running terminal. Cancel discards the draft.
 
 The settings file is `$XDG_CONFIG_HOME/ivy/config`, or
-`~/.config/ivy/config` when `XDG_CONFIG_HOME` is unset. For example:
+`~/.config/ivy/config` when `XDG_CONFIG_HOME` is unset (`%APPDATA%\ivy\config` on Windows). For
+example:
 
 ```ini
 version = 1

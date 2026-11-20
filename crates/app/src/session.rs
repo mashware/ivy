@@ -24,7 +24,7 @@
 //! what the file looks like, and the tree owns how it becomes a tree.
 //!
 //! **The second half of the module does touch the disk**, and also without opening any console: where
-//! the file lives ([`path_from`]), how it is read ([`read`]) and how it is replaced without being able
+//! the file lives ([`directory`]), how it is read ([`read`]) and how it is replaced without being able
 //! to leave it half done ([`Persistence::save`]). It is here and not in whoever starts up because the
 //! file name, its ceiling and its version **are the format**: whoever looked at them on their own would
 //! be writing them a second time.
@@ -542,10 +542,10 @@ pub const FILE: &str = "layout.json";
 
 /// Where the layout lives, reading the environment.
 ///
-/// **The one-line wrapper, and the work in [`path_from`]**, which is the pattern that startup already
-/// follows five times: `std::env::set_var` has a contract over the whole process and this suite runs in
-/// parallel launching processes, so a test that wanted to set these variables would be undefined
-/// behavior.
+/// **The environment is read in [`directory`] and the decisions are taken in [`directory_from`] and
+/// [`windows_directory_from`]**, which receive the values: `std::env::set_var` has a contract over the
+/// whole process and this suite runs in parallel launching processes, so a test that wanted to set
+/// these variables would be undefined behavior.
 pub fn path() -> Option<PathBuf> {
     Some(directory()?.join(FILE))
 }
@@ -560,14 +560,11 @@ pub fn directory() -> Option<PathBuf> {
 }
 
 /// Windows has neither a home variable nor a `.config` convention: per-user settings belong in the
-/// roaming application-data folder. The desktop standard's variable still rules when it is set, so an isolated directory
-/// (the measurement script's, a manual test's) works the same on every platform.
+/// roaming application-data folder. The desktop standard's variable still rules when it is set, so an
+/// isolated directory (the measurement script's, a manual test's) works the same on every platform.
 pub fn windows_directory_from(config: Option<&OsStr>, appdata: Option<&OsStr>) -> Option<PathBuf> {
-    Some(
-        absolute(config)
-            .or_else(|| absolute(appdata))?
-            .join(DIRECTORY),
-    )
+    let base = absolute(config).or_else(|| absolute(appdata))?;
+    Some(base.join(DIRECTORY))
 }
 
 /// The decision, given the two values: **the file, or nothing if there is no trustworthy place**.
@@ -720,7 +717,8 @@ impl std::fmt::Display for SaveFailure {
         match self {
             Self::NoPlace => write!(
                 f,
-                "there is nowhere to put it: neither $XDG_CONFIG_HOME nor $HOME give an absolute path"
+                "there is nowhere to put it: neither $XDG_CONFIG_HOME nor {} give an absolute path",
+                if cfg!(windows) { "%APPDATA%" } else { "$HOME" }
             ),
             Self::Vetoed { found } => write!(
                 f,
@@ -1914,8 +1912,11 @@ mod file_tests {
     #[cfg(windows)]
     #[test]
     fn windows_startup_finds_a_configuration_directory() {
-        let directory = directory().expect("no configuration directory on Windows");
-        assert!(directory.is_absolute() && directory.ends_with("ivy"));
+        let expected = match std::env::var_os("XDG_CONFIG_HOME") {
+            Some(config) if std::path::Path::new(&config).is_absolute() => PathBuf::from(config),
+            _ => PathBuf::from(std::env::var_os("APPDATA").expect("Windows sets APPDATA")),
+        };
+        assert_eq!(directory(), Some(expected.join("ivy")));
     }
 
     #[test]

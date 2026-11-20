@@ -380,9 +380,9 @@ impl Warnings {
 
 /// Where the file lives, reading the environment.
 ///
-/// A one-line wrapper, with the work in [`path_from`], which is the sibling module's pattern and for its
-/// same reason: setting these variables from a test is undefined behavior in a process with
-/// threads, so the decision has to be testable without touching them.
+/// The environment is read in [`crate::session::directory`], and the decision is taken where it
+/// receives the values instead: setting these variables from a test is undefined behavior in a
+/// process with threads.
 pub fn path() -> Option<PathBuf> {
     Some(crate::session::directory()?.join(FILE))
 }

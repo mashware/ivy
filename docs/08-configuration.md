@@ -7,7 +7,8 @@ stops startup rather than silently resetting preferences. Measurement runs skip 
 See [D87](02-decisions.md#d87--ivy-owns-its-runtime-and-configuration-names).
 
 Where it goes: **`$XDG_CONFIG_HOME/ivy/config`** — or `~/.config/ivy/config` if
-you do not have that variable set. Next to `layout.json`, which stores the opted-in arrangement and recovery context; this file can be written by hand or through Settings.
+you do not have that variable set, and `%APPDATA%\ivy\config` on Windows
+([D107](02-decisions.md#d107--on-windows-a-console-opens-powershell-and-the-configuration-lives-in-appdataivy)). Next to `layout.json`, which stores the opted-in arrangement and recovery context; this file can be written by hand or through Settings.
 
 **If it does not exist, the terminal opens one fresh console.** You do not have to create it.
 
