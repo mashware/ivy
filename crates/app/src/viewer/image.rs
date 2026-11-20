@@ -181,6 +181,12 @@ impl Viewer {
     /// moved by the wheel or a drag that pans it; there are no scroll bars. `space` is whether
     /// Space is held and the drawer's, which is when Space + left drag pans.
     pub(super) fn show(&mut self, ui: &mut egui::Ui, theme: crate::theme::Theme, space: bool) {
+        let frame = ui.ctx().cumulative_frame_nr();
+        // A drag whose release came while the image was not painted must not resume on return.
+        if self.painted.is_none_or(|last| frame > last + 1) {
+            self.panning = None;
+        }
+        self.painted = Some(frame);
         let Some(size) = self.size() else {
             let message = self.message();
             egui::Frame::new()
@@ -198,12 +204,6 @@ impl Viewer {
                 });
             return;
         };
-        let frame = ui.ctx().cumulative_frame_nr();
-        // A drag whose release came while the image was not painted must not resume on return.
-        if self.painted.is_none_or(|last| frame > last + 1) {
-            self.panning = None;
-        }
-        self.painted = Some(frame);
         let panning = &mut self.panning;
         let Some(Opened {
             load: Load::Ready { gpu, .. },
@@ -1431,6 +1431,116 @@ mod tests {
         assert!(
             small.expand(0.5).contains_rect(back),
             "{back:?} outside {small:?}"
+        );
+    }
+
+    /// The middle button pressed on the drawer's centre, and the pointer moved a little with it.
+    fn start_middle_drag(window: &mut crate::Window, ctx: &egui::Context) -> egui::Pos2 {
+        let from = window.sidebar.last_dock.unwrap().center();
+        let press = egui::Event::PointerButton {
+            pos: from,
+            button: egui::PointerButton::Middle,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        };
+        pass(window, ctx, vec![egui::Event::PointerMoved(from), press]);
+        let at = from + egui::vec2(0.0, -10.0);
+        pass(window, ctx, vec![egui::Event::PointerMoved(at)]);
+        at
+    }
+
+    /// Moves the pointer, with whatever buttons are down, by `by` in three passes.
+    fn travel(window: &mut crate::Window, ctx: &egui::Context, from: egui::Pos2, by: egui::Vec2) {
+        for step in 1..=3 {
+            let at = from + by * step as f32 / 3.0;
+            pass(window, ctx, vec![egui::Event::PointerMoved(at)]);
+        }
+    }
+
+    /// An image opened while the middle button of a pan is still down is not dragged by it.
+    #[test]
+    fn a_new_image_is_not_moved_by_a_pan_begun_on_the_old_one() {
+        let folder = Folder::new();
+        let path = folder.0.join("wide.png");
+        write_png(&path, 2400, 1600);
+        let (mut window, ctx, _) = window_with_image(&path);
+        let at = start_middle_drag(&mut window, &ctx);
+        let name = window.active().panes()[1].name;
+        crate::viewer::open_image_target(&mut window, name, path).unwrap();
+        let started = Instant::now();
+        let fresh = loop {
+            if let Some(rect) = image_rect(&painted(&mut window, &ctx, vec![])) {
+                break rect;
+            }
+            assert!(started.elapsed() < Duration::from_secs(5));
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        assert!(ctx.input(|i| i.pointer.middle_down()));
+        travel(&mut window, &ctx, at, egui::vec2(0.0, -45.0));
+        assert_eq!(settle(&mut window, &ctx), fresh, "the old pan moved it");
+    }
+
+    /// A pan whose button was let go while the drawer showed Changes does not resume when the
+    /// image comes back with that button down again.
+    #[test]
+    fn a_pan_released_while_the_image_was_hidden_does_not_resume() {
+        let folder = Folder::new();
+        let (mut window, ctx) = zoomed_window(&folder);
+        let at = start_middle_drag(&mut window, &ctx);
+        crate::viewer::activate(&mut window, false);
+        let console = window.active().panes()[0]
+            .painted_console
+            .as_ref()
+            .unwrap()
+            .area
+            .center();
+        for pressed in [false, true] {
+            pass(
+                &mut window,
+                &ctx,
+                vec![egui::Event::PointerButton {
+                    pos: console,
+                    button: egui::PointerButton::Middle,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+        }
+        crate::viewer::activate(&mut window, true);
+        let before = settle(&mut window, &ctx);
+        assert!(ctx.input(|i| i.pointer.middle_down()));
+        travel(&mut window, &ctx, at, egui::vec2(-30.0, -45.0));
+        assert_eq!(settle(&mut window, &ctx), before, "the hidden pan resumed");
+    }
+
+    /// A stray left click in the middle of a middle-button pan neither stops it nor takes it over.
+    #[test]
+    fn a_stray_press_during_a_pan_does_not_stop_it() {
+        let folder = Folder::new();
+        let (mut window, ctx) = zoomed_window(&folder);
+        let before = settle(&mut window, &ctx);
+        let from = start_middle_drag(&mut window, &ctx);
+        let by = egui::vec2(-30.0, -45.0);
+        let middle = from + by / 2.0;
+        pass(&mut window, &ctx, vec![egui::Event::PointerMoved(middle)]);
+        for pressed in [true, false] {
+            pass(
+                &mut window,
+                &ctx,
+                vec![egui::Event::PointerButton {
+                    pos: middle,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+        }
+        travel(&mut window, &ctx, middle, by / 2.0);
+        let after = settle(&mut window, &ctx);
+        let travelled = by + egui::vec2(0.0, -10.0);
+        assert!(
+            (after.min - (before.min + travelled)).length() < 0.5,
+            "{before:?} -> {after:?}"
         );
     }
 
