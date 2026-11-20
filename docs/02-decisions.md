@@ -11271,6 +11271,10 @@ directory and the search path, so until now a planted `conpty.dll` there could b
 Each file is pinned rather than the package, because nuget.org can re-sign a package, which changes
 the archive and not the binaries.
 
+**Measured.** On the pull-request Windows job (Windows Server 2025, 10.0.26100, 20 November 2026)
+the OSC 7 test passed in 1.19 s with the bundled `OpenConsole.exe` hosting the console, and D111's
+four close tests passed on that host as well as on the system's.
+
 **Discarded.**
 - **Probing the system's host first.** It would have told whether one build of Windows keeps OSC 7,
   not every build an installer reaches.
@@ -11292,4 +11296,3 @@ the archive and not the binaries.
   joined emoji — a line the host redraws could land a column off. Not measured.
 - The installer's contents are checked by the release job's install test, not by any pull-request
   job.
-- None of the Windows tests has run yet; their first run is this pull request's Windows job.

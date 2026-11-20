@@ -3539,7 +3539,7 @@ mod tests {
 
     /// **A directory report crosses Microsoft's console host and reaches the screen** (D112). The
     /// system's host re-renders a console from its own buffer, and nothing showed it keeps this
-    /// sequence; this test is meant to show the pair Ivy ships does. Ignored by default: it needs
+    /// sequence; this test is what shows the pair Ivy ships does. Ignored by default: it needs
     /// `conpty.dll` and `OpenConsole.exe` beside the test binary, which the pull-request Windows job
     /// puts there with `scripts/conpty.py`.
     #[cfg(windows)]
