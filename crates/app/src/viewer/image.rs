@@ -212,37 +212,43 @@ impl Viewer {
         let Gpu::Uploaded(texture) = gpu else {
             return;
         };
-        let body = ui.max_rect();
+        let view = ui.available_rect_before_wrap();
         let mut scale =
-            chosen.unwrap_or_else(|| fit(body.width(), size.x, ui.ctx().pixels_per_point()));
+            chosen.unwrap_or_else(|| fit(view.width(), size.x, ui.ctx().pixels_per_point()));
         let zoom = ui.input(|i| i.zoom_delta());
         if zoom != 1.0
             && let Some(at) = ui
                 .input(|i| i.pointer.hover_pos())
-                .filter(|at| body.contains(*at))
+                .filter(|at| view.contains(*at))
         {
-            (scale, *offset) = zoom_around(scale, *offset, at - body.min, zoom);
+            (scale, *offset) = zoom_around(scale, *offset, at - view.min, zoom);
             *chosen = Some(scale);
         }
-        let (moved, hand) = ui.input(|i| pan(i, body, keyboard));
-        *offset -= moved;
+        let shown = size * scale;
+        let (moved, hand) = ui.input(|i| pan(i, view, keyboard));
+        *offset = within(*offset - moved, *offset, shown, view.size());
         if let Some(hand) = hand {
             ui.ctx().set_cursor_icon(hand);
         }
+        // egui scrolls only forward from the content's corner and never past its far edge, so a
+        // zoom that leaves the image short of the view on an axis is held where the pointer put
+        // it by blank space laid before or after it.
+        let lead = (-*offset).max(egui::Vec2::ZERO);
+        let trail = (*offset + view.size() - shown).max(egui::Vec2::ZERO);
         let output = egui::ScrollArea::both()
             .id_salt("drawer-image")
             .auto_shrink(false)
-            .scroll_offset(*offset)
+            .scroll_offset(offset.max(egui::Vec2::ZERO))
             .show(ui, |ui| {
-                let (rect, _) = ui.allocate_exact_size(size * scale, egui::Sense::hover());
+                let (rect, _) = ui.allocate_exact_size(lead + shown + trail, egui::Sense::hover());
                 ui.painter().image(
                     texture.id(),
-                    rect,
+                    egui::Rect::from_min_size(rect.min + lead, shown),
                     egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
                     egui::Color32::WHITE,
                 );
             });
-        *offset = output.state.offset;
+        *offset = output.state.offset - lead;
     }
 
     #[cfg(test)]
@@ -260,12 +266,28 @@ impl Viewer {
     }
 }
 
-/// The scale and scroll offset after zooming by `factor`, keeping the image point under `at`, a
-/// position inside the view, where it was on screen.
+/// The scale and offset after zooming by `factor`, keeping the image point under `at`, a position
+/// inside the view, where it was on screen. The offset is where the view's corner falls on the
+/// image, in points, and is negative where the image starts inside the view.
 fn zoom_around(scale: f32, offset: egui::Vec2, at: egui::Vec2, factor: f32) -> (f32, egui::Vec2) {
     let zoomed = (scale * factor).clamp(SMALLEST, LARGEST);
     let point = (offset + at) / scale;
-    (zoomed, (point * zoomed - at).max(egui::Vec2::ZERO))
+    (zoomed, point * zoomed - at)
+}
+
+/// Where a pan drag may take `offset`: where the image of `shown` size leaves none of a `view`
+/// it could fill empty, or fits in it whole; and as far out as `before`, where a zoom around the
+/// pointer had left it, so a drag can bring it back but never push it further.
+fn within(
+    offset: egui::Vec2,
+    before: egui::Vec2,
+    shown: egui::Vec2,
+    view: egui::Vec2,
+) -> egui::Vec2 {
+    let spare = shown - view;
+    let low = spare.min(egui::Vec2::ZERO).min(before);
+    let high = spare.max(egui::Vec2::ZERO).max(before);
+    offset.clamp(low, high)
 }
 
 /// How far a pan drag moved the pointer this frame, and the hand the cursor shows. A plain left
@@ -684,12 +706,69 @@ mod tests {
         assert!(owned);
     }
 
+    /// The Ctrl the desktop reports before the wheel turns, as egui-winit sends it.
+    fn ctrl() -> egui::Modifiers {
+        egui::Modifiers {
+            ctrl: true,
+            command: true,
+            ..Default::default()
+        }
+    }
+
+    /// One wheel event as egui-winit builds it from a Wayland axis event while Ctrl is held: a
+    /// mouse notch is a line with no start or end, a touchpad's two fingers are points with both.
+    fn ctrl_wheel(unit: egui::MouseWheelUnit, dy: f32, phase: egui::TouchPhase) -> egui::Event {
+        egui::Event::MouseWheel {
+            unit,
+            delta: egui::vec2(0.0, dy),
+            phase,
+            modifiers: ctrl(),
+        }
+    }
+
+    /// From the fitted view, an image smaller than the drawer on both axes zooms in and back out
+    /// around the pointer on its centre, with a mouse wheel and with a touchpad, as the desktop
+    /// delivers them; the zoom stops at its bounds.
     #[test]
     fn zooming_keeps_the_point_under_the_pointer_and_stops_at_its_bounds() {
+        use egui::{MouseWheelUnit::*, TouchPhase::*};
+        let folder = Folder::new();
+        let path = folder.0.join("small.png");
+        write_png(&path, 600, 120);
+        let (mut window, ctx, _) = window_with_image(&path);
+        let before = settle(&mut window, &ctx);
+        let body = window.sidebar.last_dock.unwrap();
+        assert!(body.width() > before.width() && body.height() > before.height() * 1.5);
+        let at = before.center();
+        let under = |rect: egui::Rect| (at - rect.min) / rect.size();
+        painted(&mut window, &ctx, vec![egui::Event::PointerMoved(at)]);
+        painted(
+            &mut window,
+            &ctx,
+            vec![egui::Event::ModifiersChanged(ctrl())],
+        );
+        let notches = vec![ctrl_wheel(Line, 1.0, Move)];
+        let mut gestures = vec![(notches.clone(), true), (notches.clone(), true)];
+        let fingers = std::iter::once(ctrl_wheel(Point, 6.0, Start))
+            .chain((0..6).map(|_| ctrl_wheel(Point, 6.0, Move)))
+            .chain(std::iter::once(ctrl_wheel(Point, 0.0, End)));
+        gestures.push((fingers.collect(), true));
+        gestures.push((vec![ctrl_wheel(Line, -1.0, Move)], false));
+        let mut last = before;
+        for (events, bigger) in gestures {
+            for event in events {
+                painted(&mut window, &ctx, vec![event]);
+            }
+            let now = settle(&mut window, &ctx);
+            assert_eq!(now.width() > last.width(), bigger, "{last:?} -> {now:?}");
+            // Within the point the content's corner is rounded to.
+            assert!(
+                ((under(now) - under(before)) * now.size()).length() < 1.0,
+                "the point under the pointer moved: {before:?} -> {now:?}"
+            );
+            last = now;
+        }
         let (offset, at) = (egui::vec2(100.0, 40.0), egui::vec2(200.0, 150.0));
-        let (scale, moved) = zoom_around(0.5, offset, at, 1.5);
-        assert_eq!(scale, 0.75);
-        assert_eq!((moved + at) / scale, (offset + at) / 0.5);
         assert_eq!(zoom_around(0.5, offset, at, 1000.0).0, LARGEST);
         assert_eq!(zoom_around(0.5, offset, at, 0.0001).0, SMALLEST);
     }
