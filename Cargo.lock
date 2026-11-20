@@ -3271,6 +3271,7 @@ dependencies = [
  "async-io",
  "futures-lite",
  "libc",
+ "objc2-foundation 0.3.2",
  "portable-pty",
  "regex-syntax",
  "zbus",

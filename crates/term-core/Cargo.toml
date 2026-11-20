@@ -17,6 +17,11 @@ regex-syntax = "0.8"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# The Mac's own language and region, for a console launched by an app that inherited no locale.
+# Already in the tree through eframe at this version; only its features are named.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSLocale", "NSString"] }
+
 # **The engine, again and on purpose.** The benches in `examples/` measure the engine **below this
 # crate's facade**: an example compiles as its own binary and does not see the crate's normal
 # dependencies. Without this, measuring what the scrollback costs would mean opening a hole in the
