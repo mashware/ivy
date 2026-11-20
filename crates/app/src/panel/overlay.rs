@@ -394,11 +394,11 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn apply_refuses_stale_or_revoked_authority_and_reports_each_once() {
         #[derive(Debug)]
         struct Current(bool);
         impl panel_control::OverlayAuthority for Current {
-            #[cfg(unix)]
             fn current(&self) -> bool {
                 self.0
             }

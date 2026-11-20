@@ -5979,11 +5979,13 @@ mod tests {
     /// the same request reports the same transition without closing anything else. A later
     /// publication is a new generation and makes the panel visible again.
     #[test]
+    #[cfg(unix)]
     fn retiring_a_session_clears_its_panel_and_only_its_untouched_consoles() {
         check_session_retirement(None);
     }
 
     #[test]
+    #[cfg(unix)]
     fn a_done_holder_can_retire_its_auxiliaries_even_after_a_file_takes_the_document() {
         check_session_retirement(Some(false));
         check_session_retirement(Some(true));
