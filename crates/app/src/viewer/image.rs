@@ -237,14 +237,21 @@ impl Viewer {
         // hover test is not used: it reaches a few points into a popup's border, and it knows the
         // image's rect only from the previous pass, which drops a gesture on the first frame.
         // Where no area is under the pointer `layer_id_at` answers none: that is the background.
-        let over = ui.input(|i| i.pointer.hover_pos()).filter(|&at| {
+        let on_image = |at: egui::Pos2| {
             let top = ui
                 .ctx()
                 .layer_id_at(at)
                 .unwrap_or_else(egui::LayerId::background);
             view.contains(at) && top == ui.layer_id()
-        });
+        };
+        let over = ui
+            .input(|i| i.pointer.hover_pos())
+            .filter(|&at| on_image(at));
         let over_image = over.is_some();
+        // Judged outside `pan`'s read of the input: `layer_id_at` takes the lock that read holds.
+        use egui::PointerButton::{Middle, Primary};
+        let presses = ui.input(|i| [Middle, Primary].map(|b| viewport::pressed_at(i, b)));
+        let pressed = presses.map(|at| at.is_some_and(on_image));
         let mut scale =
             chosen.unwrap_or_else(|| viewport::fit(room.x, size.x, ui.ctx().pixels_per_point()));
         if *seen != Some((room, scale)) {
@@ -264,7 +271,7 @@ impl Viewer {
             *offset = viewport::clamp(zoomed, Some(zoomed), size * scale, room);
             *chosen = Some(scale);
         }
-        let (mut moved, hand) = ui.input(|i| viewport::pan(i, over_image, view, space, panning));
+        let (mut moved, hand) = ui.input(|i| viewport::pan(i, over_image, pressed, space, panning));
         let shown = size * scale;
         if over.is_some() {
             // Only the axes applied are taken; the rest stays for whoever reads the wheel later.
@@ -2006,52 +2013,163 @@ mod tests {
         assert_eq!(after, Some(before), "the pan resumed");
     }
 
+    /// The 500×400 screen the viewer is laid out alone in.
+    const SCREEN: egui::Rect = egui::Rect {
+        min: egui::Pos2::ZERO,
+        max: egui::pos2(500.0, 400.0),
+    };
+
+    /// One pass of `viewer` alone, laid out in `view`, under a foreground popup at `popup` when
+    /// there is one; says where it painted the whole image.
+    fn alone(
+        ctx: &egui::Context,
+        viewer: &mut Viewer,
+        events: Vec<egui::Event>,
+        view: egui::Rect,
+        popup: Option<egui::Rect>,
+    ) -> Option<egui::Rect> {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(SCREEN),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                let mut child = ui.new_child(egui::UiBuilder::new().max_rect(view));
+                viewer.show(&mut child, crate::theme::Theme::default(), false);
+                if let Some(place) = popup {
+                    egui::Area::new(egui::Id::new("test-popup-press"))
+                        .order(egui::Order::Foreground)
+                        .fixed_pos(place.min)
+                        .show(ui.ctx(), |ui| {
+                            ui.allocate_exact_size(place.size(), egui::Sense::hover());
+                        });
+                }
+            },
+        );
+        let rect = image_rect(&output.shapes);
+        output.drop_without_applying_deltas();
+        rect
+    }
+
+    fn button(button: egui::PointerButton, pos: egui::Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos,
+            button,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    /// Moves the pointer up from `from` in three passes of 20 points, with whatever buttons are
+    /// down, and says where the last one painted the image.
+    fn climb(
+        ctx: &egui::Context,
+        viewer: &mut Viewer,
+        from: egui::Pos2,
+        view: egui::Rect,
+        popup: Option<egui::Rect>,
+    ) -> Option<egui::Rect> {
+        let mut after = None;
+        for step in 1..=3 {
+            let at = from - egui::vec2(0.0, 20.0 * step as f32);
+            after = alone(
+                ctx,
+                viewer,
+                vec![egui::Event::PointerMoved(at)],
+                view,
+                popup,
+            );
+        }
+        after
+    }
+
     /// A middle press beside the image and a move onto it, delivered in the same frame, start no
-    /// pan: the drag that follows leaves the image where it is.
+    /// pan: the drag that follows leaves the image, taller than the view, where it is.
     #[test]
     fn a_press_beside_the_image_starts_no_pan_when_the_move_on_comes_with_it() {
         let ctx = egui::Context::default();
-        let mut viewer = ready(image::RgbaImage::new(2000, 2000));
-        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 400.0));
-        let view = egui::Rect::from_min_max(egui::pos2(100.0, 0.0), screen.max);
-        let run = |viewer: &mut Viewer, events| {
-            let output = ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(screen),
-                    events,
-                    ..Default::default()
-                },
-                |ui| {
-                    let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(view));
-                    viewer.show(&mut ui, crate::theme::Theme::default(), false);
-                },
-            );
-            let rect = image_rect(&output.shapes);
-            output.drop_without_applying_deltas();
-            rect
-        };
+        let mut viewer = ready(image::RgbaImage::new(2000, 4000));
+        let view = egui::Rect::from_min_max(egui::pos2(100.0, 0.0), SCREEN.max);
         let beside = egui::pos2(50.0, 200.0);
-        let before = run(&mut viewer, vec![egui::Event::PointerMoved(beside)]).unwrap();
+        let moved = |at| vec![egui::Event::PointerMoved(at)];
+        let before = alone(&ctx, &mut viewer, moved(beside), view, None).unwrap();
+        assert!(before.height() > view.height(), "{before:?} in {view:?}");
         let on = view.center();
-        run(
-            &mut viewer,
-            vec![
-                egui::Event::PointerButton {
-                    pos: beside,
-                    button: egui::PointerButton::Middle,
-                    pressed: true,
-                    modifiers: egui::Modifiers::NONE,
-                },
-                egui::Event::PointerMoved(on),
-            ],
-        );
+        let events = vec![
+            button(egui::PointerButton::Middle, beside, true),
+            egui::Event::PointerMoved(on),
+        ];
+        alone(&ctx, &mut viewer, events, view, None);
         assert_eq!(viewer.panning, None);
-        let mut after = None;
-        for step in 1..=3 {
-            let at = on - egui::vec2(0.0, 20.0 * step as f32);
-            after = run(&mut viewer, vec![egui::Event::PointerMoved(at)]);
-        }
+        let after = climb(&ctx, &mut viewer, on, view, None);
         assert_eq!(after, Some(before), "the press beside the image panned it");
+    }
+
+    /// A middle press on a popup open over the image is the popup's, also when the pointer leaves
+    /// the popup for the image in the same frame: no pan starts and the drag leaves the image.
+    #[test]
+    fn a_press_on_a_popup_over_the_image_starts_no_pan_when_the_pointer_leaves_it_at_once() {
+        let ctx = egui::Context::default();
+        let mut viewer = ready(image::RgbaImage::new(2000, 4000));
+        let place = egui::Rect::from_center_size(SCREEN.center(), egui::vec2(160.0, 100.0));
+        let popup = Some(place);
+        let off = egui::pos2(place.center().x, place.bottom() + 60.0);
+        let moved = |at| vec![egui::Event::PointerMoved(at)];
+        alone(&ctx, &mut viewer, moved(place.center()), SCREEN, popup);
+        let before = alone(&ctx, &mut viewer, moved(place.center()), SCREEN, popup).unwrap();
+        assert!(before.height() > SCREEN.height(), "{before:?}");
+        let events = vec![
+            button(egui::PointerButton::Middle, place.center(), true),
+            egui::Event::PointerMoved(off),
+        ];
+        alone(&ctx, &mut viewer, events, SCREEN, popup);
+        assert_eq!(viewer.panning, None);
+        let after = climb(&ctx, &mut viewer, off, SCREEN, popup);
+        assert_eq!(
+            after,
+            Some(before),
+            "the press on the popup panned the image"
+        );
+    }
+
+    /// A middle press on the image and a move off it, delivered in the same frame, start the pan:
+    /// the press is judged where it landed, and the drag that follows moves the image.
+    #[test]
+    fn a_press_on_the_image_pans_though_the_pointer_leaves_it_in_the_same_frame() {
+        let ctx = egui::Context::default();
+        let mut viewer = ready(image::RgbaImage::new(2000, 4000));
+        let view = egui::Rect::from_min_max(egui::pos2(100.0, 0.0), SCREEN.max);
+        let on = view.center();
+        let beside = egui::pos2(50.0, on.y);
+        let before = alone(&ctx, &mut viewer, vec![], view, None).unwrap();
+        let events = vec![
+            button(egui::PointerButton::Middle, on, true),
+            egui::Event::PointerMoved(beside),
+        ];
+        alone(&ctx, &mut viewer, events, view, None);
+        assert_eq!(viewer.panning, Some(egui::PointerButton::Middle));
+        let after = climb(&ctx, &mut viewer, beside, view, None).unwrap();
+        assert_eq!(after.top(), before.top() - 60.0, "{before:?} -> {after:?}");
+    }
+
+    /// A middle press on the image in the same frame another button is released starts the pan,
+    /// though egui forgets where a press began on any release.
+    #[test]
+    fn a_middle_press_pans_though_another_button_is_released_in_the_same_frame() {
+        use egui::PointerButton::{Middle, Primary};
+        let ctx = egui::Context::default();
+        let mut viewer = ready(image::RgbaImage::new(2000, 4000));
+        let on = SCREEN.center();
+        let before = alone(&ctx, &mut viewer, vec![], SCREEN, None).unwrap();
+        let primary = vec![egui::Event::PointerMoved(on), button(Primary, on, true)];
+        alone(&ctx, &mut viewer, primary, SCREEN, None);
+        assert_eq!(viewer.panning, None);
+        let events = vec![button(Middle, on, true), button(Primary, on, false)];
+        alone(&ctx, &mut viewer, events, SCREEN, None);
+        assert_eq!(viewer.panning, Some(Middle));
+        let after = climb(&ctx, &mut viewer, on, SCREEN, None).unwrap();
+        assert_eq!(after.top(), before.top() - 60.0, "{before:?} -> {after:?}");
     }
 
     /// A fitted image scrolled down keeps the part at the top of the view there when the drawer

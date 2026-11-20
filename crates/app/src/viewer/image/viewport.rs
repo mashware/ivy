@@ -86,17 +86,35 @@ pub(super) fn wheel(
     )
 }
 
+/// Where `wanted` last went down this frame. Read from the frame's own events rather than from the
+/// pointer: it may leave the image in the same frame, and egui forgets `press_origin` on any
+/// button's release.
+pub(super) fn pressed_at(
+    input: &egui::InputState,
+    wanted: egui::PointerButton,
+) -> Option<egui::Pos2> {
+    input.events.iter().rev().find_map(|event| match *event {
+        egui::Event::PointerButton {
+            pos,
+            button,
+            pressed: true,
+            ..
+        } if button == wanted => Some(pos),
+        _ => None,
+    })
+}
+
 /// How far a pan drag moved the pointer this frame, and the hand the cursor shows. A plain left
 /// drag never pans: marks are drawn with it. Space + left drag is Figma's convention, and the
 /// middle button pans with no key for a mouse that has one. The button that started a pan is
 /// latched in `panning` until it is released, so letting Space go halfway through, or a stray
 /// press of another button, does not turn the rest into something else. `over` is whether the
-/// pointer is on the image with nothing of a higher layer above it, and a pan starts only from a
-/// press inside `view`: a press beside it and a move onto it can arrive in the same frame.
+/// pointer is on the image with nothing of a higher layer above it, and `pressed` whether the
+/// middle and the primary button went down on it this frame, as `pressed_at` places a press.
 pub(super) fn pan(
     input: &egui::InputState,
     over: bool,
-    view: egui::Rect,
+    pressed: [bool; 2],
     space: bool,
     panning: &mut Option<egui::PointerButton>,
 ) -> (egui::Vec2, Option<egui::CursorIcon>) {
@@ -113,18 +131,17 @@ pub(super) fn pan(
         }
         *panning = None;
     }
-    if over && pointer.press_origin().is_some_and(|at| view.contains(at)) {
-        *panning = if pointer.button_pressed(Middle) {
-            Some(Middle)
-        } else if space && pointer.button_pressed(Primary) {
-            Some(Primary)
-        } else {
-            None
-        };
-        if panning.is_some() {
-            // The press frame's delta is the travel from wherever the pointer was before it.
-            return (egui::Vec2::ZERO, Some(egui::CursorIcon::Grabbing));
-        }
+    let [middle, primary] = pressed;
+    *panning = if middle {
+        Some(Middle)
+    } else if space && primary {
+        Some(Primary)
+    } else {
+        None
+    };
+    if panning.is_some() {
+        // The press frame's delta is the travel from wherever the pointer was before it.
+        return (egui::Vec2::ZERO, Some(egui::CursorIcon::Grabbing));
     }
     let hand = (space && over).then_some(egui::CursorIcon::Grab);
     (egui::Vec2::ZERO, hand)

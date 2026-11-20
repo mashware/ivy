@@ -9236,8 +9236,9 @@ for anything else.
   it to keep the gesture. The drawer stays not modal: nothing dims. With a mouse, Space + left drag
   and a middle-button drag move the image, with a grab hand while they do. A plain left drag does
   not pan, because the next step draws marks with it. Space + drag is Figma's convention and the
-  middle button needs no key. Whether a drag pans is decided when its button goes down and lasts
-  until that button is released: a press of another button meanwhile neither stops the pan nor
+  middle button needs no key. Whether a drag pans is decided when its button goes down, by where
+  it went down: on the image with nothing of a higher layer above that point, wherever the pointer
+  is by the end of that frame. It lasts until that button is released: a press of another button meanwhile neither stops the pan nor
   takes it over, and a pan is forgotten when another image opens, when the image is closed, and
   after any frame the image was not painted, so a release that happened while it was hidden cannot
   leave a pan behind. On a touch screen the image zooms with two fingers and does not pan:
