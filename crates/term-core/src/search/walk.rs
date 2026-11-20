@@ -44,6 +44,9 @@ fn matches(search: &Search, logical: &Logical, span: Range<usize>) -> Vec<Range<
 /// would start with a word character touching another and be rejected the same way. Going on one
 /// character at a time instead made a long run quadratic: `\d+` over «x» and a scrollback of
 /// digits finds and rejects one candidate per digit, each read to the end of the run.
+/// **A candidate rejected only at its end is not skipped this way** — nothing tells where the next
+/// one that counts could start — so a pattern built for it (`-+\w` over a long run of dashes) stays
+/// quadratic: the hostile-pattern pause D61 accepts.
 fn past_rejected(text: &str, start: usize) -> Option<usize> {
     let word = |c: char| c.is_alphanumeric() || c == '_';
     let mut at = next_char(text, start)?;

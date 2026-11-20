@@ -8345,7 +8345,10 @@ a check on the match only so that a literal and a pattern follow the same rule.
   is set on the engine's syntax**, so a pattern's own `(?i)` or `(?-i)` overrides the box. **A
   candidate whole word rejects gives its characters back**: the search goes on one character past
   where the candidate started, so `1.1` at the end of `v1.1.1` is now found walking either way and
-  marked, where #120 accepted missing it one way. **Marking reads one row past each of its cuts**
+  marked, where #120 accepted missing it one way. Retrying past a rejected candidate skips the rest of a run of word
+  characters, so a long run is read once; a candidate rejected only at its end is retried one
+  character on, and a pattern built for that (`-+\w` over a long run of dashes) is quadratic — one
+  more hostile pattern, accepted as below. **Marking reads one row past each of its cuts**
   as context it never marks, so a line cut by `MARKING_REACH` is not taken to start or end at the
   cut by whole word, `^`, `$` or `\b`.
 - **A hostile pattern is accepted as a pause, by the user's decision — asked twice.** A pattern
