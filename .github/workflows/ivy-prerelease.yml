@@ -77,6 +77,17 @@ jobs:
                             'windows_paths_a_link_planted_at_the_temporary_is_not_written_through') {
             if (-not ($printed -match "$name \.\.\. ok$")) { throw "$name did not run and pass" }
           }
+      - name: Test that a console ends with its program and closes without waiting
+        shell: pwsh
+        run: |
+          cargo test --locked -p term-core --lib -- windows_exit 2>&1 | Tee-Object -Variable printed
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($name in 'windows_exit_ordinary_end_is_reported',
+                            'windows_exit_close_does_not_abandon_the_reader',
+                            'windows_exit_close_ends_a_parked_writer',
+                            'windows_exit_an_exit_code_of_259_is_an_ended_program') {
+            if (-not ($printed -match "$name \.\.\. ok$")) { throw "$name did not run and pass" }
+          }
 
   build:
     if: ${{ github.event_name == 'workflow_dispatch' }}

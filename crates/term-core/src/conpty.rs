@@ -140,3 +140,130 @@ pub(crate) fn terminate(process: RawHandle) -> io::Result<()> {
     // refusal, and the line written for one would be false.
     if ended() { Ok(()) } else { Err(refused) }
 }
+
+/// Run only on Windows, by the prerelease workflow's Windows job (D108): the `windows_exit` prefix
+/// is what that job filters and names.
+#[cfg(test)]
+mod tests {
+    use crate::{Ending, Pty, READER_GIVE_UP, Size};
+    use std::sync::mpsc::Receiver;
+    use std::time::{Duration, Instant};
+
+    /// Generous on purpose: a cold PowerShell on a CI runner takes seconds to start.
+    const DEADLINE: Duration = Duration::from_secs(30);
+
+    /// By absolute path, never a bare name: the launcher searches the current directory for one.
+    fn powershell() -> String {
+        let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_owned());
+        format!(r"{root}\System32\WindowsPowerShell\v1.0\powershell.exe")
+    }
+
+    fn spawn(command: &str) -> (Pty, Receiver<Vec<u8>>) {
+        Pty::spawn(
+            &powershell(),
+            &["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
+            Size::default(),
+        )
+        .expect("PowerShell starts in a console")
+    }
+
+    /// Waits for the program's own result, never for bytes: ConPTY writes before the program does,
+    /// so the marker is built at run time and its echo cannot satisfy this.
+    fn wait_for_marker(output: &Receiver<Vec<u8>>) {
+        let deadline = Instant::now() + DEADLINE;
+        let mut seen = Vec::new();
+        while !String::from_utf8_lossy(&seen).contains("IVY_OK") {
+            let left = deadline.saturating_duration_since(Instant::now());
+            match output.recv_timeout(left) {
+                Ok(bytes) => seen.extend_from_slice(&bytes),
+                Err(_) => panic!(
+                    "the program never wrote IVY_OK: {:?}",
+                    String::from_utf8_lossy(&seen)
+                ),
+            }
+        }
+    }
+
+    /// **The defect itself**: a program that ends on its own ends its console, with nobody closing
+    /// it. Before the exit watcher this waited for ever, because the pseudoconsole stayed open.
+    #[test]
+    fn windows_exit_ordinary_end_is_reported() {
+        let (pty, output) = spawn("Write-Output ('IVY' + '_OK')");
+        wait_for_marker(&output);
+        let deadline = Instant::now() + DEADLINE;
+        while pty.ending().is_none() && Instant::now() < deadline {
+            // Drained so the reader is never parked on a full channel; bounded by the deadline.
+            let _ = output.recv_timeout(Duration::from_millis(10));
+        }
+        assert_eq!(
+            pty.ending(),
+            Some(Ending::EndedWell),
+            "the program ended and its console never did"
+        );
+    }
+
+    /// **Closing a live console does not abandon its reader.** The close used to drop the master
+    /// last, after waiting the whole reader deadline for an end of file only that drop could give.
+    /// The cost is the observable: an abandoned reader costs at least the deadline.
+    #[test]
+    fn windows_exit_close_does_not_abandon_the_reader() {
+        let (pty, output) = spawn("Write-Output ('IVY' + '_OK'); Start-Sleep 30");
+        wait_for_marker(&output);
+        let started = Instant::now();
+        drop(pty);
+        let took = started.elapsed();
+        assert!(
+            took < READER_GIVE_UP,
+            "closing took {took:?}: the reader was abandoned at the deadline instead of ending"
+        );
+    }
+
+    /// **A writer parked on a program that reads nothing ends once its console is closed.** The
+    /// premise is asserted first: if the host swallowed the whole write, the writer was never parked
+    /// and the close would prove nothing.
+    #[test]
+    fn windows_exit_close_ends_a_parked_writer() {
+        let (mut pty, output) = spawn("Write-Output ('IVY' + '_OK'); Start-Sleep 30");
+        wait_for_marker(&output);
+        pty.write(&vec![b'x'; 8 * 1024 * 1024])
+            .expect("an empty queue takes a write whole");
+        std::thread::sleep(Duration::from_secs(2));
+        assert!(
+            pty.backlog().is_some_and(|backlog| backlog.bytes > 0),
+            "premise: the writer is parked on a program that reads nothing"
+        );
+        let writer = pty.writer.take().expect("the writer thread is there");
+        drop(pty);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !writer.is_finished() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            writer.is_finished(),
+            "the writer is still parked after its console was closed"
+        );
+    }
+
+    /// **An exit code of 259 is not «still running».** Windows uses that number for a live process,
+    /// so a program that exits with it must be told apart by its handle — by the watcher, which
+    /// would otherwise never end the console, and by closing, which would otherwise call it refused.
+    #[test]
+    fn windows_exit_an_exit_code_of_259_is_an_ended_program() {
+        let (pty, output) = spawn("Write-Output ('IVY' + '_OK'); exit 259");
+        wait_for_marker(&output);
+        let deadline = Instant::now() + DEADLINE;
+        while pty.ending().is_none() && Instant::now() < deadline {
+            let _ = output.recv_timeout(Duration::from_millis(10));
+        }
+        assert_eq!(pty.ending(), Some(Ending::EndedWell));
+        let process = pty
+            .child
+            .as_ref()
+            .and_then(|child| child.as_raw_handle())
+            .expect("the child has a process handle");
+        assert!(
+            super::terminate(process).is_ok(),
+            "a program that already ended was reported as refusing to end"
+        );
+    }
+}
