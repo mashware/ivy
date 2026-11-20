@@ -7,6 +7,10 @@ use eframe::egui;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+/// How far the zoom goes, in screen points per pixel of the original.
+const SMALLEST: f32 = 0.01;
+const LARGEST: f32 = 32.0;
+
 /// Which document the drawer's document tab paints.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum Document {
@@ -123,7 +127,16 @@ impl Viewer {
             picture.original.width() as f32,
             picture.original.height() as f32,
         );
-        let scale = self.scale.unwrap_or_else(|| fit(body.width(), size.x));
+        let mut scale = self.scale.unwrap_or_else(|| fit(body.width(), size.x));
+        let zoom = ui.input(|i| i.zoom_delta());
+        if zoom != 1.0
+            && let Some(at) = ui
+                .input(|i| i.pointer.hover_pos())
+                .filter(|at| body.contains(*at))
+        {
+            (scale, self.offset) = zoom_around(scale, self.offset, at - body.min, zoom);
+            self.scale = Some(scale);
+        }
         let output = egui::ScrollArea::both()
             .id_salt("drawer-image")
             .auto_shrink(false)
@@ -139,6 +152,14 @@ impl Viewer {
             });
         self.offset = output.state.offset;
     }
+}
+
+/// The scale and scroll offset after zooming by `factor`, keeping the image point under `at`, a
+/// position inside the view, where it was on screen.
+fn zoom_around(scale: f32, offset: egui::Vec2, at: egui::Vec2, factor: f32) -> (f32, egui::Vec2) {
+    let zoomed = (scale * factor).clamp(SMALLEST, LARGEST);
+    let point = (offset + at) / scale;
+    (zoomed, (point * zoomed - at).max(egui::Vec2::ZERO))
 }
 
 /// The scale that fits an image `width` pixels wide into `room` points, never enlarging it.
@@ -368,6 +389,146 @@ mod tests {
             image_rect(&shapes).is_some(),
             "the reopened drawer paints no image"
         );
+    }
+
+    /// Ctrl+wheel over the image zooms it around the pointer; the consoles beside the drawer keep
+    /// their colours, and the same gesture over a console leaves the image alone.
+    #[test]
+    fn ctrl_wheel_zooms_the_image_without_dimming_the_consoles() {
+        let folder = Folder::new();
+        let path = folder.0.join("wide.png");
+        write_png(&path, 2400, 1600);
+        let (mut window, ctx, _) = window_with_image(&path);
+        let shapes = painted(&mut window, &ctx, vec![]);
+        let metrics =
+            crate::painter::CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
+        let consoles = crate::tab_bar::geometry(&window, area(), &metrics).consoles;
+        let plain = inks(&shapes, consoles);
+        assert!(!plain.is_empty());
+        let before = image_rect(&shapes).unwrap();
+        let body = window.sidebar.last_dock.unwrap();
+        let at = egui::pos2(body.center().x, body.bottom() - 60.0);
+        let chord = egui::Modifiers {
+            ctrl: true,
+            command: true,
+            ..Default::default()
+        };
+        let wheel = |at: egui::Pos2| {
+            vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::ModifiersChanged(chord),
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Line,
+                    delta: egui::vec2(0.0, 3.0),
+                    phase: egui::TouchPhase::Move,
+                    modifiers: chord,
+                },
+            ]
+        };
+        let mut shapes = painted(&mut window, &ctx, wheel(at));
+        for _ in 0..30 {
+            shapes = painted(&mut window, &ctx, vec![]);
+        }
+        let after = image_rect(&shapes).unwrap();
+        assert!(
+            after.width() > before.width() * 1.2,
+            "{before:?} -> {after:?}"
+        );
+        let under = |rect: egui::Rect| (at - rect.min) / rect.width();
+        assert!(
+            (under(before) - under(after)).length() < 0.01,
+            "the point under the pointer moved: {before:?} -> {after:?}"
+        );
+        assert_eq!(
+            inks(&shapes, consoles),
+            plain,
+            "the zoom dimmed the consoles"
+        );
+        painted(&mut window, &ctx, wheel(consoles.center()));
+        for _ in 0..30 {
+            shapes = painted(&mut window, &ctx, vec![]);
+        }
+        assert_eq!(image_rect(&shapes).unwrap().width(), after.width());
+    }
+
+    /// With the keys elsewhere, a Ctrl+wheel over the drawer is still the drawer's: egui reports
+    /// it as a zoom with no scroll, which the drawer's own scroll test would not see.
+    #[test]
+    fn the_drawer_claims_a_ctrl_wheel_over_it_without_the_keyboard() {
+        let folder = Folder::new();
+        let path = folder.0.join("wide.png");
+        write_png(&path, 2400, 1600);
+        let (mut window, ctx, _) = window_with_image(&path);
+        crate::viewer::blur(&mut window);
+        let at = window.sidebar.last_dock.unwrap().center();
+        let chord = egui::Modifiers {
+            ctrl: true,
+            command: true,
+            ..Default::default()
+        };
+        let metrics =
+            crate::painter::CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
+        let mut owned = false;
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(area()),
+                events: vec![
+                    egui::Event::PointerMoved(at),
+                    egui::Event::ModifiersChanged(chord),
+                    egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Line,
+                        delta: egui::vec2(0.0, 3.0),
+                        phase: egui::TouchPhase::Move,
+                        modifiers: chord,
+                    },
+                ],
+                ..Default::default()
+            },
+            |ui| {
+                assert_eq!(ui.input(|i| i.smooth_scroll_delta), egui::Vec2::ZERO);
+                owned = crate::viewer::before_keys(&mut window, ui, &metrics);
+            },
+        );
+        output.drop_without_applying_deltas();
+        assert!(owned);
+    }
+
+    #[test]
+    fn zooming_keeps_the_point_under_the_pointer_and_stops_at_its_bounds() {
+        let (offset, at) = (egui::vec2(100.0, 40.0), egui::vec2(200.0, 150.0));
+        let (scale, moved) = zoom_around(0.5, offset, at, 1.5);
+        assert_eq!(scale, 0.75);
+        assert_eq!((moved + at) / scale, (offset + at) / 0.5);
+        assert_eq!(zoom_around(0.5, offset, at, 1000.0).0, LARGEST);
+        assert_eq!(zoom_around(0.5, offset, at, 0.0001).0, SMALLEST);
+    }
+
+    /// An image wider than the drawer fits its width; a narrower one is shown at one point per
+    /// pixel rather than enlarged.
+    #[test]
+    fn an_image_is_fitted_to_the_drawer_width_and_never_enlarged() {
+        let body = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(500.0, 400.0));
+        for (width, height, shown) in [(2000, 1000, 500.0), (300, 100, 300.0)] {
+            let ctx = egui::Context::default();
+            let mut viewer = Viewer {
+                picture: Some(Picture {
+                    original: std::sync::Arc::new(image::RgbaImage::new(width, height)),
+                    display: egui::ColorImage::filled([4, 2], egui::Color32::RED),
+                }),
+                ..Viewer::default()
+            };
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(body),
+                    ..Default::default()
+                },
+                |ui| viewer.show(ui, crate::theme::Theme::default()),
+            );
+            let rect = image_rect(&output.shapes).unwrap();
+            output.drop_without_applying_deltas();
+            assert_eq!(rect.width(), shown, "{width}x{height}");
+            assert_eq!(rect.height(), shown * height as f32 / width as f32);
+        }
     }
 
     #[test]
