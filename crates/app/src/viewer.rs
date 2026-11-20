@@ -204,6 +204,15 @@ impl State {
         }
     }
 
+    /// Forgets what this state showed, keeping only which tab it is and the window's context.
+    fn forget(&mut self) {
+        *self = Self {
+            context: self.context.take(),
+            tool_markdown: self.tool_markdown,
+            ..Self::default()
+        };
+    }
+
     fn record(&mut self, spent: Duration) {
         self.cost += spent;
         self.frame += spent;
@@ -253,7 +262,23 @@ pub(super) fn select_state(window: &mut crate::Window, markdown: bool) {
     window.viewer_other.tool_markdown = Some(!markdown);
 }
 
+/// Shows the image in the document tab. The drawer's open, keyboard and gesture flags stay the
+/// Markdown state's, so the image takes input exactly as a Markdown document would.
+fn show_image(window: &mut crate::Window) {
+    select_state(window, true);
+    crate::sidebar::select(window, crate::sidebar::Tool::Document);
+    window.viewer.open = true;
+    window.viewer.keyboard = true;
+    if let Some(ctx) = &window.viewer.context {
+        ctx.request_repaint();
+    }
+}
+
 pub(crate) fn activate(window: &mut crate::Window, markdown: bool) {
+    if markdown && window.image.shown() {
+        show_image(window);
+        return;
+    }
     select_state(window, markdown);
     let tool = if markdown {
         crate::sidebar::Tool::Document
@@ -350,12 +375,10 @@ fn close_tab(window: &mut crate::Window, markdown: bool, ctx: &egui::Context) {
         state.message = "Send or clear the review comments before closing the review.".into();
         return;
     }
-    let kept = State {
-        context: state.context.take(),
-        tool_markdown: state.tool_markdown,
-        ..State::default()
-    };
-    *state = kept;
+    state.forget();
+    if markdown {
+        window.image = image::Viewer::default();
+    }
     let active = crate::sidebar::active(window);
     let closed = if markdown {
         crate::sidebar::Tool::Document
@@ -589,7 +612,8 @@ fn title(window: &crate::Window, unavailable: bool) -> drawer::Title {
 
 #[cfg(test)]
 pub(crate) use code_header::document_relative_path;
-pub(crate) use origin::{open_diff_for_pane, open_document_target};
+pub(crate) use image::is_image;
+pub(crate) use origin::{open_diff_for_pane, open_document_target, open_image_target};
 
 #[cfg(test)]
 mod interaction_tests;

@@ -113,6 +113,7 @@ pub(crate) fn open_document_target(
     if !pin(&mut window.viewer, source) {
         return false;
     }
+    window.image = super::image::Viewer::default();
     crate::sidebar::select(window, crate::sidebar::Tool::Document);
     // Files follows the focused console, so the folder a relative path is counted from is the
     // one Files showed when the file was opened, not whatever it shows later.
@@ -130,6 +131,22 @@ pub(crate) fn open_document_target(
     }
     if let Some(ctx) = &window.viewer.context {
         ctx.request_repaint();
+    }
+    true
+}
+
+/// Opens an image in the drawer's document tab, pinned to the console it was printed in. It
+/// replaces the Markdown document there, which is forgotten as closing its tab forgets it.
+pub(crate) fn open_image_target(window: &mut Window, pane: usize, path: PathBuf) -> bool {
+    let Some(source) = source(window, pane) else {
+        return false;
+    };
+    super::select_state(window, true);
+    window.viewer.forget();
+    window.image.open(source, path);
+    super::show_image(window);
+    if let Some(ctx) = window.viewer.context.clone() {
+        window.image.poll(&ctx);
     }
     true
 }
@@ -345,6 +362,39 @@ mod tests {
             names
         );
     }
+    /// The image is pinned to the console it was printed in, not to the focused one, and it and a
+    /// Markdown document replace each other in the document tab.
+    #[test]
+    fn an_image_pins_its_console_and_replaces_the_markdown_document() {
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+        let ctx = egui::Context::default();
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
+        one_frame_in(&mut window, &ctx, area, vec![]);
+        let names: Vec<_> = window.all_panes().map(|p| p.name).collect();
+        assert_eq!(window.active().focus, names[0]);
+        open_document_target(&mut window, names[0], PathBuf::from("/docs/guide.md"), None);
+        assert!(open_image_target(
+            &mut window,
+            names[1],
+            PathBuf::from("/shots/screen.png")
+        ));
+        assert_eq!(window.image.origin.as_ref().unwrap().pane, names[1]);
+        assert!(window.image.shown());
+        assert_eq!(
+            crate::sidebar::active(&window),
+            Some(crate::sidebar::Tool::Document)
+        );
+        assert!(window.viewer.open && window.viewer.path.is_empty());
+        open_document_target(&mut window, names[0], PathBuf::from("/docs/guide.md"), None);
+        assert!(!window.image.shown() && window.image.origin.is_none());
+        assert!(!open_image_target(
+            &mut window,
+            9999,
+            PathBuf::from("/x.png")
+        ));
+        assert!(!window.image.shown());
+    }
+
     #[test]
     fn changing_console_clears_previous_document() {
         let mut state = State::default();
