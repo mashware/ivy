@@ -457,6 +457,20 @@ pub(crate) fn show(window: &mut Window, ui: &mut egui::Ui, area: egui::Rect) {
     window.timed_separately += window.sidebar.take_cost();
 }
 
+/// The root Files last took for `pane`, if any.
+pub(crate) fn root_of(window: &Window, pane: usize) -> Option<PathBuf> {
+    window.explorer.navigation.get(&pane)?.root.clone()
+}
+
+/// The row Files has selected for `pane`, and whether it is an expanded folder.
+#[cfg(test)]
+pub(crate) fn selected_of(window: &Window, pane: usize) -> Option<(PathBuf, bool)> {
+    let nav = window.explorer.navigation.get(&pane)?;
+    let selected = nav.selected.clone()?;
+    let expanded = nav.expanded.contains(&selected);
+    Some((selected, expanded))
+}
+
 pub(crate) fn open_path(window: &mut Window, pane: usize, path: PathBuf) {
     let Some(tab) = window
         .tabs
@@ -497,7 +511,43 @@ pub(crate) fn open_path(window: &mut Window, pane: usize, path: PathBuf) {
     ctx.request_repaint();
 }
 
-fn display(path: &Path) -> String {
+/// Show `folder` in the source console's Files: inside the tree it already shows, expanded,
+/// selected and scrolled into view, keeping its root; a folder outside that root opens as one.
+pub(crate) fn reveal_folder(window: &mut Window, pane: usize, folder: PathBuf) {
+    let inside = window
+        .explorer
+        .navigation
+        .get(&pane)
+        .and_then(|nav| nav.root.as_ref())
+        .is_some_and(|root| folder.starts_with(root));
+    if !inside {
+        open_path(window, pane, folder);
+        return;
+    }
+    let Some(tab) = window
+        .tabs
+        .iter()
+        .position(|tab| tab.panes().iter().any(|p| p.name == pane))
+    else {
+        return;
+    };
+    window.active = tab;
+    window.active_mut().focus = pane;
+    if !crate::sidebar::files_visible(window) {
+        crate::sidebar::select(window, crate::sidebar::Tool::Files);
+    }
+    reveal(window);
+    let state = &mut window.explorer;
+    search::reveal(state, pane, &folder);
+    if let Some(nav) = state.navigation.get_mut(&pane) {
+        nav.expanded.insert(folder);
+    }
+    if let Some(ctx) = &state.context {
+        ctx.request_repaint();
+    }
+}
+
+pub(crate) fn display(path: &Path) -> String {
     path.to_string_lossy().chars().flat_map(|c| {
         if c.is_control() || matches!(c, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{206f}' | '\u{feff}') {
             c.escape_unicode().collect::<Vec<_>>()

@@ -1,5 +1,6 @@
 //! Read-only document views, independent of console and producer identity.
 mod code;
+mod code_header;
 mod delivery;
 mod diff;
 mod drawer;
@@ -553,6 +554,7 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
         (&tabs, &title),
     );
     ctx.input_mut(|input| input.events = filtered);
+    code_header::reveal_in_files(window);
     window.viewer.record(started.elapsed());
     window.timed_separately += window.viewer.take_cost();
 }
@@ -584,6 +586,8 @@ fn title(window: &crate::Window, unavailable: bool) -> drawer::Title {
     }
 }
 
+#[cfg(test)]
+pub(crate) use code_header::document_relative_path;
 pub(crate) use origin::{open_diff_for_pane, open_document_target};
 
 #[cfg(test)]

@@ -29,6 +29,62 @@ fn panes_and_worktrees_restore_independent_navigation_and_restart_hidden() {
     assert!(!restarted.visible && restarted.navigation.is_empty());
 }
 
+/// A file opened from Files is counted from the folder Files showed then, even after Files moves
+/// on with the focused console; outside that folder there is no relative path.
+#[test]
+fn an_opened_file_keeps_the_files_folder_it_was_opened_from() {
+    let mut nonce = [0u8; 8];
+    getrandom::fill(&mut nonce).unwrap();
+    let base = std::env::temp_dir().join(format!("files-root-{}", u64::from_ne_bytes(nonce)));
+    let (root, other) = (base.join("r"), base.join("other"));
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::create_dir_all(&other).unwrap();
+    std::fs::write(root.join("src/a.ts"), "a").unwrap();
+    std::fs::write(root.join("src/b.ts"), "b").unwrap();
+    let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+    let pane = window.all_panes().next().unwrap().name;
+    window.explorer.reconcile(&[(pane, Some(root.clone()))]);
+    assert!(crate::viewer::open_document_target(
+        &mut window,
+        pane,
+        root.join("src/a.ts"),
+        None
+    ));
+    window.explorer.reconcile(&[(pane, Some(other.clone()))]);
+    let relative = crate::viewer::document_relative_path(&window);
+    // Opened again while Files shows another folder, the same tree is outside it.
+    assert!(crate::viewer::open_document_target(
+        &mut window,
+        pane,
+        root.join("src/b.ts"),
+        None
+    ));
+    let outside = crate::viewer::document_relative_path(&window);
+    let _ = std::fs::remove_dir_all(&base);
+    assert_eq!(root_of(&window, pane), Some(other));
+    assert_eq!(relative, Some(PathBuf::from("src/a.ts")));
+    assert_eq!(outside, None);
+}
+
+/// A folder inside the root Files shows is revealed in that tree, expanded and selected, and the
+/// root stays where it was.
+#[test]
+fn a_folder_inside_the_root_is_revealed_without_moving_the_root() {
+    let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+    let pane = window.all_panes().next().unwrap().name;
+    window
+        .explorer
+        .reconcile(&[(pane, Some("/repo/main".into()))]);
+    assert_eq!(selected_of(&window, pane), None);
+    reveal_folder(&mut window, pane, "/repo/main/src/deep".into());
+    assert_eq!(
+        selected_of(&window, pane),
+        Some(("/repo/main/src/deep".into(), true))
+    );
+    assert_eq!(root_of(&window, pane), Some("/repo/main".into()));
+    assert!(window.explorer.visible);
+}
+
 #[test]
 fn files_expansion_and_scroll_survive_shared_sidebar_tool_switches() {
     let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);

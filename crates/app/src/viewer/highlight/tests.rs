@@ -205,3 +205,10 @@ fn css_has_no_line_comments_and_rust_raw_strings_take_their_prefixes() {
         );
     }
 }
+
+#[test]
+fn scss_line_comments_are_coloured_as_comments() {
+    let path = Path::new("/r/site.scss");
+    let line = one("a { color: red; } // note", Family::of(path, ""));
+    assert!(has(&line, "// note", Comment), "{line:?}");
+}

@@ -428,6 +428,47 @@ const SOURCES: &[(&str, &str, usize)] = &[
         0,
     ),
     (
+        "src/viewer/code/rows.rs",
+        include_str!("../src/viewer/code/rows.rs"),
+        0,
+    ),
+    (
+        "src/viewer/code_header.rs",
+        include_str!("../src/viewer/code_header.rs"),
+        0,
+    ),
+    (
+        "src/viewer/code_header/tests.rs",
+        include_str!("../src/viewer/code_header/tests.rs"),
+        0,
+    ),
+    (
+        "src/viewer/code_header/tests/window.rs",
+        include_str!("../src/viewer/code_header/tests/window.rs"),
+        0,
+    ),
+    ("src/opener.rs", include_str!("../src/opener.rs"), 0),
+    (
+        "src/opener/linux.rs",
+        include_str!("../src/opener/linux.rs"),
+        0,
+    ),
+    (
+        "src/opener/macos.rs",
+        include_str!("../src/opener/macos.rs"),
+        0,
+    ),
+    (
+        "src/opener/windows.rs",
+        include_str!("../src/opener/windows.rs"),
+        0,
+    ),
+    (
+        "src/opener/tests.rs",
+        include_str!("../src/opener/tests.rs"),
+        0,
+    ),
+    (
         "src/viewer/highlight.rs",
         include_str!("../src/viewer/highlight.rs"),
         0,
