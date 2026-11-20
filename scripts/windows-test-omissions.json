@@ -156,6 +156,36 @@
   },
   {
     "binary": "app/app:lib",
+    "name": "header::splitting::tests::split_directory_fallback_shell_receives_the_same_directory",
+    "reason": "unix-only: requires Unix shell directory reports and Linux-native split cwd resolution"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "header::splitting::tests::split_directory_foreign_report_vetoes_native_and_previous_local_directory",
+    "reason": "unix-only: requires Unix shell directory reports and Linux-native split cwd resolution"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "header::splitting::tests::split_directory_osc_report_survives_source_exit_and_deleted_path_refuses_split",
+    "reason": "unix-only: requires Unix shell directory reports and Linux-native split cwd resolution"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "header::splitting::tests::split_directory_tracks_cd_for_both_orientations",
+    "reason": "unix-only: requires Unix shell directory reports and Linux-native split cwd resolution"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "header::splitting::tests::split_directory_unknown_after_source_exit_uses_ordinary_launch_directory",
+    "reason": "unix-only: requires Unix shell directory reports and Linux-native split cwd resolution"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "header::splitting::tests::split_directory_uses_named_toolbar_target_instead_of_focus",
+    "reason": "unix-only: requires Unix shell directory reports and Linux-native split cwd resolution"
+  },
+  {
+    "binary": "app/app:lib",
     "name": "keyboard::tests::clicking_failed_recovery_does_not_discard_an_unanswered_held_paste",
     "reason": "unix-only: depends on Linux-specific bracketed-paste size boundary and /bin/cat child behavior"
   },
@@ -265,6 +295,41 @@
     "binary": "app/app:lib",
     "name": "opening::codex_tests::launched_shells_keep_their_own_pane_identity_and_survive_repeated_codex_runs",
     "reason": "unix-only: launches POSIX shell wrapper scripts and relies on Unix executable permissions"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::overlay::native_tests::admitted_proof_survives_helper_exit_but_not_hold_replacement_or_root_death",
+    "reason": "unix-only: requires Linux process ancestry, Unix-domain sockets and POSIX PTY fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::overlay::native_tests::foreign_client_root_and_closed_holder_are_refused",
+    "reason": "unix-only: requires Linux process ancestry, Unix-domain sockets and POSIX PTY fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::overlay::native_tests::full_admission_queue_refuses_without_changing_the_document",
+    "reason": "unix-only: requires Linux process ancestry, Unix-domain sockets and POSIX PTY fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::overlay::native_tests::native_claude_outside_desktop_path_admits_hook_and_clears_wait",
+    "reason": "unix-only: requires Linux process ancestry, Unix-domain sockets and POSIX PTY fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::overlay::native_tests::nested_client_is_rejected_but_generic_descendant_hook_is_allowed",
+    "reason": "unix-only: requires Linux process ancestry, Unix-domain sockets and POSIX PTY fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::overlay::native_tests::same_client_helper_is_admitted_without_waiting_for_window_apply",
+    "reason": "unix-only: requires Linux process ancestry, Unix-domain sockets and POSIX PTY fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::overlay::native_tests::unheld_and_script_held_refusals_keep_their_contract",
+    "reason": "unix-only: requires Linux process ancestry, Unix-domain sockets and POSIX PTY fixtures"
   },
   {
     "binary": "app/app:lib",
