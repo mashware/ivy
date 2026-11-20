@@ -102,37 +102,37 @@
   {
     "binary": "app/app:lib",
     "name": "client_attestation::programs::tests::desktop_path_discovers_native_claude_in_its_user_installation",
-    "reason": "unix-only: exercises Unix native client discovery and process identity"
+    "reason": "unix-only: exercises Unix resolver-child lifetime, process groups and pipe EOF"
   },
   {
     "binary": "app/app:lib",
     "name": "client_attestation::programs::tests::explicit_path_keeps_precedence_over_native_claude_installation",
-    "reason": "unix-only: exercises Unix native client discovery and process identity"
+    "reason": "unix-only: exercises Unix resolver-child lifetime, process groups and pipe EOF"
   },
   {
     "binary": "app/app:lib",
     "name": "client_attestation::programs::tests::native_claude_fallback_refuses_scripts_missing_or_relative_home",
-    "reason": "unix-only: exercises Unix native client discovery and process identity"
+    "reason": "unix-only: exercises Unix resolver-child lifetime, process groups and pipe EOF"
   },
   {
     "binary": "app/app:lib",
     "name": "client_attestation::programs::tests::native_claude_version_symlink_is_discovered_with_colon_in_home",
-    "reason": "unix-only: exercises Unix native client discovery and process identity"
+    "reason": "unix-only: exercises Unix resolver-child lifetime, process groups and pipe EOF"
   },
   {
     "binary": "app/app:lib",
     "name": "client_attestation::programs::tests::native_fallback_does_not_discover_other_clients_or_nonexecutables",
-    "reason": "unix-only: exercises Unix native client discovery and process identity"
+    "reason": "unix-only: exercises Unix resolver-child lifetime, process groups and pipe EOF"
   },
   {
     "binary": "app/app:lib",
     "name": "client_attestation::programs::tests::trusted_path_discards_empty_and_relative_entries",
-    "reason": "unix-only: exercises Unix native client discovery and process identity"
+    "reason": "unix-only: exercises Unix resolver-child lifetime, process groups and pipe EOF"
   },
   {
     "binary": "app/app:lib",
     "name": "client_attestation::programs::tests::unsupported_path_client_does_not_fall_back_to_another_installation",
-    "reason": "unix-only: exercises Unix native client discovery and process identity"
+    "reason": "unix-only: exercises Unix resolver-child lifetime, process groups and pipe EOF"
   },
   {
     "binary": "app/app:lib",
@@ -197,7 +197,7 @@
   {
     "binary": "app/app:lib",
     "name": "launch::tests::a_real_scoped_exit_keeps_repainting_until_the_observer_finishes",
-    "reason": "unix-only: requires Linux systemd user-manager semantics",
+    "reason": "unix-only: requires the built target/debug/app and a real systemd user manager",
     "linux_ignore_reason": "requires the built target/debug/app and a real systemd user manager"
   },
   {
@@ -213,7 +213,7 @@
   {
     "binary": "app/app:lib",
     "name": "launch::tests::normal_restored_fallback_and_takeover_paths_use_the_explicit_ivy_launcher",
-    "reason": "unix-only: requires Linux systemd user-manager semantics",
+    "reason": "unix-only: requires the built target/debug/app and a real systemd user manager",
     "linux_ignore_reason": "requires the built target/debug/app and a real systemd user manager"
   },
   {
@@ -389,7 +389,7 @@
   {
     "binary": "app/app:lib",
     "name": "pty_output::tests::the_destination_keeps_what_it_already_had",
-    "reason": "unix-only: POSIX shell fixtures and Unix PTY output lifetime"
+    "reason": "unix-only: uses Unix permission bits to test an unwritable destination"
   },
   {
     "binary": "app/app:lib",
@@ -444,7 +444,7 @@
   {
     "binary": "app/app:lib",
     "name": "resume::tests::restored_client_fixed_arguments_and_directory_reach_a_real_isolated_scope",
-    "reason": "unix-only: requires Linux systemd user-manager semantics",
+    "reason": "unix-only: requires the built target/debug/app and a real systemd user manager",
     "linux_ignore_reason": "requires the built target/debug/app and a real systemd user manager"
   },
   {
@@ -1583,7 +1583,7 @@
   {
     "binary": "panel-control/panel_control:lib",
     "name": "endpoint::tests::a_pane_cannot_be_reached_through_another_panes_endpoint",
-    "reason": "unix-only: requires Unix stream socket path and routing semantics"
+    "reason": "unix-only: requires Unix stream socket routing"
   },
   {
     "binary": "panel-control/panel_control:lib",
@@ -1598,12 +1598,12 @@
   {
     "binary": "panel-control/panel_control:lib",
     "name": "endpoint::tests::the_endpoint_lives_inside_the_panes_own_directory",
-    "reason": "unix-only: requires Unix stream socket path and routing semantics"
+    "reason": "unix-only: requires Unix socket path placement"
   },
   {
     "binary": "panel-control/panel_control:lib",
     "name": "endpoint::tests::what_was_bound_is_what_gets_connected_to",
-    "reason": "unix-only: requires Unix stream socket path and routing semantics"
+    "reason": "unix-only: requires Unix stream socket connection semantics"
   },
   {
     "binary": "panel-control/panel_control:lib",
@@ -1748,7 +1748,7 @@
   {
     "binary": "panel-control/panel_mcp_handshake:test",
     "name": "conditional_instructions_neither_probe_nor_promise_a_socket",
-    "reason": "unix-only: requires Unix socket transport fixtures"
+    "reason": "unix-only: requires Unix socket-type inspection"
   },
   {
     "binary": "panel-control/session_helper:test",
@@ -1758,7 +1758,7 @@
   {
     "binary": "panel-control/session_helper:test",
     "name": "invalid_whole_identity_exits_before_reading_stdin_or_connecting",
-    "reason": "unix-only: requires Unix socket routing and non-text environment values"
+    "reason": "unix-only: requires Unix non-text environment values"
   },
   {
     "binary": "panel-control/session_helper:test",
@@ -1778,42 +1778,42 @@
   {
     "binary": "term-core/term_core:lib",
     "name": "foreground::tests::ancestry_diagnostic_is_tristate_and_ignores_foreground_rules",
-    "reason": "unix-only: requires Linux process ancestry and pidfd inspection"
+    "reason": "unix-only: requires Linux process ancestry inspection"
   },
   {
     "binary": "term-core/term_core:lib",
     "name": "foreground::tests::child_exit_status_distinguishes_success_from_failed_resume",
-    "reason": "unix-only: requires Linux process ancestry and pidfd inspection"
+    "reason": "unix-only: requires Unix shell process semantics"
   },
   {
     "binary": "term-core/term_core:lib",
     "name": "foreground::tests::detached_helper_is_attested_only_as_a_descendant_of_the_live_foreground_pane",
-    "reason": "unix-only: requires Linux process ancestry and pidfd inspection"
+    "reason": "unix-only: requires Linux procfs inspection"
   },
   {
     "binary": "term-core/term_core:lib",
     "name": "foreground::tests::detached_helpers_do_not_make_a_background_ancestor_foreground",
-    "reason": "unix-only: requires Linux process ancestry and pidfd inspection"
+    "reason": "unix-only: requires Linux procfs inspection"
   },
   {
     "binary": "term-core/term_core:lib",
     "name": "foreground::tests::foreground_scope_is_owned_send_and_ends_with_its_console",
-    "reason": "unix-only: requires Linux process ancestry and pidfd inspection"
+    "reason": "unix-only: requires Linux pidfd support"
   },
   {
     "binary": "term-core/term_core:lib",
     "name": "foreground::tests::foreground_scope_rejects_the_other_console_and_background_groups",
-    "reason": "unix-only: requires Linux process ancestry and pidfd inspection"
+    "reason": "unix-only: requires Linux process group inspection"
   },
   {
     "binary": "term-core/term_core:lib",
     "name": "foreground::tests::native_process_directory_checks_birth_executable_and_live_process",
-    "reason": "unix-only: requires Linux process ancestry and pidfd inspection"
+    "reason": "unix-only: requires Linux procfs inspection"
   },
   {
     "binary": "term-core/term_core:lib",
     "name": "foreground::tests::nested_descendants_are_exposed_and_root_exit_is_native",
-    "reason": "unix-only: requires Linux process ancestry and pidfd inspection"
+    "reason": "unix-only: requires Linux procfs inspection"
   },
   {
     "binary": "term-core/term_core:lib",
@@ -1823,17 +1823,17 @@
   {
     "binary": "term-core/term_core:lib",
     "name": "received::tests::a_prelude_that_fails_never_marks_the_program_ready",
-    "reason": "unix-only: requires POSIX shell and Unix canonical line-discipline behavior"
+    "reason": "unix-only: requires POSIX shell exit and EOF semantics"
   },
   {
     "binary": "term-core/term_core:lib",
     "name": "received::tests::a_prelude_with_a_semicolon_of_its_own_is_refused",
-    "reason": "unix-only: requires POSIX shell and Unix canonical line-discipline behavior"
+    "reason": "unix-only: requires POSIX shell command chaining"
   },
   {
     "binary": "term-core/term_core:lib",
     "name": "received::tests::it_reports_what_the_program_got_and_not_what_the_echo_showed",
-    "reason": "unix-only: requires POSIX shell and Unix canonical line-discipline behavior"
+    "reason": "unix-only: requires Unix canonical line discipline and echo semantics"
   },
   {
     "binary": "term-core/term_core:lib",
@@ -1876,17 +1876,17 @@
   {
     "binary": "term-core/term_core:lib",
     "name": "scope_gate::tests::absent_helper_connection_obeys_startup_deadline",
-    "reason": "unix-only: requires Linux Unix-socket launcher semantics"
+    "reason": "unix-only: requires Unix socket semantics"
   },
   {
     "binary": "term-core/term_core:lib",
     "name": "scope_gate::tests::explicit_executable_resolution_preserves_relative_path_and_refuses_directories",
-    "reason": "unix-only: requires Linux Unix-socket launcher semantics"
+    "reason": "unix-only: requires Unix executable permission semantics"
   },
   {
     "binary": "term-core/term_core:lib",
     "name": "scope_gate::tests::gate_is_private_and_removes_its_endpoint_on_drop",
-    "reason": "unix-only: requires Linux Unix-socket launcher semantics"
+    "reason": "unix-only: requires Unix socket and permission semantics"
   },
   {
     "binary": "term-core/term_core:lib",
@@ -1941,32 +1941,32 @@
   {
     "binary": "term-core/term_core:lib",
     "name": "tests::a_refusal_clears_on_the_next_write_the_queue_accepts",
-    "reason": "unix-only: requires POSIX shell, line-discipline, or EOF behavior"
+    "reason": "unix-only: requires POSIX terminal raw mode and line-discipline semantics"
   },
   {
     "binary": "term-core/term_core:lib",
     "name": "tests::a_refusal_in_one_console_leaves_another_console_accepting",
-    "reason": "unix-only: requires POSIX shell, line-discipline, or EOF behavior"
+    "reason": "unix-only: requires POSIX terminal raw mode and stopped-reader PTY behavior"
   },
   {
     "binary": "term-core/term_core:lib",
     "name": "tests::a_refused_write_adds_nothing_to_what_is_owed",
-    "reason": "unix-only: requires POSIX shell, line-discipline, or EOF behavior"
+    "reason": "unix-only: requires POSIX terminal raw mode and stopped-reader PTY behavior"
   },
   {
     "binary": "term-core/term_core:lib",
     "name": "tests::a_write_past_the_ceiling_is_refused_and_named_by_its_own_message",
-    "reason": "unix-only: requires POSIX shell, line-discipline, or EOF behavior"
+    "reason": "unix-only: requires POSIX terminal raw mode and stopped-reader PTY behavior"
   },
   {
     "binary": "term-core/term_core:lib",
     "name": "tests::an_oversized_write_is_accepted_whole_when_the_queue_is_under_the_ceiling",
-    "reason": "unix-only: requires POSIX shell, line-discipline, or EOF behavior"
+    "reason": "unix-only: requires POSIX terminal raw mode and stopped-reader PTY behavior"
   },
   {
     "binary": "term-core/term_core:lib",
     "name": "tests::closing_a_console_does_not_wait_out_the_librarys_poll_step",
-    "reason": "unix-only: requires POSIX shell, line-discipline, or EOF behavior"
+    "reason": "unix-only: requires Unix hang-up signal behavior"
   },
   {
     "binary": "term-core/term_core:lib",
@@ -1986,17 +1986,17 @@
   {
     "binary": "term-core/term_core:lib",
     "name": "tests::closing_does_not_hang_when_a_survivor_holds_the_pseudoterminal",
-    "reason": "unix-only: requires POSIX shell, line-discipline, or EOF behavior"
+    "reason": "unix-only: requires POSIX terminal raw mode and detached session semantics"
   },
   {
     "binary": "term-core/term_core:lib",
     "name": "tests::each_refused_write_is_counted_even_while_the_flag_is_already_up",
-    "reason": "unix-only: requires POSIX shell, line-discipline, or EOF behavior"
+    "reason": "unix-only: requires POSIX terminal raw mode and stopped-reader PTY behavior"
   },
   {
     "binary": "term-core/term_core:lib",
     "name": "tests::nothing_handed_over_is_lost_when_the_program_reads_late",
-    "reason": "unix-only: requires POSIX shell, line-discipline, or EOF behavior"
+    "reason": "unix-only: requires POSIX terminal raw mode and line-discipline semantics"
   },
   {
     "binary": "term-core/term_core:lib",
@@ -2006,12 +2006,12 @@
   {
     "binary": "term-core/term_core:lib",
     "name": "tests::the_write_returns_even_though_the_program_never_reads_its_input",
-    "reason": "unix-only: requires POSIX shell, line-discipline, or EOF behavior"
+    "reason": "unix-only: requires POSIX terminal raw mode and nonblocking input semantics"
   },
   {
     "binary": "term-core/term_core:lib",
     "name": "tests::without_consuming_it_what_arrives_is_bounded",
-    "reason": "unix-only: requires POSIX shell, line-discipline, or EOF behavior"
+    "reason": "unix-only: requires the Unix /dev/zero byte source"
   },
   {
     "binary": "term-core/term_core:lib",
