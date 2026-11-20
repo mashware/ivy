@@ -1,0 +1,11 @@
+{
+  "number": 162,
+  "ref": "#162",
+  "title": "Windows CI: run clippy and the whole test suite, and launch the installed app",
+  "body": "Part of porting Ivy to Windows entirely (Linux and macOS already work). Found by the Windows porting inventory.\n\n## What is wrong\n\n- `.github/workflows/ivy-prerelease.yml:22-37`: clippy and `cargo test` run on `ubuntu-24.04` only.\n- The `windows` job (`:192-225`) only runs `cargo build --release ... --bins` and the installer lifecycle.\n- `packaging/windows/test-install.ps1` never starts `Ivy.exe` and sets `XDG_CONFIG_HOME` itself (`:11`), which hides A2.\n- `#[cfg(windows)]` test arms (`endpoint.rs:363`, `metadata.rs:425`, `client.rs:449`, `splitting.rs:466`) have never compiled.\n- **Effect:** the published installer crashed on launch, and nothing caught it.\n- The suite is pervasively `sh`-based: `Pty::spawn(\"sh\", [\"-c\", ...])` throughout `pty_output.rs`, `lib.rs`, `resume.rs` and others. A Windows `cargo test` will fail wholesale until tests are gated or given a `cmd`/`pwsh` arm.\n- **Fix:**\n  - Add a `windows-2025` job: `cargo clippy --workspace --all-targets -D warnings` and `cargo test --workspace`. Gate Unix-shell tests behind `cfg(unix)` with a reported skip count, never silent (see the F2.7 row about early-returning tests).\n  - Add a launch smoke test. Start `Ivy.exe` with a clean profile (no `XDG_*`, no `SHELL`) and a measuring or self-closing mode (`measure.rs` already has one). Assert it opens a console, writes its layout under `%APPDATA%`, and exits 0.\n\n## Acceptance criteria\n\n- A regression like the current launch crash fails CI.\n  - Every `#[cfg(windows)]` test arm compiles and runs.\n  - Skipped Unix-only tests are counted in the job output, never silent.\n\n## Depends on\n\n- #161",
+  "url": "https://github.com/mashware/ivy/issues/162",
+  "base": "main",
+  "kind": null,
+  "comments": [],
+  "stack": true
+}
