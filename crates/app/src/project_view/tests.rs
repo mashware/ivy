@@ -548,16 +548,26 @@ fn exhausted_palette_keeps_distinct_project_names_in_actual_headers() {
             assert_eq!(badges[0].ink, Color32::WHITE);
             assert_eq!(badges[1].ink, Color32::WHITE);
             assert_ne!(badges[0].name, badges[1].name);
-            for badge in badges {
-                assert!(
-                    output.shapes.iter().any(|shape| matches!(
-                        &shape.shape,
-                        egui::Shape::Text(text) if text.galley.job.text == badge.name
-                            && text.galley.job.sections.iter().all(|section| section.format.color == Color32::WHITE)
-                    )),
-                    "project name must remain painted after color exhaustion"
-                );
-            }
+            // Both names stay painted; the unfocused one in the fallback white, the focused one in
+            // the focus green (#141), which the badge itself never takes.
+            let painted_in = |name: &str| {
+                output.shapes.iter().find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.job.text == name => {
+                        Some(text.galley.job.sections[0].format.color)
+                    }
+                    _ => None,
+                })
+            };
+            let colours: Vec<_> = badges.iter().map(|b| painted_in(&b.name)).collect();
+            assert!(
+                colours.iter().all(Option::is_some),
+                "project name must remain painted after color exhaustion"
+            );
+            assert!(
+                colours.contains(&Some(Color32::WHITE)),
+                "the unfocused name lost the fallback white: {colours:?}"
+            );
+            let accent = Color32::from_rgb(0x3c, 0xc3, 0x84);
             assert_eq!(
                 output
                     .shapes
@@ -566,12 +576,12 @@ fn exhausted_palette_keeps_distinct_project_names_in_actual_headers() {
                         &shape.shape,
                         egui::Shape::Rect(r) if r.fill == Color32::TRANSPARENT
                             && r.stroke.width == 1.0
-                            && r.stroke.color == Color32::WHITE
+                            && r.stroke.color == accent
                             && r.rect.height() > 100.0
                     ))
                     .count(),
                 1,
-                "the focused console's outline must use the resulting project color"
+                "the focused console's outline must be the focus green"
             );
         }
         output.drop_without_applying_deltas();

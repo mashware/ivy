@@ -265,7 +265,13 @@ mod tests {
     #[test]
     fn integrated_measurement_start_does_not_start_a_request() {
         let mut chrome = super::super::Chrome::default();
-        chrome.start(&egui::Context::default(), false);
+        let ctx = egui::Context::default();
+        crate::pane_view::allow_focus_fades(&ctx, true);
+        chrome.start(&ctx, true);
+        assert!(
+            !crate::pane_view::focus_fades(&ctx),
+            "a measured run fades nothing"
+        );
         assert!(chrome.enabled());
         assert!(!chrome.updates.service.checking());
         assert!(chrome.updates.service.releases().is_empty());

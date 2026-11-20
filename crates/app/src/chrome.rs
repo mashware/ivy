@@ -43,9 +43,12 @@ impl Chrome {
     pub(crate) fn enable(&mut self) {
         self.enabled = true;
     }
-    pub(crate) fn start(&mut self, ctx: &egui::Context, automatic_updates: bool) {
+    pub(crate) fn start(&mut self, ctx: &egui::Context, measuring: bool) {
         self.enable();
-        if automatic_updates {
+        // The focus green fades only where nobody is measuring: the frames a fade wakes would be
+        // published as the framework's cost (D13).
+        crate::pane_view::allow_focus_fades(ctx, !measuring);
+        if !measuring {
             self.updates.start(ctx);
         }
     }

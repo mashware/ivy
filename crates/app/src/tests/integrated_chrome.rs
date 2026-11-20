@@ -140,10 +140,11 @@ mod tests {
     }
 
     /// Same-project headers carry no stripe (the owner removed it, 17 November 2026); focus moves
-    /// the panel surface between them, and the focused console is outlined in its project's ink —
-    /// the accent once it has none. Ivy Night's panel, chrome and accent are written out.
+    /// the green between them (#141): the focused header is the panel tinted with the accent and
+    /// outlined in it, project or not, and the other keeps its project's ink on the chrome. Ivy
+    /// Night's panel, chrome, accent and line are written out.
     #[test]
-    fn focus_moves_the_surface_and_an_outline_in_the_projects_ink() {
+    fn focus_moves_the_green_surface_and_outline_between_consoles() {
         let ctx = egui::Context::default();
         chrome::prepare(&ctx);
         let mut window = window_with("sleep 30", "sleep 30");
@@ -160,8 +161,9 @@ mod tests {
             });
         }
         let area = area_of(1400.0);
-        // Ivy Night's panel #171D21 with 18 % of the ink, and its chrome #0F1315 with 14 %.
-        let panel = egui::Color32::from_rgb(0x3b, 0x37, 0x2e);
+        // Ivy Night's panel #171D21 with 18 % of the accent #3CC384, and its chrome #0F1315 with
+        // 14 % of the project's ink.
+        let panel = egui::Color32::from_rgb(0x1e, 0x3b, 0x33);
         let chrome = egui::Color32::from_rgb(0x2c, 0x29, 0x21);
         let accent = egui::Color32::from_rgb(0x3c, 0xc3, 0x84);
         let line = egui::Color32::from_rgb(0x25, 0x2e, 0x33);
@@ -206,7 +208,7 @@ mod tests {
             focused.left() < other.left(),
             "focus starts on the first console"
         );
-        assert_eq!(outline_around(&baseline, focused), Some(ink));
+        assert_eq!(outline_around(&baseline, focused), Some(accent));
         assert_eq!(outline_around(&baseline, other), Some(line));
         window.active_mut().focus = 1;
         let moved = frame(&mut window, &ctx, area, vec![]);
@@ -217,7 +219,7 @@ mod tests {
         );
         assert_eq!(
             outline_around(&moved, focused),
-            Some(ink),
+            Some(accent),
             "the outline did not follow the focus"
         );
         window.active_mut().focus = 0;
@@ -225,9 +227,102 @@ mod tests {
         let neutral = frame(&mut window, &ctx, area, vec![]);
         let first = window.active().panes()[0].name;
         assert_eq!(window.active().focus, first);
-        let plain = header(&neutral, egui::Color32::from_rgb(0x17, 0x1d, 0x21))
-            .expect("a console without a project keeps the plain panel");
-        assert_eq!(outline_around(&neutral, plain), Some(accent));
+        let green =
+            header(&neutral, panel).expect("a focused console without a project turns green too");
+        assert_eq!(outline_around(&neutral, green), Some(accent));
+    }
+
+    /// With fades allowed, moving focus fades the outline: half-way through the 150 ms neither
+    /// console's outline is the plain line or the accent, after it the new one is the accent and
+    /// the old one the line, and once settled nothing asks for another repaint. With fades not
+    /// allowed — every measured run — the same move lands on the same frame and asks for nothing.
+    #[test]
+    fn moving_focus_fades_the_green_and_a_measured_run_does_not() {
+        let accent = egui::Color32::from_rgb(0x3c, 0xc3, 0x84);
+        let line = egui::Color32::from_rgb(0x25, 0x2e, 0x33);
+        let area = area_of(1400.0);
+        let outlines = |shapes: &[egui::epaint::ClippedShape]| -> Vec<egui::Color32> {
+            let mut found: Vec<(f32, egui::Color32)> = shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Rect(r)
+                        if r.fill == egui::Color32::TRANSPARENT
+                            && r.stroke.width == 1.0
+                            && r.rect.height() > 100.0 =>
+                    {
+                        Some((r.rect.left(), r.stroke.color))
+                    }
+                    _ => None,
+                })
+                .collect();
+            found.sort_by(|a, b| a.0.total_cmp(&b.0));
+            found.into_iter().map(|(_, c)| c).collect()
+        };
+        let pass = |window: &mut Window, ctx: &egui::Context, time: f64| {
+            let mut frame = eframe::Frame::_new_kittest();
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(area),
+                    time: Some(time),
+                    ..Default::default()
+                },
+                |ui| eframe::App::ui(window, ui, &mut frame),
+            );
+            let delay = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+            let shapes = std::mem::take(&mut output.shapes);
+            output.drop_without_applying_deltas();
+            (outlines(&shapes), delay)
+        };
+        for fades in [true, false] {
+            let ctx = egui::Context::default();
+            chrome::prepare(&ctx);
+            crate::pane_view::allow_focus_fades(&ctx, fades);
+            let mut window = window_with("sleep 30", "sleep 30");
+            window.chrome.enable();
+            window.headers = window.headers.integrated(true);
+            for time in [0.0, 1.0, 1.5] {
+                pass(&mut window, &ctx, time);
+            }
+            assert_eq!(pass(&mut window, &ctx, 2.0).0, vec![accent, line]);
+            window.active_mut().focus = 1;
+            // The two passes after focus moves ask for another anyway (the focused header's
+            // controls appear, D96); the third is where a fade keeps the window awake or not.
+            let (moved, _) = pass(&mut window, &ctx, 2.0);
+            pass(&mut window, &ctx, 2.016);
+            let (_, delay) = pass(&mut window, &ctx, 2.032);
+            if fades {
+                // egui steps the animation by one predicted frame on the pass the target moves,
+                // so neither end has been reached yet — that is what «it did not jump» means.
+                assert!(
+                    moved[0] != line && moved[1] != accent,
+                    "the fade jumped: {moved:?}"
+                );
+                assert!(
+                    delay < std::time::Duration::from_secs(1),
+                    "the fade asked for no frame"
+                );
+                let (half, _) = pass(&mut window, &ctx, 2.075);
+                assert!(
+                    half.iter().all(|c| *c != accent && *c != line),
+                    "half-way, an outline is already at an end: {half:?}"
+                );
+                let (done, _) = pass(&mut window, &ctx, 2.2);
+                assert_eq!(done, vec![line, accent]);
+                // The cursor blink (600 ms halves) still wakes the window; a fade asks for the
+                // next frame, about 16 ms away, so anything past 100 ms is not the fade.
+                let (_, settled) = pass(&mut window, &ctx, 2.3);
+                assert!(
+                    settled > std::time::Duration::from_millis(100),
+                    "a settled fade still wakes: {settled:?}"
+                );
+            } else {
+                assert_eq!(moved, vec![line, accent], "a measured run faded");
+                assert!(
+                    delay > std::time::Duration::from_millis(100),
+                    "a measured run woke for the fade: {delay:?}"
+                );
+            }
+        }
     }
 
     fn has_text(shapes: &[egui::epaint::ClippedShape], needle: &str) -> bool {
@@ -1081,8 +1176,13 @@ mod tests {
             roles.tx3 != roles.line2,
             "the colour check below would be vacuous"
         );
+        // On the focused header's green tint (#141) the separator ink, muted text #8E9390, is
+        // brought toward the text until it reads at 4.5:1: #9FA4A0, written out.
+        assert_eq!(roles.tx3, egui::Color32::from_rgb(0x8e, 0x93, 0x90));
         assert!(
-            rules.iter().all(|c| *c == roles.tx3),
+            rules
+                .iter()
+                .all(|c| *c == egui::Color32::from_rgb(0x9f, 0xa4, 0xa0)),
             "the rules are not in the title separator's ink: {rules:?}"
         );
         let title = egui::pos2(cells.left() - 40.0, cells.center().y);
@@ -2606,10 +2706,13 @@ mod tests {
                 egui::Color32::from_rgb(0x0d, 0x1b, 0x28),
                 egui::Color32::from_rgb(0xef, 0xcb, 0xa9),
             ),
+            // The focused header is Gruvbox's own panel #1D2021 — the configuration does not move
+            // it — tinted with its green to #393C22 (#141). The configured dark text would not
+            // read there, so the label is white, the readable fallback.
             (
                 "theme=gruvbox-dark\nbackground=#e2d4c6\nforeground=#241c14",
                 egui::Color32::from_rgb(0xd7, 0xc9, 0xbb),
-                egui::Color32::from_rgb(0x24, 0x1c, 0x14),
+                egui::Color32::WHITE,
             ),
         ] {
             let (settings, warnings) = settings::interpret(config).unwrap();
@@ -2649,7 +2752,7 @@ mod tests {
         for width in [1400.0, 240.0] {
             let ctx = egui::Context::default();
             let mut window = window_with("sleep 30", "sleep 30");
-            window.chrome.start(&ctx, false);
+            window.chrome.start(&ctx, true);
             window.headers = window.headers.integrated(true);
             let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 600.0));
             let shapes = open_updates_menu(&mut window, &ctx, area);
@@ -2675,7 +2778,7 @@ mod tests {
         let ctx = egui::Context::default();
         let received = term_core::received::Received::new("updates-input");
         let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
-        window.chrome.start(&ctx, false);
+        window.chrome.start(&ctx, true);
         window.headers = window.headers.integrated(true);
         received.wait_until_ready(Duration::from_secs(5));
         let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0));
@@ -2765,7 +2868,7 @@ mod tests {
             let ctx = egui::Context::default();
             let received = term_core::received::Received::new("updates-menu-scroll");
             let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
-            window.chrome.start(&ctx, false);
+            window.chrome.start(&ctx, true);
             window.headers = window.headers.integrated(true);
             received.wait_until_ready(Duration::from_secs(5));
             let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 250.0));
@@ -2975,7 +3078,7 @@ mod tests {
                     let ctx = egui::Context::default();
                     chrome::prepare(&ctx);
                     let mut window = window_with("sleep 30", "sleep 30");
-                    window.chrome.start(&ctx, false);
+                    window.chrome.start(&ctx, true);
                     window.headers = window.headers.integrated(true);
                     let area =
                         egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 900.0));
@@ -3042,7 +3145,7 @@ mod tests {
             let received = term_core::received::Received::new("board-menu-ownership");
             let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
             received.wait_until_ready(Duration::from_secs(5));
-            window.chrome.start(&ctx, false);
+            window.chrome.start(&ctx, true);
             window.headers = window.headers.integrated(true);
             window.settings_editor =
                 settings::editor::Editor::resolved(settings::Entry::Normal, None);
