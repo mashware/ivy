@@ -45,6 +45,8 @@ pub(crate) mod pane;
 pub(crate) mod summary;
 use buttons::buttons_drawn;
 pub(crate) use document::Reader as DocumentReader;
+#[cfg(windows)]
+pub(crate) use document::install_windows_document_publisher;
 use driving::RetirementState;
 pub(crate) use driving::{Holder, Released, Retirement};
 use links::{LaidOutLink, PaintedLink};

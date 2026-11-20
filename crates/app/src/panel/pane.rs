@@ -29,7 +29,7 @@ pub(crate) fn state_and_control_with_authority(
     #[allow(unused_mut)]
     let mut state = panel::PanelState::default();
     #[cfg(windows)]
-    let hwnd = crate::opening::control_hwnd(ctx);
+    let hwnd = crate::control::control_hwnd(ctx);
     #[cfg(not(windows))]
     let hwnd = None;
     let control = dir.and_then(|dir| {

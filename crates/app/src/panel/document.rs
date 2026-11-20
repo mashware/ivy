@@ -114,7 +114,7 @@ pub(super) fn clear(state: &mut PanelState) {
     state.last_good = None;
     state.committed.clear();
     #[cfg(windows)]
-    state.publish_windows_document(None);
+    publish_windows_document(state, None);
     state.layout = None;
     state.drawn = None;
 }
@@ -127,15 +127,7 @@ impl PanelState {
 
     /// Installs one complete producer document in interface-owned and connection-visible state.
     pub(super) fn commit(&mut self, panel: Panel) {
-        #[cfg(windows)]
-        self.publish_windows_document(Some(&panel));
-        let panel = Arc::new(panel);
-        self.last_good = Some(Arc::clone(&panel));
-        self.committed.replace(panel);
-        // A successful publication starts a new generation. From this point a retry of an earlier
-        // retirement is not idempotent: it is an attempt to retire this new publication, and must
-        // pass the holder check again.
-        self.retirement = super::RetirementState::Active;
+        commit(self, panel);
     }
 
     /// Writes the producer's last committed document without taking a hold.
@@ -144,34 +136,45 @@ impl PanelState {
             .read()
             .expect("the state owns the strong document capability")
     }
-
-    #[cfg(windows)]
-    pub(crate) fn install_windows_document_publisher(
-        &mut self,
-        publisher: panel_control::windows_services::DocumentPublisher,
-    ) {
-        self.windows_document = Some(publisher);
-        self.publish_windows_document(self.last_good.as_deref());
-    }
-
-    #[cfg(windows)]
-    fn publish_windows_document(&self, panel: Option<&Panel>) {
-        let Some(publisher) = &self.windows_document else {
-            return;
-        };
-        let result = match panel {
-            Some(panel) => match panel_contract::serialize(panel) {
-                Ok(document) => publisher.publish(document),
-                Err(problem) => publisher.publish_failed(problem.to_string()),
-            },
-            None => publisher.clear(),
-        };
-        if let Err(problem) = result {
-            eprintln!("Windows panel snapshot was not updated: {problem}");
-        }
-    }
 }
 
+fn commit(state: &mut PanelState, panel: Panel) {
+    #[cfg(windows)]
+    publish_windows_document(state, Some(&panel));
+    let panel = Arc::new(panel);
+    state.last_good = Some(Arc::clone(&panel));
+    state.committed.replace(panel);
+    // A successful publication starts a new generation. From this point a retry of an earlier
+    // retirement is not idempotent: it is an attempt to retire this new publication, and must
+    // pass the holder check again.
+    state.retirement = super::RetirementState::Active;
+}
+
+#[cfg(windows)]
+pub(crate) fn install_windows_document_publisher(
+    state: &mut PanelState,
+    publisher: panel_control::windows_services::DocumentPublisher,
+) {
+    state.windows_document = Some(publisher);
+    publish_windows_document(state, state.last_good.as_deref());
+}
+
+#[cfg(windows)]
+fn publish_windows_document(state: &PanelState, panel: Option<&Panel>) {
+    let Some(publisher) = &state.windows_document else {
+        return;
+    };
+    let result = match panel {
+        Some(panel) => match panel_contract::serialize(panel) {
+            Ok(document) => publisher.publish(document),
+            Err(problem) => publisher.publish_failed(problem.to_string()),
+        },
+        None => publisher.clear(),
+    };
+    if let Err(problem) = result {
+        eprintln!("Windows panel snapshot was not updated: {problem}");
+    }
+}
 #[cfg(all(test, windows))]
 mod windows_control_tests {
     use super::*;
@@ -180,7 +183,7 @@ mod windows_control_tests {
     fn windows_control_document_snapshot_tracks_commit_clear_and_failed_serialize() {
         let (reader, publisher) = panel_control::windows_services::DocumentSnapshot::new();
         let mut state = PanelState::default();
-        state.install_windows_document_publisher(publisher);
+        install_windows_document_publisher(&mut state, publisher);
         let panel = panel_contract::parse_document(r#"{"lines":["committed"]}"#).unwrap();
         let canonical = panel_contract::serialize(&panel).unwrap();
         state.commit(panel);

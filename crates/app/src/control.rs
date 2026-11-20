@@ -32,9 +32,12 @@ use crate::{Pane, Window};
 mod applying;
 mod channel;
 mod retiring;
+pub(crate) use channel::control_hwnd;
 pub(crate) use channel::open_with_authority;
 #[cfg(all(test, unix))]
 pub(crate) use channel::open_with_sessions;
+#[cfg(windows)]
+pub(crate) use channel::remember_native_window;
 
 /// How many deliveries a pane's inbox may hold before a publication is refused.
 ///
@@ -327,7 +330,7 @@ impl PaneControl {
 
     #[cfg(windows)]
     pub(crate) fn install_windows_document(&self, state: &mut PanelState) {
-        state.install_windows_document_publisher(self.windows_document.clone());
+        crate::panel::install_windows_document_publisher(state, self.windows_document.clone());
     }
 
     #[cfg(windows)]
@@ -352,12 +355,10 @@ impl PaneControl {
     }
 }
 
-impl Pane {
-    #[cfg(windows)]
-    fn apply_ready_control_closes(&mut self) {
-        if let Some(control) = self.control.as_mut() {
-            control.apply_ready_windows_closes(&mut self.panel_state, &mut self.signals);
-        }
+#[cfg(windows)]
+fn apply_ready_control_closes(pane: &mut Pane) {
+    if let Some(control) = pane.control.as_mut() {
+        control.apply_ready_windows_closes(&mut pane.panel_state, &mut pane.signals);
     }
 }
 
@@ -828,7 +829,7 @@ fn answer_windows_requests(
     }
     #[cfg(windows)]
     for pane in window.all_panes_mut() {
-        pane.apply_ready_control_closes();
+        apply_ready_control_closes(pane);
     }
     if window.control.has_retired() {
         ctx.request_repaint();

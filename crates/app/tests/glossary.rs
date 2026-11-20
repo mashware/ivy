@@ -1695,6 +1695,7 @@ const NOT_OURS: &[&str] = &[
     "MEASURE_DRAGS",
     "PANEL_DIR",
     "PANEL_ID",
+    "PANEL_SERVER_PID",
     "PWD",
     "SHELL",
     "SHLVL",

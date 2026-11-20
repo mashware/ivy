@@ -25,21 +25,7 @@ pub(crate) fn native_window(
     measuring: bool,
 ) -> term_core::Result<Window> {
     #[cfg(windows)]
-    {
-        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-        let hwnd = cc
-            .window_handle()
-            .ok()
-            .and_then(|handle| match handle.as_raw() {
-                RawWindowHandle::Win32(handle) => Some(handle.hwnd.get()),
-                _ => None,
-            });
-        if let Some(hwnd) = hwnd {
-            cc.egui_ctx.data_mut(|data| {
-                data.insert_temp(egui::Id::new("ivy-panel-control-hwnd"), hwnd);
-            });
-        }
-    }
+    control::remember_native_window(cc);
     chrome::prepare(&cc.egui_ctx);
     let mut window = Window::opening(
         &cc.egui_ctx,
@@ -52,83 +38,6 @@ pub(crate) fn native_window(
         window.clipboard = clipboard::Service::new(cc.egui_ctx.clone());
     }
     Ok(window)
-}
-
-pub(crate) fn control_hwnd(ctx: &egui::Context) -> Option<isize> {
-    #[cfg(windows)]
-    {
-        ctx.data(|data| data.get_temp(egui::Id::new("ivy-panel-control-hwnd")))
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = ctx;
-        None
-    }
-}
-
-#[cfg(all(test, windows))]
-mod windows_control_tests {
-    use super::*;
-    use std::ptr::{null, null_mut};
-
-    #[test]
-    fn windows_control_native_wake_posts_without_waiting_for_dispatch() {
-        use windows_sys::Win32::{
-            System::LibraryLoader::GetModuleHandleW,
-            UI::WindowsAndMessaging::{
-                CreateWindowExW, DefWindowProcW, DestroyWindow, MSG, PM_REMOVE, PeekMessageW,
-                RegisterClassW, UnregisterClassW, WM_PAINT, WNDCLASSW,
-            },
-        };
-
-        let class_name: Vec<u16> = format!("IvyControlWake{}", std::process::id())
-            .encode_utf16()
-            .chain(std::iter::once(0))
-            .collect();
-        let instance = unsafe { GetModuleHandleW(null()) };
-        let class = WNDCLASSW {
-            lpfnWndProc: Some(DefWindowProcW),
-            hInstance: instance,
-            lpszClassName: class_name.as_ptr(),
-            ..Default::default()
-        };
-        assert_ne!(
-            unsafe { RegisterClassW(&class) },
-            0,
-            "register native test window"
-        );
-        let hwnd = unsafe {
-            CreateWindowExW(
-                0,
-                class_name.as_ptr(),
-                class_name.as_ptr(),
-                0,
-                0,
-                0,
-                0,
-                0,
-                (-3isize) as _,
-                null_mut(),
-                instance,
-                null(),
-            )
-        };
-        assert!(!hwnd.is_null(), "create native message window");
-        let wake = panel_control::WindowsWake::from_hwnd(hwnd as isize).unwrap();
-        wake.post().expect("post native wake without dispatch");
-        let mut message = MSG::default();
-        assert_ne!(
-            unsafe { PeekMessageW(&mut message, hwnd, WM_PAINT, WM_PAINT, PM_REMOVE) },
-            0,
-            "the posted WM_PAINT is queued while the window thread has not dispatched it"
-        );
-        wake.revoke();
-        assert!(wake.post().is_err(), "revoked HWND rejects later posts");
-        unsafe {
-            DestroyWindow(hwnd);
-            UnregisterClassW(class_name.as_ptr(), instance);
-        }
-    }
 }
 
 impl Pane {

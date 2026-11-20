@@ -345,7 +345,7 @@ pub(crate) fn complete(pane: &mut crate::Pane) {
             pane.pty
                 .context
                 .as_ref()
-                .and_then(crate::opening::control_hwnd),
+                .and_then(crate::control::control_hwnd),
         )
     });
     pane.restoration.scope_unavailable = false;
