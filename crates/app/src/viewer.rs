@@ -1,5 +1,6 @@
 //! Read-only document views, independent of console and producer identity.
 mod code;
+mod code_header;
 mod delivery;
 mod diff;
 mod drawer;
@@ -599,6 +600,24 @@ pub(crate) fn hide(window: &mut crate::Window) {
 #[cfg(test)]
 pub(crate) fn is_open(window: &crate::Window) -> bool {
     window.viewer.open
+}
+/// What Copy relative path would give for the open document, if anything.
+#[cfg(test)]
+pub(crate) fn document_relative_path(window: &crate::Window) -> Option<PathBuf> {
+    let state = select_document(window);
+    code_header::relative(
+        std::path::Path::new(&state.path),
+        state.code.root.as_deref(),
+    )
+    .map(ToOwned::to_owned)
+}
+#[cfg(test)]
+fn select_document(window: &crate::Window) -> &State {
+    if window.viewer.tool_markdown.unwrap_or(true) {
+        &window.viewer
+    } else {
+        &window.viewer_other
+    }
 }
 /// Whether the drawer was asked to show `path` as code.
 #[cfg(test)]

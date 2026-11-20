@@ -29,6 +29,34 @@ fn panes_and_worktrees_restore_independent_navigation_and_restart_hidden() {
     assert!(!restarted.visible && restarted.navigation.is_empty());
 }
 
+/// A file opened from Files is counted from the folder Files showed then, even after Files moves
+/// on with the focused console; outside that folder there is no relative path.
+#[test]
+fn an_opened_file_keeps_the_files_folder_it_was_opened_from() {
+    let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+    let pane = window.all_panes().next().unwrap().name;
+    window.explorer.reconcile(&[(pane, Some("/r".into()))]);
+    assert!(crate::viewer::open_document_target(
+        &mut window,
+        pane,
+        PathBuf::from("/r/src/a.ts"),
+        None
+    ));
+    window.explorer.reconcile(&[(pane, Some("/other".into()))]);
+    assert_eq!(root_of(&window, pane), Some(PathBuf::from("/other")));
+    assert_eq!(
+        crate::viewer::document_relative_path(&window),
+        Some(PathBuf::from("src/a.ts"))
+    );
+    assert!(crate::viewer::open_document_target(
+        &mut window,
+        pane,
+        PathBuf::from("/r/src/b.ts"),
+        None
+    ));
+    assert_eq!(crate::viewer::document_relative_path(&window), None);
+}
+
 #[test]
 fn files_expansion_and_scroll_survive_shared_sidebar_tool_switches() {
     let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);

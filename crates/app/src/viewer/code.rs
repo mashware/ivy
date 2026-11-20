@@ -92,6 +92,9 @@ pub(crate) struct CodeState {
     /// of that file, so an agent rewriting it does not pull the sideways scroll back under the
     /// reader.
     widest_seen: (PathBuf, f32),
+    /// The Files folder of the source console when the file was opened: what the header's path
+    /// and its relative copy are counted from.
+    pub(super) root: Option<PathBuf>,
 }
 
 impl CodeState {

@@ -457,6 +457,11 @@ pub(crate) fn show(window: &mut Window, ui: &mut egui::Ui, area: egui::Rect) {
     window.timed_separately += window.sidebar.take_cost();
 }
 
+/// The folder Files shows for `pane` right now, if Files has ever listed one for it.
+pub(crate) fn root_of(window: &Window, pane: usize) -> Option<PathBuf> {
+    window.explorer.navigation.get(&pane)?.root.clone()
+}
+
 pub(crate) fn open_path(window: &mut Window, pane: usize, path: PathBuf) {
     let Some(tab) = window
         .tabs
