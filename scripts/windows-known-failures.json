@@ -1,1 +1,956 @@
-[]
+[
+  {
+    "binary": "app/app:lib",
+    "name": "board::branches::tests::distinct_worktrees_and_switches_refresh",
+    "reason": "drive letters and backslashes break path handling",
+    "issue": "https://github.com/mashware/ivy/issues/186"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_console_with_nothing_published_says_so_rather_than_answering_an_empty_document",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_delivered_document_ages_from_the_moment_it_arrived",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_document_read_back_is_counted_with_the_size_it_was_paid_at",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_document_that_arrived_by_file_is_read_back_by_a_producer_that_never_published",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_file_written_while_the_panel_was_held_is_read_when_the_hold_ends",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_key_that_names_nothing_refuses_the_patch_and_the_document_a_producer_sees_is_unchanged",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_patch_is_counted_apart_from_a_publication_and_with_the_size_it_left_behind",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_patch_near_the_ceiling_applies_and_is_counted_at_that_size",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_patch_needs_the_hold_a_publication_takes",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_patch_reaching_a_panel_whose_holder_let_go_is_told_to_publish_first",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_patch_whose_result_is_over_the_ceiling_is_refused_and_changes_nothing",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_producer_that_addresses_nothing_can_still_reach_the_ends_and_nothing_else",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_publication_after_patches_leaves_nothing_of_the_patched_state",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_publication_wakes_the_window",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_read_while_no_pass_runs_sees_the_last_commit_not_the_queued_write",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_request_that_waits_for_the_window_wakes_it",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_second_source_is_refused_by_the_name_of_the_one_holding_it",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::a_split_request_waits_for_the_window_instead_of_being_applied",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::the_three_numbers_the_report_publishes_count_what_they_say_they_count",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::three_edits_in_one_request_land_and_leave_the_rest_of_the_panel_alone",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::what_an_agent_publishes_is_on_the_panel_and_the_file_was_never_written",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::what_is_read_back_carries_nothing_the_application_added",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::when_the_connection_closes_the_hold_ends_and_what_it_said_stays",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "control::tests::while_it_is_held_a_file_publication_is_not_read",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "explorer::interaction_tests::a_press_on_the_list_over_the_files_divider_picks_the_row_and_resizes_nothing",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "explorer::interaction_tests::ctrl_clicking_a_local_path_reveals_its_own_consoles_file_and_scrolls_to_it",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "explorer::interaction_tests::enter_reveals_a_match_and_ctrl_enter_opens_markdown_in_the_drawer",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "explorer::interaction_tests::files_button_follows_tabs_and_restores_navigation_without_leaking_input",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "explorer::interaction_tests::files_selects_and_refreshes_markdown_without_leaving_maximized_reading",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "explorer::interaction_tests::markdown_single_click_opens_the_file_from_the_active_console",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "explorer::interaction_tests::partial_name_search_notice_is_visible_even_when_the_folder_exceeds_listing_limits",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "explorer::interaction_tests::refresh_clears_a_deleted_selection_and_reports_a_deleted_explorer_root",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "explorer::interaction_tests::remote_source_suspends_navigation_and_local_directory_changes_follow_automatically",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "explorer::interaction_tests::scrolling_files_keeps_console_paint_and_geometry_stable",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "explorer::interaction_tests::show_more_reaches_deep_content_without_changing_the_root",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "explorer::interaction_tests::the_pattern_toggle_reads_the_query_as_a_pattern_says_a_bad_one_and_keeps_the_tree",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "explorer::interaction_tests::the_search_closes_when_focus_moves_to_another_console",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "explorer::interaction_tests::typed_name_search_finds_files_and_folders_below_collapsed_directories",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "explorer::interaction_tests::typing_a_search_keeps_the_tree_loaded_and_the_keys_in_files",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "explorer::load::tests::blocked_filesystem_reader_leaves_frames_and_console_input_progressing",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "ligature_tests::tests::same_window_replaces_ligature_drawing_after_size_scale_face_and_reset",
+    "reason": "selection, clipboard, ligature or emoji painting differs on Windows",
+    "issue": "https://github.com/mashware/ivy/issues/188"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "links::local::tests::accepts_local_paths_and_refuses_web_or_remote_targets",
+    "reason": "drive letters and backslashes break path handling",
+    "issue": "https://github.com/mashware/ivy/issues/186"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "links::local::tests::local_files_and_directories_keep_literal_paths_without_executing_them",
+    "reason": "drive letters and backslashes break path handling",
+    "issue": "https://github.com/mashware/ivy/issues/186"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "opener::tests::a_click_hands_the_desktop_what_it_decided",
+    "reason": "drive letters and backslashes break path handling",
+    "issue": "https://github.com/mashware/ivy/issues/186"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "opener::tests::only_a_regular_file_is_launched",
+    "reason": "drive letters and backslashes break path handling",
+    "issue": "https://github.com/mashware/ivy/issues/186"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "opener::tests::open_launches_an_allowed_document_and_reveals_anything_else",
+    "reason": "drive letters and backslashes break path handling",
+    "issue": "https://github.com/mashware/ivy/issues/186"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::claim_strip::tests::a_panel_shorter_than_a_row_paints_no_band",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::claim_strip::tests::a_short_panel_shrinks_the_band_and_keeps_the_marker_row",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::claim_strip::tests::a_stale_wait_dims_and_a_stale_done_stays_whole_on_the_strip",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::driving::tests::a_patch_can_end_yield_and_failed_patches_do_not_move_its_cutoff",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::driving::tests::done_by_publish_or_patch_yields_only_the_document",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::driving::tests::done_never_resurrects_equal_or_older_files_even_after_disconnect",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::driving::tests::malformed_newer_file_keeps_the_channel_patchable_and_does_not_end_yield",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::driving::tests::retirement_remains_authorized_after_done_and_after_file_takeover",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::overlay::tests::apply_refuses_stale_or_revoked_authority_and_reports_each_once",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::pressing::a_new_document_cannot_retarget_the_previous_paintings_link_region",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::pressing::a_press_is_refused_while_the_panel_is_not_settled",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::provenance::tests::observation_survives_disconnect_and_only_a_valid_newer_file_replaces_it",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::tests::a_half_written_write_does_not_erase_the_last_good_panel",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::tests::a_just_published_panel_confesses_nothing",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::tests::a_panel_that_has_been_quiet_longer_than_its_due_confesses_it",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::tests::a_passing_failure_does_not_leave_the_panel_accused_forever",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::tests::a_publication_that_is_not_understood_is_confessed_without_losing_the_good_one",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::tests::aging_throws_away_the_layout_even_if_the_file_does_not_change",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::tests::an_already_old_panel_wakes_again_when_its_number_changes",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::tests::an_integrated_claim_is_a_strip_and_the_rows_start_below_it",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::tests::how_long_until_it_is_time_to_warn_is_known",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::tests::it_does_not_read_again_if_the_files_date_has_not_changed",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::tests::retirement_suppresses_that_file_generation_but_a_later_one_invalidates_the_retry",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::tests::the_claim_disappears_when_the_producer_stops_claiming",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::tests::the_finished_does_go_out_when_its_file_stops_being_read",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::tests::the_layout_is_thrown_away_when_the_producer_publishes",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::tests::the_warning_comes_out_even_if_the_producer_turns_off_the_header",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::tests::with_a_deadline_of_zero_the_warning_does_not_say_zero_minutes",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::tests::with_hours_of_silence_it_wakes_once_per_hour",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "panel::tests::with_the_date_moved_it_does_read_again",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "project_view::tests::colliding_names_are_disambiguated_by_shared_identity_paths",
+    "reason": "drive letters and backslashes break path handling",
+    "issue": "https://github.com/mashware/ivy/issues/186"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "project_view::tests::remote_directory_veto_clears_existing_badge_and_accounts_work",
+    "reason": "drive letters and backslashes break path handling",
+    "issue": "https://github.com/mashware/ivy/issues/186"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "restoration::tests::oversized_serialized_snapshot_never_replaces_the_previous_file",
+    "reason": "drive letters and backslashes break path handling",
+    "issue": "https://github.com/mashware/ivy/issues/186"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "restoration::tests::verified_client_directory_wins_over_wrapper_cwd_but_not_remote_veto",
+    "reason": "drive letters and backslashes break path handling",
+    "issue": "https://github.com/mashware/ivy/issues/186"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "resume::tests::saved_identity_is_typed_and_lower_modes_remove_it",
+    "reason": "drive letters and backslashes break path handling",
+    "issue": "https://github.com/mashware/ivy/issues/186"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "session::file_tests::an_empty_or_relative_variable_is_not_a_path_and_does_not_rule_out_the_other",
+    "reason": "drive letters and backslashes break path handling",
+    "issue": "https://github.com/mashware/ivy/issues/186"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "session::file_tests::the_path_comes_out_of_the_configuration_directory",
+    "reason": "drive letters and backslashes break path handling",
+    "issue": "https://github.com/mashware/ivy/issues/186"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "session::file_tests::with_no_configuration_directory_it_falls_back_to_home",
+    "reason": "drive letters and backslashes break path handling",
+    "issue": "https://github.com/mashware/ivy/issues/186"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "settings::editor::runtime::tests::ligatures_save_cancel_and_reset_preserve_programs_grid_and_lazy_fonts",
+    "reason": "selection, clipboard, ligature or emoji painting differs on Windows",
+    "issue": "https://github.com/mashware/ivy/issues/188"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "settings::tests::the_file_is_looked_for_where_the_document_says",
+    "reason": "drive letters and backslashes break path handling",
+    "issue": "https://github.com/mashware/ivy/issues/186"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_claim_nobody_holds_reaches_the_card_dimmed",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_click_beside_the_silence_is_not_answered_by_it",
+    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
+    "issue": "https://github.com/mashware/ivy/issues/187"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_click_on_the_silence_takes_it_off_the_glass_through_the_mouse_pass",
+    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
+    "issue": "https://github.com/mashware/ivy/issues/187"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_console_click_uses_the_old_pixels_and_does_not_clear_the_selection",
+    "reason": "selection, clipboard, ligature or emoji painting differs on Windows",
+    "issue": "https://github.com/mashware/ivy/issues/188"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_console_that_stopped_receiving_says_so_over_its_grid",
+    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
+    "issue": "https://github.com/mashware/ivy/issues/187"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_console_that_went_quiet_puts_no_sentence_of_ours_in_its_grid",
+    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
+    "issue": "https://github.com/mashware/ivy/issues/187"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_console_too_short_for_the_whole_sentence_says_nothing_at_all",
+    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
+    "issue": "https://github.com/mashware/ivy/issues/187"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_console_whose_reading_ended_badly_does_not_close_the_window_on_its_own",
+    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
+    "issue": "https://github.com/mashware/ivy/issues/187"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::between_two_equal_claims_the_card_shows_the_one_someone_holds",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::closing_a_pane_of_tiny_weights_leaves_no_sibling_without_a_weight",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::context_clipboard::tests::console_menu_copy_preserves_selection_and_copies_it",
+    "reason": "selection, clipboard, ligature or emoji painting differs on Windows",
+    "issue": "https://github.com/mashware/ivy/issues/188"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::dismissing_the_silence_takes_the_sentence_away_and_undoes_nothing",
+    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
+    "issue": "https://github.com/mashware/ivy/issues/187"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::done_probes_the_file_after_a_watcher_notice_was_consumed",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::integrated_chrome::tests::an_unheld_claims_ring_is_the_same_whole_ring_in_its_full_colour",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::integrated_chrome::tests::search_blink_deadline_covers_both_halves_and_disarms_when_closed",
+    "reason": "selection, clipboard, ligature or emoji painting differs on Windows",
+    "issue": "https://github.com/mashware/ivy/issues/188"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::settings_editor::tests::an_open_editor_does_not_stop_output_in_any_tab",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_program_of_the_console_born_on_splitting_sees_the_size_of_its_pane",
+    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
+    "issue": "https://github.com/mashware/ivy/issues/187"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_real_window_declares_the_emojis_it_painted_in_its_pass",
+    "reason": "selection, clipboard, ligature or emoji painting differs on Windows",
+    "issue": "https://github.com/mashware/ivy/issues/188"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_silence_is_stroked_filled_and_drawn_where_its_box_is",
+    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
+    "issue": "https://github.com/mashware/ivy/issues/187"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::what_painting_a_color_emoji_costs_comes_out_of_the_paintings_span_and_is_declared",
+    "reason": "selection, clipboard, ligature or emoji painting differs on Windows",
+    "issue": "https://github.com/mashware/ivy/issues/188"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "viewer::code_header::tests::a_binary_file_keeps_its_header",
+    "reason": "drive letters and backslashes break path handling",
+    "issue": "https://github.com/mashware/ivy/issues/186"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "viewer::code_header::tests::copy_relative_path_says_why_it_is_off",
+    "reason": "drive letters and backslashes break path handling",
+    "issue": "https://github.com/mashware/ivy/issues/186"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "viewer::code_header::tests::open_launches_a_document_reveals_a_script_and_says_which",
+    "reason": "drive letters and backslashes break path handling",
+    "issue": "https://github.com/mashware/ivy/issues/186"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "viewer::code_header::tests::outside_the_files_folder_there_is_no_relative_path_and_it_says_why",
+    "reason": "drive letters and backslashes break path handling",
+    "issue": "https://github.com/mashware/ivy/issues/186"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "viewer::code_header::tests::the_copy_items_copy_the_literal_paths",
+    "reason": "drive letters and backslashes break path handling",
+    "issue": "https://github.com/mashware/ivy/issues/186"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "viewer::interaction_tests::git_viewer_opens_and_switches_modes_through_its_controls",
+    "reason": "the test fixture assumes Unix file times or shell commands",
+    "issue": "https://github.com/mashware/ivy/issues/189"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "viewer::load::tests::code_files_say_why_they_are_not_text",
+    "reason": "drive letters and backslashes break path handling",
+    "issue": "https://github.com/mashware/ivy/issues/186"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "viewer::tests::the_file_tab_keeps_a_code_file_across_tabs",
+    "reason": "drive letters and backslashes break path handling",
+    "issue": "https://github.com/mashware/ivy/issues/186"
+  },
+  {
+    "binary": "app/batches:test",
+    "name": "the_batch_with_emoji_in_its_panels_is_held_to_the_colour_guard",
+    "reason": "the repository guard reads the checkout in Unix form",
+    "issue": "https://github.com/mashware/ivy/issues/190"
+  },
+  {
+    "binary": "app/prose:test",
+    "name": "no_line_of_the_prototypes_reads_as_spanish",
+    "reason": "the repository guard reads the checkout in Unix form",
+    "issue": "https://github.com/mashware/ivy/issues/190"
+  },
+  {
+    "binary": "app/vendor_patch:test",
+    "name": "nothing_else_in_the_vendored_copy_has_drifted_from_the_published_crate",
+    "reason": "the repository guard reads the checkout in Unix form",
+    "issue": "https://github.com/mashware/ivy/issues/190"
+  },
+  {
+    "binary": "app/waits:test",
+    "name": "every_blocking_wait_in_production_code_is_bounded_or_declared_abandoned",
+    "reason": "the repository guard reads the checkout in Unix form",
+    "issue": "https://github.com/mashware/ivy/issues/190"
+  },
+  {
+    "binary": "panel-control/panel-mcp:bin",
+    "name": "tests::idle_revocation_disconnects_the_producer_without_another_tool_call",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/panel-mcp:bin",
+    "name": "tests::route_reassociation_moves_an_existing_bridge_between_real_panes",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "client::tests::a_document_comes_back_in_the_order_the_pane_sent_it",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "client::tests::a_document_that_is_not_json_never_leaves_the_producer",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "client::tests::a_document_written_across_several_lines_still_arrives_as_one_request",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "client::tests::a_producer_is_told_what_fell_away_and_nothing_when_nothing_did",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "client::tests::a_producer_publishes_and_reads_what_the_window_decided",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "client::tests::a_producer_retires_and_reads_the_auxiliary_console_outcome",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "client::tests::a_source_carrying_quotes_does_not_break_the_request",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "client::tests::an_open_with_no_addressable_identity_comes_back_as_an_open",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "client::tests::ops_that_are_not_json_never_leave_the_producer",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "client::tests::the_split_verbs_travel_and_their_payloads_come_back",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "codex_relay::tests::empty_config_requires_complete_inventory_before_accepting_resume",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "codex_relay::tests::exit_cancels_epoch_without_waiting_for_a_held_route",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "codex_relay::tests::loaded_resume_success_is_held_until_the_running_mcp_proves_its_route",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "codex_route::tests::binding_and_old_revocation",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "codex_route::tests::binding_another_conversation_revokes_only_the_same_pane",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "codex_route::tests::binding_waits_until_inflight_route_guard_is_released",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "codex_route::tests::cancellation_does_not_wait_for_inflight_guard_and_fresh_epoch_reuses_route",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "codex_route::tests::failed_mapping_commit_restores_the_previous_record_and_removes_temporary_file",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "codex_route::tests::failed_replacement_restores_the_displaced_pane",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "codex_route::tests::interrupted_unrelated_record_does_not_poison_a_new_binding",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "codex_route::tests::orphan_active_after_interruption_is_found_without_a_thread_mapping",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "codex_route::tests::public_proof_is_immutable_across_bind_and_revoke",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "session::helper::publish_tests::publish_silence_gate_requires_a_whole_identity_and_supported_endpoint",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "session::tests::hook_discards_content_and_update_refuses_it",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "session::tests::literal_requests_round_trip_and_unknown_authority_is_refused",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "session::tests::metadata_fields_and_complete_request_are_bounded",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/session_helper:test",
+    "name": "publish_cli_rejects_invalid_identity_and_bad_input_before_connect",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "panel-control/session_helper:test",
+    "name": "publish_cli_rejects_oversized_stdin_before_endpoint_connect",
+    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
+    "issue": "https://github.com/mashware/ivy/issues/185"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::a_console_that_is_still_reading_has_no_ending_to_report",
+    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
+    "issue": "https://github.com/mashware/ivy/issues/187"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::a_failure_carries_the_systems_own_number_where_the_kind_says_nothing",
+    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
+    "issue": "https://github.com/mashware/ivy/issues/187"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::a_lang_passed_by_the_caller_beats_the_decided_one",
+    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
+    "issue": "https://github.com/mashware/ivy/issues/187"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::closing_an_ordinary_console_does_not_spend_the_abandon_deadline",
+    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
+    "issue": "https://github.com/mashware/ivy/issues/187"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::the_decided_lang_reaches_the_program",
+    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
+    "issue": "https://github.com/mashware/ivy/issues/187"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::the_program_receives_the_terminal_type",
+    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
+    "issue": "https://github.com/mashware/ivy/issues/187"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::the_program_receives_the_variables_passed_to_it",
+    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
+    "issue": "https://github.com/mashware/ivy/issues/187"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::what_the_program_writes_arrives_over_the_channel",
+    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
+    "issue": "https://github.com/mashware/ivy/issues/187"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::with_none_by_value_the_variable_is_removed_even_though_the_crate_sets_it",
+    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
+    "issue": "https://github.com/mashware/ivy/issues/187"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::without_passing_anything_the_variable_is_not_defined",
+    "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
+    "issue": "https://github.com/mashware/ivy/issues/187"
+  }
+]
