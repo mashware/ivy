@@ -15,6 +15,15 @@ pub(crate) fn strip(window: &Window, area: Rect) -> strip::Strip {
     )
 }
 
+/// Whether the window was opened by a person or by the measurement bench: a measured run checks
+/// for no updates and fades nothing. A type rather than a `bool` because the argument it replaced
+/// meant the opposite.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Run {
+    Interactive,
+    Measured,
+}
+
 #[derive(Default, Debug)]
 pub(crate) struct Chrome {
     enabled: bool,
@@ -43,12 +52,13 @@ impl Chrome {
     pub(crate) fn enable(&mut self) {
         self.enabled = true;
     }
-    pub(crate) fn start(&mut self, ctx: &egui::Context, measuring: bool) {
+    pub(crate) fn start(&mut self, ctx: &egui::Context, run: Run) {
         self.enable();
+        let interactive = run == Run::Interactive;
         // The focus green fades only where nobody is measuring: the frames a fade wakes would be
         // published as the framework's cost (D13).
-        crate::pane_view::allow_focus_fades(ctx, !measuring);
-        if !measuring {
+        crate::pane_view::allow_focus_fades(ctx, interactive);
+        if interactive {
             self.updates.start(ctx);
         }
     }

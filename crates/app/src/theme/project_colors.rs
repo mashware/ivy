@@ -18,16 +18,43 @@ const AWAY_FROM_MEANINGS: f32 = 20.0;
 
 /// For a dark panel: violet, turquoise, pink, brown, white, maroon, sand, lavender-grey, then the
 /// same names in a lighter second tone.
-const ON_DARK: [u32; 15] = [
-    0xb48cf0, 0x3fd0c0, 0xf08cc8, 0xc8946a, 0xe8e8e8, 0xd06a88, 0xd8c49a, 0x9c9cc8, //
-    0xd8c4ff, 0xa4f2ea, 0xffc4e4, 0xe6b890, 0xf09ab4, 0xf2e4c4, 0xd0d0ee,
+const ON_DARK: [Color32; 15] = [
+    hex(0xb48cf0),
+    hex(0x3fd0c0),
+    hex(0xf08cc8),
+    hex(0xc8946a),
+    hex(0xe8e8e8),
+    hex(0xd06a88),
+    hex(0xd8c49a),
+    hex(0x9c9cc8), //
+    hex(0xd8c4ff),
+    hex(0xa4f2ea),
+    hex(0xffc4e4),
+    hex(0xe6b890),
+    hex(0xf09ab4),
+    hex(0xf2e4c4),
+    hex(0xd0d0ee),
 ];
 
 /// For a light panel: the same names, deeper, with a near-black slate for white; then a second
 /// tone of each.
-const ON_LIGHT: [u32; 16] = [
-    0x7048c0, 0x0a7e74, 0xb8327e, 0x8a5a30, 0x3a4048, 0x8e2444, 0x7e6a3a, 0x5a5a8e, //
-    0x9a70e0, 0x065a54, 0x8c1e5c, 0x6a4220, 0x60666e, 0x6a1430, 0x5e4e26, 0x40406e,
+const ON_LIGHT: [Color32; 16] = [
+    hex(0x7048c0),
+    hex(0x0a7e74),
+    hex(0xb8327e),
+    hex(0x8a5a30),
+    hex(0x3a4048),
+    hex(0x8e2444),
+    hex(0x7e6a3a),
+    hex(0x5a5a8e), //
+    hex(0x9a70e0),
+    hex(0x065a54),
+    hex(0x8c1e5c),
+    hex(0x6a4220),
+    hex(0x60666e),
+    hex(0x6a1430),
+    hex(0x5e4e26),
+    hex(0x40406e),
 ];
 
 /// The inks projects take, in the order they are handed out. A colour that does not read at 3:1 on
@@ -38,16 +65,10 @@ pub(crate) fn project_accents(theme: &Theme) -> Vec<Color32> {
     let panel = theme.panel_background();
     let dark =
         project_ink_contrast(Color32::WHITE, panel) >= project_ink_contrast(Color32::BLACK, panel);
-    let meanings = [
-        theme.palette[1],
-        theme.palette[3],
-        theme.palette[4],
-        theme.focus(),
-    ];
-    let list: &[u32] = if dark { &ON_DARK } else { &ON_LIGHT };
+    let meanings = meanings(theme);
+    let list: &[Color32] = if dark { &ON_DARK } else { &ON_LIGHT };
     let mut kept: Vec<Color32> = Vec::new();
-    for &value in list {
-        let ink = Color32::from_rgb((value >> 16) as u8, (value >> 8) as u8, value as u8);
+    for &ink in list {
         if project_ink_contrast(ink, panel) >= MARK_CONTRAST
             && meanings
                 .iter()
@@ -58,6 +79,23 @@ pub(crate) fn project_accents(theme: &Theme) -> Vec<Color32> {
         }
     }
     kept
+}
+
+/// What a project colour must not be mistaken for: the wait, block and done claims (slots 3, 1
+/// and 4), the panel body's ok and done green (slot 2) and the focus green, which a configuration
+/// can set apart from slot 2.
+fn meanings(theme: &Theme) -> [Color32; 5] {
+    [
+        theme.palette[1],
+        theme.palette[2],
+        theme.palette[3],
+        theme.palette[4],
+        theme.focus(),
+    ]
+}
+
+const fn hex(value: u32) -> Color32 {
+    Color32::from_rgb((value >> 16) as u8, (value >> 8) as u8, value as u8)
 }
 
 /// CIE76 distance in Lab (D65): how different two colours look, which RGB distance is not.
@@ -149,6 +187,7 @@ mod tests {
                 );
                 for meaning in [
                     theme.palette[1],
+                    theme.palette[2],
                     theme.palette[3],
                     theme.palette[4],
                     theme.focus(),
@@ -176,7 +215,7 @@ mod tests {
         let accents = project_accents(&theme);
         assert_eq!(accents[7], rgb(0x9c9cc8));
         assert_eq!(accents[8], rgb(0xa4f2ea));
-        let list: Vec<Color32> = ON_DARK.iter().map(|v| rgb(*v)).collect();
+        let list = ON_DARK.to_vec();
         assert!(
             accents.iter().all(|ink| list.contains(ink)),
             "an ink was altered: {accents:?}"
@@ -198,5 +237,22 @@ mod tests {
         let accents = project_accents(&theme);
         assert!(!accents.contains(&rgb(0xd06a88)), "{accents:?}");
         assert_eq!(accents[5], rgb(0xd8c49a));
+    }
+
+    /// The panel body's ok and done green (slot 2) stays a meaning when a configuration sets the
+    /// focus elsewhere: slot 2 on the turquoise removes turquoise even with a violet focus.
+    #[test]
+    fn the_body_green_stays_a_meaning_when_the_focus_is_set_apart() {
+        let mut palette = [None; 16];
+        palette[2] = Some(rgb(0x3fd0c0));
+        let theme = NamedTheme::IvyNight
+            .theme()
+            .with_colors(&crate::settings::Colors {
+                palette,
+                focus: Some(rgb(0x707070)),
+                ..Default::default()
+            });
+        let accents = project_accents(&theme);
+        assert!(!accents.contains(&rgb(0x3fd0c0)), "{accents:?}");
     }
 }

@@ -156,10 +156,11 @@ pub(crate) fn separator_color(window: &crate::Window) -> egui::Color32 {
     }
 }
 
-/// How far a console has turned to the focus green: 1 focused, 0 not, and in between for the
-/// 150 ms after focus moves. Read by the outline and the header under the same id, so both fade
-/// together. Without fades it answers at once and never touches egui's animation, which would
-/// request a repaint even with no time to animate.
+/// How far a console has turned to the focus green, 0 to 1, over the 150 ms after focus moves.
+/// The outline and the header's ink read it under one id per console, so the two move as one;
+/// the header's ground and text follow focus at once (D96 amended by #141). Without fades it is
+/// 0 or 1 and egui's animation is never asked, because asking requests a repaint even with no
+/// time left to animate.
 pub(crate) fn focus_mix(ctx: &egui::Context, pane: usize, focused: bool) -> f32 {
     let target = if focused { 1.0 } else { 0.0 };
     if !focus_fades(ctx) {
@@ -168,15 +169,17 @@ pub(crate) fn focus_mix(ctx: &egui::Context, pane: usize, focused: bool) -> f32 
     ctx.animate_value_with_time(egui::Id::new(("focus-mix", pane)), target, FOCUS_FADE)
 }
 
-/// Kept in the context rather than threaded through every painter: the header and the outline are
-/// reached from different call sites, and `lib.rs` may not grow (D28). Absent means no fades, which
-/// is what every window built by a test gets.
-pub(crate) fn allow_focus_fades(ctx: &egui::Context, yes: bool) {
-    ctx.data_mut(|data| data.insert_temp(egui::Id::new("focus-fades"), yes));
+/// Where the run's choice to fade is kept. In the context rather than threaded through every
+/// painter: the header is reached through `HowToPaint`, built in `lib.rs`, which may not grow
+/// (D28). Absent means no fades, which is what every window a test builds gets.
+const FOCUS_FADES: &str = "focus-fades";
+
+pub(crate) fn allow_focus_fades(ctx: &egui::Context, allowed: bool) {
+    ctx.data_mut(|data| data.insert_temp(egui::Id::new(FOCUS_FADES), allowed));
 }
 
 pub(crate) fn focus_fades(ctx: &egui::Context) -> bool {
-    ctx.data(|data| data.get_temp(egui::Id::new("focus-fades")))
+    ctx.data(|data| data.get_temp(egui::Id::new(FOCUS_FADES)))
         .unwrap_or(false)
 }
 

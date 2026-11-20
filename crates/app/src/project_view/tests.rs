@@ -126,6 +126,32 @@ fn remote_directory_veto_clears_existing_badge_and_accounts_work() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+/// More projects than Ivy Night's nine colours: the tenth repeats the first named colour (violet
+/// #B48CF0), not the text colour #E4E8E2, which sits one step from the list's white #E8E8E8 and
+/// would make the fifth and the tenth project look alike. With no candidate at all, the text colour.
+#[test]
+fn past_the_list_projects_repeat_it_from_the_start_and_never_take_the_text_colour() {
+    let theme = Theme::default();
+    let candidates = crate::theme::project_accents(&theme);
+    assert_eq!(candidates.len(), 9, "{candidates:?}");
+    let mut used = Vec::new();
+    for _ in 0..11 {
+        used.push(next_ink(
+            &candidates,
+            used.iter().copied(),
+            theme.foreground(),
+        ));
+    }
+    assert_eq!(used[..9], candidates[..]);
+    assert_eq!(used[9], Color32::from_rgb(0xb4, 0x8c, 0xf0));
+    assert_eq!(used[10], Color32::from_rgb(0x3f, 0xd0, 0xc0));
+    assert!(!used.contains(&theme.foreground()));
+    assert_eq!(
+        next_ink(&[], std::iter::empty(), theme.foreground()),
+        theme.foreground()
+    );
+}
+
 /// A mid-grey panel (0x78) sits where neither the dark-panel nor the light-panel colours reach
 /// 3:1: nothing is offered rather than an ink washed toward the text.
 #[test]

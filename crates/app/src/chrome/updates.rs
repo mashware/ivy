@@ -267,7 +267,7 @@ mod tests {
         let mut chrome = super::super::Chrome::default();
         let ctx = egui::Context::default();
         crate::pane_view::allow_focus_fades(&ctx, true);
-        chrome.start(&ctx, true);
+        chrome.start(&ctx, super::super::Run::Measured);
         assert!(
             !crate::pane_view::focus_fades(&ctx),
             "a measured run fades nothing"

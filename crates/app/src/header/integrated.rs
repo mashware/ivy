@@ -75,7 +75,7 @@ pub(crate) fn paint_strip(
                 zoomed,
                 folded: pane.folded,
                 focused: strip.focused,
-                focus: crate::pane_view::focus_mix(ui.ctx(), pane.name, strip.focused),
+                green: crate::pane_view::focus_mix(ui.ctx(), pane.name, strip.focused),
                 project: pane.project.as_ref(),
             },
         );
@@ -262,7 +262,7 @@ struct Appearance<'a> {
     /// Whether this console is the one the window hands its keys to.
     focused: bool,
     /// How far this header has turned to the focus green, 0 to 1 (see `pane_view::focus_mix`).
-    focus: f32,
+    green: f32,
     project: Option<&'a crate::project_view::Badge>,
 }
 
@@ -288,25 +288,25 @@ fn readable(ink: Color32, surface: Color32, toward: Color32, contrast: f32) -> C
 /// What a header paints its surface and its words in.
 struct Colors {
     surface: Color32,
-    /// The project's name: its ink, readable at 3:1 like any mark.
+    /// The project's name, readable at 3:1 like any mark.
     name: Option<Color32>,
     /// The task, readable at 4.5:1 like any text.
     text: Color32,
     separator: Color32,
 }
 
-fn colors(roles: &crate::theme::Roles, ink: Option<Color32>, focused: bool, focus: f32) -> Colors {
-    // The whole header carries a low tint of its project's ink over the stripe: a stripe alone was
-    // reported almost invisible (#48), and the design kit tints the header 18 % when focused.
+fn colors(roles: &crate::theme::Roles, ink: Option<Color32>, focused: bool, green: f32) -> Colors {
+    // The whole header carries a low tint of an ink: a stripe alone was reported almost invisible
+    // (#48), and the design kit tints the header 18 % when focused.
     let ground = if focused { roles.panel } else { roles.chrome };
     let text = if focused { roles.tx } else { roles.tx2 };
     // Green is the focused console's colour (D96 amended by #141): the project's ink turns to the
-    // accent by `focus`, and a console with no project takes the accent's tint as focus arrives.
+    // accent by `green`, and a console with no project takes the accent's tint as focus arrives.
     let (ink, strength) = match ink {
-        Some(ink) => (crate::theme::mix(ink, roles.accent, focus), 1.0),
-        None => (roles.accent, focus),
+        Some(ink) => (crate::theme::mix(ink, roles.accent, green), 1.0),
+        None => (roles.accent, green),
     };
-    if strength == 0.0 {
+    if strength <= 0.0 {
         // A role surface, where the roles' own text rules already hold (D94, D59).
         return Colors {
             surface: ground,
@@ -335,12 +335,12 @@ fn paint(ui: &egui::Ui, strip: egui::Rect, theme: &Theme, appearance: Appearance
         zoomed,
         folded,
         focused,
-        focus,
+        green,
         project,
     } = appearance;
     let roles = crate::ui::style::roles(ui.ctx(), theme);
     let painter = ui.painter().with_clip_rect(strip.intersect(ui.clip_rect()));
-    let colors = colors(&roles, project.map(|project| project.ink), focused, focus);
+    let colors = colors(&roles, project.map(|project| project.ink), focused, green);
     let surface = colors.surface;
     painter.rect_filled(
         strip,
@@ -705,7 +705,7 @@ mod tests {
                     zoomed: false,
                     folded: false,
                     focused: true,
-                    focus: 1.0,
+                    green: 1.0,
                     project: Some(&badge),
                 },
             );
@@ -762,7 +762,7 @@ mod tests {
             zoomed: false,
             folded: false,
             focused,
-            focus: if focused { 1.0 } else { 0.0 },
+            green: if focused { 1.0 } else { 0.0 },
             project,
         }
     }
@@ -781,7 +781,7 @@ mod tests {
     /// the chrome tinted with the project's own ink and name it in that ink, beside the task in the
     /// text role of the surface — and no stripe, no gradient and no «01».
     #[test]
-    fn project_stripe_and_ink_replace_the_gradient_and_focus_picks_the_surface() {
+    fn focus_paints_the_header_green_and_the_others_in_their_project_ink() {
         let ctx = egui::Context::default();
         let ink = rgb(0xb48cf0);
         let badge = badge(ink);
@@ -892,9 +892,16 @@ mod tests {
             inks.push(None);
             for ink in inks {
                 // Mid-fade included: a header half-way to the green reads like either end.
-                for (focused, focus) in [(true, 1.0), (true, 0.5), (false, 0.5), (false, 0.0)] {
-                    let c = colors(&roles, ink, focused, focus);
-                    let label = format!("{named:?} {ink:?} focused={focused} focus={focus}");
+                // (true, 0) is the first frame of every fade-in: the project's own ink on the panel.
+                for (focused, green) in [
+                    (true, 1.0),
+                    (true, 0.5),
+                    (true, 0.0),
+                    (false, 0.5),
+                    (false, 0.0),
+                ] {
+                    let c = colors(&roles, ink, focused, green);
+                    let label = format!("{named:?} {ink:?} focused={focused} green={green}");
                     assert!(
                         project_ink_contrast(c.text, c.surface) >= 4.5,
                         "{label}: task"

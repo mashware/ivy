@@ -2752,7 +2752,7 @@ mod tests {
         for width in [1400.0, 240.0] {
             let ctx = egui::Context::default();
             let mut window = window_with("sleep 30", "sleep 30");
-            window.chrome.start(&ctx, true);
+            window.chrome.start(&ctx, crate::chrome::Run::Measured);
             window.headers = window.headers.integrated(true);
             let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 600.0));
             let shapes = open_updates_menu(&mut window, &ctx, area);
@@ -2778,7 +2778,7 @@ mod tests {
         let ctx = egui::Context::default();
         let received = term_core::received::Received::new("updates-input");
         let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
-        window.chrome.start(&ctx, true);
+        window.chrome.start(&ctx, crate::chrome::Run::Measured);
         window.headers = window.headers.integrated(true);
         received.wait_until_ready(Duration::from_secs(5));
         let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0));
@@ -2868,7 +2868,7 @@ mod tests {
             let ctx = egui::Context::default();
             let received = term_core::received::Received::new("updates-menu-scroll");
             let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
-            window.chrome.start(&ctx, true);
+            window.chrome.start(&ctx, crate::chrome::Run::Measured);
             window.headers = window.headers.integrated(true);
             received.wait_until_ready(Duration::from_secs(5));
             let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 250.0));
@@ -3078,7 +3078,7 @@ mod tests {
                     let ctx = egui::Context::default();
                     chrome::prepare(&ctx);
                     let mut window = window_with("sleep 30", "sleep 30");
-                    window.chrome.start(&ctx, true);
+                    window.chrome.start(&ctx, crate::chrome::Run::Measured);
                     window.headers = window.headers.integrated(true);
                     let area =
                         egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 900.0));
@@ -3145,7 +3145,7 @@ mod tests {
             let received = term_core::received::Received::new("board-menu-ownership");
             let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
             received.wait_until_ready(Duration::from_secs(5));
-            window.chrome.start(&ctx, true);
+            window.chrome.start(&ctx, crate::chrome::Run::Measured);
             window.headers = window.headers.integrated(true);
             window.settings_editor =
                 settings::editor::Editor::resolved(settings::Entry::Normal, None);
