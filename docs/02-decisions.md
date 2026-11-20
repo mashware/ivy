@@ -11038,8 +11038,9 @@ of the same tab:
 - It is read-only.
 - It has a line-number gutter.
 - Its text is monospace and coloured by language family: Rust; the C-like languages (C, C++, Go,
-  Java, Kotlin, Swift, C#, JavaScript, TypeScript, CSS); PHP; the `#`-comment family (Python,
-  shells, Ruby, YAML, TOML, INI, `Makefile`, `Dockerfile`, a `#!` first line); JSON; SQL; plain text.
+  Java, Kotlin, Swift, C#, JavaScript, TypeScript); CSS, which has block comments only; PHP; the
+  `#`-comment family (Python, shells, Ruby, YAML, TOML, INI, `Makefile`, `Dockerfile`, a `#!` first
+  line); JSON; SQL; plain text.
 - It refreshes once a second, like the Markdown reader.
 - A file it cannot show says so in one sentence: `Binary file` (a NUL in the first 8 KiB),
   `Not UTF-8 text`, or `Larger than 1 MiB`.
