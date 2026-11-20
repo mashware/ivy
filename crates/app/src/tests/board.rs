@@ -1353,6 +1353,8 @@ mod tests {
             },
             tx,
             &ctx,
+            #[cfg(windows)]
+            None,
         );
         assert!(matches!(
             rx.recv_timeout(std::time::Duration::from_secs(3)).unwrap(),

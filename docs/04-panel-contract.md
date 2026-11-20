@@ -385,6 +385,25 @@ fallback and one-time warning.
   notice even when the producer does not write its mark, which is exactly when it is most needed.
   `updated_at` is painted as what it is: what the producer says.
 
+### Windows endpoint security and lifetime
+
+The app creates the directory with a protected user-and-SYSTEM DACL at birth. Inherited clients
+reject reparse points, foreign ownership and unsafe grants. The named pipe uses an explicit
+user-and-SYSTEM DACL, rejects remote clients and reserves the first instance against name squatting.
+Before sending any request bytes, Rust clients compare `GetNamedPipeServerProcessId` with the
+expected app PID. Forward `PANEL_SERVER_PID` alongside `PANEL_ID` and `PANEL_DIR` on Windows;
+never persist their values or obtain the expectation from the connected server.
+
+Windows transport operations use overlapped I/O with private cancellation events. Pane shutdown
+stops admission, cancels and drains pending operations, then joins the channel workers. Windows
+reads use bounded committed snapshots off the UI frame; delivery and disconnect accounting keep
+accepted work ahead of its holder cleanup even when the window inbox is full.
+
+The pre-1.0 Rust endpoint API now exposes platform `Listener` and `Stream` types. Windows apps use
+`Channel::open_windows` and concrete `WindowsServices`; callback constructors remain Unix APIs.
+Direct Windows producers can supply an expected PID with `Producer::of_server`; `Producer::of`
+uses the inherited `PANEL_SERVER_PID` and cannot bypass server authentication.
+
 ### What this transport does not give
 
 - **It does not know who writes.** Anyone who can write in the directory *is* the producer.
@@ -409,7 +428,7 @@ is that **a channel has somebody to tell** what that tolerance dropped — see
 
 | Who reads | Where it listens |
 |---|---|
-| The application | **`$PANEL_DIR/control.sock`** on POSIX; on Windows, a named pipe that is **not bound yet** — see below |
+| The application | **`$PANEL_DIR/control.sock`** on POSIX; **`\\.\pipe\ivy-<PANEL_ID>`** on Windows |
 
 **What travels is newline-delimited JSON, one request per line:**
 
@@ -699,11 +718,11 @@ only verbs that name another pane:
 `panel-mcp`, a binary that ships with the terminal, speaks this channel over MCP for an agent that
 would rather call a tool than open a socket. It is a client of this transport and not the transport
 itself. When it starts with a whole identity — `PANEL_ID` set, non-empty and UTF-8, and `PANEL_DIR`
-set and absolute, the same rule its tool calls apply — and metadata identifies
-`PANEL_DIR/control.sock` as a socket, its answer to `initialize` carries `instructions` asking the
-agent to publish its panel and keep `attention` true. This checks socket presence only: it does not
-connect, prove liveness or check path length. Otherwise, including Windows until the channel is
-bound there, `instructions` is absent. **D88**.
+set and absolute, the same rule its tool calls apply — and the directory exists, its answer to
+`initialize` carries conditional `instructions` asking the agent to publish its panel and keep
+`attention` current. Windows also requires `PANEL_SERVER_PID`, the nonzero decimal PID inherited
+from the app. Guidance does not probe or prove liveness: the first operation connects lazily and
+reports failures. **D88**.
 
 ### Rules of this transport
 
@@ -760,11 +779,8 @@ bound there, `instructions` is absent. **D88**.
 
 ### What this transport does not give
 
-- **It is not there on Windows yet.** A named pipe gets a default security descriptor that lets any
-  process on the machine open it, and nothing in the milestone that built this channel can compile or
-  run Windows code to prove otherwise; what cannot be proven is not bound. **F2.7** is where the pipe,
-  its descriptor and the assertion over both arrive together. Until then a Windows pane publishes by
-  file, which works exactly as it always did; `panel_retire` is therefore unavailable there too.
+- **Windows session and overlay authorization remain unsupported.** The named pipe enables ordinary
+  panels, plans, signals and split operations; it does not add native session attestation.
 - **It does not survive the producer.** That is the point, not a gap: a hold that outlived its holder
   would freeze that panel for the life of the window.
 

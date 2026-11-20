@@ -48,7 +48,7 @@ fn main() {
         route.as_deref(),
         id.as_deref(),
         dir.as_deref(),
-        panel_control::endpoint::BINDS,
+        panel_control::endpoint::BINDS && expected_server_available(),
         dir.as_deref()
             .is_some_and(|dir| std::path::Path::new(dir).is_dir()),
     );
@@ -64,6 +64,17 @@ fn main() {
             &mut pane,
             instructions,
         );
+    }
+}
+
+fn expected_server_available() -> bool {
+    #[cfg(windows)]
+    {
+        panel_control::client::server_pid(std::env::var_os("PANEL_SERVER_PID").as_deref()).is_ok()
+    }
+    #[cfg(not(windows))]
+    {
+        true
     }
 }
 
@@ -376,9 +387,8 @@ fn attach_route_proof(answer: String, proof: Option<&str>) -> String {
 /// [`panel_control::client::whole_identity`], the same one the first tool call applies — so the
 /// handshake and the calls never disagree about whether this is a console.
 ///
-/// **And only where the control channel binds** ([`panel_control::endpoint::BINDS`]): on Windows it
-/// is not bound until F2.7 (D43), every tool call there fails and a pane publishes by file only, so
-/// telling the agent to call `panel_set` would be a promise the bridge cannot keep.
+/// Guidance requires a supported channel and, on Windows, an inherited expected server PID.
+/// Connectivity is checked lazily by the first operation.
 ///
 /// It takes the values — and whether the channel binds — instead of reading them, so both gates
 /// can be tested on any platform without `set_var`; `main` reads them, and the binary's integration
@@ -1035,6 +1045,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn idle_revocation_disconnects_the_producer_without_another_tool_call() {
         use panel_contract::PanelDir;
@@ -1151,6 +1162,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn route_reassociation_moves_an_existing_bridge_between_real_panes() {
         use panel_contract::PanelDir;

@@ -292,6 +292,12 @@ pub struct PaneControl {
     did: Control,
     /// Read work may complete after this pane is closed, so its tally has an owner outside the pane.
     reads: ReadActivity,
+    #[cfg(windows)]
+    windows_document: panel_control::windows_services::DocumentPublisher,
+    #[cfg(windows)]
+    windows_plan: panel_control::windows_services::PlanPublisher,
+    #[cfg(windows)]
+    windows_releases: panel_control::windows_services::ReleaseRegistry,
 }
 
 impl PaneControl {
@@ -319,6 +325,16 @@ impl PaneControl {
         std::mem::take(&mut self.waiting_on_the_window)
     }
 
+    #[cfg(windows)]
+    pub(crate) fn install_windows_document(&self, state: &mut PanelState) {
+        state.install_windows_document_publisher(self.windows_document.clone());
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn windows_plan_publisher(&self) -> panel_control::windows_services::PlanPublisher {
+        self.windows_plan.clone()
+    }
+
     #[cfg(test)]
     pub(crate) fn enqueue_for_tests(&self, delivery: Delivery) {
         self.test_sender
@@ -336,16 +352,45 @@ impl PaneControl {
     }
 }
 
+impl Pane {
+    #[cfg(windows)]
+    fn apply_ready_control_closes(&mut self) {
+        if let Some(control) = self.control.as_mut() {
+            control.apply_ready_windows_closes(&mut self.panel_state, &mut self.signals);
+        }
+    }
+}
+
 impl PaneControl {
+    fn with_snapshot_metrics(&self, did: Control) -> Control {
+        #[cfg(windows)]
+        let did = {
+            let mut did = did;
+            let snapshots = self.windows_document.read_metrics();
+            did.read_back += snapshots.read_back as usize;
+            did.read_refused += snapshots.read_refused as usize;
+            did.largest_serialized = did.largest_serialized.max(snapshots.largest_serialized);
+            did
+        };
+        did
+    }
+
     /// What this pane's channel has done, for the report.
     #[cfg(test)]
     pub fn did(&self) -> Control {
-        self.did.and(self.reads.did())
+        self.with_snapshot_metrics(self.did.and(self.reads.did()))
     }
 
     /// Counters whose work cannot finish after this pane is dropped.
     pub(crate) fn did_in_the_window(&self) -> Control {
-        self.did
+        self.with_snapshot_metrics(self.did)
+    }
+
+    /// Stops Windows readers before their counters are banked on a closing pane.
+    pub(crate) fn stop_and_did_in_the_window(&mut self) -> Control {
+        #[cfg(windows)]
+        self._channel.shutdown();
+        self.did_in_the_window()
     }
 }
 
@@ -723,10 +768,12 @@ fn answer_windows_requests(
     }
 
     for (origin, delivery) in waiting {
-        let Some(delivery) = crate::board::plans::dispatch(window, origin, delivery, ctx) else {
+        let Some(mut delivery) = crate::board::plans::dispatch(window, origin, delivery, ctx)
+        else {
             continue;
         };
-        let answer = match delivery.what {
+        let what = std::mem::replace(&mut delivery.what, What::Closed);
+        let answer = match what {
             What::Open {
                 side,
                 program,
@@ -759,6 +806,8 @@ fn answer_windows_requests(
                 window
                     .opened_by_agents
                     .forget_the_connection(origin, delivery.connection);
+                #[cfg(windows)]
+                delivery.complete();
                 // Nothing waits on a release —the thread that sends it is on its way out— so
                 // there is nobody to answer and nothing to say.
                 continue;
@@ -773,7 +822,13 @@ fn answer_windows_requests(
             | What::PlanGet
             | What::PlanRetire => Answer::Refused("that request is not the window's".to_owned()),
         };
+        #[cfg(windows)]
+        delivery.complete();
         let _ = delivery.answer.send(answer);
+    }
+    #[cfg(windows)]
+    for pane in window.all_panes_mut() {
+        pane.apply_ready_control_closes();
     }
     if window.control.has_retired() {
         ctx.request_repaint();

@@ -16,8 +16,16 @@ use std::os::unix::net::UnixStream;
 use interprocess::local_socket::GenericFilePath;
 #[cfg(windows)]
 use interprocess::local_socket::GenericNamespaced;
-use interprocess::local_socket::{Listener, Stream, prelude::*};
+#[cfg(unix)]
+pub(crate) use interprocess::local_socket::{Listener, Stream, prelude::*};
+#[cfg(unix)]
 use interprocess::local_socket::{ListenerOptions, Name};
+#[cfg(windows)]
+use interprocess::local_socket::{Name, ToNsName};
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+pub use windows::{Listener, Stream};
 
 /// The channel-owned end of a private wake pair.
 ///
@@ -26,13 +34,18 @@ use interprocess::local_socket::{ListenerOptions, Name};
 pub(crate) struct AcceptorStopper {
     #[cfg(unix)]
     _signal: UnixStream,
+    #[cfg(windows)]
+    _signal: windows::StopSignal,
 }
 
 /// The listener and private wake descriptor owned by one acceptor thread.
 pub(crate) struct Acceptor {
+    #[cfg(unix)]
     listener: Listener,
     #[cfg(unix)]
     signal: UnixStream,
+    #[cfg(windows)]
+    inner: windows::Acceptor,
 }
 
 /// What woke the acceptor.
@@ -45,10 +58,8 @@ pub(crate) enum AcceptorReady {
 pub(crate) fn acceptor(listener: Listener) -> io::Result<(AcceptorStopper, Acceptor)> {
     #[cfg(windows)]
     {
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "the control channel has no Windows listener until F2.7",
-        ))
+        let (signal, inner) = windows::acceptor(listener)?;
+        Ok((AcceptorStopper { _signal: signal }, Acceptor { inner }))
     }
     #[cfg(unix)]
     {
@@ -68,10 +79,7 @@ impl Acceptor {
     pub(crate) fn wait(&self) -> io::Result<AcceptorReady> {
         #[cfg(windows)]
         {
-            Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "the control channel has no Windows listener until F2.7",
-            ))
+            self.inner.wait()
         }
         #[cfg(unix)]
         {
@@ -104,7 +112,17 @@ impl Acceptor {
 
     /// Accepts the connection whose readiness [`Self::wait`] reported.
     pub(crate) fn accept(&self) -> io::Result<Stream> {
+        #[cfg(windows)]
+        {
+            return self.inner.accept();
+        }
+        #[cfg(unix)]
         self.listener.accept()
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn wait_for_stop(&self, timeout: std::time::Duration) -> io::Result<bool> {
+        self.inner.wait_for_stop(timeout)
     }
 }
 
@@ -133,12 +151,9 @@ pub fn name_of(dir: &Path, id: &str) -> io::Result<Name<'static>> {
     }
 }
 
-/// Whether [`bind`] binds on this platform: a producer that has to decide whether to promise a
-/// channel — the MCP bridge's handshake, and `Producer::of_this_pane`, which refuses before
-/// connecting — reads it here instead of restating the platform list.
-/// The day F2.7 binds on Windows this has to change with it, and `binding_is_what_binds_says`
-/// fails there until it does.
-pub const BINDS: bool = cfg!(not(windows));
+/// Whether [`bind`] is supported on this platform. Producers use this to decide whether they can
+/// offer the control channel.
+pub const BINDS: bool = cfg!(any(unix, windows));
 
 /// Whether the Unix control socket currently has socket metadata at the contract path.
 ///
@@ -152,42 +167,31 @@ pub fn socket_present(dir: &Path) -> bool {
         .is_ok_and(|metadata| metadata.file_type().is_socket())
 }
 
-/// Windows has no filesystem socket until its control channel is implemented.
+/// Windows has no filesystem socket. This hint reports whether inherited identity and server PID
+/// are complete; it does not probe the named pipe or claim that the server is reachable.
 #[cfg(windows)]
 pub fn socket_present(_dir: &Path) -> bool {
-    false
+    std::env::var("PANEL_ID").is_ok_and(|id| !id.is_empty())
+        && std::env::var("PANEL_SERVER_PID")
+            .ok()
+            .and_then(|pid| pid.parse::<u32>().ok())
+            .is_some_and(|pid| pid != 0)
+        && private_to_this_user(_dir).is_ok()
 }
 
-/// Binds a pane's endpoint, ready to accept.
+/// Binds a pane's endpoint, ready to accept. Windows creates a byte-mode overlapped pipe with a
+/// protected user-and-SYSTEM DACL and rejects remote clients. Unix uses the pane directory's socket.
 ///
-/// **It does not bind on Windows, and that is a decision rather than an omission.** A named pipe
-/// gets a default security descriptor that lets any process on the machine open it, so binding one
-/// without an explicit DACL would turn a channel whose whole access control is a `0o700` directory
-/// into a machine-wide one — silently, and on the one platform where a non-local caller can exist
-/// at all. The delivery that brings this crate cannot compile or run a line of Windows code, so the
-/// descriptor cannot be asserted; the rule it was given is that what cannot be proven is not bound.
-/// **F2.7 is the milestone that compiles here for the first time**, and it is where the pipe, its
-/// descriptor and the assertion over both arrive together. Until then a Windows pane has no channel
-/// and publishes by file, exactly as every pane did before this milestone.
-///
-/// **The listener blocks in `accept`, and that is the shape that costs nothing at rest.** An
-/// earlier version made the accept non-blocking so the acceptor could poll its stop flag, which cost
-/// every pane a thread waking five times a second for the life of the window — four idle panes
-/// alone were about twenty wake-ups a second, and on a laptop that is what shows up as battery. The
-/// acceptor parks in `poll` over the listener and a private wake descriptor; dropping the other end
-/// wakes it without polling at rest or opening a client connection. The streams it hands out are
-/// blocking, which is what lets a receive timeout be put on them (see [`crate::listener`]).
+/// The acceptor waits on the listener and a private stop signal, so it does no periodic polling at
+/// rest and does not need to open a synthetic client connection during shutdown. The Unix acceptor
+/// uses `poll`; the Windows acceptor waits on overlapped connect and stop events. Both transports
+/// provide bounded read and write operations to the listener (see [`crate::listener`]).
 pub fn bind(dir: &Path, id: &str) -> io::Result<Listener> {
     // `BINDS` says the same thing to callers that must not promise a channel; the test
     // `binding_is_what_binds_says` ties the two together.
     #[cfg(windows)]
     {
-        let _ = (dir, id);
-        return Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "the control channel is not bound on Windows until its security descriptor can be \
-             asserted",
-        ));
+        return windows::bind(dir, id);
     }
     #[cfg(not(windows))]
     {
@@ -202,7 +206,11 @@ pub fn private_to_this_user(dir: &Path) -> io::Result<()> {
         // SAFETY: geteuid has no arguments or memory preconditions.
         private_to_uid(dir, unsafe { libc::geteuid() })
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        windows::private_to_this_user(dir)
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = dir;
         Ok(())
@@ -248,7 +256,20 @@ fn private_to_uid(dir: &Path, uid: u32) -> io::Result<()> {
 
 /// Opens a connection to a pane's endpoint, from the producer's side.
 pub fn connect(dir: &Path, id: &str) -> io::Result<Stream> {
+    #[cfg(windows)]
+    {
+        return windows::connect(dir, id);
+    }
+    #[cfg(unix)]
     Stream::connect(name_of(dir, id)?)
+}
+
+/// Connects only after the pipe server process matches the inherited app PID.
+#[cfg(windows)]
+pub fn connect_authenticated(dir: &Path, id: &str, expected_pid: u32) -> io::Result<Stream> {
+    let stream = windows::connect(dir, id)?;
+    stream.verify_server_pid(expected_pid)?;
+    Ok(stream)
 }
 
 #[cfg(test)]

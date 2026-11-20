@@ -342,6 +342,10 @@ pub(crate) fn complete(pane: &mut crate::Pane) {
                     wake();
                 }
             },
+            pane.pty
+                .context
+                .as_ref()
+                .and_then(crate::opening::control_hwnd),
         )
     });
     pane.restoration.scope_unavailable = false;

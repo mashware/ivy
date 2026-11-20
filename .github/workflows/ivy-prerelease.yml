@@ -57,6 +57,36 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - name: Test the private Windows control transport and MCP bridge
+        shell: pwsh
+        run: |
+          cargo test --locked -p panel-contract -p panel-control 2>&1 | Tee-Object -Variable printed
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($name in 'binding_is_what_binds_says',
+                            'first_instance_refuses_a_duplicate_and_pipe_dacl_is_exact',
+                            'fresh_panel_directory_has_the_required_owner_and_protected_acl',
+                            'dropping_a_channel_cancels_and_drains_a_pending_accept',
+                            'stop_cancels_idle_and_partial_reads_after_completion_is_drained',
+                            'stop_cancels_a_write_to_a_peer_that_is_not_reading',
+                            'held_snapshot_returns_busy_and_drop_joins_idle_worker',
+                            'timed_out_split_delivery_stays_pending_until_late_ui_completion',
+                            'panic_and_spawn_failure_paths_still_join_and_close_slots',
+                            'windows_client_rejects_wrong_server_before_sending_request_bytes',
+                            'windows_mcp_instructions_require_expected_pid_and_panel_set_round_trips') {
+            if (-not ($printed -match "$name \.\.\. ok$")) { throw "$name did not run and pass" }
+          }
+      - name: Test the Windows control lifecycle integration
+        shell: pwsh
+        run: |
+          cargo test --locked -p app --lib -- windows_control 2>&1 | Tee-Object -Variable printed
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($name in 'windows_control_server_pid_is_separate_and_cleared_without_a_panel',
+                            'windows_control_document_snapshot_tracks_commit_clear_and_failed_serialize',
+                            'windows_control_native_wake_posts_without_waiting_for_dispatch',
+                            'windows_control_plan_snapshots_follow_commit_retire_and_revoke_off_frame',
+                            'windows_control_plan_snapshot_registration_cannot_miss_a_concurrent_commit') {
+            if (-not ($printed -match "$name \.\.\. ok$")) { throw "$name did not run and pass" }
+          }
       - name: Test the Windows console program and configuration directory
         shell: pwsh
         run: |

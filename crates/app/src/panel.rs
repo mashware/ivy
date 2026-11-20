@@ -222,6 +222,8 @@ impl PartialOrd for AttentionState {
 /// so hides a broken producer behind a plausible summary from an hour ago.
 #[derive(Default)]
 pub struct PanelState {
+    #[cfg(windows)]
+    windows_document: Option<panel_control::windows_services::DocumentPublisher>,
     last_good: Option<Arc<Panel>>,
     /// Observation belongs to the document, so disconnect does not erase it.
     published_by: panel_control::PublicationOrigin,

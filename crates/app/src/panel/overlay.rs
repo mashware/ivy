@@ -239,6 +239,8 @@ fn admit(
             authority: proof,
         },
         answer,
+        #[cfg(windows)]
+        release: None,
     }) {
         Ok(()) => {
             wake();
@@ -428,6 +430,8 @@ mod tests {
                     authority: Arc::new(Current(live)),
                 },
                 answer,
+                #[cfg(windows)]
+                release: None,
             });
         }
         control.apply(&mut state, &mut Default::default(), SystemTime::now());

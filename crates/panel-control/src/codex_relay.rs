@@ -200,6 +200,7 @@ fn output(exe: &OsStr, args: &[&str], timeout: Duration) -> io::Result<String> {
         for name in panel_contract::ENV_NAMES {
             command.env_remove(name);
         }
+        command.env_remove("PANEL_SERVER_PID");
     }
     let mut child = command.spawn()?;
     let stdout = child

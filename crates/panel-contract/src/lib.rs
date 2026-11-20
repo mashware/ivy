@@ -17,6 +17,7 @@
 //! the state is published is part of the contract, just as much as *what* is published.
 
 use std::ffi::OsStr;
+#[cfg(not(windows))]
 use std::fs::DirBuilder;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -25,6 +26,8 @@ mod dropped;
 mod panel;
 mod patch;
 pub mod plan;
+#[cfg(windows)]
+pub mod windows_directory;
 
 pub use dropped::Dropped;
 pub use panel::{
@@ -170,17 +173,22 @@ fn remove(path: &Path) -> Option<io::Error> {
 /// creation mode that does accept intermediate segments also does not complain when the path is
 /// already there — it would adopt a directory this crate did not make.
 fn create_dir(path: &Path) -> io::Result<()> {
-    let mut builder = DirBuilder::new();
-    // Without this the mode comes from the session's umask —measured: `0775` with this machine's—,
-    // and a file that tells what the user is up to is going to live there. Under the user's runtime
-    // directory it would not be reachable, because it is already theirs and theirs alone; but the
-    // fallback can be a temporary shared by everyone.
-    #[cfg(unix)]
+    #[cfg(windows)]
     {
-        use std::os::unix::fs::DirBuilderExt;
-        builder.mode(0o700);
+        windows_directory::create(path)
     }
-    builder.create(path)
+    #[cfg(not(windows))]
+    {
+        let mut builder = DirBuilder::new();
+        // Without this the mode comes from the session's umask, and a file with user state is
+        // going to live here. The fallback may be a temporary shared by everyone.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
+        builder.create(path)
+    }
 }
 
 /// Eight hexadecimal digits.

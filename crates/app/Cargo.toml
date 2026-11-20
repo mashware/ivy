@@ -170,7 +170,10 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_System_Registry",
     "Win32_UI_Shell",
     "Win32_UI_Shell_Common",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_LibraryLoader",
 ] }
+raw-window-handle = "0.6.2"
 
 # Centring macOS's own window buttons in the integrated header (`chrome/traffic_lights.rs`). All
 # three are already in the tree through eframe at these versions; only their features are named.

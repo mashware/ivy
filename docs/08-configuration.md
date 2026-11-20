@@ -138,7 +138,7 @@ is in the README. These settings belong to Codex, not Ivy's configuration file.
 
 If an Ivy bridge entry already exists under another name, update that table and preserve its
 command and other settings instead of adding a duplicate. `env_vars` forwards **variable names**
-from the launching environment; never save a console's actual `PANEL_ID` or `PANEL_DIR` in `env`.
+from the launching environment; on Windows also forward `PANEL_SERVER_PID`. Never save a console's actual `PANEL_ID` or `PANEL_DIR` in `env`.
 See the [official Codex MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
 
 In a newly opened ordinary Bash, Zsh or Fish console, type `codex`, `codex resume <session-id>`

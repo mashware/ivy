@@ -5751,6 +5751,8 @@ mod tests {
                 connection,
                 what,
                 answer: answering,
+                #[cfg(windows)]
+                release: None,
             });
         with_metrics(|metrics| window.answer_the_windows_requests(ctx, whole_window, metrics));
         answer
@@ -6258,12 +6260,16 @@ mod tests {
             connection,
             what: panel_control::What::Retire,
             answer: retiring,
+            #[cfg(windows)]
+            release: None,
         });
         control.enqueue_for_tests(panel_control::Delivery {
             origin: panel_control::PublicationOrigin::Unknown,
             connection,
             what: panel_control::What::Closed,
             answer: closing,
+            #[cfg(windows)]
+            release: None,
         });
         control.apply(
             &mut origin.panel_state,
@@ -6342,6 +6348,8 @@ mod tests {
             connection,
             what: panel_control::What::Retire,
             answer: retiring,
+            #[cfg(windows)]
+            release: None,
         });
         control.enqueue_for_tests(panel_control::Delivery {
             origin: panel_control::PublicationOrigin::Unknown,
@@ -6352,6 +6360,8 @@ mod tests {
                     .expect("the new panel"),
             },
             answer: publishing,
+            #[cfg(windows)]
+            release: None,
         });
         control.apply(
             &mut origin.panel_state,
@@ -6453,6 +6463,8 @@ mod tests {
             connection,
             what: panel_control::What::Closed,
             answer: closing,
+            #[cfg(windows)]
+            release: None,
         });
         control.apply(
             &mut origin.panel_state,

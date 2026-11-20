@@ -7,7 +7,7 @@
 use std::io::{self, Read, Write};
 use std::path::Path;
 
-use interprocess::local_socket::Stream;
+use crate::endpoint::Stream;
 
 use crate::endpoint;
 use crate::wire::{MAX_REQUEST, Side};
@@ -36,6 +36,22 @@ pub fn whole_identity<'a>(
     dir.is_absolute().then_some((id, dir))
 }
 
+/// Parses the app identity separately from the stable two-variable pane address.
+pub fn server_pid(value: Option<&std::ffi::OsStr>) -> io::Result<u32> {
+    value
+        .and_then(std::ffi::OsStr::to_str)
+        .filter(|text| !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit()))
+        .and_then(|text| text.parse::<u32>().ok())
+        .filter(|pid| *pid != 0)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput,
+            "PANEL_SERVER_PID must be the nonzero decimal PID inherited from Ivy; check how your client forwards it"))
+}
+
+#[cfg(windows)]
+pub(crate) fn inherited_server_pid() -> io::Result<u32> {
+    server_pid(std::env::var_os("PANEL_SERVER_PID").as_deref())
+}
+
 /// A connection to one pane's channel.
 ///
 /// **The hold this delivery gives a source lasts as long as this value does**, which is why it is a
@@ -48,7 +64,8 @@ pub struct Producer {
 impl Producer {
     /// Opens the channel of the pane named by the two variables the program inherited.
     ///
-    /// **No third variable, and no identifier on the wire.** Which pane this reaches is decided by
+    /// Windows also requires the inherited server PID, checked before writing request bytes.
+    /// No identifier is sent on the wire. Which pane this reaches is decided by
     /// which endpoint was opened, so there is nothing in any message for anybody to trust.
     ///
     /// **A whole identity or nothing, and never a fallback** ([`whole_identity`]). Which of the two
@@ -112,8 +129,22 @@ impl Producer {
     /// several panes of its own would use. It takes the pair as given: the rule of
     /// [`whole_identity`] is the caller's to apply.
     pub fn of(dir: &Path, id: &str) -> io::Result<Self> {
+        #[cfg(windows)]
+        {
+            Self::of_server(dir, id, inherited_server_pid()?)
+        }
+        #[cfg(not(windows))]
         Ok(Self {
             stream: endpoint::connect(dir, id)?,
+        })
+    }
+
+    /// Opens a Windows pane with the expected app PID supplied by its launch environment.
+    #[cfg(windows)]
+    pub fn of_server(dir: &Path, id: &str, expected_pid: u32) -> io::Result<Self> {
+        endpoint::private_to_this_user(dir)?;
+        Ok(Self {
+            stream: endpoint::connect_authenticated(dir, id, expected_pid)?,
         })
     }
 
@@ -409,6 +440,7 @@ pub enum Answered {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
     #[test]
     fn legacy_reply_reader_ignores_retryable_extension() {
         let parsed: super::Reply<'_> =
@@ -467,18 +499,27 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     use super::*;
+    #[cfg(unix)]
     use crate::listener::{Answer, Channel, Delivery, What};
+    #[cfg(unix)]
     use panel_contract::PanelDir;
+    #[cfg(unix)]
     use std::sync::Arc;
+    #[cfg(unix)]
     use std::sync::atomic::AtomicUsize;
+    #[cfg(unix)]
     use std::sync::mpsc::{Receiver, sync_channel};
+    #[cfg(unix)]
     use std::time::Duration;
 
+    #[cfg(unix)]
     fn a_pane() -> (PanelDir, Channel, Receiver<Delivery>) {
         a_pane_reading(Arc::new(|| Err("nothing has been published".to_owned())))
     }
 
+    #[cfg(unix)]
     fn a_pane_reading(
         read_document: crate::listener::ReadDocument,
     ) -> (PanelDir, Channel, Receiver<Delivery>) {
@@ -501,6 +542,7 @@ mod tests {
 
     /// The two halves of this crate speak to each other, which is the only thing that proves the
     /// wire format is one format and not two written from the same paragraph.
+    #[cfg(unix)]
     #[test]
     fn a_producer_publishes_and_reads_what_the_window_decided() {
         let (dir, _channel, inbox) = a_pane();
@@ -534,6 +576,7 @@ mod tests {
     /// listener. The assertion is on the variant and its sentence and never on «it is ok»: the decode
     /// falls through to `Answered::Ok` when it recognises no field, which is exactly what reading the
     /// new field too late would do.
+    #[cfg(unix)]
     #[test]
     fn a_producer_is_told_what_fell_away_and_nothing_when_nothing_did() {
         let (dir, _channel, inbox) = a_pane();
@@ -570,6 +613,7 @@ mod tests {
     /// that parsed the answer and compared documents would pass on exactly the version this guards
     /// against. Published as `updated_at`, `phase`, `lines`; sorted it would be `lines`, `phase`,
     /// `updated_at`.
+    #[cfg(unix)]
     #[test]
     fn a_document_comes_back_in_the_order_the_pane_sent_it() {
         let sent = "{\"updated_at\":\"x\",\"phase\":\"build\",\"lines\":[\"one\"]}";
@@ -587,6 +631,7 @@ mod tests {
     /// refusal instead of a panel. The assertion is on the panel that **reached the window**, never
     /// on the bytes written: a check on the request text would pass on a version that broke the
     /// framing somewhere further along.
+    #[cfg(unix)]
     #[test]
     fn a_document_written_across_several_lines_still_arrives_as_one_request() {
         let (dir, _channel, inbox) = a_pane();
@@ -617,6 +662,7 @@ mod tests {
     }
 
     /// The producer sends the zero-argument request and retains both result counts.
+    #[cfg(unix)]
     #[test]
     fn a_producer_retires_and_reads_the_auxiliary_console_outcome() {
         let (dir, _channel, inbox) = a_pane();
@@ -645,6 +691,7 @@ mod tests {
     /// **The three `split_*` verbs have a client half too, and their payloads survive the round trip.**
     /// The window here answers by hand: what is asserted is that each request arrives as the right
     /// `What`, and that a handle and a read come back to the caller that asked.
+    #[cfg(unix)]
     #[test]
     fn the_split_verbs_travel_and_their_payloads_come_back() {
         let (dir, _channel, inbox) = a_pane();
@@ -703,6 +750,7 @@ mod tests {
     /// takes a JSON null for an absent one — so the reply used to fall all the way through to
     /// `Answered::Ok`, which the MCP bridge words as «published». The window answers over a real
     /// listener, so the null is the one the wire writes, not one typed into the test.
+    #[cfg(unix)]
     #[test]
     fn an_open_with_no_addressable_identity_comes_back_as_an_open() {
         let (dir, _channel, inbox) = a_pane();
@@ -727,6 +775,7 @@ mod tests {
 
     /// A document that is not JSON is refused **to its author, here**, instead of travelling to the
     /// window and coming back as an answer nobody can act on.
+    #[cfg(unix)]
     #[test]
     fn a_document_that_is_not_json_never_leaves_the_producer() {
         let (dir, _channel, inbox) = a_pane();
@@ -747,6 +796,7 @@ mod tests {
     /// Ops that are not JSON are refused **to their author, here**, exactly as a document that is not
     /// JSON is: a list nobody can read must not travel to the window and come back as a refusal its
     /// sender has to guess the origin of.
+    #[cfg(unix)]
     #[test]
     fn ops_that_are_not_json_never_leave_the_producer() {
         let (dir, _channel, inbox) = a_pane();
@@ -777,6 +827,7 @@ mod tests {
 
     /// A source with a quote in it cannot break the request it travels in, which is the same hazard
     /// the reply's escaping answers on the other side.
+    #[cfg(unix)]
     #[test]
     fn a_source_carrying_quotes_does_not_break_the_request() {
         let (dir, _channel, inbox) = a_pane();
@@ -802,5 +853,32 @@ mod tests {
             window.join().expect("the window thread finished"),
             "say \"hello\""
         );
+    }
+}
+
+#[cfg(test)]
+mod server_identity_tests {
+    use super::server_pid;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn expected_server_pid_is_strict_and_nonzero() {
+        assert_eq!(
+            server_pid(Some(OsStr::new("4294967295"))).unwrap(),
+            u32::MAX
+        );
+        for value in [
+            None,
+            Some(""),
+            Some("0"),
+            Some("-1"),
+            Some("+1"),
+            Some(" 1"),
+            Some("1 "),
+            Some("1.0"),
+            Some("4294967296"),
+        ] {
+            assert!(server_pid(value.map(OsStr::new)).is_err(), "{value:?}");
+        }
     }
 }
