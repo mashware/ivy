@@ -4,7 +4,7 @@
 //! **The grid is read a logical line at a time, as text**, and a regex engine that never gives up
 //! looks through it. The terminal engine's own search walked the grid cell by cell with a lazy DFA
 //! that, on a pattern too large for its cache, stopped and reported no match where there was one,
-//! saying so only in a log (D61). Wrapped lines and wide characters are [`line`]'s; walking from one
+//! saying so only in a log (D61). Wrapped lines and wide characters are [`mod@line`]'s; walking from one
 //! line to the next is [`walk`]'s; whole word, which no engine judges the way the box means it, is
 //! decided on each match there.
 
