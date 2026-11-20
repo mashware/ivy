@@ -276,10 +276,9 @@ fn the_list(console: Rect, frame: Rect, covered: bool, metrics: &CellMetrics, ro
         .map(|choice| choice.label().chars().count())
         .max()
         .unwrap_or(0) as f32;
-    let width = (row_label_left(button)
-        + (longest + 1.0) * metrics.width()
-        + tick_inset(button, metrics))
-    .min(room);
+    let width =
+        (row_label_left(button) + (longest + 1.0) * metrics.width() + tick_inset(button, metrics))
+            .min(room);
     let height = Choice::ALL.len() as f32 * button + 2.0 * PAD;
     let beside = if covered {
         frame.top() - height
