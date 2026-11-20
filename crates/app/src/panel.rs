@@ -1776,6 +1776,41 @@ mod tests {
         );
     }
 
+    /// **The file's absence does not hide that a channel document went stale.** Once its
+    /// connection is gone nobody stands behind the claim, and the missing file must not take the
+    /// place of the clock that says so — nor keep the claim painted as backed.
+    #[test]
+    fn a_released_channel_document_with_no_file_still_says_it_went_stale() {
+        let dir = PanelDir::create().expect("create the directory");
+        let mut state = PanelState::default();
+        let an_hour_ago = SystemTime::now() - Duration::from_secs(60 * 60);
+        state
+            .deliver(
+                7,
+                "Codex",
+                panel_contract::parse_document(
+                    r#"{"attention":"wait","stale_after_minutes":1,"lines":["hola mundo"]}"#,
+                )
+                .expect("the document is a panel"),
+                an_hour_ago,
+            )
+            .expect("nobody was holding it");
+        state.release(7);
+
+        state.refresh(dir.path());
+
+        let now = SystemTime::now();
+        let painted = texts(paint_the_state(&mut state, PLACE, now));
+        assert!(
+            painted.iter().any(|row| row.contains("no news")),
+            "a stale channel document stopped saying so once its file was looked for: {painted:?}"
+        );
+        assert!(
+            !state.attention(now).expect("it still claims").backed,
+            "a stale claim nobody holds kept its backing"
+        );
+    }
+
     /// **`header: false` turns off the identity line, not the application's honesty.** If it turned it
     /// off, a producer would only have to set it for its broken panel not to look it.
     #[test]
