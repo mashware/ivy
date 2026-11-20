@@ -380,14 +380,11 @@ impl Warnings {
 
 /// Where the file lives, reading the environment.
 ///
-/// A one-line wrapper, with the work in [`path_from`], which is the sibling module's pattern and for its
-/// same reason: setting these variables from a test is undefined behavior in a process with
-/// threads, so the decision has to be testable without touching them.
+/// The environment is read in [`crate::session::directory`], and the decision is taken where it
+/// receives the values instead: setting these variables from a test is undefined behavior in a
+/// process with threads.
 pub fn path() -> Option<PathBuf> {
-    path_from(
-        std::env::var_os("XDG_CONFIG_HOME").as_deref(),
-        std::env::var_os("HOME").as_deref(),
-    )
+    Some(crate::session::directory()?.join(FILE))
 }
 
 /// Where the file lives, with the two given values.
@@ -448,8 +445,9 @@ pub(crate) fn to_use(
         // **With nowhere to trust it is not read either, and it is said.** Whoever has the
         // environment without an absolute path would write a file that is never applied; the
         // sibling module already has that same verb.
+        let home = if cfg!(windows) { "%APPDATA%" } else { "$HOME" };
         eprintln!(
-            "ivy: there is nowhere to look for the settings (neither $XDG_CONFIG_HOME nor $HOME \
+            "ivy: there is nowhere to look for the settings (neither $XDG_CONFIG_HOME nor {home} \
              gives an absolute path). Opening with the factory ones."
         );
         return (

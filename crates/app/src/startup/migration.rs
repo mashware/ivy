@@ -2,13 +2,8 @@
 use std::{io, path::Path};
 
 pub(super) fn prepare(measuring: bool) -> io::Result<()> {
-    if !measuring {
-        let config = std::env::var_os("XDG_CONFIG_HOME");
-        let home = std::env::var_os("HOME");
-        if let Some(directory) = crate::session::directory_from(config.as_deref(), home.as_deref())
-        {
-            migrate(&directory)?;
-        }
+    if !measuring && let Some(directory) = crate::session::directory() {
+        migrate(&directory)?;
     }
     Ok(())
 }

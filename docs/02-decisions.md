@@ -10946,3 +10946,33 @@ client obey, so the last word belongs to something the person reads.
 **Open.** Measured only on Linux, with the decision tested as a pure function over a path. A real Mac
 must confirm the notice on a freshly downloaded build. Not covered: an app opened straight from a
 mounted image without quarantine, whose `/Volumes/…` path also disappears when the image is ejected.
+
+## D107 — On Windows a console opens PowerShell, and the configuration lives in `%APPDATA%\ivy`
+
+**Decided.** On Windows, a console's program is, in order: the shell variable when it names an
+absolute Windows path to a file; `pwsh.exe` found in an absolute directory of the session's search
+path; `powershell.exe` found the same way; `cmd.exe` by an absolute path (`%ComSpec%` when absolute,
+else `%SystemRoot%\System32\cmd.exe`). That `cmd.exe` is also the program a failed launch falls back
+to, and a launch whose program already is the fallback does not retry it. The choice is resolved once
+per process. Settings, the layout and the recovery files live in `%APPDATA%\ivy`; `XDG_CONFIG_HOME`
+still wins when it is an absolute path, so an isolated directory works the same on every platform.
+
+**Why.** The first Windows installer closed on launch: Windows has no shell variable and no
+`/bin/sh`, the fallback was `/bin/sh` too, and the configuration directory came only from
+`XDG_CONFIG_HOME`/`HOME`, which Windows does not set (#161). PowerShell first is what Windows
+Terminal does. The program still comes from the session's own environment, never from configuration
+or a foreign file, which is what keeps launching it outside the sensitive surface.
+
+**Discarded.**
+- **`cmd.exe` first, from `%ComSpec%`**, as WezTerm does: the shell the agent CLIs document for
+  Windows is PowerShell, and `cmd.exe` stays one keystroke away as the fallback.
+- **Taking the shell variable as it comes**: a Git Bash or MSYS session exports `/usr/bin/bash`, a
+  path Windows cannot launch, so every console would fail into `cmd.exe` with an error line.
+- **A bare `cmd.exe`**: the launcher searches a bare name again, current directory and relative
+  search-path entries included, so a repository holding a `cmd.exe` could run in place of the system's.
+- **`%LOCALAPPDATA%` or `%USERPROFILE%\.config`**: the settings are a person's preferences, which
+  Windows roams in `%APPDATA%`; a `.config` folder is a Unix convention Windows tools do not look in.
+
+**Open.** Measured only on Linux, with the decisions tested as pure functions over given values. A
+real spawn of the resolved default and of the fallback runs on the pull-request Windows job; the
+installed app's launch is checked by hand until #162 adds a smoke test.

@@ -49,6 +49,18 @@ jobs:
       - name: Test native panel routing and Codex launcher
         run: cargo test --locked -p panel-control
 
+  windows-startup-checks:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - name: Test the Windows console program and configuration directory
+        shell: pwsh
+        run: |
+          cargo test --locked -p app --lib -- windows_startup
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
   build:
     if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-24.04

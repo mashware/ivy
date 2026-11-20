@@ -24,7 +24,7 @@
 //! what the file looks like, and the tree owns how it becomes a tree.
 //!
 //! **The second half of the module does touch the disk**, and also without opening any console: where
-//! the file lives ([`path_from`]), how it is read ([`read`]) and how it is replaced without being able
+//! the file lives ([`directory`]), how it is read ([`read`]) and how it is replaced without being able
 //! to leave it half done ([`Persistence::save`]). It is here and not in whoever starts up because the
 //! file name, its ceiling and its version **are the format**: whoever looked at them on their own would
 //! be writing them a second time.
@@ -542,15 +542,29 @@ pub const FILE: &str = "layout.json";
 
 /// Where the layout lives, reading the environment.
 ///
-/// **The one-line wrapper, and the work in [`path_from`]**, which is the pattern that startup already
-/// follows five times: `std::env::set_var` has a contract over the whole process and this suite runs in
-/// parallel launching processes, so a test that wanted to set these variables would be undefined
-/// behavior.
+/// **The environment is read in [`directory`] and the decisions are taken in [`directory_from`] and
+/// [`windows_directory_from`]**, which receive the values: `std::env::set_var` has a contract over the
+/// whole process and this suite runs in parallel launching processes, so a test that wanted to set
+/// these variables would be undefined behavior.
 pub fn path() -> Option<PathBuf> {
-    path_from(
-        std::env::var_os("XDG_CONFIG_HOME").as_deref(),
-        std::env::var_os("HOME").as_deref(),
-    )
+    Some(directory()?.join(FILE))
+}
+
+/// The dedicated directory, reading the environment of this platform.
+pub fn directory() -> Option<PathBuf> {
+    let config = std::env::var_os("XDG_CONFIG_HOME");
+    #[cfg(windows)]
+    return windows_directory_from(config.as_deref(), std::env::var_os("APPDATA").as_deref());
+    #[cfg(not(windows))]
+    directory_from(config.as_deref(), std::env::var_os("HOME").as_deref())
+}
+
+/// Windows has neither a home variable nor a `.config` convention: per-user settings belong in the
+/// roaming application-data folder. The desktop standard's variable still rules when it is set, so an
+/// isolated directory (the measurement script's, a manual test's) works the same on every platform.
+pub fn windows_directory_from(config: Option<&OsStr>, appdata: Option<&OsStr>) -> Option<PathBuf> {
+    let base = absolute(config).or_else(|| absolute(appdata))?;
+    Some(base.join(DIRECTORY))
 }
 
 /// The decision, given the two values: **the file, or nothing if there is no trustworthy place**.
@@ -703,7 +717,8 @@ impl std::fmt::Display for SaveFailure {
         match self {
             Self::NoPlace => write!(
                 f,
-                "there is nowhere to put it: neither $XDG_CONFIG_HOME nor $HOME give an absolute path"
+                "there is nowhere to put it: neither $XDG_CONFIG_HOME nor {} give an absolute path",
+                if cfg!(windows) { "%APPDATA%" } else { "$HOME" }
             ),
             Self::Vetoed { found } => write!(
                 f,
@@ -1865,6 +1880,43 @@ mod file_tests {
             path_from(Some(OsStr::new("/home/config")), Some(OsStr::new("/home"))),
             Some(PathBuf::from("/home/config/ivy/layout.json"))
         );
+    }
+
+    #[test]
+    fn windows_startup_keeps_the_configuration_in_appdata() {
+        let appdata = std::env::temp_dir().join("Roaming");
+        let config = std::env::temp_dir().join("isolated");
+        assert_eq!(
+            windows_directory_from(None, Some(appdata.as_os_str())),
+            Some(appdata.join("ivy"))
+        );
+        assert_eq!(
+            windows_directory_from(Some(config.as_os_str()), Some(appdata.as_os_str())),
+            Some(config.join("ivy"))
+        );
+        for variable in ["", "config", "./config"] {
+            assert_eq!(
+                windows_directory_from(Some(OsStr::new(variable)), Some(appdata.as_os_str())),
+                Some(appdata.join("ivy")),
+                "with {variable:?} it did not fall back to %APPDATA%"
+            );
+        }
+        assert_eq!(
+            windows_directory_from(None, Some(OsStr::new("Roaming"))),
+            None
+        );
+        assert_eq!(windows_directory_from(None, None), None);
+    }
+
+    /// What the reported launch lacked: on Windows the configuration directory resolves at all.
+    #[cfg(windows)]
+    #[test]
+    fn windows_startup_finds_a_configuration_directory() {
+        let expected = match std::env::var_os("XDG_CONFIG_HOME") {
+            Some(config) if std::path::Path::new(&config).is_absolute() => PathBuf::from(config),
+            _ => PathBuf::from(std::env::var_os("APPDATA").expect("Windows sets APPDATA")),
+        };
+        assert_eq!(directory(), Some(expected.join("ivy")));
     }
 
     #[test]
