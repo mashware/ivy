@@ -238,7 +238,10 @@ impl Viewer {
         // image's rect only from the previous pass, which drops a gesture on the first frame.
         // Where no area is under the pointer `layer_id_at` answers none: that is the background.
         let over = ui.input(|i| i.pointer.hover_pos()).filter(|&at| {
-            let top = ui.ctx().layer_id_at(at).unwrap_or_else(egui::LayerId::background);
+            let top = ui
+                .ctx()
+                .layer_id_at(at)
+                .unwrap_or_else(egui::LayerId::background);
             view.contains(at) && top == ui.layer_id()
         });
         let over_image = over.is_some();
@@ -1828,8 +1831,14 @@ mod tests {
                 let output = pass_with(&mut window, &ctx, std::mem::take(&mut events), &mut popup);
                 now = image_rect(&output.shapes);
             }
-            assert_eq!(now, before, "{at:?}: the wheel inside the popup moved the image");
-            assert!(received.get().y < 0.0, "{at:?}: the popup was left no wheel");
+            assert_eq!(
+                now, before,
+                "{at:?}: the wheel inside the popup moved the image"
+            );
+            assert!(
+                received.get().y < 0.0,
+                "{at:?}: the popup was left no wheel"
+            );
         }
     }
 
