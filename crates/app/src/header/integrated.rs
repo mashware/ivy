@@ -75,6 +75,7 @@ pub(crate) fn paint_strip(
                 zoomed,
                 folded: pane.folded,
                 focused: strip.focused,
+                green: crate::pane_view::focus_mix(ui.ctx(), pane.name, strip.focused),
                 project: pane.project.as_ref(),
             },
         );
@@ -260,6 +261,8 @@ struct Appearance<'a> {
     folded: bool,
     /// Whether this console is the one the window hands its keys to.
     focused: bool,
+    /// How far this header has turned to the focus green, 0 to 1 (see `pane_view::focus_mix`).
+    green: f32,
     project: Option<&'a crate::project_view::Badge>,
 }
 
@@ -285,19 +288,25 @@ fn readable(ink: Color32, surface: Color32, toward: Color32, contrast: f32) -> C
 /// What a header paints its surface and its words in.
 struct Colors {
     surface: Color32,
-    /// The project's name: its ink, readable at 3:1 like any mark.
+    /// The project's name, readable at 3:1 like any mark.
     name: Option<Color32>,
     /// The task, readable at 4.5:1 like any text.
     text: Color32,
     separator: Color32,
 }
 
-fn colors(roles: &crate::theme::Roles, ink: Option<Color32>, focused: bool) -> Colors {
-    // The whole header carries a low tint of its project's ink over the stripe: a stripe alone was
-    // reported almost invisible (#48), and the design kit tints the header 18 % when focused.
+fn colors(roles: &crate::theme::Roles, ink: Option<Color32>, focused: bool, green: f32) -> Colors {
+    // The whole header carries a low tint of an ink: a stripe alone was reported almost invisible
+    // (#48), and the design kit tints the header 18 % when focused.
     let ground = if focused { roles.panel } else { roles.chrome };
     let text = if focused { roles.tx } else { roles.tx2 };
-    let Some(ink) = ink else {
+    // Green is the focused console's colour (D96 amended by #141): the project's ink turns to the
+    // accent by `green`, and a console with no project takes the accent's tint as focus arrives.
+    let (ink, strength) = match ink {
+        Some(ink) => (crate::theme::mix(ink, roles.accent, green), 1.0),
+        None => (roles.accent, green),
+    };
+    if strength <= 0.0 {
         // A role surface, where the roles' own text rules already hold (D94, D59).
         return Colors {
             surface: ground,
@@ -305,8 +314,9 @@ fn colors(roles: &crate::theme::Roles, ink: Option<Color32>, focused: bool) -> C
             text,
             separator: roles.tx3,
         };
-    };
-    let surface = crate::theme::mix(ground, ink, if focused { 0.18 } else { 0.14 });
+    }
+    let tint = if focused { 0.18 } else { 0.14 } * strength;
+    let surface = crate::theme::mix(ground, ink, tint);
     Colors {
         surface,
         name: Some(readable(ink, surface, roles.tx, 3.0)),
@@ -325,11 +335,12 @@ fn paint(ui: &egui::Ui, strip: egui::Rect, theme: &Theme, appearance: Appearance
         zoomed,
         folded,
         focused,
+        green,
         project,
     } = appearance;
     let roles = crate::ui::style::roles(ui.ctx(), theme);
     let painter = ui.painter().with_clip_rect(strip.intersect(ui.clip_rect()));
-    let colors = colors(&roles, project.map(|project| project.ink), focused);
+    let colors = colors(&roles, project.map(|project| project.ink), focused, green);
     let surface = colors.surface;
     painter.rect_filled(
         strip,
@@ -694,6 +705,7 @@ mod tests {
                     zoomed: false,
                     folded: false,
                     focused: true,
+                    green: 1.0,
                     project: Some(&badge),
                 },
             );
@@ -750,6 +762,7 @@ mod tests {
             zoomed: false,
             folded: false,
             focused,
+            green: if focused { 1.0 } else { 0.0 },
             project,
         }
     }
@@ -763,24 +776,30 @@ mod tests {
         })
     }
 
-    /// **Literal Ivy Night colours, written out**: the focused header sits on the panel and the
-    /// others on the chrome, each tinted with the project's ink; the project is a 3-point stripe
-    /// and its name in its own ink, beside
-    /// the task in the text role of the surface — and no gradient and no «01» any more.
+    /// **Literal Ivy Night colours, written out**: the focused header sits on the panel tinted
+    /// with the focus green #3CC384 and names its project in that green (#141); the others sit on
+    /// the chrome tinted with the project's own ink and name it in that ink, beside the task in the
+    /// text role of the surface — and no stripe, no gradient and no «01».
     #[test]
-    fn project_stripe_and_ink_replace_the_gradient_and_focus_picks_the_surface() {
+    fn focus_paints_the_header_green_and_the_others_in_their_project_ink() {
         let ctx = egui::Context::default();
-        let ink = rgb(0x43c071);
+        let ink = rgb(0xb48cf0);
         let badge = badge(ink);
         let strip = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(500.0, 28.0));
         let metrics = CellMetrics::of(8.0, 16.0);
         let label_rect = targets(strip, &metrics, true)[0].1;
-        // The panel #171D21 with 18 % of the ink when focused; the chrome #0F1315 with 14 % when not.
-        // The separator, muted text #8E9390, is brought back until it reads at 4.5:1 on the focused
-        // tint; on the darker unfocused one it already does.
-        for (focused, surface, text, separator) in [
-            (true, rgb(0x1f3a2f), rgb(0xe4e8e2), rgb(0x9fa4a0)),
-            (false, rgb(0x162b22), rgb(0xa5aaa6), rgb(0x8e9390)),
+        // The panel #171D21 with 18 % of the green when focused; the chrome #0F1315 with 14 % of
+        // the violet when not. The separator, muted text #8E9390, is brought back until it reads at
+        // 4.5:1 on the focused tint; on the darker unfocused one it already does.
+        for (focused, surface, name, text, separator) in [
+            (
+                true,
+                rgb(0x1e3b33),
+                rgb(0x3cc384),
+                rgb(0xe4e8e2),
+                rgb(0x9fa4a0),
+            ),
+            (false, rgb(0x262434), ink, rgb(0xa5aaa6), rgb(0x8e9390)),
         ] {
             let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
                 paint(
@@ -812,7 +831,7 @@ mod tests {
                     .any(|s| matches!(&s.shape, egui::Shape::Mesh(_))),
                 "the old gradient is still painted"
             );
-            assert_eq!(text_color(&out.shapes, "Backend"), Some(ink));
+            assert_eq!(text_color(&out.shapes, "Backend"), Some(name));
             assert_eq!(text_color(&out.shapes, " / "), Some(separator));
             assert_eq!(text_color(&out.shapes, "Fix login"), Some(text));
             assert_eq!(text_color(&out.shapes, "01"), None);
@@ -824,7 +843,8 @@ mod tests {
             out.drop_without_applying_deltas();
         }
         assert!(badge.painted.load(std::sync::atomic::Ordering::Relaxed));
-        // Without a project there is no stripe and the task starts after the same inset.
+        // Without a project there is no stripe and the task starts after the same inset; focused,
+        // it still turns green — the same #1E3B33 tint as a focused project.
         let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
             paint(ui, strip, &Theme::default(), appearance(None, true, None));
         });
@@ -834,6 +854,13 @@ mod tests {
                 .iter()
                 .any(|s| matches!(&s.shape, egui::Shape::Rect(r)
             if r.rect.width() == 3.0))
+        );
+        assert!(
+            out.shapes
+                .iter()
+                .any(|s| matches!(&s.shape, egui::Shape::Rect(r)
+                if r.rect == strip && r.fill == rgb(0x1e3b33))),
+            "a focused console without a project is not green"
         );
         assert_eq!(text_color(&out.shapes, "Fix login"), Some(rgb(0xe4e8e2)));
         out.drop_without_applying_deltas();
@@ -862,10 +889,19 @@ mod tests {
             let mut inks: Vec<Option<egui::Color32>> =
                 project_accents(&theme).into_iter().map(Some).collect();
             inks.extend([Some(rgb(0x202020)), Some(rgb(0xf0f0f0))]);
+            inks.push(None);
             for ink in inks {
-                for focused in [true, false] {
-                    let c = colors(&roles, ink, focused);
-                    let label = format!("{named:?} {ink:?} focused={focused}");
+                // Mid-fade included: a header half-way to the green reads like either end.
+                // (true, 0) is the first frame of every fade-in: the project's own ink on the panel.
+                for (focused, green) in [
+                    (true, 1.0),
+                    (true, 0.5),
+                    (true, 0.0),
+                    (false, 0.5),
+                    (false, 0.0),
+                ] {
+                    let c = colors(&roles, ink, focused, green);
+                    let label = format!("{named:?} {ink:?} focused={focused} green={green}");
                     assert!(
                         project_ink_contrast(c.text, c.surface) >= 4.5,
                         "{label}: task"

@@ -701,6 +701,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         include_str!("../src/theme/roles.rs"),
         33,
     ),
+    (
+        "src/theme/project_colors.rs",
+        include_str!("../src/theme/project_colors.rs"),
+        20,
+    ),
     ("src/ui.rs", include_str!("../src/ui.rs"), 2),
     ("src/ui/style.rs", include_str!("../src/ui/style.rs"), 12),
     (

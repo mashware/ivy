@@ -6,7 +6,10 @@
 //! sequences, and an application that resolves there comes out black.
 
 mod catalog;
+mod project_colors;
 mod roles;
+
+pub(crate) use project_colors::project_accents;
 
 pub(crate) use roles::{Roles, metrics};
 
@@ -490,32 +493,6 @@ impl Theme {
             }
         }
     }
-}
-
-pub(crate) fn project_accents(theme: &Theme) -> Vec<Color32> {
-    let mut colors = Vec::new();
-    // Cyan and magenta and their bright twins only (D96): green, red and yellow (1, 2, 3, 9, 10,
-    // 11) are the accent and the wait and block claims, and blue (4) is the done claim, with 12 too
-    // close to it — a project painted in any of them would read as a state.
-    for slot in [6, 5, 13, 14] {
-        let original = theme.color(term_core::TermColor::Indexed(slot));
-        let mut color = original;
-        for step in 0..=10 {
-            let amount = step as f32 / 10.0;
-            color = mix(original, theme.foreground(), amount);
-            if project_ink_contrast(color, theme.panel_background()) >= 3.0 {
-                break;
-            }
-        }
-        if project_ink_contrast(color, theme.panel_background()) >= 3.0
-            && colors
-                .iter()
-                .all(|other| project_inks_distinct(color, *other))
-        {
-            colors.push(color);
-        }
-    }
-    colors
 }
 
 pub(crate) fn project_inks_distinct(a: Color32, b: Color32) -> bool {
@@ -1186,29 +1163,22 @@ mod tests {
         }
     }
 
-    /// A project never takes the done claim's blue (slot 4) or its bright twin (12), even where
-    /// they are the theme's most distinct colours: a project in blue would read as finished work.
+    /// A project never takes a colour near the done claim's blue (slot 4), wherever a person moves
+    /// it: a project in that colour would read as finished work. Set to the list's violet, violet
+    /// leaves the list on every theme.
     #[test]
-    fn project_colours_never_take_the_done_blue_or_its_twin() {
+    fn project_colours_never_take_the_done_blue() {
         use eframe::egui::Color32;
-        let blue = Color32::from_rgb(0x30, 0x50, 0xff);
-        let bright = Color32::from_rgb(0x90, 0x20, 0xff);
+        let violet = Color32::from_rgb(0xb4, 0x8c, 0xf0);
         let mut palette = [None; 16];
-        palette[4] = Some(blue);
-        palette[12] = Some(bright);
+        palette[4] = Some(violet);
         for &named in super::NamedTheme::ALL {
             let theme = named.theme().with_colors(&crate::settings::Colors {
                 palette,
                 ..Default::default()
             });
             let accents = super::project_accents(&theme);
-            assert!(accents.len() <= 4, "{named:?}: {accents:?}");
-            for slot in [blue, bright] {
-                for step in 0..=10 {
-                    let lifted = super::mix(slot, theme.foreground(), step as f32 / 10.0);
-                    assert!(!accents.contains(&lifted), "{named:?}: {lifted:?}");
-                }
-            }
+            assert!(!accents.contains(&violet), "{named:?}: {accents:?}");
         }
     }
 }

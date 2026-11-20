@@ -24,22 +24,21 @@ fn default_theme_produces_distinguishable_contrasting_inks() {
     }
 }
 
+/// Project colours no longer come from the palette (#141), so a palette collapsed to one grey
+/// still leaves projects as many distinct, readable inks as the factory theme.
 #[test]
-fn monochrome_palette_has_finite_distinct_candidates() {
+fn monochrome_palette_still_offers_distinct_candidates() {
     let colors = crate::settings::Colors {
         palette: [Some(Color32::GRAY); 16],
         ..Default::default()
     };
     let theme = Theme::default().with_colors(&colors);
     let inks = crate::theme::project_accents(&theme);
-    assert!(
-        inks.len() <= 1,
-        "duplicate source colors must not promise distinct accents"
-    );
-    assert!(
-        inks.iter()
-            .all(|ink| contrast(*ink, theme.panel_background()) >= 3.0)
-    );
+    assert!(inks.len() >= 8, "{inks:?}");
+    for (i, ink) in inks.iter().enumerate() {
+        assert!(contrast(*ink, theme.panel_background()) >= 3.0);
+        assert!(inks[..i].iter().all(|other| separated(*ink, *other)));
+    }
 }
 
 #[test]
@@ -127,12 +126,40 @@ fn remote_directory_veto_clears_existing_badge_and_accounts_work() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+/// More projects than Ivy Night's nine colours: the tenth repeats the first named colour (violet
+/// #B48CF0), not the text colour #E4E8E2, which sits one step from the list's white #E8E8E8 and
+/// would make the fifth and the tenth project look alike. With no candidate at all, the text colour.
+#[test]
+fn past_the_list_projects_repeat_it_from_the_start_and_never_take_the_text_colour() {
+    let theme = Theme::default();
+    let candidates = crate::theme::project_accents(&theme);
+    assert_eq!(candidates.len(), 9, "{candidates:?}");
+    let mut used = Vec::new();
+    for _ in 0..11 {
+        used.push(next_ink(
+            &candidates,
+            used.iter().copied(),
+            theme.foreground(),
+        ));
+    }
+    assert_eq!(used[..9], candidates[..]);
+    assert_eq!(used[9], Color32::from_rgb(0xb4, 0x8c, 0xf0));
+    assert_eq!(used[10], Color32::from_rgb(0x3f, 0xd0, 0xc0));
+    assert!(!used.contains(&theme.foreground()));
+    assert_eq!(
+        next_ink(&[], std::iter::empty(), theme.foreground()),
+        theme.foreground()
+    );
+}
+
+/// A mid-grey panel (0x78) sits where neither the dark-panel nor the light-panel colours reach
+/// 3:1: nothing is offered rather than an ink washed toward the text.
 #[test]
 fn no_candidate_is_offered_when_theme_cannot_supply_contrast() {
     let colors = crate::settings::Colors {
         palette: [Some(Color32::GRAY); 16],
         foreground: Some(Color32::GRAY),
-        panel: Some(Color32::GRAY),
+        panel: Some(Color32::from_gray(0x78)),
         ..Default::default()
     };
     let theme = Theme::default().with_colors(&colors);
@@ -425,6 +452,9 @@ fn projects_keep_identity_and_accent_across_tabs_focus_and_theme_changes() {
 
     let mut palette = [Some(Color32::from_rgb(255, 32, 32)); 16];
     palette[2] = Some(Color32::from_rgb(32, 255, 32));
+    // The done blue moved onto the list's violet: violet leaves the list, so every project's
+    // accent is reassigned from the new theme rather than kept from the old one.
+    palette[4] = Some(Color32::from_rgb(0xb4, 0x8c, 0xf0));
     let overrides = crate::settings::Colors {
         palette,
         foreground: Some(Color32::WHITE),
@@ -504,16 +534,14 @@ fn exhausted_palette_keeps_distinct_project_names_in_actual_headers() {
         );
     }
     let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+    // A mid-grey panel no list colour reads on: both projects fall back to the text colour.
     window.theme = Theme::default().with_colors(&crate::settings::Colors {
         palette: [Some(Color32::WHITE); 16],
         foreground: Some(Color32::WHITE),
-        panel: Some(Color32::BLACK),
+        panel: Some(Color32::from_gray(0x78)),
         ..Default::default()
     });
-    assert_eq!(
-        crate::theme::project_accents(&window.theme),
-        vec![Color32::WHITE]
-    );
+    assert!(crate::theme::project_accents(&window.theme).is_empty());
     configure(
         &mut window,
         crate::settings::Entry::Normal,
@@ -546,16 +574,26 @@ fn exhausted_palette_keeps_distinct_project_names_in_actual_headers() {
             assert_eq!(badges[0].ink, Color32::WHITE);
             assert_eq!(badges[1].ink, Color32::WHITE);
             assert_ne!(badges[0].name, badges[1].name);
-            for badge in badges {
-                assert!(
-                    output.shapes.iter().any(|shape| matches!(
-                        &shape.shape,
-                        egui::Shape::Text(text) if text.galley.job.text == badge.name
-                            && text.galley.job.sections.iter().all(|section| section.format.color == Color32::WHITE)
-                    )),
-                    "project name must remain painted after color exhaustion"
-                );
-            }
+            // Both names stay painted; the unfocused one in the fallback white, the focused one in
+            // the focus green (#141), which the badge itself never takes.
+            let painted_in = |name: &str| {
+                output.shapes.iter().find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.job.text == name => {
+                        Some(text.galley.job.sections[0].format.color)
+                    }
+                    _ => None,
+                })
+            };
+            let colours: Vec<_> = badges.iter().map(|b| painted_in(&b.name)).collect();
+            assert!(
+                colours.iter().all(Option::is_some),
+                "project name must remain painted after color exhaustion"
+            );
+            assert!(
+                colours.contains(&Some(Color32::WHITE)),
+                "the unfocused name lost the fallback white: {colours:?}"
+            );
+            let accent = Color32::from_rgb(0x3c, 0xc3, 0x84);
             assert_eq!(
                 output
                     .shapes
@@ -564,12 +602,12 @@ fn exhausted_palette_keeps_distinct_project_names_in_actual_headers() {
                         &shape.shape,
                         egui::Shape::Rect(r) if r.fill == Color32::TRANSPARENT
                             && r.stroke.width == 1.0
-                            && r.stroke.color == Color32::WHITE
+                            && r.stroke.color == accent
                             && r.rect.height() > 100.0
                     ))
                     .count(),
                 1,
-                "the focused console's outline must use the resulting project color"
+                "the focused console's outline must be the focus green"
             );
         }
         output.drop_without_applying_deltas();

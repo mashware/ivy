@@ -198,16 +198,11 @@ pub(crate) fn refresh(window: &mut Window, ctx: &egui::Context) {
         let candidates = crate::theme::project_accents(&window.theme);
         for (_, identity) in &identities {
             if !state.assignments.contains_key(&identity.key) {
-                let ink = candidates
-                    .iter()
-                    .copied()
-                    .find(|ink| {
-                        state
-                            .assignments
-                            .values()
-                            .all(|used| separated(*ink, *used))
-                    })
-                    .unwrap_or_else(|| window.theme.foreground());
+                let ink = next_ink(
+                    &candidates,
+                    state.assignments.values().copied(),
+                    window.theme.foreground(),
+                );
                 state.assignments.insert(identity.key.clone(), ink);
             }
         }
@@ -234,6 +229,28 @@ pub(crate) fn refresh(window: &mut Window, ctx: &egui::Context) {
     state.pending += cost;
     window.timed_separately += cost;
     window.projects = state;
+}
+
+/// The ink a newly seen project takes: the first candidate distinct from every ink in use; once
+/// every candidate is taken, the list again from its start, so the tenth project repeats the first
+/// named colour instead of taking the text colour — which on Ivy Night is one step from the list's
+/// white (#141). The text colour only when the theme offers no candidate at all.
+pub(crate) fn next_ink(
+    candidates: &[Color32],
+    used: impl Iterator<Item = Color32> + Clone,
+    fallback: Color32,
+) -> Color32 {
+    if let Some(free) = candidates
+        .iter()
+        .copied()
+        .find(|ink| used.clone().all(|other| separated(*ink, other)))
+    {
+        return free;
+    }
+    match candidates.len() {
+        0 => fallback,
+        n => candidates[used.count() % n],
+    }
 }
 
 fn published_directory(path: &std::path::Path) -> Option<PathBuf> {

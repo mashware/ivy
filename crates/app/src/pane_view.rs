@@ -156,6 +156,36 @@ pub(crate) fn separator_color(window: &crate::Window) -> egui::Color32 {
     }
 }
 
+/// How far a console has turned to the focus green, 0 to 1, over the 150 ms after focus moves.
+/// The outline and the header's ink read it under one id per console, so the two move as one;
+/// the header's ground and text follow focus at once (D96 amended by #141). Without fades it is
+/// 0 or 1 and egui's animation is never asked, because asking requests a repaint even with no
+/// time left to animate.
+pub(crate) fn focus_mix(ctx: &egui::Context, pane: usize, focused: bool) -> f32 {
+    let target = if focused { 1.0 } else { 0.0 };
+    if !focus_fades(ctx) {
+        return target;
+    }
+    ctx.animate_value_with_time(egui::Id::new(("focus-mix", pane)), target, FOCUS_FADE)
+}
+
+/// Where the run's choice to fade is kept. In the context rather than threaded through every
+/// painter: the header is reached through `HowToPaint`, built in `lib.rs`, which may not grow
+/// (D28). Absent means no fades, which is what every window a test builds gets.
+const FOCUS_FADES: &str = "focus-fades";
+
+pub(crate) fn allow_focus_fades(ctx: &egui::Context, allowed: bool) {
+    ctx.data_mut(|data| data.insert_temp(egui::Id::new(FOCUS_FADES), allowed));
+}
+
+pub(crate) fn focus_fades(ctx: &egui::Context) -> bool {
+    ctx.data(|data| data.get_temp(egui::Id::new(FOCUS_FADES)))
+        .unwrap_or(false)
+}
+
+/// How long the focus green takes to arrive and to leave.
+const FOCUS_FADE: f32 = 0.150;
+
 pub(crate) fn paint_borders(window: &mut crate::Window, ui: &egui::Ui, rects: &[egui::Rect]) {
     let integrated = window.chrome.enabled();
     let started = integrated.then(std::time::Instant::now);
@@ -165,17 +195,16 @@ pub(crate) fn paint_borders(window: &mut crate::Window, ui: &egui::Ui, rects: &[
         if rect == egui::Rect::NOTHING || (!integrated && focused != Some(index)) {
             continue;
         }
-        // A console with a project outlines its focus in that project's ink, the colour its header
-        // already carries; the owner asked for it on 17 November 2026 (D96 amended).
+        // Green is the focused console's colour, whatever its project (D96 amended by #141): the
+        // outline fades from the plain line to the accent as focus arrives, and back as it leaves.
         let color = match roles {
             None => window.theme.focus(),
-            Some(roles) if focused == Some(index) => window
-                .active()
-                .panes()
-                .get(index)
-                .and_then(|pane| pane.project.as_ref())
-                .map_or(roles.accent, |project| project.ink),
-            Some(roles) => roles.line,
+            Some(roles) => {
+                let t = window.active().panes().get(index).map_or(0.0, |pane| {
+                    focus_mix(ui.ctx(), pane.name, focused == Some(index))
+                });
+                crate::theme::mix(roles.line, roles.accent, t)
+            }
         };
         ui.painter().rect_stroke(
             rect,
