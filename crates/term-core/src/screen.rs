@@ -379,16 +379,16 @@ impl Screen {
         self.term.resize(Dims::from(size));
     }
 
-    /// The grid's current size.
-    ///
-    /// It is read from the grid itself instead of being stored separately: with two copies of the same datum,
-    /// resizing and updating only one lets them diverge without anything failing.
     /// The engine's terminal, for the search's own tests to read the grid they built.
     #[cfg(test)]
     pub(crate) fn term(&self) -> &Term<impl alacritty_terminal::event::EventListener> {
         &self.term
     }
 
+    /// The grid's current size.
+    ///
+    /// It is read from the grid itself instead of being stored separately: with two copies of the same datum,
+    /// resizing and updating only one lets them diverge without anything failing.
     pub fn size(&self) -> Size {
         let grid = self.term.grid();
         Size {

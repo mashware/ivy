@@ -7,7 +7,7 @@ use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Line, Point};
 
 use super::line::{Logical, extract, first_row, last_row, wraps};
-use super::{Search, Toward};
+use super::{Search, Toward, next_char};
 
 /// A match a step found, and whether it was reached by carrying on from the other end.
 pub(crate) struct Hit {
@@ -15,19 +15,28 @@ pub(crate) struct Hit {
     pub(crate) wrapped: bool,
 }
 
-/// The matches in `logical` that count, left to right.
+/// The matches inside `span` of `logical` that count, left to right.
 ///
-/// **An empty match never counts**: it has no cell to select or mark. **Matches do not overlap**,
-/// as the terminal engine's never did, so a whole-word candidate that is rejected still uses up its
-/// characters (D61's accepted `1.1` inside `v1.1.1`).
-fn matches(search: &Search, logical: &Logical) -> Vec<Range<usize>> {
-    search
-        .regex
-        .find_iter(&logical.text)
-        .map(|found| found.range())
-        .filter(|range| !range.is_empty())
-        .filter(|range| !search.whole_word || is_whole_word(&logical.text, range.clone()))
-        .collect()
+/// **An empty match never counts**: it has no cell to select or mark. **A candidate that whole word
+/// rejects gives its characters back**: the search goes on one character past where it started, so
+/// a whole word overlapping a rejected candidate — `1.1` at the end of `v1.1.1`, `b` in `xa b` for
+/// `a b|b` — is still found. Matches that count never overlap.
+fn matches(search: &Search, logical: &Logical, span: Range<usize>) -> Vec<Range<usize>> {
+    let text = &logical.text;
+    let mut found = Vec::new();
+    let mut at = span.start;
+    while let Some(range) = search.pattern.find_in(text, at..span.end) {
+        if !search.whole_word || is_whole_word(text, range.clone()) {
+            at = range.end;
+            found.push(range);
+        } else {
+            match next_char(text, range.start) {
+                Some(next) => at = next,
+                None => break,
+            }
+        }
+    }
+    found
 }
 
 /// Whether `range` of `text` is a whole word: each of its ends that is itself a word character
@@ -53,9 +62,11 @@ fn is_whole_word(text: &str, range: Range<usize>) -> bool {
 /// handed to `each` with the cells it takes.
 ///
 /// **The rows are cut at every hard break**, so a match never joins two lines the program ended,
-/// and **a logical line that runs past `first` or `last` is read only between them**: marking hands
-/// its bounded rows here, and reading the rest of a line wrapped across the whole history on every
-/// frame is exactly the cost D61 says marking does not have.
+/// and **a logical line that runs past `first` or `last` is matched only between them**: marking
+/// hands its bounded rows here, and reading the rest of a line wrapped across the whole history on
+/// every frame is exactly the cost D61 says marking does not have. **One row past each cut is read
+/// as context and never matched**: the character on the other side of a cut is what tells whole
+/// word, `^`, `$` and `\b` that the cut is not the line's start or end.
 pub(crate) fn mark<T>(
     term: &Term<T>,
     search: &Search,
@@ -63,14 +74,26 @@ pub(crate) fn mark<T>(
     last: Line,
     mut each: impl FnMut(RangeInclusive<Point>),
 ) {
+    let grid = term.grid();
+    let (top, bottom) = (grid.topmost_line(), grid.bottommost_line());
     let mut from = first;
     while from <= last {
         let mut to = from;
         while to < last && wraps(term, to) {
             to += 1;
         }
-        let logical = extract(term, from, to);
-        for range in matches(search, &logical) {
+        let before = if from > top && wraps(term, from - 1) {
+            from - 1
+        } else {
+            from
+        };
+        let after = if to < bottom && wraps(term, to) {
+            to + 1
+        } else {
+            to
+        };
+        let logical = extract(term, before, after);
+        for range in matches(search, &logical, logical.span(from, to)) {
             each(logical.cells(range));
         }
         from = to + 1;
@@ -138,7 +161,7 @@ fn pick(
     toward: Toward,
     counts: impl Fn(&RangeInclusive<Point>) -> bool,
 ) -> Option<RangeInclusive<Point>> {
-    let mut cells = matches(search, logical)
+    let mut cells = matches(search, logical, 0..logical.text.len())
         .into_iter()
         .map(|range| logical.cells(range))
         .filter(|cells| counts(cells));
@@ -148,8 +171,9 @@ fn pick(
     }
 }
 
-/// The last match in the logical lines from the one row `from` belongs to up to row `until`,
-/// walking up a whole logical line at a time.
+/// The last match in the logical lines that end at row `from` or above it, down to row `until`,
+/// walking up a whole logical line at a time. **`from` must be the last row of its logical line**:
+/// the rows below it are not read.
 fn upward<T>(
     term: &Term<T>,
     search: &Search,
@@ -168,7 +192,8 @@ fn upward<T>(
     None
 }
 
-/// The first match in the logical lines from the one row `from` belongs to down to row `until`.
+/// The first match in the logical lines that start at row `from` or below it, up to row `until`.
+/// **`from` must be the first row of its logical line**: the rows above it are not read.
 fn downward<T>(
     term: &Term<T>,
     search: &Search,

@@ -24,8 +24,19 @@ impl Logical {
     /// **A wide character ends on its spacer**, which is where the terminal engine's walk toward
     /// newer lines left a match's end, so a selection made from a match is the one it always was.
     pub(crate) fn cells(&self, bytes: Range<usize>) -> RangeInclusive<Point> {
+        debug_assert!(!bytes.is_empty(), "an empty match takes no cells");
         let owner = |byte: usize| self.chars.partition_point(|&(at, ..)| at <= byte) - 1;
         self.chars[owner(bytes.start)].1..=self.chars[owner(bytes.end - 1)].2
+    }
+}
+
+impl Logical {
+    /// The bytes of the text that rows `first` to `last` gave.
+    pub(crate) fn span(&self, first: Line, last: Line) -> Range<usize> {
+        let byte = |index: usize| self.chars.get(index).map_or(self.text.len(), |c| c.0);
+        let start = self.chars.partition_point(|c| c.1.line < first);
+        let end = self.chars.partition_point(|c| c.1.line <= last);
+        byte(start)..byte(end)
     }
 }
 

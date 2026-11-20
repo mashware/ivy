@@ -1,18 +1,20 @@
-//! Searching what a console still holds, its history included.
+//! Searching what a console still holds, its history included — and, through [`Pattern`], any
+//! other text the application searches the way the console does.
 //!
 //! **The grid is read a logical line at a time, as text**, and a regex engine that never gives up
 //! looks through it. The terminal engine's own search walked the grid cell by cell with a lazy DFA
-//! that, on a pattern too large for its cache, stopped and reported no match where there was one —
-//! saying so only in a log (D61, amended for #121). This module owns the walk since: wrapped lines
-//! and wide characters ([`line`]), which way a step goes and where it starts ([`walk`]), and the
-//! two rules the engine has no notion of — case, set on the engine's syntax, and whole word, judged
-//! on each match.
+//! that, on a pattern too large for its cache, stopped and reported no match where there was one,
+//! saying so only in a log (D61). Wrapped lines and wide characters are [`line`]'s; walking from one
+//! line to the next is [`walk`]'s; whole word, which no engine judges the way the box means it, is
+//! decided on each match there.
 
 mod line;
 pub(crate) mod walk;
 
 use std::borrow::Cow;
+use std::ops::Range;
 
+use regex_automata::Input;
 use regex_automata::meta::{self, Regex};
 use regex_automata::util::syntax;
 
@@ -21,12 +23,72 @@ use regex_automata::util::syntax;
 /// build — the engine's own default is five times this, and a short Unicode pattern reaches it.
 const SIZE_LIMIT: usize = 2 * 1024 * 1024;
 
-/// What a console is searched for, compiled once and kept for as long as the search is open.
+/// A query compiled: the text to find, escaped, or a pattern, with the box's case.
 ///
 /// **Opaque on purpose**: the engine's type does not leave this crate, for the same reason as
-/// [`Scroll`](crate::Scroll).
+/// [`Scroll`](crate::Scroll). The console's search and Files' name search both build one, so a
+/// query means the same thing in either place and is refused for the same reasons.
+pub struct Pattern {
+    regex: Regex,
+}
+
+impl Pattern {
+    /// Compiles `text` the way `options` says: as the text to find, escaped, or as a pattern. Only
+    /// `regex` and `match_case` are read; whole word and wrapping are how a console walks.
+    ///
+    /// **Case is set on the engine's syntax** rather than with an inline flag ahead of the query,
+    /// so a pattern's own flag still overrides the box and the parser's complaints point at what
+    /// the person typed.
+    pub fn new(text: &str, options: Options) -> Result<Self, Refused> {
+        if text.is_empty() {
+            return Err(Refused::Empty);
+        }
+        let pattern = if options.regex {
+            Cow::Borrowed(text)
+        } else {
+            Cow::Owned(regex_syntax::escape(text))
+        };
+        Regex::builder()
+            .configure(Regex::config().nfa_size_limit(Some(SIZE_LIMIT)))
+            .syntax(syntax::Config::new().case_insensitive(!options.match_case))
+            .build(&pattern)
+            .map(|regex| Self { regex })
+            .map_err(refused)
+    }
+
+    /// Where `haystack` first holds a match, in bytes. **An empty match is no match**: it has
+    /// nothing to select or mark, and a pattern such as `x*` would otherwise match everywhere.
+    pub fn find(&self, haystack: &str) -> Option<Range<usize>> {
+        self.find_in(haystack, 0..haystack.len())
+    }
+
+    /// The first non-empty match that lies inside `span` of `haystack`. **What lies around the
+    /// span is still read** by `^`, `$` and `\b`, so a span cut out of a longer line does not turn
+    /// its edges into a line's start or end.
+    pub(crate) fn find_in(&self, haystack: &str, span: Range<usize>) -> Option<Range<usize>> {
+        let mut at = span.start;
+        while at <= span.end {
+            let found = self
+                .regex
+                .find(Input::new(haystack).range(at..span.end))?
+                .range();
+            if !found.is_empty() {
+                return Some(found);
+            }
+            at = next_char(haystack, found.start)?;
+        }
+        None
+    }
+}
+
+/// The byte where the character after the one at `at` starts, if there is one.
+pub(crate) fn next_char(text: &str, at: usize) -> Option<usize> {
+    text[at..].chars().next().map(|c| at + c.len_utf8())
+}
+
+/// What a console is searched for, compiled once and kept for as long as the search is open.
 pub struct Search {
-    pub(crate) regex: Regex,
+    pub(crate) pattern: Pattern,
     pub(crate) whole_word: bool,
     pub(crate) wrap: bool,
 }
@@ -36,9 +98,9 @@ pub struct Search {
 /// **Not part of the query's text**, so changing one never edits what the person typed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Options {
-    /// Off, case is ignored always — not the engine's own rule, which turns case-sensitive the
-    /// moment the query holds an uppercase letter. An explicit box means what it says (**D61**).
-    /// A pattern's own inline flag, `(?i)` or `(?-i)`, still wins over it.
+    /// Off, case is ignored always — not the terminal engine's old rule, which turned
+    /// case-sensitive the moment the query held an uppercase letter. An explicit box means what it
+    /// says (**D61**). A pattern's own inline flag, `(?i)` or `(?-i)`, still wins over it.
     pub match_case: bool,
     /// A match counts only when each of its ends that is a word character does not touch another
     /// one — the boundary rule of `\b`.
@@ -75,30 +137,13 @@ pub enum Refused {
 }
 
 impl Search {
-    /// Compiles `text` the way `options` says: as the text to find, escaped, or as a pattern.
-    ///
-    /// **Case is set on the engine's syntax** rather than with an inline flag ahead of the query,
-    /// so a pattern's own flag still overrides the box and the parser's complaints point at what
-    /// the person typed.
+    /// Compiles `text` as [`Pattern::new`] does, and keeps how the console walks it.
     pub fn new(text: &str, options: Options) -> Result<Self, Refused> {
-        if text.is_empty() {
-            return Err(Refused::Empty);
-        }
-        let pattern = if options.regex {
-            Cow::Borrowed(text)
-        } else {
-            Cow::Owned(regex_syntax::escape(text))
-        };
-        Regex::builder()
-            .configure(Regex::config().nfa_size_limit(Some(SIZE_LIMIT)))
-            .syntax(syntax::Config::new().case_insensitive(!options.match_case))
-            .build(&pattern)
-            .map(|regex| Self {
-                regex,
-                whole_word: options.whole_word,
-                wrap: options.wrap,
-            })
-            .map_err(refused)
+        Pattern::new(text, options).map(|pattern| Self {
+            pattern,
+            whole_word: options.whole_word,
+            wrap: options.wrap,
+        })
     }
 }
 
@@ -784,7 +829,7 @@ mod tests {
         let Err(Refused::Invalid(why)) = Search::new("(", regex()) else {
             panic!("an unclosed group was not refused as invalid");
         };
-        assert!(!why.is_empty() && !why.contains('\n'), "{why:?}");
+        assert!(why.contains("unclosed") && !why.contains('\n'), "{why:?}");
         assert!(
             Search::new("(", Options::default()).is_ok(),
             "as text, «(» is just a character"
@@ -953,13 +998,164 @@ mod tests {
 
     #[test]
     fn a_match_never_crosses_a_line_the_program_ended() {
-        let mut screen = screen_with(4, &["foo", "bar"]);
+        // The first line fills its row, so no padding stands between «foo» and «bar»: only the
+        // break does.
+        let full = format!("{}foo", "x".repeat(17));
+        let mut screen = screen_with(4, &[full.as_str(), "bar"]);
         for search in [literal("foobar"), with(r"foo\s*bar", regex())] {
+            let mut view = screen.view();
+            assert_eq!(screen.mark_matches(&mut view, &search), 0);
             assert_eq!(
                 screen.find(&search, Toward::Older, KeepClear::NONE),
                 Found::Nothing
             );
         }
+        // The control: the same rows joined by a wrap are one line.
+        let mut joined = Screen::new(Size { rows: 4, cols: 20 });
+        joined.advance(format!("{full}bar").as_bytes());
+        assert_eq!(
+            joined.find(&literal("foobar"), Toward::Older, KeepClear::NONE),
+            Found::Match
+        );
+    }
+
+    /// The columns of the visible row the selection sits on.
+    fn selected_columns(screen: &Screen) -> Vec<usize> {
+        let view = screen.view();
+        let cols = view.size().cols as usize;
+        view.cells()
+            .chunks_exact(cols)
+            .find(|row| row.iter().any(|cell| cell.selected))
+            .map(|row| (0..cols).filter(|&col| row[col].selected).collect())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn on_one_line_each_step_takes_the_nearest_match_that_way() {
+        let mut screen = screen_with(4, &["x", "item item", "y"]);
+        screen.scroll_by(Scroll::ToTop);
+        let search = literal("item");
+        for expected in [vec![0, 1, 2, 3], vec![5, 6, 7, 8]] {
+            assert_eq!(
+                screen.find(&search, Toward::Newer, KeepClear::NONE),
+                Found::Match
+            );
+            assert_eq!(selected_columns(&screen), expected);
+        }
+
+        // Adjacent matches: the step starts one cell past the current one, not two.
+        let mut screen = screen_with(4, &["aa"]);
+        let search = literal("a");
+        for (toward, expected) in [
+            (Toward::Older, vec![1]),
+            (Toward::Older, vec![0]),
+            (Toward::Newer, vec![1]),
+        ] {
+            assert_eq!(
+                screen.find(&search, toward, KeepClear::NONE),
+                Found::Match
+            );
+            assert_eq!(selected_columns(&screen), expected, "{toward:?}");
+        }
+    }
+
+    #[test]
+    fn without_wrap_a_match_behind_the_start_on_the_same_line_is_no_more() {
+        let mut screen = screen_with(4, &["a a"]);
+        screen.scroll_by(Scroll::ToTop);
+        let search = with(
+            "a",
+            Options {
+                wrap: false,
+                ..Options::default()
+            },
+        );
+        for expected in [Found::Match, Found::Match, Found::NoMore] {
+            assert_eq!(
+                screen.find(&search, Toward::Newer, KeepClear::NONE),
+                expected
+            );
+        }
+        assert_eq!(selected_columns(&screen), vec![2]);
+    }
+
+    #[test]
+    fn a_whole_word_overlapping_a_rejected_candidate_is_still_found() {
+        for (line, query, options, expected) in [
+            (
+                "xa b",
+                "a b|b",
+                Options {
+                    whole_word: true,
+                    ..regex()
+                },
+                "b",
+            ),
+            ("v1.1.1", "1.1", whole_word(), "1.1"),
+        ] {
+            for toward in [Toward::Older, Toward::Newer] {
+                let mut screen = screen_with(4, &[line]);
+                assert_eq!(
+                    screen.find(&with(query, options), toward, KeepClear::NONE),
+                    Found::Match,
+                    "«{query}» in «{line}» walking {toward:?}"
+                );
+                assert_eq!(screen.selected_text().as_deref(), Some(expected));
+            }
+        }
+    }
+
+    #[test]
+    fn marking_judges_the_rows_it_cuts_by_what_lies_past_the_cut() {
+        use alacritty_terminal::index::Line;
+
+        // Five columns: «abcdk» wraps into «need», so the second row starts inside «kneed».
+        let marked_in = |text: &str, search: &Search, first: i32, last: i32| {
+            let mut screen = Screen::new(Size { rows: 3, cols: 5 });
+            screen.advance(text.as_bytes());
+            let mut cells = 0;
+            walk::mark(screen.term(), search, Line(first), Line(last), |_| cells += 1);
+            cells
+        };
+        let need = with(
+            "need",
+            Options {
+                whole_word: true,
+                ..Options::default()
+            },
+        );
+        assert_eq!(marked_in("abcdkneed", &need, 1, 1), 0, "the cut read as a word's start");
+        assert_eq!(marked_in("abcd need", &need, 1, 1), 1, "the control");
+        assert_eq!(
+            marked_in("abcdkneed", &with("^need", regex()), 1, 1),
+            0,
+            "the cut read as the line's start"
+        );
+        assert_eq!(
+            marked_in("abcdkneed", &with("k$", regex()), 0, 0),
+            0,
+            "the cut read as the line's end"
+        );
+    }
+
+    #[test]
+    fn marking_reaches_no_further_below_the_screen_than_above_it() {
+        let rows = 4;
+        let mut screen = Screen::new(Size { rows, cols: 20 });
+        let filler = "y".repeat(20 * (crate::screen::MARKING_REACH + 50));
+        screen.advance(format!("S{filler}E").as_bytes());
+        screen.scroll_by(Scroll::ToTop);
+        let mut view = screen.view();
+        assert!(
+            view.cells().iter().any(|cell| cell.c == 'S'),
+            "the premise: the line's start is on screen"
+        );
+
+        assert_eq!(
+            screen.mark_matches(&mut view, &with("S[^E]*E", regex())),
+            0,
+            "marking read the wrapped line beyond its reach below the screen"
+        );
     }
 
     #[test]
