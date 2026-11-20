@@ -1302,6 +1302,11 @@ mod tests {
         drop(channel);
     }
 
+    crate::windows_unix_omission!(
+        panel_publish_is_admitted_off_frame_and_publisher_disconnect_is_silent,
+        "unix-only: requires Linux pidfd-backed peer lifetime"
+    );
+
     #[cfg(target_os = "linux")]
     #[test]
     fn panel_publish_is_admitted_off_frame_and_publisher_disconnect_is_silent() {
