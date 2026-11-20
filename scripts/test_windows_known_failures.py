@@ -93,6 +93,21 @@ class Judge(unittest.TestCase):
         self.assertEqual(len(problems), 1)
         self.assertIn("now ignored", problems[0])
 
+    def test_an_intermittent_entry_may_pass_or_fail(self):
+        passing = dict(entry("app/app:lib", "a::passes"), intermittent=True)
+        known = self.known(entry("app/app:lib", "a::fails"), entry("app/batches:test", "b::fails"), passing)
+        self.assertEqual(known_failures.judge(known, self.outcomes, self.unfinished), [])
+        failing = dict(entry("app/app:lib", "a::fails"), intermittent=True)
+        known = self.known(failing, entry("app/batches:test", "b::fails"))
+        self.assertEqual(known_failures.judge(known, self.outcomes, self.unfinished), [])
+
+    def test_an_intermittent_entry_still_has_to_run(self):
+        gone = dict(entry("app/app:lib", "gone"), intermittent=True)
+        known = self.known(entry("app/app:lib", "a::fails"), entry("app/batches:test", "b::fails"), gone)
+        problems = known_failures.judge(known, self.outcomes, self.unfinished)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("did not run", problems[0])
+
     def test_a_crashed_binary_fails_even_with_everything_listed(self):
         known = self.known(entry("app/app:lib", "a::fails"), entry("app/batches:test", "b::fails"))
         problems = known_failures.judge(known, self.outcomes, ["app/batches:test"])
@@ -116,6 +131,10 @@ class ParseKnown(unittest.TestCase):
     def test_an_issue_that_is_not_a_github_issue_is_refused(self):
         with self.assertRaises(known_failures.KnownFailureError):
             self.parse([{"binary": "b", "name": "n", "reason": "r", "issue": "later"}])
+
+    def test_intermittent_must_be_true(self):
+        with self.assertRaises(known_failures.KnownFailureError):
+            self.parse([dict(entry("b", "n"), intermittent=False)])
 
     def test_a_duplicate_is_refused(self):
         with self.assertRaises(known_failures.KnownFailureError):

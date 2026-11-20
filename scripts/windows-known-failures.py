@@ -5,7 +5,8 @@ The first native Windows run found tests that fail there for reasons nobody had 
 Each one is listed by name in `windows-known-failures.json` with the issue that tracks it. The
 list is a ratchet: a failure not on it fails the job, and so does a listed test that now passes or
 no longer runs, so an entry is removed by the change that fixes it and nothing can join it in
-silence.
+silence. An entry marked `intermittent` is one Windows CI has seen both pass and fail: it may do
+either, and it still has to run.
 """
 
 from __future__ import annotations
@@ -36,10 +37,12 @@ def parse_known(path: Path) -> dict[tuple[str, str], dict[str, str]]:
     required = {"binary", "name", "reason", "issue"}
     known: dict[tuple[str, str], dict[str, str]] = {}
     for index, entry in enumerate(data):
-        if not isinstance(entry, dict) or set(entry) != required:
-            raise KnownFailureError(f"entry {index} must contain exactly {sorted(required)}")
+        if not isinstance(entry, dict) or set(entry) - {"intermittent"} != required:
+            raise KnownFailureError(f"entry {index} must contain exactly {sorted(required)} and optional intermittent")
         if not all(isinstance(entry[key], str) and entry[key] for key in required):
             raise KnownFailureError(f"entry {index} fields must be nonempty strings")
+        if "intermittent" in entry and entry["intermittent"] is not True:
+            raise KnownFailureError(f"entry {index} intermittent must be true when present")
         if not re.fullmatch(r"https://github\.com/[^/]+/[^/]+/issues/\d+", entry["issue"]):
             raise KnownFailureError(f"entry {index} issue must be a GitHub issue URL")
         key = entry["binary"], entry["name"]
@@ -99,7 +102,9 @@ def judge(
             problems.append(f"new Windows failure: {key[0]}::{key[1]}")
     for key, entry in sorted(known.items()):
         outcome = outcomes.get(key)
-        if outcome == "ok":
+        # An intermittent entry may pass or fail, but it still has to run: one that disappears or is
+        # ignored is as stale as any other.
+        if outcome == "ok" and not entry.get("intermittent"):
             problems.append(f"listed failure now passes, remove it from the list: {key[0]}::{key[1]} ({entry['issue']})")
         elif outcome is None:
             problems.append(f"listed failure did not run: {key[0]}::{key[1]} ({entry['issue']})")
@@ -147,7 +152,8 @@ def main() -> int:
         problems = judge(known, outcomes, unfinished)
         failed = sum(outcome == "FAILED" for outcome in outcomes.values())
         for key, entry in sorted(known.items()):
-            print(f"known Windows failure: {key[0]}::{key[1]} — {entry['reason']} ({entry['issue']})")
+            kind = "intermittent" if entry.get("intermittent") else "known"
+            print(f"{kind} Windows failure: {key[0]}::{key[1]} — {entry['reason']} ({entry['issue']})")
         print(f"Known Windows failures: {len(known)}; failed in this run: {failed}")
         if problems:
             raise KnownFailureError("\n".join(problems))

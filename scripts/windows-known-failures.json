@@ -470,8 +470,9 @@
   {
     "binary": "app/app:lib",
     "name": "project_view::tests::remote_directory_veto_clears_existing_badge_and_accounts_work",
-    "reason": "drive letters and backslashes break path handling",
-    "issue": "https://github.com/mashware/ivy/issues/186"
+    "reason": "a file still open elsewhere cannot be removed in time (os error 32)",
+    "issue": "https://github.com/mashware/ivy/issues/186",
+    "intermittent": true
   },
   {
     "binary": "app/app:lib",
@@ -613,6 +614,13 @@
   },
   {
     "binary": "app/app:lib",
+    "name": "tests::integrated_chrome::tests::search_blink_deadlines_follow_focus_enabled_state_and_the_measurement_ceiling",
+    "reason": "the unfocused search box is sometimes still counted as blinking",
+    "issue": "https://github.com/mashware/ivy/issues/188",
+    "intermittent": true
+  },
+  {
+    "binary": "app/app:lib",
     "name": "tests::settings_editor::tests::an_open_editor_does_not_stop_output_in_any_tab",
     "reason": "the test fixture assumes Unix file times or shell commands",
     "issue": "https://github.com/mashware/ivy/issues/189"
@@ -640,6 +648,13 @@
     "name": "tests::what_painting_a_color_emoji_costs_comes_out_of_the_paintings_span_and_is_declared",
     "reason": "selection, clipboard, ligature or emoji painting differs on Windows",
     "issue": "https://github.com/mashware/ivy/issues/188"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::with_the_flag_raised_the_frame_reads_again",
+    "reason": "a changed panel file is sometimes not read again in the same frame",
+    "issue": "https://github.com/mashware/ivy/issues/189",
+    "intermittent": true
   },
   {
     "binary": "app/app:lib",
