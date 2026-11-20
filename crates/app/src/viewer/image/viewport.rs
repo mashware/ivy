@@ -15,6 +15,26 @@ pub(super) fn fit(room: f32, width: f32, pixels_per_point: f32) -> f32 {
         .clamp(SMALLEST, LARGEST)
 }
 
+/// The size an image of `size` pixels takes on screen at `scale`, where an axis within half a
+/// physical pixel of the `view`'s is the view's: a fit's float rounding can overshoot the view by
+/// a sliver, and the wheel and `clamp` would treat that sliver as room to scroll.
+pub(super) fn shown(
+    size: egui::Vec2,
+    scale: f32,
+    view: egui::Vec2,
+    pixels_per_point: f32,
+) -> egui::Vec2 {
+    let snap = |shown: f32, view: f32| {
+        if (shown - view).abs() < 0.5 / pixels_per_point {
+            view
+        } else {
+            shown
+        }
+    };
+    let shown = size * scale;
+    egui::vec2(snap(shown.x, view.x), snap(shown.y, view.y))
+}
+
 /// The scale and offset after zooming by `factor`, keeping the point of the image of `size`
 /// pixels under `at`, a position inside the view, where it was on screen. With `at` off the image,
 /// the image's nearest point is the one kept, so a zoom over the blank around it never carries the
@@ -291,6 +311,25 @@ mod tests {
         let (to, taken) = wheel(egui::vec2(-30.0, 7.0), offset, shown, view);
         assert_eq!(to, egui::vec2(700.0, 493.0));
         assert_eq!(taken, egui::vec2(-10.0, 7.0));
+    }
+
+    /// A fit whose float rounding lands a sliver past the view's width leaves no room to scroll:
+    /// the wheel moves it neither way and takes nothing.
+    #[test]
+    fn a_fit_rounded_past_the_view_is_not_scrolled() {
+        let view = egui::vec2(497.3, 400.0);
+        let mut overshot = 0;
+        for width in 1000..3000 {
+            let size = egui::vec2(width as f32, 100.0);
+            let scale = fit(view.x, size.x, 1.0);
+            overshot += usize::from(size.x * scale > view.x);
+            let shown = shown(size, scale, view, 1.0);
+            for delta in [egui::vec2(3.0, 0.0), egui::vec2(-3.0, 0.0)] {
+                let moved = wheel(delta, egui::Vec2::ZERO, shown, view);
+                assert_eq!(moved, (egui::Vec2::ZERO, egui::Vec2::ZERO), "{width}");
+            }
+        }
+        assert!(overshot > 0, "no width rounded past the view");
     }
 
     #[test]

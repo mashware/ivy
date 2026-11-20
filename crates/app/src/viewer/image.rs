@@ -254,15 +254,15 @@ impl Viewer {
         use egui::PointerButton::{Middle, Primary};
         let presses = ui.input(|i| [Middle, Primary].map(|b| viewport::pressed_at(i, b)));
         let pressed = presses.map(|at| at.is_some_and(on_image));
-        let mut scale =
-            chosen.unwrap_or_else(|| viewport::fit(room.x, size.x, ui.ctx().pixels_per_point()));
+        let ppp = ui.ctx().pixels_per_point();
+        let mut scale = chosen.unwrap_or_else(|| viewport::fit(room.x, size.x, ppp));
         if *seen != Some((room, scale)) {
             if chosen.is_none()
                 && let Some((_, then)) = *seen
             {
                 *offset *= scale / then;
             }
-            *offset = viewport::clamp(*offset, None, size * scale, room);
+            *offset = viewport::clamp(*offset, None, viewport::shown(size, scale, room, ppp), room);
         }
         let zoom = ui.input(|i| i.zoom_delta());
         if zoom != 1.0
@@ -270,11 +270,16 @@ impl Viewer {
         {
             let zoomed;
             (scale, zoomed) = viewport::zoom_around(scale, *offset, at - view.min, zoom, size);
-            *offset = viewport::clamp(zoomed, Some(zoomed), size * scale, room);
+            *offset = viewport::clamp(
+                zoomed,
+                Some(zoomed),
+                viewport::shown(size, scale, room, ppp),
+                room,
+            );
             *chosen = Some(scale);
         }
         let (moved, hand) = ui.input(|i| viewport::pan(i, over_image, pressed, space, panning));
-        let shown = size * scale;
+        let shown = viewport::shown(size, scale, room, ppp);
         *offset = viewport::clamp(*offset - moved, Some(*offset), shown, room);
         if over.is_some() {
             // Only what moved the image is taken; the rest stays for whoever reads the wheel later.
