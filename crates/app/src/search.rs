@@ -11,7 +11,9 @@
 use eframe::egui::{self, Key};
 use term_core::{Found, Options, Refused, Screen, Search, Toward, View};
 
+mod editing;
 pub(crate) mod floating;
+use editing::Motion;
 
 /// What one console keeps about searching it: the search open on it, if any, and what its presses
 /// cost since the last time it was painted.
@@ -131,6 +133,8 @@ impl OnThisConsole {
 #[derive(Default)]
 pub(crate) struct Mode {
     query: String,
+    /// A byte offset on a UTF-8 boundary; painting converts it to a galley character index.
+    caret: usize,
     /// The query compiled, **kept between presses** so the engine's automata keep what they learnt
     /// about this grid. Emptied whenever the query or an option changes.
     compiled: Option<Result<Search, Refused>>,
@@ -205,6 +209,10 @@ pub(crate) enum Step {
     Toggle,
     Type(String),
     Backspace,
+    Move(Motion),
+    DeleteForward {
+        word: bool,
+    },
     /// `Ctrl+W` and `Ctrl+Backspace`: what they do on a shell's line.
     DeleteWord,
     /// `Ctrl+U`, the same.
@@ -273,7 +281,7 @@ impl Steps {
 
 /// Which of the search's own keys this event is, if any.
 ///
-/// **The search's gestures and the editing a shell's line already taught everybody** — and nothing
+/// **The search's gestures, insertion-point navigation and shell-style deletion** — and nothing
 /// else, so the search never deafens a console: every key not listed here is the program's, and
 /// reaching the program closes the search. Modifiers are not looked at beyond the ones named: a
 /// `Ctrl+Enter` is still a step older, an `Alt+Backspace` still deletes a character.
@@ -288,6 +296,22 @@ fn step_for(event: &egui::Event, chord: egui::Modifiers) -> Option<Step> {
             Key::Enter => Some(Step::Go(Toward::Older)),
             Key::Backspace if chord.ctrl => Some(Step::DeleteWord),
             Key::Backspace => Some(Step::Backspace),
+            Key::Delete => Some(Step::DeleteForward {
+                word: chord.ctrl || chord.alt,
+            }),
+            Key::ArrowLeft if cfg!(target_os = "macos") && chord.mac_cmd => {
+                Some(Step::Move(Motion::Start))
+            }
+            Key::ArrowRight if cfg!(target_os = "macos") && chord.mac_cmd => {
+                Some(Step::Move(Motion::End))
+            }
+            Key::ArrowLeft if chord.ctrl || chord.alt => Some(Step::Move(Motion::WordLeft)),
+            Key::ArrowRight if chord.ctrl || chord.alt => Some(Step::Move(Motion::WordRight)),
+            Key::ArrowLeft => Some(Step::Move(Motion::Left)),
+            Key::ArrowRight => Some(Step::Move(Motion::Right)),
+            Key::Home | Key::ArrowUp => Some(Step::Move(Motion::Start)),
+            Key::End | Key::ArrowDown => Some(Step::Move(Motion::End)),
+            Key::PageUp | Key::PageDown => Some(Step::Move(Motion::Stay)),
             Key::W if chord.ctrl => Some(Step::DeleteWord),
             Key::U if chord.ctrl => Some(Step::Clear),
             _ => None,
@@ -369,22 +393,18 @@ pub(crate) fn apply(console: &mut OnThisConsole, screen: &mut Screen, steps: Ste
             // of a copied line above all — are dropped: the engine never matches across a hard line
             // break, so a pasted line would never be found. One inside the text becomes a space,
             // so `foo\nbar` does not search for a word nobody wrote.
-            Step::Type(text) => open.query.extend(
-                text.trim_end_matches(char::is_control)
-                    .chars()
-                    .map(|c| if c.is_control() { ' ' } else { c }),
-            ),
-            Step::Backspace => {
-                open.query.pop();
+            Step::Type(text) => open.insert(&text),
+            Step::Backspace => open.backspace(),
+            Step::DeleteWord => open.delete_word(),
+            Step::DeleteForward { word } => open.delete_forward(word),
+            Step::Move(motion) => {
+                open.move_caret(motion);
+                continue;
             }
-            Step::DeleteWord => {
-                let kept = open
-                    .query
-                    .trim_end()
-                    .trim_end_matches(|c: char| !c.is_whitespace());
-                open.query.truncate(kept.len());
+            Step::Clear => {
+                open.query.clear();
+                open.caret = 0;
             }
-            Step::Clear => open.query.clear(),
             Step::Go(toward) => {
                 // The rows the box takes, as it was last painted: the step keeps the match off them
                 // while the view is in the history. Before the first painting there is no box yet.
@@ -833,7 +853,10 @@ mod tests {
             None,
             "the interrupt is the program's"
         );
-        assert_eq!(step_for(&key(Key::ArrowUp), none), None);
+        assert_eq!(
+            step_for(&key(Key::ArrowUp), none),
+            Some(Step::Move(Motion::Start))
+        );
 
         let mut closed = Steps::new(false);
         assert!(!closed.took(&egui::Event::Text("x".into()), none));

@@ -304,6 +304,7 @@ pub(crate) fn pointer(
                 super::integrated::Target::Search => {
                     // The keyboard follows the search, so what is typed next lands in its query.
                     window.active_mut().focus = name;
+                    window.blink.saw_a_key();
                     if let Some(pane) = window.pane_called(name) {
                         crate::search::toggle_on(&mut pane.search, &mut pane.screen);
                     }

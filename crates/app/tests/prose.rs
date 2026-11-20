@@ -939,6 +939,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
     ("src/report.rs", include_str!("../src/report.rs"), 238),
     ("src/search.rs", include_str!("../src/search.rs"), 48),
     (
+        "src/search/editing.rs",
+        include_str!("../src/search/editing.rs"),
+        1,
+    ),
+    (
         "src/search/floating.rs",
         include_str!("../src/search/floating.rs"),
         15,

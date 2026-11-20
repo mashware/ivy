@@ -671,6 +671,10 @@ const MODULES: &[(&str, &str)] = &[
     ("src/report.rs", include_str!("../src/report.rs")),
     ("src/search.rs", include_str!("../src/search.rs")),
     (
+        "src/search/editing.rs",
+        include_str!("../src/search/editing.rs"),
+    ),
+    (
         "src/search/floating.rs",
         include_str!("../src/search/floating.rs"),
     ),

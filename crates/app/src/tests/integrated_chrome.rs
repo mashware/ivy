@@ -4182,4 +4182,213 @@ mod tests {
             painted.layout.frame
         );
     }
+    #[test]
+    fn search_navigation_edits_the_query_without_reaching_the_program() {
+        let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
+        let received = term_core::received::Received::new("search-navigation");
+        let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        received.wait_until_ready(Duration::from_secs(5));
+        let area = tall_area();
+        frame(&mut window, &ctx, area, vec![]);
+        let at = control(&window, &ctx, area, 0, 112.5);
+        window.blink.typed_at = Instant::now() - Duration::from_secs(20);
+        frame(&mut window, &ctx, area, click_at(at));
+        assert!(window.blink.typed_at.elapsed() < Duration::from_secs(1));
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![egui::Event::Text("Ask".into())],
+        );
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![key(egui::Key::ArrowLeft), egui::Event::Text("!".into())],
+        );
+        assert_eq!(
+            window.active().panes()[0]
+                .search
+                .open
+                .as_ref()
+                .unwrap()
+                .query(),
+            "As!k"
+        );
+        for navigation in [
+            egui::Key::Home,
+            egui::Key::End,
+            egui::Key::ArrowUp,
+            egui::Key::ArrowDown,
+            egui::Key::ArrowRight,
+            egui::Key::PageUp,
+            egui::Key::PageDown,
+        ] {
+            frame(&mut window, &ctx, area, vec![key(navigation)]);
+            assert!(
+                window.active().panes()[0].search.is_open(),
+                "{navigation:?} closed search"
+            );
+        }
+        let shapes = frame(&mut window, &ctx, area, vec![]);
+        assert!(has_text(&shapes, "As!k"));
+        assert!(!has_text(&shapes, "As!k_"));
+        frame(
+            &mut window,
+            &ctx,
+            area,
+            vec![key(egui::Key::Escape), egui::Event::Text("Q".into())],
+        );
+        assert_eq!(
+            received.wait_for(1, Duration::from_secs(5)),
+            b"Q",
+            "navigation/editing leaked to the program before the sentinel"
+        );
+    }
+    fn search_blink_fixture() -> (Window, egui::Context) {
+        let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
+        let mut window = integrated_pair();
+        for pane in window.active_mut().panes_mut() {
+            // The field must be the only possible source of a blink deadline.
+            pane.screen.advance(b"\x1b[?25l");
+        }
+        let area = tall_area();
+        frame(&mut window, &ctx, area, vec![]);
+        let at = control(&window, &ctx, area, 0, 112.5);
+        frame(&mut window, &ctx, area, click_at(at));
+        assert!(window.active().panes()[0].search.is_open());
+        (window, ctx)
+    }
+
+    fn search_blink_delay(
+        window: &mut Window,
+        ctx: &egui::Context,
+        elapsed: Duration,
+        focused: bool,
+        disabled: bool,
+    ) -> Duration {
+        let mut delay = Duration::ZERO;
+        // Drain the immediate paints requested by opening the box and loading fonts.
+        for _ in 0..4 {
+            window.blink.typed_at = Instant::now() - elapsed;
+            let mut app_frame = eframe::Frame::_new_kittest();
+            eframe::App::logic(window, ctx, &mut app_frame);
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(tall_area()),
+                    focused,
+                    ..Default::default()
+                },
+                |ui| {
+                    if disabled {
+                        ui.disable();
+                    }
+                    eframe::App::ui(window, ui, &mut app_frame);
+                },
+            );
+            delay = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+            output.drop_without_applying_deltas();
+        }
+        delay
+    }
+
+    #[test]
+    fn search_blink_deadline_covers_both_halves_and_disarms_when_closed() {
+        let (mut window, ctx) = search_blink_fixture();
+        for millis in [100, 700, 1300] {
+            let delay = search_blink_delay(
+                &mut window,
+                &ctx,
+                Duration::from_millis(millis),
+                true,
+                false,
+            );
+            assert!(
+                window.blink.painted,
+                "search did not participate at {millis} ms"
+            );
+            assert!(
+                !delay.is_zero() && delay <= Duration::from_millis(600),
+                "search did not arm its blink deadline at {millis} ms: {delay:?}"
+            );
+        }
+        let delay = search_blink_delay(&mut window, &ctx, Duration::from_secs(16), true, false);
+        assert!(!window.blink.painted, "idle search still participates");
+        assert_eq!(delay, Duration::MAX, "idle search still wakes the window");
+        let delay = search_blink_delay(&mut window, &ctx, Duration::from_millis(100), true, false);
+        assert!(window.blink.painted && !delay.is_zero() && delay <= Duration::from_millis(600));
+        frame(
+            &mut window,
+            &ctx,
+            tall_area(),
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert!(!window.active().panes()[0].search.is_open());
+        let delay = search_blink_delay(&mut window, &ctx, Duration::from_millis(100), true, false);
+        assert!(
+            !window.blink.painted,
+            "closed search left stale blink participation"
+        );
+        assert_eq!(delay, Duration::MAX, "closed search left a blink deadline");
+    }
+
+    #[test]
+    fn search_blink_deadlines_follow_focus_enabled_state_and_the_measurement_ceiling() {
+        let (mut window, ctx) = search_blink_fixture();
+        let age = Duration::from_millis(700);
+        let active = search_blink_delay(&mut window, &ctx, age, true, false);
+        assert!(window.blink.painted && !active.is_zero() && active <= Duration::from_millis(600));
+        let names = names_in_order(&window);
+        window.active_mut().focus = names[1];
+        let delay = search_blink_delay(&mut window, &ctx, age, true, false);
+        assert!(!window.blink.painted, "unfocused search still participates");
+        assert_eq!(
+            delay,
+            Duration::MAX,
+            "unfocused search still wakes the window"
+        );
+        window.active_mut().focus = names[0];
+        for (focused, disabled) in [(false, false), (true, true)] {
+            let active = search_blink_delay(&mut window, &ctx, age, true, false);
+            assert!(
+                window.blink.painted && !active.is_zero() && active <= Duration::from_millis(600)
+            );
+            let delay = search_blink_delay(&mut window, &ctx, age, focused, disabled);
+            assert!(
+                !window.blink.painted,
+                "focused={focused}, disabled={disabled}"
+            );
+            assert_eq!(delay, Duration::MAX, "inactive field still has a deadline");
+        }
+        let active = search_blink_delay(&mut window, &ctx, age, true, false);
+        assert!(window.blink.painted && !active.is_zero() && active <= Duration::from_millis(600));
+        window.blink.ceiling = Some(false);
+        let delay = search_blink_delay(&mut window, &ctx, age, true, false);
+        assert!(
+            !window.blink.painted,
+            "blink-off measurement ceiling was bypassed"
+        );
+        assert_eq!(
+            delay,
+            Duration::MAX,
+            "measurement search still wakes the window"
+        );
+    }
 }

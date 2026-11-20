@@ -38,6 +38,7 @@ pub(super) fn intercept(window: &mut Window, ui: &egui::Ui) -> bool {
             .header_input
             .claim_press(down.then_some(button.button), frame);
         window.active_mut().focus = name;
+        window.blink.saw_a_key();
         window.drag_in_progress = None;
         if button.button == egui::PointerButton::Primary
             && let Some(step) = target.step()

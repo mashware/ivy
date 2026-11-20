@@ -837,3 +837,15 @@ conversation. Do not close the terminal or repeat setup to refresh an existing r
 prove a configuration failure. Its initial guide explains reconnection; **Manual setup and
 diagnostics** contains the first-time setup prompt. Copying a reconnect command only copies text,
 without typing it into the program or editing client configuration.
+
+## Editing a console search
+
+While a console search is open, Left/Right move through its query, Home/Up and End/Down reach
+the ends, and Ctrl/Alt+Left/Right move by words. On macOS, Command+Left/Right reach the ends.
+Typing and pasting insert at the vertical caret; Backspace deletes before it and Delete after it.
+Ctrl+W/Ctrl+Backspace delete the previous word, Ctrl+Delete the next, and Ctrl+U clears the query.
+Enter/Shift+Enter still walk matches and Escape closes search. Configured application shortcuts
+retain precedence. Shift movement moves the caret without selecting query text.
+
+The caret follows the application's existing cursor blink setting and idle/focus rules. Search
+options and the floating box's position are unchanged.

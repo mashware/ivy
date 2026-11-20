@@ -123,8 +123,21 @@ fn a_real_signal_retains_output_and_has_a_dismissible_truthful_notice() {
     )
     .unwrap();
     let deadline = Instant::now() + Duration::from_secs(3);
-    while pane.pty.termination() == term_core::Termination::Pending && Instant::now() < deadline {
+    while Instant::now() < deadline {
         pane.pump(Default::default());
+        let text: String = pane
+            .screen
+            .view()
+            .cells()
+            .iter()
+            .map(|cell| cell.c)
+            .collect();
+        // Process exit and delivery through the reader's bridge are independent observations.
+        if pane.pty.termination() == term_core::Termination::Signal
+            && text.contains("retained-output")
+        {
+            break;
+        }
         std::thread::sleep(Duration::from_millis(2));
     }
     pane.pump(Default::default());
