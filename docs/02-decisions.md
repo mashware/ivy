@@ -11038,7 +11038,7 @@ of the same tab:
 - It is read-only.
 - It has a line-number gutter.
 - Its text is monospace and coloured by language family: Rust; the C-like languages (C, C++, Go,
-  Java, Kotlin, Swift, C#, JavaScript, TypeScript); CSS, which has block comments only; PHP; the
+  Java, Kotlin, Swift, C#, JavaScript, TypeScript, SCSS); CSS, which has block comments only; PHP; the
   `#`-comment family (Python, shells, Ruby, YAML, TOML, INI, `Makefile`, `Dockerfile`, a `#!` first
   line); JSON; SQL; plain text.
 - It refreshes once a second, like the Markdown reader.
@@ -11088,33 +11088,43 @@ work). The owner asked for a read-only viewer with simple colouring (#159).
 - No measured batch loads or paints a document in the drawer. The code view's painting is inside the
   declared «document viewers» span, but it has no published figure.
 - A selection is made by dragging within the visible rows. Dragging past the edge does not scroll.
-- The header with the breadcrumb, Open and its menu comes with #159's second pull request.
+- The header with the breadcrumb, Open and its menu came with #159's second pull request (D109).
 
 ## D109 — Open hands the desktop only documents, judged where the link leads, and never through a shell
 
 **Decided.** The code view has a header row above the file:
 
 - **The path**, from the Files folder the file was opened from down to the file, with the file's
-  type icon. Each folder in it shows that folder in Files. A file outside that folder shows its
-  whole path instead.
+  type icon. A file outside that folder shows its whole path instead. A click on a folder of the
+  path shows it in Files:
+  - inside the root Files shows, it is revealed, expanded and selected in that tree, and the root
+    is kept;
+  - outside that root, the folder opens as Files' new root.
+  The folders are spelled from the root as Files took it, links unresolved, because Files compares
+  a folder with that root.
 - **Open**, which hands the file to the desktop's default application.
 - **A menu beside Open**: Open in File Manager (the file shown selected), Copy absolute path, Copy
   relative path, and Wrap lines.
 
 Opening a file runs whatever the desktop associates with its type, and the files come from a
-cloned repository or an agent's output. So Open follows six rules:
+cloned repository or an agent's output. So Open follows seven rules:
 
 - **An allow-list, not a deny-list.** Open launches only these last extensions, in any case: `txt
-  log md json yaml yml toml ini csv xml css rs c h cpp go java kt swift cs ts tsx pdf png jpg jpeg
-  gif webp`. Anything else, a file without an extension included, is shown in the file manager
-  instead, and Open's tooltip says so before the click. A script is revealed, never run.
+  log md json yaml yml toml ini csv css rs c h cpp go java kt swift cs ts tsx pdf png jpg jpeg gif
+  webp`. Anything else, a file without an extension included, is shown in the file manager
+  instead, and once the path is resolved Open's tooltip says so before the click. A script is
+  revealed, never run.
+- **Only a regular file, read again at the launch.** A folder, a pipe or a device named like a
+  document is revealed. Right before the launcher gets the path, it is read again without following
+  links: if it is no longer a regular file, nothing is launched. That narrows the window in which a
+  judged file can be swapped for a link; it does not close it.
 - **Judged on the canonical path.** Every link is followed first, and the decision and the launch
   use that same path. A `notes.txt` link to `run.sh` is judged as `run.sh`.
 - **A name must show as itself.** A name with a line break, a direction override or another
   character `panel_contract::is_shown_as_itself` refuses is revealed. On Windows a name ending in a
   dot or a space is revealed too, because Win32 drops that character and another file would open.
-  Both Copy items refuse such a path and say why, judged on the whole string copied. What they copy
-  is the literal path, with no quoting.
+  Both Copy items refuse a path with a line break or a direction override anywhere in it, folders
+  included, and say why. What they copy is the literal path, with no quoting.
 - **No shell, one argument.**
   - Linux: `xdg-open` with the absolute path as its only argument.
   - macOS: `open`, and `open -R` to reveal.
@@ -11125,8 +11135,9 @@ cloned repository or an agent's output. So Open follows six rules:
   waits for the process it started, so none is left as a zombie. A failure prints one line on
   standard error with the path escaped.
 - **Linux reveals over D-Bus, with a deadline.** `FileManager1.ShowItems` is called with the file's
-  `file://` address and given five seconds. With no answer, the parent folder opens instead. A
-  reveal never falls back to opening the file.
+  `file://` address and given five seconds. If the call fails or times out, one line on standard
+  error says why, and the parent folder opens instead, once it is read again as a folder and not a
+  link. A reveal never falls back to opening the file.
 
 Copy relative path counts from the Files folder of the source console **when the file was
 opened**. Files follows the focused console, so reading that folder later would change the answer
@@ -11148,7 +11159,8 @@ owner decided on 20 November 2026 that Open shows a script or an executable inst
   its brackets.
 - **A network-share check on Windows.** The loader and Files have already read that share before
   Open is offered.
-- **`html` and `svg` in the allow-list.** The default browser runs their scripts.
+- **`html`, `svg` and `xml` in the allow-list.** The default browser runs their scripts, and an
+  XML file in the XHTML namespace is a page; the default handler for XML is often a browser.
 
 **Open.**
 - The macOS and Windows openers are compiled per platform, but no one has run them yet (F2.7).

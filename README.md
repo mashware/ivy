@@ -230,8 +230,9 @@ switching tools preserves their sources and navigation. **Search** in Files list
 a floating list: **Enter** shows the match in the tree and **Ctrl+Enter** opens a file match in the drawer: Markdown
 formatted, anything else as read-only code with line numbers and theme colours.
 
-Above code, a header shows where the file lives, from the Files folder down; click a folder in it to
-show that folder in Files. **Open** opens a document (text, data, source, PDF or an image) with the
+Above code, a header shows where the file lives, from the Files folder down. Click a folder in it to
+show that folder in Files: inside the tree Files shows, it is expanded and selected and the root
+stays; outside it, that folder becomes the root. **Open** opens a document (text, data, source, PDF or an image) with the
 system's default application; a script, a program or an unknown type is shown in the file manager
 instead, and the tooltip says which. The arrow beside it offers **Open in File Manager**, **Copy
 absolute path**, **Copy relative path** and **Wrap lines**.
