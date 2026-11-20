@@ -245,6 +245,17 @@ fn row_label_left(button: f32) -> f32 {
     PAD + button + PAD
 }
 
+/// The tick's side: the painter draws it at this size, centred in the row-height square.
+fn tick_side(metrics: &CellMetrics) -> f32 {
+    metrics.height() * 0.8
+}
+
+/// How far the tick sits from the list's left edge: the list's padding plus the square's margin
+/// around the tick. The list leaves the same room after the label.
+fn tick_inset(button: f32, metrics: &CellMetrics) -> f32 {
+    PAD + (button - tick_side(metrics)) / 2.0
+}
+
 /// Whether two rectangles share area — not merely an edge, which `Rect::intersects` counts, so a
 /// match a step left right under the box's bottom edge does not send the box away.
 fn overlaps(a: Rect, b: Rect) -> bool {
@@ -257,13 +268,18 @@ fn the_list(console: Rect, frame: Rect, covered: bool, metrics: &CellMetrics, ro
     let button = metrics.height() + 2.0 * PAD;
     // Sized from the longest label rather than a fixed count of cells: a fixed eighteen clipped
     // «Whole word only», because the tick takes a whole row-height square before the label.
-    // The labels are ASCII, so one character is one cell of the monospace font they are painted in.
+    // The label is laid out as one string at the font's own advance, which is wider than the cell
+    // (the cell is rounded down to whole pixels, D34), so one cell is added for that difference.
+    // After it, the same room the tick has on its left, so the list reads balanced.
     let longest = Choice::ALL
         .iter()
         .map(|choice| choice.label().chars().count())
         .max()
         .unwrap_or(0) as f32;
-    let width = (row_label_left(button) + longest * metrics.width() + 2.0 * PAD).min(room);
+    let width = (row_label_left(button)
+        + (longest + 1.0) * metrics.width()
+        + tick_inset(button, metrics))
+    .min(room);
     let height = Choice::ALL.len() as f32 * button + 2.0 * PAD;
     let beside = if covered {
         frame.top() - height
@@ -385,7 +401,7 @@ pub(crate) fn paint(
                 }
                 let tick = Rect::from_center_size(
                     pos2(rect.left() + rect.height() / 2.0, rect.center().y),
-                    vec2(metrics.height() * 0.8, metrics.height() * 0.8),
+                    vec2(tick_side(metrics), tick_side(metrics)),
                 );
                 painter.rect_stroke(tick, 3.0, stroke, egui::StrokeKind::Inside);
                 if choice.is_on(options) {
@@ -710,10 +726,11 @@ mod tests {
             let label_right = rect.left() - PAD
                 + row_label_left(rect.height())
                 + choice.label().chars().count() as f32 * metrics().width();
+            // After the label, at least the room the tick has on its left — the visual padding.
+            let edge = list.right() - tick_inset(rect.height(), &metrics());
             assert!(
-                label_right <= list.right() - PAD,
-                "{choice:?}'s label ends at {label_right}, past the list's inner edge {}",
-                list.right() - PAD
+                label_right <= edge,
+                "{choice:?}'s label ends at {label_right}, past the padded edge {edge}"
             );
         }
     }
