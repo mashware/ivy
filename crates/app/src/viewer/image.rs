@@ -1378,7 +1378,8 @@ mod tests {
         })
     }
 
-    /// A zoomed image far larger than the drawer is painted inside the drawer's body only.
+    /// A zoomed image far larger than the drawer is painted inside the drawer's body only, never
+    /// over its strip.
     #[test]
     fn a_zoomed_image_is_clipped_to_the_drawer() {
         let folder = Folder::new();
@@ -1388,6 +1389,12 @@ mod tests {
         assert!(image_rect(&shapes).unwrap().contains_rect(dock));
         let clip = image_clip(&shapes).unwrap();
         assert!(dock.contains_rect(clip), "{clip:?} outside {dock:?}");
+        let strip = crate::viewer::strip_place(&window, dock, crate::viewer::StripAction::Document)
+            .unwrap();
+        assert!(
+            clip.top() > strip.y,
+            "{clip:?} covers the strip at {strip:?}"
+        );
     }
 
     /// A small image moved into the far corner of a maximized drawer is put back whole inside the
