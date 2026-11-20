@@ -33,6 +33,7 @@ use eframe::egui;
 pub(crate) mod actions;
 pub(crate) mod controls;
 pub(crate) mod integrated;
+mod linger;
 pub(crate) mod menu;
 mod splitting;
 pub(crate) mod title_text;
