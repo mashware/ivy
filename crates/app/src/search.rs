@@ -473,10 +473,14 @@ impl Mode {
         said.into()
     }
 
-    /// Whether the status says the query could not be searched with — which the box must show
-    /// however little room it has, or a refused query would look like silence.
-    pub(crate) fn is_refused(&self) -> bool {
-        self.refusal().is_some()
+    /// The refusal in the fewest words, for a box too narrow for [`status`](Self::status): what
+    /// is wrong without the parser's why.
+    pub(crate) fn short_refusal(&self) -> Option<&'static str> {
+        self.refusal().map(|refused| match refused {
+            Refused::Empty => "type what to look for",
+            Refused::TooLarge => "too complex",
+            Refused::Invalid(_) => "invalid pattern",
+        })
     }
 
     /// Why the query cannot be searched with, if it cannot. **A query the engine already refused

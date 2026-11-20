@@ -18,7 +18,7 @@ pub(crate) struct Hit {
 /// The matches inside `span` of `logical` that count, left to right.
 ///
 /// **An empty match never counts**: it has no cell to select or mark. **A candidate that whole word
-/// rejects gives its characters back**: the search goes on one character past where it started, so
+/// rejects gives its characters back**: the search goes on past where it started, so
 /// a whole word overlapping a rejected candidate — `1.1` at the end of `v1.1.1`, `b` in `xa b` for
 /// `a b|b` — is still found. Matches that count never overlap.
 fn matches(search: &Search, logical: &Logical, span: Range<usize>) -> Vec<Range<usize>> {
@@ -30,13 +30,29 @@ fn matches(search: &Search, logical: &Logical, span: Range<usize>) -> Vec<Range<
             at = range.end;
             found.push(range);
         } else {
-            match next_char(text, range.start) {
+            match past_rejected(text, range.start) {
                 Some(next) => at = next,
                 None => break,
             }
         }
     }
     found
+}
+
+/// Where the search goes on after a whole-word candidate starting at `start` was rejected: one
+/// character on, and then **past every position inside a run of word characters**, where a match
+/// would start with a word character touching another and be rejected the same way. Going on one
+/// character at a time instead made a long run quadratic: `\d+` over `x` and a scrollback of
+/// digits finds and rejects one candidate per digit, each read to the end of the run.
+fn past_rejected(text: &str, start: usize) -> Option<usize> {
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    let mut at = next_char(text, start)?;
+    while text[at..].chars().next().is_some_and(word)
+        && text[..at].chars().next_back().is_some_and(word)
+    {
+        at = next_char(text, at)?;
+    }
+    Some(at)
 }
 
 /// Whether `range` of `text` is a whole word: each of its ends that is itself a word character

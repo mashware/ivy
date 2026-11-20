@@ -1103,6 +1103,33 @@ mod tests {
     }
 
     #[test]
+    fn a_long_run_of_rejected_candidates_is_walked_once() {
+        // Forty thousand digits after an «x»: every candidate inside the run is rejected. Going on
+        // one character per rejection read the rest of the run each time — some eight hundred
+        // million steps, a test that never ends — where skipping the run reads it once.
+        let mut screen = Screen::new(Size { rows: 3, cols: 200 });
+        screen.advance(format!("x{} 7", "1".repeat(40_000)).as_bytes());
+        let search = with(
+            r"\d+",
+            Options {
+                whole_word: true,
+                ..regex()
+            },
+        );
+        let started = std::time::Instant::now();
+        assert_eq!(
+            screen.find(&search, Toward::Older, KeepClear::NONE),
+            Found::Match
+        );
+        assert_eq!(screen.selected_text().as_deref(), Some("7"));
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "the run was read once per rejected candidate: {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
     fn marking_judges_the_rows_it_cuts_by_what_lies_past_the_cut() {
         use alacritty_terminal::index::Line;
 

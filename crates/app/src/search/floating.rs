@@ -473,16 +473,14 @@ fn paint_the_field(
         .x
         <= room_for_status;
     // **A refusal is never left out**: a query that was not searched with, painted as nothing,
-    // reads as «no match». It is cut with «…» to the room instead; anything else gives way.
-    let mut job = egui::text::LayoutJob::simple_singleline(
-        if fits || mode.is_refused() {
-            wanted.into_owned()
-        } else {
-            String::new()
-        },
-        metrics.font(),
-        roles.tx2,
-    );
+    // reads as «no match». Where the whole of it does not fit, its short form does — cut with «…»
+    // only if even that does not; anything else gives way.
+    let status = match (fits, mode.short_refusal()) {
+        (true, _) => wanted.into_owned(),
+        (false, Some(short)) => short.to_owned(),
+        (false, None) => String::new(),
+    };
+    let mut job = egui::text::LayoutJob::simple_singleline(status, metrics.font(), roles.tx2);
     job.wrap = egui::text::TextWrapping::truncate_at_width(room_for_status);
     let said = clipped.layout_job(job);
     let status_left = inner.right() - said.size().x;
@@ -1022,7 +1020,7 @@ mod tests {
         for (refused, said) in [
             (
                 term_core::Refused::Invalid("unclosed group".into()),
-                "invalid",
+                "invalid pattern",
             ),
             (term_core::Refused::TooLarge, "too complex"),
         ] {
@@ -1044,8 +1042,10 @@ mod tests {
                 })
                 .collect();
             assert!(
-                painted.iter().any(|text| text.starts_with(said)),
-                "the refusal was not painted: {painted:?}"
+                painted
+                    .iter()
+                    .any(|text| text.starts_with(said) && !text.contains('…')),
+                "the refusal was not painted whole, in one form or the other: {painted:?}"
             );
         }
     }

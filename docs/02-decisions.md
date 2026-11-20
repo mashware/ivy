@@ -8318,7 +8318,10 @@ a check on the match only so that a literal and a pattern follow the same rule.
 - **A fourth option, Regular expression**, in the console's options list, off by default and kept
   with the other three. Off, the query is literal exactly as before. **The Files name search gets the
   same choice** as a `.*` toggle beside its field, matched against each entry's name, case-insensitive
-  as that search always was; an inline `(?-i)` makes it sensitive.
+  as that search always was; an inline `(?-i)` makes it sensitive. Both modes now go through the
+  same engine as the console, so Files' text search folds case the engine's way instead of
+  lowercasing: at the edges of Unicode a listing changes — `i` no longer finds `İzmir`, `σ` now
+  finds `ΟΔΟΣ`. A pattern's own spaces are part of it; text is still trimmed.
 - **The engine that gave up is no longer used.** `alacritty_terminal`'s search runs a lazy DFA that,
   on a pattern whose states do not fit its cache, clears it three times and stops, and the crate
   turns that into «no match» with only a log line — which made «not found» and «gave up»
@@ -8327,7 +8330,9 @@ a check on the match only so that a literal and a pattern follow the same rule.
   from its lazy DFA to engines that never give up. **Literal and regex share this one path**; a literal
   is the escaped query.
 - **What the person is told instead of «no matches»**: a pattern that does not parse shows the
-  parser's message; a pattern too complex to build says so. The build limit is 2 MiB of automaton,
+  parser's message; a pattern too complex to build says so. The box's field leaves about twenty
+  cells for that, so where the whole of it does not fit its short form is shown — «invalid
+  pattern», «too complex» — and a refusal is never the part that gives way to the query. The build limit is 2 MiB of automaton,
   the same the old engine used, and it refuses short patterns with large Unicode counts — `\w{50}`
   (2.8 MB) is refused.
 - **What stays as D61 decided**: the match is the selection, the step starts one cell past it, wraps
@@ -8356,10 +8361,11 @@ a check on the match only so that a literal and a pattern follow the same rule.
   silent miss for a match across a cut, which is what this amendment removes; and a per-frame marking
   budget, which would also need the huge line cut to bound it.
 - **Measured** with `cargo run --release --example search -p term-core` (3 549 rows of 180 columns,
-  twenty presses each way, two runs, 20 November 2026). A press that finds nothing: **2.82–3.14 ms**
+  twenty presses each way, three runs — the last after the review's fixes — 20 November 2026; ranges are
+  medians across runs). A press that finds nothing: **2.81–3.14 ms**
   walking older, **3.48–3.90 ms** newer — down from 11.4–13.6 ms, because the engine reads each line
   as text instead of a byte per cell through the grid. Whole word rejected on every line
-  **4.55–4.64 ms** older, **5.60–5.68 ms** newer; over one wrapped line **7.14–7.90 ms**. An ordinary
+  **4.47–4.64 ms** older, **5.60–5.71 ms** newer; over one wrapped line **7.14–8.10 ms**. An ordinary
   pattern that finds nothing (`absent\s+\d+`) **2.69–2.88 ms**. The hostile figures are above.
   What marking costs per painting in the window is the job of batch `E` against `C`.
 
