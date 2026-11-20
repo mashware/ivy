@@ -233,10 +233,15 @@ impl Viewer {
         }
         // Only a frame that paints the image may keep a pan latched.
         self.painted = Some(frame);
-        // A menu or popup open above the image takes the pointer, and with it the wheel.
-        let over_image = ui
-            .allocate_rect(view, egui::Sense::hover())
-            .contains_pointer();
+        // A menu or popup open above the image takes the pointer, and with it the wheel. egui's own
+        // hover test is not used: it reaches a few points into a popup's border, and it knows the
+        // image's rect only from the previous pass, which drops a gesture on the first frame.
+        // Where no area is under the pointer `layer_id_at` answers none: that is the background.
+        let over = ui.input(|i| i.pointer.hover_pos()).filter(|&at| {
+            let top = ui.ctx().layer_id_at(at).unwrap_or_else(egui::LayerId::background);
+            view.contains(at) && top == ui.layer_id()
+        });
+        let over_image = over.is_some();
         let mut scale =
             chosen.unwrap_or_else(|| viewport::fit(room.x, size.x, ui.ctx().pixels_per_point()));
         if *seen != Some((room, scale)) {
@@ -247,7 +252,6 @@ impl Viewer {
             }
             *offset = viewport::clamp(*offset, None, size * scale, room);
         }
-        let over = ui.input(|i| i.pointer.hover_pos()).filter(|_| over_image);
         let zoom = ui.input(|i| i.zoom_delta());
         if zoom != 1.0
             && let Some(at) = over
@@ -1782,6 +1786,81 @@ mod tests {
             egui::Vec2::ZERO,
             "the image's wheel was left for later"
         );
+    }
+
+    /// A wheel a few points inside a popup's border, over the image, is the popup's: egui's hover
+    /// test reaches that far into a lower layer, and the image must not take the turn from there.
+    #[test]
+    fn the_wheel_just_inside_a_popup_border_is_the_popups() {
+        let folder = Folder::new();
+        let (mut window, ctx) = zoomed_window(&folder);
+        let centre = window.sidebar.last_dock.unwrap().center();
+        let place = egui::Rect::from_center_size(centre, egui::vec2(220.0, 140.0));
+        let received = std::cell::Cell::new(egui::Vec2::ZERO);
+        let mut popup = |ctx: &egui::Context| {
+            egui::Area::new(egui::Id::new("test-popup-border"))
+                .order(egui::Order::Foreground)
+                .fixed_pos(place.min)
+                .show(ctx, |ui| {
+                    ui.allocate_exact_size(place.size(), egui::Sense::hover());
+                    received.set(received.get() + ui.input(|i| i.smooth_scroll_delta));
+                });
+        };
+        for at in [
+            place.left_top() + egui::vec2(3.0, 3.0),
+            place.left_center() + egui::vec2(2.0, 0.0),
+            place.center_bottom() - egui::vec2(0.0, 4.0),
+        ] {
+            let mut before = None;
+            for _ in 0..3 {
+                let output = pass_with(
+                    &mut window,
+                    &ctx,
+                    vec![egui::Event::PointerMoved(at)],
+                    &mut popup,
+                );
+                before = image_rect(&output.shapes);
+            }
+            received.set(egui::Vec2::ZERO);
+            let mut events = plain_wheel(at, egui::vec2(0.0, -3.0));
+            let mut now = None;
+            for _ in 0..30 {
+                let output = pass_with(&mut window, &ctx, std::mem::take(&mut events), &mut popup);
+                now = image_rect(&output.shapes);
+            }
+            assert_eq!(now, before, "{at:?}: the wheel inside the popup moved the image");
+            assert!(received.get().y < 0.0, "{at:?}: the popup was left no wheel");
+        }
+    }
+
+    /// A zoom on the very first frame the image is painted is not dropped: whether the pointer is
+    /// on the image is judged against that frame's view, not one remembered from the frame before.
+    #[test]
+    fn a_zoom_on_the_first_frame_the_image_shows_is_not_dropped() {
+        let ctx = egui::Context::default();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let run = |viewer: &mut Viewer, events| {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    events,
+                    ..Default::default()
+                },
+                |ui| viewer.show(ui, crate::theme::Theme::default(), false),
+            );
+            let rect = image_rect(&output.shapes);
+            output.drop_without_applying_deltas();
+            rect
+        };
+        let mut viewer = Viewer::default();
+        viewer.open(source(), PathBuf::from("/shot.png"));
+        let at = egui::pos2(150.0, 50.0);
+        // Loading, then decoded: no pass before this one painted the image.
+        assert_eq!(run(&mut viewer, vec![egui::Event::PointerMoved(at)]), None);
+        viewer = ready(image::RgbaImage::new(600, 120));
+        // Fitted, 600 points wide: an 800-point view does not enlarge it.
+        let first = run(&mut viewer, vec![egui::Event::Zoom(2.0)]).unwrap();
+        assert!(first.width() > 900.0, "{first:?}");
     }
 
     /// The wheel does not slide an image smaller than the drawer on either axis.
