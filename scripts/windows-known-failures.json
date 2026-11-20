@@ -247,6 +247,13 @@
   },
   {
     "binary": "app/app:lib",
+    "name": "ligature_tests::tests::actual_window_shapes_but_copy_search_and_geometry_keep_the_source_cells",
+    "reason": "ligatures are sometimes not shaped in the real window",
+    "issue": "https://github.com/mashware/ivy/issues/188",
+    "intermittent": true
+  },
+  {
+    "binary": "app/app:lib",
     "name": "ligature_tests::tests::same_window_replaces_ligature_drawing_after_size_scale_face_and_reset",
     "reason": "selection, clipboard, ligature or emoji painting differs on Windows",
     "issue": "https://github.com/mashware/ivy/issues/188"
