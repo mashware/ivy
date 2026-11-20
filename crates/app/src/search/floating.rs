@@ -466,14 +466,25 @@ fn paint_the_field(
     // The status gives way to the query: it is left out where it would leave fewer than six
     // cells for what was typed.
     let wanted = mode.status();
+    let room_for_status = (inner.width() - 6.0 * metrics.width()).max(0.0);
     let fits = clipped
-        .layout_no_wrap(wanted.to_owned(), metrics.font(), roles.tx2)
+        .layout_no_wrap(wanted.to_string(), metrics.font(), roles.tx2)
         .size()
         .x
-        + 6.0 * metrics.width()
-        <= inner.width();
-    let status = if fits { wanted.as_str() } else { "" };
-    let said = clipped.layout_no_wrap(status.to_owned(), metrics.font(), roles.tx2);
+        <= room_for_status;
+    // **A refusal is never left out**: a query that was not searched with, painted as nothing,
+    // reads as «no match». It is cut with «…» to the room instead; anything else gives way.
+    let mut job = egui::text::LayoutJob::simple_singleline(
+        if fits || mode.is_refused() {
+            wanted.into_owned()
+        } else {
+            String::new()
+        },
+        metrics.font(),
+        roles.tx2,
+    );
+    job.wrap = egui::text::TextWrapping::truncate_at_width(room_for_status);
+    let said = clipped.layout_job(job);
     let status_left = inner.right() - said.size().x;
     clipped.galley(
         pos2(status_left, inner.center().y - said.size().y / 2.0),
@@ -1000,6 +1011,43 @@ mod tests {
         });
         output.textures_delta.clear();
         (output.shapes, blinking)
+    }
+
+    #[test]
+    fn a_refusal_is_painted_in_a_field_of_the_box_s_own_width() {
+        let field = Rect::from_min_size(
+            pos2(10.0, 10.0),
+            vec2(FIELD_CELLS * metrics().width() + 2.0 * PAD, 30.0),
+        );
+        for (refused, said) in [
+            (
+                term_core::Refused::Invalid("unclosed group".into()),
+                "invalid",
+            ),
+            (term_core::Refused::TooLarge, "too complex"),
+        ] {
+            let mut mode = Mode::default();
+            mode.insert("(");
+            mode.compiled = Some(Err(refused));
+            let ctx = egui::Context::default();
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let roles = crate::theme::Roles::of(&Theme::default());
+                paint_the_field(ui.painter(), &mode, field, &roles, &metrics(), None);
+            });
+            output.textures_delta.clear();
+            let painted: Vec<String> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                    _ => None,
+                })
+                .collect();
+            assert!(
+                painted.iter().any(|text| text.starts_with(said)),
+                "the refusal was not painted: {painted:?}"
+            );
+        }
     }
 
     fn caret_in(shapes: &[egui::epaint::ClippedShape]) -> Option<Rect> {

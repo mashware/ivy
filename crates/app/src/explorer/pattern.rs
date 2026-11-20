@@ -1,77 +1,48 @@
-//! What Files' name search matches a name against: the typed text, or a pattern (D61, #121).
+//! What Files' name search matches a name against: the typed text or a pattern, compiled the way the
+//! console's search compiles its query (D61), so a query means the same thing in both places.
 
-use regex_automata::meta::Regex;
-use regex_automata::util::syntax;
 use std::ops::Range;
-
-/// The same ceiling as the console's search: a pattern is compiled on every keystroke, and the
-/// engine's own default lets a short Unicode pattern take tens of milliseconds to build.
-const SIZE_LIMIT: usize = 2 * 1024 * 1024;
+use std::sync::Arc;
+use term_core::{Options, Pattern, Refused};
 
 /// A query, compiled once per change and shared with the worker that walks the folders.
-#[derive(Debug)]
-pub(crate) enum Matcher {
-    /// The text, lowercased: a name matches when its lowercase holds it, as Files always did.
-    Text(String),
-    /// A pattern, case-insensitive unless it says otherwise with `(?-i)`.
-    Pattern(Regex),
-}
+pub(crate) struct Matcher(Pattern);
 
 impl Matcher {
-    /// The query as text or as a pattern; a pattern that cannot be built says why, in words the
-    /// list can show instead of an empty result.
+    /// The query as text or as a pattern, case-insensitive as Files always was — a pattern's own
+    /// `(?-i)` overrides it. One that cannot be built says why, in words the list shows instead of
+    /// an empty result.
     pub(crate) fn new(query: &str, regex: bool) -> Result<Self, String> {
-        if !regex {
-            return Ok(Self::Text(query.to_lowercase()));
-        }
-        Regex::builder()
-            .configure(Regex::config().nfa_size_limit(Some(SIZE_LIMIT)))
-            .syntax(syntax::Config::new().case_insensitive(true))
-            .build(query)
-            .map(Self::Pattern)
-            .map_err(|error| {
-                if let Some(syntax) = error.syntax_error() {
-                    // The parser's own message draws the pattern with a caret under the fault
-                    // over several lines; the list's footer has one.
-                    let why = match syntax {
-                        regex_syntax::Error::Parse(error) => error.kind().to_string(),
-                        regex_syntax::Error::Translate(error) => error.kind().to_string(),
-                        other => other.to_string(),
-                    };
-                    format!("Invalid pattern: {why}.")
-                } else if error.size_limit().is_some() {
-                    "Pattern too complex to search.".into()
-                } else {
-                    format!("Invalid pattern: {error}.")
-                }
+        let options = Options {
+            regex,
+            ..Options::default()
+        };
+        Pattern::new(query, options)
+            .map(Self)
+            .map_err(|refused| match refused {
+                Refused::Empty => "Type a name to search.".into(),
+                Refused::TooLarge => "Too complex to search.".into(),
+                Refused::Invalid(why) => format!("Invalid pattern: {why}."),
             })
     }
 
-    /// The part of `name` this query matches, if any. **An empty match is no match**: a pattern
-    /// such as `x*` would otherwise list every entry with nothing to show for it.
+    /// The part of `name` this query matches, if any.
     pub(crate) fn span(&self, name: &str) -> Option<Range<usize>> {
-        match self {
-            Self::Text(needle) => {
-                // Lowercasing can change a character's length, so an offset found in the
-                // lowercased name is only kept where it falls on the name's own boundaries.
-                let at = name.to_lowercase().find(needle.as_str())?;
-                let end = at + needle.len();
-                (name.is_char_boundary(at) && name.is_char_boundary(end)).then_some(at..end)
-            }
-            Self::Pattern(regex) => regex
-                .find_iter(name)
-                .map(|found| found.range())
-                .find(|range| !range.is_empty()),
-        }
+        self.0.find(name)
     }
 
-    /// Whether `name` is listed.
+    /// Whether `name` is listed: exactly when it has a part to mark.
     pub(crate) fn matches(&self, name: &str) -> bool {
-        match self {
-            Self::Text(needle) => name.to_lowercase().contains(needle.as_str()),
-            Self::Pattern(_) => self.span(name).is_some(),
-        }
+        self.span(name).is_some()
     }
+}
+
+/// The query a matcher was compiled from, kept beside it: the list asks for the matcher on every
+/// frame, and compiling again is only due when either changed.
+pub(crate) struct Compiled {
+    pub(crate) query: String,
+    pub(crate) regex: bool,
+    pub(crate) result: Result<Arc<Matcher>, String>,
 }
 
 #[cfg(test)]
@@ -115,12 +86,15 @@ mod tests {
 
     #[test]
     fn a_pattern_that_cannot_be_built_says_why() {
-        let invalid = Matcher::new("(", true).unwrap_err();
-        assert!(invalid.starts_with("Invalid pattern: "), "{invalid}");
+        let invalid = Matcher::new("(", true).err().unwrap();
+        assert!(
+            invalid.starts_with("Invalid pattern: ") && invalid.contains("unclosed"),
+            "{invalid}"
+        );
         assert!(!invalid.contains('\n'), "{invalid}");
         assert_eq!(
-            Matcher::new(r"\w{50}", true).unwrap_err(),
-            "Pattern too complex to search."
+            Matcher::new(r"\w{50}", true).err().unwrap(),
+            "Too complex to search."
         );
         assert!(
             Matcher::new("(", false).is_ok(),

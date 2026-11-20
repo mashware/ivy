@@ -9,6 +9,7 @@
 //! rules.
 
 use eframe::egui::{self, Key};
+use std::borrow::Cow;
 use term_core::{Found, Options, Refused, Screen, Search, Toward, View};
 
 mod editing;
@@ -135,8 +136,9 @@ pub(crate) struct Mode {
     query: String,
     /// A byte offset on a UTF-8 boundary; painting converts it to a galley character index.
     caret: usize,
-    /// The query compiled, **kept between presses** so the engine's automata keep what they learnt
-    /// about this grid. Emptied whenever the query or an option changes.
+    /// The query compiled, **kept between presses and paintings**: marking reads it on every frame,
+    /// and building a pattern costs up to milliseconds. Emptied whenever the query or an option
+    /// changes.
     compiled: Option<Result<Search, Refused>>,
     outcome: Outcome,
     /// Whether the options' list is unfolded beside the box. Changed only by the steps.
@@ -459,24 +461,33 @@ impl Mode {
     /// What the box says about the last press, beside the query: nothing while typing or after a
     /// match, and why there is nothing to show otherwise — **never «no match» for a query that
     /// was not searched with**.
-    pub(crate) fn status(&self) -> String {
-        // A query the engine already refused while marking says so before anybody presses Enter:
-        // its matches are not lit, and the box is the only place that can say why. An empty one
-        // is just a box nobody has typed in yet.
-        let refused = match (&self.outcome, &self.compiled) {
-            (Outcome::Refused(refused), _) => Some(refused),
-            (Outcome::Typing, Some(Err(refused))) if *refused != Refused::Empty => Some(refused),
-            _ => None,
-        };
-        let said = match (refused, &self.outcome) {
+    pub(crate) fn status(&self) -> Cow<'static, str> {
+        let said = match (self.refusal(), &self.outcome) {
             (Some(Refused::Empty), _) => "type what to look for",
             (Some(Refused::TooLarge), _) => "too complex to search",
-            (Some(Refused::Invalid(why)), _) => return format!("invalid pattern: {why}"),
+            (Some(Refused::Invalid(why)), _) => return format!("invalid pattern: {why}").into(),
             (None, Outcome::NotFound) => "no match",
             (None, Outcome::NoMore) => "no more matches",
             (None, _) => "",
         };
-        said.to_owned()
+        said.into()
+    }
+
+    /// Whether the status says the query could not be searched with — which the box must show
+    /// however little room it has, or a refused query would look like silence.
+    pub(crate) fn is_refused(&self) -> bool {
+        self.refusal().is_some()
+    }
+
+    /// Why the query cannot be searched with, if it cannot. **A query the engine already refused
+    /// while marking says so before anybody presses Enter**: its matches are not lit, and the box
+    /// is the only place that can say why. An empty one is just a box nobody has typed in yet.
+    fn refusal(&self) -> Option<&Refused> {
+        match (&self.outcome, &self.compiled) {
+            (Outcome::Refused(refused), _) => Some(refused),
+            (Outcome::Typing, Some(Err(refused))) if *refused != Refused::Empty => Some(refused),
+            _ => None,
+        }
     }
 }
 
@@ -613,7 +624,7 @@ mod tests {
             ..Options::default()
         };
         for (query, said) in [
-            ("(", "invalid pattern: "),
+            ("(", "invalid pattern: unclosed"),
             (r"\w{50}", "too complex to search"),
         ] {
             let mut console = OnThisConsole {

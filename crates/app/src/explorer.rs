@@ -129,8 +129,10 @@ impl Explorer {
             generation: nav.generation,
             epoch: nav.epoch,
             path,
-            query: nav.query.trim().to_owned(),
-            regex: nav.regex,
+            query: nav.search_query().to_owned(),
+            // A listing has no query, so its key never carries the flag: flipping it must not
+            // make the tree's cached folders look like other requests.
+            regex: nav.regex && !nav.search_query().is_empty(),
             reveal: false,
         }
     }

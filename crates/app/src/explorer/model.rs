@@ -13,19 +13,24 @@ pub(super) struct Navigation {
     /// The name search reads the query as a pattern. **An option, not part of the query**: a new
     /// folder or a cleared query keeps it.
     pub(super) regex: bool,
-    /// The query compiled for the flag it was compiled with, kept while neither changes: the list
-    /// asks for it on every frame and the worker takes the same one.
-    pub(super) matcher: Option<(
-        String,
-        bool,
-        Result<std::sync::Arc<super::pattern::Matcher>, String>,
-    )>,
+    /// The name search's query compiled, with what it was compiled from.
+    pub(super) compiled: Option<super::pattern::Compiled>,
     pub(super) reveal_selected: bool,
     pub(super) generation: u64,
     pub(super) epoch: u64,
 }
 
 impl Navigation {
+    /// The query the name search runs: as typed for a pattern, whose spaces are part of it, and
+    /// without the spaces around it for text, as Files always read it.
+    pub(super) fn search_query(&self) -> &str {
+        if self.regex {
+            &self.query
+        } else {
+            self.query.trim()
+        }
+    }
+
     pub(super) fn observe(&mut self, source: Option<PathBuf>) -> bool {
         if self.source == source {
             return false;

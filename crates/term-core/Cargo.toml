@@ -12,7 +12,7 @@ portable-pty = "0.9"
 # primitive that cannot miss a metacharacter.
 regex-syntax = "0.8"
 # The search's engine: its meta regex falls back from a lazy DFA to engines that never give up, where
-# the terminal engine's own search gives up on a large pattern and reports no match (D61, #121).
+# the terminal engine's own search gives up on a large pattern and reports no match (D61).
 # Already in the tree through that engine, with the same features.
 regex-automata = "0.4"
 

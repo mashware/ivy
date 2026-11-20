@@ -1051,10 +1051,7 @@ mod tests {
             (Toward::Older, vec![0]),
             (Toward::Newer, vec![1]),
         ] {
-            assert_eq!(
-                screen.find(&search, toward, KeepClear::NONE),
-                Found::Match
-            );
+            assert_eq!(screen.find(&search, toward, KeepClear::NONE), Found::Match);
             assert_eq!(selected_columns(&screen), expected, "{toward:?}");
         }
     }
@@ -1114,7 +1111,9 @@ mod tests {
             let mut screen = Screen::new(Size { rows: 3, cols: 5 });
             screen.advance(text.as_bytes());
             let mut cells = 0;
-            walk::mark(screen.term(), search, Line(first), Line(last), |_| cells += 1);
+            walk::mark(screen.term(), search, Line(first), Line(last), |_| {
+                cells += 1
+            });
             cells
         };
         let need = with(
@@ -1124,7 +1123,11 @@ mod tests {
                 ..Options::default()
             },
         );
-        assert_eq!(marked_in("abcdkneed", &need, 1, 1), 0, "the cut read as a word's start");
+        assert_eq!(
+            marked_in("abcdkneed", &need, 1, 1),
+            0,
+            "the cut read as a word's start"
+        );
         assert_eq!(marked_in("abcd need", &need, 1, 1), 1, "the control");
         assert_eq!(
             marked_in("abcdkneed", &with("^need", regex()), 1, 1),

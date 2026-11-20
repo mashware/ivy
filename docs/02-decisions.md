@@ -8307,8 +8307,13 @@ remain historical rationale and are superseded only by this amendment.
 
 ### Amended 20 November 2026 — regular expressions, in the console and in Files (#121)
 
-This supersedes the «Regular expressions» row of the discarded table above, and the «Literal, not
-a pattern» paragraph's reason.
+This supersedes, above: the «Regular expressions» row of the discarded table and «take regular
+expressions» among what the search does not do; the «Literal, not a pattern» paragraph's reason; in
+#120's amendment, case «set with an inline flag ahead of the escaped literal», the rejected candidate
+«skipped inside the engine's own walk», the rescanning and the spacer-stepping that explained, and
+the accepted miss of a whole word overlapping a rejected candidate; and the second half of the
+`\b` row of #120's discarded table — the meta engine does take a Unicode `\b`, and whole word stays
+a check on the match only so that a literal and a pattern follow the same rule.
 
 - **A fourth option, Regular expression**, in the console's options list, off by default and kept
   with the other three. Off, the query is literal exactly as before. **The Files name search gets the
@@ -8331,7 +8336,13 @@ a pattern» paragraph's reason.
   `MARKING_REACH` lines beyond it, one logical line at a time.
 - **What changes, declared**: walking older, a match is now chosen left-to-right inside its line, as
   marking always chose it — `aa` over `aaa` selects the first two cells where it used to select the
-  last two. The row's padding is still part of the text, so `$` matches after it, as before.
+  last two. The row's padding is still part of the text, so `$` matches after it, as before. **Case
+  is set on the engine's syntax**, so a pattern's own `(?i)` or `(?-i)` overrides the box. **A
+  candidate whole word rejects gives its characters back**: the search goes on one character past
+  where the candidate started, so `1.1` at the end of `v1.1.1` is now found walking either way and
+  marked, where #120 accepted missing it one way. **Marking reads one row past each of its cuts**
+  as context it never marks, so a line cut by `MARKING_REACH` is not taken to start or end at the
+  cut by whole word, `^`, `$` or `\b`.
 - **A hostile pattern is accepted as a pause, by the user's decision — asked twice.** A pattern
   with a large count over text that varies (`\p{L}.{170}~` over random letters, digits and a wide
   character) is the engine's slowest case: **0.32–0.33 s a press** at the median over a full history of lines,

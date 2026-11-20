@@ -13,10 +13,6 @@ eframe.workspace = true
 pulldown-cmark = { version = "0.13", default-features = false }
 term-core = { path = "../term-core" }
 panel-contract = { path = "../panel-contract" }
-# Files' name search as a pattern: the same engine and the same parser the console's search uses
-# (D61, #121). Both already in the tree through `term-core`.
-regex-automata = "0.4"
-regex-syntax = "0.8"
 
 # The second transport of the panel document: the endpoint a producer speaks to instead of writing
 # the file. It depends on nothing visual, exactly like the contract it carries, so the window takes it

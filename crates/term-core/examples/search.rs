@@ -19,7 +19,7 @@
 //! and over **one line wrapped across the whole history**, the case that made a walk which asked
 //! the engine again after each rejection quadratic (D61).
 //!
-//! **A pattern adds a third** (#121): an ordinary one, and one built to make the engine walk slowly
+//! **A pattern adds a third**: an ordinary one, and one built to make the engine walk slowly
 //! — `\p{L}.{170}~`, which the terminal engine's own search gave up on and which the regex engine
 //! answers by falling back to its slowest exact engine. The person decided that pattern is paid as
 //! a pause rather than bounded (D61), so this is where its size is measured.

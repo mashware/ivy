@@ -1,7 +1,7 @@
 //! Files' name search as a floating list over the window (`Files.dc.html`, D72): the existing
 //! worker finds the names below the displayed root; Enter reveals a match in the tree and
 //! Ctrl+Enter opens it.
-use super::pattern::Matcher;
+use super::pattern::{Compiled, Matcher};
 use super::{Entry, EntryKind, Explorer, Request, display};
 use eframe::egui;
 use std::path::{Path, PathBuf};
@@ -21,32 +21,36 @@ pub(super) enum Pick {
 
 /// The matches for the pane's query, what to say instead, and the search to run when the
 /// worker has not answered yet.
-struct Matches {
-    entries: Vec<Entry>,
+pub(super) struct Matches {
+    pub(super) entries: Vec<Entry>,
     said: Option<String>,
     pending: Option<(Request, Arc<Matcher>)>,
     /// What the rows mark in each name.
-    matcher: Option<Arc<Matcher>>,
+    pub(super) matcher: Option<Arc<Matcher>>,
 }
 
 /// The pane's query compiled for its flag, compiled again only when either changed.
 fn matcher(state: &mut Explorer, pane: usize) -> Result<Arc<Matcher>, String> {
     let nav = state.navigation.get_mut(&pane).unwrap();
-    let query = nav.query.trim();
+    let query = nav.search_query().to_owned();
     if !nav
-        .matcher
+        .compiled
         .as_ref()
-        .is_some_and(|(compiled, regex, _)| compiled == query && *regex == nav.regex)
+        .is_some_and(|compiled| compiled.query == query && compiled.regex == nav.regex)
     {
-        let built = Matcher::new(query, nav.regex).map(Arc::new);
-        nav.matcher = Some((query.to_owned(), nav.regex, built));
+        let result = Matcher::new(&query, nav.regex).map(Arc::new);
+        nav.compiled = Some(Compiled {
+            query,
+            regex: nav.regex,
+            result,
+        });
     }
-    nav.matcher.as_ref().unwrap().2.clone()
+    nav.compiled.as_ref().unwrap().result.clone()
 }
 
-fn matches(state: &mut Explorer, pane: usize) -> Matches {
+pub(super) fn matches(state: &mut Explorer, pane: usize) -> Matches {
     let nav = &state.navigation[&pane];
-    let (Some(root), false) = (nav.root.clone(), nav.query.trim().is_empty()) else {
+    let (Some(root), false) = (nav.root.clone(), nav.search_query().is_empty()) else {
         return Matches {
             entries: Vec::new(),
             said: None,

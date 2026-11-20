@@ -289,6 +289,10 @@ impl Loader {
     }
 
     pub(crate) fn submit(&mut self, request: Request, ctx: &egui::Context) {
+        debug_assert!(
+            request.query.is_empty(),
+            "a name search goes through `search`, with its compiled query"
+        );
         self.submit_with(request, None, ctx);
     }
 

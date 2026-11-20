@@ -1603,6 +1603,24 @@ fn the_pattern_toggle_reads_the_query_as_a_pattern_says_a_bad_one_and_keeps_the_
         window.explorer.cache.contains_key(&tree),
         "flipping the toggle dropped the tree's listing"
     );
+    // The tree behind the list kept reading the listings it had: none was loaded again under a
+    // key that only differs by the flag.
+    frame(&mut window, &ctx, area, vec![]);
+    assert!(
+        !window
+            .explorer
+            .cache
+            .keys()
+            .any(|key| key.query.is_empty() && key.regex),
+        "the tree loaded its folders again under the pattern flag"
+    );
+    // What the row marks is the part the pattern matched.
+    let found = super::search::matches(&mut window.explorer, pane);
+    let marked = found
+        .matcher
+        .as_ref()
+        .and_then(|matcher| matcher.span("main.rs"));
+    assert_eq!(marked, Some(0..4), "the row marks «main»");
     // The keys stayed in the field: what is typed next extends the pattern.
     type_text(&mut window, &ctx, area, "(");
     assert_eq!(window.explorer.navigation[&pane].query, "^main(");
