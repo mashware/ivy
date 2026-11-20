@@ -2,8 +2,8 @@
 //! from a randomized read-only copy under `…/AppTranslocation/<uuid>/d/`. That copy exists only
 //! while this launch lives, so a path derived from it must never be offered for a client to save.
 //!
-//! The path component is the observable signal. `SecTranslocateIsTranslocatedURL` is the
-//! authoritative one, but it needs the Security framework for an answer the path already gives.
+//! The path component is the observable signal. The Security framework's translocation query is
+//! the authoritative one, but it needs a native binding for an answer the path already gives.
 //! Removing the quarantine attribute is ruled out as an installation step
 //! (`docs/10-installation.md`), so the only remedy offered is moving the app with Finder.
 use std::path::Path;

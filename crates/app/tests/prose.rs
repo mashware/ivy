@@ -289,6 +289,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         include_str!("../src/chrome/connection/recovery.rs"),
         1,
     ),
+    (
+        "src/chrome/connection/translocation.rs",
+        include_str!("../src/chrome/connection/translocation.rs"),
+        1,
+    ),
     ("src/resume.rs", include_str!("../src/resume.rs"), 1),
     (
         "src/chrome/typography.rs",
