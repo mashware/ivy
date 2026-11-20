@@ -54,6 +54,11 @@ arrived» passes with a program that starts and exits at once: the D30 disguise 
 Windows. Write a command whose result differs from its echo (cmd `echo IVY^_OK`,
 PowerShell `Write-Output ('IVY' + '_OK')`) and wait for the result.
 
+**And the pseudoconsole asks before the shell runs.** Measured on windows-2025 (CI run
+44777035929): the only bytes pwsh produced in 30 s were `ESC[6n` — ConPTY's cursor report
+request — and it waits for the answer before the shell proceeds. The app answers it through the
+screen's audited replies (D86); a test driving a bare `Pty` must write `ESC[1;1R` itself.
+
 Also: no Windows type-check is possible from the Linux dev machine, because `ring`
 needs the MSVC `lib.exe`; the pull-request Windows job is the only compiler.
 
