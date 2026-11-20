@@ -1746,6 +1746,36 @@ mod tests {
         );
     }
 
+    /// **A document that arrived over the channel never had a file behind it** (#155). Reporting
+    /// `done` yields the hold and makes the panel look at the file again, and that look finds
+    /// nothing — which is the baseline, not a deletion to confess.
+    #[test]
+    fn a_channel_document_that_reports_done_does_not_confess_a_file_it_never_had() {
+        let dir = PanelDir::create().expect("create the directory");
+        let mut state = PanelState::default();
+        state
+            .deliver(
+                7,
+                "Codex",
+                panel_contract::parse_document(r#"{"attention":"done","lines":["hola mundo"]}"#)
+                    .expect("the document is a panel"),
+                SystemTime::now(),
+            )
+            .expect("nobody was holding it");
+
+        state.refresh(dir.path());
+
+        let painted = texts(paint_the_state(&mut state, PLACE, SystemTime::now()));
+        assert!(
+            painted.iter().any(|row| row.contains("hola mundo")),
+            "the channel's document stopped being shown: {painted:?}"
+        );
+        assert!(
+            !painted.iter().any(|row| row.contains("no longer there")),
+            "a file that never existed was confessed as deleted: {painted:?}"
+        );
+    }
+
     /// **`header: false` turns off the identity line, not the application's honesty.** If it turned it
     /// off, a producer would only have to set it for its broken panel not to look it.
     #[test]

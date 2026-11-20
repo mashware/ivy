@@ -607,10 +607,15 @@ fn warning_about_the_panel(state: &panel::PanelState, now: SystemTime) -> Option
     // **The file that does not exist yet is the exception, and it goes first for that.** The rest
     // is ordered by what has to be said: first the read failures, which are the most recent thing
     // known, and only if there is none is the clock looked at.
+    //
+    // A missing file is only a loss when the document shown came from it. One that arrived over
+    // the channel never had a file behind it, and a yield to `done` makes the panel look at the
+    // file all the same (D17: the file is one transport, not the source of truth).
     match (&state.problem, &state.last_good) {
         (Some(problem), _) if panel::is_a_missing_file(problem) => state
             .last_good
             .as_ref()
+            .filter(|_| !state.channel_owns_document())
             .map(|_| "the panel file is no longer there".to_owned()),
         (Some(problem), Some(_)) => Some(format!("what is shown is not the latest: {problem}")),
         (Some(problem), None) => Some(format!("no panel: {problem}")),
