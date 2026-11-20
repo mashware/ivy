@@ -8959,7 +8959,8 @@ viewport icon alone proves.
 
 ## D72 — Document viewers share a transient sidebar and never become consoles
 
-**8 November 2026 — #337; amended for #73 on 15 November 2026 and for #93 on 17 November 2026.**
+**8 November 2026 — #337; amended for #73 on 15 November 2026, for #93 on 17 November 2026 and for
+#178 on 20 November 2026.**
 Markdown and Git changes open in a transient surface beside the consoles, together with Files and
 the global Board; since #93 that surface is Files on the left and a drawer below (see the last
 section). The
@@ -9169,6 +9170,44 @@ for what it did not cause). No frame-cost figure is claimed: the host, viewer an
 keep their named spans, and `scripts/measure-frame.sh` has not been re-run on this geometry. Its
 dock regime is versioned `dock-v2-4-closed/open`; `dock-v1-*` measured the rail, a different
 console grid and a width drag, and the script refuses it rather than relabel it.
+
+### Images in the document tab — 20 November 2026, #178
+
+Agents print the paths of the screenshots they take, and reading one meant leaving the terminal.
+A `.png`, `.jpg` or `.jpeg` path (any letter case) now opens in the drawer's document tab: Ctrl+click
+on it in a console, or activating it in Files. Ctrl+click on an image no longer reveals it in Files,
+which would show a name and not the picture; every other local path is revealed as before. Files
+says «Only Markdown and images open in the drawer.» for anything else.
+
+- **One document tab, as before.** The image and a Markdown file replace each other there: opening
+  one forgets the other, and closing the tab forgets both. The image is pinned to the console it was
+  printed in, not to the focused one, and the strip names that console.
+- **Decoded once.** The file is read and decoded on the viewer's worker when it is opened and
+  never again: switching to Changes and back, or closing and reopening the drawer, shows the same
+  picture, and a program that overwrites the same screenshot name does not change what is on
+  screen. Markdown's one-second refresh does not apply.
+- **Bounded before it is decoded.** The path is opened nonblocking and refused unless it is a
+  regular file, as Markdown's is; at most 32 MiB is read; the format comes from the bytes, and only
+  PNG and JPEG are decoded; the decode may allocate at most 256 MiB (`image::Limits::max_alloc`),
+  counting the RGBA copy the viewer keeps when the file is not already RGBA. Each refusal is a
+  visible message. The GPU gets a copy no side of which exceeds its `max_texture_side`, made after
+  the decode and outside that cap; the original is kept at full resolution.
+- **Seen as a person reads a screenshot.** It fits the drawer's width and is never enlarged past one
+  point per pixel; Ctrl+wheel zooms around the pointer and the wheel and the scroll bars pan it. egui
+  reports Ctrl+wheel as a zoom and not as a scroll, so the drawer counts the zoom as pointer activity
+  over it to keep the gesture. The drawer stays not modal: nothing dims.
+- **Cost.** Decoding runs on the worker. The texture is uploaded once, by the backend after the
+  pass, so on the frame an image opens that upload lands in the framework remainder, not in the
+  viewer's span. No measurement batch opens an image, so no published figure changes.
+
+Discarded: an image `Kind` inside the existing viewer state, because the document tab's click
+forces the Markdown kind and a kind change clears that state, which would erase the image on the
+way back from Changes; a third viewer state, because the two that exist are swapped with a single
+boolean; a separate image surface beside the drawer, because it would bring a second geometry and a
+second set of input rules for what D72 already gives one place; refreshing the image from disk,
+because what was opened would change under the person reading it; a separate side limit, because
+the allocation cap already refuses the headers that would need one; GIF, WebP and SVG, because
+screenshots are PNG or JPEG.
 
 ## D73 — Connection help is global and reports observed publication
 
