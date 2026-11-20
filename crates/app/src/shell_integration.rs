@@ -44,7 +44,7 @@ pub(crate) const FALLBACK_SHELL: &str = "cmd.exe";
 
 /// Windows has no `SHELL` and no `/bin/sh`. The newer PowerShell when it is installed, else the one
 /// every Windows ships, else `cmd.exe`, as Windows Terminal picks. Looked up on the session's own
-/// `PATH`, never in configuration, and only in absolute directories so the folder a console starts
+/// search path, never in configuration, and only in absolute directories so the folder a console starts
 /// in cannot plant one.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn windows_default(path: Option<&OsStr>, is_file: impl Fn(&Path) -> bool) -> String {

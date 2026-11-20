@@ -559,8 +559,8 @@ pub fn directory() -> Option<PathBuf> {
     directory_from(config.as_deref(), std::env::var_os("HOME").as_deref())
 }
 
-/// Windows has neither `HOME` nor a `.config` convention: per-user settings belong in the roaming
-/// application-data folder. `XDG_CONFIG_HOME` still rules when it is set, so an isolated directory
+/// Windows has neither a home variable nor a `.config` convention: per-user settings belong in the
+/// roaming application-data folder. The desktop standard's variable still rules when it is set, so an isolated directory
 /// (the measurement script's, a manual test's) works the same on every platform.
 pub fn windows_directory_from(config: Option<&OsStr>, appdata: Option<&OsStr>) -> Option<PathBuf> {
     Some(
