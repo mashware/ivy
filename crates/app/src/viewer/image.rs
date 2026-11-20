@@ -233,10 +233,12 @@ impl Viewer {
         }
         // Only a frame that paints the image may keep a pan latched.
         self.painted = Some(frame);
-        // A menu or popup open above the image takes the pointer, and with it the wheel. egui's own
-        // hover test is not used: it reaches a few points into a popup's border, and it knows the
-        // image's rect only from the previous pass, which drops a gesture on the first frame.
-        // Where no area is under the pointer `layer_id_at` answers none: that is the background.
+        // A menu or popup open above the image takes the pointer, and with it the wheel and a press.
+        // egui's own hover test is not used: it reaches a few points into a popup's border. The
+        // view tested is this frame's, but `layer_id_at` knows every area, the drawer's own among
+        // them, only from the previous pass: on the first frame after the drawer is maximized,
+        // resized or shown again, a gesture where it just grew can still be dropped. Where no area
+        // is under the pointer `layer_id_at` answers none: that is the background.
         let on_image = |at: egui::Pos2| {
             let top = ui
                 .ctx()
