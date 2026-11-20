@@ -615,6 +615,7 @@ mod tests {
         window.viewer.loaded = Some(super::super::load::Loaded {
             text: "diff".into(),
             markdown: None,
+            code: None,
             diff: Some(loaded_diff()),
         });
         window.viewer.review.comments.push(review_comment());
@@ -703,6 +704,7 @@ mod tests {
         window.viewer.loaded = Some(super::super::load::Loaded {
             text: "diff".into(),
             markdown: None,
+            code: None,
             diff: Some(Document::parse(
                 "diff --git a/first.rs b/first.rs\n--- a/first.rs\n+++ b/first.rs\n@@ -1 +1 @@\n-old\n+new\n",
             ).unwrap()),
@@ -720,7 +722,7 @@ mod tests {
         crate::sidebar::select(&mut window, crate::sidebar::Tool::Git);
 
         for tool in [
-            crate::sidebar::Tool::Markdown,
+            crate::sidebar::Tool::Document,
             crate::sidebar::Tool::Files,
             crate::sidebar::Tool::Board,
             crate::sidebar::Tool::Git,
@@ -770,7 +772,7 @@ mod tests {
         });
         crate::viewer::hide(&mut window);
         let pane = window.active().panes()[0].name;
-        assert!(!crate::viewer::open_markdown_target(
+        assert!(!crate::viewer::open_document_target(
             &mut window,
             pane,
             "/tmp/other.md".into(),

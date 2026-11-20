@@ -1562,7 +1562,7 @@ mod tests {
             "a click on the field edits it"
         );
         // Switching the sidebar away and back takes the field's focus with the Board's.
-        crate::sidebar::select(&mut window, crate::sidebar::Tool::Markdown);
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Document);
         crate::sidebar::select(&mut window, crate::sidebar::Tool::Board);
         assert_eq!(
             window.board.filter_state(),
@@ -1810,7 +1810,7 @@ mod tests {
         // Once the file can be written, reopening the Board writes the choice and clears the note.
         let fixed = arrangement_file("fixed");
         window.board.remember_in = Some(fixed.clone());
-        crate::sidebar::select(&mut window, crate::sidebar::Tool::Markdown);
+        crate::sidebar::select(&mut window, crate::sidebar::Tool::Document);
         crate::sidebar::select(&mut window, crate::sidebar::Tool::Board);
         let shapes = frame(&mut window, &ctx, vec![]);
         let written = std::fs::read_to_string(&fixed).unwrap_or_default();

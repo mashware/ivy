@@ -188,12 +188,8 @@ pub(super) fn activate(
             }
             None
         }
-        EntryKind::File | EntryKind::Link
-            if entry
-                .path
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("md")) =>
-        {
+        // Any file opens in the drawer's File tab: Markdown formatted, anything else as code.
+        EntryKind::File | EntryKind::Link => {
             if entry.path.to_str().is_none() {
                 state.message = "This path cannot be opened as Unicode text.".into();
                 None
@@ -661,7 +657,7 @@ mod tests {
     }
 
     #[test]
-    fn activation_only_opens_markdown_and_keeps_folders_in_the_tree() {
+    fn activation_opens_any_file_and_keeps_folders_in_the_tree() {
         let mut state = Explorer::default();
         state.reconcile(&[(1, Some("/root".into()))]);
         assert_eq!(
@@ -669,7 +665,18 @@ mod tests {
             Some((1, "/root/link.md".into()))
         );
         assert!(state.message.is_empty());
-        assert!(activate(&mut state, 1, &entry("/root/code.rs", EntryKind::File)).is_none());
+        for code in [
+            "/root/code.rs",
+            "/root/index.php",
+            "/root/ci.yml",
+            "/root/notes.txt",
+        ] {
+            assert_eq!(
+                activate(&mut state, 1, &entry(code, EntryKind::File)),
+                Some((1, code.into()))
+            );
+        }
+        assert!(activate(&mut state, 1, &entry("/root/fifo", EntryKind::Other)).is_none());
         assert_eq!(
             activate(&mut state, 1, &entry("/root/README.MD", EntryKind::File)),
             Some((1, "/root/README.MD".into()))

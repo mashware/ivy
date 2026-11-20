@@ -15,7 +15,7 @@ pub(crate) enum Icon {
     PanelShown,
     SplitRight,
     SplitDown,
-    Markdown,
+    Document,
     Search,
     Connect,
     Menu,
@@ -51,7 +51,7 @@ impl Icon {
             Self::PanelShown => glyph::SQUARE_HALF,
             Self::SplitRight => glyph::SQUARE_SPLIT_HORIZONTAL,
             Self::SplitDown => glyph::SQUARE_SPLIT_VERTICAL,
-            Self::Markdown => glyph::MARKDOWN_LOGO,
+            Self::Document => glyph::FILE_TEXT,
             Self::Search => glyph::MAGNIFYING_GLASS,
             Self::Connect => glyph::PLUGS_CONNECTED,
             Self::Menu => glyph::LIST,
@@ -140,7 +140,7 @@ mod tests {
             Icon::PanelShown,
             Icon::SplitRight,
             Icon::SplitDown,
-            Icon::Markdown,
+            Icon::Document,
             Icon::Search,
             Icon::Connect,
             Icon::Menu,
@@ -176,7 +176,7 @@ mod tests {
                 | Icon::PanelShown
                 | Icon::SplitRight
                 | Icon::SplitDown
-                | Icon::Markdown
+                | Icon::Document
                 | Icon::Search
                 | Icon::Connect
                 | Icon::Menu

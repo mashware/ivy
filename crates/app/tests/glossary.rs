@@ -137,6 +137,12 @@ const GLOSSARY_CLEAN_FILES: &[&str] = &[
     "app/src/viewer/tests.rs",
     "app/src/viewer/view.rs",
     "app/src/viewer/interaction_tests.rs",
+    "app/src/viewer/code.rs",
+    "app/src/viewer/code/tests.rs",
+    "app/src/viewer/highlight.rs",
+    "app/src/viewer/highlight/families.rs",
+    "app/src/viewer/highlight/tests.rs",
+    "app/src/viewer/palette.rs",
     "app/src/painter/pane.rs",
     "app/src/launch/tests.rs",
     "app/src/launch.rs",
@@ -426,6 +432,12 @@ const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/src/viewer/tests.rs", "app"),
     ("app/src/viewer/view.rs", "app"),
     ("app/src/viewer/interaction_tests.rs", "app"),
+    ("app/src/viewer/code.rs", "app"),
+    ("app/src/viewer/code/tests.rs", "app"),
+    ("app/src/viewer/highlight.rs", "app"),
+    ("app/src/viewer/highlight/families.rs", "app"),
+    ("app/src/viewer/highlight/tests.rs", "app"),
+    ("app/src/viewer/palette.rs", "app"),
     ("app/src/painter/pane.rs", "app"),
     ("app/src/launch/tests.rs", "app"),
     ("app/src/launch.rs", "app"),
@@ -1499,6 +1511,8 @@ const NOT_OURS: &[&str] = &[
     "regionCode",
     // **An Electron option.** The macOS window-button module cites the one whose approach it follows.
     "trafficLightPosition",
+    // **A highlighting crate the code view set aside.** `viewer/highlight.rs` names it to say why.
+    "syntect",
     // **Standard-library waits, not names of this tree.** `waits.rs` cites the ones it judges and the
     // ones it deliberately does not.
     "wait_while",

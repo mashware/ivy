@@ -435,11 +435,7 @@ pub(crate) fn show(window: &mut Window, ui: &mut egui::Ui, area: egui::Rect) {
                 Some(search::Pick::Reveal(path)) => search::reveal(state, pane, &path),
                 Some(search::Pick::Open(entry)) => {
                     search::reveal(state, pane, &entry.path);
-                    let opened = view::activate(state, pane, &entry);
-                    if opened.is_none() && entry.kind != EntryKind::Directory {
-                        state.message = "Only Markdown files open in the drawer.".into();
-                    }
-                    open = open.or(opened);
+                    open = open.or(view::activate(state, pane, &entry));
                 }
                 None => {}
             }
@@ -449,7 +445,7 @@ pub(crate) fn show(window: &mut Window, ui: &mut egui::Ui, area: egui::Rect) {
         }
         ui.ctx().input_mut(|input| input.events = filtered);
         if let Some((pane, path)) = open {
-            if crate::viewer::open_markdown_target(window, pane, path, None) {
+            if crate::viewer::open_document_target(window, pane, path, None) {
                 ui.ctx().request_repaint();
             } else {
                 window.explorer.message =

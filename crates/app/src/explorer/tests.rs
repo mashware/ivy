@@ -44,7 +44,7 @@ fn files_expansion_and_scroll_survive_shared_sidebar_tool_switches() {
 
     for tool in [
         crate::sidebar::Tool::Files,
-        crate::sidebar::Tool::Markdown,
+        crate::sidebar::Tool::Document,
         crate::sidebar::Tool::Board,
         crate::sidebar::Tool::Files,
     ] {

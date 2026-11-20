@@ -11,7 +11,8 @@ use std::time::{Duration, Instant};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Tool {
     Files,
-    Markdown,
+    /// The drawer tab that shows one file: Markdown formatted, anything else as code.
+    Document,
     Git,
     Board,
 }
@@ -20,7 +21,7 @@ impl Tool {
     pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Files => "Files",
-            Self::Markdown => "Markdown",
+            Self::Document => "File",
             Self::Git => "Git",
             Self::Board => "Board",
         }
@@ -210,7 +211,7 @@ pub(crate) fn toggle(window: &mut Window, tool: Tool, ctx: &egui::Context) {
         }
         Tool::Files if files_visible(window) => close_files(window),
         _ if active(window) == Some(tool) => close(window, ctx),
-        Tool::Markdown => crate::viewer::activate(window, true),
+        Tool::Document => crate::viewer::activate(window, true),
         Tool::Git => crate::viewer::activate(window, false),
         _ => select(window, tool),
     }
@@ -248,7 +249,7 @@ pub(crate) fn before_keys(
     let frame = ctx.cumulative_frame_nr();
     // The drawer's own buttons change the partition, so they are resolved before final tiling,
     // against the drawer as displayed.
-    let drawer = matches!(active(window), Some(Tool::Markdown | Tool::Git))
+    let drawer = matches!(active(window), Some(Tool::Document | Tool::Git))
         .then_some(geometry.dock)
         .flatten();
     let list = crate::explorer::list_rect(window);
@@ -388,7 +389,7 @@ pub(crate) fn paint_icon(
     use crate::ui::icons::Icon;
     let icon = match tool {
         Tool::Files => Icon::Files,
-        Tool::Markdown => Icon::Markdown,
+        Tool::Document => Icon::Document,
         Tool::Git => Icon::Branch,
         Tool::Board => Icon::Board,
     };

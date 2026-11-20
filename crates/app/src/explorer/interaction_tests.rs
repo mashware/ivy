@@ -362,7 +362,7 @@ fn files_button_follows_tabs_and_restores_navigation_without_leaking_input() {
             "removed toolbar control {removed} remains"
         );
     }
-    // Click the actual folder disclosure control, then select a plain-text child quietly.
+    // Click the actual folder disclosure control, then open a plain-text child as code.
     let src = painted
         .iter()
         .find(|(text, pos)| text == "src" && dock.contains(*pos))
@@ -372,8 +372,14 @@ fn files_button_follows_tabs_and_restores_navigation_without_leaking_input() {
     click_at(&mut window, &ctx, area, arrow);
     wait_for_text(&mut window, &ctx, area, "a.txt");
     click_text(&mut window, &ctx, area, "a.txt");
-    assert!(!crate::viewer::is_open(&window));
+    assert!(crate::viewer::shows_as_code(
+        &window,
+        &first.join("src/a.txt")
+    ));
     assert!(window.explorer.message.is_empty());
+    // Close the drawer that click opened: the sizes compared at the end are Files' alone.
+    crate::sidebar::close(&mut window, &ctx);
+    frame(&mut window, &ctx, area, vec![]);
     let selected = first.join("src/a.txt");
     // Advance simulated time so these pairs are double-clicks, not part of the preceding clicks.
     for _ in 0..70 {
@@ -404,6 +410,7 @@ fn files_button_follows_tabs_and_restores_navigation_without_leaking_input() {
     click_at(&mut window, &ctx, area, arrow);
     wait_for_text(&mut window, &ctx, area, "a.txt");
     click_text(&mut window, &ctx, area, "a.txt");
+    crate::sidebar::close(&mut window, &ctx);
     window.explorer.navigation.get_mut(&ids[0]).unwrap().scroll = 120.0;
     frame(&mut window, &ctx, area, vec![]);
     // Reload expanded, scrolled contents through the real icon and wait through loading frames.
@@ -460,6 +467,8 @@ fn files_button_follows_tabs_and_restores_navigation_without_leaking_input() {
     assert_eq!(window.explorer.navigation[&ids[0]].scroll, 120.0);
     // Give the explorer keyboard focus before checking Escape ownership.
     click_text(&mut window, &ctx, area, "00-second.txt");
+    crate::sidebar::close(&mut window, &ctx);
+    frame(&mut window, &ctx, area, vec![]);
     let before_escape = window.pane_called(ids[2]).unwrap().keystrokes.clone();
     frame(
         &mut window,
@@ -807,7 +816,7 @@ fn clicking_a_linked_markdown_file_opens_the_existing_viewer() {
     wait_for_text(&mut window, &ctx, area, "LINKED_MARKDOWN_CONTENT");
     assert_eq!(
         crate::sidebar::active(&window),
-        Some(crate::sidebar::Tool::Markdown)
+        Some(crate::sidebar::Tool::Document)
     );
 }
 
@@ -947,7 +956,7 @@ fn enter_reveals_a_match_and_ctrl_enter_opens_markdown_in_the_drawer() {
         assert_eq!(nav.selected, Some(directory.0.join("docs/plan.md")));
         assert!(nav.expanded.contains(&directory.0.join("docs")));
         assert_eq!(
-            crate::sidebar::active(&window) == Some(crate::sidebar::Tool::Markdown),
+            crate::sidebar::active(&window) == Some(crate::sidebar::Tool::Document),
             command,
             "Enter only reveals; Ctrl+Enter opens"
         );
@@ -1527,7 +1536,7 @@ fn typing_a_search_keeps_the_tree_loaded_and_the_keys_in_files() {
     type_text(&mut window, &ctx, area, "q");
     assert_eq!(window.explorer.navigation[&pane].query, "zzzq");
     assert_eq!(window.pane_called(pane).unwrap().keystrokes, before);
-    // Ctrl+Enter on a file that is not Markdown reveals it and says why it did not open.
+    // Ctrl+Enter on a file that is not Markdown reveals it and opens it in the File tab as code.
     for _ in 0..4 {
         frame(
             &mut window,
@@ -1552,13 +1561,15 @@ fn typing_a_search_keeps_the_tree_loaded_and_the_keys_in_files() {
         modifiers: egui::Modifiers::COMMAND,
     };
     frame(&mut window, &ctx, area, vec![open]);
-    wait_for_text(
-        &mut window,
-        &ctx,
-        area,
-        "Only Markdown files open in the drawer.",
+    frame(&mut window, &ctx, area, vec![]);
+    assert_eq!(
+        crate::sidebar::active(&window),
+        Some(crate::sidebar::Tool::Document)
     );
-    assert_eq!(crate::sidebar::active(&window), None);
+    assert!(crate::viewer::shows_as_code(
+        &window,
+        &directory.0.join("docs/notes.txt")
+    ));
     assert_eq!(
         window.explorer.navigation[&pane].selected,
         Some(directory.0.join("docs/notes.txt"))

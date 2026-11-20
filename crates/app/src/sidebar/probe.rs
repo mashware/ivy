@@ -101,7 +101,7 @@ pub(crate) fn inject(window: &mut crate::Window, raw: &mut egui::RawInput, ctx: 
     let started = std::time::Instant::now();
     let active = window.sidebar.active;
     let last_consoles = window.sidebar.last_consoles;
-    let markdown_button = button(window, super::Tool::Markdown);
+    let markdown_button = button(window, super::Tool::Document);
     let board_button = button(window, super::Tool::Board);
     let last_dock = window.sidebar.last_dock;
     let Some(probe) = &mut window.sidebar.probe else {
@@ -134,7 +134,7 @@ pub(crate) fn inject(window: &mut crate::Window, raw: &mut egui::RawInput, ctx: 
     } else {
         probe.last_active = Some(active);
     }
-    if let Some(dock) = last_dock.filter(|_| active == Some(super::Tool::Markdown)) {
+    if let Some(dock) = last_dock.filter(|_| active == Some(super::Tool::Document)) {
         let height = dock.height();
         if height > 0.0 {
             if probe.minimum_height == 0.0 || height < probe.minimum_height {
@@ -163,7 +163,7 @@ pub(crate) fn inject(window: &mut crate::Window, raw: &mut egui::RawInput, ctx: 
             probe.stage = Stage::PressDivider;
         }
         Stage::PressDivider => {
-            if let Some(dock) = last_dock.filter(|_| active == Some(super::Tool::Markdown)) {
+            if let Some(dock) = last_dock.filter(|_| active == Some(super::Tool::Document)) {
                 let pos = egui::pos2(dock.center().x, dock.top() - super::DIVIDER / 2.0);
                 pointer(raw, pos, true);
                 probe.stage = Stage::MoveDivider;

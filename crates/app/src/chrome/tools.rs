@@ -6,7 +6,7 @@ use eframe::egui::{self, Color32, Rect};
 
 /// The tool a title-bar button opens, read from its hover text (the Board's carries its chord).
 pub(super) fn tool_of(hint: &str) -> Option<Tool> {
-    [Tool::Files, Tool::Markdown, Tool::Board]
+    [Tool::Files, Tool::Document, Tool::Board]
         .into_iter()
         .find(|tool| hint.starts_with(tool.label()))
 }
@@ -32,7 +32,7 @@ pub(super) fn show(
     let places = [
         (Tool::Files, "Files".to_owned(), slots.files),
         (Tool::Board, board, slots.board),
-        (Tool::Markdown, "Markdown".to_owned(), slots.markdown),
+        (Tool::Document, "File".to_owned(), slots.markdown),
     ];
     let mut action = None;
     let mut painted = Vec::new();

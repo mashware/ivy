@@ -24,6 +24,46 @@ fn viewers_name_the_frame_work_they_remove() {
     );
 }
 
+/// A code file an agent rewrites shows its new text within the refresh, without reopening it.
+#[test]
+fn an_open_code_file_follows_its_rewrites() {
+    let mut nonce = [0; 8];
+    getrandom::fill(&mut nonce).unwrap();
+    let dir =
+        Directory(std::env::temp_dir().join(format!("viewer-code-{}", u64::from_ne_bytes(nonce))));
+    std::fs::create_dir(&dir.0).unwrap();
+    let file = dir.0.join("lib.rs");
+    std::fs::write(&file, "fn before() {}\n").unwrap();
+    let ctx = egui::Context::default();
+    let mut state = State::default();
+    state.open(Kind::Code);
+    state.open = true;
+    state.path = file.to_string_lossy().into_owned();
+    state.start(&ctx);
+    let shown = |state: &State| state.loaded.as_ref().map(|loaded| loaded.text.clone());
+    let wait_for = |state: &mut State, text: &str| {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while shown(state).as_deref() != Some(text) {
+            assert!(
+                Instant::now() < deadline,
+                "{:?} / {}",
+                shown(state),
+                state.message
+            );
+            state.poll(&ctx);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    };
+    wait_for(&mut state, "fn before() {}\n");
+    assert!(
+        state.loaded.as_ref().unwrap().code.is_some(),
+        "a .rs file is read as code"
+    );
+    std::fs::write(&file, "fn after() {}\n").unwrap();
+    wait_for(&mut state, "fn after() {}\n");
+    assert_eq!(state.requested, Some((file, Kind::Code)));
+}
+
 #[test]
 fn work_in_both_viewer_banks_counts_as_one_application_frame() {
     let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
@@ -106,6 +146,7 @@ fn background_refresh_does_not_move_or_hide_the_markdown() {
     state.loaded = Some(Loaded {
         text: text.into(),
         markdown: Some(markdown::MarkdownDocument::parse(text).unwrap()),
+        code: None,
         diff: None,
     });
     frame(&mut state, &ctx);
@@ -394,7 +435,7 @@ fn the_strip_switches_tabs_and_the_diff_layout_where_it_paints_them() {
     };
     assert_eq!(
         crate::sidebar::active(&window),
-        Some(crate::sidebar::Tool::Markdown)
+        Some(crate::sidebar::Tool::Document)
     );
     let changes = place(&window, StripAction::Changes);
     click_at(&mut window, &ctx, area, changes);
