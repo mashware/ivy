@@ -59,6 +59,7 @@ pub use launch::enable as enable_scope_launcher;
 mod links;
 pub mod measure;
 pub mod mouse;
+mod opener;
 mod opening;
 pub mod painter;
 pub mod panel;

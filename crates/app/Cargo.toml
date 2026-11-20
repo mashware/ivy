@@ -150,12 +150,27 @@ arboard = { version = "3.6.1", default-features = false }
 # Data-control owns its connection and completes seat setup before accepting operations;
 # unsupported compositors can use arboard's X11/XWayland fallback.
 arboard = { version = "3.6.1", default-features = false, features = ["wayland-data-control"] }
+# Showing a file selected in the desktop's file manager: the `FileManager1` bus service, called
+# without starting a process whose arguments would need quoting (D109). The same three crates, at the
+# same versions and features, that `term-core` already compiles for its scope placement.
+zbus = { version = "5.13", default-features = false, features = ["async-io"] }
+async-io = "2"
+futures-lite = "2"
 
-# A file's identity (volume serial number and file index), which std's Windows `MetadataExt` keeps
-# behind an unstable feature, and the flag that opens a link instead of its target (D108). 0.61 is
-# already in the lock.
+# Two uses, one table. A file's identity (volume serial number and file index), which std's Windows
+# `MetadataExt` keeps behind an unstable feature, and the flag that opens a link instead of its
+# target (D108). And opening a file with its default application and showing it in Explorer,
+# through the shell's own calls rather than a command line `cmd` would read (D109). 0.61 is already
+# in the lock; only its features are named.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_System_Registry",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
+] }
 
 # Centring macOS's own window buttons in the integrated header (`chrome/traffic_lights.rs`). All
 # three are already in the tree through eframe at these versions; only their features are named.

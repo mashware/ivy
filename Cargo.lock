@@ -116,10 +116,12 @@ name = "app"
 version = "0.1.0-alpha.14"
 dependencies = [
  "arboard",
+ "async-io",
  "dunce",
  "eframe",
  "egui-phosphor",
  "fontique",
+ "futures-lite",
  "getrandom 0.3.4",
  "harfrust",
  "host-load",
@@ -144,6 +146,7 @@ dependencies = [
  "webbrowser",
  "windows-sys 0.61.2",
  "winit",
+ "zbus",
 ]
 
 [[package]]
