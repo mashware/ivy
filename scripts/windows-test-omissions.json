@@ -102,37 +102,37 @@
   {
     "binary": "app/app:lib",
     "name": "client_attestation::programs::tests::desktop_path_discovers_native_claude_in_its_user_installation",
-    "reason": "unix-only: exercises Unix resolver-child lifetime, process groups and pipe EOF"
+    "reason": "unix-only: exercises Unix native client discovery and process identity"
   },
   {
     "binary": "app/app:lib",
     "name": "client_attestation::programs::tests::explicit_path_keeps_precedence_over_native_claude_installation",
-    "reason": "unix-only: exercises Unix resolver-child lifetime, process groups and pipe EOF"
+    "reason": "unix-only: exercises Unix native client discovery and process identity"
   },
   {
     "binary": "app/app:lib",
     "name": "client_attestation::programs::tests::native_claude_fallback_refuses_scripts_missing_or_relative_home",
-    "reason": "unix-only: exercises Unix resolver-child lifetime, process groups and pipe EOF"
+    "reason": "unix-only: exercises Unix native client discovery and process identity"
   },
   {
     "binary": "app/app:lib",
     "name": "client_attestation::programs::tests::native_claude_version_symlink_is_discovered_with_colon_in_home",
-    "reason": "unix-only: exercises Unix resolver-child lifetime, process groups and pipe EOF"
+    "reason": "unix-only: exercises Unix native client discovery and process identity"
   },
   {
     "binary": "app/app:lib",
     "name": "client_attestation::programs::tests::native_fallback_does_not_discover_other_clients_or_nonexecutables",
-    "reason": "unix-only: exercises Unix resolver-child lifetime, process groups and pipe EOF"
+    "reason": "unix-only: exercises Unix native client discovery and process identity"
   },
   {
     "binary": "app/app:lib",
     "name": "client_attestation::programs::tests::trusted_path_discards_empty_and_relative_entries",
-    "reason": "unix-only: exercises Unix resolver-child lifetime, process groups and pipe EOF"
+    "reason": "unix-only: exercises Unix native client discovery and process identity"
   },
   {
     "binary": "app/app:lib",
     "name": "client_attestation::programs::tests::unsupported_path_client_does_not_fall_back_to_another_installation",
-    "reason": "unix-only: exercises Unix resolver-child lifetime, process groups and pipe EOF"
+    "reason": "unix-only: exercises Unix native client discovery and process identity"
   },
   {
     "binary": "app/app:lib",
