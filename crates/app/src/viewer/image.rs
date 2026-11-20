@@ -1555,7 +1555,9 @@ mod tests {
             if let Some(rect) = image_rect(&painted(&mut window, &ctx, vec![])) {
                 break rect;
             }
-            assert!(started.elapsed() < Duration::from_secs(5));
+            // A hang guard, not a speed claim: this 2400×1600 debug decode takes seconds under
+            // the full suite's load, like the one `window_with_image` waits for.
+            assert!(started.elapsed() < Duration::from_secs(30));
             std::thread::sleep(Duration::from_millis(5));
         };
         assert!(ctx.input(|i| i.pointer.middle_down()));
