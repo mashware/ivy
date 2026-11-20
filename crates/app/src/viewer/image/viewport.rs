@@ -10,12 +10,9 @@ pub(super) const LARGEST: f32 = 32.0;
 /// The scale that fits an image `width` pixels wide into `room` points, never enlarging it past
 /// one physical pixel per pixel: a screenshot shown larger than it was taken only blurs.
 pub(super) fn fit(room: f32, width: f32, pixels_per_point: f32) -> f32 {
-    let fitted = (room / width.max(1.0)).min(1.0 / pixels_per_point);
-    if fitted.is_finite() {
-        fitted.clamp(SMALLEST, LARGEST)
-    } else {
-        SMALLEST
-    }
+    (room / width.max(1.0))
+        .min(1.0 / pixels_per_point)
+        .clamp(SMALLEST, LARGEST)
 }
 
 /// The scale and offset after zooming by `factor`, keeping the point of the image of `size`
@@ -44,8 +41,7 @@ pub(super) fn zoom_around(
 /// belongs whole inside the view, but a zoom around the pointer may have carried it across an
 /// edge: with `before`, where it was, it may stay as far out as that and only come back, so a zoom
 /// (`before` = `offset`) never moves it and a pan never pushes it further out. Without `before`, as
-/// when the view changed size, it is put whole inside. A value that is not finite goes back to the
-/// corner.
+/// when the view changed size, it is put whole inside.
 pub(super) fn clamp(
     offset: egui::Vec2,
     before: Option<egui::Vec2>,
@@ -54,9 +50,6 @@ pub(super) fn clamp(
 ) -> egui::Vec2 {
     let axis = |offset: f32, before: Option<f32>, shown: f32, view: f32| {
         let spare = shown - view;
-        if !offset.is_finite() || !spare.is_finite() {
-            return 0.0;
-        }
         let (mut low, mut high) = (spare.min(0.0), spare.max(0.0));
         if let Some(before) = before.filter(|b| spare <= 0.0 && b.is_finite()) {
             (low, high) = (low.min(before), high.max(before));

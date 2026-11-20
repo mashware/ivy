@@ -258,7 +258,7 @@ impl Viewer {
         if let Some(hand) = hand {
             ui.ctx().set_cursor_icon(hand);
         }
-        ui.painter_at(view).image(
+        ui.painter().image(
             texture.id(),
             egui::Rect::from_min_size(view.min - *offset, size * scale),
             egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
