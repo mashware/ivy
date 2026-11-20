@@ -264,8 +264,12 @@ impl Viewer {
         let (mut moved, hand) = ui.input(|i| viewport::pan(i, over_image, view, space, panning));
         let shown = size * scale;
         if over.is_some() {
-            let wheel = ui.input_mut(|i| std::mem::take(&mut i.smooth_scroll_delta));
-            moved += viewport::wheel(wheel, *offset, shown, room);
+            // Only the axes applied are taken; the rest stays for whoever reads the wheel later.
+            moved += ui.input_mut(|i| {
+                let taken = viewport::wheel(i.smooth_scroll_delta, *offset, shown, room);
+                i.smooth_scroll_delta -= taken;
+                taken
+            });
         }
         *offset = viewport::clamp(*offset - moved, Some(*offset), shown, room);
         *seen = Some((room, scale));
@@ -1893,6 +1897,38 @@ mod tests {
         let back = settle(&mut window, &ctx);
         assert!(back.top() > zoomed.top(), "{zoomed:?} -> {back:?}");
         assert_eq!(back.size(), zoomed.size());
+    }
+
+    /// A wheel turned on both axes over an image taller than the drawer and narrower than it moves
+    /// it down and takes only that axis: the sideways part is left for whoever reads the wheel
+    /// later in the frame.
+    #[test]
+    fn the_image_takes_only_the_wheel_axes_it_applies() {
+        let folder = Folder::new();
+        let path = folder.0.join("tall.png");
+        write_png(&path, 600, 4800);
+        let (mut window, ctx, _) = window_with_image(&path);
+        let before = settle(&mut window, &ctx);
+        let dock = window.sidebar.last_dock.unwrap();
+        assert!(
+            before.width() < dock.width() && before.height() > dock.height(),
+            "{before:?} in {dock:?}"
+        );
+        let at = egui::pos2(before.center().x, dock.center().y);
+        let mut left = egui::Vec2::ZERO;
+        let mut events = plain_wheel(at, egui::vec2(3.0, -3.0));
+        let mut after = None;
+        for _ in 0..30 {
+            let output = pass_with(&mut window, &ctx, std::mem::take(&mut events), |ctx| {
+                left += ctx.input(|i| i.smooth_scroll_delta);
+            });
+            after = image_rect(&output.shapes);
+        }
+        let after = after.unwrap();
+        assert!(after.top() < before.top(), "{before:?} -> {after:?}");
+        assert_eq!(after.left(), before.left());
+        assert_eq!(left.y, 0.0, "the applied axis was left for later");
+        assert!(left.x > 0.0, "the axis not applied was taken: {left:?}");
     }
 
     /// The wheel does not slide an image smaller than the drawer on either axis.
