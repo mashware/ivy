@@ -4519,14 +4519,21 @@ mod tests {
         (shapes, delay)
     }
 
-    /// The alpha of every header icon painted inside `cells`.
+    /// The alpha of every header icon and group rule painted inside `cells`.
     fn icon_alphas(shapes: &[egui::epaint::ClippedShape], cells: egui::Rect) -> Vec<u8> {
-        shapes
+        let icons = shapes
             .iter()
             .filter_map(|s| crate::ui::icons::painted_icon(&s.shape))
             .filter(|(_, _, square)| cells.contains(square.center()))
-            .map(|(_, color, _)| color.a())
-            .collect()
+            .map(|(_, color, _)| color.a());
+        let rules = shapes.iter().filter_map(|s| match &s.shape {
+            egui::Shape::LineSegment { points, stroke } if cells.contains(points[0]) => {
+                Some(stroke.color.a())
+            }
+            _ => None,
+        });
+        let alphas: Vec<u8> = icons.chain(rules).collect();
+        alphas
     }
 
     fn whole(alphas: &[u8]) -> bool {
@@ -4633,6 +4640,75 @@ mod tests {
             window.active().panes().len(),
             3,
             "a fading split did not split its console"
+        );
+    }
+
+    /// Near the end of the fade a control is too faint to be aimed at, and a press there is the
+    /// title's: it focuses the console and closes nothing.
+    #[test]
+    fn a_control_too_faint_to_see_does_not_answer() {
+        let (ctx, mut window, area) = lingering_pair(true);
+        let names = names_in_order(&window);
+        let close = control(&window, &ctx, area, 0, 12.5);
+        let other = pane_rect(&window, &ctx, area, names[1]).center();
+        let at = |window: &mut Window, time, events| {
+            timed_pass(window, &ctx, area, time, events);
+        };
+        at(&mut window, 10.0, click_at(other));
+        for time in [12.0, 13.0, 13.4, 13.44] {
+            at(&mut window, time, vec![]);
+        }
+        at(&mut window, 13.45, click_at(close));
+        at(&mut window, 13.46, vec![]);
+        assert_eq!(
+            window.active().panes().len(),
+            2,
+            "a close at a tenth of its opacity closed the console"
+        );
+    }
+
+    /// A console whose header was not painted for a while — its tab in the background — comes back
+    /// without lingering controls nobody saw leave.
+    #[test]
+    fn a_header_back_from_a_background_tab_does_not_linger() {
+        let ctx = egui::Context::default();
+        crate::fonts::install_icons_only(&ctx);
+        crate::pane_view::allow_focus_fades(&ctx, true);
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        window.chrome.enable();
+        window.headers = window.headers.integrated(true);
+        window.blink.ceiling = Some(false);
+        let area = tall_area();
+        timed_pass(&mut window, &ctx, area, 0.0, vec![]);
+        let title = control(&window, &ctx, area, 1, 300.0);
+        let body = pane_rect(&window, &ctx, area, names_in_order(&window)[1]).center();
+        let cells = control_cells(&window, &ctx, area, 1);
+        let (seen, _) = timed_pass(
+            &mut window,
+            &ctx,
+            area,
+            0.1,
+            vec![egui::Event::PointerMoved(title)],
+        );
+        assert!(
+            whole(&icon_alphas(&seen, cells)),
+            "the hover did not show them"
+        );
+        window.active = 1;
+        for time in [1.0, 2.0] {
+            timed_pass(&mut window, &ctx, area, time, vec![]);
+        }
+        window.active = 0;
+        let (back, _) = timed_pass(
+            &mut window,
+            &ctx,
+            area,
+            60.0,
+            vec![egui::Event::PointerMoved(body)],
+        );
+        assert!(
+            icon_alphas(&back, cells).is_empty(),
+            "controls nobody saw leave came back lingering"
         );
     }
 

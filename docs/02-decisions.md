@@ -10604,17 +10604,21 @@ of the base and not dropped before the title when narrow — the label-only thre
 25-point cell, and the splits still go first.
 
 **Amended 20 November 2026 — #157.** Controls nobody wants any more **linger, then fade**. The owner
-found them vanishing on the very pass the console lost focus or the pointer left its header
-abrupt. Now they stay whole for 3 s and fade to nothing over 0.5 s; appearing is still immediate.
+found it abrupt that they vanished on the very pass the console lost focus or the pointer left its
+header. Now they stay whole for 3 s and fade to nothing over 0.5 s; appearing is still immediate.
 
 - **The countdown starts on the first pass that finds them unwanted.** Not at the last pass that
   wanted them: a window at rest paints nothing, so that stamp can be seconds old when a click on
   another console finally arrives, and the controls would vanish on the spot. A design challenger
   found this before any code existed.
-- **What shows answers.** The controls are registered, painted and recorded as painted while any
-  opacity is left, so the rule above — pressable only where painted in the previous pass — holds
-  through the wait and the fade. Focus or the pointer coming back makes them wanted again, whole on
-  that pass. The double-click guard is untouched: it concerns controls that were not painted.
+- **What shows answers.** The controls are recorded as painted — and so pressable, by the rule
+  above — through the wait and the fade until they drop below a quarter of their opacity; the
+  last stretch of the fade is painted but answers no press, because an icon that faint is one
+  nobody aims at, and a quick move-and-click could otherwise reach a close nobody saw. The review
+  found that case. Focus or the pointer coming back makes them wanted again, whole on that pass.
+  The double-click guard is untouched: it concerns controls that were not painted.
+- **Only what was seen leaving lingers.** A header that went unpainted (its tab in the background,
+  a sibling behind a maximized console) does not start a countdown when it comes back.
 - **Rest.** The wait asks to be woken once, at its end; the fade asks for every frame for half a
   second; after it nothing is asked. The header span now also paints the headers that are
   lingering or fading.
