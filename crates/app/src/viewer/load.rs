@@ -4,6 +4,7 @@ use std::fs::OpenOptions;
 use std::io::{ErrorKind, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 use std::time::Duration;
@@ -14,6 +15,8 @@ const MARKDOWN_LIMIT: usize = 1024 * 1024;
 const CODE_LIMIT: usize = 1024 * 1024;
 /// How far into a file a NUL byte is looked for before it is called binary.
 const BINARY_SNIFF: usize = 8 * 1024;
+const IMAGE_LIMIT: usize = 32 * 1024 * 1024;
+const DECODE_LIMIT: u64 = 256 * 1024 * 1024;
 const DIFF_LIMIT: usize = 4 * 1024 * 1024;
 const STDERR_LIMIT: usize = 64 * 1024;
 const GIT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -51,9 +54,15 @@ pub(super) struct Loaded {
     pub(super) diff: Option<super::diff::Document>,
 }
 
-pub(super) struct Job {
-    receiver: Receiver<Result<Loaded, String>>,
+pub(super) struct Job<T = Loaded> {
+    receiver: Receiver<Result<T, String>>,
     finished: Cell<bool>,
+}
+
+/// What the image viewer shows: the decoded file, and the copy the GPU can take.
+pub(crate) struct Picture {
+    pub(super) original: Arc<image::RgbaImage>,
+    pub(super) display: egui::ColorImage,
 }
 
 impl Job {
@@ -68,47 +77,46 @@ impl Job {
         base: String,
         ctx: egui::Context,
     ) -> Result<Self, String> {
-        let (sender, receiver) = mpsc::channel();
-        thread::Builder::new()
-            .name("viewer-loader".into())
-            .spawn(move || {
-                let result = std::panic::catch_unwind(|| match kind {
-                    Kind::Markdown => read_markdown(&path).and_then(|text| {
-                        let markdown = Some(super::markdown::MarkdownDocument::parse(&text)?);
-                        Ok(Loaded {
-                            text,
-                            markdown,
-                            code: None,
-                            diff: None,
-                        })
-                    }),
-                    Kind::Code => read_text(&path).map(|text| Loaded {
-                        code: Some(super::code::CodeDocument::parse(&path, &text)),
-                        text,
-                        markdown: None,
-                        diff: None,
-                    }),
-                    Kind::Unstaged | Kind::Staged | Kind::Local | Kind::AgainstBase => {
-                        load_diff(&path, kind, &base).map(|(text, diff)| Loaded {
-                            text,
-                            markdown: None,
-                            code: None,
-                            diff: Some(diff),
-                        })
-                    }
+        spawn(ctx, move || match kind {
+            Kind::Markdown => read_markdown(&path).and_then(|text| {
+                let markdown = Some(super::markdown::MarkdownDocument::parse(&text)?);
+                Ok(Loaded {
+                    text,
+                    markdown,
+                    code: None,
+                    diff: None,
                 })
-                .unwrap_or_else(|_| Err("Viewer loader failed unexpectedly".into()));
-                let _ = sender.send(result);
-                ctx.request_repaint();
-            })
-            .map_err(|e| format!("Cannot start viewer loader: {e}"))?;
-        Ok(Self {
-            receiver,
-            finished: Cell::new(false),
+            }),
+            Kind::Code => read_text(&path).map(|text| Loaded {
+                code: Some(super::code::CodeDocument::parse(&path, &text)),
+                text,
+                markdown: None,
+                diff: None,
+            }),
+            Kind::Unstaged | Kind::Staged | Kind::Local | Kind::AgainstBase => {
+                load_diff(&path, kind, &base).map(|(text, diff)| Loaded {
+                    text,
+                    markdown: None,
+                    code: None,
+                    diff: Some(diff),
+                })
+            }
         })
     }
+}
 
-    pub(super) fn poll(&self) -> Option<Result<Loaded, String>> {
+impl Job<Picture> {
+    pub(super) fn image(
+        path: PathBuf,
+        max_side: usize,
+        ctx: egui::Context,
+    ) -> Result<Self, String> {
+        spawn(ctx, move || decode_image(&path, max_side))
+    }
+}
+
+impl<T> Job<T> {
+    pub(super) fn poll(&self) -> Option<Result<T, String>> {
         if self.finished.get() {
             return None;
         }
@@ -120,6 +128,51 @@ impl Job {
         self.finished.set(true);
         Some(result)
     }
+}
+
+fn spawn<T: Send + 'static>(
+    ctx: egui::Context,
+    work: impl FnOnce() -> Result<T, String> + Send + std::panic::UnwindSafe + 'static,
+) -> Result<Job<T>, String> {
+    let (sender, receiver) = mpsc::channel();
+    thread::Builder::new()
+        .name("viewer-loader".into())
+        .spawn(move || {
+            let result = std::panic::catch_unwind(work)
+                .unwrap_or_else(|_| Err("Viewer loader failed unexpectedly".into()));
+            let _ = sender.send(result);
+            ctx.request_repaint();
+        })
+        .map_err(|e| format!("Cannot start viewer loader: {e}"))?;
+    Ok(Job {
+        receiver,
+        finished: Cell::new(false),
+    })
+}
+
+/// Opens a path a program printed without letting a FIFO or a device block the worker.
+fn open_regular(path: &Path) -> Result<std::fs::File, String> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let file = options
+        .open(path)
+        .map_err(|e| format!("Cannot open file: {e}"))?;
+    let metadata = file
+        .metadata()
+        .map_err(|e| format!("Cannot inspect file: {e}"))?;
+    if metadata.is_dir() {
+        // Files lists a link to a folder as a link and does not follow it (#88).
+        return Err("This is a folder, not a file".into());
+    }
+    if !metadata.is_file() {
+        return Err("The selected path is not a regular file".into());
+    }
+    Ok(file)
 }
 
 fn read_markdown(path: &Path) -> Result<String, String> {
@@ -146,28 +199,63 @@ fn read_text(path: &Path) -> Result<String, String> {
         .unwrap_or(text))
 }
 
-fn open_regular(path: &Path) -> Result<std::fs::File, String> {
-    let mut options = OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NONBLOCK);
+/// Decodes a PNG or JPEG once, keeping the original and a copy no side of which exceeds
+/// `max_side`, the largest texture the GPU takes.
+fn decode_image(path: &Path, max_side: usize) -> Result<Picture, String> {
+    use image::{ImageDecoder, ImageFormat, ImageReader};
+    let bytes = read_bounded(open_regular(path)?, IMAGE_LIMIT)
+        .map_err(|e| format!("Cannot read image: {e}"))?;
+    let mut reader = ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|e| format!("Cannot read image: {e}"))?;
+    if !matches!(reader.format(), Some(ImageFormat::Png | ImageFormat::Jpeg)) {
+        return Err("This file is not a PNG or JPEG image".into());
     }
-    let file = options
-        .open(path)
-        .map_err(|e| format!("Cannot open file: {e}"))?;
-    let metadata = file
-        .metadata()
-        .map_err(|e| format!("Cannot inspect file: {e}"))?;
-    if metadata.is_dir() {
-        // Files lists a link to a folder as a link and does not follow it (#88).
-        return Err("This is a folder, not a file".into());
+    let mut limits = image::Limits::default();
+    limits.max_alloc = Some(DECODE_LIMIT);
+    reader.limits(limits.clone());
+    let failed = |e: image::ImageError| match e {
+        image::ImageError::Limits(_) => {
+            "This image needs more memory than the viewer allows".into()
+        }
+        e => format!("Cannot decode image: {e}"),
+    };
+    let mut decoder = reader.into_decoder().map_err(failed)?;
+    let (width, height) = decoder.dimensions();
+    // `into_rgba8` allocates a second buffer the decoder's own accounting never sees.
+    if decoder.color_type() != image::ColorType::Rgba8 {
+        limits
+            .reserve(u64::from(width) * u64::from(height) * 4)
+            .map_err(failed)?;
     }
-    if !metadata.is_file() {
-        return Err("The selected path is not a regular file".into());
-    }
-    Ok(file)
+    limits.reserve(decoder.total_bytes()).map_err(failed)?;
+    decoder.set_limits(limits).map_err(failed)?;
+    let original = image::DynamicImage::from_decoder(decoder)
+        .map_err(failed)?
+        .into_rgba8();
+    let side = original.width().max(original.height()) as usize;
+    let color = |image: &image::RgbaImage| {
+        egui::ColorImage::from_rgba_unmultiplied(
+            [image.width() as usize, image.height() as usize],
+            image.as_raw(),
+        )
+    };
+    let display = if side > max_side {
+        let scale = max_side as f64 / side as f64;
+        let fit = |n: u32| ((f64::from(n) * scale).floor() as u32).max(1);
+        color(&image::imageops::resize(
+            &original,
+            fit(original.width()),
+            fit(original.height()),
+            image::imageops::FilterType::Triangle,
+        ))
+    } else {
+        color(&original)
+    };
+    Ok(Picture {
+        original: Arc::new(original),
+        display,
+    })
 }
 
 fn read_bounded(reader: impl Read, limit: usize) -> std::io::Result<Vec<u8>> {
@@ -717,6 +805,127 @@ mod tests {
         }
         assert!(Kind::Code.is_document() && Kind::Markdown.is_document());
         assert!(!Kind::Local.is_document() && !Kind::AgainstBase.is_document());
+    }
+
+    /// A PNG that is its header and a truncated first data chunk: enough for the decoder to learn
+    /// its size, and nothing a decode could finish.
+    fn png_header(width: u32, height: u32, color: u8) -> Vec<u8> {
+        fn crc(bytes: &[u8]) -> u32 {
+            let mut c = !0u32;
+            for &b in bytes {
+                c ^= u32::from(b);
+                for _ in 0..8 {
+                    c = if c & 1 != 0 {
+                        0xEDB8_8320 ^ (c >> 1)
+                    } else {
+                        c >> 1
+                    };
+                }
+            }
+            !c
+        }
+        let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
+        let mut chunk = b"IHDR".to_vec();
+        chunk.extend(width.to_be_bytes());
+        chunk.extend(height.to_be_bytes());
+        chunk.extend([8, color, 0, 0, 0]);
+        out.extend(13u32.to_be_bytes());
+        out.extend(&chunk);
+        out.extend(crc(&chunk).to_be_bytes());
+        let data = b"IDAT\x78\x9c";
+        out.extend(2u32.to_be_bytes());
+        out.extend(data);
+        out.extend(crc(data).to_be_bytes());
+        out.extend(0u32.to_be_bytes());
+        out.extend(b"IEND");
+        out.extend(crc(b"IEND").to_be_bytes());
+        out
+    }
+
+    #[test]
+    fn an_image_that_is_not_a_regular_png_or_jpeg_within_the_size_cap_says_why() {
+        let temp = Temp::new();
+        assert!(
+            decode_image(&temp.0, 4096)
+                .err()
+                .unwrap()
+                .contains("not a regular file")
+        );
+        let large = temp.0.join("large.png");
+        fs::File::create(&large)
+            .unwrap()
+            .set_len(IMAGE_LIMIT as u64 + 1)
+            .unwrap();
+        assert!(
+            decode_image(&large, 4096)
+                .err()
+                .unwrap()
+                .contains("size limit")
+        );
+        for (name, bytes) in [
+            ("text.png", b"not an image at all".to_vec()),
+            ("anim.png", b"GIF89a\x01\x00\x01\x00\x00\x00\x00;".to_vec()),
+        ] {
+            let path = temp.0.join(name);
+            fs::write(&path, bytes).unwrap();
+            assert_eq!(
+                decode_image(&path, 4096).err().unwrap(),
+                "This file is not a PNG or JPEG image",
+                "{name}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_fifo_named_like_an_image_is_refused_without_blocking() {
+        let temp = Temp::new();
+        let fifo = temp.0.join("shot.png");
+        let name = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        assert!(
+            decode_image(&fifo, 4096)
+                .err()
+                .unwrap()
+                .contains("not a regular file")
+        );
+    }
+
+    /// Both sizes sit between this viewer's cap and the library's own default of 512 MiB, so only
+    /// the viewer's cap refuses them; the RGB one fits that cap until its RGBA copy is counted.
+    #[test]
+    fn a_decode_over_the_allocation_cap_is_refused_before_it_runs() {
+        let temp = Temp::new();
+        for (name, width, color) in [("rgba.png", 9000, 6), ("rgb.png", 8000, 2)] {
+            let path = temp.0.join(name);
+            fs::write(&path, png_header(width, width, color)).unwrap();
+            assert_eq!(
+                decode_image(&path, 4096).err().unwrap(),
+                "This image needs more memory than the viewer allows",
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_display_copy_fits_the_texture_side_and_the_original_keeps_its_size() {
+        let temp = Temp::new();
+        let png = temp.0.join("shot.png");
+        image::RgbaImage::from_pixel(300, 120, image::Rgba([10, 20, 30, 255]))
+            .save_with_format(&png, image::ImageFormat::Png)
+            .unwrap();
+        let picture = decode_image(&png, 100).unwrap();
+        assert_eq!(picture.original.dimensions(), (300, 120));
+        assert_eq!(picture.display.size, [100, 40]);
+        assert_eq!(decode_image(&png, 300).unwrap().display.size, [300, 120]);
+        let jpeg = temp.0.join("photo.JPG");
+        image::RgbImage::from_pixel(64, 32, image::Rgb([200, 100, 50]))
+            .save_with_format(&jpeg, image::ImageFormat::Jpeg)
+            .unwrap();
+        assert_eq!(
+            decode_image(&jpeg, 4096).unwrap().original.dimensions(),
+            (64, 32)
+        );
     }
 
     #[cfg(unix)]

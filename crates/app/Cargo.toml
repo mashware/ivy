@@ -134,7 +134,14 @@ harfrust = "0.12"
 # `image/png → arboard → egui-winit → eframe → app`. It is the same argument that justifies `serde`
 # with `derive` above: the root manifest's policy reasons about **what enters the tree**, not about
 # how many lines the manifest has.
-image = { version = "0.25", default-features = false, features = ["png"] }
+#
+# **And to decode the screenshots a console's program prints**, which arrive as PNG or JPEG. `jpeg`
+# is the one feature this adds, and it compiles two packages on Linux and Windows: `zune-jpeg` and
+# `zune-core`, pure Rust with no system library. On macOS they were already compiled, because the
+# clipboard's `image/tiff` pulls them in there — checked with
+# `cargo tree -p app --target aarch64-apple-darwin -e normal -i tiff`, which gives
+# `tiff → image → arboard`, and the same for `x86_64-pc-windows-msvc`, which prints nothing.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
 # The interface's icons: Phosphor Regular and its codepoints (D103). Only the face and the constants
 # are used — never `add_to_fonts`, which puts the face in the proportional chain where its blank
