@@ -716,7 +716,7 @@ clicking it; a maximized drawer takes Space without a click. A plain left drag n
 image. A touch screen zooms it with two fingers and does not move it: on Linux, macOS and Windows
 a touch reaches the terminal as touches and never as a scroll, and a one-finger drag is the plain
 left drag. A wheel over a menu
-open above the image belongs to that menu. On GNOME with "disable
+open above the image, and a drag begun on it, belong to that menu. On GNOME with "disable
 touchpad while typing" on, which is the default, holding Space blocks touchpad clicks, so with a
 touchpad the image is moved with two fingers and zoomed with Ctrl + two fingers. While one image is
 still being read, opening another says so instead of starting a second read. Only empty authorities,
