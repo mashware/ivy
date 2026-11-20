@@ -50,6 +50,8 @@ pub(crate) struct State {
     message: String,
     refresh_at: Option<Instant>,
     keyboard: bool,
+    /// Whether the Space held now was pressed while the drawer held the keys.
+    space: bool,
     held: bool,
     blocked_frame: Option<u64>,
     events: Option<Vec<egui::Event>>,
@@ -83,6 +85,7 @@ impl Default for State {
             message: String::new(),
             refresh_at: None,
             keyboard: false,
+            space: false,
             held: false,
             blocked_frame: None,
             events: None,
@@ -467,6 +470,10 @@ pub(crate) fn before_keys(
         window.viewer.context = Some(ctx.clone());
         let frame = ctx.cumulative_frame_nr();
         let over = ctx.input(|i| i.pointer.interact_pos().is_some_and(|p| rect.contains(p)));
+        // Read before a press below hands the keys over: a Space a console was given stays its own.
+        let holds = window.viewer.keyboard || window.sidebar.maximized;
+        let held = window.viewer.space;
+        window.viewer.space = ctx.input(|i| image::space_is_ours(i, holds, held));
         if ctx.input(|i| i.pointer.any_pressed()) && !window.viewer.held {
             window.viewer.keyboard = over;
             window.viewer.held = over;

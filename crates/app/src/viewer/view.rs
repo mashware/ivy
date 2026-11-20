@@ -117,7 +117,7 @@ pub(super) fn show(
                     roles.base,
                 );
                 match image {
-                    Some(image) => image.show(&mut body_ui, theme, state.keyboard),
+                    Some(image) => image.show(&mut body_ui, theme, state.space),
                     None => body_content(state, &mut body_ui, theme, unavailable),
                 }
             });

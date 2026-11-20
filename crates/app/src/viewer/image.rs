@@ -30,6 +30,8 @@ pub(crate) struct Viewer {
     /// unresponsive filesystem cannot be cancelled, so its handle is kept and no other decode
     /// starts until it ends: repeated opens cannot pile up readers.
     abandoned: Option<(PathBuf, Job<Picture>)>,
+    /// Whether the drag under way pans the image, decided when its button went down.
+    panning: bool,
 }
 
 struct Opened {
@@ -172,9 +174,9 @@ impl Viewer {
     }
 
     /// Paints the image over the drawer's body: fitted to its width until the person zooms, and
-    /// scrolled with the wheel, the scroll bars, or a drag that pans it. `keyboard` is whether
-    /// the drawer holds the keys, which is when Space belongs to it.
-    pub(super) fn show(&mut self, ui: &mut egui::Ui, theme: crate::theme::Theme, keyboard: bool) {
+    /// scrolled with the wheel, the scroll bars, or a drag that pans it. `space` is whether Space
+    /// is held and the drawer's, which is when Space + left drag pans.
+    pub(super) fn show(&mut self, ui: &mut egui::Ui, theme: crate::theme::Theme, space: bool) {
         let Some(size) = self.size() else {
             let message = self.message();
             egui::Frame::new()
@@ -192,6 +194,7 @@ impl Viewer {
                 });
             return;
         };
+        let panning = &mut self.panning;
         let Some(Opened {
             load: Load::Ready { gpu, .. },
             scale: chosen,
@@ -225,7 +228,8 @@ impl Viewer {
             *chosen = Some(scale);
         }
         let shown = size * scale;
-        let (moved, hand) = ui.input(|i| pan(i, view, keyboard));
+        let grab = without_bars(view, shown, &ui.spacing().scroll);
+        let (moved, hand) = ui.input(|i| pan(i, grab, space, panning));
         *offset = within(*offset - moved, *offset, shown, view.size());
         if let Some(hand) = hand {
             ui.ctx().set_cursor_icon(hand);
@@ -238,6 +242,10 @@ impl Viewer {
         let output = egui::ScrollArea::both()
             .id_salt("drawer-image")
             .auto_shrink(false)
+            .scroll_source(egui::scroll_area::ScrollSource {
+                drag: egui::scroll_area::DragScroll::Never,
+                ..Default::default()
+            })
             .scroll_offset(offset.max(egui::Vec2::ZERO))
             .show(ui, |ui| {
                 let (rect, _) = ui.allocate_exact_size(lead + shown + trail, egui::Sense::hover());
@@ -290,30 +298,70 @@ fn within(
     offset.clamp(low, high)
 }
 
+/// The view less the strips egui's scroll bars take, so a drag on a bar moves the bar alone.
+fn without_bars(
+    view: egui::Rect,
+    shown: egui::Vec2,
+    scroll: &egui::style::ScrollStyle,
+) -> egui::Rect {
+    let strip = scroll.bar_width + scroll.bar_outer_margin;
+    let mut grab = view;
+    if shown.y > view.height() {
+        grab.max.x -= strip;
+    }
+    if shown.x > view.width() {
+        grab.max.y -= strip;
+    }
+    grab
+}
+
 /// How far a pan drag moved the pointer this frame, and the hand the cursor shows. A plain left
 /// drag never pans: marks are drawn with it. Space + left drag is Figma's convention, and the
-/// middle button pans with no key for a mouse that has one; Space is the drawer's only while it
-/// holds the keys, so a Space typed into a console stays that program's.
+/// middle button pans with no key for a mouse that has one. Whether a drag pans is decided when
+/// its button goes down and kept until it is released, so letting Space go halfway through does
+/// not turn the rest into a plain drag.
 fn pan(
     input: &egui::InputState,
-    body: egui::Rect,
-    keyboard: bool,
+    grab: egui::Rect,
+    space: bool,
+    panning: &mut bool,
 ) -> (egui::Vec2, Option<egui::CursorIcon>) {
     let pointer = &input.pointer;
-    let space = keyboard && input.key_down(egui::Key::Space);
-    let started_over = pointer.press_origin().is_some_and(|at| body.contains(at));
-    if started_over && (pointer.middle_down() || (space && pointer.primary_down())) {
-        // The press frame's delta is the travel from wherever the pointer was before it.
-        let moved = if pointer.any_pressed() {
-            egui::Vec2::ZERO
-        } else {
-            pointer.delta()
-        };
-        return (moved, Some(egui::CursorIcon::Grabbing));
+    if pointer.any_pressed() {
+        let over = pointer.press_origin().is_some_and(|at| grab.contains(at));
+        *panning = over
+            && (pointer.button_pressed(egui::PointerButton::Middle)
+                || (space && pointer.button_pressed(egui::PointerButton::Primary)));
+        if *panning {
+            // The press frame's delta is the travel from wherever the pointer was before it.
+            return (egui::Vec2::ZERO, Some(egui::CursorIcon::Grabbing));
+        }
+    } else if *panning && (pointer.middle_down() || pointer.primary_down()) {
+        return (pointer.delta(), Some(egui::CursorIcon::Grabbing));
     }
-    let hovering = pointer.hover_pos().is_some_and(|at| body.contains(at));
+    if !pointer.any_down() {
+        *panning = false;
+    }
+    let hovering = pointer.hover_pos().is_some_and(|at| grab.contains(at));
     let hand = (space && hovering).then_some(egui::CursorIcon::Grab);
     (egui::Vec2::ZERO, hand)
+}
+
+/// Whether the Space held now is the drawer's: it is when it went down while the drawer `holds`
+/// the keys, and stays as it was, `held`, until it is let go.
+pub(super) fn space_is_ours(input: &egui::InputState, holds: bool, held: bool) -> bool {
+    let pressed = input.events.iter().any(|event| {
+        matches!(
+            event,
+            egui::Event::Key {
+                key: egui::Key::Space,
+                pressed: true,
+                repeat: false,
+                ..
+            }
+        )
+    });
+    input.key_down(egui::Key::Space) && if pressed { holds } else { held }
 }
 
 /// The scale that fits an image `width` pixels wide into `room` points, never enlarging it past
@@ -1067,6 +1115,19 @@ mod tests {
         by: egui::Vec2,
     ) -> Vec<egui::CursorIcon> {
         let from = window.sidebar.last_dock.unwrap().center();
+        drag_at(window, ctx, button, from, by, false)
+    }
+
+    /// Drags `button` from `from` by `by` in three steps, letting Space go after the first when
+    /// `let_go` is set, and returns the cursor each moving pass asked for.
+    fn drag_at(
+        window: &mut crate::Window,
+        ctx: &egui::Context,
+        button: egui::PointerButton,
+        from: egui::Pos2,
+        by: egui::Vec2,
+        let_go: bool,
+    ) -> Vec<egui::CursorIcon> {
         let press = |pos, pressed| egui::Event::PointerButton {
             pos,
             button,
@@ -1082,7 +1143,11 @@ mod tests {
         let mut cursors = Vec::new();
         for step in 1..=3 {
             let at = from + by * step as f32 / 3.0;
-            let output = pass(window, ctx, vec![egui::Event::PointerMoved(at)]);
+            let mut events = vec![egui::Event::PointerMoved(at)];
+            if let_go && step == 2 {
+                events.insert(0, space(false));
+            }
+            let output = pass(window, ctx, events);
             cursors.push(output.platform_output.cursor_icon);
         }
         pass(window, ctx, vec![press(from + by, false)]);
@@ -1164,6 +1229,130 @@ mod tests {
         let held = pass(&mut window, &ctx, vec![]);
         assert!(ctx.input(|i| i.key_down(egui::Key::Space)));
         assert_ne!(held.platform_output.cursor_icon, egui::CursorIcon::Grab);
+        // The click hands the drawer the keys; the Space already down stays the console's.
+        let before = settle(&mut window, &ctx);
+        let cursors = drag(
+            &mut window,
+            &ctx,
+            egui::PointerButton::Primary,
+            egui::vec2(-30.0, -45.0),
+        );
+        assert!(ctx.input(|i| i.key_down(egui::Key::Space)));
+        assert!(
+            !cursors.contains(&egui::CursorIcon::Grabbing),
+            "{cursors:?}"
+        );
+        assert_eq!(
+            settle(&mut window, &ctx),
+            before,
+            "a console's Space panned"
+        );
+    }
+
+    /// Once egui has seen a touch its own drag-to-scroll would move the image as well: a pan
+    /// still travels exactly as far as the pointer, and a plain left drag leaves the image.
+    #[test]
+    fn after_a_touch_a_pan_moves_the_image_once_and_a_plain_drag_not_at_all() {
+        let folder = Folder::new();
+        let (mut window, ctx) = zoomed_window(&folder);
+        let touch = |phase| egui::Event::Touch {
+            device_id: egui::TouchDeviceId(1),
+            id: egui::TouchId(1),
+            phase,
+            pos: egui::pos2(2.0, 2.0),
+            force: None,
+        };
+        pass(&mut window, &ctx, vec![touch(egui::TouchPhase::Start)]);
+        pass(&mut window, &ctx, vec![touch(egui::TouchPhase::End)]);
+        assert!(ctx.input(|i| i.has_touch_screen()));
+        let before = settle(&mut window, &ctx);
+        let by = egui::vec2(-30.0, -45.0);
+        drag(&mut window, &ctx, egui::PointerButton::Primary, by);
+        assert_eq!(
+            settle(&mut window, &ctx),
+            before,
+            "a plain left drag scrolled"
+        );
+        drag(&mut window, &ctx, egui::PointerButton::Middle, by);
+        let after = settle(&mut window, &ctx);
+        assert!(
+            (after.min - (before.min + by)).length() < 0.5,
+            "{before:?} -> {after:?}"
+        );
+    }
+
+    /// A drag that started as a pan stays one when Space is let go before the button.
+    #[test]
+    fn letting_space_go_halfway_through_a_pan_keeps_panning() {
+        let folder = Folder::new();
+        let (mut window, ctx) = zoomed_window(&folder);
+        let before = settle(&mut window, &ctx);
+        pass(&mut window, &ctx, vec![space(true)]);
+        let from = window.sidebar.last_dock.unwrap().center();
+        let by = egui::vec2(-30.0, -45.0);
+        let cursors = drag_at(
+            &mut window,
+            &ctx,
+            egui::PointerButton::Primary,
+            from,
+            by,
+            true,
+        );
+        assert_eq!(cursors, [egui::CursorIcon::Grabbing; 3]);
+        let after = settle(&mut window, &ctx);
+        assert!(
+            (after.min - (before.min + by)).length() < 0.5,
+            "{before:?} -> {after:?}"
+        );
+    }
+
+    /// Space + left drag on a scroll bar is the bar's: no hand over it and no pan.
+    #[test]
+    fn a_space_drag_on_a_scroll_bar_leaves_the_pan_to_the_bar() {
+        let folder = Folder::new();
+        let (mut window, ctx) = zoomed_window(&folder);
+        let before = settle(&mut window, &ctx);
+        let dock = window.sidebar.last_dock.unwrap();
+        let bar = egui::pos2(dock.right() - 3.0, dock.center().y);
+        pass(&mut window, &ctx, vec![space(true)]);
+        let hover = pass(&mut window, &ctx, vec![egui::Event::PointerMoved(bar)]);
+        assert_ne!(hover.platform_output.cursor_icon, egui::CursorIcon::Grab);
+        let by = egui::vec2(0.0, 30.0);
+        let cursors = drag_at(
+            &mut window,
+            &ctx,
+            egui::PointerButton::Primary,
+            bar,
+            by,
+            false,
+        );
+        assert!(
+            !cursors.contains(&egui::CursorIcon::Grabbing),
+            "{cursors:?}"
+        );
+        let after = settle(&mut window, &ctx);
+        assert_eq!(after.left(), before.left());
+        assert!(after.top() < before.top(), "{before:?} -> {after:?}");
+    }
+
+    /// A maximized drawer reads every key even when nobody clicked it, so Space is its own there
+    /// and Space + left drag pans.
+    #[test]
+    fn space_pans_a_maximized_drawer_that_was_not_clicked() {
+        let folder = Folder::new();
+        let (mut window, ctx) = zoomed_window(&folder);
+        crate::sidebar::toggle_maximize(&mut window);
+        crate::viewer::blur(&mut window);
+        let before = settle(&mut window, &ctx);
+        pass(&mut window, &ctx, vec![space(true)]);
+        let by = egui::vec2(-30.0, -45.0);
+        let cursors = drag(&mut window, &ctx, egui::PointerButton::Primary, by);
+        assert_eq!(cursors, [egui::CursorIcon::Grabbing; 3]);
+        let after = settle(&mut window, &ctx);
+        assert!(
+            (after.min - (before.min + by)).length() < 0.5,
+            "{before:?} -> {after:?}"
+        );
     }
 
     /// Shift + wheel moves the zoomed image sideways and not down, which egui does on its own.
