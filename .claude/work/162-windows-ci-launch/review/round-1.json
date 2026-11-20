@@ -1,0 +1,55 @@
+{
+  "round": {
+    "tier": "proportional",
+    "effective_size": "M",
+    "agents": {
+      "panel:portability": 1,
+      "panel:windows-core": 1,
+      "contract": 1,
+      "reinforcement:performance": 1,
+      "sweep": 1
+    }
+  },
+  "findings": [
+    {
+      "sources": [
+        "panel:portability"
+      ],
+      "severity": "major",
+      "file": "crates/app/src/lib.rs",
+      "outcome": "fixed"
+    },
+    {
+      "sources": [
+        "panel:windows-core"
+      ],
+      "severity": "blocker",
+      "file": "crates/panel-control/src/listener.rs",
+      "outcome": "fixed"
+    },
+    {
+      "sources": [
+        "panel:windows-core"
+      ],
+      "severity": "blocker",
+      "file": "crates/panel-control/tests/session_helper.rs",
+      "outcome": "fixed"
+    },
+    {
+      "sources": [
+        "contract"
+      ],
+      "severity": "major",
+      "file": "packaging/windows/test-launch.ps1",
+      "outcome": "fixed"
+    },
+    {
+      "sources": [
+        "reinforcement:performance"
+      ],
+      "severity": "minor",
+      "file": "packaging/windows/test-launch.ps1",
+      "outcome": "fixed"
+    }
+  ]
+}

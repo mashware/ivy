@@ -1,0 +1,17 @@
+Changed lines: 5643 over 71 file(s), `137fd3481658`..`a0952cfcc9a3` (base `origin/main`)
+Config read: FLOW.codex.md — FLOW_CONTEXT=unattended: FLOW.unattended.md not found
+review_depth: proportional
+Diff size: L   ·   meta.json.size: M   ·   Effective size: M
+Note: the diff points higher than the recorded size — the work may be misclassified. One line in 06-review.md, not a heavier review.
+Tier: proportional → built-in at `high`, panel: yes
+With the sensitive-surface bump: built-in at `xhigh`, panel always
+Budget: budget_max 12 · fanout_max 4
+Within 10% under a threshold: no
+quality.sensitive_paths matched: none (the key is empty)
+
+Left to you, because a command cannot see it: whether the generic categories apply
+(auth, secrets, payments, personal data, a public contract, a schema change), and
+whether a matched path is a control-flow change or observability only — a log level,
+a metric, a message text gets the review its size already earned. Decide, then record
+which of the two it was. Any deviation from the tier above goes in 06-review.md with
+its reason.

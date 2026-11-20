@@ -1,0 +1,83 @@
+    Checking panel-contract v0.1.0-alpha.14 (/work/repo/crates/panel-contract)
+    Checking term-core v0.1.0-alpha.14 (/work/repo/crates/term-core)
+    Checking panel-control v0.1.0-alpha.14 (/work/repo/crates/panel-control)
+    Checking app v0.1.0-alpha.14 (/work/repo/crates/app)
+error: empty line after doc comment
+   --> crates/app/src/viewer/code_header/tests/window.rs:105:1
+    |
+105 | / /// floats over the drawer, keeps its clicks — the item acts and no console is focused by it.
+106 | |
+    | |_^
+...
+109 |   fn a_folder_of_the_path_shows_in_files_and_the_menu_keeps_its_clicks() {
+    |   -------------------------------------------------------------------- the comment documents this function
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#empty_line_after_doc_comments
+    = note: `-D clippy::empty-line-after-doc-comments` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::empty_line_after_doc_comments)]`
+    = help: if the empty line is unintentional, remove it
+
+error: empty line after doc comment
+   --> crates/app/src/viewer/code_header/tests/window.rs:204:1
+    |
+204 | / /// elsewhere the same folder opens as a new root.
+205 | |
+    | |_^
+...
+208 |   fn a_folder_of_the_path_under_a_linked_root_shows_inside_the_tree() {
+    |   ----------------------------------------------------------------- the comment documents this function
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#empty_line_after_doc_comments
+    = help: if the empty line is unintentional, remove it
+
+error: cannot find macro `windows_unix_omission` in this scope
+   --> crates/app/tests/scope_launch.rs:490:1
+    |
+490 | windows_unix_omission!(
+    | ^^^^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `windows_unix_omission` in this scope
+   --> crates/app/tests/scope_launch.rs:494:1
+    |
+494 | windows_unix_omission!(
+    | ^^^^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `windows_unix_omission` in this scope
+   --> crates/app/tests/scope_launch.rs:498:1
+    |
+498 | windows_unix_omission!(
+    | ^^^^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `windows_unix_omission` in this scope
+   --> crates/app/tests/scope_launch.rs:502:1
+    |
+502 | windows_unix_omission!(
+    | ^^^^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `windows_unix_omission` in this scope
+   --> crates/app/tests/scope_launch.rs:506:1
+    |
+506 | windows_unix_omission!(
+    | ^^^^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `windows_unix_omission` in this scope
+   --> crates/app/tests/scope_launch.rs:510:1
+    |
+510 | windows_unix_omission!(
+    | ^^^^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `windows_unix_omission` in this scope
+   --> crates/app/tests/scope_launch.rs:514:1
+    |
+514 | windows_unix_omission!(
+    | ^^^^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `windows_unix_omission` in this scope
+   --> crates/app/tests/scope_launch.rs:518:1
+    |
+518 | windows_unix_omission!(
+    | ^^^^^^^^^^^^^^^^^^^^^
+
+error: could not compile `app` (test "scope_launch") due to 8 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `app` (lib test) due to 2 previous errors

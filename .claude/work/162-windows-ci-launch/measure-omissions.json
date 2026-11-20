@@ -1,0 +1,32 @@
+[
+  {
+    "binary": "app/app:lib",
+    "name": "measure::tests::two_consoles_of_the_script_take_different_turns_without_clobbering_each_other",
+    "reason": "unix-only: Linux measurement script requires sh and coreutils"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "measure::tests::the_scripts_compare_mode_admits_the_fraction_and_rejects_another_window",
+    "reason": "unix-only: Linux measurement script requires sh and coreutils"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "measure::tests::every_letter_the_script_offers_goes_through_its_batch_allocation",
+    "reason": "unix-only: Linux measurement script requires sh and coreutils"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "measure::tests::project_report_guard_rejects_bad_or_duplicate_records_and_accepts_legacy_comparison",
+    "reason": "unix-only: Linux measurement script requires sh and coreutils"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "measure::tests::sidebar_report_guard_rejects_zero_frames_for_open_and_closed_docks",
+    "reason": "unix-only: Linux measurement script requires sh and coreutils"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "measure::tests::every_pattern_the_script_looks_for_in_the_report_still_extracts_something",
+    "reason": "unix-only: report patterns execute sed and grep"
+  }
+]

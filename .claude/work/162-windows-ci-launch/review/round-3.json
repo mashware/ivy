@@ -1,0 +1,27 @@
+{
+  "round": {
+    "tier": "proportional",
+    "effective_size": "XS",
+    "agents": {
+      "sweep": 1
+    }
+  },
+  "findings": [
+    {
+      "sources": [
+        "sweep"
+      ],
+      "severity": "major",
+      "file": "crates/app/src/tests/context_clipboard.rs",
+      "outcome": "fixed"
+    },
+    {
+      "sources": [
+        "sweep"
+      ],
+      "severity": "nit",
+      "file": "crates/app/src/tests/context_clipboard.rs",
+      "outcome": "fixed"
+    }
+  ]
+}

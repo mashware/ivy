@@ -1,0 +1,5 @@
+    Blocking waiting for file lock on build directory
+    Checking panel-contract v0.1.0-alpha.14 (/work/repo/crates/panel-contract)
+    Checking term-core v0.1.0-alpha.14 (/work/repo/crates/term-core)
+    Checking panel-control v0.1.0-alpha.14 (/work/repo/crates/panel-control)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.48s

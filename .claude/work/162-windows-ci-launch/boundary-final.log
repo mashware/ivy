@@ -1,0 +1,9 @@
+   Compiling app v0.1.0-alpha.14 (/work/repo/crates/app)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.74s
+     Running unittests src/lib.rs (/opt/cargo-target/debug/deps/app-8c07d2856c0d11c7)
+
+running 1 test
+test tests::context_clipboard::tests::menu_paste_uses_current_bracketed_mode_and_holds_overlong_lines ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2020 filtered out; finished in 0.48s
+

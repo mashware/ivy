@@ -1,6 +1,1 @@
-{
-  "phase": "plan",
-  "now": "Study complete; design response applied and one PR planned",
-  "next": "Study approval, then implementation",
-  "attention": "done"
-}
+{"phase": "ship", "attention": "done", "now": "Handed to the orchestrator for draft publication; local checks pass", "next": "Require native Windows CI and launch evidence before merge"}

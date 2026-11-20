@@ -1,19 +1,8 @@
 {
-  "kind": "ask",
-  "id": "162-codex:d983dfab2615",
-  "question": "<!-- flow-study -->\n## What and why\nTicket #162: catch Windows compilation, test and installed-startup regressions before publishing an installer. The design-challenge answer has been applied; this study contains no implementation.\n\n## Acceptance criteria\n- AC1: On windows-2025, both pull_request and workflow_dispatch run `cargo clippy --locked --workspace --all-targets -- -D warnings` and `cargo test --locked --workspace`; either nonzero result fails verification.\n- AC2: Windows-only endpoint/client/metadata/splitting arms and existing windows_startup/windows_paths tests compile and execute; required named witnesses must pass rather than match zero tests.\n- AC3: Output lists every intentionally unsupported Unix-only test by qualified binary/name and reason, plus the exact total including zero. No unsupported boundary test silently returns success; portable tests remain enabled. Pinned Rust 1.97.1 libtest listings must match the checked-in omission inventory on Windows and corresponding real tests on Linux. Reject missing, unexpected and duplicate entries; separately report unrelated ignores.\n- AC4: Launch installed Ivy.exe with all XDG_* and SHELL absent and an empty absolute APPDATA directory. Observe the native window and a working default console through the actual input path, bind its witness to the normal resolver's child executable, retain inherited PATH/ComSpec, close normally with exit 0, and require valid nonempty layout JSON with a saved console at `<APPDATA>/ivy/layout.json`.\n- AC5: Controlled startup crash, shell-spawn failure, suppressed layout saving and deadline overrun each fail the smoke. Installer payload hashes, replacement, uninstall and preference retention continue to pass.\n\n## Design in brief\nAudit tests and helpers individually, preserving portable and Windows-specific coverage. Use explicit ignored Windows counterparts for Unix-only behavior and a compiler-checked inventory/report with negative fixtures. Extend the existing native Windows checks to the full workspace and reuse candidate artifacts for installed startup. Run normal startup and close because measurement mode vetoes persistence. Discover windows by launched PID/title/class; wait on state with a bounded deadline, fail unexpected modal dialogs, and retain diagnostics before cleanup.\nNo unmet ticket dependencies: #161 is already on main at 8380c4e (#179). Base main was inspected at 0429d9ea71534b88703625be6e90563207562a7b.\n\n## MR/PR plan\nWave 1: PR 1 — Verify the Windows workspace and installed application launch. Includes platform fixtures, checked omission accounting, full Windows lint/tests and installed clean-profile launch/lifecycle checks. No predecessor PRs. Indicative estimate: 600 lines, 25 files, size M; correct coverage takes priority over estimates. One coherent verification slice avoids intermediate coverage reductions and an unexecuted driver.\n\n## Schema changes\nnone\n\n## Risks\nNative Windows GUI/ConPTY execution cannot be verified in this Linux study container. No tests or CI jobs ran for this study; implementation must demonstrate Linux regression checks and actual Windows outcomes, including negative controls. Per-test auditing prevents broad gates hiding portable assertions. PID-bound state waits and diagnostics address GUI timing and dialogs. Preserve the existing disposable-runner installer gate and release publication dependencies. Remaining manual keyboard/platform validation in F2.7 is outside this ticket.\n<!-- end flow-study -->",
-  "options": [
-    {
-      "label": "Approve the design and the plan",
-      "recommended": true
-    }
-  ],
-  "free_text": true,
-  "gate": "study_approval",
-  "at": "2026-11-20T19:12:56+00:00",
+  "kind": "blocked",
+  "reason": "the forge refuses refs/ai-hold/*: the CI-changing branch was not pushed",
   "branch": null,
   "head": null,
   "after_study": "recommended",
-  "study": "pending",
   "workflow": "flow"
 }

@@ -1,0 +1,12 @@
+{
+  "round": {
+    "tier": "proportional",
+    "effective_size": "S",
+    "agents": {
+      "reinforcement:corrected": 1,
+      "reinforcement:core": 1,
+      "sweep": 2
+    }
+  },
+  "findings": []
+}

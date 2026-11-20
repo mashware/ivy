@@ -1,0 +1,23 @@
+   Compiling panel-control v0.1.0-alpha.14 (/work/repo/crates/panel-control)
+   Compiling app v0.1.0-alpha.14 (/work/repo/crates/app)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.78s
+     Running tests/shape.rs (/opt/cargo-target/debug/deps/shape-469b3caaf514dbfe)
+
+running 14 tests
+test a_leading_inner_test_attribute_excludes_only_a_test_only_module ... ok
+test a_ratchet_entry_that_names_two_blocks_is_refused ... ok
+test a_ratchet_entry_is_measured_by_its_kind_and_refused_when_ambiguous ... ok
+test a_type_spread_across_modules_is_summed_as_one ... ok
+test a_trait_this_crate_declares_is_charged_to_the_type ... ok
+test a_gate_that_is_private_on_purpose_still_has_its_counted_callers ... ok
+test every_impl_block_was_closed ... ok
+test no_impl_block_is_over_its_ceiling ... ok
+test every_impl_header_is_one_the_type_walk_can_read ... ok
+test only_an_unambiguous_test_statement_is_excluded_from_production_lines ... ok
+test the_pseudoterminal_is_declared_before_the_bridge_that_holds_its_receiver ... ok
+test no_module_is_over_its_ceiling ... ok
+test no_type_is_over_its_ceiling ... ok
+test no_entry_of_the_ratchet_is_stale ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.36s
+

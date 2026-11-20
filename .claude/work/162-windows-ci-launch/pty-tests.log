@@ -1,0 +1,513 @@
+   Compiling panel-contract v0.1.0-alpha.14 (/work/repo/crates/panel-contract)
+   Compiling term-core v0.1.0-alpha.14 (/work/repo/crates/term-core)
+warning: unreachable expression
+   --> crates/panel-contract/src/lib.rs:196:5
+    |
+194 |         return builder.create(path);
+    |         --------------------------- any code following this expression is unreachable
+195 |     }
+196 |     builder.create(path)
+    |     ^^^^^^^^^^^^^^^^^^^^ unreachable expression
+    |
+    = note: `#[warn(unreachable_code)]` (part of `#[warn(unused)]`) on by default
+
+   Compiling panel-control v0.1.0-alpha.14 (/work/repo/crates/panel-control)
+warning: `panel-contract` (lib) generated 1 warning
+   Compiling app v0.1.0-alpha.14 (/work/repo/crates/app)
+warning: unused attribute `allow`
+  --> crates/app/src/agent_setup.rs:85:5
+   |
+85 |     #[allow(unused_doc_comments)]
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+  --> crates/app/src/agent_setup.rs:86:5
+   |
+86 |     crate::windows_unix_omission!(
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: `#[warn(unused_attributes)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused attribute `allow`
+   --> crates/app/src/resume.rs:467:5
+    |
+467 |     #[allow(unused_doc_comments)]
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+   --> crates/app/src/resume.rs:468:5
+    |
+468 |     crate::windows_unix_omission!(
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused attribute `allow`
+   --> crates/app/src/resume.rs:534:5
+    |
+534 |     #[allow(unused_doc_comments)]
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+   --> crates/app/src/resume.rs:535:5
+    |
+535 |     crate::windows_unix_omission!(
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused attribute `allow`
+  --> crates/app/src/launch/tests.rs:68:1
+   |
+68 | #[allow(unused_doc_comments)]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+  --> crates/app/src/launch/tests.rs:69:1
+   |
+69 | crate::windows_unix_omission!(
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused doc comment
+   --> crates/app/src/opener/tests.rs:121:1
+    |
+121 | / /// A link is judged by the file it leads to: a `.txt` name pointing at a script is revealed, and
+122 | | /// one pointing at a document opens that document.
+    | |_--------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+    = note: `#[warn(unused_doc_comments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused attribute `allow`
+   --> crates/app/src/opener/tests.rs:123:1
+    |
+123 | #[allow(unused_doc_comments)]
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+   --> crates/app/src/opener/tests.rs:124:1
+    |
+124 | crate::windows_unix_omission!(
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused doc comment
+   --> crates/app/src/opener/tests.rs:184:1
+    |
+184 | /// Only a regular file opens: a folder or a pipe named like a document is shown instead.
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused attribute `allow`
+   --> crates/app/src/opener/tests.rs:185:1
+    |
+185 | #[allow(unused_doc_comments)]
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+   --> crates/app/src/opener/tests.rs:186:1
+    |
+186 | crate::windows_unix_omission!(
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused doc comment
+   --> crates/app/src/opener/tests.rs:201:1
+    |
+201 | / /// Right before the launch, the judged file is read again: once swapped for a link, it is not
+202 | | /// handed over.
+    | |_---------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused attribute `allow`
+   --> crates/app/src/opener/tests.rs:203:1
+    |
+203 | #[allow(unused_doc_comments)]
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+   --> crates/app/src/opener/tests.rs:204:1
+    |
+204 | crate::windows_unix_omission!(
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused attribute `allow`
+    --> crates/app/src/panel.rs:2522:5
+     |
+2522 |     #[allow(unused_doc_comments)]
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+    --> crates/app/src/panel.rs:2523:5
+     |
+2523 |     crate::windows_unix_omission!(
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused attribute `allow`
+    --> crates/app/src/panel.rs:2573:5
+     |
+2573 |     #[allow(unused_doc_comments)]
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+    --> crates/app/src/panel.rs:2574:5
+     |
+2574 |     crate::windows_unix_omission!(
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused attribute `allow`
+   --> crates/app/src/project/tests.rs:341:1
+    |
+341 | #[allow(unused_doc_comments)]
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+   --> crates/app/src/project/tests.rs:342:1
+    |
+342 | crate::windows_unix_omission!(
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused attribute `allow`
+   --> crates/app/src/session/ownership.rs:174:5
+    |
+174 |     #[allow(unused_doc_comments)]
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+   --> crates/app/src/session/ownership.rs:175:5
+    |
+175 |     crate::windows_unix_omission!(
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused attribute `allow`
+   --> crates/app/src/session/ownership.rs:204:5
+    |
+204 |     #[allow(unused_doc_comments)]
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+   --> crates/app/src/session/ownership.rs:205:5
+    |
+205 |     crate::windows_unix_omission!(
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused attribute `allow`
+    --> crates/app/src/session.rs:1969:5
+     |
+1969 |     #[allow(unused_doc_comments)]
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+    --> crates/app/src/session.rs:1970:5
+     |
+1970 |     crate::windows_unix_omission!(
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused attribute `allow`
+    --> crates/app/src/session.rs:2019:5
+     |
+2019 |     #[allow(unused_doc_comments)]
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+    --> crates/app/src/session.rs:2020:5
+     |
+2020 |     crate::windows_unix_omission!(
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused attribute `allow`
+    --> crates/app/src/session.rs:2499:5
+     |
+2499 |     #[allow(unused_doc_comments)]
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+    --> crates/app/src/session.rs:2500:5
+     |
+2500 |     crate::windows_unix_omission!(
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused attribute `allow`
+    --> crates/app/src/session.rs:2535:5
+     |
+2535 |     #[allow(unused_doc_comments)]
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+    --> crates/app/src/session.rs:2536:5
+     |
+2536 |     crate::windows_unix_omission!(
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused attribute `allow`
+    --> crates/app/src/session.rs:2671:5
+     |
+2671 |     #[allow(unused_doc_comments)]
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+    --> crates/app/src/session.rs:2672:5
+     |
+2672 |     crate::windows_unix_omission!(
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused attribute `allow`
+   --> crates/app/src/settings/store.rs:195:5
+    |
+195 |     #[allow(unused_doc_comments)]
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+   --> crates/app/src/settings/store.rs:196:5
+    |
+196 |     crate::windows_unix_omission!(
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused attribute `allow`
+    --> crates/app/src/explorer/interaction_tests.rs:1249:1
+     |
+1249 | #[allow(unused_doc_comments)]
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+    --> crates/app/src/explorer/interaction_tests.rs:1250:1
+     |
+1250 | crate::windows_unix_omission!(
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused attribute `allow`
+    --> crates/app/src/explorer/interaction_tests.rs:1416:1
+     |
+1416 | #[allow(unused_doc_comments)]
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+    --> crates/app/src/explorer/interaction_tests.rs:1417:1
+     |
+1417 | crate::windows_unix_omission!(
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused attribute `allow`
+   --> crates/app/src/sidebar/tests.rs:107:1
+    |
+107 | #[allow(unused_doc_comments)]
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+   --> crates/app/src/sidebar/tests.rs:108:1
+    |
+108 | crate::windows_unix_omission!(
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused attribute `allow`
+   --> crates/app/src/sidebar/tests.rs:305:1
+    |
+305 | #[allow(unused_doc_comments)]
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+   --> crates/app/src/sidebar/tests.rs:306:1
+    |
+306 | crate::windows_unix_omission!(
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused attribute `allow`
+   --> crates/app/src/sidebar/tests.rs:417:1
+    |
+417 | #[allow(unused_doc_comments)]
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+   --> crates/app/src/sidebar/tests.rs:418:1
+    |
+418 | crate::windows_unix_omission!(
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused attribute `allow`
+   --> crates/app/src/startup/migration.rs:105:5
+    |
+105 |     #[allow(unused_doc_comments)]
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+   --> crates/app/src/startup/migration.rs:106:5
+    |
+106 |     crate::windows_unix_omission!(
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused doc comment
+   --> crates/app/src/viewer/code_header/tests.rs:300:1
+    |
+300 | / /// A name with a line break or a direction override is never copied, and Open shows it in the
+301 | | /// file manager instead of launching it, though its last extension is a document's.
+    | |_-----------------------------------------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused attribute `allow`
+   --> crates/app/src/viewer/code_header/tests.rs:302:1
+    |
+302 | #[allow(unused_doc_comments)]
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+   --> crates/app/src/viewer/code_header/tests.rs:303:1
+    |
+303 | crate::windows_unix_omission!(
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused doc comment
+   --> crates/app/src/viewer/code_header/tests.rs:339:1
+    |
+339 | / /// The path is judged whole: a line break in a folder's name refuses both Copy items, and a
+340 | | /// plain path beside it copies.
+    | |_-------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused attribute `allow`
+   --> crates/app/src/viewer/code_header/tests.rs:341:1
+    |
+341 | #[allow(unused_doc_comments)]
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+   --> crates/app/src/viewer/code_header/tests.rs:342:1
+    |
+342 | crate::windows_unix_omission!(
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused attribute `allow`
+   --> crates/app/src/viewer/load.rs:722:5
+    |
+722 |     #[allow(unused_doc_comments)]
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+   --> crates/app/src/viewer/load.rs:723:5
+    |
+723 |     crate::windows_unix_omission!(
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused attribute `allow`
+   --> crates/app/src/viewer/tests.rs:173:1
+    |
+173 | #[allow(unused_doc_comments)]
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+   --> crates/app/src/viewer/tests.rs:174:1
+    |
+174 | crate::windows_unix_omission!(
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused attribute `allow`
+    --> crates/app/src/lib.rs:6843:5
+     |
+6843 |     #[allow(unused_doc_comments)]
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+    --> crates/app/src/lib.rs:6844:5
+     |
+6844 |     crate::windows_unix_omission!(
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused attribute `allow`
+  --> crates/app/src/tests/agent_signals/native_transport.rs:18:1
+   |
+18 | #[allow(unused_doc_comments)]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+  --> crates/app/src/tests/agent_signals/native_transport.rs:19:1
+   |
+19 | crate::windows_unix_omission!(
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused attribute `allow`
+  --> crates/app/src/tests/agent_signals/native_transport.rs:58:1
+   |
+58 | #[allow(unused_doc_comments)]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+  --> crates/app/src/tests/agent_signals/native_transport.rs:59:1
+   |
+59 | crate::windows_unix_omission!(
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused attribute `allow`
+    --> crates/app/src/tests/board.rs:1778:5
+     |
+1778 |     #[allow(unused_doc_comments)]
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+    --> crates/app/src/tests/board.rs:1779:5
+     |
+1779 |     crate::windows_unix_omission!(
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused attribute `allow`
+   --> crates/app/src/tests/header_controls.rs:620:5
+    |
+620 |     #[allow(unused_doc_comments)]
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: the built-in attribute `allow` will be ignored, since it's applied to the macro invocation `crate::windows_unix_omission`
+   --> crates/app/src/tests/header_controls.rs:621:5
+    |
+621 |     crate::windows_unix_omission!(
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `app` (lib test) generated 38 warnings (run `cargo fix --lib -p app --tests` to apply 33 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 16.94s
+     Running unittests src/lib.rs (/opt/cargo-target/debug/deps/app-8c07d2856c0d11c7)
+
+running 38 tests
+test pty_output::tests::a_console_still_reading_is_not_finished_whatever_it_has_recorded ... ok
+test pty_output::tests::a_console_that_ended_well_with_a_queue_left_is_not_finished_yet ... ok
+test pty_output::tests::a_console_that_ended_well_with_nothing_left_to_show_is_finished ... ok
+test pty_output::tests::a_failed_read_is_said_once_and_the_frames_after_it_say_nothing ... ok
+test pty_output::tests::a_dismissed_refusal_stays_dismissed_while_it_is_the_same_refusal ... ok
+test pty_output::tests::a_console_that_was_never_refused_owes_nothing ... ok
+test pty_output::tests::a_failed_read_is_said_with_the_kind_and_the_number_the_system_gave ... ok
+test pty_output::tests::a_failure_the_system_gave_no_number_for_is_still_said ... ok
+test pty_output::tests::a_pickup_over_a_console_that_is_still_reading_spends_nothing ... ok
+test pty_output::tests::a_refusal_after_an_accepted_write_is_owed_again ... ok
+test pty_output::tests::a_refusal_is_owed_until_it_is_dismissed ... ok
+test pty_output::tests::a_retry_refused_after_a_dismissal_is_owed_again ... ok
+test pty_output::tests::a_silent_ending_does_not_spend_the_sentence_a_later_failure_is_owed ... ok
+test pty_output::tests::a_pickup_on_empty_does_not_invent_a_wait_of_zero ... ok
+test pty_output::tests::dismissing_a_refusal_that_is_not_there_does_nothing ... ok
+test pty_output::tests::no_ending_at_all_is_finished_while_a_queue_is_left ... ok
+test pty_output::tests::no_other_ending_counts_as_finished_however_drained_the_console_is ... ok
+test pty_output::tests::picking_up_joins_the_two_stretches_when_the_queue_has_wrapped_around ... ok
+test pty_output::tests::arrivals_already_served_do_not_accumulate ... ok
+test pty_output::tests::picking_up_leaves_the_queue_empty ... ok
+test pty_output::tests::query_error_reporting_is_bounded_when_the_log_sink_stops_reading ... ok
+test pty_output::tests::pump_diagnostics_do_not_wait_for_a_full_stderr_pipe ... ok
+test pty_output::tests::a_bridge_whose_thread_lets_go_of_the_receiver_records_nobody_listening ... ok
+test pty_output::tests::destroying_the_bridge_with_the_queue_full_ends_its_thread ... ok
+test pty_output::tests::the_arrival_of_bytes_wakes_the_window ... ok
+test pty_output::tests::the_death_of_the_program_survives_having_handed_off_the_channel ... ok
+test pty_output::tests::the_maximum_that_falls_past_the_wrap_takes_from_both_stretches ... ok
+test pty_output::tests::the_maximum_that_falls_within_the_first_stretch_does_not_touch_the_second ... ok
+ivy: this console stopped receiving: read failed (Uncategorized, os error 70)test pty_output::tests::the_pickup_the_frame_already_makes_is_what_spends_it ... 
+ok
+test pty_output::tests::the_three_endings_that_are_not_a_failure_say_nothing_on_this_channel ... ok
+test pty_output::tests::the_destination_keeps_what_it_already_had ... ok
+test pty_output::tests::the_maximum_is_respected_and_what_is_left_over_stays_for_next_time ... ok
+test pty_output::tests::what_the_frame_hands_over_is_read_off_the_pseudoterminal_and_not_invented ... ok
+test pty_output::tests::what_the_program_writes_reaches_the_queue ... ok
+test pty_output::tests::when_the_final_notification_arrives_the_death_is_already_published ... ok
+test pty_output::tests::what_is_picked_up_says_since_when_it_was_waiting ... ok
+test pty_output::tests::while_the_program_lives_the_bridge_says_so ... ok
+test pty_output::tests::the_bridge_queue_does_not_grow_without_limit ... ok
+
+test result: ok. 38 passed; 0 failed; 0 ignored; 0 measured; 1983 filtered out; finished in 0.54s
+

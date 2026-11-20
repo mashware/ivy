@@ -1,0 +1,18 @@
+   Compiling app v0.1.0-alpha.14 (/work/repo/crates/app)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.84s
+     Running tests/glossary.rs (/opt/cargo-target/debug/deps/glossary-6dde305d1d4ea0bf)
+
+running 9 tests
+test no_file_of_a_finished_crate_is_still_named_in_spanish ... ok
+test the_glossary_is_still_where_this_test_reads_it_from ... ok
+test the_reader_of_citations_asks_about_the_right_things ... ok
+test the_reader_of_file_citations_knows_the_four_shapes ... ok
+test the_scanner_tells_code_from_prose ... ok
+test the_three_rules_answer_what_they_promise ... ok
+test no_retired_file_name_is_still_cited ... ok
+test no_spanish_identifier_survives_in_a_finished_crate ... ok
+test no_comment_cites_a_name_the_code_no_longer_has has been running for over 60 seconds
+test no_comment_cites_a_name_the_code_no_longer_has ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 180.13s
+

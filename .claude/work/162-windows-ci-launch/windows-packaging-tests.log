@@ -1,0 +1,9 @@
+test_boost_fallback_preserves_original_text_and_attribution (scripts.test_windows.WindowsPackageTests.test_boost_fallback_preserves_original_text_and_attribution) ... ok
+test_rejects_foreign_architecture_and_missing_pe (scripts.test_windows.WindowsPackageTests.test_rejects_foreign_architecture_and_missing_pe) ... ok
+test_rejects_missing_notices_and_invalid_version (scripts.test_windows.WindowsPackageTests.test_rejects_missing_notices_and_invalid_version) ... ok
+test_stage_preserves_executables_and_notices (scripts.test_windows.WindowsPackageTests.test_stage_preserves_executables_and_notices) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.012s
+
+OK

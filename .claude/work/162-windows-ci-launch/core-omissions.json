@@ -1,0 +1,517 @@
+[
+  {
+    "binary": "panel-contract/panel_contract:lib",
+    "name": "panel::tests::a_link_to_a_normal_file_is_read_as_the_file_it_points_to",
+    "reason": "unix-only: requires Unix symlink semantics"
+  },
+  {
+    "binary": "panel-contract/panel_contract:lib",
+    "name": "panel::tests::a_named_pipe_is_rejected_instead_of_hanging_the_window",
+    "reason": "unix-only: requires Unix FIFO semantics"
+  },
+  {
+    "binary": "panel-contract/panel_contract:lib",
+    "name": "panel::tests::without_permission_to_read_it_it_is_not_confused_with_not_having_published",
+    "reason": "unix-only: requires Unix permission bits"
+  },
+  {
+    "binary": "panel-contract/panel_contract:lib",
+    "name": "tests::a_relative_system_temporary_falls_back_to_tmp",
+    "reason": "unix-only: requires Unix temporary-directory environment semantics"
+  },
+  {
+    "binary": "panel-contract/panel_contract:lib",
+    "name": "tests::the_directory_cannot_be_read_by_anyone_else",
+    "reason": "unix-only: requires Unix permission modes"
+  },
+  {
+    "binary": "panel-control/inherited_directory:test",
+    "name": "genuine_inherited_directory_returns_the_document",
+    "reason": "unix-only: requires Unix domain socket transport"
+  },
+  {
+    "binary": "panel-control/inherited_directory:test",
+    "name": "unsafe_inherited_directories_never_reach_a_listening_socket",
+    "reason": "unix-only: requires Unix socket paths, permission bits, and symlink semantics"
+  },
+  {
+    "binary": "panel-control/ivy_codex_launch:test",
+    "name": "tests::explicit_independent_admin_remote_and_unknown_preserve_arguments_environment_and_status",
+    "reason": "unix-only: requires POSIX shell executables, signal behavior, and executable permission bits"
+  },
+  {
+    "binary": "panel-control/ivy_codex_launch:test",
+    "name": "tests::failed_shared_setup_never_starts_an_independent_session",
+    "reason": "unix-only: requires POSIX shell executables, signal behavior, and executable permission bits"
+  },
+  {
+    "binary": "panel-control/ivy_codex_launch:test",
+    "name": "tests::inherits_auth_and_mcp_environment_without_changing_configuration_or_adding_api_keys",
+    "reason": "unix-only: requires POSIX shell executables, signal behavior, and executable permission bits"
+  },
+  {
+    "binary": "panel-control/ivy_codex_launch:test",
+    "name": "tests::missing_remote_capabilities_never_start_an_independent_session",
+    "reason": "unix-only: requires POSIX shell executables, signal behavior, and executable permission bits"
+  },
+  {
+    "binary": "panel-control/ivy_codex_launch:test",
+    "name": "tests::preserves_client_signal",
+    "reason": "unix-only: requires POSIX shell executables, signal behavior, and executable permission bits"
+  },
+  {
+    "binary": "panel-control/ivy_codex_launch:test",
+    "name": "tests::refuses_recursive_executable",
+    "reason": "unix-only: requires POSIX shell executables, signal behavior, and executable permission bits"
+  },
+  {
+    "binary": "panel-control/ivy_codex_launch:test",
+    "name": "tests::shared_launch_uses_capabilities_with_arbitrary_cli_and_server_version_labels",
+    "reason": "unix-only: requires POSIX shell executables, signal behavior, and executable permission bits"
+  },
+  {
+    "binary": "panel-control/ivy_codex_launch:test",
+    "name": "tests::stalled_capability_probe_fails_in_bounded_time_without_starting_a_session",
+    "reason": "unix-only: requires POSIX shell executables, signal behavior, and executable permission bits"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "codex_route::tests::symlink_and_missing_routes_are_rejected",
+    "reason": "unix-only: requires Unix symlink semantics"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "endpoint::tests::a_pane_cannot_be_reached_through_another_panes_endpoint",
+    "reason": "unix-only: requires Unix stream socket path and routing semantics"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "endpoint::tests::inherited_directory_requires_private_mode_type_and_effective_owner",
+    "reason": "unix-only: requires Unix permission bits and ownership metadata"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "endpoint::tests::nothing_outside_this_user_can_reach_the_endpoint",
+    "reason": "unix-only: requires Unix socket permissions and ownership metadata"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "endpoint::tests::the_endpoint_lives_inside_the_panes_own_directory",
+    "reason": "unix-only: requires Unix stream socket path and routing semantics"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "endpoint::tests::what_was_bound_is_what_gets_connected_to",
+    "reason": "unix-only: requires Unix stream socket path and routing semantics"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "listener::tests::a_connection_that_dies_releases_what_it_held",
+    "reason": "unix-only: requires Unix-domain socket peer-disconnect handling"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "listener::tests::a_document_is_read_while_the_window_queue_is_full_and_nobody_is_woken",
+    "reason": "unix-only: requires Unix-domain socket transport for panel_get while the inbox is full"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "listener::tests::a_document_that_is_not_a_panel_never_reaches_the_window",
+    "reason": "unix-only: requires Unix-domain socket request parsing and refusal delivery"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "listener::tests::a_mismatched_answer_is_refused_rather_than_reshaped",
+    "reason": "unix-only: requires Unix-domain socket request/reply identity checks"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "listener::tests::a_pane_serves_as_many_connections_as_it_serves_and_no_more",
+    "reason": "unix-only: requires Unix-domain socket multi-connection routing"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "listener::tests::a_patch_travels_to_the_pane_with_its_ops_already_read",
+    "reason": "unix-only: requires Unix-domain socket patch delivery and replies"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "listener::tests::a_taken_patch_names_what_its_lines_dropped_and_a_refused_one_does_not",
+    "reason": "unix-only: requires Unix-domain socket transport for patch delivery and refusal replies"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "listener::tests::a_taken_publication_names_what_it_dropped_and_a_refused_one_does_not",
+    "reason": "unix-only: requires Unix-domain socket transport for publication and refusal replies"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "listener::tests::agent_signal_crosses_the_socket_and_disconnect_is_reported",
+    "reason": "unix-only: requires Unix-domain socket transport for agent-signal delivery and disconnect notification"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "listener::tests::agent_signal_queue_full_replies_retryable_over_the_socket_but_panel_does_not",
+    "reason": "unix-only: requires Unix-domain socket transport for retryable and legacy replies"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "listener::tests::an_unknown_tool_is_refused_by_name_and_the_connection_lives_on",
+    "reason": "unix-only: requires Unix-domain socket request routing and replies"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "listener::tests::closing_after_the_endpoint_path_is_removed_still_ends_the_acceptor",
+    "reason": "unix-only: requires Unix socket endpoint removal while the acceptor is active"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "listener::tests::closing_the_pane_ends_every_thread_it_had",
+    "reason": "unix-only: requires Unix-domain socket acceptor and shutdown lifecycle"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "listener::tests::diagnostic_peer_is_the_connected_process",
+    "reason": "unix-only: requires Unix socket peer credentials"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "listener::tests::inspector_runs_once_and_its_observation_reaches_each_delivery",
+    "reason": "unix-only: requires Unix socket peer credentials"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "listener::tests::one_read_is_answered_after_the_pane_closes_and_no_more",
+    "reason": "unix-only: requires Unix-domain socket transport and close-time buffered request semantics"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "listener::tests::panel_publish_is_admitted_off_frame_and_publisher_disconnect_is_silent",
+    "reason": "unix-only: requires Linux pidfd-backed peer lifetime"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "listener::tests::plan_verbs_parse_off_the_frame_and_forward_project_scope_operations",
+    "reason": "unix-only: requires Unix-domain socket plan-request delivery and replies"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "listener::tests::publishing_wakes_the_window",
+    "reason": "unix-only: requires Unix-domain socket publication and window wakeup"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "listener::tests::retirement_travels_to_the_window_and_its_counts_return",
+    "reason": "unix-only: requires Unix-domain socket retirement delivery and replies"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "listener::tests::the_original_channel_api_still_hands_panel_get_to_its_owner",
+    "reason": "unix-only: requires Unix-domain socket transport for the legacy Channel API"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "listener::tests::the_split_verbs_travel_to_the_window_and_its_answer_returns",
+    "reason": "unix-only: requires Unix-domain socket split-request delivery and replies"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "listener::tests::the_window_s_answer_is_what_the_caller_reads",
+    "reason": "unix-only: requires Unix-domain socket transport for window replies"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "listener::tests::two_connections_are_heard_at_the_same_time",
+    "reason": "unix-only: requires concurrent Unix-domain socket connections"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "listener::tests::what_is_published_over_the_channel_reaches_the_window_and_no_file_is_written",
+    "reason": "unix-only: requires Unix-domain socket transport from producer to window inbox"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "session::tests::sockets::real_session_socket_bypasses_full_ui_inbox_and_cannot_spoof_peer",
+    "reason": "unix-only: requires Unix socket peer credentials"
+  },
+  {
+    "binary": "panel-control/panel_control:lib",
+    "name": "session::tests::sockets::session_helper_cannot_release_or_replace_existing_panel_connection",
+    "reason": "unix-only: requires Unix socket peer credentials"
+  },
+  {
+    "binary": "panel-control/panel_mcp_handshake:test",
+    "name": "an_early_bridge_keeps_publication_guidance_when_the_channel_binds_later",
+    "reason": "unix-only: requires Unix socket transport fixtures"
+  },
+  {
+    "binary": "panel-control/panel_mcp_handshake:test",
+    "name": "conditional_instructions_neither_probe_nor_promise_a_socket",
+    "reason": "unix-only: requires Unix socket transport fixtures"
+  },
+  {
+    "binary": "panel-control/session_helper:test",
+    "name": "helper_reports_only_allowed_metadata_with_its_actual_kernel_identity",
+    "reason": "unix-only: requires a Unix-domain channel and kernel socket peer identity"
+  },
+  {
+    "binary": "panel-control/session_helper:test",
+    "name": "invalid_whole_identity_exits_before_reading_stdin_or_connecting",
+    "reason": "unix-only: requires Unix socket routing and non-text environment values"
+  },
+  {
+    "binary": "panel-control/session_helper:test",
+    "name": "publish_cli_maps_unheld_and_policy_refusal_to_the_declared_output",
+    "reason": "unix-only: requires Unix-domain channel transport for authorization replies"
+  },
+  {
+    "binary": "panel-control/session_helper:test",
+    "name": "session_exchange_rejects_invalid_identity_before_connecting",
+    "reason": "unix-only: requires Unix socket routing and non-text environment values"
+  },
+  {
+    "binary": "term-core/idle_console_cpu:test",
+    "name": "a_waiting_console_costs_no_processor_time",
+    "reason": "unix-only: requires Linux process CPU accounting and nonblocking PTY behavior"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "foreground::tests::ancestry_diagnostic_is_tristate_and_ignores_foreground_rules",
+    "reason": "unix-only: requires Linux process ancestry and pidfd inspection"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "foreground::tests::child_exit_status_distinguishes_success_from_failed_resume",
+    "reason": "unix-only: requires Linux process ancestry and pidfd inspection"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "foreground::tests::detached_helper_is_attested_only_as_a_descendant_of_the_live_foreground_pane",
+    "reason": "unix-only: requires Linux process ancestry and pidfd inspection"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "foreground::tests::detached_helpers_do_not_make_a_background_ancestor_foreground",
+    "reason": "unix-only: requires Linux process ancestry and pidfd inspection"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "foreground::tests::foreground_scope_is_owned_send_and_ends_with_its_console",
+    "reason": "unix-only: requires Linux process ancestry and pidfd inspection"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "foreground::tests::foreground_scope_rejects_the_other_console_and_background_groups",
+    "reason": "unix-only: requires Linux process ancestry and pidfd inspection"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "foreground::tests::native_process_directory_checks_birth_executable_and_live_process",
+    "reason": "unix-only: requires Linux process ancestry and pidfd inspection"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "foreground::tests::nested_descendants_are_exposed_and_root_exit_is_native",
+    "reason": "unix-only: requires Linux process ancestry and pidfd inspection"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "locale::tests::the_c_library_is_asked_whether_a_locale_exists",
+    "reason": "unix-only: requires the Unix C locale database"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "received::tests::a_prelude_that_fails_never_marks_the_program_ready",
+    "reason": "unix-only: requires POSIX shell and Unix canonical line-discipline behavior"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "received::tests::a_prelude_with_a_semicolon_of_its_own_is_refused",
+    "reason": "unix-only: requires POSIX shell and Unix canonical line-discipline behavior"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "received::tests::it_reports_what_the_program_got_and_not_what_the_echo_showed",
+    "reason": "unix-only: requires POSIX shell and Unix canonical line-discipline behavior"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "scope::protocol_tests::observer_delayed_evidence_and_bus_disconnect_use_actual_manager_results",
+    "reason": "unix-only: requires Linux systemd user-manager semantics"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "scope::protocol_tests::observer_stops_at_the_real_500ms_cutoff_and_ignores_later_oom_evidence",
+    "reason": "unix-only: requires Linux systemd user-manager semantics"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "scope::protocol_tests::unknown_oom_policy_retries_the_actual_protocol_and_retains_the_basic_scope",
+    "reason": "unix-only: requires Linux systemd user-manager semantics"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "scope::tests::a_stalled_manager_future_is_cancelled_at_its_owned_deadline",
+    "reason": "unix-only: requires Linux systemd user-manager semantics"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "scope::tests::an_expired_deadline_does_not_poll_a_stalled_future_forever",
+    "reason": "unix-only: requires Linux systemd user-manager semantics"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "scope::tests::only_unknown_optional_oom_property_permits_a_basic_scope_retry",
+    "reason": "unix-only: requires Linux systemd user-manager semantics"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "scope::tests::placement_requires_the_exact_unified_or_systemd_hierarchy",
+    "reason": "unix-only: requires Linux systemd user-manager semantics"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "scope_gate::tests::absent_helper_connection_obeys_startup_deadline",
+    "reason": "unix-only: requires Linux Unix-socket launcher semantics"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "scope_gate::tests::explicit_executable_resolution_preserves_relative_path_and_refuses_directories",
+    "reason": "unix-only: requires Linux Unix-socket launcher semantics"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "scope_gate::tests::gate_is_private_and_removes_its_endpoint_on_drop",
+    "reason": "unix-only: requires Linux Unix-socket launcher semantics"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "termination::tests::actual_child_status_distinguishes_sigkill_from_exit_137",
+    "reason": "unix-only: requires Unix signal exit-status semantics"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "termination::tests::dropping_a_pty_retires_observer_reaping_before_the_close_signal",
+    "reason": "unix-only: requires Linux observer reaping behavior"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "termination::tests::observer_cannot_reap_between_the_close_status_check_and_signal",
+    "reason": "unix-only: requires Linux observer reaping behavior"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::a_program_not_reapable_after_an_accepted_kill_is_left_running_and_reaped",
+    "reason": "unix-only: requires Unix process signaling"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::a_program_that_catches_the_hang_up_finishes_saving_before_it_is_killed",
+    "reason": "unix-only: requires Unix process signaling"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::a_program_that_dies_with_its_writer_waiting_for_room_makes_the_writer_give_up",
+    "reason": "unix-only: requires Linux nonblocking PTY writer behavior"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::a_program_that_exited_is_readable_as_such_through_the_real_path",
+    "reason": "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::a_program_that_ignores_the_hang_up_is_killed_after_its_grace",
+    "reason": "unix-only: requires Unix process signaling"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::a_program_that_refuses_the_hang_up_is_left_running_and_reaped_when_it_ends",
+    "reason": "unix-only: requires Unix process signaling"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::a_program_whose_kill_is_refused_after_its_grace_is_left_running_and_reaped",
+    "reason": "unix-only: requires Unix process signaling"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::a_refusal_clears_on_the_next_write_the_queue_accepts",
+    "reason": "unix-only: requires POSIX shell, line-discipline, or EOF behavior"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::a_refusal_in_one_console_leaves_another_console_accepting",
+    "reason": "unix-only: requires POSIX shell, line-discipline, or EOF behavior"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::a_refused_write_adds_nothing_to_what_is_owed",
+    "reason": "unix-only: requires POSIX shell, line-discipline, or EOF behavior"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::a_write_past_the_ceiling_is_refused_and_named_by_its_own_message",
+    "reason": "unix-only: requires POSIX shell, line-discipline, or EOF behavior"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::an_oversized_write_is_accepted_whole_when_the_queue_is_under_the_ceiling",
+    "reason": "unix-only: requires POSIX shell, line-discipline, or EOF behavior"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::closing_a_console_does_not_wait_out_the_librarys_poll_step",
+    "reason": "unix-only: requires POSIX shell, line-discipline, or EOF behavior"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::closing_a_console_whose_buffer_is_exactly_full_ends_its_writer",
+    "reason": "unix-only: requires Linux nonblocking PTY writer behavior"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::closing_a_console_whose_program_left_a_survivor_ends_its_writer_before_the_close_returns",
+    "reason": "unix-only: requires Linux nonblocking PTY writer behavior"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::closing_a_console_whose_program_stopped_reading_ends_its_writer",
+    "reason": "unix-only: requires Linux nonblocking PTY writer behavior"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::closing_does_not_hang_when_a_survivor_holds_the_pseudoterminal",
+    "reason": "unix-only: requires POSIX shell, line-discipline, or EOF behavior"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::each_refused_write_is_counted_even_while_the_flag_is_already_up",
+    "reason": "unix-only: requires POSIX shell, line-discipline, or EOF behavior"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::nothing_handed_over_is_lost_when_the_program_reads_late",
+    "reason": "unix-only: requires POSIX shell, line-discipline, or EOF behavior"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::the_channel_closes_when_the_program_finishes",
+    "reason": "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::the_write_returns_even_though_the_program_never_reads_its_input",
+    "reason": "unix-only: requires POSIX shell, line-discipline, or EOF behavior"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::without_consuming_it_what_arrives_is_bounded",
+    "reason": "unix-only: requires POSIX shell, line-discipline, or EOF behavior"
+  },
+  {
+    "binary": "term-core/term_core:lib",
+    "name": "tests::working_directory_follows_live_pty_child_and_stops_after_exit",
+    "reason": "unix-only: requires Unix process working-directory inspection"
+  }
+]

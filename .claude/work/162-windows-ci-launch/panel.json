@@ -1,15 +1,17 @@
 {
-  "updated_at": "2026-11-20T19:12:54.094Z",
-  "phase": "plan",
+  "updated_at": "2026-11-20T20:28:59.714Z",
+  "phase": "ship",
   "header": true,
   "attention": "done",
   "lines": [
     {"key":"title","text":"Windows CI: run clippy and the whole test suite, and launch the installed app","style":"title"},
     "",
     {"key":"mrs","text":"PRs","style":"section","summary":"0/1 merged","collapsed":true},
-    {"key":"mr-1","ref":"#1","text":"Verify the Windows workspace and installed application launch","mark":"pending"},
+    {"key":"mr-1","ref":"#1","text":"Verify the Windows workspace and installed application launch","mark":"current"},
     "",
-    {"key":"now","ref":"Now","text":"Study complete; design response applied and one PR planned","mark":"info"},
-    {"key":"next","ref":"Next","text":"Study approval, then implementation","mark":"info"}
+    {"key":"open","ref":"Open","text":"1 follow-ups","mark":"info"},
+    "",
+    {"key":"now","ref":"Now","text":"Handed to the orchestrator for draft publication; local checks pass","mark":"info"},
+    {"key":"next","ref":"Next","text":"Require native Windows CI and launch evidence before merge","mark":"info"}
   ]
 }

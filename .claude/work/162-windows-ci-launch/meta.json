@@ -8,19 +8,22 @@
   "stacked_on": null,
   "worktree": null,
   "size": "M",
-  "phase": "plan",
+  "phase": "ship",
   "phases_done": [
     "context",
     "design",
-    "plan"
+    "plan",
+    "build",
+    "review",
+    "validate"
   ],
   "draft_from_conversation": false,
   "tracker_issue": null,
   "related_repos": [],
   "roadmap": null,
   "started_at": "2026-11-20T19:04:49.099460+00:00",
-  "updated_at": "2026-11-20T19:12:34.501940+00:00",
-  "notes": "Study complete; approved design-challenge response applied. One PR planned; waiting for study approval before code.",
+  "updated_at": "2026-11-20T20:28:34.046760+00:00",
+  "notes": "Handed to the orchestrator for draft publication; native Windows verification remains required before merge.",
   "pending": null,
   "defaults_used": [
     {
@@ -44,6 +47,26 @@
       "key": "unattended:plan-review",
       "default": "One PR; existing independent proposal retained and updated with approved omission accounting",
       "phase": "plan"
+    },
+    {
+      "key": "unattended:rehomed",
+      "default": "Created 162-windows-ci-launch from main",
+      "phase": "run"
+    },
+    {
+      "key": "unattended:base-caught-up",
+      "default": "0429d9e \u2192 137fd34 on main",
+      "phase": "run"
+    },
+    {
+      "key": "unattended:brief",
+      "default": "Business brief recorded before code",
+      "phase": "build"
+    },
+    {
+      "key": "unattended:overrun",
+      "default": "Keep one coherent PR despite 71-file, >5600-line diff; named per-test omission accounting must accompany the Windows CI gate.",
+      "phase": "build"
     }
   ],
   "ticket_deps": [],
@@ -59,6 +82,51 @@
       "at": "2026-11-20T19:08:45.490969+00:00",
       "agents": 1,
       "source": "not reported"
+    },
+    {
+      "phase": "review",
+      "at": "2026-11-20T20:21:13.033Z",
+      "round": 1,
+      "tier": "proportional",
+      "effective_size": "M",
+      "agents": {
+        "panel:portability": 1,
+        "panel:windows-core": 1,
+        "contract": 1,
+        "reinforcement:performance": 1,
+        "sweep": 1
+      },
+      "reviewers": 5,
+      "usd": null,
+      "source": "not reported"
+    },
+    {
+      "phase": "review",
+      "at": "2026-11-20T20:24:37.942Z",
+      "round": 2,
+      "tier": "proportional",
+      "effective_size": "S",
+      "agents": {
+        "reinforcement:corrected": 1,
+        "reinforcement:core": 1,
+        "sweep": 2
+      },
+      "reviewers": 4,
+      "usd": null,
+      "source": "not reported"
+    },
+    {
+      "phase": "review",
+      "at": "2026-11-20T20:27:08.882Z",
+      "round": 3,
+      "tier": "proportional",
+      "effective_size": "XS",
+      "agents": {
+        "sweep": 1
+      },
+      "reviewers": 1,
+      "usd": null,
+      "source": "not reported"
     }
   ],
   "mrs": [
@@ -66,12 +134,106 @@
       "n": 1,
       "title": "Verify the Windows workspace and installed application launch",
       "size": "M",
-      "status": "pending",
-      "phases_done": [],
+      "status": "published",
+      "phases_done": [
+        "build",
+        "review",
+        "validate"
+      ],
       "wave": 1,
       "depends_on": [],
       "lines_est": 600,
-      "files_est": 25
+      "files_est": 25,
+      "candidate_sha": "0e65d3a37a81561bbc8715ed96271d7cdf59a4a9",
+      "reviewed_sha": "0e65d3a37a81561bbc8715ed96271d7cdf59a4a9",
+      "fixed_sha": "",
+      "validated_sha": "0e65d3a37a81561bbc8715ed96271d7cdf59a4a9"
     }
-  ]
+  ],
+  "candidate_sha": "0e65d3a37a81561bbc8715ed96271d7cdf59a4a9",
+  "reviewed_sha": "0e65d3a37a81561bbc8715ed96271d7cdf59a4a9",
+  "fixed_sha": "",
+  "review_findings": [
+    {
+      "round": 1,
+      "sources": [
+        "panel:portability"
+      ],
+      "severity": "major",
+      "file": "crates/app/src/lib.rs",
+      "outcome": "fixed"
+    },
+    {
+      "round": 1,
+      "sources": [
+        "panel:windows-core"
+      ],
+      "severity": "blocker",
+      "file": "crates/panel-control/src/listener.rs",
+      "outcome": "fixed"
+    },
+    {
+      "round": 1,
+      "sources": [
+        "panel:windows-core"
+      ],
+      "severity": "blocker",
+      "file": "crates/panel-control/tests/session_helper.rs",
+      "outcome": "fixed"
+    },
+    {
+      "round": 1,
+      "sources": [
+        "contract"
+      ],
+      "severity": "major",
+      "file": "packaging/windows/test-launch.ps1",
+      "outcome": "fixed"
+    },
+    {
+      "round": 1,
+      "sources": [
+        "reinforcement:performance"
+      ],
+      "severity": "minor",
+      "file": "packaging/windows/test-launch.ps1",
+      "outcome": "fixed"
+    },
+    {
+      "round": 3,
+      "sources": [
+        "sweep"
+      ],
+      "severity": "major",
+      "file": "crates/app/src/tests/context_clipboard.rs",
+      "outcome": "fixed"
+    },
+    {
+      "round": 3,
+      "sources": [
+        "sweep"
+      ],
+      "severity": "nit",
+      "file": "crates/app/src/tests/context_clipboard.rs",
+      "outcome": "fixed"
+    }
+  ],
+  "validated_sha": "0e65d3a37a81561bbc8715ed96271d7cdf59a4a9",
+  "followups": [
+    {
+      "id": "F1",
+      "kind": "edge-case",
+      "title": "Verify the native Windows workspace and installed launch in CI",
+      "why": "This Linux runner cannot execute a Windows desktop or installer; native arms and launch controls must pass before merge.",
+      "source": "validate",
+      "status": "proposed",
+      "ticket": null,
+      "work": null,
+      "note": "Require windows-startup-checks and windows jobs green; inspect windows-launch-evidence including all four controls and normal launch."
+    }
+  ],
+  "knowledge": {
+    "status": "later"
+  },
+  "publish_result": "Accepted by ai publish; runner will push the branch and open the draft when this run ends."
 }

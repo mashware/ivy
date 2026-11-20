@@ -1,0 +1,632 @@
+[
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_console_holding_a_paste_paints_the_question_over_it",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_notice_names_the_keys_only_where_they_would_arrive",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_press_next_to_the_notice_does_not_answer_it",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_click_on_its_notice_discards_the_question_of_an_unfocused_console",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_send_button_sends_the_paste_composed_for_the_mode_at_the_click",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_click_on_the_question_discards_the_paste_and_the_program_receives_none_of_it",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_chorded_press_on_the_send_button_does_not_send_the_paste",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_send_button_sits_under_the_question_inside_the_top_half_or_not_at_all",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_console_saying_it_went_quiet_moves_neither_the_question_nor_its_button",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_notice_box_does_not_shrink_when_the_keyboard_leaves",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_box_of_a_held_paste_is_stroked_over_the_console_holding_it",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_console_too_small_for_the_notice_has_no_box_to_press",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_console_with_room_for_a_line_but_not_the_answer_has_no_box",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_wording_for_an_absent_window_costs_no_console_its_notice",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::no_console_gets_a_box_that_clips_the_way_out_it_will_show",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_question_is_clipped_to_its_own_box",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_console_under_one_row_has_no_box_either",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_console_whose_ceiling_leaves_no_room_for_a_line_has_no_box",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_tall_console_gets_the_box_its_question_needs_and_not_half_the_screen",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_capped_notice_ends_at_the_middle_of_its_console_and_not_past_it",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_press_that_dismisses_the_silence_is_not_also_given_to_the_program",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_refused_write_says_so_without_claiming_the_output_stopped",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_held_paste_the_full_queue_refuses_stays_held_and_keeps_its_send_button",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_retry_refused_after_the_sentence_was_dismissed_brings_the_sentence_back",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_click_on_the_refusal_takes_it_off_the_glass_through_the_mouse_pass",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::dismissing_the_ended_output_notice_does_not_silence_a_separate_refusal",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_silence_stands_under_the_held_paste_and_gives_way_to_it",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::both_notices_together_stay_out_of_the_bottom_half_of_their_console",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_console_with_room_for_only_one_notice_keeps_the_question_and_drops_the_silence",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_press_on_the_panel_beside_it_does_not_answer_the_question",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::answering_a_question_does_not_swallow_the_rest_of_the_queue",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::only_the_primary_button_answers_the_question",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_click_answers_only_the_question_it_landed_on",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_console_too_narrow_for_the_notice_has_no_box_to_press",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_press_is_judged_where_the_button_went_down",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_chorded_press_on_the_notice_does_not_destroy_the_paste",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_click_on_the_notice_does_not_reach_the_program_that_asked_for_the_mouse",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_pasted_line_that_does_not_fit_reaches_the_program_as_nothing_at_all",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_file_published_while_the_channel_holds_the_panel_is_read_when_the_hold_ends",
+    "reason": "unix-only: exercises the Unix panel-control endpoint"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::reads_from_two_real_panes_survive_one_closing_in_the_final_report",
+    "reason": "unix-only: exercises the Unix panel-control endpoint"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::terminal_query_replies_reach_the_program_through_the_console_pump",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_dump_bigger_than_the_budget_takes_several_frames_and_arrives_whole",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::on_resizing_the_program_inside_finds_out_about_the_new_size",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_program_inside_publishes_in_the_directory_it_was_told",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_program_sees_no_variable_that_is_not_declared",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_console_with_no_directory_starts_the_same_and_its_program_does_not_see_the_identity",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_dump_in_one_console_neither_stalls_nor_dirties_the_other",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_program_of_a_background_tab_learns_the_size_measured_for_it",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_window_that_lost_the_desktops_focus_tells_its_focused_console_to_come_back",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_window_dragged_to_the_stops_can_still_be_saved_and_read_back",
+    "reason": "unix-only: launches the POSIX cat fixture for saved-window restoration"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::dragging_a_long_row_without_stopping_leaves_no_weight_below_the_floor",
+    "reason": "unix-only: launches the POSIX cat fixture for saved-window restoration"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_saved_window_comes_back_with_the_same_tree_and_the_strip_reaches_no_file",
+    "reason": "unix-only: launches the POSIX cat fixture for saved-window restoration"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_freshly_opened_window_has_nothing_to_save",
+    "reason": "unix-only: launches the POSIX cat fixture for saved-window restoration"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_window_opens_with_the_saved_layout",
+    "reason": "unix-only: launches the POSIX cat fixture for saved-window restoration"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::only_the_restored_window_declares_where_its_consoles_came_from",
+    "reason": "unix-only: launches the POSIX cat fixture for saved-window restoration"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_window_that_came_from_a_real_file_publishes_what_reading_it_cost",
+    "reason": "unix-only: launches the POSIX cat fixture for saved-window restoration"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_panel_width_no_gesture_could_leave_comes_back_grabbable",
+    "reason": "unix-only: launches the POSIX cat fixture for saved-window restoration"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_restored_window_arms_its_counters_from_what_it_opened",
+    "reason": "unix-only: launches the POSIX cat fixture for saved-window restoration"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::with_nothing_saved_the_window_opens_factory_fresh",
+    "reason": "unix-only: launches the POSIX cat fixture for saved-window restoration"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_navigation_keys_and_the_arrows_reach_a_real_program_in_the_form_it_asked_for",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::on_the_alternate_screen_without_mouse_the_wheel_arrives_as_arrows",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::under_application_cursor_keys_the_wheel_sends_the_arrows_the_program_asked_for",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::pumping_the_console_does_not_return_the_scrollback_to_where_the_program_writes",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_press_on_a_button_makes_the_program_receive_its_command",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_press_that_answers_the_question_is_not_handed_to_the_program_on_a_repeated_pass",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_drag_from_a_press_that_answered_the_question_marks_text",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_split_that_does_not_fit_is_refused_and_spends_nothing",
+    "reason": "unix-only: exercises the Unix panel-control endpoint"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::an_agent_opens_a_console_without_moving_the_focus_and_loses_it_when_somebody_types",
+    "reason": "unix-only: exercises the Unix panel-control endpoint"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_disconnect_after_an_admitted_retirement_does_not_release_its_authority_early",
+    "reason": "unix-only: exercises the Unix panel-control endpoint"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_publication_after_a_queued_retirement_cannot_overtake_it",
+    "reason": "unix-only: exercises the Unix panel-control endpoint"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::an_ordinary_disconnect_preserves_the_panel_and_every_auxiliary_console",
+    "reason": "unix-only: exercises the Unix panel-control endpoint"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::only_a_console_an_agent_opened_says_on_its_panel_that_it_went_back",
+    "reason": "unix-only: exercises the Unix panel-control endpoint"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_console_the_agent_opened_is_closed_by_its_handle_and_the_handle_is_forgotten",
+    "reason": "unix-only: exercises the Unix panel-control endpoint"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_close_is_refused_for_a_handle_this_connection_does_not_own",
+    "reason": "unix-only: exercises the Unix panel-control endpoint"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_ctrl_click_on_a_bracketed_url_opens_it_once_and_the_program_hears_nothing",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_wheel_reaches_the_program_that_asked_for_it_and_does_not_move_the_scrollback",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_page_of_wheel_reaches_the_program_as_one_notch_per_row",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::with_shift_the_wheel_belongs_to_the_scrollback_even_if_the_program_asks_for_it",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_click_reaches_the_program_that_asked_for_it_and_with_its_cell",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::dragging_inside_a_program_that_asks_for_the_mouse_does_not_mark_text",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_press_on_the_strip_is_not_reported_to_the_program_that_asked_for_the_mouse",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_repeated_pass_does_not_send_the_click_twice_to_the_program",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::pressing_on_the_panel_does_not_hand_the_drag_to_the_program",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_button_that_is_not_the_primary_gets_its_press_and_its_release_too",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_chord_does_not_vanish_midway_through_the_drag",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::releasing_over_another_console_reports_it_to_the_one_that_got_the_press",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_mouse_gesture_is_three_reports_and_a_single_effect",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_drag_does_not_repeat_the_report_of_the_cell_it_is_already_on",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::with_shift_text_is_marked_even_if_the_program_asks_for_the_mouse",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::moving_the_pane_beats_the_program_that_asks_for_the_mouse",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::retiring_a_session_clears_its_panel_and_only_its_untouched_consoles",
+    "reason": "unix-only: exercises the Unix panel-control endpoint"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_done_holder_can_retire_its_auxiliaries_even_after_a_file_takes_the_document",
+    "reason": "unix-only: exercises the Unix panel-control endpoint"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::integrated_chrome::tests::connection_guide_and_its_closing_frame_deliver_no_keys_or_paste_to_the_program",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::integrated_chrome::tests::reconnect_help_copies_only_the_command_and_never_types_into_the_console",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::integrated_chrome::tests::connection_guide_copies_setup_prompt_with_local_path_without_typing_it",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::integrated_chrome::tests::narrow_tab_labels_select_without_invisible_close_targets",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::integrated_chrome::tests::update_notes_close_and_pointer_release_do_not_type_or_resize_consoles",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::integrated_chrome::tests::short_window_menu_scroll_keeps_existing_commands_reachable_without_console_input",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::integrated_chrome::tests::board_menu_owns_keyboard_dismissal_and_cross_surface_releases",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::integrated_chrome::tests::the_search_box_keeps_clear_of_a_held_paste_s_question",
+    "reason": "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::integrated_chrome::tests::search_navigation_edits_the_query_without_reaching_the_program",
+    "reason": "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_console_that_ended_well_says_nothing_over_its_grid",
+    "reason": "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_live_console_in_a_background_tab_does_not_let_the_window_close",
+    "reason": "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::a_two_pass_frame_does_not_lose_what_the_console_interpreted",
+    "reason": "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::closing_a_console_by_hand_does_not_close_the_window_with_what_was_left_to_read",
+    "reason": "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::closing_a_tab_by_hand_does_not_close_the_window_with_what_was_left_to_read",
+    "reason": "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::closing_a_tab_does_not_rename_the_ones_that_are_left_in_the_report",
+    "reason": "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::closing_a_tab_does_not_take_away_what_its_consoles_had_already_declared",
+    "reason": "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::one_console_dying_does_not_close_the_window",
+    "reason": "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_console_of_a_tab_that_is_not_seen_goes_on_being_drained",
+    "reason": "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_report_distinguishes_a_dead_focus_from_a_pane_with_no_side",
+    "reason": "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_report_publishes_the_dividers_in_the_order_in_which_they_are_dragged",
+    "reason": "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_report_publishes_the_font_the_window_was_really_opened_with",
+    "reason": "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_report_publishes_the_size_the_window_had",
+    "reason": "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_report_publishes_the_spans_of_the_consoles_of_every_tab",
+    "reason": "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_report_says_how_many_tabs_there_were_and_which_one_was_visible",
+    "reason": "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_sweep_of_the_unpainted_goes_after_the_painting_and_not_before",
+    "reason": "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_unpainted_console_declares_what_it_interpreted_and_not_one_span_more",
+    "reason": "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_window_closes_when_both_have_died_and_no_queue_is_left",
+    "reason": "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_window_closes_when_those_of_every_tab_have_died",
+    "reason": "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::the_window_opens_two_consoles_each_with_its_own_program_alive",
+    "reason": "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::what_an_unpainted_console_interprets_is_declared_all_the_same",
+    "reason": "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::what_is_declared_apart_is_discounted_from_the_rest_and_not_carried_to_the_next_frame",
+    "reason": "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::what_the_program_writes_ends_up_in_the_grid_only_once",
+    "reason": "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::with_a_single_console_the_report_does_not_say_there_are_spare_sides",
+    "reason": "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "tests::with_three_panes_the_report_invents_no_sides_and_calls_no_single_divider_the_divider",
+    "reason": "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+  }
+]

@@ -1,12 +1,10 @@
-# 162 — Windows CI and installed launch
-- Size: M; phase: plan; study complete, awaiting approval.
-- Answer applied: compiler-checked per-test omission inventory and pinned Rust listings.
-- PR 1: full Windows workspace lint/tests, visible Unix omissions and installed launch smoke.
-- Train: 0/1 published; wave 1 has one pending PR, no dependencies.
-- Acceptance: AC1–AC5 in 03-design.md; no unresolved high design finding.
-- #161 already merged on base; no unmet ticket dependencies.
-- No schema changes; no production code written or tests run.
-- Windows runtime behavior requires native validation during implementation.
-- Next: approve study, then build PR 1.
-- Effective config: FLOW.codex.md; FLOW_CONTEXT=unattended, context file absent.
-- Shared rules 0.118.0; plugin manifest absent, version comparison unavailable.
+# 162 · Windows CI and installed launch
+Size M · one PR · phase ship.
+Handed to the orchestrator for draft publication.
+Candidate/review/validation: 0e65d3a37a81561bbc8715ed96271d7cdf59a4a9.
+Full Linux suite: 2,690 passed, 16 existing ignored; final Linux-only gate test also passed.
+Final formatting, workspace Clippy, compiler omission accounting, Python and PowerShell fixtures passed.
+379 named Unix omissions; 28 Linux harnesses verified.
+Core/host-load MSVC all-target Clippy passed; whole-app native Windows execution pending.
+F1: require both Windows jobs green and inspect launch evidence before merge.
+No source-review blockers remain; native success is not claimed.

@@ -1,0 +1,401 @@
+   Compiling panel-control v0.1.0-alpha.14 (/work/repo/crates/panel-control)
+   Compiling app v0.1.0-alpha.14 (/work/repo/crates/app)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 18.71s
+omitted app/app:lib::agent_setup::tests::refuses_symlink_destination — unix-only: requires Unix symlinks to plant a competing destination
+omitted app/app:lib::ai_sessions::tests::claude_null_directory_uses_the_verified_client_not_its_shell_or_helper — unix-only: requires Linux process ancestry and Unix-domain client session sockets
+omitted app/app:lib::ai_sessions::tests::codex_probe::installed_codex_hook_stdout_preflight — unix-only: requires Linux Unix-domain client sockets and process identity
+  existing Linux ignore: metadata-only installed helper preflight; requires an explicit helper path
+omitted app/app:lib::ai_sessions::tests::codex_probe::installed_codex_hook_trust_preflight — unix-only: requires Linux Unix-domain client sockets and process identity
+  existing Linux ignore: metadata-only official hooks/list; no thread or model is started
+omitted app/app:lib::ai_sessions::tests::codex_probe::installed_codex_one_message_capture_and_exact_resume — unix-only: requires Linux Unix-domain client sockets and process identity
+  existing Linux ignore: one authorized installed Codex message; root must inspect and explicitly enable
+omitted app/app:lib::ai_sessions::tests::codex_probe::installed_codex_resume_only_status_diagnostic — unix-only: requires Linux Unix-domain client sockets and process identity
+  existing Linux ignore: resume-only diagnosis of this probe's one used message; /status only, no model turn
+omitted app/app:lib::ai_sessions::tests::detached_reporters_require_their_own_current_foreground_client_root — unix-only: requires Linux process ancestry and Unix-domain client session sockets
+omitted app/app:lib::ai_sessions::tests::installed_session_client_probe — unix-only: requires Linux process ancestry and Unix-domain client session sockets
+  existing Linux ignore: requires an explicitly isolated official-client configuration and no model input
+omitted app/app:lib::ai_sessions::tests::native_close_accepts_only_a_post_probe_ack_and_retains_the_frozen_sample — unix-only: requires Linux process lifetime observation and Unix-domain client session sockets
+omitted app/app:lib::ai_sessions::tests::native_close_rejects_an_old_challenge_even_when_the_sequence_increases — unix-only: requires Linux process lifetime observation and Unix-domain client session sockets
+omitted app/app:lib::ai_sessions::tests::native_close_uses_one_deadline_and_strips_unacknowledged_live_clients — unix-only: requires Linux process lifetime observation and Unix-domain client session sockets
+omitted app/app:lib::ai_sessions::tests::native_root_exit_invalidates_once_and_codex_keeps_last_accepted_report — unix-only: requires Linux process exit observation and Unix-domain client session sockets
+omitted app/app:lib::ai_sessions::tests::native_session_endpoint_rejects_a_reporter_from_another_real_pane — unix-only: requires Linux foreground-process identity and Unix-domain client session sockets
+omitted app/app:lib::ai_sessions::tests::native_session_generations_sequences_helpers_and_idle_probes — unix-only: requires Linux process ancestry and Unix-domain client session sockets
+omitted app/app:lib::ai_sessions::tests::unavailable_claude_root_directory_revokes_the_verified_identity — unix-only: requires Linux process ancestry and Unix-domain client session sockets
+omitted app/app:lib::client_attestation::programs::child::tests::resolver_cleanup_exhaustion_rejects_before_spawning_another_child — unix-only: exercises Unix resolver-child lifetime, process groups and pipe EOF
+omitted app/app:lib::client_attestation::programs::child::tests::volta_descendant_holding_stdout_cannot_extend_the_exchange_deadline — unix-only: exercises Unix resolver-child lifetime, process groups and pipe EOF
+omitted app/app:lib::client_attestation::programs::child::tests::volta_stdout_and_success_are_collected_under_one_deadline — unix-only: exercises Unix resolver-child lifetime, process groups and pipe EOF
+omitted app/app:lib::client_attestation::programs::child::tests::volta_timeout_does_not_wait_after_kill_and_the_child_is_reaped — unix-only: exercises Unix resolver-child lifetime, process groups and pipe EOF
+omitted app/app:lib::client_attestation::programs::tests::desktop_path_discovers_native_claude_in_its_user_installation — unix-only: exercises Unix native client discovery and process identity
+omitted app/app:lib::client_attestation::programs::tests::explicit_path_keeps_precedence_over_native_claude_installation — unix-only: exercises Unix native client discovery and process identity
+omitted app/app:lib::client_attestation::programs::tests::native_claude_fallback_refuses_scripts_missing_or_relative_home — unix-only: exercises Unix native client discovery and process identity
+omitted app/app:lib::client_attestation::programs::tests::native_claude_version_symlink_is_discovered_with_colon_in_home — unix-only: exercises Unix native client discovery and process identity
+omitted app/app:lib::client_attestation::programs::tests::native_fallback_does_not_discover_other_clients_or_nonexecutables — unix-only: exercises Unix native client discovery and process identity
+omitted app/app:lib::client_attestation::programs::tests::trusted_path_discards_empty_and_relative_entries — unix-only: exercises Unix native client discovery and process identity
+omitted app/app:lib::client_attestation::programs::tests::unsupported_path_client_does_not_fall_back_to_another_installation — unix-only: exercises Unix native client discovery and process identity
+omitted app/app:lib::clipboard::tests::first_primary_operation_selects_primary_without_a_clipboard_fallback — unix-only: exercises Linux primary-selection clipboard API semantics
+omitted app/app:lib::clipboard::tests::primary_publication_coalesces_without_issuing_an_ordinary_clipboard_command — unix-only: exercises Linux primary-selection clipboard API semantics
+omitted app/app:lib::explorer::interaction_tests::a_press_on_the_floating_list_over_a_console_never_reaches_its_program — unix-only: uses POSIX stty and a child input recorder to verify the floating-list press is swallowed
+omitted app/app:lib::explorer::interaction_tests::maximized_files_input_and_document_handoff_never_reach_covered_programs — unix-only: uses stty raw mode and cat to verify pointer actions do not reach a PTY program
+omitted app/app:lib::keyboard::tests::clicking_failed_recovery_does_not_discard_an_unanswered_held_paste — unix-only: depends on Linux-specific bracketed-paste size boundary and /bin/cat child behavior
+omitted app/app:lib::keyboard::tests::clipboard_takeover_uses_the_fresh_shell_gate_instead_of_old_tui_paste_mode — unix-only: depends on Linux-specific bracketed-paste size boundary and /bin/cat child behavior
+omitted app/app:lib::launch::tests::a_real_scoped_exit_keeps_repainting_until_the_observer_finishes — unix-only: requires Linux systemd user-manager semantics
+  existing Linux ignore: requires the built target/debug/app and a real systemd user manager
+omitted app/app:lib::launch::tests::a_real_signal_retains_output_and_has_a_dismissible_truthful_notice — unix-only: sends a Unix signal to a POSIX shell and checks signal termination
+omitted app/app:lib::launch::tests::closing_a_pending_launch_drops_the_late_child_without_resurrecting_the_console — unix-only: requires Unix process signals
+omitted app/app:lib::launch::tests::normal_restored_fallback_and_takeover_paths_use_the_explicit_ivy_launcher — unix-only: requires Linux systemd user-manager semantics
+  existing Linux ignore: requires the built target/debug/app and a real systemd user manager
+omitted app/app:lib::launch::tests::pending_input_and_latest_geometry_reach_the_real_program_in_order — unix-only: runs /bin/sh and stty to verify queued input and PTY geometry
+omitted app/app:lib::launch::tests::startup_prefix_is_interpreted_before_resize_even_with_the_bridge_parked — unix-only: uses /bin/sh, stty and cat to test startup input ordering
+omitted app/app:lib::measure::tests::every_letter_the_script_offers_goes_through_its_batch_allocation — unix-only: Linux measurement script requires sh and coreutils
+omitted app/app:lib::measure::tests::every_pattern_the_script_looks_for_in_the_report_still_extracts_something — unix-only: report patterns execute sed and grep
+omitted app/app:lib::measure::tests::project_report_guard_rejects_bad_or_duplicate_records_and_accepts_legacy_comparison — unix-only: Linux measurement script requires sh and coreutils
+omitted app/app:lib::measure::tests::sidebar_report_guard_rejects_zero_frames_for_open_and_closed_docks — unix-only: Linux measurement script requires sh and coreutils
+omitted app/app:lib::measure::tests::the_scripts_compare_mode_admits_the_fraction_and_rejects_another_window — unix-only: Linux measurement script requires sh and coreutils
+omitted app/app:lib::measure::tests::two_consoles_of_the_script_take_different_turns_without_clobbering_each_other — unix-only: Linux measurement script requires sh and coreutils
+omitted app/app:lib::opener::tests::a_file_swapped_for_a_link_after_the_judgement_is_not_launched — unix-only: requires Unix symlink or permission semantics
+omitted app/app:lib::opener::tests::a_link_is_judged_by_where_it_leads — unix-only: creates symlinks to distinguish a script link from a regular document
+omitted app/app:lib::opener::tests::linux::a_folder_swapped_for_a_link_is_not_opened — unix-only: uses Linux symlink semantics in the xdg-open resolver
+omitted app/app:lib::opener::tests::linux::a_launcher_that_exits_unhappy_says_so — unix-only: invokes Linux xdg-open and inspects its process exit
+omitted app/app:lib::opener::tests::linux::a_reveal_nobody_answers_opens_the_folder_and_never_the_file — unix-only: exercises Linux desktop portal fallback and xdg-open
+omitted app/app:lib::opener::tests::linux::an_open_runs_the_file_and_asks_no_bus — unix-only: exercises Linux desktop portal fallback for xdg-open
+omitted app/app:lib::opener::tests::linux::the_opener_gets_the_path_as_its_one_argument — unix-only: invokes the Linux xdg-open resolver
+omitted app/app:lib::opening::codex_tests::launched_shells_keep_their_own_pane_identity_and_survive_repeated_codex_runs — unix-only: launches POSIX shell wrapper scripts and relies on Unix executable permissions
+omitted app/app:lib::panel::provenance::tests::opened_pane_labels_outside_socket_and_accepts_its_shell_descendant_without_session_capture — unix-only: authenticates a shell descendant through Linux process ancestry and Unix sockets
+omitted app/app:lib::panel::tests::an_atomic_republication_of_identical_bytes_is_a_new_file_generation — unix-only: uses Unix atomic rename to replace a published panel file
+omitted app/app:lib::panel::tests::retirement_rejects_a_named_pipe_without_blocking_the_interface — unix-only: creates a FIFO to exercise nonblocking panel retirement
+omitted app/app:lib::project::tests::non_utf8_repository_paths_group_checkout_subdirectory_and_worktree — unix-only: constructs non-UTF-8 paths with Unix OsStr encoding
+omitted app/app:lib::pty_output::tests::a_bridge_whose_thread_lets_go_of_the_receiver_records_nobody_listening — unix-only: POSIX shell fixtures and Unix PTY output lifetime
+omitted app/app:lib::pty_output::tests::a_pickup_on_empty_does_not_invent_a_wait_of_zero — unix-only: POSIX shell fixtures and Unix PTY output lifetime
+omitted app/app:lib::pty_output::tests::destroying_the_bridge_with_the_queue_full_ends_its_thread — unix-only: POSIX shell fixtures and Unix PTY output lifetime
+omitted app/app:lib::pty_output::tests::picking_up_leaves_the_queue_empty — unix-only: POSIX shell fixtures and Unix PTY output lifetime
+omitted app/app:lib::pty_output::tests::the_arrival_of_bytes_wakes_the_window — unix-only: POSIX shell fixtures and Unix PTY output lifetime
+omitted app/app:lib::pty_output::tests::the_bridge_queue_does_not_grow_without_limit — unix-only: POSIX shell fixtures and Unix PTY output lifetime
+omitted app/app:lib::pty_output::tests::the_death_of_the_program_survives_having_handed_off_the_channel — unix-only: POSIX shell fixtures and Unix PTY output lifetime
+omitted app/app:lib::pty_output::tests::the_destination_keeps_what_it_already_had — unix-only: POSIX shell fixtures and Unix PTY output lifetime
+omitted app/app:lib::pty_output::tests::the_maximum_is_respected_and_what_is_left_over_stays_for_next_time — unix-only: POSIX shell fixtures and Unix PTY output lifetime
+omitted app/app:lib::pty_output::tests::what_is_picked_up_says_since_when_it_was_waiting — unix-only: POSIX shell fixtures and Unix PTY output lifetime
+omitted app/app:lib::pty_output::tests::what_the_frame_hands_over_is_read_off_the_pseudoterminal_and_not_invented — unix-only: POSIX shell fixtures and Unix PTY output lifetime
+omitted app/app:lib::pty_output::tests::what_the_program_writes_reaches_the_queue — unix-only: POSIX shell fixtures and Unix PTY output lifetime
+omitted app/app:lib::pty_output::tests::when_the_final_notification_arrives_the_death_is_already_published — unix-only: POSIX shell fixtures and Unix PTY output lifetime
+omitted app/app:lib::pty_output::tests::while_the_program_lives_the_bridge_says_so — unix-only: POSIX shell fixtures and Unix PTY output lifetime
+omitted app/app:lib::restoration::tests::directory_restore_sets_the_real_child_cwd_without_console_input — unix-only: verifies child working directory through Linux process inspection
+omitted app/app:lib::resume::tests::a_wrong_live_session_is_replaced_before_notice_keyboard_clipboard_or_mouse_input — unix-only: uses /bin/cat and a POSIX shell to verify raw input reaches a fresh takeover process
+omitted app/app:lib::resume::tests::every_client_reaches_the_child_with_only_fixed_arguments_and_a_structured_cwd — unix-only: runs executable POSIX shell fixtures to inspect child arguments and working directory
+omitted app/app:lib::resume::tests::failed_resume_retains_output_until_explicit_fresh_shell_takeover — unix-only: launches /bin/sh with POSIX commands to exercise failed-resume takeover
+omitted app/app:lib::resume::tests::restored_client_fixed_arguments_and_directory_reach_a_real_isolated_scope — unix-only: requires Linux systemd user-manager semantics
+  existing Linux ignore: requires the built target/debug/app and a real systemd user manager
+omitted app/app:lib::session::file_tests::a_file_that_cannot_be_read_neither_prevents_startup_nor_vetoes_writing — unix-only: uses Unix permission bits to make an existing file unreadable
+omitted app/app:lib::session::file_tests::a_link_planted_at_the_destination_is_not_written_through — unix-only: plants a Unix symlink at the persistence destination to verify it is never followed
+omitted app/app:lib::session::file_tests::a_named_pipe_is_rejected_without_waiting — unix-only: creates a FIFO to test nonblocking rejection of special files
+omitted app/app:lib::session::file_tests::the_destination_is_replaced_whole_and_never_written_over — unix-only: uses Unix atomic file replacement semantics
+omitted app/app:lib::session::file_tests::the_directory_and_the_file_are_born_only_for_the_user — unix-only: asserts Unix owner and permission bits on the settings directory and file
+omitted app/app:lib::session::ownership::tests::crashed_owner_releases_lease_while_fork_child_lives — unix-only: forks a child and signals its parent to test owner lease release
+omitted app/app:lib::session::ownership::tests::fork_owner_child — unix-only: forks a child process to verify owner lease lifetime
+omitted app/app:lib::settings::editor::tests::lowering_recovery_after_a_wrong_live_session_still_replaces_it_before_input — unix-only: uses /bin/cat and a POSIX shell to verify keyboard and clipboard input after recovery
+omitted app/app:lib::settings::store::tests::symbolic_link_save_is_refused_and_permissions_survive — unix-only: requires Unix symlink or permission semantics
+omitted app/app:lib::shell_integration::tests::cleanup_never_removes_unknown_contents — unix-only: creates an executable POSIX shell helper using Unix permissions
+omitted app/app:lib::shell_integration::tests::fish_preserves_newlines_in_executable_path_and_arguments — unix-only: invokes fish and creates executable POSIX shell wrappers
+omitted app/app:lib::shell_integration::tests::missing_helper_at_preparation_or_runtime_keeps_real_shells_usable — unix-only: invokes bash, zsh and fish with POSIX helper scripts
+omitted app/app:lib::shell_integration::tests::real_shells_use_post_configuration_path_and_remain_alive — unix-only: starts bash, zsh and fish with POSIX startup files and executable shell hooks
+omitted app/app:lib::shell_integration::tests::relative_tmpdir_uses_absolute_shared_base_and_warns_once — unix-only: requires executable POSIX shell integration with bash and /bin/sh
+omitted app/app:lib::shell_integration::tests::unsupported_shell_reports_limitation_and_still_runs_commands — unix-only: invokes /bin/sh with POSIX commands
+omitted app/app:lib::shell_integration::tests::user_commands_win_with_diagnostic — unix-only: creates executable POSIX shell wrappers for command resolution
+omitted app/app:lib::shell_integration::tests::zsh_disabling_rcs_does_not_install_codex_function — unix-only: invokes zsh and inspects its POSIX startup behavior
+omitted app/app:lib::shell_integration::tests::zsh_restores_original_directory_and_honors_changes_from_zshenv — unix-only: invokes zsh and relies on its POSIX startup configuration
+omitted app/app:lib::sidebar::tests::board_blocks_all_mouse_buttons_and_motion_to_covered_programs — unix-only: uses stty raw mode and cat to verify input never reaches the child
+omitted app/app:lib::sidebar::tests::console_mouse_release_crossing_into_files_or_the_drawer_reaches_its_program — unix-only: uses stty raw mode and cat to inspect child PTY input
+omitted app/app:lib::sidebar::tests::divider_drags_retain_consoles_and_cannot_reach_their_mouse_protocol — unix-only: uses stty raw mode and cat to inspect child PTY input
+omitted app/app:lib::startup::migration::tests::dangling_destination_is_not_replaced — unix-only: requires Unix symlink or permission semantics
+omitted app/app:lib::tests::a_button_that_is_not_the_primary_gets_its_press_and_its_release_too — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::a_capped_notice_ends_at_the_middle_of_its_console_and_not_past_it — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::a_chorded_press_on_the_notice_does_not_destroy_the_paste — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::a_chorded_press_on_the_send_button_does_not_send_the_paste — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::a_click_answers_only_the_question_it_landed_on — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::a_click_on_its_notice_discards_the_question_of_an_unfocused_console — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::a_click_on_the_notice_does_not_reach_the_program_that_asked_for_the_mouse — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::a_click_on_the_question_discards_the_paste_and_the_program_receives_none_of_it — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::a_click_on_the_refusal_takes_it_off_the_glass_through_the_mouse_pass — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::a_click_reaches_the_program_that_asked_for_it_and_with_its_cell — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::a_close_is_refused_for_a_handle_this_connection_does_not_own — unix-only: exercises the Unix panel-control endpoint
+omitted app/app:lib::tests::a_console_holding_a_paste_paints_the_question_over_it — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::a_console_that_ended_well_says_nothing_over_its_grid — unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop
+omitted app/app:lib::tests::a_console_the_agent_opened_is_closed_by_its_handle_and_the_handle_is_forgotten — unix-only: exercises the Unix panel-control endpoint
+omitted app/app:lib::tests::a_console_too_narrow_for_the_notice_has_no_box_to_press — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::a_console_too_small_for_the_notice_has_no_box_to_press — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::a_console_under_one_row_has_no_box_either — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::a_console_whose_ceiling_leaves_no_room_for_a_line_has_no_box — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::a_console_with_no_directory_starts_the_same_and_its_program_does_not_see_the_identity — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::a_console_with_room_for_a_line_but_not_the_answer_has_no_box — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::a_console_with_room_for_only_one_notice_keeps_the_question_and_drops_the_silence — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::a_ctrl_click_on_a_bracketed_url_opens_it_once_and_the_program_hears_nothing — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::a_disconnect_after_an_admitted_retirement_does_not_release_its_authority_early — unix-only: exercises the Unix panel-control endpoint
+omitted app/app:lib::tests::a_done_holder_can_retire_its_auxiliaries_even_after_a_file_takes_the_document — unix-only: exercises the Unix panel-control endpoint
+omitted app/app:lib::tests::a_drag_from_a_press_that_answered_the_question_marks_text — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::a_dump_bigger_than_the_budget_takes_several_frames_and_arrives_whole — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::a_dump_in_one_console_neither_stalls_nor_dirties_the_other — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::a_file_published_while_the_channel_holds_the_panel_is_read_when_the_hold_ends — unix-only: exercises the Unix panel-control endpoint
+omitted app/app:lib::tests::a_freshly_opened_window_has_nothing_to_save — unix-only: launches the POSIX cat fixture for saved-window restoration
+omitted app/app:lib::tests::a_held_paste_the_full_queue_refuses_stays_held_and_keeps_its_send_button — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::a_live_console_in_a_background_tab_does_not_let_the_window_close — unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop
+omitted app/app:lib::tests::a_mouse_gesture_is_three_reports_and_a_single_effect — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::a_page_of_wheel_reaches_the_program_as_one_notch_per_row — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::a_panel_width_no_gesture_could_leave_comes_back_grabbable — unix-only: launches the POSIX cat fixture for saved-window restoration
+omitted app/app:lib::tests::a_pasted_line_that_does_not_fit_reaches_the_program_as_nothing_at_all — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::a_press_next_to_the_notice_does_not_answer_it — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::a_press_on_a_button_makes_the_program_receive_its_command — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::a_press_on_the_panel_beside_it_does_not_answer_the_question — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::a_press_on_the_strip_is_not_reported_to_the_program_that_asked_for_the_mouse — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::a_press_that_answers_the_question_is_not_handed_to_the_program_on_a_repeated_pass — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::a_publication_after_a_queued_retirement_cannot_overtake_it — unix-only: exercises the Unix panel-control endpoint
+omitted app/app:lib::tests::a_refused_write_says_so_without_claiming_the_output_stopped — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::a_repeated_pass_does_not_send_the_click_twice_to_the_program — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::a_retry_refused_after_the_sentence_was_dismissed_brings_the_sentence_back — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::a_saved_window_comes_back_with_the_same_tree_and_the_strip_reaches_no_file — unix-only: launches the POSIX cat fixture for saved-window restoration
+omitted app/app:lib::tests::a_split_that_does_not_fit_is_refused_and_spends_nothing — unix-only: exercises the Unix panel-control endpoint
+omitted app/app:lib::tests::a_tall_console_gets_the_box_its_question_needs_and_not_half_the_screen — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::a_two_pass_frame_does_not_lose_what_the_console_interpreted — unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop
+omitted app/app:lib::tests::a_window_dragged_to_the_stops_can_still_be_saved_and_read_back — unix-only: launches the POSIX cat fixture for saved-window restoration
+omitted app/app:lib::tests::a_window_that_lost_the_desktops_focus_tells_its_focused_console_to_come_back — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::agent_signals::native_transport::automatic_capability_does_not_refuse_human_input_when_writer_is_backpressured — unix-only: requires stty raw mode and sleep to hold a PTY writer backlog
+omitted app/app:lib::tests::agent_signals::native_transport::healthy_native_client_receives_the_exact_capability_response — unix-only: requires stty raw mode and dd to capture PTY input bytes
+omitted app/app:lib::tests::an_agent_opens_a_console_without_moving_the_focus_and_loses_it_when_somebody_types — unix-only: exercises the Unix panel-control endpoint
+omitted app/app:lib::tests::an_ordinary_disconnect_preserves_the_panel_and_every_auxiliary_console — unix-only: exercises the Unix panel-control endpoint
+omitted app/app:lib::tests::answering_a_question_does_not_swallow_the_rest_of_the_queue — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::board::tests::a_refused_choice_stays_on_screen_and_is_said_on_the_board — unix-only: requires Unix symlink or permission semantics
+omitted app/app:lib::tests::board::tests::board_open_and_escape_preserve_consoles_and_swallow_the_closing_frames_input — unix-only: requires POSIX raw-mode child byte capture to assert keyboard and mouse routing
+omitted app/app:lib::tests::board::tests::clicking_a_board_card_closes_the_dock_and_never_sends_its_gesture — unix-only: requires POSIX raw-mode child byte capture to assert keyboard and mouse routing
+omitted app/app:lib::tests::board::tests::clicking_the_covered_console_does_not_forward_keyboard_input — unix-only: requires POSIX raw-mode child byte capture to assert keyboard and mouse routing
+omitted app/app:lib::tests::board::tests::configurable_board_binding_returns_the_disabled_chord_to_the_program — unix-only: requires POSIX raw-mode child byte capture to assert keyboard and mouse routing
+omitted app/app:lib::tests::board::tests::enter_restores_a_hidden_target_and_does_not_deliver_trailing_text_or_paste — unix-only: requires POSIX raw-mode child byte capture to assert keyboard and mouse routing
+omitted app/app:lib::tests::board::tests::repeated_egui_closing_passes_cannot_send_the_frames_input_to_a_program — unix-only: requires POSIX raw-mode child byte capture to assert keyboard and mouse routing
+omitted app/app:lib::tests::both_notices_together_stay_out_of_the_bottom_half_of_their_console — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::closing_a_console_by_hand_does_not_close_the_window_with_what_was_left_to_read — unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop
+omitted app/app:lib::tests::closing_a_tab_by_hand_does_not_close_the_window_with_what_was_left_to_read — unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop
+omitted app/app:lib::tests::closing_a_tab_does_not_rename_the_ones_that_are_left_in_the_report — unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop
+omitted app/app:lib::tests::closing_a_tab_does_not_take_away_what_its_consoles_had_already_declared — unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop
+omitted app/app:lib::tests::context_clipboard::tests::blocked_clipboard_owner_leaves_frames_and_program_input_available — unix-only: requires POSIX raw-mode child byte capture to verify clipboard and keyboard delivery
+omitted app/app:lib::tests::context_clipboard::tests::delayed_paste_to_closed_console_is_discarded — unix-only: requires POSIX raw-mode child byte capture to verify clipboard and keyboard delivery
+omitted app/app:lib::tests::context_clipboard::tests::dismissing_menu_with_escape_or_outside_click_never_reaches_program — unix-only: requires POSIX raw-mode child byte capture to verify clipboard and keyboard delivery
+omitted app/app:lib::tests::context_clipboard::tests::dragging_console_selection_publishes_primary — unix-only: publishes through the Linux primary-selection clipboard
+omitted app/app:lib::tests::context_clipboard::tests::menu_paste_reply_targets_original_console_after_focus_changes — unix-only: requires POSIX raw-mode child byte capture to verify clipboard and keyboard delivery
+omitted app/app:lib::tests::context_clipboard::tests::menu_paste_uses_current_bracketed_mode_and_holds_overlong_lines — unix-only: requires POSIX raw-mode child byte capture to verify clipboard and keyboard delivery
+omitted app/app:lib::tests::context_clipboard::tests::reporting_program_keeps_context_buttons_until_shift_overrides_them — unix-only: requires POSIX raw-mode child byte capture to verify clipboard and keyboard delivery
+omitted app/app:lib::tests::dismissing_the_ended_output_notice_does_not_silence_a_separate_refusal — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::dragging_a_long_row_without_stopping_leaves_no_weight_below_the_floor — unix-only: launches the POSIX cat fixture for saved-window restoration
+omitted app/app:lib::tests::dragging_inside_a_program_that_asks_for_the_mouse_does_not_mark_text — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::header_controls::tests::a_hidden_panel_keeps_its_live_producer_and_shows_its_next_publication — unix-only: launches a shell fixture to publish a panel over a Unix-domain socket
+omitted app/app:lib::tests::header_controls::tests::compact_menu_navigation_never_reaches_the_program — unix-only: requires POSIX raw-mode child byte capture to verify keyboard and mouse routing
+omitted app/app:lib::tests::header_controls::tests::losing_window_focus_while_a_menu_is_open_does_not_leave_shift_stuck — unix-only: requires POSIX raw-mode child byte capture to verify keyboard and mouse routing
+omitted app/app:lib::tests::header_controls::tests::modifier_changes_inside_a_menu_still_make_copy_copy_after_dismissal — unix-only: requires POSIX raw-mode child byte capture to verify keyboard and mouse routing
+omitted app/app:lib::tests::header_controls::tests::toggling_the_panel_sends_no_mouse_report_to_a_program_that_requested_clicks — unix-only: requires POSIX stty and shell printf to enable xterm mouse reporting in the PTY fixture
+omitted app/app:lib::tests::integrated_chrome::tests::board_menu_owns_keyboard_dismissal_and_cross_surface_releases — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::integrated_chrome::tests::connection_guide_and_its_closing_frame_deliver_no_keys_or_paste_to_the_program — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::integrated_chrome::tests::connection_guide_copies_setup_prompt_with_local_path_without_typing_it — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::integrated_chrome::tests::narrow_tab_labels_select_without_invisible_close_targets — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::integrated_chrome::tests::reconnect_help_copies_only_the_command_and_never_types_into_the_console — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::integrated_chrome::tests::search_navigation_edits_the_query_without_reaching_the_program — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::integrated_chrome::tests::short_window_menu_scroll_keeps_existing_commands_reachable_without_console_input — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::integrated_chrome::tests::the_search_box_keeps_clear_of_a_held_paste_s_question — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::integrated_chrome::tests::update_notes_close_and_pointer_release_do_not_type_or_resize_consoles — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::moving_the_pane_beats_the_program_that_asks_for_the_mouse — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::no_console_gets_a_box_that_clips_the_way_out_it_will_show — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::on_resizing_the_program_inside_finds_out_about_the_new_size — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::on_the_alternate_screen_without_mouse_the_wheel_arrives_as_arrows — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::one_console_dying_does_not_close_the_window — unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop
+omitted app/app:lib::tests::only_a_console_an_agent_opened_says_on_its_panel_that_it_went_back — unix-only: exercises the Unix panel-control endpoint
+omitted app/app:lib::tests::only_the_primary_button_answers_the_question — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::only_the_restored_window_declares_where_its_consoles_came_from — unix-only: launches the POSIX cat fixture for saved-window restoration
+omitted app/app:lib::tests::pane_rename::tests::terminal_title_override_and_return_action_own_input_and_preserve_manual_names_only — unix-only: requires a POSIX raw-mode child byte recorder for terminal input behavior
+omitted app/app:lib::tests::pressing_on_the_panel_does_not_hand_the_drag_to_the_program — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::pumping_the_console_does_not_return_the_scrollback_to_where_the_program_writes — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::reads_from_two_real_panes_survive_one_closing_in_the_final_report — unix-only: exercises the Unix panel-control endpoint
+omitted app/app:lib::tests::releasing_over_another_console_reports_it_to_the_one_that_got_the_press — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::retiring_a_session_clears_its_panel_and_only_its_untouched_consoles — unix-only: exercises the Unix panel-control endpoint
+omitted app/app:lib::tests::terminal_query_replies_reach_the_program_through_the_console_pump — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::the_box_of_a_held_paste_is_stroked_over_the_console_holding_it — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::the_chord_does_not_vanish_midway_through_the_drag — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::the_console_of_a_tab_that_is_not_seen_goes_on_being_drained — unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop
+omitted app/app:lib::tests::the_console_saying_it_went_quiet_moves_neither_the_question_nor_its_button — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::the_drag_does_not_repeat_the_report_of_the_cell_it_is_already_on — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::the_navigation_keys_and_the_arrows_reach_a_real_program_in_the_form_it_asked_for — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::the_notice_box_does_not_shrink_when_the_keyboard_leaves — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::the_notice_names_the_keys_only_where_they_would_arrive — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::the_press_is_judged_where_the_button_went_down — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::the_press_that_dismisses_the_silence_is_not_also_given_to_the_program — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::the_program_inside_publishes_in_the_directory_it_was_told — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::the_program_of_a_background_tab_learns_the_size_measured_for_it — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::the_program_sees_no_variable_that_is_not_declared — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::the_question_is_clipped_to_its_own_box — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::the_report_distinguishes_a_dead_focus_from_a_pane_with_no_side — unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop
+omitted app/app:lib::tests::the_report_publishes_the_dividers_in_the_order_in_which_they_are_dragged — unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop
+omitted app/app:lib::tests::the_report_publishes_the_font_the_window_was_really_opened_with — unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop
+omitted app/app:lib::tests::the_report_publishes_the_size_the_window_had — unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop
+omitted app/app:lib::tests::the_report_publishes_the_spans_of_the_consoles_of_every_tab — unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop
+omitted app/app:lib::tests::the_report_says_how_many_tabs_there_were_and_which_one_was_visible — unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop
+omitted app/app:lib::tests::the_restored_window_arms_its_counters_from_what_it_opened — unix-only: launches the POSIX cat fixture for saved-window restoration
+omitted app/app:lib::tests::the_send_button_sends_the_paste_composed_for_the_mode_at_the_click — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::the_send_button_sits_under_the_question_inside_the_top_half_or_not_at_all — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::the_silence_stands_under_the_held_paste_and_gives_way_to_it — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::the_sweep_of_the_unpainted_goes_after_the_painting_and_not_before — unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop
+omitted app/app:lib::tests::the_unpainted_console_declares_what_it_interpreted_and_not_one_span_more — unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop
+omitted app/app:lib::tests::the_wheel_reaches_the_program_that_asked_for_it_and_does_not_move_the_scrollback — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::the_window_closes_when_both_have_died_and_no_queue_is_left — unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop
+omitted app/app:lib::tests::the_window_closes_when_those_of_every_tab_have_died — unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop
+omitted app/app:lib::tests::the_window_opens_two_consoles_each_with_its_own_program_alive — unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop
+omitted app/app:lib::tests::the_window_opens_with_the_saved_layout — unix-only: launches the POSIX cat fixture for saved-window restoration
+omitted app/app:lib::tests::the_window_that_came_from_a_real_file_publishes_what_reading_it_cost — unix-only: launches the POSIX cat fixture for saved-window restoration
+omitted app/app:lib::tests::the_wording_for_an_absent_window_costs_no_console_its_notice — unix-only: asserts the Linux canonical-input boundary used by held-paste handling
+omitted app/app:lib::tests::under_application_cursor_keys_the_wheel_sends_the_arrows_the_program_asked_for — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::what_an_unpainted_console_interprets_is_declared_all_the_same — unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop
+omitted app/app:lib::tests::what_is_declared_apart_is_discounted_from_the_rest_and_not_carried_to_the_next_frame — unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop
+omitted app/app:lib::tests::what_the_program_writes_ends_up_in_the_grid_only_once — unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop
+omitted app/app:lib::tests::with_a_single_console_the_report_does_not_say_there_are_spare_sides — unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop
+omitted app/app:lib::tests::with_nothing_saved_the_window_opens_factory_fresh — unix-only: launches the POSIX cat fixture for saved-window restoration
+omitted app/app:lib::tests::with_shift_text_is_marked_even_if_the_program_asks_for_the_mouse — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::with_shift_the_wheel_belongs_to_the_scrollback_even_if_the_program_asks_for_it — unix-only: uses POSIX shell commands or Unix PTY input fixtures
+omitted app/app:lib::tests::with_three_panes_the_report_invents_no_sides_and_calls_no_single_divider_the_divider — unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop
+omitted app/app:lib::viewer::code_header::tests::a_folder_that_does_not_show_as_itself_is_never_copied — unix-only: constructs a non-UTF-8 path with Unix OsStr encoding
+omitted app/app:lib::viewer::code_header::tests::a_name_that_does_not_show_as_itself_is_never_copied_or_launched — unix-only: constructs a non-UTF-8 path with Unix OsStr encoding
+omitted app/app:lib::viewer::code_header::tests::window::a_folder_of_the_path_shows_in_files_and_the_menu_keeps_its_clicks — unix-only: tests filesystem symlink path resolution in the Linux file tree
+omitted app/app:lib::viewer::code_header::tests::window::a_folder_of_the_path_under_a_linked_root_shows_inside_the_tree — unix-only: tests filesystem symlink path resolution in the Linux file tree
+omitted app/app:lib::viewer::delivery::tests::delivers_once_to_pinned_pane_and_refuses_closed_or_unwrapped_multiline — unix-only: uses POSIX shell fixtures and Unix PTY byte-delivery assertions
+omitted app/app:lib::viewer::interaction_tests::non_repository_console_paints_a_clear_message_after_review_click — unix-only: verifies a real shell process and Linux repository state after a viewer interaction
+omitted app/app:lib::viewer::load::tests::git_timeout_does_not_wait_for_child — unix-only: sends a Unix signal to stop a timed out Git child
+omitted app/app:lib::viewer::origin::tests::review_opens_live_console_repository_without_shell_directory_reports — unix-only: exercises live Linux worktree state and shell directory reports
+omitted app/app:lib::viewer::origin::tests::review_uses_live_worktree_changes_after_a_stale_local_directory_report — unix-only: exercises live Linux worktree state and shell directory reports
+omitted app/app:lib::viewer::tests::viewer_typing_and_dismissal_never_reach_the_program — unix-only: uses stty raw mode and cat to inspect bytes delivered to a PTY program
+omitted app/batches:test::a_crashed_run_is_invalidated_for_the_crash_whatever_its_report_lost — unix-only: invokes sh to execute the measurement guard script
+omitted app/batches:test::a_report_missing_the_line_a_guard_reads_is_invalidated_by_that_guard — unix-only: invokes sh to execute the measurement guard script
+omitted app/batches:test::board_controls_publish_identical_panel_documents — unix-only: invokes sh to execute POSIX document builders
+omitted app/batches:test::board_guards_require_real_navigation_and_reject_closed_activity — unix-only: invokes sh to run POSIX report validation functions
+omitted app/batches:test::board_variants_are_only_averaged_with_their_own_mode — unix-only: invokes sh to compare measurement reports
+omitted app/batches:test::graphical_settings_reports_require_the_requested_effects — unix-only: invokes sh to run POSIX report validation functions
+omitted app/batches:test::integrated_chrome_batches_require_painted_pane_headers — unix-only: invokes sh to run POSIX report validation functions
+omitted app/batches:test::integrated_chrome_witness_and_regimes_are_checked — unix-only: invokes sh to run POSIX report validation functions
+omitted app/batches:test::ligature_comparison_requires_matching_mode_font_size_and_scale — unix-only: invokes sh to compare measurement reports
+omitted app/batches:test::rich_board_guard_requires_observation_and_real_interactions — unix-only: invokes sh to run POSIX report validation functions
+omitted app/batches:test::settings_variants_are_not_averaged_across_modes — unix-only: invokes sh to compare measurement reports
+omitted app/batches:test::the_large_document_lands_between_the_floor_and_the_ceiling — unix-only: invokes sh with POSIX shell functions extracted from the measurement script
+omitted app/scope_launch:test::bounded_kernel_oom_is_attributed_without_touching_other_scopes — unix-only: requires delegated Linux cgroup memory-controller scopes
+  existing Linux ignore: requires an owned systemd test scope with memory-controller delegation
+omitted app/scope_launch:test::denied_scope_fallback_runs_once_with_closed_or_stalled_stderr — unix-only: exercises Linux pipe closure and fcntl nonblocking stderr behavior
+omitted app/scope_launch:test::failed_and_stalled_manager_preserve_argv_environment_cwd_exactly_once — unix-only: invokes /bin/sh and exercises Linux process-manager stderr backpressure
+omitted app/scope_launch:test::real_helper_honors_path_override_and_relative_executable — unix-only: creates executable POSIX shell fixtures and verifies Unix PATH lookup
+omitted app/scope_launch:test::real_helper_preserves_resize_input_session_and_root_close — unix-only: verifies Linux process groups, sessions and TIOCGWINSZ terminal ioctl
+omitted app/scope_launch:test::real_helper_returns_failed_exec_instead_of_reporting_successful_launch — unix-only: requires Unix exec failure and ENOENT reporting from the Linux test launcher
+omitted app/scope_launch:test::real_ivy_helper_preserves_argv_environment_directory_and_controlling_terminal — unix-only: invokes /bin/sh and verifies Unix controlling-terminal behavior
+omitted app/scope_launch:test::real_systemd_oomd_kills_only_the_busy_console_in_a_disposable_guest — unix-only: requires systemd-oomd and a disposable Linux guest
+  existing Linux ignore: managed pressure is allowed only inside the explicitly marked disposable QEMU guest
+omitted app/scope_launch:test::real_systemd_scopes_separate_roots_and_immediate_descendants_from_the_gui — unix-only: requires Linux systemd user scopes and process ancestry
+  existing Linux ignore: requires a real systemd user manager; run explicitly with the session bus
+omitted panel-contract/panel_contract:lib::panel::tests::a_link_to_a_normal_file_is_read_as_the_file_it_points_to — unix-only: requires Unix symlink semantics
+omitted panel-contract/panel_contract:lib::panel::tests::a_named_pipe_is_rejected_instead_of_hanging_the_window — unix-only: requires Unix FIFO semantics
+omitted panel-contract/panel_contract:lib::panel::tests::without_permission_to_read_it_it_is_not_confused_with_not_having_published — unix-only: requires Unix permission bits
+omitted panel-contract/panel_contract:lib::tests::a_relative_system_temporary_falls_back_to_tmp — unix-only: requires Unix temporary-directory environment semantics
+omitted panel-contract/panel_contract:lib::tests::the_directory_cannot_be_read_by_anyone_else — unix-only: requires Unix permission modes
+omitted panel-control/inherited_directory:test::genuine_inherited_directory_returns_the_document — unix-only: requires Unix domain socket transport
+omitted panel-control/inherited_directory:test::unsafe_inherited_directories_never_reach_a_listening_socket — unix-only: requires Unix socket paths, permission bits, and symlink semantics
+omitted panel-control/ivy_codex_launch:test::tests::explicit_independent_admin_remote_and_unknown_preserve_arguments_environment_and_status — unix-only: requires POSIX shell executables, signal behavior, and executable permission bits
+omitted panel-control/ivy_codex_launch:test::tests::failed_shared_setup_never_starts_an_independent_session — unix-only: requires POSIX shell executables, signal behavior, and executable permission bits
+omitted panel-control/ivy_codex_launch:test::tests::inherits_auth_and_mcp_environment_without_changing_configuration_or_adding_api_keys — unix-only: requires POSIX shell executables, signal behavior, and executable permission bits
+omitted panel-control/ivy_codex_launch:test::tests::missing_remote_capabilities_never_start_an_independent_session — unix-only: requires POSIX shell executables, signal behavior, and executable permission bits
+omitted panel-control/ivy_codex_launch:test::tests::preserves_client_signal — unix-only: requires POSIX shell executables, signal behavior, and executable permission bits
+omitted panel-control/ivy_codex_launch:test::tests::refuses_recursive_executable — unix-only: requires POSIX shell executables, signal behavior, and executable permission bits
+omitted panel-control/ivy_codex_launch:test::tests::shared_launch_uses_capabilities_with_arbitrary_cli_and_server_version_labels — unix-only: requires POSIX shell executables, signal behavior, and executable permission bits
+omitted panel-control/ivy_codex_launch:test::tests::stalled_capability_probe_fails_in_bounded_time_without_starting_a_session — unix-only: requires POSIX shell executables, signal behavior, and executable permission bits
+omitted panel-control/panel_control:lib::codex_route::tests::symlink_and_missing_routes_are_rejected — unix-only: requires Unix symlink semantics
+omitted panel-control/panel_control:lib::endpoint::tests::a_pane_cannot_be_reached_through_another_panes_endpoint — unix-only: requires Unix stream socket path and routing semantics
+omitted panel-control/panel_control:lib::endpoint::tests::inherited_directory_requires_private_mode_type_and_effective_owner — unix-only: requires Unix permission bits and ownership metadata
+omitted panel-control/panel_control:lib::endpoint::tests::nothing_outside_this_user_can_reach_the_endpoint — unix-only: requires Unix socket permissions and ownership metadata
+omitted panel-control/panel_control:lib::endpoint::tests::the_endpoint_lives_inside_the_panes_own_directory — unix-only: requires Unix stream socket path and routing semantics
+omitted panel-control/panel_control:lib::endpoint::tests::what_was_bound_is_what_gets_connected_to — unix-only: requires Unix stream socket path and routing semantics
+omitted panel-control/panel_control:lib::listener::tests::a_connection_that_dies_releases_what_it_held — unix-only: requires Unix-domain socket peer-disconnect handling
+omitted panel-control/panel_control:lib::listener::tests::a_document_is_read_while_the_window_queue_is_full_and_nobody_is_woken — unix-only: requires Unix-domain socket transport for panel_get while the inbox is full
+omitted panel-control/panel_control:lib::listener::tests::a_document_that_is_not_a_panel_never_reaches_the_window — unix-only: requires Unix-domain socket request parsing and refusal delivery
+omitted panel-control/panel_control:lib::listener::tests::a_mismatched_answer_is_refused_rather_than_reshaped — unix-only: requires Unix-domain socket request/reply identity checks
+omitted panel-control/panel_control:lib::listener::tests::a_pane_serves_as_many_connections_as_it_serves_and_no_more — unix-only: requires Unix-domain socket multi-connection routing
+omitted panel-control/panel_control:lib::listener::tests::a_patch_travels_to_the_pane_with_its_ops_already_read — unix-only: requires Unix-domain socket patch delivery and replies
+omitted panel-control/panel_control:lib::listener::tests::a_taken_patch_names_what_its_lines_dropped_and_a_refused_one_does_not — unix-only: requires Unix-domain socket transport for patch delivery and refusal replies
+omitted panel-control/panel_control:lib::listener::tests::a_taken_publication_names_what_it_dropped_and_a_refused_one_does_not — unix-only: requires Unix-domain socket transport for publication and refusal replies
+omitted panel-control/panel_control:lib::listener::tests::agent_signal_crosses_the_socket_and_disconnect_is_reported — unix-only: requires Unix-domain socket transport for agent-signal delivery and disconnect notification
+omitted panel-control/panel_control:lib::listener::tests::agent_signal_queue_full_replies_retryable_over_the_socket_but_panel_does_not — unix-only: requires Unix-domain socket transport for retryable and legacy replies
+omitted panel-control/panel_control:lib::listener::tests::an_unknown_tool_is_refused_by_name_and_the_connection_lives_on — unix-only: requires Unix-domain socket request routing and replies
+omitted panel-control/panel_control:lib::listener::tests::closing_after_the_endpoint_path_is_removed_still_ends_the_acceptor — unix-only: requires Unix socket endpoint removal while the acceptor is active
+omitted panel-control/panel_control:lib::listener::tests::closing_the_pane_ends_every_thread_it_had — unix-only: requires Unix-domain socket acceptor and shutdown lifecycle
+omitted panel-control/panel_control:lib::listener::tests::diagnostic_peer_is_the_connected_process — unix-only: requires Unix socket peer credentials
+omitted panel-control/panel_control:lib::listener::tests::inspector_runs_once_and_its_observation_reaches_each_delivery — unix-only: requires Unix socket peer credentials
+omitted panel-control/panel_control:lib::listener::tests::one_read_is_answered_after_the_pane_closes_and_no_more — unix-only: requires Unix-domain socket transport and close-time buffered request semantics
+omitted panel-control/panel_control:lib::listener::tests::panel_publish_is_admitted_off_frame_and_publisher_disconnect_is_silent — unix-only: requires Linux pidfd-backed peer lifetime
+omitted panel-control/panel_control:lib::listener::tests::plan_verbs_parse_off_the_frame_and_forward_project_scope_operations — unix-only: requires Unix-domain socket plan-request delivery and replies
+omitted panel-control/panel_control:lib::listener::tests::publishing_wakes_the_window — unix-only: requires Unix-domain socket publication and window wakeup
+omitted panel-control/panel_control:lib::listener::tests::retirement_travels_to_the_window_and_its_counts_return — unix-only: requires Unix-domain socket retirement delivery and replies
+omitted panel-control/panel_control:lib::listener::tests::the_original_channel_api_still_hands_panel_get_to_its_owner — unix-only: requires Unix-domain socket transport for the legacy Channel API
+omitted panel-control/panel_control:lib::listener::tests::the_split_verbs_travel_to_the_window_and_its_answer_returns — unix-only: requires Unix-domain socket split-request delivery and replies
+omitted panel-control/panel_control:lib::listener::tests::the_window_s_answer_is_what_the_caller_reads — unix-only: requires Unix-domain socket transport for window replies
+omitted panel-control/panel_control:lib::listener::tests::two_connections_are_heard_at_the_same_time — unix-only: requires concurrent Unix-domain socket connections
+omitted panel-control/panel_control:lib::listener::tests::what_is_published_over_the_channel_reaches_the_window_and_no_file_is_written — unix-only: requires Unix-domain socket transport from producer to window inbox
+omitted panel-control/panel_control:lib::session::tests::sockets::real_session_socket_bypasses_full_ui_inbox_and_cannot_spoof_peer — unix-only: requires Unix socket peer credentials
+omitted panel-control/panel_control:lib::session::tests::sockets::session_helper_cannot_release_or_replace_existing_panel_connection — unix-only: requires Unix socket peer credentials
+omitted panel-control/panel_mcp_handshake:test::an_early_bridge_keeps_publication_guidance_when_the_channel_binds_later — unix-only: requires Unix socket transport fixtures
+omitted panel-control/panel_mcp_handshake:test::conditional_instructions_neither_probe_nor_promise_a_socket — unix-only: requires Unix socket transport fixtures
+omitted panel-control/session_helper:test::helper_reports_only_allowed_metadata_with_its_actual_kernel_identity — unix-only: requires a Unix-domain channel and kernel socket peer identity
+omitted panel-control/session_helper:test::invalid_whole_identity_exits_before_reading_stdin_or_connecting — unix-only: requires Unix socket routing and non-text environment values
+omitted panel-control/session_helper:test::publish_cli_maps_unheld_and_policy_refusal_to_the_declared_output — unix-only: requires Unix-domain channel transport for authorization replies
+omitted panel-control/session_helper:test::session_exchange_rejects_invalid_identity_before_connecting — unix-only: requires Unix socket routing and non-text environment values
+omitted term-core/idle_console_cpu:test::a_waiting_console_costs_no_processor_time — unix-only: requires Linux process CPU accounting and nonblocking PTY behavior
+omitted term-core/term_core:lib::foreground::tests::ancestry_diagnostic_is_tristate_and_ignores_foreground_rules — unix-only: requires Linux process ancestry and pidfd inspection
+omitted term-core/term_core:lib::foreground::tests::child_exit_status_distinguishes_success_from_failed_resume — unix-only: requires Linux process ancestry and pidfd inspection
+omitted term-core/term_core:lib::foreground::tests::detached_helper_is_attested_only_as_a_descendant_of_the_live_foreground_pane — unix-only: requires Linux process ancestry and pidfd inspection
+omitted term-core/term_core:lib::foreground::tests::detached_helpers_do_not_make_a_background_ancestor_foreground — unix-only: requires Linux process ancestry and pidfd inspection
+omitted term-core/term_core:lib::foreground::tests::foreground_scope_is_owned_send_and_ends_with_its_console — unix-only: requires Linux process ancestry and pidfd inspection
+omitted term-core/term_core:lib::foreground::tests::foreground_scope_rejects_the_other_console_and_background_groups — unix-only: requires Linux process ancestry and pidfd inspection
+omitted term-core/term_core:lib::foreground::tests::native_process_directory_checks_birth_executable_and_live_process — unix-only: requires Linux process ancestry and pidfd inspection
+omitted term-core/term_core:lib::foreground::tests::nested_descendants_are_exposed_and_root_exit_is_native — unix-only: requires Linux process ancestry and pidfd inspection
+omitted term-core/term_core:lib::locale::tests::the_c_library_is_asked_whether_a_locale_exists — unix-only: requires the Unix C locale database
+omitted term-core/term_core:lib::received::tests::a_prelude_that_fails_never_marks_the_program_ready — unix-only: requires POSIX shell and Unix canonical line-discipline behavior
+omitted term-core/term_core:lib::received::tests::a_prelude_with_a_semicolon_of_its_own_is_refused — unix-only: requires POSIX shell and Unix canonical line-discipline behavior
+omitted term-core/term_core:lib::received::tests::it_reports_what_the_program_got_and_not_what_the_echo_showed — unix-only: requires POSIX shell and Unix canonical line-discipline behavior
+omitted term-core/term_core:lib::scope::protocol_tests::observer_delayed_evidence_and_bus_disconnect_use_actual_manager_results — unix-only: requires Linux systemd user-manager semantics
+  existing Linux ignore: private dbus-daemon requires Unix sockets; run explicitly outside the sandbox
+omitted term-core/term_core:lib::scope::protocol_tests::observer_stops_at_the_real_500ms_cutoff_and_ignores_later_oom_evidence — unix-only: requires Linux systemd user-manager semantics
+  existing Linux ignore: private dbus-daemon requires Unix sockets; run explicitly outside the sandbox
+omitted term-core/term_core:lib::scope::protocol_tests::unknown_oom_policy_retries_the_actual_protocol_and_retains_the_basic_scope — unix-only: requires Linux systemd user-manager semantics
+  existing Linux ignore: private dbus-daemon requires Unix sockets; run explicitly outside the sandbox
+omitted term-core/term_core:lib::scope::tests::a_stalled_manager_future_is_cancelled_at_its_owned_deadline — unix-only: requires Linux systemd user-manager semantics
+omitted term-core/term_core:lib::scope::tests::an_expired_deadline_does_not_poll_a_stalled_future_forever — unix-only: requires Linux systemd user-manager semantics
+omitted term-core/term_core:lib::scope::tests::only_unknown_optional_oom_property_permits_a_basic_scope_retry — unix-only: requires Linux systemd user-manager semantics
+omitted term-core/term_core:lib::scope::tests::placement_requires_the_exact_unified_or_systemd_hierarchy — unix-only: requires Linux systemd user-manager semantics
+omitted term-core/term_core:lib::scope_gate::tests::absent_helper_connection_obeys_startup_deadline — unix-only: requires Linux Unix-socket launcher semantics
+omitted term-core/term_core:lib::scope_gate::tests::explicit_executable_resolution_preserves_relative_path_and_refuses_directories — unix-only: requires Linux Unix-socket launcher semantics
+omitted term-core/term_core:lib::scope_gate::tests::gate_is_private_and_removes_its_endpoint_on_drop — unix-only: requires Linux Unix-socket launcher semantics
+omitted term-core/term_core:lib::termination::tests::actual_child_status_distinguishes_sigkill_from_exit_137 — unix-only: requires Unix signal exit-status semantics
+omitted term-core/term_core:lib::termination::tests::dropping_a_pty_retires_observer_reaping_before_the_close_signal — unix-only: requires Linux observer reaping behavior
+omitted term-core/term_core:lib::termination::tests::observer_cannot_reap_between_the_close_status_check_and_signal — unix-only: requires Linux observer reaping behavior
+omitted term-core/term_core:lib::tests::a_program_not_reapable_after_an_accepted_kill_is_left_running_and_reaped — unix-only: requires Unix process signaling
+omitted term-core/term_core:lib::tests::a_program_that_catches_the_hang_up_finishes_saving_before_it_is_killed — unix-only: requires Unix process signaling
+omitted term-core/term_core:lib::tests::a_program_that_dies_with_its_writer_waiting_for_room_makes_the_writer_give_up — unix-only: requires Linux nonblocking PTY writer behavior
+omitted term-core/term_core:lib::tests::a_program_that_exited_is_readable_as_such_through_the_real_path — unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop
+omitted term-core/term_core:lib::tests::a_program_that_ignores_the_hang_up_is_killed_after_its_grace — unix-only: requires Unix process signaling
+omitted term-core/term_core:lib::tests::a_program_that_refuses_the_hang_up_is_left_running_and_reaped_when_it_ends — unix-only: requires Unix process signaling
+omitted term-core/term_core:lib::tests::a_program_whose_kill_is_refused_after_its_grace_is_left_running_and_reaped — unix-only: requires Unix process signaling
+omitted term-core/term_core:lib::tests::a_refusal_clears_on_the_next_write_the_queue_accepts — unix-only: requires POSIX shell, line-discipline, or EOF behavior
+omitted term-core/term_core:lib::tests::a_refusal_in_one_console_leaves_another_console_accepting — unix-only: requires POSIX shell, line-discipline, or EOF behavior
+omitted term-core/term_core:lib::tests::a_refused_write_adds_nothing_to_what_is_owed — unix-only: requires POSIX shell, line-discipline, or EOF behavior
+omitted term-core/term_core:lib::tests::a_write_past_the_ceiling_is_refused_and_named_by_its_own_message — unix-only: requires POSIX shell, line-discipline, or EOF behavior
+omitted term-core/term_core:lib::tests::an_oversized_write_is_accepted_whole_when_the_queue_is_under_the_ceiling — unix-only: requires POSIX shell, line-discipline, or EOF behavior
+omitted term-core/term_core:lib::tests::closing_a_console_does_not_wait_out_the_librarys_poll_step — unix-only: requires POSIX shell, line-discipline, or EOF behavior
+omitted term-core/term_core:lib::tests::closing_a_console_whose_buffer_is_exactly_full_ends_its_writer — unix-only: requires Linux nonblocking PTY writer behavior
+omitted term-core/term_core:lib::tests::closing_a_console_whose_program_left_a_survivor_ends_its_writer_before_the_close_returns — unix-only: requires Linux nonblocking PTY writer behavior
+omitted term-core/term_core:lib::tests::closing_a_console_whose_program_stopped_reading_ends_its_writer — unix-only: requires Linux nonblocking PTY writer behavior
+omitted term-core/term_core:lib::tests::closing_does_not_hang_when_a_survivor_holds_the_pseudoterminal — unix-only: requires POSIX shell, line-discipline, or EOF behavior
+omitted term-core/term_core:lib::tests::each_refused_write_is_counted_even_while_the_flag_is_already_up — unix-only: requires POSIX shell, line-discipline, or EOF behavior
+omitted term-core/term_core:lib::tests::nothing_handed_over_is_lost_when_the_program_reads_late — unix-only: requires POSIX shell, line-discipline, or EOF behavior
+omitted term-core/term_core:lib::tests::the_channel_closes_when_the_program_finishes — unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop
+omitted term-core/term_core:lib::tests::the_write_returns_even_though_the_program_never_reads_its_input — unix-only: requires POSIX shell, line-discipline, or EOF behavior
+omitted term-core/term_core:lib::tests::without_consuming_it_what_arrives_is_bounded — unix-only: requires POSIX shell, line-discipline, or EOF behavior
+omitted term-core/term_core:lib::tests::working_directory_follows_live_pty_child_and_stops_after_exit — unix-only: requires Unix process working-directory inspection
+Windows Unix-only omissions: 379
+unrelated ignored test [linux]: app/app:lib::control::tests::measure_a_patch_at_the_ceiling — manual release-mode latency measurement
+unrelated ignored test [linux]: app/app:lib::control::tests::measure_off_frame_document_reads — manual release-mode latency measurement
+Unrelated ignored tests [linux]: 2
+Compiled test executables checked: 28 (linux)
