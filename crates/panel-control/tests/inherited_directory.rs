@@ -120,6 +120,9 @@ fn genuine_inherited_directory_returns_the_document() {
                 Err(error) => panic!("{error}"),
             }
         };
+        // On macOS an accepted socket inherits the listener's non-blocking flag (Linux's does
+        // not), so the read below returned WouldBlock whenever the bridge had not written yet.
+        stream.set_nonblocking(false).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(2)))
             .unwrap();

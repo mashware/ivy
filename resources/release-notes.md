@@ -1,6 +1,14 @@
-# Ivy 0.1.0-alpha.13
+# Ivy 0.1.0-alpha.14
 
 ## New in this alpha
+
+- On macOS, closing a console no longer freezes Ivy when its program cannot be stopped right away.
+- On macOS, Codex publishes its status panel to its own console instead of another one.
+- On macOS, typing at the prompt no longer leaves doubled text that cannot be erased: consoles get a UTF-8 locale when the desktop provides none. Native Mac validation is pending in this alpha.
+- Console search keeps arrow keys, Home, End and deletion in its own input, editing at a visible blinking caret instead of sending them to the running program.
+- The search options list fits its longest label instead of clipping it.
+
+## Previously in 0.1.0-alpha.13
 
 - Claude Code hooks can clear an answered question's waiting claim when Ivy was launched from the desktop without Claude's native installation on PATH. Hooks still have to belong to the same running client.
 
@@ -118,12 +126,12 @@
 
 ## Choose a download
 
-- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.13_amd64.deb`.
-- Arch Linux x86_64: `ivy-terminal-0.1.0alpha13-1-x86_64.pkg.tar.zst`.
-- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.13-macos-arm64.dmg`.
-- macOS 15+ Intel: `Ivy-0.1.0-alpha.13-macos-x86_64.dmg`.
-- Windows 11 x64: `Ivy-0.1.0-alpha.13-windows-x86_64-setup.exe`.
+- Ubuntu 24.04 / 26.04 x86_64: `ivy_0.1.0-alpha.14_amd64.deb`.
+- Arch Linux x86_64: `ivy-terminal-0.1.0alpha14-1-x86_64.pkg.tar.zst`.
+- macOS 15+ Apple Silicon: `Ivy-0.1.0-alpha.14-macos-arm64.dmg`.
+- macOS 15+ Intel: `Ivy-0.1.0-alpha.14-macos-x86_64.dmg`.
+- Windows 11 x64: `Ivy-0.1.0-alpha.14-windows-x86_64-setup.exe`.
 
 Download `release-manifest.json` and `SHA256SUMS` with the chosen package and verify its SHA-256
-before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.13/docs/10-installation.md)
+before installing. See the [installation instructions](https://github.com/mashware/ivy/blob/v0.1.0-alpha.14/docs/10-installation.md)
 for verification, installation, upgrade and removal commands. No Rust toolchain is needed.
