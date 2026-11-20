@@ -5079,6 +5079,14 @@ on a dump the two now run close. No frame batch was run to see whether that ever
 | **`poll` for room before a write that still blocks** | «There is room» means *some* room: a larger write still parks in the kernel, and if the program dies in the meantime it is the same leak, narrower |
 | **Closing another copy of the master from `Drop`** | Measured: it does not wake the writer. The blocked write holds its own |
 
+### Amended on 20 November 2026: on Windows the close ends the writer ([#163](https://github.com/mashware/ivy/issues/163))
+
+**Windows keeps the blocking write, and loses the leak.** The writer still parks in `write_all` when
+the program reads nothing. But closing the console now closes its pseudoconsole, and the
+pseudoconsole's host then closes the pipe the writer waits on, so the write fails with a broken pipe
+and the thread ends (D111). Overlapped writes with `CancelIoEx` were not an option: `portable-pty`'s
+pipes are anonymous pipes, which do not support overlapped I/O. **macOS keeps the leak** until F2.7.
+
 ---
 
 ## D30 — A test that needs a terminal mode proves it has one, and no control character can prove it
@@ -7867,6 +7875,13 @@ case.
 | **Keeping the master read until the child is reaped**, so the drain at exit can finish | It fixes only the explanation above, which is not reproduced, and it keeps the wait on the interface pass |
 | **Waiting with no bound and relying on the kill** | That is the defect. A kill accepted by the system is not a program gone |
 | **A longer bound** | Only time the window is frozen for. A program that is not reapable a tenth of a second after a kill is not going to become reapable by waiting more |
+
+**Amended on 20 November 2026** ([#163](https://github.com/mashware/ivy/issues/163)): **on Windows a
+refusal is seen, and nothing is left waiting on the interface pass.** `portable-pty`'s `kill` read
+`TerminateProcess`'s result the wrong way round and discarded it, so the refused path above was never
+taken on Windows. This crate now calls `TerminateProcess` itself and writes this decision's line when
+it fails. Windows takes neither the 100 ms bound nor the `left-running` thread: there is no zombie to
+reap, and the thread that watches the program's exit (D111) already waits on it.
 
 ## D57 — Every blocking wait in production code is bounded or declared abandoned, and a test enforces it
 
@@ -11167,3 +11182,58 @@ owner decided on 20 November 2026 that Open shows a script or an executable inst
 - Under WSL with `wslu`, `xdg-open` may be `wslview`, which hands the path to PowerShell or `cmd`.
   Nothing mitigates that.
 - No measured batch opens the header's menu or wraps a file.
+
+## D111 — On Windows a console closes its pseudoconsole when its program ends and when it is closed, never on the interface pass
+
+**Decided on 20 November 2026** ([#163](https://github.com/mashware/ivy/issues/163)). On Windows a
+console's master lives in a shared slot, and **taking it out and dropping it is closing the
+pseudoconsole** (`ClosePseudoConsole`):
+
+- **When the program ends.** A thread started with the console waits on a handle of the program's
+  process and, when it ends, closes the pseudoconsole. The output pipe breaks, the reader reads end of
+  file, and the console reports an ordinary ending (`Ending::EndedWell`, D38): typing `exit` closes
+  the pane, and the last pane closes the window, through the path Linux and macOS already take.
+- **When the console is closed.** `Drop for Pty` ends the program with `TerminateProcess`, reads its
+  result, and hands the master to a thread that drops it. The reader then ends with end of file
+  instead of being abandoned at `READER_GIVE_UP` (D32), and a writer parked on a program that reads
+  nothing fails with a broken pipe and ends (D29).
+- **The reader drains to end of file.** After a close or after its host is gone, it keeps reading and
+  discarding instead of returning. The reason is still recorded first.
+
+**Why.** Three symptoms had one cause. `portable-pty` keeps the pseudoconsole in a value shared by the
+master and the slave, and closes it only when the last of them goes. It also hands both pipe ends it
+creates to the pseudoconsole's host and keeps neither. So nothing this crate held could produce an end
+of file while the `Pty` lived: an exited program left a dead pane, the window never closed after its
+last shell, and the «stopped receiving» notices never fired. The close itself ran last in `Drop`, on
+the interface pass, after the reader had been told to stop. Microsoft documents that
+`ClosePseudoConsole` can wait indefinitely for its last frame to be read, and before Windows 11 24H2
+the call is synchronous.
+
+**A refusal is seen now.** `portable-pty`'s `kill` reads `TerminateProcess`'s result the wrong way
+round and then discards it. This crate calls `TerminateProcess` itself. A refusal writes D56's line,
+and the close still happens. Whether the program already ended is asked of its handle, never of its
+exit code: a program that exits with 259 reports the same code Windows uses for «still running».
+
+**On Windows, `exit` also ends programs still attached to that console.** `ClosePseudoConsole` sends
+them Windows' close event and then ends them. On Linux a survivor holding the terminal keeps the pane
+open (D32). Whether closing should end a console's background programs everywhere is #193's
+question; this decision does not answer it beyond what the platform's own close does.
+
+| Discarded | Why |
+|---|---|
+| **Overlapped writes and `CancelIoEx` for the writer**, the ticket's proposal | `portable-pty`'s pipes are anonymous pipes, which do not support overlapped I/O. It would mean replacing `openpty`. Closing the pseudoconsole already breaks the pipe the writer waits on |
+| **A Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`** | It decides that closing a console ends its whole process tree, which is #193's open product question |
+| **A grace period before terminating** | `ClosePseudoConsole` already sends the close event to attached programs before ending them |
+| **Only the exit watcher, leaving `Drop` as it was** | Every close would still wait out the reader deadline, abandon the reader, and close on the interface pass with nobody draining |
+| **A drain thread on a second reader on the close path** | It needed the watcher to check the stop flag. That opened a race: the watcher closing while `Drop` stopped the reader, with nobody draining. A reader that drains until end of file removes the race and the second reader |
+| **`reaped_within` and `left-running` on Windows** | Windows has no zombies to reap, and the exit watcher already waits on the process |
+
+**What it costs, declared.** Each console has one more thread, parked on its process handle, for as
+long as its program lives. A program that survives both `TerminateProcess` and the close keeps that
+thread and the reader for as long as it lives, the same trade D56 makes. If the closing thread cannot
+be created, the close runs on the interface pass, where the draining reader bounds it.
+
+**Not verified.** The tests run only in the prerelease workflow's Windows job (prefix `windows_exit`,
+D108). That image is Windows Server 2025, built on the 24H2 codebase, so it may not show the
+synchronous close of Windows 10 and Windows 11 before 24H2. Nobody has watched a window close itself
+on a Windows desktop yet (F2.7).

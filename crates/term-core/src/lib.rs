@@ -22,9 +22,9 @@ use std::time::Duration;
 #[cfg(unix)]
 use std::time::Instant;
 
-use portable_pty::{Child, CommandBuilder, native_pty_system};
 #[cfg(not(windows))]
 use portable_pty::MasterPty;
+use portable_pty::{Child, CommandBuilder, native_pty_system};
 
 #[cfg(windows)]
 mod conpty;

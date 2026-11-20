@@ -1597,6 +1597,10 @@ const NOT_OURS: &[&str] = &[
     "Cc",
     "Cf",
     "DEL",
+    // **The Windows call that closes a pseudoconsole.** `portable-pty` makes it when its value is
+    // dropped; `term-core`'s ConPTY module cites it where it explains why dropping the master is the
+    // close and why the reader drains first.
+    "ClosePseudoConsole",
     // Other programs, and what the operating system gives them.
     "bash",
     // The one that writes for ever in two-byte lines, which is why the leak bench uses it.

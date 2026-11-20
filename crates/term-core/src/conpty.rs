@@ -26,7 +26,7 @@ pub(crate) type Slot = Arc<Mutex<Option<Box<dyn MasterPty + Send>>>>;
 const INFINITE: u32 = 0xFFFF_FFFF;
 const WAIT_OBJECT_0: u32 = 0;
 
-// Two functions of `kernel32`, declared here rather than pulled in through a bindings crate: they
+// Two functions of kernel32, declared here rather than pulled in through a bindings crate: they
 // are the only ones this module needs, and their signatures have not changed since Windows XP.
 #[link(name = "kernel32")]
 unsafe extern "system" {
@@ -141,7 +141,7 @@ pub(crate) fn terminate(process: RawHandle) -> io::Result<()> {
     if ended() { Ok(()) } else { Err(refused) }
 }
 
-/// Run only on Windows, by the prerelease workflow's Windows job (D108): the `windows_exit` prefix
+/// Run only on Windows, by the prerelease workflow's Windows job (D108): the windows_exit prefix
 /// is what that job filters and names.
 #[cfg(test)]
 mod tests {
@@ -161,7 +161,13 @@ mod tests {
     fn spawn(command: &str) -> (Pty, Receiver<Vec<u8>>) {
         Pty::spawn(
             &powershell(),
-            &["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
+            &[
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                command,
+            ],
             Size::default(),
         )
         .expect("PowerShell starts in a console")
