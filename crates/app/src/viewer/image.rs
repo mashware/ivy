@@ -462,24 +462,41 @@ mod tests {
         output
     }
 
-    /// The image the drawer painted: the one rect filled with a texture, its clip, and the whole
-    /// image's place, worked back from the part in view and its texture coordinates.
+    /// The image the drawer painted: the one rect filled with a texture, at any depth of nested
+    /// shapes, its clip, and the whole image's place, worked back from the part in view and its
+    /// texture coordinates. More than one textured rect fails, rather than picking one.
     fn image_shape(
         shapes: &[egui::epaint::ClippedShape],
     ) -> Option<(egui::Rect, &egui::epaint::RectShape, egui::Rect)> {
-        shapes.iter().find_map(|clipped| match &clipped.shape {
-            egui::Shape::Rect(rect) => {
-                let uv = rect.brush.as_ref()?.uv;
-                let size = rect.rect.size() / uv.size();
-                let min = rect.rect.min - uv.min.to_vec2() * size;
-                // Worked back through a division, two passes over the same image can differ in
-                // their last bits; a 1/1024 point grid hides that and nothing a test measures.
-                let grid = |v: egui::Vec2| (v * 1024.0).round() / 1024.0;
-                let whole = egui::Rect::from_min_size(grid(min.to_vec2()).to_pos2(), grid(size));
-                Some((whole, rect, clipped.clip_rect))
+        fn walk<'a>(
+            shape: &'a egui::Shape,
+            clip: egui::Rect,
+            found: &mut Vec<(&'a egui::epaint::RectShape, egui::Rect)>,
+        ) {
+            match shape {
+                egui::Shape::Rect(rect) if rect.brush.is_some() => found.push((rect, clip)),
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        walk(shape, clip, found);
+                    }
+                }
+                _ => {}
             }
-            _ => None,
-        })
+        }
+        let mut found = Vec::new();
+        for clipped in shapes {
+            walk(&clipped.shape, clipped.clip_rect, &mut found);
+        }
+        assert!(found.len() <= 1, "{} textured rects painted", found.len());
+        let (rect, clip) = found.pop()?;
+        let uv = rect.brush.as_ref()?.uv;
+        let size = rect.rect.size() / uv.size();
+        let min = rect.rect.min - uv.min.to_vec2() * size;
+        // Worked back through a division, two passes over the same image can differ in their last
+        // bits; a 1/1024 point grid hides that and nothing a test measures.
+        let grid = |v: egui::Vec2| (v * 1024.0).round() / 1024.0;
+        let whole = egui::Rect::from_min_size(grid(min.to_vec2()).to_pos2(), grid(size));
+        Some((whole, rect, clip))
     }
 
     /// Where the drawer painted the whole image, also the parts outside the view.
