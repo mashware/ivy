@@ -412,6 +412,7 @@ pub(crate) fn suspend(window: &mut crate::Window) {
         state.open = false;
         state.keyboard = false;
         state.held = false;
+        state.space = false;
         state.refresh_at = None;
         state.events = None;
     }
@@ -426,6 +427,10 @@ pub(crate) fn keys(
     let blocked = blocked || window.chrome.guide_blocked(ui.ctx());
     window.viewer.context = Some(ui.ctx().clone());
     window.viewer_other.context = Some(ui.ctx().clone());
+    if blocked {
+        window.viewer.space = false;
+        window.viewer_other.space = false;
+    }
     let owned = !blocked && before_keys(window, ui, metrics);
     delivery::deliver(window, ui.ctx());
     let requests = if blocked || owned {
@@ -444,8 +449,12 @@ pub(crate) fn before_keys(
 ) -> bool {
     let started = Instant::now();
     let owned = (|| {
+        // Every return below leaves Space not the drawer's unless it is worked out again, so a
+        // Space held across a closed drawer cannot pan when it comes back.
+        let held = window.viewer.space || window.viewer_other.space;
         for state in [&mut window.viewer, &mut window.viewer_other] {
             state.events = None;
+            state.space = false;
         }
         if window.settings_editor.is_open() || window.pane_view.is_modal() {
             return false;
@@ -472,7 +481,6 @@ pub(crate) fn before_keys(
         let over = ctx.input(|i| i.pointer.interact_pos().is_some_and(|p| rect.contains(p)));
         // Read before a press below hands the keys over: a Space a console was given stays its own.
         let holds = window.viewer.keyboard || window.sidebar.maximized;
-        let held = window.viewer.space;
         window.viewer.space = ctx.input(|i| image::space_is_ours(i, holds, held));
         if ctx.input(|i| i.pointer.any_pressed()) && !window.viewer.held {
             window.viewer.keyboard = over;

@@ -1544,6 +1544,52 @@ mod tests {
         );
     }
 
+    /// A Space the drawer owned, then the drawer closed with Escape, and Space let go and pressed
+    /// again in a console: when the image comes back with that Space still down, it is the
+    /// console's, so no hand shows and a left drag does not pan.
+    #[test]
+    fn a_space_pressed_while_the_drawer_was_closed_does_not_pan_when_it_returns() {
+        let folder = Folder::new();
+        let (mut window, ctx) = zoomed_window(&folder);
+        let at = window.sidebar.last_dock.unwrap().center();
+        pass(&mut window, &ctx, vec![egui::Event::PointerMoved(at)]);
+        let owned = pass(&mut window, &ctx, vec![space(true)]);
+        assert_eq!(owned.platform_output.cursor_icon, egui::CursorIcon::Grab);
+        let escape = |pressed| egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        pass(&mut window, &ctx, vec![escape(true)]);
+        pass(&mut window, &ctx, vec![escape(false)]);
+        assert_eq!(crate::sidebar::active(&window), None);
+        pass(&mut window, &ctx, vec![space(false)]);
+        pass(&mut window, &ctx, vec![space(true)]);
+        crate::sidebar::toggle(&mut window, crate::sidebar::Tool::Markdown, &ctx);
+        let before = settle(&mut window, &ctx);
+        assert!(ctx.input(|i| i.key_down(egui::Key::Space)));
+        let hover = pass(&mut window, &ctx, vec![egui::Event::PointerMoved(at)]);
+        assert_ne!(hover.platform_output.cursor_icon, egui::CursorIcon::Grab);
+        let cursors = drag(
+            &mut window,
+            &ctx,
+            egui::PointerButton::Primary,
+            egui::vec2(-30.0, -45.0),
+        );
+        assert!(ctx.input(|i| i.key_down(egui::Key::Space)));
+        assert!(
+            !cursors.contains(&egui::CursorIcon::Grabbing),
+            "{cursors:?}"
+        );
+        assert_eq!(
+            settle(&mut window, &ctx),
+            before,
+            "a console's Space panned"
+        );
+    }
+
     /// A maximized drawer reads every key even when nobody clicked it, so Space is its own there
     /// and Space + left drag pans.
     #[test]
