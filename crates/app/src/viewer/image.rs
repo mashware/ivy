@@ -543,6 +543,9 @@ mod tests {
         for pane in window.active_mut().panes_mut() {
             pane.screen.advance(b"\x1b[31mred\x1b[0m plain text\r\n");
         }
+        // With the keys elsewhere, the drawer owns only the frames of the gesture itself, so the
+        // consoles' plain colours are the ones painted while nothing claims the pointer.
+        crate::viewer::blur(&mut window);
         let shapes = painted(&mut window, &ctx, vec![]);
         let metrics =
             crate::painter::CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
@@ -573,6 +576,11 @@ mod tests {
             ]
         };
         let mut shapes = painted(&mut window, &ctx, wheel(at));
+        assert_eq!(
+            inks(&shapes, consoles),
+            plain,
+            "the zoom dimmed the consoles"
+        );
         for _ in 0..30 {
             shapes = painted(&mut window, &ctx, vec![]);
         }
@@ -585,11 +593,6 @@ mod tests {
         assert!(
             (under(before) - under(after)).length() < 0.01,
             "the point under the pointer moved: {before:?} -> {after:?}"
-        );
-        assert_eq!(
-            inks(&shapes, consoles),
-            plain,
-            "the zoom dimmed the consoles"
         );
         painted(&mut window, &ctx, wheel(consoles.center()));
         for _ in 0..30 {
