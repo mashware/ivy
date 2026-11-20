@@ -337,16 +337,18 @@ mod default_shell_tests {
         };
         pty.write(command).unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        let mut seen = Vec::new();
-        while !String::from_utf8_lossy(&seen).contains("IVY_OK") {
+        let (mut seen, mut answered) = (String::new(), 0);
+        while !seen.contains("IVY_OK") {
             let left = deadline.saturating_duration_since(std::time::Instant::now());
-            assert!(
-                !left.is_zero(),
-                "{program} never ran the command: {:?}",
-                String::from_utf8_lossy(&seen)
-            );
+            assert!(!left.is_zero(), "{program} never ran the command: {seen:?}");
             if let Ok(bytes) = output.recv_timeout(left) {
-                seen.extend(bytes);
+                seen.push_str(&String::from_utf8_lossy(&bytes));
+            }
+            // ConPTY asks where the cursor is and waits for the answer, which the window's
+            // screen gives in the app; here nobody else would.
+            for _ in answered..seen.matches("\x1b[6n").count() {
+                pty.write(b"\x1b[1;1R").unwrap();
+                answered += 1;
             }
         }
     }
