@@ -10775,3 +10775,33 @@ settles: whether `cdcd` is gone in a
 console of this build — the reporter's test also made zsh a login shell, so a co-factor may remain —
 and whether `NSLocale.currentLocale` reports the system language or the app's own (English) one on
 macOS 14 and later, which would turn a Spanish user's `es_ES.UTF-8` into `en_US.UTF-8`.
+
+## D106 — A translocated Ivy offers no path for a client to save, and setup is confirmed in the client
+
+**Decided.** When macOS runs Ivy from a Gatekeeper App Translocation copy — its executable's real
+path has an `AppTranslocation` component — the connection guide offers no path a client could save:
+not the MCP bridge, not the first-time setup prompt that carries it, not the session-recovery helper
+or adapters. In their place it says that Ivy is running from a temporary copy, and that the remedy is
+moving `Ivy.app` to Applications with Finder and opening it again from there. And the MCP bridge setup the
+guide describes ends with a check the person makes in the client's own MCP list (`/mcp`), never with
+the agent's word that it connected.
+
+**Why.** A quarantined app opened from where it was downloaded runs from a randomized, read-only copy
+under `/private/var/folders/…/AppTranslocation/`, and that copy disappears when Ivy quits. The guide
+built the bridge path from its own executable, labelled it «found», and Codex saved it: on the next
+launch the `ivy` server was `failed (0 tools)` (#145). Codex had reported the connection as working,
+although the guide already asked it to prove that with `panel_get`/`panel_set` — Ivy cannot make a
+client obey, so the last word belongs to something the person reads.
+
+**Discarded.**
+- **Removing the quarantine attribute** or suggesting `xattr`: ruled out as an installation step by
+  `docs/10-installation.md`.
+- **Offering the original bundle path** resolved through the Security framework's translocation
+  query: it needs a native binding, and the original location is the Downloads folder or a mounted
+  image, which is exactly the install the person has to fix.
+- **Asking the Security framework whether the app is translocated** instead of reading the path: the
+  same answer the path already gives, for a native binding.
+
+**Open.** Measured only on Linux, with the decision tested as a pure function over a path. A real Mac
+must confirm the notice on a freshly downloaded build. Not covered: an app opened straight from a
+mounted image without quarantine, whose `/Volumes/…` path also disappears when the image is ejected.

@@ -139,3 +139,127 @@ fn initial_help_explains_saved_setup_and_discloses_first_time_installation_only_
         );
     }
 }
+
+const TRANSLOCATED: &str =
+    "/private/var/folders/rq/x/T/AppTranslocation/78459825-AB/d/Ivy.app/Contents/MacOS/ivy";
+
+fn painted(output: &egui::FullOutput) -> Vec<String> {
+    output
+        .shapes
+        .iter()
+        .filter_map(|shape| match &shape.shape {
+            egui::Shape::Text(label) => Some(label.galley.text().to_owned()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_translocated_mac_launch_offers_no_bridge_path() {
+    let bridge = Bridge::beside(Some(TRANSLOCATED.into()), true);
+    assert!(bridge.translocated);
+    assert_eq!(bridge.path, None);
+    // The same path read on another platform is not Gatekeeper's, and keeps the old behaviour.
+    let elsewhere = Bridge::beside(Some(TRANSLOCATED.into()), false);
+    assert!(!elsewhere.translocated);
+    assert!(elsewhere.path.is_some());
+    let installed = Bridge::beside(
+        Some("/Applications/Ivy.app/Contents/MacOS/ivy".into()),
+        true,
+    );
+    assert!(!installed.translocated);
+    assert_eq!(
+        installed.path.as_deref(),
+        Some(
+            std::path::Path::new("/Applications/Ivy.app/Contents/MacOS")
+                .join(if cfg!(windows) {
+                    "panel-mcp.exe"
+                } else {
+                    "panel-mcp"
+                })
+                .as_path()
+        )
+    );
+}
+
+#[test]
+fn a_translocated_recovery_section_offers_no_path_either() {
+    let ctx = egui::Context::default();
+    let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+        recovery::show(recovery::Status::default(), true, &mut None, ui);
+    });
+    output.textures_delta.clear();
+    let texts = painted(&output);
+    assert!(
+        texts
+            .iter()
+            .any(|text| text == translocation::NO_RECOVERY_PATHS)
+    );
+    for absent in ["Copy recovery helper path", "Copy recovery adapters path"] {
+        assert!(!texts.iter().any(|text| text == absent), "{absent} offered");
+    }
+}
+
+#[test]
+fn a_translocated_guide_says_how_to_fix_it_and_shows_no_path_to_copy() {
+    let ctx = egui::Context::default();
+    ctx.data_mut(|data| {
+        data.insert_temp(
+            egui::Id::new(BRIDGE_KEY),
+            Bridge::beside(Some(TRANSLOCATED.into()), true),
+        )
+    });
+    let mut guide = Guide::default();
+    let initial = frame(&ctx, &mut guide, vec![]);
+    let at = center(&initial, "Manual setup and diagnostics");
+    click(&ctx, &mut guide, at);
+    let manual = frame(&ctx, &mut guide, vec![]);
+    let texts = painted(&manual);
+    assert_eq!(
+        texts
+            .iter()
+            .filter(|text| *text == translocation::NOTICE)
+            .count(),
+        1,
+        "the notice is painted once"
+    );
+    for absent in [
+        "Copy first-time setup prompt",
+        "Copy bridge path",
+        "Check bridge again",
+    ] {
+        assert!(!texts.iter().any(|text| text == absent), "{absent} offered");
+    }
+    assert!(
+        !texts.iter().any(|text| text.contains("AppTranslocation")),
+        "a translocated path is painted"
+    );
+}
+
+#[test]
+fn the_last_step_asks_the_person_to_check_the_client_themselves() {
+    let ctx = egui::Context::default();
+    ctx.data_mut(|data| {
+        data.insert_temp(
+            egui::Id::new(BRIDGE_KEY),
+            Bridge::beside(
+                Some("/Applications/Ivy.app/Contents/MacOS/ivy".into()),
+                true,
+            ),
+        )
+    });
+    let mut guide = Guide::default();
+    let initial = frame(&ctx, &mut guide, vec![]);
+    let at = center(&initial, "Manual setup and diagnostics");
+    click(&ctx, &mut guide, at);
+    let manual = frame(&ctx, &mut guide, vec![]);
+    assert!(
+        center(&manual, SELF_CHECK).y > center(&manual, "3. Start the agent in an Ivy console").y,
+        "the self-check is not part of the last step"
+    );
+    let prompt = setup_prompt(&Bridge::beside(
+        Some("/Applications/Ivy.app/Contents/MacOS/ivy".into()),
+        true,
+    ));
+    assert!(prompt.contains("ask me to open this client's MCP server list myself"));
+}

@@ -45,7 +45,12 @@ fn resources() -> Option<PathBuf> {
     .find(|root| root.join("README.md").is_file())
 }
 
-pub(super) fn show(status: Status, copied: &mut Option<&'static str>, ui: &mut egui::Ui) {
+pub(super) fn show(
+    status: Status,
+    translocated: bool,
+    copied: &mut Option<&'static str>,
+    ui: &mut egui::Ui,
+) {
     ui.separator();
     ui.strong("Recover AI sessions");
     ui.label(if status.enabled { "Session recovery is enabled for this window." } else { "Choose Layout, directories and AI sessions in Settings to record this window. Additional windows do not record recovery." });
@@ -63,6 +68,13 @@ pub(super) fn show(status: Status, copied: &mut Option<&'static str>, ui: &mut e
     ui.weak("Codex 0.167.0 restores its last hook-reported conversation. Switching without sending a message can leave an earlier conversation recorded.");
     if !cfg!(target_os = "linux") {
         ui.label("Verified AI capture is currently available on Linux. This host can still recover layout and directories.");
+    }
+    if translocated {
+        ui.colored_label(
+            ui.visuals().warn_fg_color,
+            super::translocation::NO_RECOVERY_PATHS,
+        );
+        return;
     }
     if let Some(helper) = crate::resume::helper_path() {
         super::copyable(

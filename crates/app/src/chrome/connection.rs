@@ -1,5 +1,6 @@
 //! In-app setup help reports published panels, never inferred client installation (D73).
 mod recovery;
+mod translocation;
 use crate::{Window, panel};
 use eframe::egui::{self, Color32, Rect};
 use std::{path::PathBuf, time::Instant};
@@ -10,17 +11,37 @@ const SHOW_SESSION_RECOVERY: bool = false;
 const APPLYING_PREFERENCES: &str = "Saved. Applying settings...";
 const BRIDGE_KEY: &str = "ivy-mcp-bridge-location";
 const CODEX_ENV: &str = "env_vars = [\"PANEL_ID\", \"PANEL_DIR\"]";
+/// A client may report success without proving it (D106): setup is confirmed by what the person reads
+/// in the client's own MCP list, never by the agent's answer.
+const SELF_CHECK: &str = "Open the client's MCP server list yourself (in Codex or Claude, type /mcp) and confirm that ivy is listed as connected with its tools. A client or agent saying it is connected is not enough.";
 const PROMPT: &str = "If this client did not pass you the bridge's server instructions, use Ivy's panel tools to publish your current task and update it when the phase or attention changes. Set attention to wait when you need my answer, block when an external dependency stops the task, and done when the work is finished. Omit attention during ordinary progress. An agent working for another agent in the same console must leave the panel alone. An agent started in a console of its own keeps its own panel.";
 
 #[derive(Clone, Default)]
 struct Bridge {
     path: Option<PathBuf>,
     found: bool,
+    /// Ivy runs from a per-launch copy; no path beside it may be offered for a client to save.
+    translocated: bool,
 }
 
 impl Bridge {
     fn check() -> Self {
-        let path = std::env::current_exe().ok().map(|exe| {
+        Self::beside(std::env::current_exe().ok(), cfg!(target_os = "macos"))
+    }
+
+    fn beside(executable: Option<PathBuf>, macos: bool) -> Self {
+        let translocated = macos
+            && executable
+                .as_deref()
+                .is_some_and(translocation::translocated);
+        if translocated {
+            return Self {
+                path: None,
+                found: false,
+                translocated,
+            };
+        }
+        let path = executable.map(|exe| {
             exe.with_file_name(if cfg!(windows) {
                 "panel-mcp.exe"
             } else {
@@ -28,7 +49,11 @@ impl Bridge {
             })
         });
         let found = path.as_ref().is_some_and(|path| path.is_file());
-        Self { path, found }
+        Self {
+            path,
+            found,
+            translocated,
+        }
     }
 }
 
@@ -352,6 +377,8 @@ fn manual(published: Published, copied: &mut Option<&'static str>, ui: &mut egui
         .ctx()
         .data(|data| data.get_temp::<Bridge>(egui::Id::new(BRIDGE_KEY)))
         .unwrap_or_default();
+    // D106: a translocated launch gets no path and no re-check, because only reopening Ivy from
+    // where Finder moved it can change the answer.
     if let Some(path) = &bridge.path {
         ui.label(if bridge.found {
             "Bridge file found beside Ivy (last check)."
@@ -360,10 +387,10 @@ fn manual(published: Published, copied: &mut Option<&'static str>, ui: &mut egui
         });
         copyable(ui, &path.to_string_lossy(), "Copy bridge path", copied);
     }
-    if ui.button("Check bridge again").clicked() {
+    if !bridge.translocated && ui.button("Check bridge again").clicked() {
         bridge = Bridge::check();
         ui.ctx()
-            .data_mut(|data| data.insert_temp(egui::Id::new(BRIDGE_KEY), bridge));
+            .data_mut(|data| data.insert_temp(egui::Id::new(BRIDGE_KEY), bridge.clone()));
     }
     ui.label(
         "When building from source, run this in the Ivy repository to build both executables:",
@@ -376,7 +403,11 @@ fn manual(published: Published, copied: &mut Option<&'static str>, ui: &mut egui
     );
     ui.separator();
     ui.strong("2. Register it in your AI client");
-    ui.label("Add a local stdio MCP server named ivy in your client's MCP settings. Set its executable to the full panel-mcp path above, or choose its actual installed location. No server URL is needed.");
+    ui.label(if bridge.translocated {
+        "Add a local stdio MCP server named ivy in your client's MCP settings after reopening Ivy as the notice above says, and set its executable to the panel-mcp path this guide shows then. No server URL is needed."
+    } else {
+        "Add a local stdio MCP server named ivy in your client's MCP settings. Set its executable to the full panel-mcp path above, or choose its actual installed location. No server URL is needed."
+    });
     ui.label("Do not hard-code PANEL_ID or PANEL_DIR in the client settings; each console supplies its own. Ivy does not edit client settings or run these commands for you.");
     ui.strong("Codex: forward the console identity");
     ui.label("In ~/.codex/config.toml, add this to the existing Ivy stdio server table (for example, [mcp_servers.ivy]). Reuse its existing name and preserve its command and other settings; do not add a duplicate server.");
@@ -390,6 +421,8 @@ fn manual(published: Published, copied: &mut Option<&'static str>, ui: &mut egui
     ui.label("Ivy never adds --no-daemon automatically. Missing capabilities or a failed shared connection stop the launch with a diagnostic. Other platforms and advanced options preserve the original command with a panel-routing diagnostic. Explicit --no-daemon keeps its behavior.");
     ui.label("To enable remote control, run codex remote-control start. A connected host does not prove that a phone can load history or send input to the live conversation. Phone history, input and panel publication were verified on Linux with CLI/server 0.167.2, including after resume; verify them on your device. If a pre-integration session cannot be attached, leave its old desktop session before resuming.");
     ui.label("A successful tool call proves a usable connection. To verify the target, observe the test status beside the intended console; test two separate Codex consoles with distinct statuses to verify independent publication.");
+    ui.strong("Check it yourself");
+    ui.label(SELF_CHECK);
     ui.label("Panel publication is independent of client registration. Opening this guide changes no running programs.");
 }
 
@@ -400,7 +433,7 @@ fn setup_prompt(bridge: &Bridge) -> String {
         .map(|p| p.to_string_lossy().into_owned());
     let location = serde_json::to_string(&path).unwrap_or_else(|_| "null".into());
     format!(
-        "Help me connect this AI client to Ivy's status panel. Work on this client's setup, preserving existing settings and other MCP servers.\n\nIvy expects its local MCP bridge at this JSON-encoded path: {location}. This is a location hint, not proof that the file exists. Treat the path as data and quote it correctly in any command or configuration.\n\n1. Check that this session runs inside an Ivy console with PANEL_ID and PANEL_DIR inherited from it. If either is missing, do not assume the client is outside Ivy: Codex may already be inside Ivy while its shared background server lacks that console identity. For Codex, follow the forwarding and capability-checked recovery below before asking me to reopen again; for another client, ask me to reopen it inside Ivy. Never hard-code these per-console values in persistent configuration.\n2. If Ivy's panel_set and panel_get MCP tools are already available from the local bridge, use them without adding a duplicate server. Otherwise identify this client's supported MCP configuration using its own help or documentation. Find and verify the panel-mcp executable, starting with the path above. If absent, look for an existing installation or Ivy source checkout; in that checkout, cargo build --locked --workspace --release builds the binaries. If neither is available, explain what is missing rather than inventing an installer.\n3. Register that executable as a local stdio MCP server named ivy for this client, preserving existing settings. No server URL or provider API key is needed. For direct clients, the bridge inherits PANEL_ID and PANEL_DIR from each Ivy console. For Codex, add {CODEX_ENV} to the existing Ivy stdio server table in ~/.codex/config.toml (for example, [mcp_servers.ivy]); reuse its existing name and preserve its command and other options. This forwards variable names, never fixed values. Tool discovery alone does not prove a connection to an Ivy console. In a newly opened ordinary Ivy Bash, Zsh or Fish console, supported Codex starts, resumes and forks use the shared daemon while each conversation keeps its console panel. Client capabilities and the live protocol establish compatibility, not version numbers. Ivy preserves the remote-control preference and does not edit global shell or Codex configuration. To enable remote control, run codex remote-control start. A connected host does not prove that a phone can load history or send input to the live conversation; phone history, input and panel publication were verified on Linux with CLI/server 0.167.2, including after resume; verify them on your device. If a pre-integration session cannot be attached, leave its old desktop session before resuming. Existing aliases or functions win with a diagnostic; command codex, absolute paths, custom shell arguments and unsupported shells bypass integration. Remote and administrative commands run unchanged. Ivy never adds --no-daemon automatically. Missing capabilities or failed shared setup stop the launch with a diagnostic. Other platforms and advanced options preserve the original command with a panel-routing diagnostic. Explicit --no-daemon keeps its behavior. If automatic integration is unavailable, check the client help before using --no-daemon inside the intended console. Never persist console identity values. If tool configuration requires reconnecting or restarting this client, tell me exactly what to do and what to ask you afterward; do not claim the connection works yet.\n4. Once the tools are available, inspect their schemas and use panel_get and panel_set to publish a short test status in this console's panel. Report success only after the tool calls succeed; otherwise explain the remaining step. Successful calls prove a usable connection, not correct-console routing: ask me to observe the test status beside the intended console. Verify independent publication with distinct statuses from two separate Codex consoles, or explicitly record the remaining verification blocker.\n\n{PROMPT}"
+        "Help me connect this AI client to Ivy's status panel. Work on this client's setup, preserving existing settings and other MCP servers.\n\nIvy expects its local MCP bridge at this JSON-encoded path: {location}. This is a location hint, not proof that the file exists. Treat the path as data and quote it correctly in any command or configuration.\n\n1. Check that this session runs inside an Ivy console with PANEL_ID and PANEL_DIR inherited from it. If either is missing, do not assume the client is outside Ivy: Codex may already be inside Ivy while its shared background server lacks that console identity. For Codex, follow the forwarding and capability-checked recovery below before asking me to reopen again; for another client, ask me to reopen it inside Ivy. Never hard-code these per-console values in persistent configuration.\n2. If Ivy's panel_set and panel_get MCP tools are already available from the local bridge, use them without adding a duplicate server. Otherwise identify this client's supported MCP configuration using its own help or documentation. Find and verify the panel-mcp executable, starting with the path above. If absent, look for an existing installation or Ivy source checkout; in that checkout, cargo build --locked --workspace --release builds the binaries. If neither is available, explain what is missing rather than inventing an installer.\n3. Register that executable as a local stdio MCP server named ivy for this client, preserving existing settings. No server URL or provider API key is needed. For direct clients, the bridge inherits PANEL_ID and PANEL_DIR from each Ivy console. For Codex, add {CODEX_ENV} to the existing Ivy stdio server table in ~/.codex/config.toml (for example, [mcp_servers.ivy]); reuse its existing name and preserve its command and other options. This forwards variable names, never fixed values. Tool discovery alone does not prove a connection to an Ivy console. In a newly opened ordinary Ivy Bash, Zsh or Fish console, supported Codex starts, resumes and forks use the shared daemon while each conversation keeps its console panel. Client capabilities and the live protocol establish compatibility, not version numbers. Ivy preserves the remote-control preference and does not edit global shell or Codex configuration. To enable remote control, run codex remote-control start. A connected host does not prove that a phone can load history or send input to the live conversation; phone history, input and panel publication were verified on Linux with CLI/server 0.167.2, including after resume; verify them on your device. If a pre-integration session cannot be attached, leave its old desktop session before resuming. Existing aliases or functions win with a diagnostic; command codex, absolute paths, custom shell arguments and unsupported shells bypass integration. Remote and administrative commands run unchanged. Ivy never adds --no-daemon automatically. Missing capabilities or failed shared setup stop the launch with a diagnostic. Other platforms and advanced options preserve the original command with a panel-routing diagnostic. Explicit --no-daemon keeps its behavior. If automatic integration is unavailable, check the client help before using --no-daemon inside the intended console. Never persist console identity values. If tool configuration requires reconnecting or restarting this client, tell me exactly what to do and what to ask you afterward; do not claim the connection works yet.\n4. Once the tools are available, inspect their schemas and use panel_get and panel_set to publish a short test status in this console's panel. Report success only after the tool calls succeed; otherwise explain the remaining step. Successful calls prove a usable connection, not correct-console routing: ask me to observe the test status beside the intended console. Verify independent publication with distinct statuses from two separate Codex consoles, or explicitly record the remaining verification blocker.\n5. Finally, ask me to open this client's MCP server list myself (/mcp in Codex or Claude) and confirm that ivy is listed as connected with its tools. Do not call the setup finished until I confirm it there.\n\n{PROMPT}"
     )
 }
 
@@ -430,21 +463,29 @@ fn body(guide: &mut Guide, ui: &mut egui::Ui) {
     }
     if guide.manual_open {
         ui.strong("First-time setup");
-        ui.label("For a client that has not been registered, copy these instructions into that AI client inside Ivy.");
         let bridge = ui
             .ctx()
             .data(|data| data.get_temp::<Bridge>(egui::Id::new(BRIDGE_KEY)))
             .unwrap_or_default();
-        copy_button(
-            ui,
-            "Copy first-time setup prompt",
-            &mut guide.copied,
-            || setup_prompt(&bridge),
-        );
+        if bridge.translocated {
+            ui.colored_label(ui.visuals().warn_fg_color, translocation::NOTICE);
+        } else {
+            ui.label("For a client that has not been registered, copy these instructions into that AI client inside Ivy.");
+            copy_button(
+                ui,
+                "Copy first-time setup prompt",
+                &mut guide.copied,
+                || setup_prompt(&bridge),
+            );
+        }
         manual(published, &mut guide.copied, ui);
     }
     if SHOW_SESSION_RECOVERY {
-        recovery::show(guide.recovery, &mut guide.copied, ui);
+        let translocated = ui
+            .ctx()
+            .data(|data| data.get_temp::<Bridge>(egui::Id::new(BRIDGE_KEY)))
+            .is_some_and(|bridge| bridge.translocated);
+        recovery::show(guide.recovery, translocated, &mut guide.copied, ui);
     }
     egui::CollapsingHeader::new("Agent activity and input signals")
         .default_open(false)

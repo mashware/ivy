@@ -336,6 +336,10 @@ const MODULES: &[(&str, &str)] = &[
         "app/src/chrome/connection/recovery.rs",
         include_str!("../src/chrome/connection/recovery.rs"),
     ),
+    (
+        "app/src/chrome/connection/translocation.rs",
+        include_str!("../src/chrome/connection/translocation.rs"),
+    ),
     ("app/src/resume.rs", include_str!("../src/resume.rs")),
     (
         "panel-control/src/bin/ivy-session.rs",

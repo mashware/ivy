@@ -209,6 +209,10 @@ const MODULES: &[(&str, &str)] = &[
         "src/chrome/connection/recovery.rs",
         include_str!("../src/chrome/connection/recovery.rs"),
     ),
+    (
+        "src/chrome/connection/translocation.rs",
+        include_str!("../src/chrome/connection/translocation.rs"),
+    ),
     ("src/resume.rs", include_str!("../src/resume.rs")),
     (
         "src/chrome/typography.rs",
