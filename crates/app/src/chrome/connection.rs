@@ -11,8 +11,8 @@ const SHOW_SESSION_RECOVERY: bool = false;
 const APPLYING_PREFERENCES: &str = "Saved. Applying settings...";
 const BRIDGE_KEY: &str = "ivy-mcp-bridge-location";
 const CODEX_ENV: &str = "env_vars = [\"PANEL_ID\", \"PANEL_DIR\"]";
-/// A client may report success without proving it, so the guide ends on something the person reads
-/// in the client's own MCP list rather than in the agent's answer.
+/// A client may report success without proving it (D106): setup is confirmed by what the person reads
+/// in the client's own MCP list, never by the agent's answer.
 const SELF_CHECK: &str = "Open the client's MCP server list yourself (in Codex or Claude, type /mcp) and confirm that ivy is listed as connected with its tools. A client or agent saying it is connected is not enough.";
 const PROMPT: &str = "If this client did not pass you the bridge's server instructions, use Ivy's panel tools to publish your current task and update it when the phase or attention changes. Set attention to wait when you need my answer, block when an external dependency stops the task, and done when the work is finished. Omit attention during ordinary progress. An agent working for another agent in the same console must leave the panel alone. An agent started in a console of its own keeps its own panel.";
 
@@ -377,9 +377,8 @@ fn manual(published: Published, copied: &mut Option<&'static str>, ui: &mut egui
         .ctx()
         .data(|data| data.get_temp::<Bridge>(egui::Id::new(BRIDGE_KEY)))
         .unwrap_or_default();
-    if bridge.translocated {
-        ui.colored_label(ui.visuals().warn_fg_color, translocation::NOTICE);
-    }
+    // The notice above the first-time setup already explains a translocated launch; checking again
+    // cannot change the answer until Ivy is reopened from where it was moved.
     if let Some(path) = &bridge.path {
         ui.label(if bridge.found {
             "Bridge file found beside Ivy (last check)."
@@ -388,7 +387,7 @@ fn manual(published: Published, copied: &mut Option<&'static str>, ui: &mut egui
         });
         copyable(ui, &path.to_string_lossy(), "Copy bridge path", copied);
     }
-    if ui.button("Check bridge again").clicked() {
+    if !bridge.translocated && ui.button("Check bridge again").clicked() {
         bridge = Bridge::check();
         ui.ctx()
             .data_mut(|data| data.insert_temp(egui::Id::new(BRIDGE_KEY), bridge));
@@ -404,7 +403,11 @@ fn manual(published: Published, copied: &mut Option<&'static str>, ui: &mut egui
     );
     ui.separator();
     ui.strong("2. Register it in your AI client");
-    ui.label("Add a local stdio MCP server named ivy in your client's MCP settings. Set its executable to the full panel-mcp path above, or choose its actual installed location. No server URL is needed.");
+    ui.label(if bridge.translocated {
+        "Add a local stdio MCP server named ivy in your client's MCP settings once Ivy runs from Applications, and set its executable to the panel-mcp path this guide shows then. No server URL is needed."
+    } else {
+        "Add a local stdio MCP server named ivy in your client's MCP settings. Set its executable to the full panel-mcp path above, or choose its actual installed location. No server URL is needed."
+    });
     ui.label("Do not hard-code PANEL_ID or PANEL_DIR in the client settings; each console supplies its own. Ivy does not edit client settings or run these commands for you.");
     ui.strong("Codex: forward the console identity");
     ui.label("In ~/.codex/config.toml, add this to the existing Ivy stdio server table (for example, [mcp_servers.ivy]). Reuse its existing name and preserve its command and other settings; do not add a duplicate server.");
@@ -460,7 +463,6 @@ fn body(guide: &mut Guide, ui: &mut egui::Ui) {
     }
     if guide.manual_open {
         ui.strong("First-time setup");
-        ui.label("For a client that has not been registered, copy these instructions into that AI client inside Ivy.");
         let bridge = ui
             .ctx()
             .data(|data| data.get_temp::<Bridge>(egui::Id::new(BRIDGE_KEY)))
@@ -468,6 +470,7 @@ fn body(guide: &mut Guide, ui: &mut egui::Ui) {
         if bridge.translocated {
             ui.colored_label(ui.visuals().warn_fg_color, translocation::NOTICE);
         } else {
+            ui.label("For a client that has not been registered, copy these instructions into that AI client inside Ivy.");
             copy_button(
                 ui,
                 "Copy first-time setup prompt",

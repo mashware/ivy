@@ -1,4 +1,4 @@
-//! macOS Gatekeeper App Translocation: a quarantined app opened from where it was downloaded runs
+//! macOS Gatekeeper App Translocation (D106): a quarantined app opened from where it was downloaded runs
 //! from a randomized read-only copy under `…/AppTranslocation/<uuid>/d/`. That copy exists only
 //! while this launch lives, so a path derived from it must never be offered for a client to save.
 //!

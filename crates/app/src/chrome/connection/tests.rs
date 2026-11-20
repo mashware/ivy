@@ -170,10 +170,29 @@ fn a_translocated_mac_launch_offers_no_bridge_path() {
     assert!(!installed.translocated);
     assert_eq!(
         installed.path.as_deref(),
-        Some(std::path::Path::new(
-            "/Applications/Ivy.app/Contents/MacOS/panel-mcp"
-        ))
+        Some(
+            std::path::Path::new("/Applications/Ivy.app/Contents/MacOS")
+                .join(if cfg!(windows) {
+                    "panel-mcp.exe"
+                } else {
+                    "panel-mcp"
+                })
+                .as_path()
+        )
     );
+}
+
+#[test]
+fn a_translocated_recovery_section_offers_no_path_either() {
+    let ctx = egui::Context::default();
+    let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+        recovery::show(recovery::Status::default(), true, &mut None, ui);
+    });
+    let texts = painted(&output);
+    assert!(texts.iter().any(|text| text == translocation::NOTICE));
+    for absent in ["Copy recovery helper path", "Copy recovery adapters path"] {
+        assert!(!texts.iter().any(|text| text == absent), "{absent} offered");
+    }
 }
 
 #[test]
@@ -191,8 +210,19 @@ fn a_translocated_guide_says_how_to_fix_it_and_shows_no_path_to_copy() {
     click(&ctx, &mut guide, at);
     let manual = frame(&ctx, &mut guide, vec![]);
     let texts = painted(&manual);
-    assert!(texts.iter().any(|text| text == translocation::NOTICE));
-    for absent in ["Copy first-time setup prompt", "Copy bridge path"] {
+    assert_eq!(
+        texts
+            .iter()
+            .filter(|text| *text == translocation::NOTICE)
+            .count(),
+        1,
+        "the notice is painted once"
+    );
+    for absent in [
+        "Copy first-time setup prompt",
+        "Copy bridge path",
+        "Check bridge again",
+    ] {
         assert!(!texts.iter().any(|text| text == absent), "{absent} offered");
     }
     assert!(
@@ -202,7 +232,7 @@ fn a_translocated_guide_says_how_to_fix_it_and_shows_no_path_to_copy() {
 }
 
 #[test]
-fn the_guide_ends_on_a_check_the_person_makes_in_the_client() {
+fn the_last_step_asks_the_person_to_check_the_client_themselves() {
     let ctx = egui::Context::default();
     ctx.data_mut(|data| {
         data.insert_temp(
@@ -218,7 +248,10 @@ fn the_guide_ends_on_a_check_the_person_makes_in_the_client() {
     let at = center(&initial, "Manual setup and diagnostics");
     click(&ctx, &mut guide, at);
     let manual = frame(&ctx, &mut guide, vec![]);
-    center(&manual, SELF_CHECK);
+    assert!(
+        center(&manual, SELF_CHECK).y > center(&manual, "3. Start the agent in an Ivy console").y,
+        "the self-check is not part of the last step"
+    );
     let prompt = setup_prompt(&Bridge::beside(
         Some("/Applications/Ivy.app/Contents/MacOS/ivy".into()),
         true,
