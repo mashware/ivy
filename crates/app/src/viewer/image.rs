@@ -8,9 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-/// How far the zoom goes, in screen points per pixel of the original.
-const SMALLEST: f32 = 0.01;
-const LARGEST: f32 = 32.0;
+mod viewport;
 
 /// Whether a path names a file this viewer opens, by its extension in any letter case.
 pub(crate) fn is_image(path: &Path) -> bool {
@@ -30,8 +28,10 @@ pub(crate) struct Viewer {
     /// unresponsive filesystem cannot be cancelled, so its handle is kept and no other decode
     /// starts until it ends: repeated opens cannot pile up readers.
     abandoned: Option<(PathBuf, Job<Picture>)>,
-    /// Whether the drag under way pans the image, decided when its button went down.
-    panning: bool,
+    /// The button whose drag pans the image, latched when it went down.
+    panning: Option<egui::PointerButton>,
+    /// The frame the image was last painted in.
+    painted: Option<u64>,
 }
 
 struct Opened {
@@ -41,6 +41,8 @@ struct Opened {
     /// Screen points per pixel of the original; `None` fits the drawer's width.
     scale: Option<f32>,
     offset: egui::Vec2,
+    /// The view's size the last frame it was painted, so a resize puts the image back inside.
+    view: Option<egui::Vec2>,
 }
 
 enum Load {
@@ -76,11 +78,13 @@ impl Viewer {
             load,
             scale: None,
             offset: egui::Vec2::ZERO,
+            view: None,
         });
     }
 
     /// Forgets the image, keeping an unfinished decode's handle.
     pub(super) fn clear(&mut self) {
+        self.panning = None;
         if let Some(Opened {
             path,
             load: Load::Decoding(job),
@@ -173,9 +177,9 @@ impl Viewer {
         }
     }
 
-    /// Paints the image over the drawer's body: fitted to its width until the person zooms, and
-    /// scrolled with the wheel, the scroll bars, or a drag that pans it. `space` is whether Space
-    /// is held and the drawer's, which is when Space + left drag pans.
+    /// Paints the image over the drawer's body, fitted to its width until the person zooms, and
+    /// moved by the wheel or a drag that pans it; there are no scroll bars. `space` is whether
+    /// Space is held and the drawer's, which is when Space + left drag pans.
     pub(super) fn show(&mut self, ui: &mut egui::Ui, theme: crate::theme::Theme, space: bool) {
         let Some(size) = self.size() else {
             let message = self.message();
@@ -194,11 +198,18 @@ impl Viewer {
                 });
             return;
         };
+        let frame = ui.ctx().cumulative_frame_nr();
+        // A drag whose release came while the image was not painted must not resume on return.
+        if self.painted.is_none_or(|last| frame > last + 1) {
+            self.panning = None;
+        }
+        self.painted = Some(frame);
         let panning = &mut self.panning;
         let Some(Opened {
             load: Load::Ready { gpu, .. },
             scale: chosen,
             offset,
+            view: seen,
             ..
         }) = self.document.as_mut()
         else {
@@ -216,44 +227,43 @@ impl Viewer {
             return;
         };
         let view = ui.available_rect_before_wrap();
+        let room = view.size();
+        if !(room.x > 0.0 && room.y > 0.0 && room.is_finite()) {
+            return;
+        }
+        ui.allocate_rect(view, egui::Sense::hover());
         let mut scale =
-            chosen.unwrap_or_else(|| fit(view.width(), size.x, ui.ctx().pixels_per_point()));
+            chosen.unwrap_or_else(|| viewport::fit(room.x, size.x, ui.ctx().pixels_per_point()));
+        if *seen != Some(room) {
+            *offset = viewport::clamp(*offset, None, size * scale, room);
+            *seen = Some(room);
+        }
+        let over = ui
+            .input(|i| i.pointer.hover_pos())
+            .filter(|at| view.contains(*at));
         let zoom = ui.input(|i| i.zoom_delta());
         if zoom != 1.0
-            && let Some(at) = ui
-                .input(|i| i.pointer.hover_pos())
-                .filter(|at| view.contains(*at))
+            && let Some(at) = over
         {
-            (scale, *offset) = zoom_around(scale, *offset, at - view.min, zoom, size);
+            let zoomed;
+            (scale, zoomed) = viewport::zoom_around(scale, *offset, at - view.min, zoom, size);
+            *offset = viewport::clamp(zoomed, Some(zoomed), size * scale, room);
             *chosen = Some(scale);
         }
-        let shown = size * scale;
-        let (lead, trail) = blanks(*offset, shown, view.size());
-        let grab = without_bars(view, lead + shown + trail, &ui.spacing().scroll);
-        let (moved, hand) = ui.input(|i| pan(i, grab, space, panning));
-        *offset = within(*offset - moved, *offset, shown, view.size());
+        let (mut moved, hand) = ui.input(|i| viewport::pan(i, view, space, panning));
+        if over.is_some() {
+            moved += ui.input(|i| i.smooth_scroll_delta);
+        }
+        *offset = viewport::clamp(*offset - moved, Some(*offset), size * scale, room);
         if let Some(hand) = hand {
             ui.ctx().set_cursor_icon(hand);
         }
-        let (lead, trail) = blanks(*offset, shown, view.size());
-        let output = egui::ScrollArea::both()
-            .id_salt("drawer-image")
-            .auto_shrink(false)
-            .scroll_source(egui::scroll_area::ScrollSource {
-                drag: egui::scroll_area::DragScroll::Never,
-                ..Default::default()
-            })
-            .scroll_offset(offset.max(egui::Vec2::ZERO))
-            .show(ui, |ui| {
-                let (rect, _) = ui.allocate_exact_size(lead + shown + trail, egui::Sense::hover());
-                ui.painter().image(
-                    texture.id(),
-                    egui::Rect::from_min_size(rect.min + lead, shown),
-                    egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                    egui::Color32::WHITE,
-                );
-            });
-        *offset = output.state.offset - lead;
+        ui.painter_at(view).image(
+            texture.id(),
+            egui::Rect::from_min_size(view.min - *offset, size * scale),
+            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
     }
 
     #[cfg(test)]
@@ -271,96 +281,6 @@ impl Viewer {
     }
 }
 
-/// The scale and offset after zooming by `factor`, keeping the point of the image of `size`
-/// pixels under `at`, a position inside the view, where it was on screen. With `at` off the image,
-/// the image's nearest point is the one kept, so a zoom over the blank around it never carries the
-/// image out of sight. The offset is where the view's corner falls on the image, in points, and is
-/// negative where the image starts inside the view.
-fn zoom_around(
-    scale: f32,
-    offset: egui::Vec2,
-    at: egui::Vec2,
-    factor: f32,
-    size: egui::Vec2,
-) -> (f32, egui::Vec2) {
-    let zoomed = (scale * factor).clamp(SMALLEST, LARGEST);
-    let at = at.clamp(-offset, size * scale - offset);
-    let point = (offset + at) / scale;
-    (zoomed, point * zoomed - at)
-}
-
-/// The blank space laid before and after the image of `shown` size: egui scrolls only forward
-/// from the content's corner and never past its far edge, so a zoom that leaves the image short of
-/// the `view` on an axis is held where the pointer put it by space on either side.
-fn blanks(offset: egui::Vec2, shown: egui::Vec2, view: egui::Vec2) -> (egui::Vec2, egui::Vec2) {
-    let lead = (-offset).max(egui::Vec2::ZERO);
-    (lead, (offset + view - shown).max(egui::Vec2::ZERO))
-}
-
-/// Where a pan drag may take `offset`: where the image of `shown` size leaves none of a `view`
-/// it could fill empty, or fits in it whole; and as far out as `before`, where a zoom around the
-/// pointer had left it, so a drag can bring it back but never push it further.
-fn within(
-    offset: egui::Vec2,
-    before: egui::Vec2,
-    shown: egui::Vec2,
-    view: egui::Vec2,
-) -> egui::Vec2 {
-    let spare = shown - view;
-    let low = spare.min(egui::Vec2::ZERO).min(before);
-    let high = spare.max(egui::Vec2::ZERO).max(before);
-    offset.clamp(low, high)
-}
-
-/// The view less the strips egui's scroll bars take, so a drag on a bar moves the bar alone.
-fn without_bars(
-    view: egui::Rect,
-    content: egui::Vec2,
-    scroll: &egui::style::ScrollStyle,
-) -> egui::Rect {
-    let strip = scroll.bar_width + scroll.bar_outer_margin;
-    let mut grab = view;
-    if content.y > view.height() {
-        grab.max.x -= strip;
-    }
-    if content.x > view.width() {
-        grab.max.y -= strip;
-    }
-    grab
-}
-
-/// How far a pan drag moved the pointer this frame, and the hand the cursor shows. A plain left
-/// drag never pans: marks are drawn with it. Space + left drag is Figma's convention, and the
-/// middle button pans with no key for a mouse that has one. Whether a drag pans is decided when
-/// its button goes down and kept until it is released, so letting Space go halfway through does
-/// not turn the rest into a plain drag.
-fn pan(
-    input: &egui::InputState,
-    grab: egui::Rect,
-    space: bool,
-    panning: &mut bool,
-) -> (egui::Vec2, Option<egui::CursorIcon>) {
-    let pointer = &input.pointer;
-    if pointer.any_pressed() {
-        let over = pointer.press_origin().is_some_and(|at| grab.contains(at));
-        *panning = over
-            && (pointer.button_pressed(egui::PointerButton::Middle)
-                || (space && pointer.button_pressed(egui::PointerButton::Primary)));
-        if *panning {
-            // The press frame's delta is the travel from wherever the pointer was before it.
-            return (egui::Vec2::ZERO, Some(egui::CursorIcon::Grabbing));
-        }
-    } else if *panning && (pointer.middle_down() || pointer.primary_down()) {
-        return (pointer.delta(), Some(egui::CursorIcon::Grabbing));
-    }
-    if !pointer.any_down() {
-        *panning = false;
-    }
-    let hovering = pointer.hover_pos().is_some_and(|at| grab.contains(at));
-    let hand = (space && hovering).then_some(egui::CursorIcon::Grab);
-    (egui::Vec2::ZERO, hand)
-}
-
 /// Whether the Space held now is the drawer's: it is when it went down while the drawer `holds`
 /// the keys, and stays as it was, `held`, until it is let go.
 pub(super) fn space_is_ours(input: &egui::InputState, holds: bool, held: bool) -> bool {
@@ -376,12 +296,6 @@ pub(super) fn space_is_ours(input: &egui::InputState, holds: bool, held: bool) -
         )
     });
     input.key_down(egui::Key::Space) && if pressed { holds } else { held }
-}
-
-/// The scale that fits an image `width` pixels wide into `room` points, never enlarging it past
-/// one physical pixel per pixel: a screenshot shown larger than it was taken only blurs.
-fn fit(room: f32, width: f32, pixels_per_point: f32) -> f32 {
-    (room / width.max(1.0)).min(1.0 / pixels_per_point)
 }
 
 #[cfg(test)]
@@ -790,9 +704,9 @@ mod tests {
 
     /// From the fitted view, an image smaller than the drawer on both axes zooms in and back out
     /// around the pointer on its centre, with a mouse wheel and with a touchpad, as the desktop
-    /// delivers them; the zoom stops at its bounds.
+    /// delivers them, though zooming in carries its top across the drawer's.
     #[test]
-    fn zooming_keeps_the_point_under_the_pointer_and_stops_at_its_bounds() {
+    fn zooming_keeps_the_point_under_the_pointer() {
         use egui::{MouseWheelUnit::*, TouchPhase::*};
         let folder = Folder::new();
         let path = folder.0.join("small.png");
@@ -830,15 +744,6 @@ mod tests {
             );
             last = now;
         }
-        let (offset, at) = (egui::vec2(100.0, 40.0), egui::vec2(200.0, 150.0));
-        assert_eq!(
-            zoom_around(0.5, offset, at, 1000.0, egui::vec2(800.0, 600.0)).0,
-            LARGEST
-        );
-        assert_eq!(
-            zoom_around(0.5, offset, at, 0.0001, egui::vec2(800.0, 600.0)).0,
-            SMALLEST
-        );
     }
 
     /// A window with the 600x120 fixture fitted, which is smaller than the drawer on both axes,
@@ -871,7 +776,8 @@ mod tests {
         });
         let view = window.sidebar.last_dock.unwrap();
         assert!(view.contains(at));
-        for _ in 0..4 {
+        // Three notches keep it narrower than the drawer, where a zoom never clamps it.
+        for _ in 0..3 {
             painted(
                 &mut window,
                 &ctx,
@@ -884,7 +790,7 @@ mod tests {
         }
         let after = settle(&mut window, &ctx);
         assert!(
-            after.width() > before.width() * 2.0,
+            after.width() > before.width() * 1.5 && after.width() < view.width(),
             "{before:?} -> {after:?}"
         );
         assert!(
@@ -1433,33 +1339,92 @@ mod tests {
         );
     }
 
-    /// Space + left drag on a scroll bar is the bar's: no hand over it and no pan.
+    /// There are no scroll bars: Space + left drag at the drawer's right edge, where a bar would
+    /// sit, pans the image the whole way, with the hand showing.
     #[test]
-    fn a_space_drag_on_a_scroll_bar_leaves_the_pan_to_the_bar() {
+    fn a_space_drag_at_the_drawer_edge_pans_the_image() {
         let folder = Folder::new();
         let (mut window, ctx) = zoomed_window(&folder);
         let before = settle(&mut window, &ctx);
         let dock = window.sidebar.last_dock.unwrap();
-        let bar = egui::pos2(dock.right() - 3.0, dock.center().y);
+        let edge = egui::pos2(dock.right() - 3.0, dock.center().y);
         pass(&mut window, &ctx, vec![space(true)]);
+        let hover = pass(&mut window, &ctx, vec![egui::Event::PointerMoved(edge)]);
+        assert_eq!(hover.platform_output.cursor_icon, egui::CursorIcon::Grab);
         let by = egui::vec2(0.0, 30.0);
         let cursors = drag_at(
             &mut window,
             &ctx,
             egui::PointerButton::Primary,
-            bar,
+            edge,
             by,
             false,
         );
+        assert_eq!(cursors, [egui::CursorIcon::Grabbing; 3]);
         let after = settle(&mut window, &ctx);
-        assert_eq!(after.left(), before.left());
-        assert!(after.top() < before.top(), "{before:?} -> {after:?}");
         assert!(
-            !cursors.contains(&egui::CursorIcon::Grabbing),
-            "{cursors:?}"
+            (after.min - (before.min + by)).length() < 0.5,
+            "{before:?} -> {after:?}"
         );
-        let hover = pass(&mut window, &ctx, vec![egui::Event::PointerMoved(bar)]);
-        assert_ne!(hover.platform_output.cursor_icon, egui::CursorIcon::Grab);
+    }
+
+    /// The clip the image was painted under: the one mesh drawn with a texture of its own.
+    fn image_clip(shapes: &[egui::epaint::ClippedShape]) -> Option<egui::Rect> {
+        shapes.iter().find_map(|clipped| match &clipped.shape {
+            egui::Shape::Mesh(mesh) if mesh.texture_id != egui::TextureId::default() => {
+                Some(clipped.clip_rect)
+            }
+            _ => None,
+        })
+    }
+
+    /// A zoomed image far larger than the drawer is painted inside the drawer's body only.
+    #[test]
+    fn a_zoomed_image_is_clipped_to_the_drawer() {
+        let folder = Folder::new();
+        let (mut window, ctx) = zoomed_window(&folder);
+        let shapes = painted(&mut window, &ctx, vec![]);
+        let dock = window.sidebar.last_dock.unwrap();
+        assert!(image_rect(&shapes).unwrap().contains_rect(dock));
+        let clip = image_clip(&shapes).unwrap();
+        assert!(dock.contains_rect(clip), "{clip:?} outside {dock:?}");
+    }
+
+    /// A small image moved into the far corner of a maximized drawer is put back whole inside the
+    /// drawer when it shrinks again.
+    #[test]
+    fn a_smaller_drawer_takes_the_image_back_inside() {
+        let folder = Folder::new();
+        let (mut window, ctx, _, _) = small_window(&folder, |image| image.center());
+        painted(
+            &mut window,
+            &ctx,
+            vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)],
+        );
+        crate::sidebar::toggle_maximize(&mut window);
+        settle(&mut window, &ctx);
+        for _ in 0..4 {
+            drag(
+                &mut window,
+                &ctx,
+                egui::PointerButton::Middle,
+                egui::vec2(150.0, 150.0),
+            );
+        }
+        let large = window.sidebar.last_dock.unwrap();
+        let cornered = settle(&mut window, &ctx);
+        assert!(
+            (cornered.right_bottom() - large.right_bottom()).length() < 2.0,
+            "{cornered:?} in {large:?}"
+        );
+        crate::sidebar::toggle_maximize(&mut window);
+        let back = settle(&mut window, &ctx);
+        let small = window.sidebar.last_dock.unwrap();
+        assert!(small.width() < large.width() || small.height() < large.height());
+        assert!(
+            small.expand(0.5).contains_rect(back),
+            "{back:?} outside {small:?}"
+        );
     }
 
     /// A maximized drawer reads every key even when nobody clicked it, so Space is its own there

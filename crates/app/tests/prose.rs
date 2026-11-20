@@ -382,6 +382,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         0,
     ),
     (
+        "src/viewer/image/viewport.rs",
+        include_str!("../src/viewer/image/viewport.rs"),
+        0,
+    ),
+    (
         "src/viewer/review.rs",
         include_str!("../src/viewer/review.rs"),
         0,
