@@ -207,15 +207,6 @@ impl State {
         }
     }
 
-    /// Forgets what this state showed, keeping only which tab it is and the window's context.
-    fn forget(&mut self) {
-        *self = Self {
-            context: self.context.take(),
-            tool_markdown: self.tool_markdown,
-            ..Self::default()
-        };
-    }
-
     fn record(&mut self, spent: Duration) {
         self.cost += spent;
         self.frame += spent;
@@ -265,21 +256,9 @@ pub(super) fn select_state(window: &mut crate::Window, markdown: bool) {
     window.viewer_other.tool_markdown = Some(!markdown);
 }
 
-/// Shows the image in the document tab. The drawer's open, keyboard and gesture flags stay the
-/// Markdown state's, so the image takes input exactly as a Markdown document would.
-fn show_image(window: &mut crate::Window) {
-    select_state(window, true);
-    crate::sidebar::select(window, crate::sidebar::Tool::Document);
-    window.viewer.open = true;
-    window.viewer.keyboard = true;
-    if let Some(ctx) = &window.viewer.context {
-        ctx.request_repaint();
-    }
-}
-
 pub(crate) fn activate(window: &mut crate::Window, markdown: bool) {
     if markdown && window.image.shown() {
-        show_image(window);
+        origin::show_image(window);
         return;
     }
     select_state(window, markdown);
@@ -381,7 +360,7 @@ fn close_tab(window: &mut crate::Window, markdown: bool, ctx: &egui::Context) {
     if markdown {
         origin::replace_document(window, origin::Keep::Neither);
     } else {
-        state.forget();
+        origin::forget(state);
     }
     let active = crate::sidebar::active(window);
     let closed = if markdown {
@@ -564,7 +543,7 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
     let ctx = ui.ctx().clone();
     window.viewer.context = Some(ctx.clone());
     let started = Instant::now();
-    let image = showing_image(window);
+    let image = origin::showing_image(window);
     if !image
         && window.viewer.kind.is_document()
         && window.viewer.requested.is_some()
@@ -584,7 +563,7 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
         }
         window.viewer.poll(&ctx);
     }
-    let unavailable = origin(window)
+    let unavailable = origin::shown_origin(window)
         .is_none_or(|origin| !window.all_panes().any(|pane| pane.name == origin.pane));
     let filtered = ctx.input(|input| input.events.clone());
     if let Some(events) = window.viewer.events.take() {
@@ -607,24 +586,10 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
     window.timed_separately += window.viewer.take_cost();
 }
 
-/// Whether the drawer is on its document tab and that tab holds the image.
-fn showing_image(window: &crate::Window) -> bool {
-    window.image.shown() && crate::sidebar::active(window) == Some(crate::sidebar::Tool::Document)
-}
-
-/// The console the shown document was opened from.
-fn origin(window: &crate::Window) -> Option<&Source> {
-    if showing_image(window) {
-        window.image.origin()
-    } else {
-        window.viewer.origin.as_ref()
-    }
-}
-
 /// The strip's name for what the drawer shows: the source console's project, or the folder it
 /// reads; the terminal's own title says nothing a person needs here.
 fn title(window: &crate::Window, unavailable: bool) -> drawer::Title {
-    let origin = origin(window);
+    let origin = origin::shown_origin(window);
     let project = origin
         .and_then(|origin| window.all_panes().find(|pane| pane.name == origin.pane))
         .and_then(|pane| pane.project.as_ref())

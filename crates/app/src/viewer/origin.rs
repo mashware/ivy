@@ -135,6 +135,41 @@ pub(crate) fn open_document_target(
     true
 }
 
+/// Forgets what `state` showed, keeping only which tab it is and the window's context.
+pub(super) fn forget(state: &mut super::State) {
+    *state = super::State {
+        context: state.context.take(),
+        tool_markdown: state.tool_markdown,
+        ..super::State::default()
+    };
+}
+
+/// Shows the image in the document tab. The drawer's open, keyboard and gesture flags stay the
+/// document state's, so the image takes input exactly as a document would.
+pub(super) fn show_image(window: &mut Window) {
+    super::select_state(window, true);
+    crate::sidebar::select(window, crate::sidebar::Tool::Document);
+    window.viewer.open = true;
+    window.viewer.keyboard = true;
+    if let Some(ctx) = &window.viewer.context {
+        ctx.request_repaint();
+    }
+}
+
+/// Whether the drawer is on its document tab and that tab holds the image.
+pub(super) fn showing_image(window: &Window) -> bool {
+    window.image.shown() && crate::sidebar::active(window) == Some(crate::sidebar::Tool::Document)
+}
+
+/// The console the shown document was opened from.
+pub(super) fn shown_origin(window: &Window) -> Option<&super::Source> {
+    if showing_image(window) {
+        window.image.origin()
+    } else {
+        window.viewer.origin.as_ref()
+    }
+}
+
 /// What stays in the document tab when [`replace_document`] empties it.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Keep {
@@ -148,7 +183,7 @@ pub(super) enum Keep {
 pub(super) fn replace_document(window: &mut Window, keep: Keep) {
     super::select_state(window, true);
     if keep != Keep::Document {
-        window.viewer.forget();
+        forget(&mut window.viewer);
     }
     if keep != Keep::Image {
         window.image.clear();
@@ -172,7 +207,7 @@ pub(crate) fn open_image_target(
     };
     replace_document(window, Keep::Image);
     window.image.open(source, path);
-    super::show_image(window);
+    show_image(window);
     if let Some(ctx) = window.viewer.context.clone() {
         window.image.poll(&ctx);
     }
