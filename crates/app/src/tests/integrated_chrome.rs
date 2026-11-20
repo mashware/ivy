@@ -4643,6 +4643,116 @@ mod tests {
         );
     }
 
+    /// AC2 in full: the console that lost focus goes at the end of its fade, and the one that took
+    /// it shows its controls whole on the pass of the click.
+    #[test]
+    fn focus_moving_away_ends_in_gone_and_the_new_console_shows_its_controls_at_once() {
+        let (ctx, mut window, area) = lingering_pair(true);
+        let names = names_in_order(&window);
+        let left = control_cells(&window, &ctx, area, 0);
+        let right = control_cells(&window, &ctx, area, 1);
+        let other = pane_rect(&window, &ctx, area, names[1]).center();
+        let at = |window: &mut Window, time, events| timed_pass(window, &ctx, area, time, events).0;
+        let before = at(&mut window, 0.1, vec![]);
+        assert!(
+            icon_alphas(&before, right).is_empty(),
+            "the unfocused console showed its controls before the click"
+        );
+        let clicked = at(&mut window, 10.0, click_at(other));
+        assert_eq!(
+            window.active().focus,
+            names[1],
+            "the click did not move focus"
+        );
+        assert!(
+            whole(&icon_alphas(&clicked, right)),
+            "the console that took focus did not show its controls at once"
+        );
+        assert!(whole(&icon_alphas(&clicked, left)));
+        assert!(whole(&icon_alphas(&at(&mut window, 12.9, vec![]), left)));
+        assert!(fading(&icon_alphas(&at(&mut window, 13.25, vec![]), left)));
+        let gone = at(&mut window, 13.6, vec![]);
+        assert!(
+            icon_alphas(&gone, left).is_empty(),
+            "the old console's controls outlived their fade"
+        );
+        assert!(whole(&icon_alphas(&gone, right)));
+    }
+
+    /// AC3 during the wait: a second after focus left, the controls are whole and a press acts.
+    #[test]
+    fn a_lingering_control_acts_before_the_fade_starts() {
+        let (ctx, mut window, area) = lingering_pair(true);
+        let names = names_in_order(&window);
+        let split_right = control(&window, &ctx, area, 0, 162.5);
+        let other = pane_rect(&window, &ctx, area, names[1]).center();
+        let cells = control_cells(&window, &ctx, area, 0);
+        timed_pass(&mut window, &ctx, area, 10.0, click_at(other));
+        assert_eq!(window.active().focus, names[1]);
+        // The pass just before the press is the one the press gate reads (D99's `revealed`): it
+        // must be a second into the wait, not the click's own pass, where anything is still whole.
+        timed_pass(&mut window, &ctx, area, 10.5, vec![]);
+        let waiting = icon_alphas(&timed_pass(&mut window, &ctx, area, 10.99, vec![]).0, cells);
+        assert!(
+            whole(&waiting),
+            "not whole a second into the wait: {waiting:?}"
+        );
+        timed_pass(&mut window, &ctx, area, 11.0, click_at(split_right));
+        timed_pass(&mut window, &ctx, area, 11.01, vec![]);
+        assert_eq!(
+            window.active().panes().len(),
+            3,
+            "a lingering split did not split its console"
+        );
+    }
+
+    /// AC4 by focus: taking focus back mid-fade restores the controls whole on that pass, and
+    /// they stay whole while wanted.
+    #[test]
+    fn focus_coming_back_mid_fade_restores_the_controls_whole() {
+        let (ctx, mut window, area) = lingering_pair(true);
+        let names = names_in_order(&window);
+        let cells = control_cells(&window, &ctx, area, 0);
+        let own = pane_rect(&window, &ctx, area, names[0]).center();
+        let other = pane_rect(&window, &ctx, area, names[1]).center();
+        let at = |window: &mut Window, time, events| {
+            icon_alphas(&timed_pass(window, &ctx, area, time, events).0, cells)
+        };
+        at(&mut window, 10.0, click_at(other));
+        assert!(fading(&at(&mut window, 13.25, vec![])));
+        let back = at(&mut window, 13.26, click_at(own));
+        assert_eq!(
+            window.active().focus,
+            names[0],
+            "the click did not move focus back"
+        );
+        assert!(
+            whole(&back),
+            "taking focus back did not restore them: {back:?}"
+        );
+        for time in [13.6, 20.0] {
+            let kept = at(&mut window, time, vec![]);
+            assert!(whole(&kept), "wanted controls faded at {time}: {kept:?}");
+        }
+    }
+
+    /// AC7 by focus: without fades, the console that loses focus drops its controls on that pass.
+    #[test]
+    fn without_fades_a_console_losing_focus_drops_its_controls_at_once() {
+        let (ctx, mut window, area) = lingering_pair(false);
+        let names = names_in_order(&window);
+        let cells = control_cells(&window, &ctx, area, 0);
+        let other = pane_rect(&window, &ctx, area, names[1]).center();
+        let (shown, _) = timed_pass(&mut window, &ctx, area, 0.1, vec![]);
+        assert!(whole(&icon_alphas(&shown, cells)));
+        let (left, _) = timed_pass(&mut window, &ctx, area, 0.2, click_at(other));
+        assert_eq!(window.active().focus, names[1]);
+        assert!(
+            icon_alphas(&left, cells).is_empty(),
+            "a run without fades lingered after focus left"
+        );
+    }
+
     /// Near the end of the fade a control is too faint to be aimed at, and a press there is the
     /// title's: it focuses the console and closes nothing.
     #[test]
