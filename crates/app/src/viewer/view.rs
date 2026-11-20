@@ -12,7 +12,7 @@ pub(super) fn show(
     maximized: bool,
     (tabs, title): (&super::drawer::Tabs, &super::drawer::Title),
 ) {
-    let namespace = if state.kind == Kind::Markdown {
+    let namespace = if state.kind.is_document() {
         "markdown-viewer"
     } else {
         "git-viewer"
@@ -67,7 +67,7 @@ pub(super) fn show(
                 let source = title.text();
                 super::drawer::paint(&content, &strip, tabs, &roles, title, maximized);
                 if let Some(rect) = strip.controls
-                    && state.kind != Kind::Markdown
+                    && !state.kind.is_document()
                 {
                     strip_controls(state, &mut content, rect, &theme);
                 }
@@ -131,15 +131,15 @@ fn body_content(
     theme: crate::theme::Theme,
     unavailable: bool,
 ) {
-    let markdown = state.kind == Kind::Markdown;
-    if markdown && state.requested.is_none() && state.job.is_none() && state.loaded.is_none() {
+    let document = state.kind.is_document();
+    if document && state.requested.is_none() && state.job.is_none() && state.loaded.is_none() {
         egui::Frame::new().inner_margin(14).show(ui, |ui| {
-            ui.label("Choose a Markdown file in Files.");
+            ui.label("Choose a file in Files.");
         });
     }
     // The comparison and refresh live on the strip; only a base to type or comments to clear
     // need a row of their own.
-    if !markdown && (state.kind == Kind::AgainstBase || state.review.has_comments()) {
+    if !document && (state.kind == Kind::AgainstBase || state.review.has_comments()) {
         egui::Frame::new()
             .inner_margin(egui::Margin::symmetric(10, 8))
             .show(ui, |ui| controls(state, ui));
@@ -151,7 +151,7 @@ fn body_content(
             &state.message,
         );
     }
-    if state.job.is_some() && state.loaded.is_none() {
+    if state.job.is_some() && state.loaded.is_none() && state.message.is_empty() {
         ui.label("Loading…");
     }
     if let Some(loaded) = &state.loaded {
@@ -159,6 +159,10 @@ fn body_content(
             egui::Frame::new()
                 .inner_margin(egui::Margin::symmetric(26, 22))
                 .show(ui, |ui| document.show(ui));
+        } else if let Some(document) = &loaded.code {
+            let roles = crate::ui::style::roles(ui.ctx(), &theme);
+            let palette = super::palette::Palette::of(&theme, &roles);
+            super::code::show(document, &mut state.code, ui, &palette);
         } else if let Some(document) = &loaded.diff {
             let label = state
                 .origin
@@ -183,6 +187,7 @@ fn body_content(
 fn comparison(kind: Kind, base: &str) -> String {
     match kind {
         Kind::Markdown => "Markdown".into(),
+        Kind::Code => "File".into(),
         Kind::Local => "Local changes".into(),
         Kind::Unstaged => "Unstaged changes".into(),
         Kind::Staged => "Staged changes".into(),
@@ -444,11 +449,7 @@ mod tests {
             }
             output.drop_without_applying_deltas();
             if pass == 1 {
-                assert!(
-                    found
-                        .iter()
-                        .any(|text| text == "Choose a Markdown file in Files.")
-                );
+                assert!(found.iter().any(|text| text == "Choose a file in Files."));
                 assert!(!found.iter().any(|text| text == "Open"));
                 assert!(!found.iter().any(|text| text == "Markdown file"));
             }

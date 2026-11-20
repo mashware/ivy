@@ -188,12 +188,8 @@ pub(super) fn activate(
             }
             None
         }
-        EntryKind::File | EntryKind::Link
-            if entry
-                .path
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("md")) =>
-        {
+        // Any file opens in the drawer's File tab: Markdown formatted, anything else as code.
+        EntryKind::File | EntryKind::Link => {
             if entry.path.to_str().is_none() {
                 state.message = "This path cannot be opened as Unicode text.".into();
                 None
@@ -201,7 +197,10 @@ pub(super) fn activate(
                 Some((pane, entry.path.clone()))
             }
         }
-        _ => None,
+        EntryKind::Other => {
+            state.message = "Only files and folders open here.".into();
+            None
+        }
     }
 }
 
@@ -433,23 +432,25 @@ pub(super) fn show(
                                 toggle = Some(row.entry.path.clone());
                             }
                         }
-                        let icon_rect = egui::Rect::from_min_size(
-                            egui::pos2(row_rect.left() + indent + 18.0, center_y - 8.0),
-                            egui::vec2(16.0, 16.0),
-                        );
-                        let (glyph, icon_color) = if directory {
-                            (Glyph::Folder { open: expanded }, roles.accent)
+                        // The caret already says a row is a folder, so a folder carries no icon
+                        // and its name follows the caret; a file keeps its type's icon (#159).
+                        let name_left = if directory {
+                            row_rect.left() + indent + 18.0
                         } else {
+                            let icon_rect = egui::Rect::from_min_size(
+                                egui::pos2(row_rect.left() + indent + 18.0, center_y - 8.0),
+                                egui::vec2(16.0, 16.0),
+                            );
                             let kind = FileKind::of(&row.entry.path);
-                            (Glyph::File(kind), kind.color(&theme, &roles, &grounds))
+                            crate::ui::icons::paint(
+                                ui.painter(),
+                                icon_rect.center(),
+                                Glyph::File(kind),
+                                16.0,
+                                kind.color(&theme, &roles, &grounds),
+                            );
+                            icon_rect.right() + 5.0
                         };
-                        crate::ui::icons::paint(
-                            ui.painter(),
-                            icon_rect.center(),
-                            glyph,
-                            16.0,
-                            icon_color,
-                        );
                         let name =
                             display(Path::new(row.entry.path.file_name().unwrap_or_default()));
                         let suffix = if row.entry.kind == EntryKind::Link {
@@ -458,7 +459,7 @@ pub(super) fn show(
                             ""
                         };
                         ui.painter().text(
-                            egui::pos2(icon_rect.right() + 5.0, center_y),
+                            egui::pos2(name_left, center_y),
                             egui::Align2::LEFT_CENTER,
                             format!("{name}{suffix}"),
                             egui::TextStyle::Body.resolve(ui.style()),
@@ -659,7 +660,7 @@ mod tests {
     }
 
     #[test]
-    fn activation_only_opens_markdown_and_keeps_folders_in_the_tree() {
+    fn activation_opens_any_file_and_keeps_folders_in_the_tree() {
         let mut state = Explorer::default();
         state.reconcile(&[(1, Some("/root".into()))]);
         assert_eq!(
@@ -667,7 +668,20 @@ mod tests {
             Some((1, "/root/link.md".into()))
         );
         assert!(state.message.is_empty());
-        assert!(activate(&mut state, 1, &entry("/root/code.rs", EntryKind::File)).is_none());
+        for code in [
+            "/root/code.rs",
+            "/root/index.php",
+            "/root/ci.yml",
+            "/root/notes.txt",
+        ] {
+            assert_eq!(
+                activate(&mut state, 1, &entry(code, EntryKind::File)),
+                Some((1, code.into()))
+            );
+        }
+        assert!(activate(&mut state, 1, &entry("/root/fifo", EntryKind::Other)).is_none());
+        assert_eq!(state.message, "Only files and folders open here.");
+        state.message.clear();
         assert_eq!(
             activate(&mut state, 1, &entry("/root/README.MD", EntryKind::File)),
             Some((1, "/root/README.MD".into()))
@@ -787,10 +801,10 @@ mod tests {
         }
     }
 
-    /// The tree shows what each row is: a folder closed or open with the caret that says which, and
-    /// a file by its type in its type's colour.
+    /// The tree shows what each row is: a folder by the caret alone, closed or open, with its name
+    /// right after the caret; a file by its type's icon in its type's colour.
     #[test]
-    fn tree_rows_show_folders_open_or_closed_and_files_by_type() {
+    fn tree_rows_show_folders_by_their_caret_and_files_by_type() {
         use egui_phosphor::regular as glyph;
         let theme = crate::theme::Theme::default();
         let ctx = crate::ui::icons::installed_for_tests(1.0);
@@ -809,7 +823,9 @@ mod tests {
         listing(&mut state, "/root/src", vec![]);
         let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 600.0));
         // A surface's first pass only measures itself and paints nothing: the second is read.
-        let painted = |state: &mut Explorer| {
+        // The icons painted, and where each row's name begins.
+        type Painted = (Vec<(String, egui::Color32)>, Vec<(String, f32)>);
+        let painted = |state: &mut Explorer| -> Painted {
             let pass = |state: &mut Explorer| {
                 ctx.run_ui(
                     egui::RawInput {
@@ -829,22 +845,51 @@ mod tests {
                 .filter_map(|s| crate::ui::icons::painted_icon(&s.shape))
                 .map(|(g, color, _)| (g, color))
                 .collect();
+            let names = output
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Text(t) => Some((t.galley.text().to_owned(), t.pos.x)),
+                    _ => None,
+                })
+                .collect();
             output.drop_without_applying_deltas();
-            icons
+            (icons, names)
         };
         let roles = crate::ui::style::roles(&ctx, &theme);
         let has = |icons: &[(String, egui::Color32)], g: &str, color: egui::Color32| {
             icons.iter().any(|(painted, c)| painted == g && *c == color)
         };
-        let closed = painted(&mut state);
+        let left_of = |names: &[(String, f32)], name: &str| {
+            names
+                .iter()
+                .find(|(text, _)| text == name)
+                .map(|(_, x)| *x)
+                .unwrap_or_else(|| panic!("{name} not painted: {names:?}"))
+        };
+        let folder = |icons: &[(String, egui::Color32)]| {
+            icons
+                .iter()
+                .filter(|(g, _)| g == glyph::FOLDER || g == glyph::FOLDER_OPEN)
+                .count()
+        };
+        let (closed, names) = painted(&mut state);
         assert!(has(&closed, glyph::CARET_RIGHT, roles.tx3), "{closed:?}");
-        assert!(has(&closed, glyph::FOLDER, roles.accent), "{closed:?}");
         assert!(!has(&closed, glyph::CARET_DOWN, roles.tx3));
+        // Files keep their icons in the same frame, so the absence below is not an empty paint.
         let red = theme.color(term_core::TermColor::Indexed(1));
         assert!(has(&closed, glyph::FILE_RS, red), "{closed:?}");
         assert!(
             closed.iter().any(|(g, _)| g == glyph::FILE_LOCK),
             "{closed:?}"
+        );
+        // Only the root caption above the tree draws a folder; no tree row does.
+        assert_eq!(folder(&closed), 1, "{closed:?}");
+        // A folder's name takes the place its icon had; a file's name follows its icon.
+        let (src, main) = (left_of(&names, "src"), left_of(&names, "main.rs"));
+        assert!(
+            (main - src - 21.0).abs() < 0.5,
+            "src at {src}, main.rs at {main}"
         );
         state
             .navigation
@@ -852,17 +897,9 @@ mod tests {
             .unwrap()
             .expanded
             .insert("/root/src".into());
-        let open = painted(&mut state);
+        let (open, _) = painted(&mut state);
         assert!(has(&open, glyph::CARET_DOWN, roles.tx3), "{open:?}");
         assert!(!has(&open, glyph::CARET_RIGHT, roles.tx3), "{open:?}");
-        // The root row's open folder is there in both passes; the tree's own folder now opens too.
-        let opened = |icons: &[(String, egui::Color32)]| {
-            icons
-                .iter()
-                .filter(|(g, _)| g == glyph::FOLDER_OPEN)
-                .count()
-        };
-        assert_eq!(opened(&open), opened(&closed) + 1);
-        assert!(!has(&open, glyph::FOLDER, roles.accent), "{open:?}");
+        assert_eq!(folder(&open), 1, "{open:?}");
     }
 }

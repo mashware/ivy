@@ -283,7 +283,7 @@ fn title_bar_buttons_open_and_close_each_tool_without_forwarding_the_gesture() {
         );
         assert!(window.presses_for_the_program.is_empty());
     }
-    for tool in [Tool::Markdown, Tool::Board] {
+    for tool in [Tool::Document, Tool::Board] {
         let pos = button_of(&window, tool);
         assert!(pos.x > 1000.0, "{tool:?} sits in the right-hand group");
         for expected in [Some(tool), None] {
@@ -405,9 +405,9 @@ fn sidebar_state_is_transient_and_each_new_window_starts_closed_at_default_sizes
 fn console_mouse_release_crossing_into_files_or_the_drawer_reaches_its_program() {
     for (tool, maximized) in [
         (Tool::Files, false),
-        (Tool::Markdown, false),
+        (Tool::Document, false),
         (Tool::Git, false),
-        (Tool::Markdown, true),
+        (Tool::Document, true),
     ] {
         let received = term_core::received::Received::new("sidebar-console-release");
         let script = received.script("stty raw -echo");
@@ -416,7 +416,7 @@ fn console_mouse_release_crossing_into_files_or_the_drawer_reaches_its_program()
         let ctx = egui::Context::default();
         let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 800.0));
         match tool {
-            Tool::Markdown => crate::viewer::activate(&mut window, true),
+            Tool::Document => crate::viewer::activate(&mut window, true),
             Tool::Git => crate::viewer::activate(&mut window, false),
             _ => select(&mut window, tool),
         }
@@ -640,7 +640,7 @@ fn a_press_on_the_maximized_drawer_never_reaches_the_console_header_it_covers() 
             );
             assert_eq!(
                 active(&window),
-                Some(Tool::Markdown),
+                Some(Tool::Document),
                 "a header button under the drawer took the press at {at:?}"
             );
         }
@@ -814,8 +814,8 @@ fn neither_the_drawer_nor_a_title_bar_press_dims_the_consoles() {
     let consoles = crate::tab_bar::geometry(&window, area, &metrics).consoles;
     let plain = header_inks(&painted(&mut window, &ctx, area, vec![]), consoles);
     assert!(!plain.is_empty(), "no header text was found");
-    // Hold a press on the title bar's Markdown button.
-    let markdown = button_of(&window, Tool::Markdown);
+    // Hold a press on the title bar's File button.
+    let markdown = button_of(&window, Tool::Document);
     let held = painted(
         &mut window,
         &ctx,
@@ -846,7 +846,7 @@ fn neither_the_drawer_nor_a_title_bar_press_dims_the_consoles() {
             modifiers: egui::Modifiers::NONE,
         }],
     );
-    assert_eq!(active(&window), Some(Tool::Markdown));
+    assert_eq!(active(&window), Some(Tool::Document));
     let open = painted(&mut window, &ctx, area, vec![]);
     let beside = window.sidebar.last_consoles;
     assert_eq!(

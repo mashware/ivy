@@ -465,7 +465,7 @@ mod tests {
             let shapes = open_connection_guide(&mut window, &ctx, area);
             assert!(has_text(&shapes, "Connect agents"));
             assert!(
-                !has_text(&shapes, "Choose a Markdown file in Files."),
+                !has_text(&shapes, "Choose a file in Files."),
                 "the drawer overlaps the modal"
             );
             assert!(has_text(&shapes, "No panels published yet"));
@@ -486,7 +486,7 @@ mod tests {
             let shapes = frame(&mut window, &ctx, area, vec![]);
             assert!(!has_text(&shapes, "No panels published yet"));
             assert!(
-                has_text(&shapes, "Choose a Markdown file in Files."),
+                has_text(&shapes, "Choose a file in Files."),
                 "the drawer did not resume after closure at {width}"
             );
         }
@@ -3111,7 +3111,7 @@ mod tests {
                         assert!(!in_menu(removed), "menu retained {removed}");
                     }
                     // A compact bar has no room for the tools' buttons, so its menu carries them.
-                    for tool in ["Files", "Markdown", "Board"] {
+                    for tool in ["Files", "File", "Board"] {
                         assert_eq!(in_menu(tool), width < 500.0, "{tool} at {width}");
                     }
                     let at = text_center(&shapes, label);

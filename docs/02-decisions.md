@@ -11029,3 +11029,63 @@ into an intermediate directory between the walk and the open is still followed. 
 the 64-bit file index is not guaranteed unique; the 128-bit `FileIdInfo` would be. A project on a
 network share keeps its `\\?\UNC\` form, which `dunce` does not strip. Codex route storage, which has
 the same missing no-follow flag, is not supported on Windows at all yet and is #173's.
+## D109 — Files opens any file: Markdown formatted, everything else as read-only, coloured code
+
+**Decided.** One click on a file in Files opens it in the drawer's document tab, now called
+**File**. A Markdown file keeps its formatted reader. Any other regular file opens in a **code view**
+of the same tab:
+
+- It is read-only.
+- It has a line-number gutter.
+- Its text is monospace and coloured by language family: Rust; the C-like languages (C, C++, Go,
+  Java, Kotlin, Swift, C#, JavaScript, TypeScript); CSS, which has block comments only; PHP; the
+  `#`-comment family (Python, shells, Ruby, YAML, TOML, INI, `Makefile`, `Dockerfile`, a `#!` first
+  line); JSON; SQL; plain text.
+- It refreshes once a second, like the Markdown reader.
+- A file it cannot show says so in one sentence: `Binary file` (a NUL in the first 8 KiB),
+  `Not UTF-8 text`, or `Larger than 1 MiB`.
+
+Colouring is a small scanner of our own that runs on the loader thread. The frame only paints its
+runs.
+
+- **What the scanner marks:** comments, strings, numbers, keywords, capitalised type names, and
+  attributes, preprocessor lines and `$`/`@` names.
+- **Where the colours come from:** keywords, strings, numbers, type names and attributes take their
+  ANSI palette entry, then the bright one, keeping the first that reads at 4.5:1 on the document and
+  on a selection over it and differs from the colours already taken; a theme that offers neither
+  leaves that token in the text colour. Comments and line numbers take the muted text roles.
+- **Long lines:** a line over 16 KiB is painted plain, cut, and marked; copying it gives the whole
+  line.
+- **Selecting and copying:** a selection is kept as file positions, so copying a selection longer
+  than the screen, or `Ctrl+A`, copies the file's own text and never a line number.
+- **Files:** directory rows lose their folder icon. The caret alone says a row is a folder, and the
+  name starts right after it. The root caption keeps its icon.
+
+This amends two earlier notes. #88's search said Ctrl+Enter opens only a Markdown file and that
+Files «says it opens Markdown alone»: it now opens any file, and that sentence is gone. #89 said
+maximize serves «Markdown alone». The whole drawer maximizes, which
+the code already did, and code is where the width pays most.
+
+**Why.** Reading what an agent just wrote meant spending a console on `less` or `vim`, and Files
+selected every non-Markdown file without opening it (#88 left a general text viewer as separate
+work). The owner asked for a read-only viewer with simple colouring (#159).
+
+**Discarded.**
+- **`syntect` (with `two-face`) or `tree-sitter`.**
+  - `syntect` adds a few megabytes and a syntax dump.
+  - `tree-sitter` compiles C per grammar, which hurts the Windows build.
+  - Both bring colour themes of their own that would have to be mapped onto the 22-colour theme.
+  - If grammar fidelity is ever wanted, only `viewer/highlight.rs` changes.
+- **A pager in an auxiliary console:** it costs the console the feature saves, and a new console
+  type was already rejected in #88.
+- **A new sidebar tool for code:** the drawer's loader, refresh, painter and maximize already fit.
+  A third tool would duplicate them.
+- **Copying from egui's laid-out labels:** only the rows on screen are laid out in a frame, so a
+  long selection would copy truncated without saying so.
+- **Keeping the tab named «Markdown»:** it would say the wrong thing whenever it shows a `.php`.
+
+**Open.**
+- No measured batch loads or paints a document in the drawer. The code view's painting is inside the
+  declared «document viewers» span, but it has no published figure.
+- A selection is made by dragging within the visible rows. Dragging past the edge does not scroll.
+- The header with the breadcrumb, Open and its menu comes with #159's second pull request.

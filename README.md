@@ -223,18 +223,19 @@ native two-console verification as incomplete rather than claiming isolation is 
 ## Read plans and review changes
 
 Read the plan or inspect changes while your consoles keep running. **Files** opens on the left
-edge; **Markdown** and **Git** share a drawer below the consoles, as two tabs. Open Files, Markdown
+edge; **File** and **Git** share a drawer below the consoles, as two tabs. Open Files, File
 and **Board** from the title bar (or its menu when the window is narrow), drag a divider to resize,
 or click the active button again to close it. Consoles resize beside Files and above the drawer;
 switching tools preserves their sources and navigation. **Search** in Files lists matching names in
-a floating list: **Enter** shows the match in the tree and **Ctrl+Enter** opens a Markdown match in the drawer.
+a floating list: **Enter** shows the match in the tree and **Ctrl+Enter** opens a file match in the drawer: Markdown
+formatted, anything else as read-only code with line numbers and theme colours.
 
 ### Markdown previews
 
-Hold **Ctrl** and click a local `.md` path printed by an agent or shell. Ivy opens the document
-inside the terminal, with headings, lists, tables and code. Saving the file updates the preview
+Hold **Ctrl** and click a local `.md` path printed by an agent or shell to reveal it in **Files**;
+one click there opens the document inside the terminal, with headings, lists, tables and code. Saving the file updates the preview
 without reopening it. Choose documents through **Files**, or return to the retained document with
-**Markdown** in the title bar. **Maximize** on the drawer gives it the consoles' space; **Restore**
+**File** in the title bar. **Maximize** on the drawer gives it the consoles' space; **Restore**
 returns it to its previous height. Files stays beside the drawer either way, so you can choose
 another document without leaving the reading view. Running consoles remain active underneath.
 

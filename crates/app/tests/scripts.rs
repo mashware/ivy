@@ -500,6 +500,30 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/viewer/view.rs"),
     ),
     (
+        "app/src/viewer/code.rs",
+        include_str!("../src/viewer/code.rs"),
+    ),
+    (
+        "app/src/viewer/code/tests.rs",
+        include_str!("../src/viewer/code/tests.rs"),
+    ),
+    (
+        "app/src/viewer/highlight.rs",
+        include_str!("../src/viewer/highlight.rs"),
+    ),
+    (
+        "app/src/viewer/highlight/families.rs",
+        include_str!("../src/viewer/highlight/families.rs"),
+    ),
+    (
+        "app/src/viewer/highlight/tests.rs",
+        include_str!("../src/viewer/highlight/tests.rs"),
+    ),
+    (
+        "app/src/viewer/palette.rs",
+        include_str!("../src/viewer/palette.rs"),
+    ),
+    (
         "app/src/console_input.rs",
         include_str!("../src/console_input.rs"),
     ),

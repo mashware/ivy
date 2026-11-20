@@ -28,8 +28,8 @@ pub(super) fn show(
             true,
         ),
         (
-            "Markdown",
-            Action::Tool(crate::sidebar::Tool::Markdown),
+            "File",
+            Action::Tool(crate::sidebar::Tool::Document),
             None,
             false,
         ),

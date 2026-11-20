@@ -100,7 +100,7 @@ pub(crate) fn open_diff_for_pane(window: &mut Window, name: usize) {
     }
 }
 
-pub(crate) fn open_markdown_target(
+pub(crate) fn open_document_target(
     window: &mut Window,
     pane: usize,
     path: PathBuf,
@@ -113,12 +113,12 @@ pub(crate) fn open_markdown_target(
     if !pin(&mut window.viewer, source) {
         return false;
     }
-    crate::sidebar::select(window, crate::sidebar::Tool::Markdown);
-    window.viewer.open_markdown();
+    crate::sidebar::select(window, crate::sidebar::Tool::Document);
+    window.viewer.open(super::Kind::of_document(&path));
     window.viewer.path = path.to_string_lossy().into_owned();
     window.viewer.editing_path = false;
     if path.is_relative() {
-        window.viewer.message = "This console has not published its working directory. Open an absolute Markdown path or enable OSC 7 in the shell.".into();
+        window.viewer.message = "This console has not published its working directory. Open an absolute path or enable OSC 7 in the shell.".into();
         window.viewer.loaded = None;
         window.viewer.requested = None;
         window.viewer.refresh_at = None;
@@ -146,6 +146,7 @@ mod tests {
             markdown: Some(
                 crate::viewer::markdown::MarkdownDocument::parse("markdown body").unwrap(),
             ),
+            code: None,
             diff: None,
         });
 
@@ -156,6 +157,7 @@ mod tests {
         window.viewer.loaded = Some(super::super::Loaded {
             text: "git diff".into(),
             markdown: None,
+            code: None,
             diff: None,
         });
 
@@ -330,7 +332,7 @@ mod tests {
         one_frame_in(&mut window, &ctx, area, vec![]);
         let names: Vec<_> = window.all_panes().map(|p| p.name).collect();
         let name = names[1];
-        open_markdown_target(&mut window, name, PathBuf::from("relative.md"), None);
+        open_document_target(&mut window, name, PathBuf::from("relative.md"), None);
         assert_eq!(window.viewer.origin.as_ref().unwrap().pane, name);
         assert!(window.viewer.message.contains("working directory"));
         assert!(window.viewer.requested.is_none());
@@ -357,6 +359,7 @@ mod tests {
         state.loaded = Some(super::super::Loaded {
             text: "old".into(),
             markdown: Some(super::super::markdown::MarkdownDocument::parse("old").unwrap()),
+            code: None,
             diff: None,
         });
         assert!(pin(

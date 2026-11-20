@@ -298,6 +298,27 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/viewer/tests.rs"),
     ),
     ("src/viewer/view.rs", include_str!("../src/viewer/view.rs")),
+    ("src/viewer/code.rs", include_str!("../src/viewer/code.rs")),
+    (
+        "src/viewer/code/tests.rs",
+        include_str!("../src/viewer/code/tests.rs"),
+    ),
+    (
+        "src/viewer/highlight.rs",
+        include_str!("../src/viewer/highlight.rs"),
+    ),
+    (
+        "src/viewer/highlight/families.rs",
+        include_str!("../src/viewer/highlight/families.rs"),
+    ),
+    (
+        "src/viewer/highlight/tests.rs",
+        include_str!("../src/viewer/highlight/tests.rs"),
+    ),
+    (
+        "src/viewer/palette.rs",
+        include_str!("../src/viewer/palette.rs"),
+    ),
     (
         "src/console_input.rs",
         include_str!("../src/console_input.rs"),

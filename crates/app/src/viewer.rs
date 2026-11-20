@@ -1,10 +1,13 @@
 //! Read-only document views, independent of console and producer identity.
+mod code;
 mod delivery;
 mod diff;
 mod drawer;
+mod highlight;
 mod load;
 pub(crate) mod markdown;
 mod origin;
+mod palette;
 mod review;
 mod view;
 
@@ -41,6 +44,7 @@ pub(crate) struct State {
     requested: Option<(PathBuf, Kind)>,
     job: Option<(PathBuf, Kind, Job)>,
     loaded: Option<Loaded>,
+    code: code::CodeState,
     message: String,
     refresh_at: Option<Instant>,
     keyboard: bool,
@@ -73,6 +77,7 @@ impl Default for State {
             requested: None,
             job: None,
             loaded: None,
+            code: code::CodeState::default(),
             message: String::new(),
             refresh_at: None,
             keyboard: false,
@@ -88,6 +93,7 @@ impl Default for State {
 }
 
 impl State {
+    #[cfg(test)]
     pub(crate) fn open_markdown(&mut self) {
         self.open(Kind::Markdown);
     }
@@ -128,6 +134,7 @@ impl State {
         self.requested_base = self.base.clone();
         self.requested = Some((path, self.kind));
         self.loaded = None;
+        self.code.reset();
         self.message.clear();
         self.refresh_at = Some(Instant::now());
         self.poll(ctx);
@@ -147,18 +154,20 @@ impl State {
                 match result {
                     Ok(loaded) => {
                         self.message.clear();
-                        if self.kind != Kind::Markdown
+                        if !self.kind.is_document()
                             || self
                                 .loaded
                                 .as_ref()
                                 .is_none_or(|old| old.text != loaded.text)
                         {
+                            // A selection's offsets belong to the text it was made on.
+                            self.code.reset();
                             self.loaded = Some(loaded);
                         }
                     }
                     Err(why) => self.message = why,
                 }
-                self.refresh_at = (self.kind == Kind::Markdown).then(|| Instant::now() + REFRESH);
+                self.refresh_at = self.kind.is_document().then(|| Instant::now() + REFRESH);
             }
             self.job = None;
         }
@@ -245,7 +254,7 @@ pub(super) fn select_state(window: &mut crate::Window, markdown: bool) {
 pub(crate) fn activate(window: &mut crate::Window, markdown: bool) {
     select_state(window, markdown);
     let tool = if markdown {
-        crate::sidebar::Tool::Markdown
+        crate::sidebar::Tool::Document
     } else {
         crate::sidebar::Tool::Git
     };
@@ -253,9 +262,14 @@ pub(crate) fn activate(window: &mut crate::Window, markdown: bool) {
     if window.viewer.origin.is_none() && window.viewer.path.is_empty() {
         origin::initialize(window, markdown);
     }
+    // Reopening the Document tab keeps what it shows: Markdown or code alike.
     let kind = if markdown {
-        Kind::Markdown
-    } else if window.viewer.kind == Kind::Markdown {
+        if window.viewer.kind.is_document() {
+            window.viewer.kind
+        } else {
+            Kind::Markdown
+        }
+    } else if window.viewer.kind.is_document() {
         Kind::Local
     } else {
         window.viewer.kind
@@ -342,7 +356,7 @@ fn close_tab(window: &mut crate::Window, markdown: bool, ctx: &egui::Context) {
     *state = kept;
     let active = crate::sidebar::active(window);
     let closed = if markdown {
-        crate::sidebar::Tool::Markdown
+        crate::sidebar::Tool::Document
     } else {
         crate::sidebar::Tool::Git
     };
@@ -408,7 +422,7 @@ pub(crate) fn before_keys(
             return false;
         }
         let markdown = match crate::sidebar::active(window) {
-            Some(crate::sidebar::Tool::Markdown) => true,
+            Some(crate::sidebar::Tool::Document) => true,
             Some(crate::sidebar::Tool::Git) => false,
             _ => return false,
         };
@@ -493,7 +507,7 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
         return;
     }
     let markdown = match crate::sidebar::active(window) {
-        Some(crate::sidebar::Tool::Markdown) => true,
+        Some(crate::sidebar::Tool::Document) => true,
         Some(crate::sidebar::Tool::Git) => false,
         _ => return,
     };
@@ -504,7 +518,7 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
     let ctx = ui.ctx().clone();
     window.viewer.context = Some(ctx.clone());
     let started = Instant::now();
-    if window.viewer.kind == Kind::Markdown
+    if window.viewer.kind.is_document()
         && window.viewer.requested.is_some()
         && window.viewer.job.is_none()
         && window.viewer.refresh_at.is_none()
@@ -555,7 +569,7 @@ fn title(window: &crate::Window, unavailable: bool) -> drawer::Title {
         .viewer
         .requested
         .as_ref()
-        .filter(|(_, kind)| *kind != Kind::Markdown)
+        .filter(|(_, kind)| !kind.is_document())
         .map(|(path, _)| path.clone())
         .or_else(|| origin.and_then(|origin| origin.cwd.clone()))
         .and_then(|path| {
@@ -570,7 +584,7 @@ fn title(window: &crate::Window, unavailable: bool) -> drawer::Title {
     }
 }
 
-pub(crate) use origin::{open_diff_for_pane, open_markdown_target};
+pub(crate) use origin::{open_diff_for_pane, open_document_target};
 
 #[cfg(test)]
 mod interaction_tests;
@@ -585,4 +599,9 @@ pub(crate) fn hide(window: &mut crate::Window) {
 #[cfg(test)]
 pub(crate) fn is_open(window: &crate::Window) -> bool {
     window.viewer.open
+}
+/// Whether the drawer was asked to show `path` as code.
+#[cfg(test)]
+pub(crate) fn shows_as_code(window: &crate::Window, path: &std::path::Path) -> bool {
+    window.viewer.requested.as_ref() == Some(&(path.to_owned(), Kind::Code))
 }

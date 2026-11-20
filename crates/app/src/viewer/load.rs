@@ -11,6 +11,9 @@ use std::time::Duration;
 use std::time::Instant;
 
 const MARKDOWN_LIMIT: usize = 1024 * 1024;
+const CODE_LIMIT: usize = 1024 * 1024;
+/// How far into a file a NUL byte is looked for before it is called binary.
+const BINARY_SNIFF: usize = 8 * 1024;
 const DIFF_LIMIT: usize = 4 * 1024 * 1024;
 const STDERR_LIMIT: usize = 64 * 1024;
 const GIT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -18,15 +21,33 @@ const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Kind {
     Markdown,
+    /// Any other file of the Document tab, shown as code.
+    Code,
     Unstaged,
     Staged,
     Local,
     AgainstBase,
 }
 
+impl Kind {
+    /// The Document tab's kinds, as against the Changes tab's comparisons.
+    pub(super) fn is_document(self) -> bool {
+        matches!(self, Self::Markdown | Self::Code)
+    }
+
+    /// How the Document tab shows `path`: formatted when it is Markdown, as code otherwise.
+    pub(super) fn of_document(path: &Path) -> Self {
+        let markdown = path.extension().is_some_and(|ext| {
+            ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown")
+        });
+        if markdown { Self::Markdown } else { Self::Code }
+    }
+}
+
 pub(super) struct Loaded {
     pub(super) text: String,
     pub(super) markdown: Option<super::markdown::MarkdownDocument>,
+    pub(super) code: Option<super::code::CodeDocument>,
     pub(super) diff: Option<super::diff::Document>,
 }
 
@@ -57,14 +78,24 @@ impl Job {
                         Ok(Loaded {
                             text,
                             markdown,
+                            code: None,
                             diff: None,
                         })
                     }),
-                    _ => load_diff(&path, kind, &base).map(|(text, diff)| Loaded {
+                    Kind::Code => read_text(&path).map(|text| Loaded {
+                        code: Some(super::code::CodeDocument::parse(&path, &text)),
                         text,
                         markdown: None,
-                        diff: Some(diff),
+                        diff: None,
                     }),
+                    Kind::Unstaged | Kind::Staged | Kind::Local | Kind::AgainstBase => {
+                        load_diff(&path, kind, &base).map(|(text, diff)| Loaded {
+                            text,
+                            markdown: None,
+                            code: None,
+                            diff: Some(diff),
+                        })
+                    }
                 })
                 .unwrap_or_else(|_| Err("Viewer loader failed unexpectedly".into()));
                 let _ = sender.send(result);
@@ -92,6 +123,30 @@ impl Job {
 }
 
 fn read_markdown(path: &Path) -> Result<String, String> {
+    let file = open_regular(path)?;
+    let bytes =
+        read_bounded(file, MARKDOWN_LIMIT).map_err(|e| format!("Cannot read Markdown: {e}"))?;
+    String::from_utf8(bytes).map_err(|_| "Markdown is not UTF-8".into())
+}
+
+/// A file for the code view, or the one sentence that says why it cannot be shown as text.
+fn read_text(path: &Path) -> Result<String, String> {
+    let file = open_regular(path)?;
+    let bytes = read_bounded(file, CODE_LIMIT).map_err(|e| match e.kind() {
+        ErrorKind::InvalidData => "Larger than 1 MiB".to_owned(),
+        _ => format!("Cannot read file: {e}"),
+    })?;
+    if bytes[..bytes.len().min(BINARY_SNIFF)].contains(&0) {
+        return Err("Binary file".into());
+    }
+    let text = String::from_utf8(bytes).map_err(|_| "Not UTF-8 text".to_owned())?;
+    Ok(text
+        .strip_prefix('\u{feff}')
+        .map(str::to_owned)
+        .unwrap_or(text))
+}
+
+fn open_regular(path: &Path) -> Result<std::fs::File, String> {
     let mut options = OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -102,16 +157,17 @@ fn read_markdown(path: &Path) -> Result<String, String> {
     let file = options
         .open(path)
         .map_err(|e| format!("Cannot open file: {e}"))?;
-    if !file
+    let metadata = file
         .metadata()
-        .map_err(|e| format!("Cannot inspect file: {e}"))?
-        .is_file()
-    {
+        .map_err(|e| format!("Cannot inspect file: {e}"))?;
+    if metadata.is_dir() {
+        // Files lists a link to a folder as a link and does not follow it (#88).
+        return Err("This is a folder, not a file".into());
+    }
+    if !metadata.is_file() {
         return Err("The selected path is not a regular file".into());
     }
-    let bytes =
-        read_bounded(file, MARKDOWN_LIMIT).map_err(|e| format!("Cannot read Markdown: {e}"))?;
-    String::from_utf8(bytes).map_err(|_| "Markdown is not UTF-8".into())
+    Ok(file)
 }
 
 fn read_bounded(reader: impl Read, limit: usize) -> std::io::Result<Vec<u8>> {
@@ -618,6 +674,51 @@ mod tests {
         assert!(read_bounded(&vec![b'x'; DIFF_LIMIT + 1][..], DIFF_LIMIT).is_err());
         assert!(git_diff(&temp.0.join("missing"), Kind::Unstaged).is_err());
     }
+    /// A file the code view cannot show as text says why in one sentence; a text file is read
+    /// whole, without a byte-order mark.
+    #[test]
+    fn code_files_say_why_they_are_not_text() {
+        let temp = Temp::new();
+        let write = |name: &str, bytes: &[u8]| {
+            let path = temp.0.join(name);
+            fs::write(&path, bytes).unwrap();
+            path
+        };
+        let binary = write("image.png", b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR");
+        assert_eq!(read_text(&binary).unwrap_err(), "Binary file");
+        let latin1 = write("old.txt", b"caf\xe9\n");
+        assert_eq!(read_text(&latin1).unwrap_err(), "Not UTF-8 text");
+        let large = write("big.log", &vec![b'x'; CODE_LIMIT + 1]);
+        assert_eq!(read_text(&large).unwrap_err(), "Larger than 1 MiB");
+        let exact = write("fits.log", &vec![b'x'; CODE_LIMIT]);
+        assert_eq!(read_text(&exact).unwrap().len(), CODE_LIMIT);
+        let bom = write("bom.rs", "\u{feff}fn main() {}\n".as_bytes());
+        assert_eq!(read_text(&bom).unwrap(), "fn main() {}\n");
+        assert_eq!(
+            read_text(&temp.0).unwrap_err(),
+            "This is a folder, not a file"
+        );
+        // A NUL past the sniffed prefix is text that happens to hold one, not a binary.
+        let mut late = vec![b'a'; BINARY_SNIFF];
+        late.push(0);
+        assert!(read_text(&write("late.txt", &late)).is_ok());
+    }
+
+    #[test]
+    fn markdown_opens_formatted_and_anything_else_as_code() {
+        for (name, kind) in [
+            ("README.md", Kind::Markdown),
+            ("NOTES.MARKDOWN", Kind::Markdown),
+            ("main.rs", Kind::Code),
+            ("index.php", Kind::Code),
+            ("LICENSE", Kind::Code),
+        ] {
+            assert_eq!(Kind::of_document(Path::new(name)), kind, "{name}");
+        }
+        assert!(Kind::Code.is_document() && Kind::Markdown.is_document());
+        assert!(!Kind::Local.is_document() && !Kind::AgainstBase.is_document());
+    }
+
     #[cfg(unix)]
     #[test]
     fn git_timeout_does_not_wait_for_child() {

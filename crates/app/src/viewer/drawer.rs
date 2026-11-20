@@ -142,7 +142,7 @@ impl Strip {
 }
 
 pub(super) fn tabs(window: &crate::Window) -> Tabs {
-    let markdown = crate::sidebar::active(window) == Some(crate::sidebar::Tool::Markdown);
+    let markdown = crate::sidebar::active(window) == Some(crate::sidebar::Tool::Document);
     let (shown, other) = (&window.viewer, &window.viewer_other);
     let is_markdown = |state: &State| state.tool_markdown.unwrap_or(true);
     let git = [shown, other].into_iter().find(|s| !is_markdown(s));
@@ -158,7 +158,7 @@ pub(super) fn tabs(window: &crate::Window) -> Tabs {
             .and_then(|s| s.requested.as_ref().map(|(path, _)| path))
             .and_then(|path| path.file_name())
             .map(|name| name.to_string_lossy().into_owned())
-            .or_else(|| markdown.then(|| "Markdown".to_owned())),
+            .or_else(|| markdown.then(|| "File".to_owned())),
         markdown,
         side_by_side: git.is_some_and(|s| s.review.side_by_side()),
     }
@@ -409,7 +409,7 @@ fn tab(
 pub(super) fn hint(action: StripAction, maximized: bool) -> &'static str {
     match action {
         StripAction::Changes => "Review changes",
-        StripAction::Document => "Markdown document",
+        StripAction::Document => "File",
         StripAction::CloseChanges => "Close the review",
         StripAction::CloseDocument => "Close the document",
         StripAction::Unified => "Unified diff",
