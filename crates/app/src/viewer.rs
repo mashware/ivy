@@ -651,7 +651,7 @@ pub(crate) fn hide(window: &mut crate::Window) {
 #[cfg(test)]
 pub(crate) fn shown_image(window: &crate::Window) -> Option<(usize, PathBuf)> {
     let image = &window.image;
-    Some((image.origin.as_ref()?.pane, image.path.clone()?)).filter(|_| image.shown())
+    image.shown().then_some((image.origin.as_ref()?.pane, image.path.clone()?))
 }
 #[cfg(test)]
 pub(crate) fn is_open(window: &crate::Window) -> bool {
