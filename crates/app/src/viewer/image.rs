@@ -172,8 +172,9 @@ impl Viewer {
     }
 
     /// Paints the image over the drawer's body: fitted to its width until the person zooms, and
-    /// scrolled with the wheel or the scroll bars.
-    pub(super) fn show(&mut self, ui: &mut egui::Ui, theme: crate::theme::Theme) {
+    /// scrolled with the wheel, the scroll bars, or a drag that pans it. `keyboard` is whether
+    /// the drawer holds the keys, which is when Space belongs to it.
+    pub(super) fn show(&mut self, ui: &mut egui::Ui, theme: crate::theme::Theme, keyboard: bool) {
         let Some(size) = self.size() else {
             let message = self.message();
             egui::Frame::new()
@@ -223,6 +224,11 @@ impl Viewer {
             (scale, *offset) = zoom_around(scale, *offset, at - body.min, zoom);
             *chosen = Some(scale);
         }
+        let (moved, hand) = ui.input(|i| pan(i, body, keyboard));
+        *offset -= moved;
+        if let Some(hand) = hand {
+            ui.ctx().set_cursor_icon(hand);
+        }
         let output = egui::ScrollArea::both()
             .id_salt("drawer-image")
             .auto_shrink(false)
@@ -260,6 +266,32 @@ fn zoom_around(scale: f32, offset: egui::Vec2, at: egui::Vec2, factor: f32) -> (
     let zoomed = (scale * factor).clamp(SMALLEST, LARGEST);
     let point = (offset + at) / scale;
     (zoomed, (point * zoomed - at).max(egui::Vec2::ZERO))
+}
+
+/// How far a pan drag moved the pointer this frame, and the hand the cursor shows. A plain left
+/// drag never pans: marks are drawn with it. Space + left drag is Figma's convention, and the
+/// middle button pans with no key for a mouse that has one; Space is the drawer's only while it
+/// holds the keys, so a Space typed into a console stays that program's.
+fn pan(
+    input: &egui::InputState,
+    body: egui::Rect,
+    keyboard: bool,
+) -> (egui::Vec2, Option<egui::CursorIcon>) {
+    let pointer = &input.pointer;
+    let space = keyboard && input.key_down(egui::Key::Space);
+    let started_over = pointer.press_origin().is_some_and(|at| body.contains(at));
+    if started_over && (pointer.middle_down() || (space && pointer.primary_down())) {
+        // The press frame's delta is the travel from wherever the pointer was before it.
+        let moved = if pointer.any_pressed() {
+            egui::Vec2::ZERO
+        } else {
+            pointer.delta()
+        };
+        return (moved, Some(egui::CursorIcon::Grabbing));
+    }
+    let hovering = pointer.hover_pos().is_some_and(|at| body.contains(at));
+    let hand = (space && hovering).then_some(egui::CursorIcon::Grab);
+    (egui::Vec2::ZERO, hand)
 }
 
 /// The scale that fits an image `width` pixels wide into `room` points, never enlarging it past
@@ -366,6 +398,15 @@ mod tests {
         ctx: &egui::Context,
         events: Vec<egui::Event>,
     ) -> Vec<egui::epaint::ClippedShape> {
+        pass(window, ctx, events).shapes
+    }
+
+    /// One real application pass, returning everything it produced.
+    fn pass(
+        window: &mut crate::Window,
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
         let mut frame = eframe::Frame::_new_kittest();
         eframe::App::logic(window, ctx, &mut frame);
         let mut output = ctx.run_ui(
@@ -378,7 +419,7 @@ mod tests {
             |ui| eframe::App::ui(window, ui, &mut frame),
         );
         output.textures_delta.clear();
-        output.shapes
+        output
     }
 
     /// Where the drawer painted the image: the one mesh drawn with a texture of its own.
@@ -690,7 +731,7 @@ mod tests {
                 },
                 |ui| {
                     assert_eq!(ui.ctx().pixels_per_point(), pixels_per_point);
-                    viewer.show(ui, crate::theme::Theme::default());
+                    viewer.show(ui, crate::theme::Theme::default(), false);
                 },
             );
             let rect = image_rect(&output.shapes).unwrap();
@@ -880,5 +921,191 @@ mod tests {
             scrolls(&window)[0] > 0,
             "the wheel over a console did not scroll it"
         );
+    }
+
+    fn space(pressed: bool) -> egui::Event {
+        egui::Event::Key {
+            key: egui::Key::Space,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    /// Paints passes until the image stops moving, and says where it ended.
+    fn settle(window: &mut crate::Window, ctx: &egui::Context) -> egui::Rect {
+        let mut shapes = painted(window, ctx, vec![]);
+        for _ in 0..30 {
+            shapes = painted(window, ctx, vec![]);
+        }
+        image_rect(&shapes).unwrap()
+    }
+
+    /// A window with the wide fixture open and zoomed in around the drawer's centre, so it can be
+    /// moved every way; the drawer holds the keys, as after opening it.
+    fn zoomed_window(folder: &Folder) -> (crate::Window, egui::Context) {
+        let path = folder.0.join("wide.png");
+        write_png(&path, 2400, 1600);
+        let (mut window, ctx, _) = window_with_image(&path);
+        let at = window.sidebar.last_dock.unwrap().center();
+        let chord = egui::Modifiers {
+            ctrl: true,
+            command: true,
+            ..Default::default()
+        };
+        for _ in 0..4 {
+            painted(
+                &mut window,
+                &ctx,
+                vec![
+                    egui::Event::PointerMoved(at),
+                    egui::Event::ModifiersChanged(chord),
+                    egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Line,
+                        delta: egui::vec2(0.0, 3.0),
+                        phase: egui::TouchPhase::Move,
+                        modifiers: chord,
+                    },
+                ],
+            );
+        }
+        painted(
+            &mut window,
+            &ctx,
+            vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)],
+        );
+        settle(&mut window, &ctx);
+        (window, ctx)
+    }
+
+    /// Drags `button` from the drawer's centre by `by` in three steps, returning the cursor each
+    /// moving pass asked for.
+    fn drag(
+        window: &mut crate::Window,
+        ctx: &egui::Context,
+        button: egui::PointerButton,
+        by: egui::Vec2,
+    ) -> Vec<egui::CursorIcon> {
+        let from = window.sidebar.last_dock.unwrap().center();
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        pass(window, ctx, vec![egui::Event::PointerMoved(from)]);
+        pass(window, ctx, vec![press(from, true)]);
+        let mut cursors = Vec::new();
+        for step in 1..=3 {
+            let at = from + by * step as f32 / 3.0;
+            let output = pass(window, ctx, vec![egui::Event::PointerMoved(at)]);
+            cursors.push(output.platform_output.cursor_icon);
+        }
+        pass(window, ctx, vec![press(from + by, false)]);
+        cursors
+    }
+
+    /// With a mouse, the zoomed image moves with the middle button and with Space + left drag, the
+    /// hand showing while it does; a plain left drag leaves it where it is, and no gesture scrolls
+    /// a console.
+    #[test]
+    fn middle_drag_and_space_drag_pan_the_image_and_a_plain_drag_does_not() {
+        let folder = Folder::new();
+        let (mut window, ctx) = zoomed_window(&folder);
+        let history: String = (0..400).map(|n| format!("line {n}\r\n")).collect();
+        for pane in window.active_mut().panes_mut() {
+            pane.screen.advance(history.as_bytes());
+        }
+        let scrolls = |window: &crate::Window| -> Vec<usize> {
+            window
+                .active()
+                .panes()
+                .iter()
+                .map(|pane| pane.screen.view().scroll())
+                .collect()
+        };
+        let before = settle(&mut window, &ctx);
+        let by = egui::vec2(-30.0, -45.0);
+        drag(&mut window, &ctx, egui::PointerButton::Primary, by);
+        let plain = settle(&mut window, &ctx);
+        assert_eq!(plain, before, "a plain left drag panned the image");
+        let cursors = drag(&mut window, &ctx, egui::PointerButton::Middle, by);
+        assert_eq!(cursors, [egui::CursorIcon::Grabbing; 3]);
+        let middle = settle(&mut window, &ctx);
+        assert!(
+            (middle.min - (before.min + by)).length() < 0.5,
+            "{before:?} -> {middle:?}"
+        );
+        assert_eq!(middle.size(), before.size());
+        let hover = pass(&mut window, &ctx, vec![space(true)]);
+        assert_eq!(hover.platform_output.cursor_icon, egui::CursorIcon::Grab);
+        let cursors = drag(&mut window, &ctx, egui::PointerButton::Primary, by);
+        assert_eq!(cursors, [egui::CursorIcon::Grabbing; 3]);
+        pass(&mut window, &ctx, vec![space(false)]);
+        let spaced = settle(&mut window, &ctx);
+        assert!(
+            (spaced.min - (middle.min + by)).length() < 0.5,
+            "{middle:?} -> {spaced:?}"
+        );
+        assert_eq!(scrolls(&window), [0, 0], "a pan scrolled a console");
+    }
+
+    /// With a console holding the keys, Space is that program's: the drawer does not claim it and
+    /// hovering the image with it held shows no hand.
+    #[test]
+    fn a_space_typed_into_a_console_reaches_it_and_does_not_pan() {
+        let folder = Folder::new();
+        let (mut window, ctx) = zoomed_window(&folder);
+        crate::viewer::blur(&mut window);
+        let at = window.sidebar.last_dock.unwrap().center();
+        pass(&mut window, &ctx, vec![egui::Event::PointerMoved(at)]);
+        let metrics =
+            crate::painter::CellMetrics::measure(&ctx, egui::FontId::monospace(window.font_size));
+        let mut owned = true;
+        let mut left = Vec::new();
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(area()),
+                events: vec![space(true)],
+                ..Default::default()
+            },
+            |ui| {
+                owned = crate::viewer::before_keys(&mut window, ui, &metrics);
+                left = ui.input(|i| i.events.clone());
+            },
+        );
+        output.drop_without_applying_deltas();
+        assert!(!owned);
+        assert!(left.contains(&space(true)), "{left:?}");
+        let held = pass(&mut window, &ctx, vec![]);
+        assert!(ctx.input(|i| i.key_down(egui::Key::Space)));
+        assert_ne!(held.platform_output.cursor_icon, egui::CursorIcon::Grab);
+    }
+
+    /// Shift + wheel moves the zoomed image sideways and not down, which egui does on its own.
+    #[test]
+    fn shift_wheel_pans_the_image_sideways() {
+        let folder = Folder::new();
+        let (mut window, ctx) = zoomed_window(&folder);
+        let before = settle(&mut window, &ctx);
+        let at = window.sidebar.last_dock.unwrap().center();
+        painted(
+            &mut window,
+            &ctx,
+            vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::ModifiersChanged(egui::Modifiers::SHIFT),
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Line,
+                    delta: egui::vec2(0.0, -3.0),
+                    phase: egui::TouchPhase::Move,
+                    modifiers: egui::Modifiers::SHIFT,
+                },
+            ],
+        );
+        let after = settle(&mut window, &ctx);
+        assert!(after.left() < before.left(), "{before:?} -> {after:?}");
+        assert_eq!(after.top(), before.top());
     }
 }
