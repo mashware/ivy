@@ -79,6 +79,7 @@ impl Acceptor {
     pub(crate) fn wait(&self) -> io::Result<AcceptorReady> {
         #[cfg(windows)]
         {
+            // Bounded: the channel signals its private stop event when shutdown begins.
             self.inner.wait()
         }
         #[cfg(unix)]

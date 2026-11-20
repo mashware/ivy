@@ -1,7 +1,8 @@
 //! Optional off-frame services share the pane endpoint without changing panel ownership.
 use super::*;
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
+#[cfg(unix)]
 pub(crate) fn open_with_sessions(
     dir: &PanelDir,
     reader: crate::panel::DocumentReader,
@@ -199,7 +200,8 @@ pub(crate) fn control_hwnd(ctx: &egui::Context) -> Option<isize> {
     }
 }
 
-#[cfg(all(test, windows))]
+#[cfg(test)]
+#[cfg(windows)]
 mod tests {
     use super::*;
     use std::ptr::{null, null_mut};

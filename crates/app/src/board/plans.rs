@@ -70,9 +70,9 @@ impl Store {
                 #[cfg(windows)]
                 publish_all_snapshots(&shared, &snapshot_writers);
                 ctx.request_repaint();
+                #[allow(unused_mut)]
                 // Bounded: dropping the Store drops its sole sender; after queued jobs drain,
                 // `recv` returns disconnected. The worker is not joined, so the UI does not wait.
-                #[allow(unused_mut)]
                 while let Ok(mut job) = receiver.recv() {
                     let answer = apply(&shared, &mut disk, &job.identity, job.what);
                     #[cfg(windows)]

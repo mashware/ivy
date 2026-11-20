@@ -14,7 +14,8 @@ use crate::painter::CellMetrics;
 use crate::*;
 use eframe::egui;
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
+#[cfg(unix)]
 mod codex_tests;
 
 pub(crate) fn native_window(

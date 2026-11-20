@@ -175,7 +175,8 @@ fn publish_windows_document(state: &PanelState, panel: Option<&Panel>) {
         eprintln!("Windows panel snapshot was not updated: {problem}");
     }
 }
-#[cfg(all(test, windows))]
+#[cfg(test)]
+#[cfg(windows)]
 mod windows_control_tests {
     use super::*;
 

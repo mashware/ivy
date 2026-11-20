@@ -34,7 +34,8 @@ mod channel;
 mod retiring;
 pub(crate) use channel::control_hwnd;
 pub(crate) use channel::open_with_authority;
-#[cfg(all(test, unix))]
+#[cfg(test)]
+#[cfg(unix)]
 pub(crate) use channel::open_with_sessions;
 #[cfg(windows)]
 pub(crate) use channel::remember_native_window;
@@ -309,7 +310,8 @@ impl PaneControl {
     /// **A pane with no channel is a complete pane.** It publishes by file, exactly as every pane
     /// did before this milestone, which is the same decision a pane whose directory could not be
     /// created already gets.
-    #[cfg(all(test, unix))]
+    #[cfg(test)]
+    #[cfg(unix)]
     pub fn open(
         dir: &PanelDir,
         reader: crate::panel::DocumentReader,
@@ -837,7 +839,8 @@ fn answer_windows_requests(
     window.timed_separately += before.elapsed();
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use super::*;
     use panel_control::{Answered, Producer};

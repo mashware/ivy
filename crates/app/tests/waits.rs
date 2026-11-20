@@ -51,7 +51,9 @@ use std::path::{Path, PathBuf};
 /// How many waits the workspace declares today. **An equality, not a floor**: a floor would let the
 /// number go stale the day a wait is removed, and an equality is also what goes red if the matcher
 /// stops matching anything at all.
-const DECLARED_WAITS: usize = 15;
+// Six native declarations cover stop-aware accept, public blocking accept, three owned joins,
+// and the channel-local registration test barrier. Each call carries its own reason.
+const DECLARED_WAITS: usize = 21;
 
 /// The crates, files and production lines the walk must reach. A walk that examined nothing finds
 /// no undeclared wait, and would pass.

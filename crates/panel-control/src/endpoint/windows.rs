@@ -363,6 +363,8 @@ impl Drop for StopSignal {
 impl Listener {
     pub fn accept(&self) -> io::Result<Stream> {
         let (mut stop, acceptor) = acceptor(self.clone())?;
+        // Abandoned on purpose: this public blocking accept waits for a client. Channel workers
+        // use their separately owned, cancellation-aware Acceptor instead of this convenience API.
         match acceptor.wait()? {
             super::AcceptorReady::Connection => {
                 let stream = acceptor.accept()?;

@@ -108,7 +108,8 @@ pub(crate) fn server_pid_env(
     )
 }
 
-#[cfg(all(test, windows))]
+#[cfg(test)]
+#[cfg(windows)]
 mod windows_control_tests {
     use super::*;
 

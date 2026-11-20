@@ -445,11 +445,14 @@ impl Channel {
         }
         drop(self.stopper.take());
         if let Some(acceptor) = self.acceptor.take() {
+            // Bounded: stop was signalled above; I/O drains cancellation and window answers have
+            // ANSWER_DEADLINE. The acceptor joins those bounded workers before it returns.
             let _ = acceptor.join();
         }
     }
 
-    #[cfg(all(test, windows))]
+    #[cfg(test)]
+    #[cfg(windows)]
     fn open_windows_with_test_hooks(
         dir: &Path,
         id: &str,
@@ -518,6 +521,8 @@ impl Channel {
                         &mut *worker_registry.lock().unwrap_or_else(|p| p.into_inner()),
                     );
                     for handle in handles {
+                        // Bounded: workers use cancellable I/O and finite window-answer waits;
+                        // channel shutdown signals their shared stop event.
                         let _ = handle.join();
                     }
                     if result.is_err() {
@@ -541,7 +546,8 @@ impl Channel {
     }
 
     /// How many of this channel's threads are still running.
-    #[cfg(all(test, unix))]
+    #[cfg(test)]
+    #[cfg(unix)]
     pub(crate) fn alive(&self) -> usize {
         self.alive.load(Ordering::Relaxed)
     }
@@ -801,6 +807,8 @@ fn serve(
             .clone()
         {
             hooks.registration_entered.store(true, Ordering::Release);
+            // Bounded: this channel-local test hook is paired by the registration-race fixture;
+            // production construction always supplies None and cannot enter this branch.
             gate.wait();
         }
     }
@@ -812,6 +820,7 @@ fn serve(
                 let mut remaining = Vec::with_capacity(workers.len() + 1);
                 for old in workers.drain(..) {
                     if old.is_finished() {
+                        // Bounded: is_finished above observes this worker has already returned.
                         let _ = old.join();
                     } else {
                         remaining.push(old);
@@ -1487,7 +1496,8 @@ fn ask_the_window(
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use super::*;
     use panel_contract::PanelDir;
@@ -2501,7 +2511,8 @@ mod tests {
     }
 }
 
-#[cfg(all(test, windows))]
+#[cfg(test)]
+#[cfg(windows)]
 mod windows_lifecycle_tests {
     use super::*;
     use panel_contract::PanelDir;
