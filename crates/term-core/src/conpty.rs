@@ -139,21 +139,25 @@ pub(crate) fn close(slot: &Slot, process: Option<BorrowedHandle<'_>>, pid: Optio
 /// when there is no thread or no handle of its own to give that thread.
 fn end_after_grace(process: Option<BorrowedHandle<'_>>, pid: Option<u32>) {
     let Some(process) = process else { return };
-    let owned = match process.try_clone_to_owned() {
-        Ok(owned) => owned,
-        Err(_) => return end_now(process, pid),
+    let failure = match process.try_clone_to_owned() {
+        Ok(owned) => match thread::Builder::new()
+            .name("conpty-grace".to_owned())
+            .stack_size(64 * 1024)
+            .spawn(move || {
+                if wait(owned.as_handle(), CLOSE_GRACE.as_millis() as u32) != Some(true) {
+                    end_now(owned.as_handle(), pid);
+                }
+            }) {
+            Ok(_) => return,
+            Err(failure) => failure,
+        },
+        Err(failure) => failure,
     };
-    let spawned = thread::Builder::new()
-        .name("conpty-grace".to_owned())
-        .stack_size(64 * 1024)
-        .spawn(move || {
-            if wait(owned.as_handle(), CLOSE_GRACE.as_millis() as u32) != Some(true) {
-                end_now(owned.as_handle(), pid);
-            }
-        });
-    if spawned.is_err() {
-        end_now(process, pid);
-    }
+    let _ = writeln!(
+        io::stderr().lock(),
+        "a console was closed and its program was ended without its grace ({failure})"
+    );
+    end_now(process, pid);
 }
 
 fn end_now(process: BorrowedHandle<'_>, pid: Option<u32>) {
