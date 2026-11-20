@@ -468,6 +468,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/fonts/bundled.rs"),
     ),
     ("src/theme/roles.rs", include_str!("../src/theme/roles.rs")),
+    (
+        "src/theme/project_colors.rs",
+        include_str!("../src/theme/project_colors.rs"),
+    ),
     ("src/ui.rs", include_str!("../src/ui.rs")),
     ("src/ui/style.rs", include_str!("../src/ui/style.rs")),
     (

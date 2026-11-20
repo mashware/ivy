@@ -678,6 +678,10 @@ const MODULES: &[(&str, &str)] = &[
         "app/src/theme/roles.rs",
         include_str!("../src/theme/roles.rs"),
     ),
+    (
+        "app/src/theme/project_colors.rs",
+        include_str!("../src/theme/project_colors.rs"),
+    ),
     ("app/src/ui.rs", include_str!("../src/ui.rs")),
     ("app/src/ui/style.rs", include_str!("../src/ui/style.rs")),
     (

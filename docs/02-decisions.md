@@ -10331,6 +10331,36 @@ their reports from before it are not averaged with later ones; `measure-frame.sh
 tell the two apart on its own, so that line is the record. `F` and `G` paint the historical strip
 and do not change.
 
+**Amended 20 November 2026 — #141: projects take named colours, and green is the focused
+console's.** With four consoles in four folders the owner saw two cyans and two pinks: slots 6, 5, 13
+and 14 are two hue families. A project now takes, in this order, **violet, turquoise, pink, brown,
+white, maroon, sand and lavender-grey**, then the same names in a second tone — fixed values, one set
+for a dark panel and one for a light one (`theme::project_colors`). A value is kept for a theme only
+when it reads at 3:1 on the panel **as written**, sits at least ΔE 20 (CIE76) from that theme's live
+red, yellow and blue claims and its focus green, and is distinct from those already kept; one that
+fails is dropped, never brought toward the text — which is what washed the old inks to near-white.
+The owner named the colours: brown, maroon and white differ from violet and pink by lightness, which
+no rule over hues alone offers. Ivy Night keeps nine, Ivy Day nine, the pastel Catppuccin Mocha five,
+because its own claims sit where pink, maroon and sand would. Past the list a project still takes the
+text colour, as before.
+
+**Green belongs to the focused console.** Its header tint, project name and outline turn the focus
+green, with or without a project; when focus moves, the console that gets it fades to green and the
+one that loses it fades back to its project colour, in 150 ms. This reverses the 17 November
+amendment's «outlined in its project's ink». The tab's dots and the Board keep the project colour:
+the badge's ink never changes. Only the ink fades; the header's ground still switches between panel
+and chrome on the first frame. **Measured runs do not fade** — the frames a fade wakes would be
+published as the framework's cost (D13) — so `Chrome::start` allows fades only outside a measured
+run, and with fades off the mix is 0 or 1 without touching egui's animation, which requests a repaint
+even with no time left to animate.
+
+*Discarded:* the green as the first project's colour (the ticket as written — it made one project
+read as focus); colours generated around the hue circle avoiding the claim hues (measured over the
+twelve themes: four hues on Ivy Night, and a second lightness that collapsed into the first or failed
+3:1); lifting a failing colour toward the text (the near-white of the report); keeping the claim
+colours as project colours (a project in blue reads as finished work); outline-only green on focus
+(the owner wanted the whole colour); fading in HSL (150 ms of RGB mix through grey is not seen).
+
 ## D97 — A panel's claim is a strip across its top, and its controls look like controls
 
 **New signal, 16 November 2026 — #93.** The redesign D94 started draws the status panel with a band
