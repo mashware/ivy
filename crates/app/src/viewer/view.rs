@@ -3,6 +3,9 @@ use super::{Kind, State};
 use eframe::egui::{self, FontId};
 use std::path::Path;
 
+/// The radius of the body's bottom corners, inside the drawer's one-point frame.
+pub(super) const BODY_CORNER: u8 = crate::theme::metrics::RADIUS_CARD - 1;
+
 pub(super) fn show(
     state: &mut State,
     parent: &mut egui::Ui,
@@ -110,8 +113,8 @@ pub(super) fn show(
                 body_ui.painter().rect_filled(
                     body,
                     egui::CornerRadius {
-                        sw: crate::theme::metrics::RADIUS_CARD - 1,
-                        se: crate::theme::metrics::RADIUS_CARD - 1,
+                        sw: BODY_CORNER,
+                        se: BODY_CORNER,
                         ..Default::default()
                     },
                     roles.base,

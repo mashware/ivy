@@ -9204,8 +9204,12 @@ for anything else.
   physical pixel per pixel, so on a display of two pixels per point it is shown at half a point per
   pixel rather than blurred. The image has a viewport of its own, a scale and an offset the viewer
   keeps, painted clipped to the drawer's body with no scroll bars: Ctrl+wheel, or Ctrl + two-finger
-  scroll on a touchpad, zooms around the pointer; the wheel and two-finger scroll pan it on both
-  axes, and Shift+wheel arrives from egui as a horizontal scroll. Over the blank beside the image
+  scroll on a touchpad, zooms around the pointer; the wheel and two-finger scroll pan it on each
+  axis where it is larger than the drawer, and Shift+wheel arrives from egui as a horizontal
+  scroll. On an axis where it is smaller there is nothing to scroll to, so the wheel leaves it and
+  only a drag or a zoom moves it there. The wheel is the image's only while the pointer is on it
+  with nothing of a higher layer above, and once applied it is taken, so a menu or popup open over
+  the drawer keeps its own wheel and nothing later in the frame scrolls with the same turn. Over the blank beside the image
   the point kept is the image's nearest one, so a zoom there grows the image from its near edge and
   never carries it out of sight; anchoring the empty point under the pointer, as a canvas does, was
   discarded because under a fitted screenshot most of the drawer is blank and four notches there
@@ -9213,7 +9217,10 @@ for anything else.
   drawer, no gap opens between its edge and the drawer's, after a zoom, a pan or a resize. Where it
   is smaller, a zoom never moves it, so the point under the pointer stays there even when the
   image crosses the drawer's edge; a pan may only bring it back toward whole inside and never push
-  it further out; a resize of the drawer puts it whole inside. When a zoom makes an axis larger
+  it further out; a resize of the drawer puts it whole inside. While no zoom was chosen, a resize
+  changes the fit's scale, and the offset is scaled with it before that rule, so the part being
+  read stays at the top of the view. Only the part in view is painted, as a textured rect that
+  takes the body's rounded bottom corners where it reaches them. When a zoom makes an axis larger
   than the drawer, the first rule applies from that frame on. Pinning a smaller image inside on
   every change was discarded: a screenshot fitted to width and shorter than the drawer sits at its
   top, so every zoom pushed its top edge out, the pin brought it back, and the image grew downward
@@ -9229,9 +9236,10 @@ for anything else.
   until that button is released: a press of another button meanwhile neither stops the pan nor
   takes it over, and a pan is forgotten when another image opens, when the image is closed, and
   after any frame the image was not painted, so a release that happened while it was hidden cannot
-  leave a pan behind. On a touch screen the image pans with two-finger scroll only: egui reports a
-  one-finger touch drag as the primary button, which is the plain left drag the marks take, so no
-  touch-specific pan exists. Space is the drawer's only when it went down after the drawer held
+  leave a pan behind. On a touch screen the image zooms with two fingers and does not pan:
+  egui-winit turns a touch into touch events and never into a wheel event, so two fingers give
+  egui's multi-touch zoom, which the zoom reads, and no scroll; a one-finger touch drag arrives as
+  the primary button, which is the plain left drag the marks take. No touch-specific pan exists. Space is the drawer's only when it went down after the drawer held
   the keys, which is after opening the image or clicking the drawer, or at any time while the
   drawer is maximized, since a maximized drawer reads every key without a click. It is worked out
   again every frame and forgotten whenever the drawer does not take the keys, so a Space typed into

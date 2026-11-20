@@ -708,10 +708,13 @@ Files with one click or by Ctrl-clicking its path in a console. A relative path 
 console's directory. The image is read once when it is opened: a program that later overwrites the
 file does not change what is shown. It fits the drawer's width without being enlarged; Ctrl+wheel,
 or Ctrl + two-finger scroll on a touchpad, zooms around the pointer. There are no scroll bars: the
-wheel or two-finger scroll moves the image, Shift+wheel moves it sideways, and so does a
-middle-button drag, or Space + left drag. Space must be pressed after the drawer has the keys, as
-after opening the image or clicking it; a maximized drawer takes Space without a click. A plain left
-drag never moves the image, and on a touch screen it moves with two-finger scroll. On GNOME with "disable
+wheel or two-finger scroll moves the image along an axis where it is larger than the drawer, and
+Shift+wheel moves it sideways. A middle-button drag, or Space + left drag, moves it in any
+direction. Space must be pressed after the drawer has the keys, as after opening the image or
+clicking it; a maximized drawer takes Space without a click. A plain left drag never moves the
+image. A touch screen zooms it with two fingers and does not move it: a touch reaches the terminal
+as touches and never as a scroll, and a one-finger drag is the plain left drag. A wheel over a menu
+open above the image belongs to that menu. On GNOME with "disable
 touchpad while typing" on, which is the default, holding Space blocks touchpad clicks, so with a
 touchpad the image is moved with two fingers and zoomed with Ctrl + two fingers. While one image is
 still being read, opening another says so instead of starting a second read. Only empty authorities,

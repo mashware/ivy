@@ -66,10 +66,11 @@ pub(super) fn clamp(
 /// drag never pans: marks are drawn with it. Space + left drag is Figma's convention, and the
 /// middle button pans with no key for a mouse that has one. The button that started a pan is
 /// latched in `panning` until it is released, so letting Space go halfway through, or a stray
-/// press of another button, does not turn the rest into something else.
+/// press of another button, does not turn the rest into something else. `over` is whether the
+/// pointer is on the image with nothing of a higher layer above it.
 pub(super) fn pan(
     input: &egui::InputState,
-    view: egui::Rect,
+    over: bool,
     space: bool,
     panning: &mut Option<egui::PointerButton>,
 ) -> (egui::Vec2, Option<egui::CursorIcon>) {
@@ -86,7 +87,7 @@ pub(super) fn pan(
         }
         *panning = None;
     }
-    if pointer.press_origin().is_some_and(|at| view.contains(at)) {
+    if over {
         *panning = if pointer.button_pressed(Middle) {
             Some(Middle)
         } else if space && pointer.button_pressed(Primary) {
@@ -99,8 +100,7 @@ pub(super) fn pan(
             return (egui::Vec2::ZERO, Some(egui::CursorIcon::Grabbing));
         }
     }
-    let hovering = pointer.hover_pos().is_some_and(|at| view.contains(at));
-    let hand = (space && hovering).then_some(egui::CursorIcon::Grab);
+    let hand = (space && over).then_some(egui::CursorIcon::Grab);
     (egui::Vec2::ZERO, hand)
 }
 

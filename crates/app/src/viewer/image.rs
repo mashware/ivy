@@ -41,8 +41,9 @@ struct Opened {
     /// Screen points per pixel of the original; `None` fits the drawer's width.
     scale: Option<f32>,
     offset: egui::Vec2,
-    /// The view's size the last frame it was painted, so a resize puts the image back inside.
-    view: Option<egui::Vec2>,
+    /// The view's size and the scale the last frame it was painted, so a resize puts the image
+    /// back inside and a fitted image keeps the part being read.
+    view: Option<(egui::Vec2, f32)>,
 }
 
 enum Load {
@@ -186,7 +187,6 @@ impl Viewer {
         if self.painted.is_none_or(|last| frame > last + 1) {
             self.panning = None;
         }
-        self.painted = Some(frame);
         let Some(size) = self.size() else {
             let message = self.message();
             egui::Frame::new()
@@ -231,16 +231,23 @@ impl Viewer {
         if !(room.x > 0.0 && room.y > 0.0 && room.is_finite()) {
             return;
         }
-        ui.allocate_rect(view, egui::Sense::hover());
+        // Only a frame that paints the image may keep a pan latched.
+        self.painted = Some(frame);
+        // A menu or popup open above the image takes the pointer, and with it the wheel.
+        let over_image = ui
+            .allocate_rect(view, egui::Sense::hover())
+            .contains_pointer();
         let mut scale =
             chosen.unwrap_or_else(|| viewport::fit(room.x, size.x, ui.ctx().pixels_per_point()));
-        if *seen != Some(room) {
+        if *seen != Some((room, scale)) {
+            if chosen.is_none()
+                && let Some((_, then)) = *seen
+            {
+                *offset *= scale / then;
+            }
             *offset = viewport::clamp(*offset, None, size * scale, room);
-            *seen = Some(room);
         }
-        let over = ui
-            .input(|i| i.pointer.hover_pos())
-            .filter(|at| view.contains(*at));
+        let over = ui.input(|i| i.pointer.hover_pos()).filter(|_| over_image);
         let zoom = ui.input(|i| i.zoom_delta());
         if zoom != 1.0
             && let Some(at) = over
@@ -250,19 +257,44 @@ impl Viewer {
             *offset = viewport::clamp(zoomed, Some(zoomed), size * scale, room);
             *chosen = Some(scale);
         }
-        let (mut moved, hand) = ui.input(|i| viewport::pan(i, view, space, panning));
+        let (mut moved, hand) = ui.input(|i| viewport::pan(i, over_image, space, panning));
+        let shown = size * scale;
         if over.is_some() {
-            moved += ui.input(|i| i.smooth_scroll_delta);
+            // An axis the image fits on has nothing to scroll to; a drag or a zoom still moves it.
+            let wheel = ui.input_mut(|i| std::mem::take(&mut i.smooth_scroll_delta));
+            moved += egui::vec2(
+                if shown.x > room.x { wheel.x } else { 0.0 },
+                if shown.y > room.y { wheel.y } else { 0.0 },
+            );
         }
-        *offset = viewport::clamp(*offset - moved, Some(*offset), size * scale, room);
+        *offset = viewport::clamp(*offset - moved, Some(*offset), shown, room);
+        *seen = Some((room, scale));
         if let Some(hand) = hand {
             ui.ctx().set_cursor_icon(hand);
         }
-        ui.painter().image(
-            texture.id(),
-            egui::Rect::from_min_size(view.min - *offset, size * scale),
-            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-            egui::Color32::WHITE,
+        let whole = egui::Rect::from_min_size(view.min - *offset, shown);
+        let visible = whole.intersect(view);
+        if !visible.is_positive() {
+            return;
+        }
+        let uv = egui::Rect::from_min_max(
+            ((visible.min - whole.min) / shown).to_pos2(),
+            ((visible.max - whole.min) / shown).to_pos2(),
+        );
+        // Only the part in view is painted, so it can take the body's rounded bottom corners where
+        // it reaches them instead of painting past them.
+        let corner = |side: f32, edge: f32| {
+            let reaches = side == edge && visible.bottom() == view.bottom();
+            if reaches { super::view::BODY_CORNER } else { 0 }
+        };
+        let corners = egui::CornerRadius {
+            sw: corner(visible.left(), view.left()),
+            se: corner(visible.right(), view.right()),
+            ..Default::default()
+        };
+        ui.painter().add(
+            egui::epaint::RectShape::filled(visible, corners, egui::Color32::WHITE)
+                .with_texture(texture.id(), uv),
         );
     }
 
@@ -405,6 +437,16 @@ mod tests {
         ctx: &egui::Context,
         events: Vec<egui::Event>,
     ) -> egui::FullOutput {
+        pass_with(window, ctx, events, |_| {})
+    }
+
+    /// One real application pass with `after` drawing on top of it, as a later layer does.
+    fn pass_with(
+        window: &mut crate::Window,
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+        mut after: impl FnMut(&egui::Context),
+    ) -> egui::FullOutput {
         let mut frame = eframe::Frame::_new_kittest();
         eframe::App::logic(window, ctx, &mut frame);
         let mut output = ctx.run_ui(
@@ -414,24 +456,38 @@ mod tests {
                 events,
                 ..Default::default()
             },
-            |ui| eframe::App::ui(window, ui, &mut frame),
+            |ui| {
+                eframe::App::ui(window, ui, &mut frame);
+                after(ui.ctx());
+            },
         );
         output.textures_delta.clear();
         output
     }
 
-    /// Where the drawer painted the image: the one mesh drawn with a texture of its own.
-    fn image_rect(shapes: &[egui::epaint::ClippedShape]) -> Option<egui::Rect> {
-        fn find(shape: &egui::Shape) -> Option<egui::Rect> {
-            match shape {
-                egui::Shape::Mesh(mesh) if mesh.texture_id != egui::TextureId::default() => {
-                    Some(mesh.calc_bounds())
-                }
-                egui::Shape::Vec(shapes) => shapes.iter().find_map(find),
-                _ => None,
+    /// The image the drawer painted: the one rect filled with a texture, its clip, and the whole
+    /// image's place, worked back from the part in view and its texture coordinates.
+    fn image_shape(
+        shapes: &[egui::epaint::ClippedShape],
+    ) -> Option<(egui::Rect, &egui::epaint::RectShape, egui::Rect)> {
+        shapes.iter().find_map(|clipped| match &clipped.shape {
+            egui::Shape::Rect(rect) => {
+                let uv = rect.brush.as_ref()?.uv;
+                let size = rect.rect.size() / uv.size();
+                let min = rect.rect.min - uv.min.to_vec2() * size;
+                // Worked back through a division, two passes over the same image can differ in
+                // their last bits; a 1/1024 point grid hides that and nothing a test measures.
+                let grid = |v: egui::Vec2| (v * 1024.0).round() / 1024.0;
+                let whole = egui::Rect::from_min_size(grid(min.to_vec2()).to_pos2(), grid(size));
+                Some((whole, rect, clipped.clip_rect))
             }
-        }
-        shapes.iter().find_map(|clipped| find(&clipped.shape))
+            _ => None,
+        })
+    }
+
+    /// Where the drawer painted the whole image, also the parts outside the view.
+    fn image_rect(shapes: &[egui::epaint::ClippedShape]) -> Option<egui::Rect> {
+        Some(image_shape(shapes)?.0)
     }
 
     /// The fills and text colours painted inside `consoles`, as a dimmed pass would change them.
@@ -1369,14 +1425,17 @@ mod tests {
         );
     }
 
-    /// The clip the image was painted under: the one mesh drawn with a texture of its own.
+    /// The clip the image was painted under.
     fn image_clip(shapes: &[egui::epaint::ClippedShape]) -> Option<egui::Rect> {
-        shapes.iter().find_map(|clipped| match &clipped.shape {
-            egui::Shape::Mesh(mesh) if mesh.texture_id != egui::TextureId::default() => {
-                Some(clipped.clip_rect)
-            }
-            _ => None,
-        })
+        Some(image_shape(shapes)?.2)
+    }
+
+    /// The top of the drawer's body, below its strip.
+    fn body_top(window: &crate::Window, dock: egui::Rect) -> f32 {
+        let tabs = crate::viewer::drawer::tabs(window);
+        crate::viewer::drawer::Strip::framed(dock, &tabs)
+            .rect
+            .bottom()
     }
 
     /// A zoomed image far larger than the drawer is painted inside the drawer's body only, never
@@ -1390,11 +1449,10 @@ mod tests {
         assert!(image_rect(&shapes).unwrap().contains_rect(dock));
         let clip = image_clip(&shapes).unwrap();
         assert!(dock.contains_rect(clip), "{clip:?} outside {dock:?}");
-        let strip = crate::viewer::strip_place(&window, dock, crate::viewer::StripAction::Document)
-            .unwrap();
+        let body = body_top(&window, dock);
         assert!(
-            clip.top() > strip.y,
-            "{clip:?} covers the strip at {strip:?}"
+            clip.top() >= body,
+            "{clip:?} reaches the strip above {body}"
         );
     }
 
@@ -1635,5 +1693,173 @@ mod tests {
         let after = settle(&mut window, &ctx);
         assert!(after.left() < before.left(), "{before:?} -> {after:?}");
         assert_eq!(after.top(), before.top());
+    }
+
+    fn plain_wheel(at: egui::Pos2, delta: egui::Vec2) -> Vec<egui::Event> {
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Line,
+                delta,
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]
+    }
+
+    /// A popup of a higher layer open over the zoomed image, as the chrome's menus and Files'
+    /// search are: the wheel over it is left to the popup and the image stays where it is.
+    #[test]
+    fn the_wheel_over_a_popup_on_the_image_is_the_popups() {
+        let folder = Folder::new();
+        let (mut window, ctx) = zoomed_window(&folder);
+        let at = window.sidebar.last_dock.unwrap().center();
+        let place = egui::Rect::from_center_size(at, egui::vec2(220.0, 140.0));
+        // What the popup was left of the wheel, after the drawer painted below it.
+        let mut received = egui::Vec2::ZERO;
+        let mut popup = |ctx: &egui::Context| {
+            egui::Area::new(egui::Id::new("test-popup"))
+                .order(egui::Order::Tooltip)
+                .fixed_pos(place.min)
+                .show(ctx, |ui| {
+                    ui.allocate_exact_size(place.size(), egui::Sense::hover());
+                    received += ui.input(|i| i.smooth_scroll_delta);
+                });
+        };
+        let mut before = None;
+        for _ in 0..3 {
+            let output = pass_with(
+                &mut window,
+                &ctx,
+                vec![egui::Event::PointerMoved(at)],
+                &mut popup,
+            );
+            before = image_rect(&output.shapes);
+        }
+        let mut events = plain_wheel(at, egui::vec2(0.0, -3.0));
+        let mut after = None;
+        for _ in 0..30 {
+            let output = pass_with(&mut window, &ctx, std::mem::take(&mut events), &mut popup);
+            after = image_rect(&output.shapes);
+        }
+        assert_eq!(after, before, "the wheel over the popup moved the image");
+        assert!(
+            received.y < 0.0,
+            "the popup was left no wheel: {received:?}"
+        );
+    }
+
+    /// The wheel does not slide an image smaller than the drawer on either axis.
+    #[test]
+    fn the_wheel_leaves_an_image_smaller_than_the_drawer_where_it_is() {
+        let folder = Folder::new();
+        let (mut window, ctx, before, at) = small_window(&folder, |image| image.center());
+        painted(
+            &mut window,
+            &ctx,
+            vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)],
+        );
+        for delta in [egui::vec2(0.0, 3.0), egui::vec2(3.0, 0.0)] {
+            painted(&mut window, &ctx, plain_wheel(at, delta));
+            assert_eq!(settle(&mut window, &ctx), before, "{delta:?}");
+        }
+    }
+
+    /// A pan whose button is still down does not resume after frames in which the view had no
+    /// room for the image, as when the drawer's width falls to its frame.
+    #[test]
+    fn a_pan_is_dropped_through_frames_with_no_room_for_the_image() {
+        let ctx = egui::Context::default();
+        let mut viewer = ready(image::RgbaImage::new(2000, 2000));
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 400.0));
+        let none = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(0.0, 400.0));
+        let run = |viewer: &mut Viewer, events, view: egui::Rect| {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(view));
+                    viewer.show(&mut ui, crate::theme::Theme::default(), false);
+                },
+            );
+            let rect = image_rect(&output.shapes);
+            output.drop_without_applying_deltas();
+            rect
+        };
+        let from = screen.center();
+        let before = run(&mut viewer, vec![egui::Event::PointerMoved(from)], screen).unwrap();
+        let press = egui::Event::PointerButton {
+            pos: from,
+            button: egui::PointerButton::Middle,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        };
+        run(&mut viewer, vec![press], screen);
+        assert_eq!(viewer.panning, Some(egui::PointerButton::Middle));
+        let up = from - egui::vec2(0.0, 20.0);
+        assert_eq!(
+            run(&mut viewer, vec![egui::Event::PointerMoved(up)], none),
+            None
+        );
+        let further = up - egui::vec2(0.0, 40.0);
+        let after = run(
+            &mut viewer,
+            vec![egui::Event::PointerMoved(further)],
+            screen,
+        );
+        assert_eq!(after, Some(before), "the pan resumed");
+    }
+
+    /// A fitted image scrolled down keeps the part at the top of the view there when the drawer
+    /// resizes and the fit changes its scale.
+    #[test]
+    fn a_fitted_image_keeps_the_part_being_read_when_the_drawer_resizes() {
+        let folder = Folder::new();
+        let path = folder.0.join("tall.png");
+        write_png(&path, 1200, 4800);
+        let (mut window, ctx, _) = window_with_image(&path);
+        let at = window.sidebar.last_dock.unwrap().center();
+        for _ in 0..10 {
+            painted(&mut window, &ctx, plain_wheel(at, egui::vec2(0.0, -6.0)));
+        }
+        let read = |window: &crate::Window, image: egui::Rect| {
+            let top = body_top(window, window.sidebar.last_dock.unwrap());
+            (top - image.top()) / image.height()
+        };
+        let before = settle(&mut window, &ctx);
+        let was = read(&window, before);
+        assert!(was > 0.0, "{before:?}");
+        crate::sidebar::toggle_maximize(&mut window);
+        let after = settle(&mut window, &ctx);
+        assert!(after.width() > before.width(), "{before:?} -> {after:?}");
+        assert!(
+            (read(&window, after) - was).abs() * after.height() < 1.0,
+            "{was} -> {}",
+            read(&window, after)
+        );
+    }
+
+    /// A zoomed image reaching the body's bottom corners is rounded there as the body is; a fitted
+    /// one that stops short of them keeps its own square corners.
+    #[test]
+    fn a_zoomed_image_takes_the_body_rounded_corners() {
+        let folder = Folder::new();
+        let (mut window, ctx) = zoomed_window(&folder);
+        let shapes = painted(&mut window, &ctx, vec![]);
+        let (_, rect, _) = image_shape(&shapes).unwrap();
+        let round = super::super::view::BODY_CORNER;
+        assert!(round > 0);
+        assert_eq!(
+            (rect.corner_radius.sw, rect.corner_radius.se),
+            (round, round)
+        );
+        assert_eq!((rect.corner_radius.nw, rect.corner_radius.ne), (0, 0));
+        let (mut window, ctx, _, _) = small_window(&folder, |image| image.center());
+        let shapes = painted(&mut window, &ctx, vec![]);
+        let (_, rect, _) = image_shape(&shapes).unwrap();
+        assert_eq!(rect.corner_radius, egui::CornerRadius::ZERO);
     }
 }
