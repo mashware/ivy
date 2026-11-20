@@ -20,12 +20,12 @@ mod windows;
 #[cfg(windows)]
 use self::windows as platform;
 
-/// The last extensions whose default application only reads the file. Not html or svg: the
-/// default browser runs their scripts. Not js, which Windows Script Host runs.
+/// The last extensions whose default application only reads the file. Not html, svg or xml: the
+/// default browser runs their scripts, and XML in the XHTML namespace is a page. Not js, which
+/// Windows Script Host runs.
 const LAUNCHABLE: &[&str] = &[
-    "txt", "log", "md", "json", "yaml", "yml", "toml", "ini", "csv", "xml", "css", "rs", "c", "h",
-    "cpp", "go", "java", "kt", "swift", "cs", "ts", "tsx", "pdf", "png", "jpg", "jpeg", "gif",
-    "webp",
+    "txt", "log", "md", "json", "yaml", "yml", "toml", "ini", "csv", "css", "rs", "c", "h", "cpp",
+    "go", "java", "kt", "swift", "cs", "ts", "tsx", "pdf", "png", "jpg", "jpeg", "gif", "webp",
 ];
 
 /// What a click asks of the desktop, once the path is resolved and judged.
@@ -67,14 +67,57 @@ fn altered_by_windows(name: &str) -> bool {
     name.ends_with(['.', ' '])
 }
 
+/// Whether Open hands the file at `canonical` to its application: a regular file whose name may
+/// launch. A folder, a pipe or a device named like a document is shown instead.
+pub(crate) fn launches(canonical: &Path) -> bool {
+    may_launch(canonical) && std::fs::metadata(canonical).is_ok_and(|found| found.is_file())
+}
+
 /// What a click on Open (`open`) or on Open in File Manager does with `path`.
 pub(crate) fn decide(path: &Path, open: bool) -> std::io::Result<Call> {
     let canonical = canonical(path)?;
-    Ok(if open && may_launch(&canonical) {
+    Ok(if open && launches(&canonical) {
         Call::Open(canonical)
     } else {
         Call::Reveal(canonical)
     })
+}
+
+/// Whether `path` is still a regular file and not a link, read right before a launcher gets it.
+/// What `decide` judged can be swapped for a link between the judgement and the launch, and a
+/// launcher follows links; this narrows that window to the instant before the spawn, it does not
+/// close it.
+fn still_a_file(path: &Path) -> Result<(), String> {
+    match std::fs::symlink_metadata(path) {
+        Ok(found) if found.file_type().is_file() => Ok(()),
+        Ok(_) => Err("it is no longer a plain file".to_owned()),
+        Err(why) => Err(why.to_string()),
+    }
+}
+
+/// One click, whole: decide what it asks, check the file again for an open, and hand the call to
+/// `run`; the line to print when it changed nothing. The real desktop runs this on the click's
+/// thread with the platform's calls, and the tests run it with a recording `run`.
+fn act(
+    path: &Path,
+    open: bool,
+    run: impl FnOnce(&Call) -> Result<(), String>,
+) -> Result<(), String> {
+    let call = match decide(path, open) {
+        Ok(call) => call,
+        Err(why) => {
+            let what = if open { "open" } else { "show" };
+            return Err(could_not(what, path, &why.to_string()));
+        }
+    };
+    // An Open that became a reveal failed at showing, not at opening.
+    let (what, checked) = match &call {
+        Call::Open(file) => ("open", still_a_file(file)),
+        Call::Reveal(_) => ("show", Ok(())),
+    };
+    checked
+        .and_then(|()| run(&call))
+        .map_err(|why| could_not(what, path, &why))
 }
 
 /// `path` with every link followed, in the form the desktop's own calls take.
@@ -139,29 +182,31 @@ impl Desktop {
     }
 
     fn hand(&mut self, path: &Path, open: bool) {
-        let what = if open { "open" } else { "show" };
         match self {
             Self::System => {
                 let asked = path.to_owned();
                 let spawned = std::thread::Builder::new()
                     .name("file opener".into())
                     .spawn(move || {
-                        let done = decide(&asked, open)
-                            .map_err(|why| why.to_string())
-                            .and_then(|call| platform::run(&call));
-                        if let Err(why) = done {
-                            eprintln!("{}", could_not(what, &asked, &why));
+                        if let Err(line) = act(&asked, open, platform::run) {
+                            eprintln!("{line}");
                         }
                     });
                 if let Err(why) = spawned {
+                    let what = if open { "open" } else { "show" };
                     eprintln!("{}", could_not(what, path, &why.to_string()));
                 }
             }
             #[cfg(test)]
-            Self::Recorded(calls) => match decide(path, open) {
-                Ok(call) => calls.push(call),
-                Err(why) => eprintln!("{}", could_not(what, path, &why.to_string())),
-            },
+            Self::Recorded(calls) => {
+                let recorded = act(path, open, |call| {
+                    calls.push(call.clone());
+                    Ok(())
+                });
+                if let Err(line) = recorded {
+                    eprintln!("{line}");
+                }
+            }
         }
     }
 }

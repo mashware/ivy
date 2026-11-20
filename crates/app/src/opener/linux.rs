@@ -11,18 +11,58 @@ use std::time::{Duration, Instant};
 const REVEAL_DEADLINE: Duration = Duration::from_secs(5);
 
 pub(super) fn run(call: &Call) -> Result<(), String> {
-    match call {
-        Call::Open(path) => wait(opener(path)),
-        Call::Reveal(path) => match fallback(path, show_items)? {
-            Some(command) => wait(command),
-            None => Ok(()),
-        },
+    match command_for(call, show_items)? {
+        Launch::Run(command) => wait(command),
+        Launch::Done => Ok(()),
+        Launch::Folder { command, why } => {
+            let (Call::Open(path) | Call::Reveal(path)) = call;
+            let line = super::could_not("select", path, &format!("{why}; opening its folder"));
+            eprintln!("{line}");
+            wait(command).map_err(|failed| format!("{failed}, after the file manager: {why}"))
+        }
     }
+}
+
+/// What a click runs once the file manager's bus has been asked, if it had to be.
+pub(super) enum Launch {
+    /// This command, for the file itself.
+    Run(Command),
+    /// The file manager showed the file; nothing to run.
+    Done,
+    /// The file manager could not show it (`why`), so this command opens its folder.
+    Folder { command: Command, why: String },
+}
+
+/// The command for `call`: an open runs `xdg-open` on the file; a reveal asks `bus` to show the
+/// file selected and, when that fails or times out, opens its folder — never the file itself, so a
+/// reveal that failed does not become an open.
+pub(super) fn command_for(
+    call: &Call,
+    bus: impl FnOnce(&str) -> Result<(), String>,
+) -> Result<Launch, String> {
+    let path = match call {
+        Call::Open(path) => return Ok(Launch::Run(opener(path))),
+        Call::Reveal(path) => path,
+    };
+    let uri = url::Url::from_file_path(path).map_err(|()| "not an absolute path".to_owned())?;
+    let Err(why) = bus(uri.as_str()) else {
+        return Ok(Launch::Done);
+    };
+    let folder = path.parent().ok_or("it has no folder")?;
+    // `xdg-open` types what it gets: a folder swapped for a link to a page would open a browser.
+    let still_a_folder = std::fs::symlink_metadata(folder).is_ok_and(|found| found.is_dir());
+    if !still_a_folder {
+        return Err(format!("{why}, and its folder is no longer a folder"));
+    }
+    Ok(Launch::Folder {
+        command: opener(folder),
+        why,
+    })
 }
 
 /// `xdg-open` with `path` as its one argument: no shell reads it, and an absolute path never
 /// starts with a dash an option parser could take. What it and the application print is not the
-/// terminal's: a failure is said once, by this module.
+/// terminal's: a failure is said once, by the opener.
 pub(super) fn opener(path: &Path) -> Command {
     let mut command = Command::new("xdg-open");
     command
@@ -33,22 +73,8 @@ pub(super) fn opener(path: &Path) -> Command {
     command
 }
 
-/// Ask `bus` to show `path` selected; when nothing answers, the command that opens its folder
-/// instead. Never the file itself: a reveal that failed must not become an open.
-pub(super) fn fallback(
-    path: &Path,
-    bus: impl FnOnce(&str) -> Result<(), String>,
-) -> Result<Option<Command>, String> {
-    let uri = url::Url::from_file_path(path).map_err(|()| "not an absolute path".to_owned())?;
-    if bus(uri.as_str()).is_ok() {
-        return Ok(None);
-    }
-    let folder = path.parent().ok_or("it has no folder")?;
-    Ok(Some(opener(folder)))
-}
-
 /// Run `command` and wait for it, so it is reaped; a launcher that exits unhappy says so.
-fn wait(mut command: Command) -> Result<(), String> {
+pub(super) fn wait(mut command: Command) -> Result<(), String> {
     // Abandoned on purpose: nothing joins the click's thread, so a launcher that never exits
     // keeps only that thread, never the window.
     let status = command.status().map_err(|why| why.to_string())?;
