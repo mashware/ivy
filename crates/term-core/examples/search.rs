@@ -19,6 +19,11 @@
 //! and over **one line wrapped across the whole history**, the case that made a walk which asked
 //! the engine again after each rejection quadratic (D61).
 //!
+//! **A pattern adds a third** (#121): an ordinary one, and one built to make the engine walk slowly
+//! — `\p{L}.{170}~`, which the terminal engine's own search gave up on and which the regex engine
+//! answers by falling back to its slowest exact engine. The person decided that pattern is paid as
+//! a pause rather than bounded (D61), so this is where its size is measured.
+//!
 //! **In debug the numbers come out many times worse.** The one that counts is the `--release` one.
 
 use std::time::{Duration, Instant};
@@ -34,6 +39,10 @@ const ROWS: u16 = 49;
 /// How many presses are timed. The first one teaches the engine's lazy automata the grid, so it is
 /// published apart from the rest rather than averaged into them.
 const PRESSES: usize = 20;
+
+/// A pattern whose automaton does not fit a lazy DFA's cache over this text, and that is not in it:
+/// the history holds no `~`.
+const HOSTILE: &str = r"\p{L}.{170}~";
 
 fn main() {
     let mut screen = Screen::new(Size {
@@ -54,11 +63,17 @@ fn main() {
         whole_word: true,
         ..Options::default()
     };
+    let regex = Options {
+        regex: true,
+        ..Options::default()
+    };
     for (query, options, toward) in [
         ("absent", Options::default(), Toward::Older),
         ("absent", Options::default(), Toward::Newer),
         ("modul", whole_word, Toward::Older),
         ("modul", whole_word, Toward::Newer),
+        (r"absent\s+\d+", regex, Toward::Older),
+        (HOSTILE, regex, Toward::Older),
     ] {
         press(&mut screen, query, options, toward, "lines");
     }
@@ -76,15 +91,16 @@ fn main() {
     for toward in [Toward::Older, Toward::Newer] {
         press(&mut screen, "modul", whole_word, toward, "one wrapped line");
     }
+    press(&mut screen, HOSTILE, regex, Toward::Older, "one wrapped line");
 }
 
 fn press(screen: &mut Screen, query: &str, options: Options, toward: Toward, history: &str) {
     {
-        let mut search = Search::literal(query, options).expect("an ordinary literal builds");
+        let search = Search::new(query, options).expect("the query builds");
         let mut times = Vec::with_capacity(PRESSES);
         for _ in 0..PRESSES {
             let before = Instant::now();
-            let found = screen.find(&mut search, toward, KeepClear::NONE);
+            let found = screen.find(&search, toward, KeepClear::NONE);
             times.push(before.elapsed());
             assert_eq!(
                 found,
@@ -99,8 +115,9 @@ fn press(screen: &mut Screen, query: &str, options: Options, toward: Toward, his
         let median = rest[rest.len() / 2];
         let slowest = *rest.last().expect("more than one press");
         println!(
-            "{toward:?}, «{query}» whole word {}, nothing found, {history}, {} rows of {COLS} columns: first {}, then median {} and slowest {}",
+            "{toward:?}, «{query}» whole word {}, regex {}, nothing found, {history}, {} rows of {COLS} columns: first {}, then median {} and slowest {}",
             options.whole_word,
+            options.regex,
             SCROLLBACK + ROWS as usize,
             millis(first),
             millis(median),

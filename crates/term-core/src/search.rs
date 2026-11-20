@@ -1,42 +1,52 @@
 //! Searching what a console still holds, its history included.
 //!
-//! **The engine already knows how to walk its own grid**, wrapped lines and wide characters
-//! included. This module decides what is searched for and in which direction, and two rules the
-//! engine has no notion of: case, set by an inline flag ahead of the escaped text, and whole word,
-//! judged on each match the engine returns. The walk itself stays in `alacritty_terminal`, the
-//! way the rules for what «the text» is stay there for copying (D22).
+//! **The grid is read a logical line at a time, as text**, and a regex engine that never gives up
+//! looks through it. The terminal engine's own search walked the grid cell by cell with a lazy DFA
+//! that, on a pattern too large for its cache, stopped and reported no match where there was one —
+//! saying so only in a log (D61, amended for #121). This module owns the walk since: wrapped lines
+//! and wide characters ([`line`]), which way a step goes and where it starts ([`walk`]), and the
+//! two rules the engine has no notion of — case, set on the engine's syntax, and whole word, judged
+//! on each match.
 
-use alacritty_terminal::Term;
-use alacritty_terminal::grid::Dimensions;
-use alacritty_terminal::index::{Column, Direction, Line, Point};
-use alacritty_terminal::term::cell::Flags;
-use alacritty_terminal::term::search::{Match, RegexSearch};
+mod line;
+pub(crate) mod walk;
+
+use std::borrow::Cow;
+
+use regex_automata::meta::{self, Regex};
+use regex_automata::util::syntax;
+
+/// The largest automaton a query may build: what the terminal engine's search allowed, and a
+/// ceiling that keeps a pattern compiled on every keystroke from costing tens of milliseconds to
+/// build — the engine's own default is five times this, and a short Unicode pattern reaches it.
+const SIZE_LIMIT: usize = 2 * 1024 * 1024;
 
 /// What a console is searched for, compiled once and kept for as long as the search is open.
 ///
 /// **Opaque on purpose**: the engine's type does not leave this crate, for the same reason as
-/// [`Scroll`](crate::Scroll). And **kept rather than rebuilt per step**, because the engine's lazy
-/// automata learn as they walk the grid — throwing them away would pay the learning again on every
-/// Enter.
+/// [`Scroll`](crate::Scroll).
 pub struct Search {
-    pub(crate) regex: RegexSearch,
+    pub(crate) regex: Regex,
     pub(crate) whole_word: bool,
     pub(crate) wrap: bool,
 }
 
-/// How a query is matched and walked: the three choices the search box offers.
+/// How a query is matched and walked: the choices the search box offers.
 ///
 /// **Not part of the query's text**, so changing one never edits what the person typed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Options {
     /// Off, case is ignored always — not the engine's own rule, which turns case-sensitive the
     /// moment the query holds an uppercase letter. An explicit box means what it says (**D61**).
+    /// A pattern's own inline flag, `(?i)` or `(?-i)`, still wins over it.
     pub match_case: bool,
     /// A match counts only when each of its ends that is a word character does not touch another
     /// one — the boundary rule of `\b`.
     pub whole_word: bool,
     /// Past the last match, carry on from the other end of the history.
     pub wrap: bool,
+    /// The query is a pattern rather than the text to find.
+    pub regex: bool,
 }
 
 impl Default for Options {
@@ -46,46 +56,67 @@ impl Default for Options {
             match_case: false,
             whole_word: false,
             wrap: true,
+            regex: false,
         }
     }
 }
 
-/// Why there is nothing to search with.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Why there is nothing to search with — never the same thing as a search that found nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refused {
     /// The query is empty. An empty pattern matches between every two characters, which is no
     /// answer to anything a person typed.
     Empty,
-    /// The engine would not build the automaton. A literal of ordinary length never gets here; a
-    /// query long enough to pass the engine's size limit does, and saying so beats a search that
-    /// silently finds nothing.
+    /// The automaton would pass [`SIZE_LIMIT`]. A literal of ordinary length never gets here; a
+    /// short pattern can — `\w{50}` does, because each `\w` is every word character of Unicode.
     TooLarge,
+    /// The pattern does not parse, and why, in the parser's words.
+    Invalid(String),
 }
 
 impl Search {
-    /// Searches for exactly these characters, the way `options` says.
+    /// Compiles `text` the way `options` says: as the text to find, escaped, or as a pattern.
     ///
-    /// **Literal, never a pattern**: what a person types into a terminal's search is text they saw,
-    /// and a `.` or a `(` in it means that character. A pattern can also build an automaton large
-    /// enough that the engine gives up mid-search and reports no match where there is one, which
-    /// it only says in a log nobody reads — the reason and what was discarded are in **D61**.
-    ///
-    /// **Case is set by an inline flag**, which overrides the case rule the engine builds its
-    /// syntax with: that rule looks for an uppercase letter in the pattern, and would otherwise
-    /// decide for the person whatever the box says.
-    pub fn literal(text: &str, options: Options) -> Result<Self, Refused> {
+    /// **Case is set on the engine's syntax** rather than with an inline flag ahead of the query,
+    /// so a pattern's own flag still overrides the box and the parser's complaints point at what
+    /// the person typed.
+    pub fn new(text: &str, options: Options) -> Result<Self, Refused> {
         if text.is_empty() {
             return Err(Refused::Empty);
         }
-        let case = if options.match_case { "(?-i)" } else { "(?i)" };
-        RegexSearch::new(&format!("{case}{}", regex_syntax::escape(text)))
+        let pattern = if options.regex {
+            Cow::Borrowed(text)
+        } else {
+            Cow::Owned(regex_syntax::escape(text))
+        };
+        Regex::builder()
+            .configure(Regex::config().nfa_size_limit(Some(SIZE_LIMIT)))
+            .syntax(syntax::Config::new().case_insensitive(!options.match_case))
+            .build(&pattern)
             .map(|regex| Self {
                 regex,
                 whole_word: options.whole_word,
                 wrap: options.wrap,
             })
-            .map_err(|_| Refused::TooLarge)
+            .map_err(refused)
     }
+}
+
+/// What a failed build tells the person.
+fn refused(error: meta::BuildError) -> Refused {
+    if let Some(syntax) = error.syntax_error() {
+        // The parser's full message draws the pattern with a caret under the fault over several
+        // lines; the box has one, so only what is wrong is kept.
+        return Refused::Invalid(match syntax {
+            regex_syntax::Error::Parse(error) => error.kind().to_string(),
+            regex_syntax::Error::Translate(error) => error.kind().to_string(),
+            other => other.to_string(),
+        });
+    }
+    if error.size_limit().is_some() {
+        return Refused::TooLarge;
+    }
+    Refused::Invalid(error.to_string())
 }
 
 /// Which rows of the view a step keeps its match off: the ones the search's box takes, at the top
@@ -97,7 +128,7 @@ pub enum KeepClear {
 }
 
 impl KeepClear {
-    /// No rows: the match lands where the engine puts it.
+    /// No rows: the match lands where the walk puts it.
     pub const NONE: Self = Self::Top(0);
 }
 
@@ -124,72 +155,6 @@ pub enum Toward {
     Newer,
 }
 
-/// Whether `found` is a whole word: each of its ends that is itself a word character does not touch
-/// another word character on its logical line.
-///
-/// **A word character is a letter, a digit or `_`, in any script**, which is why this is a check
-/// on the match and not a `\b` in the pattern: an ASCII boundary takes every non-ASCII character
-/// for a non-word one, so `日本` would match inside `日本語`, and the engine's lazy automata do not
-/// take a Unicode boundary over non-ASCII text.
-pub(crate) fn is_whole_word<T>(term: &Term<T>, found: &Match) -> bool {
-    let word = |c: char| c.is_alphanumeric() || c == '_';
-    // **Only an end that is itself a word character has to stand apart**, the boundary rule of
-    // `\b` and of the reference editors: «foo(» is a whole word in «foo(bar)», its own «(» being
-    // the boundary.
-    let stands_apart = |at: Point, inward: Direction, outward: Direction| {
-        !own(term, at, inward).is_some_and(word) || !neighbour(term, at, outward).is_some_and(word)
-    };
-    stands_apart(*found.start(), Direction::Right, Direction::Left)
-        && stands_apart(*found.end(), Direction::Left, Direction::Right)
-}
-
-/// The character `point` holds, or — on a spacer — the one it belongs to, found that way.
-fn own<T>(term: &Term<T>, point: Point, inward: Direction) -> Option<char> {
-    let cell = &term.grid()[point];
-    if cell
-        .flags
-        .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
-    {
-        neighbour(term, point, inward)
-    } else {
-        Some(cell.c)
-    }
-}
-
-/// The character next to `point` that way, on the same logical line, if there is one.
-///
-/// **Spacer cells are not characters and are stepped over.** A wide character takes two cells,
-/// and the engine's two walks leave a match's ends on different halves of it: walking newer a
-/// match ends on its last wide character's spacer, walking older one starts on the wide cell, so
-/// the cell before it can be the spacer of the wide character in front. A wrap that had no room
-/// for a wide character leaves a spacer of its own in the last column, before the line goes on.
-fn neighbour<T>(term: &Term<T>, point: Point, toward: Direction) -> Option<char> {
-    let grid = term.grid();
-    let last = grid.last_column();
-    let wraps = |line: Line| grid[line][last].flags.contains(Flags::WRAPLINE);
-    let mut at = point;
-    loop {
-        at = match toward {
-            Direction::Left if at.column > Column(0) => Point::new(at.line, at.column - 1),
-            Direction::Left if at.line > grid.topmost_line() && wraps(at.line - 1) => {
-                Point::new(at.line - 1, last)
-            }
-            Direction::Right if at.column < last => Point::new(at.line, at.column + 1),
-            Direction::Right if at.line < grid.bottommost_line() && wraps(at.line) => {
-                Point::new(at.line + 1, Column(0))
-            }
-            _ => return None,
-        };
-        let cell = &grid[at];
-        if !cell
-            .flags
-            .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
-        {
-            return Some(cell.c);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,7 +173,7 @@ mod tests {
     }
 
     fn with(text: &str, options: Options) -> Search {
-        Search::literal(text, options).expect("an ordinary literal builds")
+        Search::new(text, options).expect("an ordinary literal builds")
     }
 
     /// The visible row the selection sits on, and that row's text — which is what tells two
@@ -817,7 +782,7 @@ mod tests {
     #[test]
     fn nothing_typed_is_not_a_search() {
         assert_eq!(
-            Search::literal("", Options::default()).err(),
+            Search::new("", Options::default()).err(),
             Some(Refused::Empty)
         );
     }
