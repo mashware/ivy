@@ -284,7 +284,7 @@ fn a_drag_from_mid_line_copies_only_what_it_crossed() {
     let rect = |text: &str| texts.iter().find(|(t, _, _)| t == text).unwrap().1;
     let (two, four) = (rect("let x2 = 2;"), rect("let x4 = 4;"));
     let cell = two.width() / "let x2 = 2;".chars().count() as f32;
-    // From before `x2` to before ` = 4;`.
+    // From the fifth character of line 2 to the seventh of line 4.
     let from = egui::pos2(two.left() + cell * 4.0 + 1.0, two.center().y);
     let to = egui::pos2(four.left() + cell * 6.0 + 1.0, four.center().y);
     for events in press_drag_release(from, to) {
