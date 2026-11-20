@@ -611,6 +611,14 @@ pub(super) fn refresh_file(state: &mut PanelState, dir: &Path) -> super::Refresh
             // it had, which is still the file's date.
             if matches!(problem, panel_contract::Problem::Missing) {
                 state.file_seen = None;
+                // **A missing file is only a loss when the document shown came from it.** One the
+                // channel published never had a file behind it (D17: the file is one transport, not
+                // the source of truth), so its absence is not a problem: recording it would confess
+                // a deletion, and would also stop the clock that says the document went stale.
+                if state.channel_owns_document() {
+                    state.problem = None;
+                    return super::Refreshed::Read;
+                }
             }
             state.problem = Some(problem);
         }
