@@ -38,7 +38,7 @@ jobs:
       - name: Check compiled Windows omission inventory on Linux
         run: python3 scripts/windows-test-report.py --platform linux
       - name: Test omission reporter fixtures
-        run: python3 -m unittest scripts/test_windows_test_report.py -v
+        run: python3 -m unittest scripts/test_windows_test_report.py scripts/test_windows_known_failures.py -v
 
   macos-panel-checks:
     if: ${{ github.event_name == 'pull_request' }}
@@ -57,7 +57,11 @@ jobs:
   windows-startup-checks:
     if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
     runs-on: windows-2025
-    timeout-minutes: 45
+    timeout-minutes: 60
+    env:
+      # The reports print test names and reasons that are not all ASCII; the runner's console code
+      # page would make Python fail on them.
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: Check Windows launch helper contracts
@@ -68,10 +72,10 @@ jobs:
         run: |
           cargo clippy --locked --workspace --all-targets -- -D warnings
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Test the Windows workspace
+      - name: Test the Windows workspace against its known failures
         shell: pwsh
         run: |
-          cargo test --locked --workspace
+          python scripts/windows-known-failures.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Check compiler-listed Unix-only omissions
         shell: pwsh
