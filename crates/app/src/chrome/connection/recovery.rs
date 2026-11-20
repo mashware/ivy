@@ -70,7 +70,10 @@ pub(super) fn show(
         ui.label("Verified AI capture is currently available on Linux. This host can still recover layout and directories.");
     }
     if translocated {
-        ui.colored_label(ui.visuals().warn_fg_color, super::translocation::NOTICE);
+        ui.colored_label(
+            ui.visuals().warn_fg_color,
+            super::translocation::NO_RECOVERY_PATHS,
+        );
         return;
     }
     if let Some(helper) = crate::resume::helper_path() {

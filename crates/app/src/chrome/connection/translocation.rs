@@ -9,7 +9,11 @@
 use std::path::Path;
 
 /// What the guide shows in place of any path while Ivy runs from the temporary copy.
-pub(super) const NOTICE: &str = "Ivy is running from a temporary copy that macOS made because it was opened where it was downloaded. That copy disappears when Ivy quits, so no path is offered here. In Finder, move Ivy.app to the Applications folder, quit Ivy, and open it again from Applications.";
+pub(super) const NOTICE: &str = "Ivy is running from a temporary copy that macOS makes for a downloaded app it has not seen moved with Finder. That copy disappears when Ivy quits, so no path is offered here. Quit Ivy, drag Ivy.app into the Applications folder in Finder, and open it again from there.";
+
+/// The recovery section's own line, kept apart from [`NOTICE`] so the guide never repeats it.
+pub(super) const NO_RECOVERY_PATHS: &str =
+    "Recovery paths are not offered while Ivy runs from a temporary copy of itself.";
 
 pub(super) fn translocated(executable: &Path) -> bool {
     executable

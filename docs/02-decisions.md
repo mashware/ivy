@@ -10755,7 +10755,7 @@ macOS 14 and later, which would turn a Spanish user's `es_ES.UTF-8` into `en_US.
 path has an `AppTranslocation` component — the connection guide offers no path a client could save:
 not the MCP bridge, not the first-time setup prompt that carries it, not the session-recovery helper
 or adapters. In their place it says that Ivy is running from a temporary copy, and that the remedy is
-moving `Ivy.app` to Applications with Finder and opening it again from there. And every setup the
+moving `Ivy.app` to Applications with Finder and opening it again from there. And the MCP bridge setup the
 guide describes ends with a check the person makes in the client's own MCP list (`/mcp`), never with
 the agent's word that it connected.
 

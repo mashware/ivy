@@ -377,8 +377,8 @@ fn manual(published: Published, copied: &mut Option<&'static str>, ui: &mut egui
         .ctx()
         .data(|data| data.get_temp::<Bridge>(egui::Id::new(BRIDGE_KEY)))
         .unwrap_or_default();
-    // The notice above the first-time setup already explains a translocated launch; checking again
-    // cannot change the answer until Ivy is reopened from where it was moved.
+    // D106: a translocated launch gets no path and no re-check, because only reopening Ivy from
+    // where Finder moved it can change the answer.
     if let Some(path) = &bridge.path {
         ui.label(if bridge.found {
             "Bridge file found beside Ivy (last check)."
@@ -404,7 +404,7 @@ fn manual(published: Published, copied: &mut Option<&'static str>, ui: &mut egui
     ui.separator();
     ui.strong("2. Register it in your AI client");
     ui.label(if bridge.translocated {
-        "Add a local stdio MCP server named ivy in your client's MCP settings once Ivy runs from Applications, and set its executable to the panel-mcp path this guide shows then. No server URL is needed."
+        "Add a local stdio MCP server named ivy in your client's MCP settings after reopening Ivy as the notice above says, and set its executable to the panel-mcp path this guide shows then. No server URL is needed."
     } else {
         "Add a local stdio MCP server named ivy in your client's MCP settings. Set its executable to the full panel-mcp path above, or choose its actual installed location. No server URL is needed."
     });

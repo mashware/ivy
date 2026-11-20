@@ -190,7 +190,11 @@ fn a_translocated_recovery_section_offers_no_path_either() {
     });
     output.textures_delta.clear();
     let texts = painted(&output);
-    assert!(texts.iter().any(|text| text == translocation::NOTICE));
+    assert!(
+        texts
+            .iter()
+            .any(|text| text == translocation::NO_RECOVERY_PATHS)
+    );
     for absent in ["Copy recovery helper path", "Copy recovery adapters path"] {
         assert!(!texts.iter().any(|text| text == absent), "{absent} offered");
     }
