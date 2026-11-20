@@ -1,12 +1,12 @@
-# Ticket 164 — Windows private control channel
-Size L; last completed phase plan; build preflight blocked; PR #1 of 1 in progress.
-Approved study: done-summary.md; design/plan preserved.
-Branch 164-windows-private-control-pipe created from main at 137fd348165866dcd3382608a811d0c594119f42.
-Business brief, copied contracts and five implementation steps: 05-implementation.md.
-No production code, tests, commits or PR publication in this run.
-Rust 1.97.1 is available at /usr/local/cargo/bin; PATH omission resolved by absolute invocation.
-Host is Linux; no native Windows executor or Windows desktop is available.
-Native ACL/other-user/remote rejection, cancellation/worker shutdown, UI wake and painting proof remain required.
-Block evidence and operator action: environment-preflight.md and blocked-reason.md.
-Next: operator supplies native Windows security/UI execution and relaunches why=start; resume first unchecked build step.
-No schema changes, no pending question, no outstanding ticket dependencies.
+# Ticket 164 — private Windows control channel
+Size L; one draft PR handed to the orchestrator.
+Branch 164-windows-private-control-pipe; reviewed and validated 4ed9487a44b152a773109cf83a7a55b3c0417b47.
+Windows private ACLs, expected PID, cancellable transport and joined workers implemented.
+Bounded snapshots, native wake and release slots integrated; wire unchanged.
+Independent review resolved authentication/revocation and fixture issues; no blockers remain.
+Cost: 9/12 subagents launched; 12 reviewer turns; broad effort max.
+Linux workspace: 2691 passed, 0 failed, 16 ignored; fmt/clippy/docs pass.
+GNU app tests and MSVC contract/control tests cross-compile; packaging 23 and JS 19 pass.
+Windows CI must execute the native matrix; no native runtime success claimed here.
+F1 distinct-user/remote proof and F2 intended-pane/resting/minimized painting remain human checks.
+Exact owner procedure is in the draft body. No schema change or pending question.

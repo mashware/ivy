@@ -1,0 +1,48 @@
+{
+  "round": {
+    "mr": 1,
+    "tier": "proportional",
+    "effective_size": "L",
+    "agents": {
+      "built-in": 1,
+      "contract": 1,
+      "idiom": 1,
+      "sweep": 1
+    }
+  },
+  "findings": [
+    {
+      "sources": [
+        "built-in",
+        "contract"
+      ],
+      "severity": "major",
+      "file": "crates/panel-control/src/endpoint.rs",
+      "outcome": "fixed"
+    },
+    {
+      "sources": [
+        "built-in"
+      ],
+      "severity": "major",
+      "file": "crates/panel-control/src/windows_services.rs",
+      "outcome": "fixed"
+    },
+    {
+      "sources": [
+        "contract"
+      ],
+      "severity": "unrated",
+      "file": "crates/app/src/chrome/connection.rs",
+      "outcome": "rejected"
+    },
+    {
+      "sources": [
+        "idiom"
+      ],
+      "severity": "minor",
+      "file": "crates/panel-control/src/windows_services.rs",
+      "outcome": "rejected"
+    }
+  ]
+}

@@ -1,0 +1,319 @@
+Cross-compilation only; native execution pending Windows CI.
+
+MSVC contract/control tests:
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Checking panel-contract v0.1.0-alpha.14 (/work/repo/crates/panel-contract)
+    Checking panel-control v0.1.0-alpha.14 (/work/repo/crates/panel-control)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.34s
+
+GNU app tests (MinGW cross-toolchain configured):
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on build directory
+    Checking panel-contract v0.1.0-alpha.14 (/work/repo/crates/panel-contract)
+warning: function `classify_snapshots` is never used
+   --> crates/term-core/src/foreground.rs:119:4
+    |
+119 | fn classify_snapshots<B: Copy + Eq>(
+    |    ^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `term-core` (lib) generated 1 warning
+    Checking panel-control v0.1.0-alpha.14 (/work/repo/crates/panel-control)
+    Checking app v0.1.0-alpha.14 (/work/repo/crates/app)
+warning: unused import: `channel`
+ --> crates/app/src/launch.rs:7:55
+  |
+7 | use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
+  |                                                       ^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `OnceLock`
+ --> crates/app/src/panel/overlay.rs:6:29
+  |
+6 | use std::sync::{Arc, Mutex, OnceLock};
+  |                             ^^^^^^^^
+
+warning: unused variable: `deadline`
+   --> crates/app/src/ai_sessions/mod.rs:177:9
+    |
+177 |     let deadline = Instant::now() + timeout;
+    |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_deadline`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variant `Registered` is never constructed
+  --> crates/app/src/ai_sessions/mod.rs:40:5
+   |
+37 | pub(crate) enum Status {
+   |                 ------ variant in this enum
+...
+40 |     Registered,
+   |     ^^^^^^^^^^
+   |
+   = note: `Status` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `frozen` is never read
+  --> crates/app/src/ai_sessions/mod.rs:60:5
+   |
+57 | struct Shared {
+   |        ------ field in this struct
+...
+60 |     frozen: AtomicBool,
+   |     ^^^^^^
+
+warning: struct `ActiveRead` is never constructed
+  --> crates/app/src/control.rs:84:8
+   |
+84 | struct ActiveRead(ReadActivity);
+   |        ^^^^^^^^^^
+
+warning: method `begin` is never used
+  --> crates/app/src/control.rs:87:8
+   |
+86 | impl ReadActivity {
+   | ----------------- method in this implementation
+87 |     fn begin(&self) -> Option<ActiveRead> {
+   |        ^^^^^
+
+warning: methods `succeeded` and `refused` are never used
+   --> crates/app/src/control.rs:147:8
+    |
+146 | impl ActiveRead {
+    | --------------- methods in this implementation
+147 |     fn succeeded(&self, bytes: usize) {
+    |        ^^^^^^^^^
+...
+158 |     fn refused(&self) {
+    |        ^^^^^^^
+
+warning: function `measured_reader` is never used
+   --> crates/app/src/control.rs:240:4
+    |
+240 | fn measured_reader(reader: crate::panel::DocumentReader, reads: ReadActivity) -> ReadDocument {
+    |    ^^^^^^^^^^^^^^^
+
+warning: methods `current` and `same` are never used
+  --> crates/app/src/panel/overlay.rs:17:8
+   |
+16 | impl Witness {
+   | ------------ methods in this implementation
+17 |     fn current(&self, scope: &ForegroundScope) -> bool {
+   |        ^^^^^^^
+...
+27 |     fn same(&self, other: &Self) -> bool {
+   |        ^^^^
+
+warning: field `source` is never read
+  --> crates/app/src/panel/overlay.rs:42:5
+   |
+39 | struct Hold {
+   |        ---- field in this struct
+...
+42 |     source: String,
+   |     ^^^^^^
+   |
+   = note: `Hold` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+
+warning: field `scope` is never read
+   --> crates/app/src/panel/overlay.rs:103:5
+    |
+102 | pub(crate) struct Authority {
+    |                   --------- field in this struct
+103 |     scope: ForegroundScope,
+    |     ^^^^^
+
+warning: method `prepare` is never used
+   --> crates/app/src/panel/overlay.rs:117:8
+    |
+108 | impl Authority {
+    | -------------- method in this implementation
+...
+117 |     fn prepare(&self) {
+    |        ^^^^^^^
+
+warning: struct `Proof` is never constructed
+   --> crates/app/src/panel/overlay.rs:149:8
+    |
+149 | struct Proof {
+    |        ^^^^^
+
+warning: function `service` is never used
+   --> crates/app/src/panel/overlay.rs:166:15
+    |
+166 | pub(crate) fn service(
+    |               ^^^^^^^
+
+warning: function `refused` is never used
+   --> crates/app/src/panel/overlay.rs:184:4
+    |
+184 | fn refused(code: &str, message: impl Into<String>) -> Reply {
+    |    ^^^^^^^
+
+warning: function `admit` is never used
+   --> crates/app/src/panel/overlay.rs:191:4
+    |
+191 | fn admit(
+    |    ^^^^^
+
+warning: `app` (lib) generated 17 warnings (run `cargo fix --lib -p app` to apply 3 suggestions)
+warning: unused import: `super::*`
+   --> crates/app/src/control/channel.rs:206:9
+    |
+206 |     use super::*;
+    |         ^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `AtomicUsize` and `Ordering`
+   --> crates/app/src/resume.rs:360:29
+    |
+360 |     use std::sync::atomic::{AtomicUsize, Ordering};
+    |                             ^^^^^^^^^^^  ^^^^^^^^
+
+warning: unused import: `view::HINT`
+   --> crates/app/src/board.rs:128:16
+    |
+128 | pub(crate) use view::HINT;
+    |                ^^^^^^^^^^
+
+warning: unused import: `std::time::Instant`
+  --> crates/app/src/viewer/load.rs:11:5
+   |
+11 | use std::time::Instant;
+   |     ^^^^^^^^^^^^^^^^^^
+
+warning: field `frozen` is never read
+  --> crates/app/src/ai_sessions/mod.rs:60:5
+   |
+57 | struct Shared {
+   |        ------ field in this struct
+...
+60 |     frozen: AtomicBool,
+   |     ^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `primary` is never used
+   --> crates/app/src/clipboard.rs:341:19
+    |
+326 | impl Harness {
+    | ------------ method in this implementation
+...
+341 |     pub(crate) fn primary(&self) -> Option<String> {
+    |                   ^^^^^^^
+
+warning: method `retired_waiting` is never used
+   --> crates/app/src/control.rs:235:19
+    |
+193 | impl WindowActivity {
+    | ------------------- method in this implementation
+...
+235 |     pub(crate) fn retired_waiting(&self) -> usize {
+    |                   ^^^^^^^^^^^^^^^
+
+warning: field `test_sender` is never read
+   --> crates/app/src/control.rs:276:5
+    |
+263 | pub struct PaneControl {
+    |            ----------- field in this struct
+...
+276 |     test_sender: std::sync::mpsc::SyncSender<Delivery>,
+    |     ^^^^^^^^^^^
+
+warning: methods `enqueue_for_tests` and `push_for_the_tests` are never used
+   --> crates/app/src/control.rs:344:19
+    |
+307 | impl PaneControl {
+    | ---------------- methods in this implementation
+...
+344 |     pub(crate) fn enqueue_for_tests(&self, delivery: Delivery) {
+    |                   ^^^^^^^^^^^^^^^^^
+...
+355 |     pub(crate) fn push_for_the_tests(&mut self, delivery: Delivery) {
+    |                   ^^^^^^^^^^^^^^^^^^
+
+warning: method `did` is never used
+   --> crates/app/src/control.rs:383:12
+    |
+367 | impl PaneControl {
+    | ---------------- method in this implementation
+...
+383 |     pub fn did(&self) -> Control {
+    |            ^^^
+
+warning: method `filter_state` is never used
+   --> crates/app/src/board.rs:107:19
+    |
+ 98 | impl State {
+    | ---------- method in this implementation
+...
+107 |     pub(crate) fn filter_state(&self) -> (&str, bool) {
+    |                   ^^^^^^^^^^^^
+
+warning: function `select_for_test` is never used
+   --> crates/app/src/board.rs:131:15
+    |
+131 | pub(crate) fn select_for_test(window: &mut crate::Window, pane: usize) {
+    |               ^^^^^^^^^^^^^^^
+
+warning: method `at_in` is never used
+  --> crates/app/src/viewer/code_header/tests.rs:75:8
+   |
+64 | impl Painted {
+   | ------------ method in this implementation
+...
+75 |     fn at_in(&self, text: &str, area: egui::Rect) -> egui::Pos2 {
+   |        ^^^^^
+
+warning: struct `Unlink` is never constructed
+ --> crates/app/src/viewer/code_header/tests/window.rs:5:8
+  |
+5 | struct Unlink(PathBuf);
+  |        ^^^^^^
+
+warning: function `window_pass` is never used
+  --> crates/app/src/viewer/code_header/tests/window.rs:14:4
+   |
+14 | fn window_pass(
+   |    ^^^^^^^^^^^
+
+warning: function `until` is never used
+  --> crates/app/src/viewer/code_header/tests/window.rs:59:4
+   |
+59 | fn until(
+   |    ^^^^^
+
+warning: function `window_click` is never used
+  --> crates/app/src/viewer/code_header/tests/window.rs:77:4
+   |
+77 | fn window_click(
+   |    ^^^^^^^^^^^^
+
+warning: function `ask_the_window` is never used
+    --> crates/app/src/lib.rs:5722:8
+     |
+5722 |     fn ask_the_window(
+     |        ^^^^^^^^^^^^^^
+
+warning: function `ask_the_window_at` is never used
+    --> crates/app/src/lib.rs:5737:8
+     |
+5737 |     fn ask_the_window_at(
+     |        ^^^^^^^^^^^^^^^^^
+
+warning: function `delivered` is never used
+  --> crates/app/src/tests/agent_signals.rs:74:4
+   |
+74 | fn delivered(pane: &mut Pane, connection: u64, what: panel_control::What) -> panel_control::Answer {
+   |    ^^^^^^^^^
+
+warning: `app` (lib test) generated 34 warnings (14 duplicates) (run `cargo fix --lib -p app --tests` to apply 4 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 8.23s

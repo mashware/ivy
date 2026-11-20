@@ -1,24 +1,21 @@
 {
-  "updated_at": "2026-11-20T19:43:29.781Z",
-  "phase": "build",
+  "updated_at": "2026-11-20T22:12:39.272Z",
+  "phase": "ship",
   "header": true,
-  "attention": "block",
+  "attention": "done",
   "lines": [
     {"key":"title","text":"Windows: bind the control channel (MCP) on a user-only named pipe","style":"title"},
     "",
     {"key":"mrs","text":"PRs","style":"section","summary":"0/1 merged","collapsed":true},
     {"key":"mr-1","ref":"#1","text":"Enable the private Windows control channel","mark":"current"},
     "",
-    {"key":"plan","text":"Plan #1","style":"section","summary":"0/5"},
-    {"key":"step-1","ref":"1","text":"Private native security and directory creation","mark":"current","indent":4},
-    {"key":"step-2","ref":"2","text":"Cancellable overlapped transport and client authentication","mark":"pending","indent":4},
-    {"key":"step-3","ref":"3","text":"Callback-free Windows services and app lifecycle","mark":"pending","indent":4},
-    {"key":"step-4","ref":"4","text":"Native test job and forwarding/discovery integration","mark":"pending","indent":4},
-    {"key":"step-5","ref":"5","text":"Native intended-pane observation","mark":"pending","indent":4},
+    {"key":"plan","text":"Plan #1","style":"section","summary":"4/5"},
+    {"key":"steps-done","ref":"1–4","text":"Private native security and directory creation · Cancellable overlapped transport and client authentication · Callback-free Windows services and app lifecycle · Native test job and forwarding/discovery integration","mark":"done","indent":4},
+    {"key":"step-5","ref":"5","text":"Native intended-pane observation","mark":"current","indent":4},
     "",
-    {"key":"now","ref":"Now","text":"Implementation preflight blocked: native Windows execution unavailable","mark":"info"},
-    {"key":"next","ref":"Next","text":"Resume implementation with native Windows security and UI testing","mark":"info"},
+    {"key":"open","ref":"Open","text":"2 follow-ups","mark":"info"},
     "",
-    {"key":"block-1","text":"Runner operator: provide native Windows execution and required security/UI test facilities, then relaunch ticket 164","mark":"block"}
+    {"key":"now","ref":"Now","text":"Reviewed implementation and green local validation handed to the orchestrator","mark":"info"},
+    {"key":"next","ref":"Next","text":"Windows CI and owner proof before draft readiness","mark":"info"}
   ]
 }

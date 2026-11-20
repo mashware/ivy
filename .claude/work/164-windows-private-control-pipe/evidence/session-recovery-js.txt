@@ -1,0 +1,124 @@
+TAP version 13
+# Subtest: Claude registers only a metadata timer, keeps next(event), and uses exact argv/stdin
+ok 1 - Claude registers only a metadata timer, keeps next(event), and uses exact argv/stdin
+  ---
+  duration_ms: 4.269766
+  type: 'test'
+  ...
+# Subtest: Claude unverified versions do not start reporters
+ok 2 - Claude unverified versions do not start reporters
+  ---
+  duration_ms: 0.402348
+  type: 'test'
+  ...
+# Subtest: Claude installed globally does nothing outside Ivy
+ok 3 - Claude installed globally does nothing outside Ivy
+  ---
+  duration_ms: 0.268679
+  type: 'test'
+  ...
+# Subtest: Claude headless/SDK surface cannot attach even with inherited pane variables
+ok 4 - Claude headless/SDK surface cannot attach even with inherited pane variables
+  ---
+  duration_ms: 0.329563
+  type: 'test'
+  ...
+# Subtest: missing, relative or control-bearing helper locator never starts Claude work
+ok 5 - missing, relative or control-bearing helper locator never starts Claude work
+  ---
+  duration_ms: 1.351542
+  type: 'test'
+  ...
+# Subtest: OpenCode accepts native/Bun direct restore, declines unsupported topology
+ok 6 - OpenCode accepts native/Bun direct restore, declines unsupported topology
+  ---
+  duration_ms: 0.624912
+  type: 'test'
+  ...
+# Subtest: OpenCode reads route metadata only and withdraws children/workspaces/home
+ok 7 - OpenCode reads route metadata only and withdraws children/workspaces/home
+  ---
+  duration_ms: 0.3605
+  type: 'test'
+  ...
+# Subtest: actual child runner passes literal argv/stdin and captures helper output
+ok 8 - actual child runner passes literal argv/stdin and captures helper output
+  ---
+  duration_ms: 36.051281
+  type: 'test'
+  ...
+# Subtest: Codex static guarded command uses the absolute locator literally and never PATH
+ok 9 - Codex static guarded command uses the absolute locator literally and never PATH
+  ---
+  duration_ms: 61.41696
+  type: 'test'
+  ...
+# Subtest: unchanged identity probes but does not republish
+ok 10 - unchanged identity probes but does not republish
+  ---
+  duration_ms: 2.605413
+  type: 'test'
+  ...
+# Subtest: new close challenge requires a fresh official read even for an unchanged ID
+ok 11 - new close challenge requires a fresh official read even for an unchanged ID
+  ---
+  duration_ms: 0.475895
+  type: 'test'
+  ...
+# Subtest: read occurs after the probe has returned its challenge
+ok 12 - read occurs after the probe has returned its challenge
+  ---
+  duration_ms: 0.390225
+  type: 'test'
+  ...
+# Subtest: stale generation discards the old sample and reads again after attaching
+ok 13 - stale generation discards the old sample and reads again after attaching
+  ---
+  duration_ms: 0.436471
+  type: 'test'
+  ...
+# Subtest: timer overlap is serialized and a route change gets a fresh follow-up
+ok 14 - timer overlap is serialized and a route change gets a fresh follow-up
+  ---
+  duration_ms: 0.687768
+  type: 'test'
+  ...
+# Subtest: stop during a delayed probe prevents later read and publication
+ok 15 - stop during a delayed probe prevents later read and publication
+  ---
+  duration_ms: 0.320837
+  type: 'test'
+  ...
+# Subtest: outside-Ivy response stops permanently, disabled response remains retryable
+ok 16 - outside-Ivy response stops permanently, disabled response remains retryable
+  ---
+  duration_ms: 0.410934
+  type: 'test'
+  ...
+# Subtest: invalid identities withdraw and extra client content never leaves the adapter
+ok 17 - invalid identities withdraw and extra client content never leaves the adapter
+  ---
+  duration_ms: 0.336546
+  type: 'test'
+  ...
+# Subtest: helper replies are bounded, typed, and consistent with their exit status
+ok 18 - helper replies are bounded, typed, and consistent with their exit status
+  ---
+  duration_ms: 0.872882
+  type: 'test'
+  ...
+# Subtest: missing generation cannot become the literal string undefined
+ok 19 - missing generation cannot become the literal string undefined
+  ---
+  duration_ms: 0.690834
+  type: 'test'
+  ...
+1..19
+# tests 19
+# suites 0
+# pass 19
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 176.028938

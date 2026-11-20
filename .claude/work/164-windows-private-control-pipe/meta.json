@@ -8,18 +8,22 @@
   "stacked_on": null,
   "worktree": null,
   "size": "L",
-  "phase": "plan",
+  "phase": "ship",
   "phases_done": [
     "context",
     "design",
-    "plan"
+    "plan",
+    "build",
+    "review",
+    "validate",
+    "ship"
   ],
   "draft_from_conversation": false,
   "tracker_issue": null,
   "related_repos": [],
   "roadmap": null,
   "started_at": "2026-11-20T19:18:21.084909+00:00",
-  "updated_at": "2026-11-20T19:43:28.818180+00:00",
+  "updated_at": "2026-11-20T22:11:55.203691+00:00",
   "notes": "Answered F1: callback-free Windows capabilities, bounded off-frame snapshots, nonblocking native UI wake, reliable release slots, owned cancellation and joined workers. Reclassified L; source-only study. #161 already on base.",
   "pending": null,
   "defaults_used": [
@@ -79,6 +83,26 @@
       "key": "unattended:environment-preflight",
       "default": "Blocked before production edits: no native Windows execution for mandatory security/lifecycle/UI proof; Rust toolchain located and working",
       "phase": "build"
+    },
+    {
+      "key": "unattended:proof-location",
+      "default": "Owner ticket clarification: Windows CI proves native criteria; remaining desktop/other-user/network proofs manual in draft body",
+      "phase": "build"
+    },
+    {
+      "key": "unattended:build-overrun",
+      "default": "Continue atomic delivery: actual file count exceeds files_est+2; security, snapshots, lifecycle and native proof remain inseparable. Additional native race tests are required acceptance proof, not optional scope.",
+      "phase": "build"
+    },
+    {
+      "key": "unattended:validation-proof",
+      "default": "Owner-approved native CI proof location; draft only; F1/F2 human observations remain pending. Full Linux suite, formatting, lint, docs and both Windows target checks pass.",
+      "phase": "validate"
+    },
+    {
+      "key": "unattended:ship",
+      "default": "Hand draft title/body to ai publish; no direct forge write or push. Knowledge and configuration offers Later.",
+      "phase": "ship"
     }
   ],
   "ticket_deps": [],
@@ -87,12 +111,197 @@
       "n": 1,
       "title": "Enable the private Windows control channel",
       "size": "L",
-      "status": "in_progress",
-      "phases_done": [],
+      "status": "published",
+      "phases_done": [
+        "build",
+        "review",
+        "validate",
+        "ship"
+      ],
       "wave": 1,
       "depends_on": [],
       "lines_est": 2400,
-      "files_est": 32
+      "files_est": 32,
+      "candidate_sha": "4ed9487a44b152a773109cf83a7a55b3c0417b47",
+      "reviewed_sha": "4ed9487a44b152a773109cf83a7a55b3c0417b47",
+      "fixed_sha": "",
+      "validated_sha": "4ed9487a44b152a773109cf83a7a55b3c0417b47"
     }
-  ]
+  ],
+  "candidate_sha": "4ed9487a44b152a773109cf83a7a55b3c0417b47",
+  "review_findings": [
+    {
+      "round": 1,
+      "mr": 1,
+      "sources": [
+        "built-in",
+        "contract"
+      ],
+      "severity": "major",
+      "file": "crates/panel-control/src/endpoint.rs",
+      "outcome": "fixed"
+    },
+    {
+      "round": 1,
+      "mr": 1,
+      "sources": [
+        "built-in"
+      ],
+      "severity": "major",
+      "file": "crates/panel-control/src/windows_services.rs",
+      "outcome": "fixed"
+    },
+    {
+      "round": 1,
+      "mr": 1,
+      "sources": [
+        "contract"
+      ],
+      "severity": "unrated",
+      "file": "crates/app/src/chrome/connection.rs",
+      "outcome": "rejected"
+    },
+    {
+      "round": 1,
+      "mr": 1,
+      "sources": [
+        "idiom"
+      ],
+      "severity": "minor",
+      "file": "crates/panel-control/src/windows_services.rs",
+      "outcome": "rejected"
+    },
+    {
+      "round": 2,
+      "mr": 1,
+      "sources": [
+        "reinforcement:app-fixtures"
+      ],
+      "severity": "major",
+      "file": "crates/app/src/control/channel.rs",
+      "outcome": "fixed"
+    },
+    {
+      "round": 2,
+      "mr": 1,
+      "sources": [
+        "reinforcement:app-fixtures"
+      ],
+      "severity": "minor",
+      "file": "crates/app/src/panel/overlay.rs",
+      "outcome": "fixed"
+    }
+  ],
+  "cost": [
+    {
+      "phase": "review",
+      "at": "2026-11-20T21:50:17.967Z",
+      "round": 1,
+      "mr": 1,
+      "tier": "proportional",
+      "effective_size": "L",
+      "agents": {
+        "built-in": 1,
+        "contract": 1,
+        "idiom": 1,
+        "sweep": 1
+      },
+      "reviewers": 4,
+      "usd": null,
+      "source": "not reported"
+    },
+    {
+      "phase": "review",
+      "at": "2026-11-20T21:56:01.282Z",
+      "round": 2,
+      "mr": 1,
+      "tier": "proportional",
+      "effective_size": "L",
+      "agents": {
+        "built-in": 1,
+        "reinforcement:app-fixtures": 3,
+        "contract": 1,
+        "sweep": 1
+      },
+      "reviewers": 6,
+      "usd": null,
+      "source": "not reported"
+    },
+    {
+      "phase": "review",
+      "at": "2026-11-20T22:00:55.668Z",
+      "round": 3,
+      "mr": 1,
+      "tier": "proportional",
+      "effective_size": "L",
+      "agents": {
+        "reinforcement:native-wiring": 1
+      },
+      "reviewers": 1,
+      "usd": null,
+      "source": "not reported"
+    },
+    {
+      "phase": "review",
+      "at": "2026-11-20T22:07:43.604Z",
+      "round": 4,
+      "mr": 1,
+      "tier": "proportional",
+      "effective_size": "L",
+      "agents": {
+        "reinforcement:wait-declarations": 1
+      },
+      "reviewers": 1,
+      "usd": null,
+      "source": "not reported"
+    }
+  ],
+  "reviewed_sha": "4ed9487a44b152a773109cf83a7a55b3c0417b47",
+  "fixed_sha": "",
+  "agent_lessons": [
+    {
+      "agent": "transport (unsaved general-purpose)",
+      "signal": "produced",
+      "phase": "review",
+      "evidence": "endpoint.rs:258 public raw connector bypassed PID validation until d251b2d",
+      "lesson": "Audit every publicly reachable constructor for bypasses of the authenticated entry path.",
+      "status": "not-editable"
+    },
+    {
+      "agent": "lifecycle (unsaved general-purpose)",
+      "signal": "produced",
+      "phase": "review",
+      "evidence": "windows_services.rs:316 admitted deliveries without observing registry revocation until d251b2d",
+      "lesson": "Linearize shutdown revocation with admission at the resource slot, including reservations already in flight.",
+      "status": "not-editable"
+    }
+  ],
+  "followups": [
+    {
+      "id": "F1",
+      "kind": "edge-case",
+      "title": "Record distinct-user denial and remote rejection on Windows",
+      "why": "Owner-approved manual proof needs a second ordinary user and working authenticated network path before readiness.",
+      "source": "validate",
+      "status": "proposed",
+      "ticket": null,
+      "work": null,
+      "note": "Exact procedure in draft PR body and windows-manual-proof.md; do not infer denial from a timeout."
+    },
+    {
+      "id": "F2",
+      "kind": "edge-case",
+      "title": "Record intended-pane painting and resting-window wake on Windows",
+      "why": "A real desktop observation is needed before readiness; native transport tests and compilation do not prove painting.",
+      "source": "validate",
+      "status": "proposed",
+      "ticket": null,
+      "work": null,
+      "note": "Use the two-pane resting/minimized procedure in the draft PR body; capture exact revision and screenshots."
+    }
+  ],
+  "validated_sha": "4ed9487a44b152a773109cf83a7a55b3c0417b47",
+  "knowledge": {
+    "status": "later"
+  }
 }

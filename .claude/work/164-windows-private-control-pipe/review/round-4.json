@@ -1,0 +1,11 @@
+{
+  "round": {
+    "mr": 1,
+    "tier": "proportional",
+    "effective_size": "L",
+    "agents": {
+      "reinforcement:wait-declarations": 1
+    }
+  },
+  "findings": []
+}

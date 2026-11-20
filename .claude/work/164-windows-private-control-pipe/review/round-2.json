@@ -1,0 +1,31 @@
+{
+  "round": {
+    "mr": 1,
+    "tier": "proportional",
+    "effective_size": "L",
+    "agents": {
+      "built-in": 1,
+      "reinforcement:app-fixtures": 3,
+      "contract": 1,
+      "sweep": 1
+    }
+  },
+  "findings": [
+    {
+      "sources": [
+        "reinforcement:app-fixtures"
+      ],
+      "severity": "major",
+      "file": "crates/app/src/control/channel.rs",
+      "outcome": "fixed"
+    },
+    {
+      "sources": [
+        "reinforcement:app-fixtures"
+      ],
+      "severity": "minor",
+      "file": "crates/app/src/panel/overlay.rs",
+      "outcome": "fixed"
+    }
+  ]
+}

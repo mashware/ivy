@@ -1,0 +1,11 @@
+{
+  "round": {
+    "mr": 1,
+    "tier": "proportional",
+    "effective_size": "L",
+    "agents": {
+      "reinforcement:native-wiring": 1
+    }
+  },
+  "findings": []
+}
