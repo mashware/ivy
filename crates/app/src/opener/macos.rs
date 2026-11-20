@@ -17,7 +17,11 @@ fn open(path: &Path, reveal: bool) -> Command {
     if reveal {
         command.arg("-R");
     }
-    command.arg(path).stdin(Stdio::null()).stdout(Stdio::null());
+    command
+        .arg(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
     command
 }
 

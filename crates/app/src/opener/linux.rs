@@ -21,10 +21,15 @@ pub(super) fn run(call: &Call) -> Result<(), String> {
 }
 
 /// `xdg-open` with `path` as its one argument: no shell reads it, and an absolute path never
-/// starts with a dash an option parser could take.
+/// starts with a dash an option parser could take. What it and the application print is not the
+/// terminal's: a failure is said once, by this module.
 pub(super) fn opener(path: &Path) -> Command {
     let mut command = Command::new("xdg-open");
-    command.arg(path).stdin(Stdio::null()).stdout(Stdio::null());
+    command
+        .arg(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
     command
 }
 

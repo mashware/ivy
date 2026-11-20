@@ -440,6 +440,11 @@ fn wrap_lines_folds_long_lines_to_the_view_and_off_restores_sideways_scrolling()
         "{after:?} overlaps {line:?}"
     );
 
+    // Ticked after scrolling right, nothing stays scrolled: the folded text starts at the gutter.
+    assert_eq!(scroll_width(&ctx, &document, &mut state), 0.0);
+    let (scrolled, _) = settled(&mut state);
+    assert_eq!(scrolled.left(), line.left());
+
     state.wrap = false;
     let (line, after) = settled(&mut state);
     assert!(line.right() > 600.0 && line.height() < 2.0 * after.height());

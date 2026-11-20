@@ -133,7 +133,7 @@ impl Drawer {
                         },
                         &drawer::Title {
                             project: None,
-                            folder: "r".into(),
+                            folder: "the source console".into(),
                             unavailable: false,
                         },
                     ),
@@ -300,8 +300,12 @@ fn a_name_that_does_not_show_as_itself_is_never_copied_or_launched() {
             );
         }
         let painted = drawer.click(&mut state, painted.at("Open"));
-        drop(painted);
         assert_eq!(recorded(&state), [Call::Reveal(file)], "{name:?}");
+        // And the refused item says why.
+        let more = painted.at(egui_phosphor::regular::CARET_DOWN);
+        let menu = drawer.click(&mut state, more);
+        let hovered = drawer.hover(&mut state, menu.at("Copy absolute path"));
+        assert!(hovered.has(UNSAFE), "{name:?}: {:?}", hovered.names());
     }
 }
 
@@ -327,6 +331,18 @@ fn open_launches_a_document_reveals_a_script_and_says_which() {
             [call(file.clone()), Call::Reveal(file)],
             "{name}"
         );
+    }
+    // A document's name on a link to a script: the tooltip and the click follow the script.
+    #[cfg(unix)]
+    {
+        let disguised = tree.at("r/notes-link.txt");
+        std::os::unix::fs::symlink(tree.at("r/run.sh"), &disguised).unwrap();
+        let mut state = opened(&disguised, Some(&tree.at("r")));
+        let mut drawer = Drawer::new();
+        let open = drawer.settled(&mut state).at("Open");
+        assert!(drawer.hover(&mut state, open).has(REVEALS));
+        drawer.click(&mut state, open);
+        assert_eq!(recorded(&state), [Call::Reveal(tree.at("r/run.sh"))]);
     }
 }
 
@@ -495,29 +511,54 @@ fn a_folder_of_the_path_shows_in_files_and_the_menu_keeps_its_clicks() {
                 .any(|(t, r)| t == "›" && dock.contains(r.center()))
         })
     });
+    drop(painted);
+    // The drawer at its shortest, where the menu has the least room under the header.
+    window.sidebar.set_height(0.0);
+    window_pass(&mut window, &ctx, &mut time, vec![]);
+    let painted = window_pass(&mut window, &ctx, &mut time, vec![]);
     let dock = window.sidebar.last_dock.expect("the drawer is placed");
+    assert!(dock.height() <= 170.0, "the drawer stayed tall: {dock:?}");
 
     // A menu item over the drawer: it copies, and the focus stays where it was.
     let focused = window.active().focus;
     let more = painted.at_in(egui_phosphor::regular::CARET_DOWN, dock);
     window_click(&mut window, &ctx, &mut time, more);
     let menu = window_pass(&mut window, &ctx, &mut time, vec![]);
+    for item in [
+        "Open in File Manager",
+        "Copy absolute path",
+        "Copy relative path",
+        "Wrap lines",
+    ] {
+        let at = menu.at(item);
+        assert!(
+            dock.contains(at),
+            "{item} at {at:?} is outside the drawer {dock:?}"
+        );
+    }
     let item = menu.at("Copy relative path");
-    assert!(
-        dock.contains(item),
-        "the menu item at {item:?} is outside the drawer {dock:?}"
-    );
     let copied = window_click(&mut window, &ctx, &mut time, item);
     assert_eq!(copied, ["src/a.ts"]);
     assert_eq!(window.active().focus, focused);
 
+    // With Files closed, a folder of the path opens Files on it and the file stays in the drawer.
+    crate::sidebar::close_files(&mut window);
+    window_pass(&mut window, &ctx, &mut time, vec![]);
     let painted = window_pass(&mut window, &ctx, &mut time, vec![]);
+    assert!(!crate::sidebar::files_visible(&window));
+    let dock = window.sidebar.last_dock.expect("the drawer is placed");
     window_click(&mut window, &ctx, &mut time, painted.at_in("src", dock));
-    until(
+    let painted = until(
         &mut window,
         &ctx,
         &mut time,
         "Files showing the folder",
         |w, _| crate::explorer::root_of(w, pane).as_ref() == Some(&root.join("src")),
     );
+    assert!(crate::sidebar::files_visible(&window));
+    let dock = window
+        .sidebar
+        .last_dock
+        .expect("the drawer is still placed");
+    painted.at_in("a.ts", dock);
 }
