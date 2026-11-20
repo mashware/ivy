@@ -188,6 +188,7 @@ fn a_click_clears_the_selection_and_nothing_is_copied() {
     let ctx = egui::Context::default();
     let mut state = CodeState {
         selection: Some((Place::default(), document.end())),
+        ..CodeState::default()
     };
     frame(&ctx, &document, &mut state, vec![]);
     let at = egui::pos2(200.0, 20.0);
@@ -210,4 +211,106 @@ fn a_click_clears_the_selection_and_nothing_is_copied() {
     }
     let (_, copied) = frame(&ctx, &document, &mut state, vec![egui::Event::Copy]);
     assert!(copied.is_empty(), "{copied:?}");
+}
+
+/// Every shape the view painted over `document`, after one settling pass.
+fn shapes(
+    document: &CodeDocument,
+    state: &mut CodeState,
+    events: Vec<egui::Event>,
+) -> Vec<egui::Shape> {
+    let ctx = egui::Context::default();
+    frame(&ctx, document, state, vec![]);
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 300.0));
+    let output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(area),
+            events,
+            ..Default::default()
+        },
+        |ui| show(document, state, ui, &palette()),
+    );
+    let shapes = output.shapes.iter().map(|c| c.shape.clone()).collect();
+    output.drop_without_applying_deltas();
+    shapes
+}
+
+/// What the view paints is coloured by token: read off the painted text, not the layout helper.
+#[test]
+fn the_painted_line_carries_the_token_colours() {
+    let document = CodeDocument::parse(Path::new("/r/a.rs"), "fn main() { 42 }\n");
+    let colours = palette();
+    let painted = shapes(&document, &mut CodeState::default(), vec![]);
+    let colour_of = |piece: &str| {
+        painted.iter().find_map(|shape| match shape {
+            egui::Shape::Text(text) if text.galley.text().starts_with("fn") => {
+                let job = &text.galley.job;
+                job.sections
+                    .iter()
+                    .find(|s| job.text[s.byte_range.start.0..s.byte_range.end.0].trim() == piece)
+                    .map(|s| s.format.color)
+            }
+            _ => None,
+        })
+    };
+    assert_eq!(colour_of("fn"), Some(colours.keyword));
+    assert_eq!(colour_of("42"), Some(colours.number));
+}
+
+/// A marked stretch is painted behind its text in the selection colour.
+#[test]
+fn a_selection_is_painted_behind_the_text() {
+    let document = CodeDocument::parse(Path::new("/r/a.rs"), &file(3));
+    let colours = palette();
+    let mut state = CodeState::default();
+    let filled = |shapes: &[egui::Shape]| {
+        shapes
+            .iter()
+            .any(|shape| matches!(shape, egui::Shape::Rect(r) if r.fill == colours.selection))
+    };
+    assert!(!filled(&shapes(&document, &mut state, vec![])));
+    state.select((0, 4), (1, 6));
+    assert!(filled(&shapes(&document, &mut state, vec![])));
+}
+
+/// A drag that starts and ends inside lines copies from there to there, not whole lines.
+#[test]
+fn a_drag_from_mid_line_copies_only_what_it_crossed() {
+    let document = CodeDocument::parse(Path::new("/r/a.rs"), &file(6));
+    let ctx = egui::Context::default();
+    let mut state = CodeState::default();
+    frame(&ctx, &document, &mut state, vec![]);
+    let (texts, _) = frame(&ctx, &document, &mut state, vec![]);
+    let rect = |text: &str| texts.iter().find(|(t, _, _)| t == text).unwrap().1;
+    let (two, four) = (rect("let x2 = 2;"), rect("let x4 = 4;"));
+    let cell = two.width() / "let x2 = 2;".chars().count() as f32;
+    // From before `x2` to before ` = 4;`.
+    let from = egui::pos2(two.left() + cell * 4.0 + 1.0, two.center().y);
+    let to = egui::pos2(four.left() + cell * 6.0 + 1.0, four.center().y);
+    for events in press_drag_release(from, to) {
+        frame(&ctx, &document, &mut state, events);
+    }
+    let (_, copied) = frame(&ctx, &document, &mut state, vec![egui::Event::Copy]);
+    assert_eq!(copied, vec!["x2 = 2;\nlet x3 = 3;\nlet x4".to_owned()]);
+}
+
+/// A line too long to lay out is painted cut, but copying it gives the whole line.
+#[test]
+fn a_truncated_line_copies_whole() {
+    let long = "x".repeat(highlight::LINE_LIMIT + 10);
+    let document = CodeDocument::parse(Path::new("/r/a.txt"), &format!("{long}\nshort\n"));
+    let ctx = egui::Context::default();
+    let mut state = CodeState::default();
+    state.select((0, 0), (1, 5));
+    let (_, copied) = frame(&ctx, &document, &mut state, vec![egui::Event::Copy]);
+    assert_eq!(copied, vec![format!("{long}\nshort")]);
+}
+
+/// Offsets that no longer fall on a character of the text are brought back to one, never sliced.
+#[test]
+fn a_place_inside_a_character_is_never_sliced() {
+    let document = CodeDocument::parse(Path::new("/r/a.txt"), "añbc\n");
+    let copied = document.text_between(Place { line: 0, byte: 0 }, Place { line: 0, byte: 2 });
+    assert_eq!(copied, "a");
+    assert_eq!(char_cursor("añbc", 2).index.0, 1);
 }

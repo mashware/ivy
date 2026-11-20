@@ -3,7 +3,8 @@
 //!
 //! The owner asked for simple colouring (#159), so this is a scanner, not a grammar: a crate
 //! with real grammars (`syntect`, `tree-sitter`) was set aside for its size and for bringing colour
-//! themes of its own. What it gets wrong is a colour, never the text.
+//! themes of its own. What it gets wrong is a colour: every line keeps the file's whole text, and a
+//! line too long to lay out is cut only where it is painted.
 mod families;
 
 pub(crate) use families::Family;
@@ -30,12 +31,20 @@ pub(crate) enum Token {
     Meta,
 }
 
-/// One line of the file as it is painted: its text and where each token begins, in bytes.
+/// One line of the file: its whole text, how much of it is painted, and where each token of the
+/// painted part begins, in bytes.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Line {
     pub(crate) text: String,
     pub(crate) runs: Vec<(usize, Token)>,
-    pub(crate) truncated: bool,
+    /// The bytes painted: the whole line, or its first [`LINE_LIMIT`] cut on a character.
+    pub(crate) shown: usize,
+}
+
+impl Line {
+    pub(crate) fn truncated(&self) -> bool {
+        self.shown < self.text.len()
+    }
 }
 
 /// What a line leaves open for the next one.
@@ -68,9 +77,9 @@ pub(crate) fn scan(text: &str, family: Family) -> Vec<Line> {
                     end -= 1;
                 }
                 return Line {
-                    text: raw[..end].to_owned(),
+                    text: raw.to_owned(),
                     runs: vec![(0, Token::Text)],
-                    truncated: true,
+                    shown: end,
                 };
             }
             let mut runs = Vec::new();
@@ -82,7 +91,7 @@ pub(crate) fn scan(text: &str, family: Family) -> Vec<Line> {
             Line {
                 text: raw.to_owned(),
                 runs,
-                truncated: false,
+                shown: raw.len(),
             }
         })
         .collect()
@@ -146,7 +155,7 @@ fn line(bytes: &[u8], family: Family, mut open: Open, runs: &mut Vec<(usize, Tok
         if at(i, BLOCK_OPEN)
             && matches!(
                 family,
-                Family::Rust | Family::CLike | Family::Php | Family::Sql
+                Family::Rust | Family::CLike | Family::Css | Family::Php | Family::Sql
             )
         {
             open = Open::Comment { depth: 1 };
@@ -224,7 +233,8 @@ fn line_comment(bytes: &[u8], i: usize, family: Family) -> bool {
         Family::Php => at("//") || (at("#") && !at("#[")),
         Family::Hash => at("#"),
         Family::Sql => at("--"),
-        Family::Json | Family::Plain => false,
+        // CSS has block comments only: a `//` there is part of a `url(https://…)`.
+        Family::Css | Family::Json | Family::Plain => false,
     }
 }
 
@@ -235,10 +245,15 @@ fn string_start(bytes: &[u8], i: usize, family: Family) -> Option<(Close, usize)
     }
     let b = bytes[i];
     let at = |s: &str| bytes[i..].starts_with(s.as_bytes());
-    if family == Family::Rust && b == b'r' && (i == 0 || !word_byte(bytes[i - 1])) {
-        let hashes = bytes[i + 1..].iter().take_while(|c| **c == b'#').count();
-        if bytes.get(i + 1 + hashes) == Some(&QUOTE) {
-            return Some((Close::Raw(hashes), hashes + 2));
+    // A raw string, with the byte or C prefix it may carry: `r"…"`, `br#"…"#`, `cr"…"`.
+    let prefix = usize::from(matches!(b, b'b' | b'c') && bytes.get(i + 1) == Some(&b'r'));
+    if family == Family::Rust && bytes[i + prefix] == b'r' && (i == 0 || !word_byte(bytes[i - 1])) {
+        let hashes = bytes[i + prefix + 1..]
+            .iter()
+            .take_while(|c| **c == b'#')
+            .count();
+        if bytes.get(i + prefix + 1 + hashes) == Some(&QUOTE) {
+            return Some((Close::Raw(hashes), prefix + hashes + 2));
         }
     }
     if family == Family::Hash && (at("\"\"\"") || at("'''")) {

@@ -1,4 +1,4 @@
-//! The title bar's doors to Files, Markdown and the Board: Files at the left end, the other two
+//! The title bar's doors to Files, File and the Board: Files at the left end, the other two
 //! left of the right-hand group, where the artboards put them once the right rail went (D72).
 use super::{Action, button_of, shortcut_label, strip};
 use crate::{Window, sidebar::Tool};
@@ -11,7 +11,7 @@ pub(super) fn tool_of(hint: &str) -> Option<Tool> {
         .find(|tool| hint.starts_with(tool.label()))
 }
 
-/// Paint Files, the Board and Markdown on their slots and record where they fell, for the probe
+/// Paint Files, the Board and File on their slots and record where they fell, for the probe
 /// and tests.
 pub(super) fn show(
     window: &mut Window,
@@ -117,4 +117,19 @@ fn labelled(
         fg,
     );
     (response.clicked(), Some(response))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Each title-bar door finds its tool by its hint, which is how it gets its icon: «File» must
+    /// not be read as «Files», nor the other way round.
+    #[test]
+    fn each_hint_names_its_own_tool() {
+        assert_eq!(tool_of("Files"), Some(Tool::Files));
+        assert_eq!(tool_of("File"), Some(Tool::Document));
+        assert_eq!(tool_of("Board (Ctrl+Shift+B)"), Some(Tool::Board));
+        assert_eq!(tool_of("Markdown"), None);
+    }
 }

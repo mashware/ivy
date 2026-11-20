@@ -160,6 +160,8 @@ impl State {
                                 .as_ref()
                                 .is_none_or(|old| old.text != loaded.text)
                         {
+                            // A selection's offsets belong to the text it was made on.
+                            self.code.reset();
                             self.loaded = Some(loaded);
                         }
                     }

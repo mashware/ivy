@@ -197,7 +197,10 @@ pub(super) fn activate(
                 Some((pane, entry.path.clone()))
             }
         }
-        _ => None,
+        EntryKind::Other => {
+            state.message = "Only files and folders open here.".into();
+            None
+        }
     }
 }
 
@@ -677,6 +680,8 @@ mod tests {
             );
         }
         assert!(activate(&mut state, 1, &entry("/root/fifo", EntryKind::Other)).is_none());
+        assert_eq!(state.message, "Only files and folders open here.");
+        state.message.clear();
         assert_eq!(
             activate(&mut state, 1, &entry("/root/README.MD", EntryKind::File)),
             Some((1, "/root/README.MD".into()))

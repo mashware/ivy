@@ -160,10 +160,12 @@ fn plain_text_is_one_run_per_line_and_line_endings_are_dropped() {
 fn a_line_over_the_limit_is_cut_on_a_character_and_painted_plain() {
     let long = format!("{}é tail", "x".repeat(LINE_LIMIT - 1));
     let lines = scan(&format!("{long}\nfn"), Family::Rust);
-    assert!(lines[0].truncated);
-    assert!(lines[0].text.len() <= LINE_LIMIT);
+    assert!(lines[0].truncated());
+    assert_eq!(lines[0].text, long, "the line keeps all of its text");
+    assert!(lines[0].shown <= LINE_LIMIT);
+    assert!(lines[0].text.is_char_boundary(lines[0].shown));
     assert_eq!(lines[0].runs, vec![(0, Text)]);
-    assert!(!lines[1].truncated);
+    assert!(!lines[1].truncated());
     assert_eq!(pieces(&lines[1]), vec![("fn", Keyword)]);
 }
 
@@ -179,4 +181,27 @@ fn families_come_from_the_extension_the_name_or_a_shebang() {
     assert_eq!(of("/r/data.json", ""), Family::Json);
     assert_eq!(of("/r/notes.txt", "#!/bin/sh"), Family::Plain);
     assert_eq!(of("/r/LICENSE", "MIT"), Family::Plain);
+}
+
+#[test]
+fn css_has_no_line_comments_and_rust_raw_strings_take_their_prefixes() {
+    let css = one("a { background: url(https://x.org/a.png); }", Family::Css);
+    assert!(!css.iter().any(|(_, t)| *t == Comment), "{css:?}");
+    assert_eq!(Family::of(Path::new("/r/site.css"), ""), Family::Css);
+    for raw in ["br#\"a \" b\"#", "cr\"x\"", "r\"y\""] {
+        let lines = scan(&format!("let v = {raw}; let n = 1;\nfn"), Family::Rust);
+        let first = pieces(&lines[0]);
+        assert!(
+            first
+                .iter()
+                .any(|(s, t)| s.ends_with(raw) && *t == Token::String)
+                || first.iter().any(|(s, t)| *s == raw && *t == Token::String),
+            "{raw}: {first:?}"
+        );
+        assert_eq!(
+            pieces(&lines[1]),
+            vec![("fn", Keyword)],
+            "{raw} bled into the next line"
+        );
+    }
 }

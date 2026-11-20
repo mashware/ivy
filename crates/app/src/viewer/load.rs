@@ -157,11 +157,14 @@ fn open_regular(path: &Path) -> Result<std::fs::File, String> {
     let file = options
         .open(path)
         .map_err(|e| format!("Cannot open file: {e}"))?;
-    if !file
+    let metadata = file
         .metadata()
-        .map_err(|e| format!("Cannot inspect file: {e}"))?
-        .is_file()
-    {
+        .map_err(|e| format!("Cannot inspect file: {e}"))?;
+    if metadata.is_dir() {
+        // Files lists a link to a folder as a link and does not follow it (#88).
+        return Err("This is a folder, not a file".into());
+    }
+    if !metadata.is_file() {
         return Err("The selected path is not a regular file".into());
     }
     Ok(file)
@@ -691,7 +694,10 @@ mod tests {
         assert_eq!(read_text(&exact).unwrap().len(), CODE_LIMIT);
         let bom = write("bom.rs", "\u{feff}fn main() {}\n".as_bytes());
         assert_eq!(read_text(&bom).unwrap(), "fn main() {}\n");
-        assert!(read_text(&temp.0).is_err(), "a folder is not a file");
+        assert_eq!(
+            read_text(&temp.0).unwrap_err(),
+            "This is a folder, not a file"
+        );
         // A NUL past the sniffed prefix is text that happens to hold one, not a binary.
         let mut late = vec![b'a'; BINARY_SNIFF];
         late.push(0);

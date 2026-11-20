@@ -4,7 +4,7 @@ use crate::theme::{Roles, Theme, project_ink_contrast, project_inks_distinct};
 use eframe::egui::Color32;
 use term_core::TermColor;
 
-/// Code is text: every colour reads at 4.5:1 on the document and on a selection over it.
+/// Code is text: the contrast a token colour must reach to be chosen, as for any text (4.5:1).
 const TEXT_CONTRAST: f32 = 4.5;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -23,10 +23,10 @@ pub(super) struct Palette {
 }
 
 impl Palette {
-    /// Each token takes its ANSI colour, or the bright one, whichever first reads on the
+    /// Each coloured token takes its ANSI colour, or the bright one, whichever first reads on the
     /// document and on a selection **and** differs from the colours already taken; a theme that
-    /// offers neither leaves the token in the text colour, so a weak palette loses colour, never
-    /// legibility.
+    /// offers neither leaves the token in the text colour. Comments and line numbers take the muted
+    /// text roles. The text colour itself is the theme's own, never checked here.
     pub(super) fn of(theme: &Theme, roles: &Roles) -> Self {
         let selection = roles.sel;
         let grounds = [roles.base, roles.base.blend(selection)];
@@ -102,11 +102,12 @@ mod tests {
             let theme = named.theme();
             let roles = Roles::of(&theme);
             let palette = Palette::of(&theme, &roles);
-            for ground in [roles.base, roles.base.blend(palette.selection)] {
+            // The grounds and the ratio are spelled out, not borrowed from the code under test.
+            for ground in [roles.base, roles.base.blend(roles.sel)] {
                 for token in TOKENS {
                     let ink = palette.of_token(token);
                     assert!(
-                        project_ink_contrast(ink, ground) >= TEXT_CONTRAST,
+                        project_ink_contrast(ink, ground) >= 4.5,
                         "{named:?} {token:?}: {ink:?} on {ground:?}"
                     );
                 }
@@ -132,5 +133,22 @@ mod tests {
                 assert!(project_inks_distinct(*a, *b), "{inks:?}");
             }
         }
+    }
+
+    /// A theme whose green and bright green are the colour keywords took cannot colour strings
+    /// apart from keywords: strings fall back to the text colour rather than take the same one.
+    #[test]
+    fn a_colour_already_taken_is_not_taken_twice() {
+        let base = Theme::default();
+        let keyword = Palette::of(&base, &Roles::of(&base)).keyword;
+        let mut colors = crate::settings::Colors::default();
+        colors.palette[2] = Some(keyword);
+        colors.palette[10] = Some(keyword);
+        let theme = base.with_colors(&colors);
+        let roles = Roles::of(&theme);
+        let palette = Palette::of(&theme, &roles);
+        assert_eq!(palette.keyword, keyword, "the fixture must keep the keywords' colour");
+        assert_ne!(palette.string, palette.keyword);
+        assert_eq!(palette.string, roles.tx);
     }
 }

@@ -232,8 +232,8 @@ formatted, anything else as read-only code with line numbers and theme colours.
 
 ### Markdown previews
 
-Hold **Ctrl** and click a local `.md` path printed by an agent or shell. Ivy opens the document
-inside the terminal, with headings, lists, tables and code. Saving the file updates the preview
+Hold **Ctrl** and click a local `.md` path printed by an agent or shell to reveal it in **Files**;
+one click there opens the document inside the terminal, with headings, lists, tables and code. Saving the file updates the preview
 without reopening it. Choose documents through **Files**, or return to the retained document with
 **File** in the title bar. **Maximize** on the drawer gives it the consoles' space; **Restore**
 returns it to its previous height. Files stays beside the drawer either way, so you can choose

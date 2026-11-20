@@ -151,7 +151,7 @@ fn body_content(
             &state.message,
         );
     }
-    if state.job.is_some() && state.loaded.is_none() {
+    if state.job.is_some() && state.loaded.is_none() && state.message.is_empty() {
         ui.label("Loading…");
     }
     if let Some(loaded) = &state.loaded {

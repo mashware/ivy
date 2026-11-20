@@ -814,7 +814,7 @@ fn neither_the_drawer_nor_a_title_bar_press_dims_the_consoles() {
     let consoles = crate::tab_bar::geometry(&window, area, &metrics).consoles;
     let plain = header_inks(&painted(&mut window, &ctx, area, vec![]), consoles);
     assert!(!plain.is_empty(), "no header text was found");
-    // Hold a press on the title bar's Markdown button.
+    // Hold a press on the title bar's File button.
     let markdown = button_of(&window, Tool::Document);
     let held = painted(
         &mut window,

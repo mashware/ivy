@@ -3,17 +3,22 @@
 use super::highlight::{self, Family, Line};
 use super::palette::Palette;
 use eframe::egui::{self, FontId, text::LayoutJob};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const FONT_SIZE: f32 = 13.0;
-/// Space between the line numbers and the text, and around the text.
+/// Space between the line numbers and the text.
 const GUTTER_GAP: f32 = 14.0;
+/// Space around the text.
 const PAD: f32 = 8.0;
+const TRUNCATED: &str = "… line truncated";
 
 /// A file laid out in lines and coloured, built on the loader thread.
 pub(crate) struct CodeDocument {
+    /// Which file this is, so another file's view does not inherit this one's scroll.
+    path: PathBuf,
     lines: Vec<Line>,
-    /// The longest line in characters, which sets how far the view scrolls sideways.
+    /// The longest painted line in characters: a first guess at how far the view scrolls sideways,
+    /// widened by what painting measures (tabs and wide characters take more than one cell).
     widest: usize,
 }
 
@@ -23,10 +28,14 @@ impl CodeDocument {
         let lines = highlight::scan(text, Family::of(path, first));
         let widest = lines
             .iter()
-            .map(|line| line.text.chars().count())
+            .map(|line| line.text[..line.shown].chars().count())
             .max()
             .unwrap_or(0);
-        Self { lines, widest }
+        Self {
+            path: path.to_owned(),
+            lines,
+            widest,
+        }
     }
 
     /// The text between two places, as the file holds it: line numbers are never part of it.
@@ -40,12 +49,12 @@ impl CodeDocument {
         for line in from.line..=to.line.min(self.lines.len().saturating_sub(1)) {
             let text = &self.lines[line].text;
             let start = if line == from.line {
-                from.byte.min(text.len())
+                boundary(text, from.byte)
             } else {
                 0
             };
             let end = if line == to.line {
-                to.byte.min(text.len())
+                boundary(text, to.byte)
             } else {
                 text.len()
             };
@@ -66,7 +75,8 @@ impl CodeDocument {
     }
 }
 
-/// A place in the file: a line and a byte inside it, always on a character boundary.
+/// A place in the file: a line and a byte inside it. It belongs to the document it was taken from,
+/// so the selection is cleared whenever that document is replaced.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct Place {
     line: usize,
@@ -78,12 +88,25 @@ pub(super) struct Place {
 #[derive(Default)]
 pub(crate) struct CodeState {
     selection: Option<(Place, Place)>,
+    /// The widest line painted so far, in points.
+    widest_seen: f32,
 }
 
 impl CodeState {
-    /// A new file starts with nothing marked.
+    /// A new document, or a new version of the open one, starts with nothing marked.
     pub(super) fn reset(&mut self) {
-        self.selection = None;
+        *self = Self::default();
+    }
+
+    #[cfg(test)]
+    pub(super) fn select(&mut self, from: (usize, usize), to: (usize, usize)) {
+        let place = |(line, byte)| Place { line, byte };
+        self.selection = Some((place(from), place(to)));
+    }
+
+    #[cfg(test)]
+    pub(super) fn has_selection(&self) -> bool {
+        self.selection.is_some()
     }
 }
 
@@ -99,7 +122,9 @@ pub(super) fn show(
     let digits = document.lines.len().max(1).to_string().len();
     let gutter = PAD + digits as f32 * glyph;
     let text_left = gutter + GUTTER_GAP;
-    let width = text_left + document.widest as f32 * glyph + 2.0 * PAD;
+    let mark = TRUNCATED.chars().count() as f32 * glyph + glyph;
+    let width =
+        text_left + (document.widest as f32 * glyph).max(state.widest_seen) + mark + 2.0 * PAD;
     let height = document.lines.len() as f32 * row + 2.0 * PAD;
     let select_all = ui.input(|i| {
         i.events.iter().any(|event| {
@@ -111,7 +136,7 @@ pub(super) fn show(
         state.selection = Some((Place::default(), document.end()));
     }
     egui::ScrollArea::both()
-        .id_salt("code-content")
+        .id_salt(("code-content", &document.path))
         .auto_shrink([false; 2])
         .show_viewport(ui, |ui, viewport| {
             let (content, response) = ui.allocate_exact_size(
@@ -136,9 +161,10 @@ pub(super) fn show(
                 );
                 let galley = painter.layout_job(job(line, &font, palette));
                 let at = egui::pos2(origin.x + text_left, top);
-                if let Some(range) = selected_in(state.selection, index, line.text.len()) {
-                    let x =
-                        |byte: usize| galley.pos_from_cursor(char_cursor(&line.text, byte)).min.x;
+                state.widest_seen = state.widest_seen.max(galley.size().x);
+                let shown = &line.text[..line.shown];
+                if let Some(range) = selected_in(state.selection, index, line.shown) {
+                    let x = |byte: usize| galley.pos_from_cursor(char_cursor(shown, byte)).min.x;
                     let (left, right) = (x(range.0), x(range.1).max(x(range.0) + glyph * 0.5));
                     let marked = egui::Rect::from_min_max(
                         egui::pos2(at.x + left, top),
@@ -146,11 +172,11 @@ pub(super) fn show(
                     );
                     painter.rect_filled(marked, 0.0, palette.selection);
                 }
-                if line.truncated {
+                if line.truncated() {
                     painter.text(
                         at + egui::vec2(galley.size().x + glyph, 0.0),
                         egui::Align2::LEFT_TOP,
-                        "… line truncated",
+                        TRUNCATED,
                         font.clone(),
                         palette.gutter,
                     );
@@ -161,7 +187,7 @@ pub(super) fn show(
             let place_at = |pos: egui::Pos2| {
                 let line = (((pos.y - origin.y) / row).floor().max(0.0) as usize)
                     .min(document.lines.len().saturating_sub(1));
-                let text = document.lines.get(line).map_or("", |l| l.text.as_str());
+                let text = document.lines.get(line).map_or("", |l| &l.text[..l.shown]);
                 let byte = match galleys.iter().find(|(index, _, _)| *index == line) {
                     Some((_, at, galley)) => {
                         let chars = galley.cursor_from_pos(pos - *at).index.0;
@@ -204,12 +230,9 @@ pub(super) fn show(
 fn job(line: &Line, font: &FontId, palette: &Palette) -> LayoutJob {
     let mut job = LayoutJob::default();
     for (n, (start, token)) in line.runs.iter().enumerate() {
-        let end = line
-            .runs
-            .get(n + 1)
-            .map_or(line.text.len(), |(next, _)| *next);
+        let end = line.runs.get(n + 1).map_or(line.shown, |(next, _)| *next);
         job.append(
-            &line.text[*start..end],
+            &line.text[*start..end.min(line.shown)],
             0.0,
             egui::TextFormat::simple(font.clone(), palette.of_token(*token)),
         );
@@ -238,7 +261,16 @@ fn selected_in(
 }
 
 fn char_cursor(text: &str, byte: usize) -> egui::text::CCursor {
-    egui::text::CCursor::new(text[..byte.min(text.len())].chars().count())
+    egui::text::CCursor::new(text[..boundary(text, byte)].chars().count())
+}
+
+/// `byte` brought back inside `text` and onto the start of a character.
+fn boundary(text: &str, byte: usize) -> usize {
+    let mut byte = byte.min(text.len());
+    while !text.is_char_boundary(byte) {
+        byte -= 1;
+    }
+    byte
 }
 
 #[cfg(test)]

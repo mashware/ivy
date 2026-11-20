@@ -661,7 +661,7 @@ a shell's startup directory change. Remote/unavailable sources suspend local bro
 Click a small folder chevron to expand/collapse it; double-clicking its name or pressing Enter
 also toggles it without leaving the normal tree root. Folders show only their chevron; files show
 their type's icon. Single-click a file, including a file symlink, to open it in the **File** tab of
-the drawer: `.md` in the Markdown reader, any other file as read-only code with line numbers and
+the drawer: `.md` and `.markdown` in the Markdown reader, any other file as read-only code with line numbers and
 colours from the theme. A binary, non-UTF-8 or larger-than-1 MiB file says so instead. Nothing
 executes.
 

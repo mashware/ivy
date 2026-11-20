@@ -59,8 +59,11 @@ fn an_open_code_file_follows_its_rewrites() {
         state.loaded.as_ref().unwrap().code.is_some(),
         "a .rs file is read as code"
     );
-    std::fs::write(&file, "fn after() {}\n").unwrap();
-    wait_for(&mut state, "fn after() {}\n");
+    // A selection made on the old text does not survive into the new one, whose bytes differ.
+    state.code.select((0, 3), (0, 9));
+    std::fs::write(&file, "fn añter() {}\n").unwrap();
+    wait_for(&mut state, "fn añter() {}\n");
+    assert!(!state.code.has_selection());
     assert_eq!(state.requested, Some((file, Kind::Code)));
 }
 
@@ -501,4 +504,95 @@ fn a_narrow_strip_shortens_the_source_before_it_drops_the_diff_layout_and_says_s
     );
     assert_eq!(hidden_source.source.width(), 0.0);
     assert!(hidden_source.crowded, "a hidden source label must be said");
+}
+
+/// The File tab paints a code file's lines, numbered, through the drawer itself.
+#[test]
+fn the_file_tab_paints_a_code_document() {
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 700.0));
+    let ctx = egui::Context::default();
+    let mut state = State::default();
+    state.open(Kind::Code);
+    let text = "fn painted_line() {}\n";
+    state.loaded = Some(Loaded {
+        text: text.into(),
+        markdown: None,
+        code: Some(code::CodeDocument::parse(
+            std::path::Path::new("/r/a.rs"),
+            text,
+        )),
+        diff: None,
+    });
+    let mut painted = Vec::new();
+    for _ in 0..2 {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(rect),
+                ..Default::default()
+            },
+            |ui| {
+                view::show(
+                    &mut state,
+                    ui,
+                    rect,
+                    crate::theme::Theme::default(),
+                    false,
+                    false,
+                    (
+                        &super::drawer::Tabs {
+                            changes: None,
+                            document: Some("a.rs".into()),
+                            markdown: true,
+                            side_by_side: false,
+                        },
+                        &super::drawer::Title {
+                            project: None,
+                            folder: "r".into(),
+                            unavailable: false,
+                        },
+                    ),
+                );
+            },
+        );
+        painted = output
+            .shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Text(t) => Some(t.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        output.drop_without_applying_deltas();
+    }
+    assert!(
+        painted.iter().any(|t| t == "fn painted_line() {}"),
+        "{painted:?}"
+    );
+    assert!(painted.iter().any(|t| t == "1"), "{painted:?}");
+}
+
+/// Opening a file picks its view by name, and leaving for the Git tab and coming back keeps it.
+#[test]
+fn the_file_tab_keeps_a_code_file_across_tabs() {
+    let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+    let ctx = egui::Context::default();
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
+    crate::tests::one_frame_in(&mut window, &ctx, area, vec![]);
+    let pane = window.all_panes().next().unwrap().name;
+    let code = std::path::PathBuf::from("/r/src/lib.rs");
+    assert!(open_document_target(
+        &mut window,
+        pane,
+        "/r/README.md".into(),
+        None
+    ));
+    assert!(!shows_as_code(
+        &window,
+        std::path::Path::new("/r/README.md")
+    ));
+    assert!(open_document_target(&mut window, pane, code.clone(), None));
+    assert!(shows_as_code(&window, &code));
+    activate(&mut window, false);
+    activate(&mut window, true);
+    assert!(shows_as_code(&window, &code));
 }

@@ -11049,16 +11049,20 @@ runs.
 
 - **What the scanner marks:** comments, strings, numbers, keywords, capitalised type names, and
   attributes, preprocessor lines and `$`/`@` names.
-- **Where the colours come from:** each takes its ANSI palette entry, then the bright one, keeping
-  the first that reads at 4.5:1 on the document and on a selection over it, and differs from the
-  colours already taken. A theme that offers neither leaves that token in the text colour.
-- **Long lines:** a line over 16 KiB is painted plain, cut, and marked.
+- **Where the colours come from:** keywords, strings, numbers, type names and attributes take their
+  ANSI palette entry, then the bright one, keeping the first that reads at 4.5:1 on the document and
+  on a selection over it and differs from the colours already taken; a theme that offers neither
+  leaves that token in the text colour. Comments and line numbers take the muted text roles.
+- **Long lines:** a line over 16 KiB is painted plain, cut, and marked; copying it gives the whole
+  line.
 - **Selecting and copying:** a selection is kept as file positions, so copying a selection longer
   than the screen, or `Ctrl+A`, copies the file's own text and never a line number.
 - **Files:** directory rows lose their folder icon. The caret alone says a row is a folder, and the
   name starts right after it. The root caption keeps its icon.
 
-This amends the #89 note that maximize serves «Markdown alone». The whole drawer maximizes, which
+This amends two earlier notes. #88's search said Ctrl+Enter opens only a Markdown file and that
+Files «says it opens Markdown alone»: it now opens any file, and that sentence is gone. #89 said
+maximize serves «Markdown alone». The whole drawer maximizes, which
 the code already did, and code is where the width pays most.
 
 **Why.** Reading what an agent just wrote meant spending a console on `less` or `vim`, and Files

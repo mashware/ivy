@@ -4,8 +4,10 @@ use std::path::Path;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Family {
     Rust,
-    /// C, C++, Go, Java, Kotlin, Swift, C#, JavaScript, TypeScript and CSS: `//` and `/* */`.
+    /// C, C++, Go, Java, Kotlin, Swift, C#, JavaScript and TypeScript: line and block comments.
     CLike,
+    /// CSS and SCSS: block comments only.
+    Css,
     Php,
     /// Python, shells, Ruby and the configuration formats: `#` comments.
     Hash,
@@ -29,8 +31,9 @@ impl Family {
             Some("rs") => Some(Self::Rust),
             Some(
                 "c" | "h" | "cpp" | "hpp" | "cc" | "cxx" | "go" | "java" | "kt" | "kts" | "swift"
-                | "cs" | "js" | "mjs" | "cjs" | "jsx" | "ts" | "tsx" | "css" | "scss",
+                | "cs" | "js" | "mjs" | "cjs" | "jsx" | "ts" | "tsx",
             ) => Some(Self::CLike),
+            Some("css" | "scss") => Some(Self::Css),
             Some("php") => Some(Self::Php),
             Some(
                 "py" | "sh" | "bash" | "zsh" | "fish" | "rb" | "yaml" | "yml" | "toml" | "ini"
@@ -56,6 +59,7 @@ impl Family {
             Self::Php => PHP,
             Self::Hash => HASH,
             Self::Json => JSON,
+            Self::Css => &[],
             Self::Sql => return SQL.iter().any(|k| k.eq_ignore_ascii_case(word)),
             Self::Plain => &[],
         };

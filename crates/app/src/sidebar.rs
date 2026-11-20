@@ -37,7 +37,7 @@ enum Edge {
 pub(crate) struct Sidebar {
     enabled: bool,
     probe: Option<probe::Probe>,
-    /// The drawer's tab (Markdown or Git) or the Board; Files is independent of it.
+    /// The drawer's tab (File or Git) or the Board; Files is independent of it.
     active: Option<Tool>,
     files_width: f32,
     height: f32,

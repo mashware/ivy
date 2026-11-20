@@ -42,7 +42,7 @@ pub(super) fn window_buttons() -> bool {
 }
 
 /// What the right-hand groups and the margin take from a full bar: the Board, the two splits,
-/// Markdown, connect and the menu, then the window's buttons. Search has no button here: each
+/// File, connect and the menu, then the window's buttons. Search has no button here: each
 /// console carries its own in its header (D61).
 fn right_reserve() -> f32 {
     RIGHT_MARGIN
@@ -208,7 +208,7 @@ mod tests {
     }
 
     /// The kit's order, with the owner's change of 17 November 2026: the logo first, Files a
-    /// little apart from it; then, right of the tabs, the Board, the two splits, Markdown,
+    /// little apart from it; then, right of the tabs, the Board, the two splits, File,
     /// connect and the menu, and the window's own buttons.
     #[test]
     fn the_bar_lays_its_buttons_out_in_the_kits_order() {
@@ -249,7 +249,7 @@ mod tests {
 
     /// Above the old 300-point threshold the full bar used to leave the tabs a band of zero below
     /// about 380 points, and one too narrow for one card ([`crate::tab_bar::MIN_BAND`]) up to about
-    /// 456 — 600 since the bar carries the kit's full set, Files, Markdown and a labelled Board
+    /// 456 — 600 since the bar carries the kit's full set, Files, File and a labelled Board
     /// included (D72, D96). At every width one tab keeps
     /// some label and an add target, and a full bar's right-hand buttons all fit after the left
     /// group, so the band starts where the drawn buttons leave it.
