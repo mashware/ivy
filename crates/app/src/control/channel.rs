@@ -12,6 +12,7 @@ pub(crate) fn open_with_sessions(
     open_services(dir, reader, reads, sessions, None, None, wake, None)
 }
 
+#[allow(clippy::too_many_arguments)] // UI capabilities are assembled at this one boundary.
 pub(crate) fn open_with_authority(
     dir: &PanelDir,
     state: &PanelState,
@@ -34,6 +35,7 @@ pub(crate) fn open_with_authority(
     )
 }
 
+#[allow(clippy::too_many_arguments)] // Mirrors the optional platform capabilities above.
 fn open_services(
     dir: &PanelDir,
     reader: crate::panel::DocumentReader,

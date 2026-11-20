@@ -255,10 +255,11 @@ fn private_to_uid(dir: &Path, uid: u32) -> io::Result<()> {
 }
 
 /// Opens a connection to a pane's endpoint, from the producer's side.
+/// Windows verifies the server against the separately inherited `PANEL_SERVER_PID` before returning.
 pub fn connect(dir: &Path, id: &str) -> io::Result<Stream> {
     #[cfg(windows)]
     {
-        return windows::connect(dir, id);
+        return connect_authenticated(dir, id, crate::client::inherited_server_pid()?);
     }
     #[cfg(unix)]
     Stream::connect(name_of(dir, id)?)

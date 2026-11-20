@@ -308,12 +308,19 @@ impl ReleaseRegistry {
             {
                 slot.state.store(0, Ordering::Relaxed);
                 slot.id.store(encoded, Ordering::Release);
+                if self.0.revoked.load(Ordering::Acquire) {
+                    slot.state.fetch_or(CLOSED, Ordering::AcqRel);
+                    return false;
+                }
                 return true;
             }
         }
         false
     }
     pub fn admit_delivery(&self, connection: Connection) -> bool {
+        if self.0.revoked.load(Ordering::Acquire) {
+            return false;
+        }
         let Some(slot) = self.slot(connection) else {
             return false;
         };
@@ -328,7 +335,13 @@ impl ReleaseRegistry {
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(_) => return true,
+                Ok(_) => {
+                    if self.0.revoked.load(Ordering::Acquire) {
+                        self.delivery_completed(connection);
+                        return false;
+                    }
+                    return true;
+                }
                 Err(now) => old = now,
             }
         }
@@ -379,6 +392,11 @@ impl ReleaseRegistry {
     }
     pub fn revoke(&self) {
         self.0.revoked.store(true, Ordering::Release);
+        // Race each slot CAS against closure: admitted work retains its pending count, while
+        // a worker that passed the stop flag cannot acquire an idle slot after this cutoff.
+        for slot in &self.0.slots {
+            slot.state.fetch_or(CLOSED, Ordering::AcqRel);
+        }
     }
     #[cfg(test)]
     pub(crate) fn is_closed_pending(&self, connection: Connection) -> bool {
@@ -503,6 +521,21 @@ pub(crate) mod tests {
         registry.delivery_completed(3);
         assert_eq!(registry.take_closed_ready(), vec![3]);
         assert!(registry.reserve(99));
+    }
+
+    #[test]
+    fn revocation_refuses_new_admissions_and_keeps_admitted_work_pending() {
+        let registry = ReleaseRegistry::new();
+        assert!(registry.reserve(1));
+        assert!(registry.reserve(2));
+        let admitted = registry.admit(1).unwrap();
+        registry.revoke();
+        assert!(!registry.reserve(3));
+        assert!(registry.admit(2).is_none());
+        assert_eq!(registry.take_closed_ready(), vec![2]);
+        drop(admitted);
+        assert_eq!(registry.take_closed_ready(), vec![1]);
+        assert!(registry.take_closed_ready().is_empty());
     }
 
     #[test]

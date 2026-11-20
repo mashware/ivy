@@ -2510,6 +2510,10 @@ mod windows_lifecycle_tests {
 
     static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    fn connect(dir: &Path, id: &str) -> io::Result<Stream> {
+        endpoint::connect_authenticated(dir, id, std::process::id())
+    }
+
     struct Pane {
         dir: PanelDir,
         channel: Option<Channel>,
@@ -2575,7 +2579,7 @@ mod windows_lifecycle_tests {
         let _serial = TEST_LOCK.lock().unwrap();
         let mut pane = pane(4);
         let _held = pane.document.lock_for_test();
-        let mut client = endpoint::connect(pane.dir.path(), pane.dir.id()).unwrap();
+        let mut client = connect(pane.dir.path(), pane.dir.id()).unwrap();
         request(&mut client, "{\"tool\":\"panel_get\"}\n");
         let reply = line(&mut client);
         assert!(reply.contains("snapshot is busy"), "{reply}");
@@ -2594,7 +2598,7 @@ mod windows_lifecycle_tests {
     fn full_inbox_keeps_close_pending_until_delivery_completes() {
         let _serial = TEST_LOCK.lock().unwrap();
         let mut pane = pane(1);
-        let mut client = endpoint::connect(pane.dir.path(), pane.dir.id()).unwrap();
+        let mut client = connect(pane.dir.path(), pane.dir.id()).unwrap();
         request(
             &mut client,
             "{\"tool\":\"panel_set\",\"source\":\"test\",\"document\":{\"lines\":[]}}\n",
@@ -2639,7 +2643,7 @@ mod windows_lifecycle_tests {
         let _serial = TEST_LOCK.lock().unwrap();
         let mut pane = pane(1);
         let alive = Arc::clone(&pane.channel.as_ref().unwrap().alive);
-        let mut client = endpoint::connect(pane.dir.path(), pane.dir.id()).unwrap();
+        let mut client = connect(pane.dir.path(), pane.dir.id()).unwrap();
         request(
             &mut client,
             "{\"tool\":\"panel_set\",\"source\":\"test\",\"document\":{\"lines\":[]}}\n",
@@ -2668,7 +2672,7 @@ mod windows_lifecycle_tests {
             .unwrap();
         plan.publish_document(r#"{"plans":[]}"#.into()).unwrap();
         let channel = Channel::open_windows(dir.path(), dir.id(), sender, services).unwrap();
-        let mut client = endpoint::connect(dir.path(), dir.id()).unwrap();
+        let mut client = connect(dir.path(), dir.id()).unwrap();
         request(&mut client, "{\"tool\":\"panel_get\"}\n");
         assert!(line(&mut client).contains("committed"));
         request(&mut client, "{\"tool\":\"plan_get\"}\n");
@@ -2684,7 +2688,7 @@ mod windows_lifecycle_tests {
     fn timed_out_split_delivery_stays_pending_until_late_ui_completion() {
         let _serial = TEST_LOCK.lock().unwrap();
         let mut pane = pane(4);
-        let mut client = endpoint::connect(pane.dir.path(), pane.dir.id()).unwrap();
+        let mut client = connect(pane.dir.path(), pane.dir.id()).unwrap();
         request(
             &mut client,
             "{\"tool\":\"split_open\",\"side\":\"right\"}\n",
@@ -2720,7 +2724,7 @@ mod windows_lifecycle_tests {
             let id = pane.dir.id().to_owned();
             let start = Arc::clone(&start);
             connectors.push(std::thread::spawn(move || {
-                let mut stream = endpoint::connect(&dir, &id).ok();
+                let mut stream = connect(&dir, &id).ok();
                 start.wait();
                 if let Some(stream) = stream.as_mut() {
                     let _ = stream.write_all(b"{\"tool\":\"panel_get\"}");
@@ -2743,7 +2747,7 @@ mod windows_lifecycle_tests {
         *hooks.registration_gate.lock().unwrap() = Some(Arc::clone(&gate));
         let mut pane = pane_with_hooks(2, Some(hooks.clone()));
         let alive = Arc::clone(&pane.channel.as_ref().unwrap().alive);
-        let mut client = endpoint::connect(pane.dir.path(), pane.dir.id()).unwrap();
+        let mut client = connect(pane.dir.path(), pane.dir.id()).unwrap();
         request(&mut client, "{\"tool\":\"panel_get\"}\n");
         let deadline = Instant::now() + Duration::from_secs(2);
         while !hooks.registration_entered.load(Ordering::Acquire) && Instant::now() < deadline {
@@ -2778,7 +2782,7 @@ mod windows_lifecycle_tests {
         let spawn_hooks = Arc::new(TestHooks::default());
         spawn_hooks.fail_worker_spawn.store(true, Ordering::Release);
         let mut spawn_failed = pane_with_hooks(1, Some(spawn_hooks));
-        let mut client = endpoint::connect(spawn_failed.dir.path(), spawn_failed.dir.id()).unwrap();
+        let mut client = connect(spawn_failed.dir.path(), spawn_failed.dir.id()).unwrap();
         request(&mut client, "{\"tool\":\"panel_get\"}\n");
         assert!(line(&mut client).contains("could not serve the connection"));
         let spawned_alive = Arc::clone(&spawn_failed.channel.as_ref().unwrap().alive);
@@ -2789,8 +2793,7 @@ mod windows_lifecycle_tests {
         worker_hooks.panic_worker.store(true, Ordering::Release);
         let mut panicked_worker = pane_with_hooks(1, Some(Arc::clone(&worker_hooks)));
         let worker_alive = Arc::clone(&panicked_worker.channel.as_ref().unwrap().alive);
-        let mut client =
-            endpoint::connect(panicked_worker.dir.path(), panicked_worker.dir.id()).unwrap();
+        let mut client = connect(panicked_worker.dir.path(), panicked_worker.dir.id()).unwrap();
         request(&mut client, "{\"tool\":\"panel_get\"}\n");
         let deadline = Instant::now() + Duration::from_secs(2);
         while !worker_hooks.worker_panicked.load(Ordering::Acquire) && Instant::now() < deadline {
