@@ -1,15 +1,24 @@
 {
-  "updated_at": "2026-11-20T19:38:29.633Z",
-  "phase": "plan",
+  "updated_at": "2026-11-20T19:43:29.781Z",
+  "phase": "build",
   "header": true,
-  "attention": "done",
+  "attention": "block",
   "lines": [
     {"key":"title","text":"Windows: bind the control channel (MCP) on a user-only named pipe","style":"title"},
     "",
     {"key":"mrs","text":"PRs","style":"section","summary":"0/1 merged","collapsed":true},
-    {"key":"mr-1","ref":"#1","text":"Enable the private Windows control channel","mark":"pending"},
+    {"key":"mr-1","ref":"#1","text":"Enable the private Windows control channel","mark":"current"},
     "",
-    {"key":"now","ref":"Now","text":"Revised study complete; shutdown challenge resolved","mark":"info"},
-    {"key":"next","ref":"Next","text":"Build the single planned PR after study approval","mark":"info"}
+    {"key":"plan","text":"Plan #1","style":"section","summary":"0/5"},
+    {"key":"step-1","ref":"1","text":"Private native security and directory creation","mark":"current","indent":4},
+    {"key":"step-2","ref":"2","text":"Cancellable overlapped transport and client authentication","mark":"pending","indent":4},
+    {"key":"step-3","ref":"3","text":"Callback-free Windows services and app lifecycle","mark":"pending","indent":4},
+    {"key":"step-4","ref":"4","text":"Native test job and forwarding/discovery integration","mark":"pending","indent":4},
+    {"key":"step-5","ref":"5","text":"Native intended-pane observation","mark":"pending","indent":4},
+    "",
+    {"key":"now","ref":"Now","text":"Implementation preflight blocked: native Windows execution unavailable","mark":"info"},
+    {"key":"next","ref":"Next","text":"Resume implementation with native Windows security and UI testing","mark":"info"},
+    "",
+    {"key":"block-1","text":"Runner operator: provide native Windows execution and required security/UI test facilities, then relaunch ticket 164","mark":"block"}
   ]
 }

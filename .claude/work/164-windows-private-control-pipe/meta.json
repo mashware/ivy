@@ -19,7 +19,7 @@
   "related_repos": [],
   "roadmap": null,
   "started_at": "2026-11-20T19:18:21.084909+00:00",
-  "updated_at": "2026-11-20T19:38:28.546459+00:00",
+  "updated_at": "2026-11-20T19:43:28.818180+00:00",
   "notes": "Answered F1: callback-free Windows capabilities, bounded off-frame snapshots, nonblocking native UI wake, reliable release slots, owned cancellation and joined workers. Reclassified L; source-only study. #161 already on base.",
   "pending": null,
   "defaults_used": [
@@ -64,6 +64,21 @@
       "key": "unattended:plan-reviewed",
       "default": "One atomic delivery; candidate lifecycle/transport cut merged; no exposure window",
       "phase": "plan"
+    },
+    {
+      "key": "unattended:rehomed",
+      "default": "164-windows-private-control-pipe created from main at 137fd348165866dcd3382608a811d0c594119f42; no upstream",
+      "phase": "run"
+    },
+    {
+      "key": "unattended:brief",
+      "default": "Business brief recorded before code",
+      "phase": "build"
+    },
+    {
+      "key": "unattended:environment-preflight",
+      "default": "Blocked before production edits: no native Windows execution for mandatory security/lifecycle/UI proof; Rust toolchain located and working",
+      "phase": "build"
     }
   ],
   "ticket_deps": [],
@@ -72,7 +87,7 @@
       "n": 1,
       "title": "Enable the private Windows control channel",
       "size": "L",
-      "status": "pending",
+      "status": "in_progress",
       "phases_done": [],
       "wave": 1,
       "depends_on": [],

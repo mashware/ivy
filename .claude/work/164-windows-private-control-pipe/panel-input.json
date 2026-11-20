@@ -1,1 +1,10 @@
-{"phase": "plan", "now": "Revised study complete; shutdown challenge resolved", "next": "Build the single planned PR after study approval", "attention": "done"}
+{
+  "phase": "build",
+  "now": "Implementation preflight blocked: native Windows execution unavailable",
+  "next": "Resume implementation with native Windows security and UI testing",
+  "blocks": [
+    {
+      "text": "Runner operator: provide native Windows execution and required security/UI test facilities, then relaunch ticket 164"
+    }
+  ]
+}
