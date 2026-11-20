@@ -24,22 +24,21 @@ fn default_theme_produces_distinguishable_contrasting_inks() {
     }
 }
 
+/// Project colours no longer come from the palette (#141), so a palette collapsed to one grey
+/// still leaves projects as many distinct, readable inks as the factory theme.
 #[test]
-fn monochrome_palette_has_finite_distinct_candidates() {
+fn monochrome_palette_still_offers_distinct_candidates() {
     let colors = crate::settings::Colors {
         palette: [Some(Color32::GRAY); 16],
         ..Default::default()
     };
     let theme = Theme::default().with_colors(&colors);
     let inks = crate::theme::project_accents(&theme);
-    assert!(
-        inks.len() <= 1,
-        "duplicate source colors must not promise distinct accents"
-    );
-    assert!(
-        inks.iter()
-            .all(|ink| contrast(*ink, theme.panel_background()) >= 3.0)
-    );
+    assert!(inks.len() >= 8, "{inks:?}");
+    for (i, ink) in inks.iter().enumerate() {
+        assert!(contrast(*ink, theme.panel_background()) >= 3.0);
+        assert!(inks[..i].iter().all(|other| separated(*ink, *other)));
+    }
 }
 
 #[test]
@@ -127,12 +126,14 @@ fn remote_directory_veto_clears_existing_badge_and_accounts_work() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+/// A mid-grey panel (0x78) sits where neither the dark-panel nor the light-panel colours reach
+/// 3:1: nothing is offered rather than an ink washed toward the text.
 #[test]
 fn no_candidate_is_offered_when_theme_cannot_supply_contrast() {
     let colors = crate::settings::Colors {
         palette: [Some(Color32::GRAY); 16],
         foreground: Some(Color32::GRAY),
-        panel: Some(Color32::GRAY),
+        panel: Some(Color32::from_gray(0x78)),
         ..Default::default()
     };
     let theme = Theme::default().with_colors(&colors);
@@ -425,6 +426,9 @@ fn projects_keep_identity_and_accent_across_tabs_focus_and_theme_changes() {
 
     let mut palette = [Some(Color32::from_rgb(255, 32, 32)); 16];
     palette[2] = Some(Color32::from_rgb(32, 255, 32));
+    // The done blue moved onto the list's violet: violet leaves the list, so every project's
+    // accent is reassigned from the new theme rather than kept from the old one.
+    palette[4] = Some(Color32::from_rgb(0xb4, 0x8c, 0xf0));
     let overrides = crate::settings::Colors {
         palette,
         foreground: Some(Color32::WHITE),
@@ -504,16 +508,14 @@ fn exhausted_palette_keeps_distinct_project_names_in_actual_headers() {
         );
     }
     let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+    // A mid-grey panel no list colour reads on: both projects fall back to the text colour.
     window.theme = Theme::default().with_colors(&crate::settings::Colors {
         palette: [Some(Color32::WHITE); 16],
         foreground: Some(Color32::WHITE),
-        panel: Some(Color32::BLACK),
+        panel: Some(Color32::from_gray(0x78)),
         ..Default::default()
     });
-    assert_eq!(
-        crate::theme::project_accents(&window.theme),
-        vec![Color32::WHITE]
-    );
+    assert!(crate::theme::project_accents(&window.theme).is_empty());
     configure(
         &mut window,
         crate::settings::Entry::Normal,
