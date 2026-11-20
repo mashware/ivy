@@ -103,6 +103,10 @@ impl Job {
             }
         })
     }
+
+    pub(super) fn poll(&self) -> Option<Result<Loaded, String>> {
+        take(self)
+    }
 }
 
 impl Job<Picture> {
@@ -113,21 +117,23 @@ impl Job<Picture> {
     ) -> Result<Self, String> {
         spawn(ctx, move || decode_image(&path, max_side))
     }
+
+    pub(super) fn poll(&self) -> Option<Result<Picture, String>> {
+        take(self)
+    }
 }
 
-impl<T> Job<T> {
-    pub(super) fn poll(&self) -> Option<Result<T, String>> {
-        if self.finished.get() {
-            return None;
-        }
-        let result = match self.receiver.try_recv() {
-            Ok(result) => result,
-            Err(TryRecvError::Empty) => return None,
-            Err(TryRecvError::Disconnected) => Err("Viewer loader stopped unexpectedly".into()),
-        };
-        self.finished.set(true);
-        Some(result)
+fn take<T>(job: &Job<T>) -> Option<Result<T, String>> {
+    if job.finished.get() {
+        return None;
     }
+    let result = match job.receiver.try_recv() {
+        Ok(result) => result,
+        Err(TryRecvError::Empty) => return None,
+        Err(TryRecvError::Disconnected) => Err("Viewer loader stopped unexpectedly".into()),
+    };
+    job.finished.set(true);
+    Some(result)
 }
 
 fn spawn<T: Send + 'static>(

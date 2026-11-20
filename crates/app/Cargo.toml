@@ -128,8 +128,8 @@ harfrust = "0.12"
 # glyphs come inside the font as **palette-indexed PNG** of 136×128 — checked by running it — so they
 # have to be expanded to RGBA and rescaled; `skrifa` hands the bytes over as they are and does neither.
 #
-# **It adds neither a package nor a feature to the tree, and that is worth saying because intuition
-# says the opposite.** `image` with the `png` feature **is already compiled here**, pulled in by the
+# **For this, it adds neither a package nor a feature to the tree, and that is worth saying because
+# intuition says the opposite.** `image` with the `png` feature **is already compiled here**, pulled in by the
 # clipboard — checked with `cargo tree -e features -i image`, which gives
 # `image/png → arboard → egui-winit → eframe → app`. It is the same argument that justifies `serde`
 # with `derive` above: the root manifest's policy reasons about **what enters the tree**, not about

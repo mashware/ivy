@@ -5,6 +5,7 @@ mod delivery;
 mod diff;
 mod drawer;
 mod highlight;
+pub(crate) mod image;
 mod load;
 pub(crate) mod markdown;
 mod origin;

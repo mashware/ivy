@@ -328,6 +328,7 @@ fn initial_window(
         sidebar: crate::sidebar::Sidebar::default(),
         viewer_other: crate::viewer::State::default(),
         viewer: crate::viewer::State::default(),
+        image: crate::viewer::image::Viewer::default(),
         explorer: crate::explorer::Explorer::default(),
         projects: crate::project_view::State::default(),
         restoration: crate::restoration::State::default(),
