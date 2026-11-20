@@ -76,12 +76,32 @@ impl CachedChild {
 }
 fn collect(state: &mut State) -> io::Result<Option<ExitStatus>> {
     if state.status.is_none()
-        && let Some(status) = state.child.try_wait()?
+        && let Some(status) = state
+            .child
+            .try_wait()?
+            .or_else(|| ended_as_259(&*state.child))
     {
         state.status = Some(status);
         state.exited = Some(Instant::now());
     }
     Ok(state.status.clone())
+}
+
+/// On Windows `portable-pty` reads the exit code to decide whether a program runs, and 259 is the
+/// code Windows uses for «still running»: a program that exits with it would read as alive for
+/// ever, and its pane would never close. The handle says it ended, and then 259 is what it returned
+/// (D111).
+#[cfg(windows)]
+fn ended_as_259(child: &(dyn Child + Send + Sync)) -> Option<ExitStatus> {
+    let raw = child.as_raw_handle()?;
+    // SAFETY: `child` owns the handle and keeps it open for the length of the call.
+    let process = unsafe { std::os::windows::io::BorrowedHandle::borrow_raw(raw) };
+    crate::conpty::has_ended(process).then(|| ExitStatus::with_exit_code(259))
+}
+
+#[cfg(not(windows))]
+fn ended_as_259(_: &(dyn Child + Send + Sync)) -> Option<ExitStatus> {
+    None
 }
 impl Child for CachedChild {
     fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {

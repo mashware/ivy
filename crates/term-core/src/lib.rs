@@ -731,7 +731,7 @@ impl Pty {
         });
 
         #[cfg(windows)]
-        let master: conpty::Slot = Arc::new(std::sync::Mutex::new(Some(pair.master)));
+        let master = conpty::Slot::new(pair.master);
         #[cfg(not(windows))]
         let master = pair.master;
 
@@ -743,15 +743,32 @@ impl Pty {
         let reader = thread::spawn(move || {
             // Moved in and never used: what closing reads is this being dropped when the thread ends.
             let _ended = ended;
-            feed_and_record(reader, &tx, &stop_for_thread, &ending_for_thread);
+            #[cfg_attr(not(windows), allow(unused_variables, unused_mut))]
+            let mut reader = feed_and_record(reader, &tx, &stop_for_thread, &ending_for_thread);
+            // **The channel is let go before any draining**, so the host learns at once that this
+            // console is over: dropping it is what tells it.
+            drop(tx);
+            // **On Windows the pipe is then read and discarded to end of file**: the pseudoconsole's
+            // close can wait for its last frame to be read (see the `conpty` module), and after a
+            // close or a vanished host nobody else reads. A reader that panicked is the exception —
+            // its source is in no known state to read again.
+            #[cfg(windows)]
+            if ending_for_thread.get() != Some(&Ending::Panicked) {
+                drain(&mut reader);
+            }
         });
 
         // After the reader exists, so the output is being drained by the time a quick program's
         // exit closes the pseudoconsole.
         #[cfg(windows)]
-        if let Some(process) = cached_child.as_raw_handle() {
-            conpty::watch_exit(process, Arc::clone(&master));
-        }
+        conpty::watch_exit(
+            // SAFETY: the handle belongs to the child just spawned, which `cached_child` keeps
+            // open for the length of the call; the watcher duplicates it before it returns.
+            cached_child
+                .as_raw_handle()
+                .map(|raw| unsafe { std::os::windows::io::BorrowedHandle::borrow_raw(raw) }),
+            master.clone(),
+        );
 
         Ok((
             Self {
@@ -865,14 +882,7 @@ impl Pty {
             pixel_height: 0,
         };
         #[cfg(windows)]
-        if let Some(master) = self
-            .master
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .as_ref()
-        {
-            master.resize(size)?;
-        }
+        self.master.resize(size)?;
         #[cfg(not(windows))]
         self.master.resize(size)?;
         Ok(())
@@ -979,48 +989,36 @@ impl Pty {
 /// wait in it turns that test red. So what is guarded is a gap somebody could open by putting work
 /// between the two — the way this gets broken in practice — and not the instruction order itself.
 ///
-/// **On Windows the reading does not stop at the reason; it drains to end of file afterwards.** The
-/// reason is recorded first, so the host reads it as soon as it exists, but the pipe keeps being
-/// read and discarded until the pseudoconsole closes: `ClosePseudoConsole` can wait for its last
-/// frame to be read (see the `conpty` module), and after a close or a vanished host nobody else
-/// reads. A reader that panicked is the exception — its source is in no known state to read again.
-fn feed_and_record(
-    mut reader: impl Read,
+/// **The source is handed back** so that whoever called can drain it on Windows once the channel is
+/// let go.
+fn feed_and_record<R: Read>(
+    mut reader: R,
     channel: &SyncSender<Vec<u8>>,
     stop: &AtomicBool,
     ending: &OnceLock<Ending>,
-) {
+) -> R {
     // **`AssertUnwindSafe` is required and is not a formality.** The reader is a
     // `Box<dyn Read + Send>`, and a boxed trait object carries no unwind-safety bound, so this does
     // not compile without the assertion — while the flag and the channel are unwind-safe on their
     // own. What is claimed is that a channel and a reader which a panic may have left half-used are
     // still sound to observe afterwards: the standard library's channels do not poison, and the
-    // reader is dropped immediately below. Whoever widens this closure inherits that claim, which is
+    // reader is only ever read again on Windows, to be drained, and never after a panic. Whoever widens this closure inherits that claim, which is
     // why it is written here and not at the call site.
     let how = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         feed(&mut reader, channel, stop)
     }))
     .unwrap_or(Ending::Panicked);
     let _ = ending.set(how);
-    #[cfg(windows)]
-    if how != Ending::Panicked {
-        drain(&mut reader);
-    }
+    reader
 }
 
-/// Reads and discards until end of file or a failed read. Bounded by the pseudoconsole closing,
+/// Reads and discards until end of file or any failed read, an interrupted one included: nothing
+/// is left to deliver, so nothing is worth retrying for. Bounded by the pseudoconsole closing,
 /// which every path of a Windows console reaches (D111).
 #[cfg(windows)]
 fn drain(reader: &mut impl Read) {
     let mut buf = [0u8; READ_SIZE];
-    loop {
-        match reader.read(&mut buf) {
-            Ok(0) => return,
-            Ok(_) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-            Err(_) => return,
-        }
-    }
+    while let Ok(1..) = reader.read(&mut buf) {}
 }
 
 /// Reads the pseudoterminal into the channel until there is nothing more to read, and answers how
@@ -1272,21 +1270,6 @@ fn send_signal(pid: libc::pid_t, number: libc::c_int) -> std::io::Result<()> {
     }
 }
 
-/// On Windows: `TerminateProcess`, at once and with its result read (D56, D111). There is no grace
-/// to give here — closing the pseudoconsole right after is what tells the programs still attached
-/// to it, with Windows' own close event.
-#[cfg(windows)]
-fn hang_up(child: &mut (dyn Child + Send + Sync)) -> HangUp {
-    let Some(process) = child.as_raw_handle() else {
-        let _ = child.kill();
-        return HangUp::Waitable;
-    };
-    match conpty::terminate(process) {
-        Ok(()) => HangUp::Waitable,
-        Err(refused) => HangUp::Refused(refused),
-    }
-}
-
 /// Whether the program became reapable within `bound`, looking every millisecond. An error from
 /// `try_wait` counts as gone, as in `hang_up`: there is no child of ours left to wait for.
 #[cfg(unix)]
@@ -1318,6 +1301,7 @@ fn leave_running(mut child: Box<dyn Child + Send + Sync>) {
 }
 
 /// What hanging a program up left behind.
+#[cfg(unix)]
 enum HangUp {
     /// Gone, signalled with the system's consent, or a refusal this crate cannot see (the library's
     /// `kill`). On Unix the close waits for it at most [`REAP_GIVE_UP`], then leaves it running.
@@ -1364,29 +1348,21 @@ impl Drop for Pty {
         // pseudoterminal and triggers the end of file in the reader thread. Waiting for the thread
         // before that would hang it, because it would still be blocked inside `read`.
         //
-        // **On Windows the program is ended and then the pseudoconsole is closed, on a thread that
-        // is not this one** (D111): the close is what gives the reader its end of file and the
-        // writer its broken pipe, and it can wait for the host. Nothing is waited for here but the
-        // reader below; the program needs no reaping, and the exit watcher already holds a handle
-        // of its own and ends when the program does.
+        // **On Windows the pseudoconsole is closed first, and the program ended after a grace, on a
+        // thread that is not this one** (D111): the close tells the program, gives the reader its
+        // end of file and the writer its broken pipe, and it can wait for the host. Nothing is
+        // waited for here but the reader below; the program needs no reaping.
         #[cfg(windows)]
-        if let Some(mut child) = self.child.take()
-            && let HangUp::Refused(refused) = hang_up(child.as_mut())
-        {
-            use std::io::Write;
-
-            // Not `eprintln!`, for the reason the Unix refused arm gives.
-            let _ = writeln!(
-                std::io::stderr().lock(),
-                "a console was closed and Windows refused to end its program (pid {}): \
-                 {refused}. It may keep running",
+        if let Some(child) = self.child.take() {
+            conpty::close(
+                &self.master,
+                // SAFETY: `child` owns the handle and outlives the call, which duplicates it.
                 child
-                    .process_id()
-                    .map_or_else(|| "unknown".to_owned(), |pid| pid.to_string())
+                    .as_raw_handle()
+                    .map(|raw| unsafe { std::os::windows::io::BorrowedHandle::borrow_raw(raw) }),
+                child.process_id(),
             );
         }
-        #[cfg(windows)]
-        conpty::close_elsewhere(&self.master);
         #[cfg(unix)]
         if let Some(mut child) = self.child.take() {
             let left = hang_up(child.as_mut(), self.send_signal);

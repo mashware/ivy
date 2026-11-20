@@ -80,10 +80,12 @@ jobs:
       - name: Test that a console ends with its program and closes without waiting
         shell: pwsh
         run: |
-          cargo test --locked -p term-core --lib -- windows_exit 2>&1 | Tee-Object -Variable printed
+          # One at a time: each test starts PowerShell, and four cold starts at once on a runner
+          # measure the runner rather than the close.
+          cargo test --locked -p term-core --lib -- windows_exit --test-threads=1 2>&1 | Tee-Object -Variable printed
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           foreach ($name in 'windows_exit_ordinary_end_is_reported',
-                            'windows_exit_close_does_not_abandon_the_reader',
+                            'windows_exit_close_ends_the_reader',
                             'windows_exit_close_ends_a_parked_writer',
                             'windows_exit_an_exit_code_of_259_is_an_ended_program') {
             if (-not ($printed -match "$name \.\.\. ok$")) { throw "$name did not run and pass" }

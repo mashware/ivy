@@ -7881,7 +7881,8 @@ refusal is seen, and nothing is left waiting on the interface pass.** `portable-
 `TerminateProcess`'s result the wrong way round and discarded it, so the refused path above was never
 taken on Windows. This crate now calls `TerminateProcess` itself and writes this decision's line when
 it fails. Windows takes neither the 100 ms bound nor the `left-running` thread: there is no zombie to
-reap, and the thread that watches the program's exit (D111) already waits on it.
+reap, and the thread that watches the program's exit (D111) already waits on it. The line is
+written by the thread that closes the console, after its grace.
 
 ## D57 — Every blocking wait in production code is bounded or declared abandoned, and a test enforces it
 
@@ -11193,12 +11194,15 @@ pseudoconsole** (`ClosePseudoConsole`):
   process and, when it ends, closes the pseudoconsole. The output pipe breaks, the reader reads end of
   file, and the console reports an ordinary ending (`Ending::EndedWell`, D38): typing `exit` closes
   the pane, and the last pane closes the window, through the path Linux and macOS already take.
-- **When the console is closed.** `Drop for Pty` ends the program with `TerminateProcess`, reads its
-  result, and hands the master to a thread that drops it. The reader then ends with end of file
-  instead of being abandoned at `READER_GIVE_UP` (D32), and a writer parked on a program that reads
-  nothing fails with a broken pipe and ends (D29).
+- **When the console is closed.** `Drop for Pty` hands the master to a thread that drops it, then
+  gives the program 200 ms — the grace D55 gives on Unix — and ends it with `TerminateProcess` if it
+  is still there, reading the result. Closing first is what tells the program: Windows sends the
+  programs attached to the pseudoconsole a close event. The reader then ends with end of file instead
+  of being abandoned at `READER_GIVE_UP` (D32), and a writer parked on a program that reads nothing
+  fails with a broken pipe and ends (D29).
 - **The reader drains to end of file.** After a close or after its host is gone, it keeps reading and
-  discarding instead of returning. The reason is still recorded first.
+  discarding instead of returning. The reason is recorded and the output channel is let go first, so
+  the host learns at once that the console is over.
 
 **Why.** Three symptoms had one cause. `portable-pty` keeps the pseudoconsole in a value shared by the
 master and the slave, and closes it only when the last of them goes. It also hands both pipe ends it
@@ -11211,8 +11215,9 @@ the call is synchronous.
 
 **A refusal is seen now.** `portable-pty`'s `kill` reads `TerminateProcess`'s result the wrong way
 round and then discards it. This crate calls `TerminateProcess` itself. A refusal writes D56's line,
-and the close still happens. Whether the program already ended is asked of its handle, never of its
-exit code: a program that exits with 259 reports the same code Windows uses for «still running».
+and the pseudoconsole is closed anyway. **Whether the program ended is asked of its handle, never of
+its exit code**: a program that exits with 259 reports the same code Windows uses for «still
+running». The console's status reads it the same way, or such a pane would never close.
 
 **On Windows, `exit` also ends programs still attached to that console.** `ClosePseudoConsole` sends
 them Windows' close event and then ends them. On Linux a survivor holding the terminal keeps the pane
@@ -11223,15 +11228,19 @@ question; this decision does not answer it beyond what the platform's own close 
 |---|---|
 | **Overlapped writes and `CancelIoEx` for the writer**, the ticket's proposal | `portable-pty`'s pipes are anonymous pipes, which do not support overlapped I/O. It would mean replacing `openpty`. Closing the pseudoconsole already breaks the pipe the writer waits on |
 | **A Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`** | It decides that closing a console ends its whole process tree, which is #193's open product question |
-| **A grace period before terminating** | `ClosePseudoConsole` already sends the close event to attached programs before ending them |
+| **Terminating first and closing after**, the order the first version of this change had | The program is then killed with no close event and no grace, where Unix gives it 200 ms to save its state (D55). The review caught it |
+| **A Job Object's own grace timer** | The close event plus this crate's 200 ms is the same grace without a Job Object |
 | **Only the exit watcher, leaving `Drop` as it was** | Every close would still wait out the reader deadline, abandon the reader, and close on the interface pass with nobody draining |
 | **A drain thread on a second reader on the close path** | It needed the watcher to check the stop flag. That opened a race: the watcher closing while `Drop` stopped the reader, with nobody draining. A reader that drains until end of file removes the race and the second reader |
 | **`reaped_within` and `left-running` on Windows** | Windows has no zombies to reap, and the exit watcher already waits on the process |
 
 **What it costs, declared.** Each console has one more thread, parked on its process handle, for as
-long as its program lives. A program that survives both `TerminateProcess` and the close keeps that
-thread and the reader for as long as it lives, the same trade D56 makes. If the closing thread cannot
-be created, the close runs on the interface pass, where the draining reader bounds it.
+long as its program lives, and a closed one has a thread for the close and its grace. A program that
+survives both the close and `TerminateProcess` keeps the watcher and the reader for as long as it
+lives, the same trade D56 makes. If the closing thread cannot be created, the program is ended at
+once and the master is leaked rather than closed on the interface pass, where a reader that is not
+draining could freeze the window for good; the reader and the writer then stay for the life of the
+process, and standard error says so.
 
 **Not verified.** The tests run only in the prerelease workflow's Windows job (prefix `windows_exit`,
 D108). That image is Windows Server 2025, built on the 24H2 codebase, so it may not show the
