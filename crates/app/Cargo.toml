@@ -140,7 +140,8 @@ harfrust = "0.12"
 # `zune-core`, pure Rust with no system library. On macOS they were already compiled, because the
 # clipboard's `image/tiff` pulls them in there — checked with
 # `cargo tree -p app --target aarch64-apple-darwin -e normal -i tiff`, which gives
-# `tiff → image → arboard`, and the same for `x86_64-pc-windows-msvc`, which prints nothing.
+# `tiff → image → arboard`; on `x86_64-pc-windows-msvc` the same command prints nothing, because
+# `tiff` is absent there.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
 # The interface's icons: Phosphor Regular and its codepoints (D103). Only the face and the constants

@@ -678,7 +678,8 @@ source-console line, changed-directory notice or local close button. Scrolling i
 dim the consoles.
 
 Ctrl-click a local path printed in a console to reveal its directory in Files. A file is selected
-in its parent and scrolled into view; directories open directly. Local `file://` links use the same
+in its parent and scrolled into view; directories open directly. A PNG or JPEG path is the
+exception: it opens in the drawer's document tab instead (see below). Local `file://` links use the same
 route. Relative paths use that console's reported directory or its known local directory; they
 never fall back to the application's directory. Unknown/remote sources and missing paths report
 unavailability. The clicked console becomes the active Files source. Web links still use their
@@ -700,7 +701,14 @@ the file manager instead. The arrow beside Open offers **Open in File
 Manager**, **Copy absolute path**, **Copy relative path** (off outside that Files folder) and **Wrap
 lines**, which is off until you tick it. Neither Copy item copies a path that would not paste as
 itself. Console path gestures reveal files in Files
-as described above. Only empty authorities, localhost and the verified local hostname are accepted
+as described above.
+
+A PNG or JPEG file (`.png`, `.jpg`, `.jpeg`, any letter case) opens in the same document tab, from
+Files with one click or by Ctrl-clicking its path in a console. A relative path is read from that
+console's directory. The image is read once when it is opened: a program that later overwrites the
+file does not change what is shown. It fits the drawer's width without being enlarged; Ctrl+wheel
+zooms around the pointer and the wheel scrolls it. While one image is still being read, opening
+another says so instead of starting a second read. Only empty authorities, localhost and the verified local hostname are accepted
 as local file links.
 
 Each console header has a **Review changes** control beside its information-panel and maximize
@@ -716,7 +724,8 @@ shows that fact instead of choosing another console's repository.
 share a drawer below them, as two tabs. Open Files and File from the title bar (from its menu
 when the bar is narrow), and Git from a console's review control. On first use, Git uses the focused console;
 changing focus alone never retargets an open view. Choose a file in **Files**.
-Ctrl-click a local console path to reveal its location in Files before opening the document. Drag
+Ctrl-click a local console path to reveal its location in Files before opening the document; a PNG
+or JPEG path opens in the drawer directly. Drag
 the divider beside Files or above the drawer to resize them, or dismiss either with its button,
 the drawer's **Close**, or Escape while it owns keyboard focus. Consoles resize alongside them and
 keep their identities. Clicking a console returns typing there. A window too small for a surface

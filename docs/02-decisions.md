@@ -9057,7 +9057,8 @@ existing single cancellable worker, with generation/epoch-tagged replies. Querie
 rejects old replies; Escape clears search before closing Files. Matching directories expand within the results, without replacing the search root. Clearing an ordinary query restores that console's tree.
 
 Ctrl+click on a local console path reveals it in Files: directories open directly and files open
-their parent with the file selected and scrolled into view. It uses the clicked console's explicit
+their parent with the file selected and scrolled into view (PNG and JPEG files open in the drawer
+instead; see «Images in the document tab» below). It uses the clicked console's explicit
 local context, never the app's directory or a remote file host. The clicked console becomes the
 active source for its Files state. Metadata and directory reading run on the same worker; missing
 paths remain visible errors, not shell commands. Web links and ordinary selection retain their
@@ -9176,34 +9177,42 @@ console grid and a width drag, and the script refuses it rather than relabel it.
 Agents print the paths of the screenshots they take, and reading one meant leaving the terminal.
 A `.png`, `.jpg` or `.jpeg` path (any letter case) now opens in the drawer's document tab: Ctrl+click
 on it in a console, or activating it in Files. Ctrl+click on an image no longer reveals it in Files,
-which would show a name and not the picture; every other local path is revealed as before. Files
-says «Only Markdown and images open in the drawer.» for anything else.
+which would show a name and not the picture; every other local path is revealed as before. A
+relative path is joined onto that console's directory, as its review is, and refused with a reason
+only when the console has none. Files says «Only Markdown, PNG and JPEG files open in the drawer.»
+for anything else.
 
 - **One document tab, as before.** The image and a Markdown file replace each other there: opening
-  one forgets the other, and closing the tab forgets both. The image is pinned to the console it was
-  printed in, not to the focused one, and the strip names that console.
+  one forgets the other, and closing the tab forgets both, through one replacement every entry
+  uses. The image is pinned to the console it was printed in, not to the focused one, and the strip
+  shows that console's project or folder.
 - **Decoded once.** The file is read and decoded on the viewer's worker when it is opened and
   never again: switching to Changes and back, or closing and reopening the drawer, shows the same
   picture, and a program that overwrites the same screenshot name does not change what is on
   screen. Markdown's one-second refresh does not apply.
-- **Bounded before it is decoded.** The path is opened nonblocking and refused unless it is a
-  regular file, as Markdown's is; at most 32 MiB is read; the format comes from the bytes, and only
+- **One read at a time.** A read stuck on an unresponsive filesystem cannot be cancelled, so
+  replacing or closing an image whose decode has not finished keeps its handle, and another open
+  while it runs is refused with «Still reading <path>…» in the drawer. Repeated opens cannot pile
+  up readers, the rule the Markdown state already keeps. Errors name the path they are about.
+- **Bounded before it is decoded.** The path is opened nonblocking on Unix and refused unless it is
+  a regular file, as Markdown's is; at most 32 MiB is read; the format comes from the bytes, and only
   PNG and JPEG are decoded; the decode may allocate at most 256 MiB (`image::Limits::max_alloc`),
   counting the RGBA copy the viewer keeps when the file is not already RGBA. Each refusal is a
   visible message. The GPU gets a copy no side of which exceeds its `max_texture_side`, made after
   the decode and outside that cap; the original is kept at full resolution.
 - **Seen as a person reads a screenshot.** It fits the drawer's width and is never enlarged past one
-  point per pixel; Ctrl+wheel zooms around the pointer and the wheel and the scroll bars pan it. egui
+  physical pixel per pixel, so on a display of two pixels per point it is shown at half a point per
+  pixel rather than blurred; Ctrl+wheel zooms around the pointer and the wheel and the scroll bars pan it. egui
   reports Ctrl+wheel as a zoom and not as a scroll, so the drawer counts the zoom as pointer activity
   over it to keep the gesture. The drawer stays not modal: nothing dims.
-- **Cost.** Decoding runs on the worker. The texture is uploaded once, by the backend after the
-  pass, so on the frame an image opens that upload lands in the framework remainder, not in the
-  viewer's span. No measurement batch opens an image, so no published figure changes.
+- **Cost.** Decoding runs on the worker. The texture is uploaded once per open, by the backend
+  after the pass, on the first frame after the decode arrives, so that upload lands in the framework
+  remainder, not in the viewer's span. No measurement batch opens an image, so no published figure changes.
 
 Discarded: an image `Kind` inside the existing viewer state, because the document tab's click
 forces the Markdown kind and a kind change clears that state, which would erase the image on the
-way back from Changes; a third viewer state, because the two that exist are swapped with a single
-boolean; a separate image surface beside the drawer, because it would bring a second geometry and a
+way back from Changes; a third `viewer::State`, because the two that exist are swapped with a
+single boolean (the image keeps a state of its own instead); a separate image surface beside the drawer, because it would bring a second geometry and a
 second set of input rules for what D72 already gives one place; refreshing the image from disk,
 because what was opened would change under the person reading it; a separate side limit, because
 the allocation cap already refuses the headers that would need one; GIF, WebP and SVG, because
