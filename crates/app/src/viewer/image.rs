@@ -34,6 +34,10 @@ pub(crate) struct Viewer {
     started: bool,
     job: Option<Job<Picture>>,
     picture: Option<Picture>,
+    texture: Option<egui::TextureHandle>,
+    /// Screen points per pixel of the original; `None` fits the drawer's width.
+    scale: Option<f32>,
+    offset: egui::Vec2,
     pub(super) message: String,
 }
 
@@ -87,6 +91,59 @@ impl Viewer {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
     }
+
+    /// Paints the image over the drawer's body: fitted to its width until the person zooms, and
+    /// scrolled with the wheel or the scroll bars.
+    pub(super) fn show(&mut self, ui: &mut egui::Ui, theme: crate::theme::Theme) {
+        if !self.message.is_empty() {
+            egui::Frame::new().inner_margin(14).show(ui, |ui| {
+                ui.colored_label(
+                    theme.panel_color(Some(panel_contract::Mark::Block), None),
+                    &self.message,
+                );
+            });
+            return;
+        }
+        let Some(picture) = self.picture.as_mut() else {
+            egui::Frame::new().inner_margin(14).show(ui, |ui| {
+                ui.label("Loading…");
+            });
+            return;
+        };
+        // The GPU copy is uploaded on the first frame that shows the image and kept from then on.
+        let texture = self.texture.get_or_insert_with(|| {
+            ui.ctx().load_texture(
+                "drawer-image",
+                std::mem::take(&mut picture.display),
+                egui::TextureOptions::LINEAR,
+            )
+        });
+        let body = ui.max_rect();
+        let size = egui::vec2(
+            picture.original.width() as f32,
+            picture.original.height() as f32,
+        );
+        let scale = self.scale.unwrap_or_else(|| fit(body.width(), size.x));
+        let output = egui::ScrollArea::both()
+            .id_salt("drawer-image")
+            .auto_shrink(false)
+            .scroll_offset(self.offset)
+            .show(ui, |ui| {
+                let (rect, _) = ui.allocate_exact_size(size * scale, egui::Sense::hover());
+                ui.painter().image(
+                    texture.id(),
+                    rect,
+                    egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            });
+        self.offset = output.state.offset;
+    }
+}
+
+/// The scale that fits an image `width` pixels wide into `room` points, never enlarging it.
+fn fit(room: f32, width: f32) -> f32 {
+    (room / width.max(1.0)).min(1.0)
 }
 
 #[cfg(test)]
@@ -172,6 +229,145 @@ mod tests {
         let now = &viewer.picture.as_ref().unwrap().original;
         assert!(std::sync::Arc::ptr_eq(&first, now));
         assert_eq!(now.dimensions(), (40, 20));
+    }
+
+    fn area() -> egui::Rect {
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0))
+    }
+
+    /// One real application pass, returning what it painted.
+    fn painted(
+        window: &mut crate::Window,
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+    ) -> Vec<egui::epaint::ClippedShape> {
+        let mut frame = eframe::Frame::_new_kittest();
+        eframe::App::logic(window, ctx, &mut frame);
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(area()),
+                events,
+                ..Default::default()
+            },
+            |ui| eframe::App::ui(window, ui, &mut frame),
+        );
+        output.textures_delta.clear();
+        output.shapes
+    }
+
+    /// Where the drawer painted the image: the one mesh drawn with a texture of its own.
+    fn image_rect(shapes: &[egui::epaint::ClippedShape]) -> Option<egui::Rect> {
+        fn find(shape: &egui::Shape) -> Option<egui::Rect> {
+            match shape {
+                egui::Shape::Mesh(mesh) if mesh.texture_id != egui::TextureId::default() => {
+                    Some(mesh.calc_bounds())
+                }
+                egui::Shape::Vec(shapes) => shapes.iter().find_map(find),
+                _ => None,
+            }
+        }
+        shapes.iter().find_map(|clipped| find(&clipped.shape))
+    }
+
+    /// The fills and text colours painted inside `consoles`, as a dimmed pass would change them.
+    fn inks(shapes: &[egui::epaint::ClippedShape], consoles: egui::Rect) -> Vec<egui::Color32> {
+        let mut inks: Vec<_> = shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Text(text) if consoles.contains(text.pos) => Some(
+                    text.override_text_color
+                        .unwrap_or(text.galley.job.sections[0].format.color)
+                        .gamma_multiply(text.opacity_factor),
+                ),
+                egui::Shape::Rect(rect) if consoles.contains_rect(rect.rect) => Some(rect.fill),
+                _ => None,
+            })
+            .collect();
+        inks.sort_by_key(|c| c.to_array());
+        inks.dedup();
+        inks
+    }
+
+    /// A window with an image open in the drawer, pinned to its second console, once decoded.
+    fn window_with_image(path: &Path) -> (crate::Window, egui::Context, Duration) {
+        let mut window = crate::tests::window_of_tabs([["sleep 30", "sleep 30"]]);
+        let ctx = egui::Context::default();
+        painted(&mut window, &ctx, vec![]);
+        let name = window.active().panes()[1].name;
+        crate::viewer::open_diff_for_pane(&mut window, name);
+        assert!(crate::viewer::open_image_target(
+            &mut window,
+            name,
+            path.to_owned()
+        ));
+        let started = Instant::now();
+        while image_rect(&painted(&mut window, &ctx, vec![])).is_none() {
+            assert!(
+                started.elapsed() < Duration::from_secs(5),
+                "{}",
+                window.image.message
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        (window, ctx, started.elapsed())
+    }
+
+    fn click(window: &mut crate::Window, ctx: &egui::Context, pos: egui::Pos2) {
+        for pressed in [true, false] {
+            painted(
+                window,
+                ctx,
+                vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+        }
+    }
+
+    /// Switching to the review and back, or closing and reopening the drawer, shows the image that
+    /// was decoded when it was opened, though the file changed on disk in between.
+    #[test]
+    fn the_image_survives_switching_tabs_and_reopening_the_drawer() {
+        use crate::sidebar::{Tool, active};
+        use crate::viewer::StripAction;
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, took) = window_with_image(&path);
+        let first = std::sync::Arc::clone(&window.image.picture.as_ref().unwrap().original);
+        write_png(&path, 64, 32);
+        let dock = window.sidebar.last_dock.unwrap();
+        for (action, tool) in [
+            (StripAction::Changes, Tool::Git),
+            (StripAction::Document, Tool::Document),
+        ] {
+            let place = crate::viewer::strip_place(&window, dock, action).unwrap();
+            click(&mut window, &ctx, place);
+            assert_eq!(active(&window), Some(tool));
+        }
+        crate::sidebar::close(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        assert_eq!(active(&window), None);
+        crate::sidebar::toggle(&mut window, Tool::Document, &ctx);
+        let until = Instant::now() + (took * 5).max(Duration::from_millis(300));
+        let mut shapes = Vec::new();
+        while Instant::now() < until {
+            shapes = painted(&mut window, &ctx, vec![]);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let now = &window.image.picture.as_ref().unwrap().original;
+        assert!(std::sync::Arc::ptr_eq(&first, now));
+        assert_eq!(now.dimensions(), (640, 400));
+        assert!(
+            image_rect(&shapes).is_some(),
+            "the reopened drawer paints no image"
+        );
     }
 
     #[test]

@@ -474,8 +474,13 @@ pub(crate) fn before_keys(
         if !ctx.input(|i| i.focused && i.pointer.any_down()) {
             window.viewer.held = false;
         }
-        let pointer_activity =
-            ctx.input(|i| i.pointer.any_pressed() || i.smooth_scroll_delta != egui::Vec2::ZERO);
+        // egui reports Ctrl+wheel as a zoom and not as a scroll, so the image's zoom gesture
+        // would otherwise leave the drawer without its input.
+        let pointer_activity = ctx.input(|i| {
+            i.pointer.any_pressed()
+                || i.smooth_scroll_delta != egui::Vec2::ZERO
+                || i.zoom_delta() != 1.0
+        });
         let was_open = window.viewer.open;
         let reading_keys = window.sidebar.maximized
             && ctx.input(|i| {
@@ -543,24 +548,27 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
     let ctx = ui.ctx().clone();
     window.viewer.context = Some(ctx.clone());
     let started = Instant::now();
-    if window.viewer.kind.is_document()
+    let image = showing_image(window);
+    if !image
+        && window.viewer.kind.is_document()
         && window.viewer.requested.is_some()
         && window.viewer.job.is_none()
         && window.viewer.refresh_at.is_none()
     {
         window.viewer.refresh_at = Some(Instant::now());
     }
-    if window.viewer.requested.is_none()
-        && !window.viewer.path.is_empty()
-        && !window.viewer.editing_path
-    {
-        window.viewer.start(&ctx);
+    if image {
+        window.image.poll(&ctx);
+    } else {
+        if window.viewer.requested.is_none()
+            && !window.viewer.path.is_empty()
+            && !window.viewer.editing_path
+        {
+            window.viewer.start(&ctx);
+        }
+        window.viewer.poll(&ctx);
     }
-    window.viewer.poll(&ctx);
-    let unavailable = window
-        .viewer
-        .origin
-        .as_ref()
+    let unavailable = origin(window)
         .is_none_or(|origin| !window.all_panes().any(|pane| pane.name == origin.pane));
     let filtered = ctx.input(|input| input.events.clone());
     if let Some(events) = window.viewer.events.take() {
@@ -575,7 +583,7 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
         window.theme,
         unavailable,
         window.sidebar.maximized,
-        (&tabs, &title),
+        (&tabs, &title, image.then_some(&mut window.image)),
     );
     ctx.input_mut(|input| input.events = filtered);
     code_header::reveal_in_files(window);
@@ -583,10 +591,24 @@ pub(crate) fn paint(window: &mut crate::Window, ui: &mut egui::Ui, dock: egui::R
     window.timed_separately += window.viewer.take_cost();
 }
 
+/// Whether the drawer is on its document tab and that tab holds the image.
+fn showing_image(window: &crate::Window) -> bool {
+    window.image.shown() && crate::sidebar::active(window) == Some(crate::sidebar::Tool::Document)
+}
+
+/// The console the shown document was opened from.
+fn origin(window: &crate::Window) -> Option<&Source> {
+    if showing_image(window) {
+        window.image.origin.as_ref()
+    } else {
+        window.viewer.origin.as_ref()
+    }
+}
+
 /// The strip's name for what the drawer shows: the source console's project, or the folder it
 /// reads; the terminal's own title says nothing a person needs here.
 fn title(window: &crate::Window, unavailable: bool) -> drawer::Title {
-    let origin = window.viewer.origin.as_ref();
+    let origin = origin(window);
     let project = origin
         .and_then(|origin| window.all_panes().find(|pane| pane.name == origin.pane))
         .and_then(|pane| pane.project.as_ref())

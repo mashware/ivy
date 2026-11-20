@@ -10,7 +10,11 @@ pub(super) fn show(
     theme: crate::theme::Theme,
     unavailable: bool,
     maximized: bool,
-    (tabs, title): (&super::drawer::Tabs, &super::drawer::Title),
+    (tabs, title, image): (
+        &super::drawer::Tabs,
+        &super::drawer::Title,
+        Option<&mut super::image::Viewer>,
+    ),
 ) {
     let namespace = if state.kind.is_document() {
         "markdown-viewer"
@@ -112,7 +116,10 @@ pub(super) fn show(
                     },
                     roles.base,
                 );
-                body_content(state, &mut body_ui, theme, unavailable);
+                match image {
+                    Some(image) => image.show(&mut body_ui, theme),
+                    None => body_content(state, &mut body_ui, theme, unavailable),
+                }
             });
         });
 }
@@ -443,7 +450,7 @@ mod tests {
                         crate::theme::Theme::default(),
                         false,
                         false,
-                        (&tabs(true), &title()),
+                        (&tabs(true), &title(), None),
                     )
                 },
             );
@@ -507,7 +514,7 @@ mod tests {
                             theme,
                             true,
                             false,
-                            (&tabs(false), &title()),
+                            (&tabs(false), &title(), None),
                         )
                     },
                 );
@@ -573,7 +580,7 @@ mod tests {
                         crate::theme::Theme::default(),
                         true,
                         false,
-                        (&tabs(false), &gone),
+                        (&tabs(false), &gone, None),
                     )
                 },
             )
