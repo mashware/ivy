@@ -3588,7 +3588,7 @@ mod tests {
         )
         .unwrap();
         // The output is read and answered first, from the start: `portable-pty` passes
-        // `PSEUDOCONSOLE_INHERIT_CURSOR`, so the host asks where the cursor is before the program
+        // the inherit-cursor flag, so the host asks where the cursor is before the program
         // runs, and a reply that came after its wait would land as typed input instead.
         let mut screen = Screen::new(Size::default());
         let deadline = Instant::now() + Duration::from_secs(30);
