@@ -247,29 +247,52 @@ mod tests {
         .expect("PowerShell starts in a console")
     }
 
-    /// Waits for the program's own result, never for bytes: ConPTY writes before the program does,
-    /// so the marker is built at run time and its echo cannot satisfy this.
-    fn wait_for_marker(output: &Receiver<Vec<u8>>) {
-        let deadline = Instant::now() + DEADLINE;
-        let mut seen = Vec::new();
-        while !String::from_utf8_lossy(&seen).contains("IVY_OK") {
-            let left = deadline.saturating_duration_since(Instant::now());
-            match output.recv_timeout(left) {
-                Ok(bytes) => seen.extend_from_slice(&bytes),
-                Err(_) => panic!(
-                    "the program never wrote IVY_OK: {:?}",
-                    String::from_utf8_lossy(&seen)
-                ),
-            }
+    /// Reads what arrives and answers ConPTY's cursor-position requests (`ESC [ 6 n`): with the
+    /// cursor inherited it waits for that answer before the program runs, and in the app the
+    /// window's screen gives it. `answered` counts the requests already answered.
+    fn read_and_answer(
+        pty: &mut Pty,
+        output: &Receiver<Vec<u8>>,
+        seen: &mut String,
+        answered: &mut usize,
+        wait: Duration,
+    ) {
+        if let Ok(bytes) = output.recv_timeout(wait) {
+            seen.push_str(&String::from_utf8_lossy(&bytes));
+        }
+        for _ in *answered..seen.matches("\x1b[6n").count() {
+            // Ignored on purpose: a console already closing refuses writes, and it needs no answer.
+            let _ = pty.write(b"\x1b[1;1R");
+            *answered += 1;
         }
     }
 
-    /// Drains the output until the console reports how it ended, or the deadline passes.
-    fn wait_for_ending(pty: &Pty, output: &Receiver<Vec<u8>>) {
+    /// Waits for the program's own result, never for bytes: ConPTY writes before the program does,
+    /// so the marker is built at run time and its echo cannot satisfy this.
+    fn wait_for_marker(pty: &mut Pty, output: &Receiver<Vec<u8>>) -> (String, usize) {
         let deadline = Instant::now() + DEADLINE;
+        let (mut seen, mut answered) = (String::new(), 0);
+        while !seen.contains("IVY_OK") {
+            let left = deadline.saturating_duration_since(Instant::now());
+            assert!(!left.is_zero(), "the program never wrote IVY_OK: {seen:?}");
+            read_and_answer(pty, output, &mut seen, &mut answered, left);
+        }
+        (seen, answered)
+    }
+
+    /// Drains and answers the output until the console reports how it ended, or the deadline
+    /// passes.
+    fn wait_for_ending(pty: &mut Pty, output: &Receiver<Vec<u8>>, so_far: (String, usize)) {
+        let deadline = Instant::now() + DEADLINE;
+        let (mut seen, mut answered) = so_far;
         while pty.ending().is_none() && Instant::now() < deadline {
-            // Bounded by the deadline; drained so the reader is never parked on a full channel.
-            let _ = output.recv_timeout(Duration::from_millis(10));
+            read_and_answer(
+                pty,
+                output,
+                &mut seen,
+                &mut answered,
+                Duration::from_millis(10),
+            );
         }
     }
 
@@ -286,9 +309,9 @@ mod tests {
     /// it. Before the exit watcher this waited for ever, because the pseudoconsole stayed open.
     #[test]
     fn windows_exit_ordinary_end_is_reported() {
-        let (pty, output) = spawn("Write-Output ('IVY' + '_OK')");
-        wait_for_marker(&output);
-        wait_for_ending(&pty, &output);
+        let (mut pty, output) = spawn("Write-Output ('IVY' + '_OK')");
+        let so_far = wait_for_marker(&mut pty, &output);
+        wait_for_ending(&mut pty, &output, so_far);
         assert_eq!(
             pty.ending(),
             Some(Ending::EndedWell),
@@ -303,7 +326,7 @@ mod tests {
     #[test]
     fn windows_exit_close_ends_the_reader() {
         let (mut pty, output) = spawn("Write-Output ('IVY' + '_OK'); Start-Sleep 30");
-        wait_for_marker(&output);
+        wait_for_marker(&mut pty, &output);
         let reader = pty.reader.take().expect("the reader thread is there");
         drop(pty);
         assert!(
@@ -318,7 +341,7 @@ mod tests {
     #[test]
     fn windows_exit_close_ends_a_parked_writer() {
         let (mut pty, output) = spawn("Write-Output ('IVY' + '_OK'); Start-Sleep 30");
-        wait_for_marker(&output);
+        wait_for_marker(&mut pty, &output);
         pty.write(&vec![b'x'; 8 * 1024 * 1024])
             .expect("an empty queue takes a write whole");
         std::thread::sleep(Duration::from_secs(2));
@@ -340,9 +363,9 @@ mod tests {
     /// closing, which would otherwise call it refused.
     #[test]
     fn windows_exit_an_exit_code_of_259_is_an_ended_program() {
-        let (pty, output) = spawn("Write-Output ('IVY' + '_OK'); exit 259");
-        wait_for_marker(&output);
-        wait_for_ending(&pty, &output);
+        let (mut pty, output) = spawn("Write-Output ('IVY' + '_OK'); exit 259");
+        let so_far = wait_for_marker(&mut pty, &output);
+        wait_for_ending(&mut pty, &output, so_far);
         assert_eq!(pty.ending(), Some(Ending::EndedWell));
         assert_eq!(
             pty.termination(),
