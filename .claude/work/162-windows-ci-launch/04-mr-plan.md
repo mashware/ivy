@@ -26,9 +26,10 @@ Evaluated pair A (test portability + workspace CI) / B (installed launch). Mergi
 
 ## Checklist for implementation
 - [ ] Inventory each shell/platform test, Windows branch, example target, and unsupported early return; keep neutral coverage.
-- [ ] Implement platform fixtures/gates and harness-derived omission names/total with reasons.
+- [ ] Implement platform fixtures/gates, compiler-checked per-test omission inventory and pinned libtest reporter; require exact qualified-name membership on Windows and real Linux counterparts; print reasons and exact total including zero.
+- [ ] Prove reporter fixtures reject missing, extra and duplicate entries; report unrelated ignores separately.
 - [ ] Run Windows full workspace clippy/tests and existing Windows witness-name checks on PR/manual runs.
-- [ ] Install and launch the candidate with clean profile; observe native window, actual shell witness, normal shutdown, valid saved layout, exit 0.
+- [ ] Install and launch the candidate with clean profile; observe PID-targeted native window, resolver-bound actual shell witness with inherited PATH/ComSpec, normal shutdown, valid saved layout, exit 0.
 - [ ] Prove smoke controls fail for crash, missing shell, missing layout and deadline; preserve replacement/removal/preferences.
 - [ ] Validate Linux whole suite and actual Windows execution, review, publish.
 
@@ -37,3 +38,6 @@ Open 03-design.md acceptance criteria and contracts before implementation. Windo
 
 ## Cost
 Planning: 1/12 agent tasks; monetary cost not reported by harness. Design: two approach advisors, one architecture advisor and one independent challenge (4/12 tasks, three reused agent contexts); configured workers/agents model from FLOW.codex.md.
+
+## Final acceptance
+One PR retained after applying the design-challenge answer. Size M remains appropriate for cross-crate platform fixtures, compiler-checked omission reporting and installed GUI verification. Plan accepted (recorded unattended); no additional planning fan-out: the existing independent plan-proposal.md remains applicable, with the approved inventory mechanism included. No schema, cross-repository or new ticket dependencies.

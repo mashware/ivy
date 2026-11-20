@@ -39,7 +39,7 @@ No configured knowledge source. Repository evidence above is authoritative for c
 - `.github/workflows/ivy-prerelease.yml`: Windows PR/manual quality and installer smoke wiring; preserve release publish dependency and static CRT build settings.
 - Test bodies/imports/helpers throughout app, term-core, panel-control, panel-contract: per-platform compilation, fixtures and omission visibility, including examples compiled by all-target clippy.
 - `packaging/windows/test-install.ps1` plus a focused launch helper if separation improves clarity: clean child profile, native launch witness, bounded close and cleanup.
-- A small reporting script under scripts only if cargo's ignored test summaries need aggregation; no source-regex test census.
+- A focused omission reporter and per-test inventory under scripts, checked against compiled harness listings on Linux and Windows; no source-regex test census.
 
 ## Data model
 No entities, migrations or indexes. No layout schema changes. Access paths: N/A — existing local JSON persistence only.
@@ -50,9 +50,9 @@ No public API changes. CI job retains its current identifier where possible to p
 ## Internal behavioral contracts
 - Windows ignores use reason `unix-only: <specific capability>`; test harness reports each and aggregate count, even for a zero count.
 - Unix-only Rust code/imports are behind cfg(unix), Linux-only probes behind target_os=linux. For a gated case, expose a same-named ignored Windows counterpart (or equivalent runtime-visible harness entry), whose reason is explicit. Never run ignored placeholders as if they proved behavior.
-- Derive omission counts from compiled test harness output, not number of gated files or source substring matches. Validate ordinary tests and omission reporting on both platforms; intentional Windows-specific tests cannot appear in omission inventory.
+- Derive omission counts from pinned Rust 1.97.1 compiled libtest listings, qualified by test binary and name. Inventory entries carry a platform reason. Windows compiled Unix-only ignored counterparts must equal the inventory; reject missing, unexpected and duplicate entries. On Linux require their compiled real counterparts, documenting any platform-specific name mapping. Print matched names, reasons and exact total, including zero; separately report unrelated existing ignores. Reporter fixtures prove these invariants. Intentional Windows-specific tests cannot appear in the omission inventory.
 - Fresh launch child removes XDG_* and SHELL; clears inherited measurement/IVY test overrides so startup stays normal. Retain standard Windows system environment and set isolated absolute APPDATA. No mutation of the process-wide Rust test environment.
-- Launch helper starts the installed executable, waits for its native HWND, drives the default shell to emit a unique output/file witness through the actual console input path, then requests ordinary window close. A created pane or process alone does not prove shell output. Prefer external native window automation over a product smoke switch; architecture review may identify a smaller equally faithful witness.
+- Launch helper starts the installed executable, waits for its native HWND, drives the default shell to emit a unique output/file witness through the actual console input path, and binds the witness to the resolver-selected actual child executable while retaining inherited PATH/ComSpec, then requests ordinary window close. Discover the native window by launched PID and title/class; use bounded state waits and capture diagnostics before cleanup. Unexpected modal dialogs fail the smoke. A created pane or process alone does not prove shell output. Prefer external native window automation over a product smoke switch; architecture review may identify a smaller equally faithful witness.
 - Require parsed layout JSON with at least one saved console using the existing schema, exit code 0 and no forced termination on the success path. A finite failure deadline terminates the process tree and reports diagnostics.
 
 ## Depends on other tickets
@@ -89,10 +89,27 @@ No retries, product fallback or new persistence format.
 | Decision | Discarded alternatives | Why |
 |----------|-------------------------|-----|
 | Normal startup and normal close | Measurement mode; new smoke-only product startup | startup.rs:35 vetoes persistence under measurement; ordinary startup covers the reported regression |
-| Runtime-visible per-test omissions | Blanket module gates; unchecked static manifest; port all Unix semantics | Mixed lib.rs/resume.rs tests contain neutral assertions and Windows arms; file counts cannot measure omitted tests |
+| Compiler-checked per-test omission inventory with visible ignored counterparts | Blanket module gates; unchecked manifest or harness total alone; port all Unix semantics | Mixed lib.rs/resume.rs tests contain neutral assertions and Windows arms; qualified compiled listings on both targets check inventory membership and exact counts |
 | Native Windows verification on PRs | Manual-only installer job; cross-compilation | Existing windows job only runs workflow_dispatch and building cannot demonstrate launch or ConPTY behavior |
 
 ## Design challenges
-Independent findings are in design-challenge.md. F1 (high): exact compiled omission accounting lacks a selected mechanism. Response pending orchestrator answer; ask-question.md contains the complete recommended compiler-checked inventory response. Medium findings about shell identity, inherited default-shell inputs and window/dialog evidence will be incorporated alongside that answer. No implementation or phase approval has occurred.
+Independent findings are in design-challenge.md.
+
+### Answer applied
+Pending question id: `162-windows-ci-launch:design:design_challenge:0429d9e:a7732e5`.
+
+```text
+Orchestrator answer: Apply the recommended response to each
+```
+
+| Finding | Severity | Response |
+|---------|----------|----------|
+| F1: exact omission accounting | high | Adopt a compiler-checked per-test inventory and the pinned Rust 1.97.1 libtest listing. Match qualified test binary + test name + platform reason; Windows compiled ignored counterparts must equal the inventory, with no duplicates, missing or unexpected Unix-only omissions. On Linux require corresponding compiled real tests, with explicit platform-counterpart mappings. Print names, reasons and exact total including zero; report unrelated ignores separately. Reporter fixtures reject extra, missing and duplicate entries. Never execute placeholders as coverage evidence. |
+| Default shell fidelity | medium | Preserve inherited PATH/ComSpec and normal shell resolution after removing SHELL. Bind the witness to the actual child executable selected by that resolver, using a command valid for it. |
+| Smoke scope | low | Retain installed startup, persistence and normal-close checks. Reuse candidate build artifacts and keep release publication gated. |
+| Automation operations | medium | Discover HWND by launched PID and title/class, wait on state with a bounded deadline, and capture process/window diagnostics before cleanup. Unexpected modal dialogs fail the smoke. |
+| ADR rationale | medium | Replace the unchecked-manifest rejection with a compiler-checked inventory; compiler listings establish the inventory's presence on both platforms. |
+
+All high findings now have responses. Design accepted for study completion (recorded unattended); implementation still requires study approval.
 
 Design agent tasks: 4/12; configured models.agents/models.workers from FLOW.codex.md; cost not reported.

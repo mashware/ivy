@@ -1,12 +1,12 @@
 # 162 — Windows CI and installed launch
-Size: M; branch: 162-windows-ci-launch; phase: context (design in progress).
-Study only; no implementation or tests run.
-Effective config: FLOW.codex.md; base/context absent; unattended via ai.
-Base already includes #161 and #177; ticket_deps is empty.
-Design: 03-design.md; inventory and contracts are provisional pending challenge answer.
-One-PR delivery proposal: 04-mr-plan.md; not phase-approved yet.
-High F1: choose verifiable compiled-test omission accounting.
-Question and concrete recommendation: ask-question.md; pending gate design_challenge.
-Medium findings: bind default-shell witness and capture window/dialog diagnostics.
-Next: apply answer to design challenge, finish design/plan, stop before build for study approval.
-Shared rules 0.118.0; installed manifest absent, version comparison unavailable.
+- Size: M; phase: plan; study complete, awaiting approval.
+- Answer applied: compiler-checked per-test omission inventory and pinned Rust listings.
+- PR 1: full Windows workspace lint/tests, visible Unix omissions and installed launch smoke.
+- Train: 0/1 published; wave 1 has one pending PR, no dependencies.
+- Acceptance: AC1–AC5 in 03-design.md; no unresolved high design finding.
+- #161 already merged on base; no unmet ticket dependencies.
+- No schema changes; no production code written or tests run.
+- Windows runtime behavior requires native validation during implementation.
+- Next: approve study, then build PR 1.
+- Effective config: FLOW.codex.md; FLOW_CONTEXT=unattended, context file absent.
+- Shared rules 0.118.0; plugin manifest absent, version comparison unavailable.

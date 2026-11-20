@@ -8,30 +8,44 @@
   "stacked_on": null,
   "worktree": null,
   "size": "M",
-  "phase": "context",
+  "phase": "plan",
   "phases_done": [
-    "context"
+    "context",
+    "design",
+    "plan"
   ],
   "draft_from_conversation": false,
   "tracker_issue": null,
   "related_repos": [],
   "roadmap": null,
   "started_at": "2026-11-20T19:04:49.099460+00:00",
-  "updated_at": "2026-11-20T19:08:45.490969+00:00",
-  "notes": "Study paused for omission-accounting design challenge; one-PR delivery proposal retained for completion after answer.",
-  "pending": {
-    "id": "162-windows-ci-launch:design:design_challenge:0429d9e:a7732e5",
-    "gate": "design_challenge",
-    "phase": "design",
-    "resume": "feat:design",
-    "resume_at": "\u00a77 after writing each challenge Response; finish design and delivery plan, then stop at study door",
-    "head": "0429d9ea71534b88703625be6e90563207562a7b",
-    "question_file": "ask-question.md",
-    "options_file": "ask-options.md",
-    "why": "study",
-    "free_text": true
-  },
-  "defaults_used": [],
+  "updated_at": "2026-11-20T19:12:34.501940+00:00",
+  "notes": "Study complete; approved design-challenge response applied. One PR planned; waiting for study approval before code.",
+  "pending": null,
+  "defaults_used": [
+    {
+      "key": "unattended:rehomed",
+      "default": "162-windows-ci-launch \u2192 162-windows-ci-launch from main",
+      "phase": "run"
+    },
+    {
+      "key": "unattended:answer:design_challenge",
+      "default": "Apply the recommended response to each",
+      "id": "162-windows-ci-launch:design:design_challenge:0429d9e:a7732e5",
+      "phase": "design",
+      "head": "0429d9ea71534b88703625be6e90563207562a7b"
+    },
+    {
+      "key": "unattended:design-review",
+      "default": "Accepted after applying the answer to the design challenge; M retained",
+      "phase": "design"
+    },
+    {
+      "key": "unattended:plan-review",
+      "default": "One PR; existing independent proposal retained and updated with approved omission accounting",
+      "phase": "plan"
+    }
+  ],
   "ticket_deps": [],
   "cost": [
     {
@@ -45,6 +59,19 @@
       "at": "2026-11-20T19:08:45.490969+00:00",
       "agents": 1,
       "source": "not reported"
+    }
+  ],
+  "mrs": [
+    {
+      "n": 1,
+      "title": "Verify the Windows workspace and installed application launch",
+      "size": "M",
+      "status": "pending",
+      "phases_done": [],
+      "wave": 1,
+      "depends_on": [],
+      "lines_est": 600,
+      "files_est": 25
     }
   ]
 }

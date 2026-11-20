@@ -1,13 +1,15 @@
 {
-  "updated_at": "2026-11-20T19:08:46.082Z",
-  "phase": "design",
+  "updated_at": "2026-11-20T19:12:54.094Z",
+  "phase": "plan",
   "header": true,
-  "attention": "wait",
+  "attention": "done",
   "lines": [
     {"key":"title","text":"Windows CI: run clippy and the whole test suite, and launch the installed app","style":"title"},
     "",
-    {"key":"now","ref":"Now","text":"Independent design challenge identified omission-accounting decision","mark":"info"},
-    {"key":"next","ref":"Next","text":"Finish study after answer","mark":"info"},
-    {"key":"decision","ref":"Decision","text":"Approve compiler-checked per-test omission inventory or provide an alternative","mark":"wait"}
+    {"key":"mrs","text":"PRs","style":"section","summary":"0/1 merged","collapsed":true},
+    {"key":"mr-1","ref":"#1","text":"Verify the Windows workspace and installed application launch","mark":"pending"},
+    "",
+    {"key":"now","ref":"Now","text":"Study complete; design response applied and one PR planned","mark":"info"},
+    {"key":"next","ref":"Next","text":"Study approval, then implementation","mark":"info"}
   ]
 }

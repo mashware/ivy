@@ -1,1 +1,6 @@
-{"phase": "design", "now": "Independent design challenge identified omission-accounting decision", "next": "Finish study after answer", "decision": "Approve compiler-checked per-test omission inventory or provide an alternative"}
+{
+  "phase": "plan",
+  "now": "Study complete; design response applied and one PR planned",
+  "next": "Study approval, then implementation",
+  "attention": "done"
+}
