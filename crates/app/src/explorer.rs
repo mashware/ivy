@@ -1,6 +1,7 @@
 //! A window-owned file surface with navigation owned by runtime console identity.
 mod load;
 mod model;
+mod pattern;
 mod search;
 mod view;
 
@@ -129,6 +130,7 @@ impl Explorer {
             epoch: nav.epoch,
             path,
             query: nav.query.trim().to_owned(),
+            regex: nav.regex,
             reveal: false,
         }
     }

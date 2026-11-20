@@ -1,9 +1,11 @@
 //! Files' name search as a floating list over the window (`Files.dc.html`, D72): the existing
 //! worker finds the names below the displayed root; Enter reveals a match in the tree and
 //! Ctrl+Enter opens it.
+use super::pattern::Matcher;
 use super::{Entry, EntryKind, Explorer, Request, display};
 use eframe::egui;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 const WIDTH: f32 = 360.0;
 const ROWS: usize = 8;
@@ -17,12 +19,29 @@ pub(super) enum Pick {
     Open(Entry),
 }
 
-/// The matches for the pane's query, what to say instead, and the request to run when the
+/// The matches for the pane's query, what to say instead, and the search to run when the
 /// worker has not answered yet.
 struct Matches {
     entries: Vec<Entry>,
     said: Option<String>,
-    pending: Option<Request>,
+    pending: Option<(Request, Arc<Matcher>)>,
+    /// What the rows mark in each name.
+    matcher: Option<Arc<Matcher>>,
+}
+
+/// The pane's query compiled for its flag, compiled again only when either changed.
+fn matcher(state: &mut Explorer, pane: usize) -> Result<Arc<Matcher>, String> {
+    let nav = state.navigation.get_mut(&pane).unwrap();
+    let query = nav.query.trim();
+    if !nav
+        .matcher
+        .as_ref()
+        .is_some_and(|(compiled, regex, _)| compiled == query && *regex == nav.regex)
+    {
+        let built = Matcher::new(query, nav.regex).map(Arc::new);
+        nav.matcher = Some((query.to_owned(), nav.regex, built));
+    }
+    nav.matcher.as_ref().unwrap().2.clone()
 }
 
 fn matches(state: &mut Explorer, pane: usize) -> Matches {
@@ -32,7 +51,21 @@ fn matches(state: &mut Explorer, pane: usize) -> Matches {
             entries: Vec::new(),
             said: None,
             pending: None,
+            matcher: None,
         };
+    };
+    // **A pattern that cannot be built is said, never searched**: an empty list would read as
+    // «nothing is called that».
+    let matcher = match matcher(state, pane) {
+        Ok(matcher) => matcher,
+        Err(why) => {
+            return Matches {
+                entries: Vec::new(),
+                said: Some(why),
+                pending: None,
+                matcher: None,
+            };
+        }
     };
     let request = state.request(pane, root);
     state.clock = state.clock.wrapping_add(1);
@@ -40,7 +73,8 @@ fn matches(state: &mut Explorer, pane: usize) -> Matches {
         return Matches {
             entries: Vec::new(),
             said: Some("Searching…".into()),
-            pending: Some(request),
+            pending: Some((request, matcher)),
+            matcher: None,
         };
     };
     cached.used = state.clock;
@@ -49,16 +83,19 @@ fn matches(state: &mut Explorer, pane: usize) -> Matches {
             entries: Vec::new(),
             said: Some("No matching files or folders.".into()),
             pending: None,
+            matcher: None,
         },
         Ok(listing) => Matches {
             entries: listing.entries.clone(),
             said: listing.notice.clone(),
             pending: None,
+            matcher: Some(matcher),
         },
         Err(error) => Matches {
             entries: Vec::new(),
             said: Some(error.clone()),
             pending: None,
+            matcher: None,
         },
     }
 }
@@ -122,9 +159,9 @@ pub(super) fn show(
 ) -> Option<Pick> {
     let found = matches(state, pane);
     if state.loading.is_none()
-        && let Some(request) = found.pending.clone()
+        && let Some((request, matcher)) = found.pending.clone()
     {
-        state.loader.submit(request.clone(), ctx);
+        state.loader.search(request.clone(), matcher, ctx);
         state.loading = Some(request);
     }
     state.search_index = state
@@ -136,7 +173,6 @@ pub(super) fn show(
     // The surfaces under an entry's icon: the floating list, and its hovered and chosen rows.
     let grounds = crate::ui::icons::row_grounds(roles.raised, roles.hover, roles.sel);
     let root = state.navigation[&pane].root.clone().unwrap_or_default();
-    let query = state.navigation[&pane].query.trim().to_lowercase();
     let mut pick = None;
     let scroll = std::mem::take(&mut state.search_scroll);
     let shown = egui::Area::new(egui::Id::new(("explorer-search", pane)))
@@ -172,7 +208,7 @@ pub(super) fn show(
                                     let (choice, response) = row(
                                         ui,
                                         entry,
-                                        (&root, &query),
+                                        (&root, found.matcher.as_deref()),
                                         chosen,
                                         (theme, &roles, &grounds),
                                     );
@@ -243,9 +279,10 @@ fn field(
     );
     ui.painter()
         .galley(cap.center() - key.size() / 2.0, key, roles.tx3);
+    let toggled = pattern_toggle(state, ui, pane, cap, roles);
     let input = egui::Rect::from_min_max(
         egui::pos2(rect.left() + 30.0, rect.top() + 2.0),
-        egui::pos2(cap.left() - 6.0, rect.bottom() - 2.0),
+        egui::pos2(cap.left() - 6.0 - TOGGLE - 4.0, rect.bottom() - 2.0),
     );
     let nav = state.navigation.get_mut(&pane).unwrap();
     let mut query = nav.query.clone();
@@ -261,7 +298,9 @@ fn field(
             .vertical_align(egui::Align::Center)
             .desired_width(input.width()),
     );
-    if std::mem::take(&mut state.focus_search) {
+    // A press on the toggle takes the focus like any press outside the field; the keys go back
+    // to the query, which is where the person was typing.
+    if std::mem::take(&mut state.focus_search) || toggled {
         field.request_focus();
     }
     // A singleline field gives the keys up on Enter; the list keeps them while open, or what is
@@ -270,20 +309,69 @@ fn field(
         field.request_focus();
     }
     if field.changed() {
-        // The query is part of each search's request, so the tree's listings stay cached; only
-        // a search still running for the old query is let go.
         nav.query = query;
-        if state
-            .loading
-            .as_ref()
-            .is_some_and(|r| r.pane == pane && !r.query.is_empty())
-        {
-            state.loader.cancel();
-            state.loading = None;
-        }
-        state.search_index = 0;
-        state.message.clear();
+        search_changed(state, pane);
     }
+}
+
+/// The width of the pattern toggle beside the field's Esc cap.
+const TOGGLE: f32 = 22.0;
+
+/// The `.*` toggle: the query read as a pattern or as text. Returns whether it was pressed.
+fn pattern_toggle(
+    state: &mut Explorer,
+    ui: &mut egui::Ui,
+    pane: usize,
+    cap: egui::Rect,
+    roles: &crate::theme::Roles,
+) -> bool {
+    let rect = egui::Rect::from_center_size(
+        egui::pos2(cap.left() - 4.0 - TOGGLE / 2.0, cap.center().y),
+        egui::vec2(TOGGLE, cap.height().max(18.0)),
+    );
+    let response = ui
+        .interact(
+            rect,
+            egui::Id::new(("explorer-name-search-pattern", pane)),
+            egui::Sense::click(),
+        )
+        .on_hover_text("Regular expression");
+    let on = state.navigation[&pane].regex;
+    if on {
+        ui.painter().rect_filled(rect, 4, roles.accent);
+    } else if response.hovered() {
+        ui.painter().rect_filled(rect, 4, roles.hover);
+    }
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        ".*",
+        egui::FontId::monospace(11.0),
+        if on { roles.base } else { roles.tx3 },
+    );
+    let pressed = response.clicked();
+    if pressed {
+        let nav = state.navigation.get_mut(&pane).unwrap();
+        nav.regex = !nav.regex;
+        search_changed(state, pane);
+    }
+    pressed
+}
+
+/// What changing how the names are matched does. The query and the flag are part of each
+/// search's request, so the tree's listings stay cached; only a search still running for the old
+/// one is let go.
+fn search_changed(state: &mut Explorer, pane: usize) {
+    if state
+        .loading
+        .as_ref()
+        .is_some_and(|r| r.pane == pane && !r.query.is_empty())
+    {
+        state.loader.cancel();
+        state.loading = None;
+    }
+    state.search_index = 0;
+    state.message.clear();
 }
 
 fn footer(ui: &mut egui::Ui, count: &str, roles: &crate::theme::Roles) {
@@ -336,7 +424,7 @@ fn count(n: usize) -> String {
 fn row(
     ui: &mut egui::Ui,
     entry: &Entry,
-    (root, query): (&Path, &str),
+    (root, matcher): (&Path, Option<&Matcher>),
     chosen: bool,
     (theme, roles, grounds): (
         &crate::theme::Theme,
@@ -384,15 +472,11 @@ fn row(
     let font = egui::FontId::proportional(13.0);
     let plain = egui::TextFormat::simple(font.clone(), roles.tx);
     let mut job = egui::text::LayoutJob::default();
-    match (!query.is_empty())
-        .then(|| name.to_lowercase().find(query))
-        .flatten()
-        .filter(|at| name.is_char_boundary(*at) && name.is_char_boundary(at + query.len()))
-    {
-        Some(at) => {
-            job.append(&name[..at], 0.0, plain.clone());
+    match matcher.and_then(|matcher| matcher.span(&name)) {
+        Some(span) => {
+            job.append(&name[..span.start], 0.0, plain.clone());
             job.append(
-                &name[at..at + query.len()],
+                &name[span.clone()],
                 0.0,
                 egui::TextFormat {
                     background: roles.wait_soft,
@@ -400,7 +484,7 @@ fn row(
                     ..plain.clone()
                 },
             );
-            job.append(&name[at + query.len()..], 0.0, plain);
+            job.append(&name[span.end..], 0.0, plain);
         }
         None => job.append(&name, 0.0, plain),
     }

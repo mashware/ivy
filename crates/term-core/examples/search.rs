@@ -91,7 +91,13 @@ fn main() {
     for toward in [Toward::Older, Toward::Newer] {
         press(&mut screen, "modul", whole_word, toward, "one wrapped line");
     }
-    press(&mut screen, HOSTILE, regex, Toward::Older, "one wrapped line");
+    press(
+        &mut screen,
+        HOSTILE,
+        regex,
+        Toward::Older,
+        "one wrapped line",
+    );
 }
 
 fn press(screen: &mut Screen, query: &str, options: Options, toward: Toward, history: &str) {

@@ -1566,6 +1566,75 @@ fn typing_a_search_keeps_the_tree_loaded_and_the_keys_in_files() {
 }
 
 #[test]
+fn the_pattern_toggle_reads_the_query_as_a_pattern_says_a_bad_one_and_keeps_the_tree() {
+    let ctx = egui::Context::default();
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));
+    let directory = Directory::new("search-pattern");
+    fs::create_dir_all(directory.0.join("src")).unwrap();
+    fs::write(directory.0.join("src/main.rs"), "").unwrap();
+    fs::write(directory.0.join("domain.rs"), "").unwrap();
+    let command = format!("cd '{}' && exec sleep 30", directory.0.display());
+    let mut window = window_of_tabs([[command.as_str(), "sleep 30"]]);
+    crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
+    frame(&mut window, &ctx, area, vec![]);
+    let pane = window.active().panes()[0].name;
+    wait_for_source(&mut window, &ctx, area, pane, &directory.0);
+    crate::sidebar::select(&mut window, crate::sidebar::Tool::Files);
+    wait_for_text(&mut window, &ctx, area, "src");
+    let tree = {
+        let mut key = window.explorer.request(pane, directory.0.clone());
+        key.query.clear();
+        key.regex = false;
+        key
+    };
+    assert!(window.explorer.cache.contains_key(&tree));
+    let before = window.pane_called(pane).unwrap().keystrokes.clone();
+    click_icon(&mut window, &ctx, area, view::Icon::Search);
+    // As text, «^main» is in no name.
+    type_text(&mut window, &ctx, area, "^main");
+    wait_for_text(&mut window, &ctx, area, "No matching files or folders.");
+
+    click_text(&mut window, &ctx, area, ".*");
+    assert!(window.explorer.navigation[&pane].regex);
+    wait_for_text(&mut window, &ctx, area, "main.rs");
+    let listed = loop_until_settled(&mut window, &ctx, area, pane);
+    assert_eq!(listed, vec![directory.0.join("src/main.rs")]);
+    assert!(
+        window.explorer.cache.contains_key(&tree),
+        "flipping the toggle dropped the tree's listing"
+    );
+    // The keys stayed in the field: what is typed next extends the pattern.
+    type_text(&mut window, &ctx, area, "(");
+    assert_eq!(window.explorer.navigation[&pane].query, "^main(");
+    wait_for_text(&mut window, &ctx, area, "Invalid pattern: ");
+    assert_eq!(window.pane_called(pane).unwrap().keystrokes, before);
+}
+
+/// The paths the open list shows once its search has answered.
+fn loop_until_settled(
+    window: &mut crate::Window,
+    ctx: &egui::Context,
+    area: egui::Rect,
+    pane: usize,
+) -> Vec<std::path::PathBuf> {
+    let deadline = Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        frame(window, ctx, area, vec![]);
+        let root = window.explorer.navigation[&pane].root.clone().unwrap();
+        let key = window.explorer.request(pane, root);
+        if let Some(Ok(listing)) = window.explorer.cache.get(&key).map(|cached| &cached.result) {
+            return listing
+                .entries
+                .iter()
+                .map(|entry| entry.path.clone())
+                .collect();
+        }
+        assert!(Instant::now() < deadline, "the search never answered");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+#[test]
 fn the_search_closes_when_focus_moves_to_another_console() {
     let ctx = egui::Context::default();
     let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));

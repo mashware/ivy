@@ -32,7 +32,9 @@ impl Logical {
 /// Whether the logical line `line` belongs to goes on in the row below.
 pub(crate) fn wraps<T>(term: &Term<T>, line: Line) -> bool {
     let grid = term.grid();
-    grid[line][grid.last_column()].flags.contains(Flags::WRAPLINE)
+    grid[line][grid.last_column()]
+        .flags
+        .contains(Flags::WRAPLINE)
 }
 
 /// The first row of the logical line `line` belongs to.
@@ -107,7 +109,10 @@ mod tests {
     }
 
     fn cells_of(logical: &Logical, needle: &str) -> RangeInclusive<Point> {
-        let at = logical.text.find(needle).expect("the needle is in the text");
+        let at = logical
+            .text
+            .find(needle)
+            .expect("the needle is in the text");
         logical.cells(at..at + needle.len())
     }
 
@@ -118,7 +123,11 @@ mod tests {
         assert!(wraps(term, Line(0)), "the premise: the first row wraps");
         assert_eq!(first_row(term, Line(1)), Line(0));
         assert_eq!(last_row(term, Line(0)), Line(1));
-        assert_eq!(last_row(term, Line(2)), Line(2), "the hard break was crossed");
+        assert_eq!(
+            last_row(term, Line(2)),
+            Line(2),
+            "the hard break was crossed"
+        );
 
         let logical = extract(term, Line(0), Line(1));
         assert_eq!(logical.text, "abcdefg   ");

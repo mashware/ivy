@@ -43,8 +43,10 @@ fn is_whole_word(text: &str, range: Range<usize>) -> bool {
     let stands_apart = |own: Option<char>, outside: Option<char>| {
         !own.is_some_and(word) || !outside.is_some_and(word)
     };
-    stands_apart(inside.chars().next(), text[..range.start].chars().next_back())
-        && stands_apart(inside.chars().next_back(), text[range.end..].chars().next())
+    stands_apart(
+        inside.chars().next(),
+        text[..range.start].chars().next_back(),
+    ) && stands_apart(inside.chars().next_back(), text[range.end..].chars().next())
 }
 
 /// The matches of `search` from row `first` to row `last`, one logical line at a time, each

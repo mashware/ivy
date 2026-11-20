@@ -131,6 +131,8 @@ dependencies = [
  "panel-control",
  "pulldown-cmark",
  "raw-window-handle",
+ "regex-automata",
+ "regex-syntax",
  "semver",
  "serde",
  "serde_json",

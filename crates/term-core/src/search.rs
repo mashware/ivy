@@ -831,7 +831,10 @@ mod tests {
         use alacritty_terminal::term::search::{RegexIter, RegexSearch};
 
         const HOSTILE: &str = r"\p{L}.{170}~";
-        let mut screen = Screen::new(Size { rows: 10, cols: 180 });
+        let mut screen = Screen::new(Size {
+            rows: 10,
+            cols: 180,
+        });
         // **Text that varies is what makes the automaton grow**: over a repeated line its states
         // repeat too and the old engine never gave up. Lines of 170 characters cannot hold a match.
         let alphabet: Vec<char> = "ab cd1 ü日~".chars().collect();
@@ -905,10 +908,7 @@ mod tests {
             },
         );
         for toward in [Toward::Older, Toward::Newer] {
-            assert_eq!(
-                screen.find(&search, toward, KeepClear::NONE),
-                Found::Match
-            );
+            assert_eq!(screen.find(&search, toward, KeepClear::NONE), Found::Match);
             assert_eq!(
                 selected_row(&screen).map(|(_, text)| text).as_deref(),
                 Some("needle need")
@@ -957,7 +957,11 @@ mod tests {
         );
         screen.clear_selection();
         assert_eq!(
-            screen.find(&with("(?-i)NEEDLE", regex()), Toward::Older, KeepClear::NONE),
+            screen.find(
+                &with("(?-i)NEEDLE", regex()),
+                Toward::Older,
+                KeepClear::NONE
+            ),
             Found::Nothing
         );
         let exact = Options {

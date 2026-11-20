@@ -606,6 +606,58 @@ mod tests {
     }
 
     #[test]
+    fn a_pattern_that_cannot_be_searched_with_says_why_and_never_no_match() {
+        let mut screen = a_screen("needle\r\n");
+        let regex = Options {
+            regex: true,
+            ..Options::default()
+        };
+        for (query, said) in [
+            ("(", "invalid pattern: "),
+            (r"\w{50}", "too complex to search"),
+        ] {
+            let mut console = OnThisConsole {
+                open: Some(Mode::default()),
+                options: regex,
+                ..OnThisConsole::default()
+            };
+            apply(
+                &mut console,
+                &mut screen,
+                steps(true, vec![Step::Type(query.into())]),
+            );
+            // While typing, the marking is what compiles the query, and the box says it already.
+            let mut view = screen.view();
+            let open = console.open.as_mut().expect("still open");
+            assert_eq!(open.mark(&screen, &mut view, regex).cells, 0);
+            assert!(
+                open.status().starts_with(said),
+                "{query}: {}",
+                open.status()
+            );
+
+            apply(
+                &mut console,
+                &mut screen,
+                steps(true, vec![Step::Go(Toward::Older)]),
+            );
+            let status = console.open.as_ref().expect("still open").status();
+            assert!(status.starts_with(said), "{query} after Enter: {status}");
+        }
+        // The same characters as text are found.
+        let mut console = OnThisConsole {
+            open: Some(Mode::default()),
+            ..OnThisConsole::default()
+        };
+        apply(
+            &mut console,
+            &mut screen,
+            steps(true, vec![Step::Type("(".into()), Step::Go(Toward::Older)]),
+        );
+        assert_eq!(console.open.as_ref().unwrap().status(), "no match");
+    }
+
+    #[test]
     fn without_wrap_the_box_says_there_are_no_more_matches() {
         let mut screen = a_screen("needle\r\n");
         let mut console = OnThisConsole::default();

@@ -10,6 +10,16 @@ pub(super) struct Navigation {
     pub(super) scroll: f32,
     pub(super) row_limit: usize,
     pub(super) query: String,
+    /// The name search reads the query as a pattern. **An option, not part of the query**: a new
+    /// folder or a cleared query keeps it.
+    pub(super) regex: bool,
+    /// The query compiled for the flag it was compiled with, kept while neither changes: the list
+    /// asks for it on every frame and the worker takes the same one.
+    pub(super) matcher: Option<(
+        String,
+        bool,
+        Result<std::sync::Arc<super::pattern::Matcher>, String>,
+    )>,
     pub(super) reveal_selected: bool,
     pub(super) generation: u64,
     pub(super) epoch: u64,
