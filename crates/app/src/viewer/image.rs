@@ -224,21 +224,18 @@ impl Viewer {
                 .input(|i| i.pointer.hover_pos())
                 .filter(|at| view.contains(*at))
         {
-            (scale, *offset) = zoom_around(scale, *offset, at - view.min, zoom);
+            (scale, *offset) = zoom_around(scale, *offset, at - view.min, zoom, size);
             *chosen = Some(scale);
         }
         let shown = size * scale;
-        let grab = without_bars(view, shown, &ui.spacing().scroll);
+        let (lead, trail) = blanks(*offset, shown, view.size());
+        let grab = without_bars(view, lead + shown + trail, &ui.spacing().scroll);
         let (moved, hand) = ui.input(|i| pan(i, grab, space, panning));
         *offset = within(*offset - moved, *offset, shown, view.size());
         if let Some(hand) = hand {
             ui.ctx().set_cursor_icon(hand);
         }
-        // egui scrolls only forward from the content's corner and never past its far edge, so a
-        // zoom that leaves the image short of the view on an axis is held where the pointer put
-        // it by blank space laid before or after it.
-        let lead = (-*offset).max(egui::Vec2::ZERO);
-        let trail = (*offset + view.size() - shown).max(egui::Vec2::ZERO);
+        let (lead, trail) = blanks(*offset, shown, view.size());
         let output = egui::ScrollArea::both()
             .id_salt("drawer-image")
             .auto_shrink(false)
@@ -274,13 +271,30 @@ impl Viewer {
     }
 }
 
-/// The scale and offset after zooming by `factor`, keeping the image point under `at`, a position
-/// inside the view, where it was on screen. The offset is where the view's corner falls on the
-/// image, in points, and is negative where the image starts inside the view.
-fn zoom_around(scale: f32, offset: egui::Vec2, at: egui::Vec2, factor: f32) -> (f32, egui::Vec2) {
+/// The scale and offset after zooming by `factor`, keeping the point of the image of `size`
+/// pixels under `at`, a position inside the view, where it was on screen. With `at` off the image,
+/// the image's nearest point is the one kept, so a zoom over the blank around it never carries the
+/// image out of sight. The offset is where the view's corner falls on the image, in points, and is
+/// negative where the image starts inside the view.
+fn zoom_around(
+    scale: f32,
+    offset: egui::Vec2,
+    at: egui::Vec2,
+    factor: f32,
+    size: egui::Vec2,
+) -> (f32, egui::Vec2) {
     let zoomed = (scale * factor).clamp(SMALLEST, LARGEST);
+    let at = at.clamp(-offset, size * scale - offset);
     let point = (offset + at) / scale;
     (zoomed, point * zoomed - at)
+}
+
+/// The blank space laid before and after the image of `shown` size: egui scrolls only forward
+/// from the content's corner and never past its far edge, so a zoom that leaves the image short of
+/// the `view` on an axis is held where the pointer put it by space on either side.
+fn blanks(offset: egui::Vec2, shown: egui::Vec2, view: egui::Vec2) -> (egui::Vec2, egui::Vec2) {
+    let lead = (-offset).max(egui::Vec2::ZERO);
+    (lead, (offset + view - shown).max(egui::Vec2::ZERO))
 }
 
 /// Where a pan drag may take `offset`: where the image of `shown` size leaves none of a `view`
@@ -301,15 +315,15 @@ fn within(
 /// The view less the strips egui's scroll bars take, so a drag on a bar moves the bar alone.
 fn without_bars(
     view: egui::Rect,
-    shown: egui::Vec2,
+    content: egui::Vec2,
     scroll: &egui::style::ScrollStyle,
 ) -> egui::Rect {
     let strip = scroll.bar_width + scroll.bar_outer_margin;
     let mut grab = view;
-    if shown.y > view.height() {
+    if content.y > view.height() {
         grab.max.x -= strip;
     }
-    if shown.x > view.width() {
+    if content.x > view.width() {
         grab.max.y -= strip;
     }
     grab
@@ -817,8 +831,121 @@ mod tests {
             last = now;
         }
         let (offset, at) = (egui::vec2(100.0, 40.0), egui::vec2(200.0, 150.0));
-        assert_eq!(zoom_around(0.5, offset, at, 1000.0).0, LARGEST);
-        assert_eq!(zoom_around(0.5, offset, at, 0.0001).0, SMALLEST);
+        assert_eq!(
+            zoom_around(0.5, offset, at, 1000.0, egui::vec2(800.0, 600.0)).0,
+            LARGEST
+        );
+        assert_eq!(
+            zoom_around(0.5, offset, at, 0.0001, egui::vec2(800.0, 600.0)).0,
+            SMALLEST
+        );
+    }
+
+    /// A window with the 600x120 fixture fitted, which is smaller than the drawer on both axes,
+    /// and the pointer resting at `at(image)`, with Ctrl held.
+    fn small_window(
+        folder: &Folder,
+        at: impl Fn(egui::Rect) -> egui::Pos2,
+    ) -> (crate::Window, egui::Context, egui::Rect, egui::Pos2) {
+        let path = folder.0.join("small.png");
+        write_png(&path, 600, 120);
+        let (mut window, ctx, _) = window_with_image(&path);
+        let before = settle(&mut window, &ctx);
+        let at = at(before);
+        painted(&mut window, &ctx, vec![egui::Event::PointerMoved(at)]);
+        painted(
+            &mut window,
+            &ctx,
+            vec![egui::Event::ModifiersChanged(ctrl())],
+        );
+        (window, ctx, before, at)
+    }
+
+    /// Ctrl+wheel over the blank below a fitted screenshot keeps the image's nearest point, on its
+    /// bottom edge, where it was, so the image grows from there and stays in sight.
+    #[test]
+    fn zooming_over_the_blank_beside_the_image_keeps_its_nearest_point() {
+        let folder = Folder::new();
+        let (mut window, ctx, before, at) = small_window(&folder, |image| {
+            egui::pos2(image.center().x, image.bottom() + 150.0)
+        });
+        let view = window.sidebar.last_dock.unwrap();
+        assert!(view.contains(at));
+        for _ in 0..4 {
+            painted(
+                &mut window,
+                &ctx,
+                vec![ctrl_wheel(
+                    egui::MouseWheelUnit::Line,
+                    1.0,
+                    egui::TouchPhase::Move,
+                )],
+            );
+        }
+        let after = settle(&mut window, &ctx);
+        assert!(
+            after.width() > before.width() * 2.0,
+            "{before:?} -> {after:?}"
+        );
+        assert!(
+            (after.bottom() - before.bottom()).abs() < 1.0,
+            "{before:?} -> {after:?}"
+        );
+        let x = |rect: egui::Rect| (at.x - rect.left()) / rect.width();
+        assert!(
+            (x(after) - x(before)).abs() * after.width() < 1.0,
+            "{before:?} -> {after:?}"
+        );
+    }
+
+    /// A drag brings an image a zoom left part out of the drawer back in, and never pushes it
+    /// further out; an image larger than the drawer stops at its edges.
+    #[test]
+    fn a_drag_never_pushes_the_image_further_out_than_it_is() {
+        use egui::PointerButton::Middle;
+        let folder = Folder::new();
+        let (mut window, ctx, fitted, at) = small_window(&folder, |image| image.center());
+        for _ in 0..2 {
+            painted(
+                &mut window,
+                &ctx,
+                vec![ctrl_wheel(
+                    egui::MouseWheelUnit::Line,
+                    1.0,
+                    egui::TouchPhase::Move,
+                )],
+            );
+        }
+        painted(
+            &mut window,
+            &ctx,
+            vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)],
+        );
+        let zoomed = settle(&mut window, &ctx);
+        let view = window.sidebar.last_dock.unwrap();
+        assert!(zoomed.left() < view.left(), "{zoomed:?}");
+        let out = egui::vec2(-40.0, 0.0);
+        drag_at(&mut window, &ctx, Middle, at, out, false);
+        assert_eq!(settle(&mut window, &ctx), zoomed, "pushed further out");
+        drag_at(&mut window, &ctx, Middle, at, -out, false);
+        let back = settle(&mut window, &ctx);
+        // Within the point the content's corner is rounded to on each side.
+        assert!(
+            (back.min - (zoomed.min - out)).length() < 1.5,
+            "{zoomed:?} -> {back:?}"
+        );
+
+        let (mut window, ctx) = zoomed_window(&folder);
+        // Short strokes, so the pointer stays inside the window egui is told about.
+        let stroke = egui::vec2(150.0, 100.0);
+        for _ in 0..60 {
+            drag(&mut window, &ctx, Middle, stroke);
+        }
+        let edge = settle(&mut window, &ctx);
+        // A fitted image sits at the drawer's corner, the edge a drag stops at.
+        assert_eq!(edge.left_top(), fitted.left_top(), "{edge:?}");
+        drag(&mut window, &ctx, Middle, stroke);
+        assert_eq!(settle(&mut window, &ctx), edge, "dragged past its edge");
     }
 
     /// A viewer holding `original`, decoded and not yet shown.
@@ -1238,14 +1365,14 @@ mod tests {
             egui::vec2(-30.0, -45.0),
         );
         assert!(ctx.input(|i| i.key_down(egui::Key::Space)));
-        assert!(
-            !cursors.contains(&egui::CursorIcon::Grabbing),
-            "{cursors:?}"
-        );
         assert_eq!(
             settle(&mut window, &ctx),
             before,
             "a console's Space panned"
+        );
+        assert!(
+            !cursors.contains(&egui::CursorIcon::Grabbing),
+            "{cursors:?}"
         );
     }
 
@@ -1267,17 +1394,17 @@ mod tests {
         assert!(ctx.input(|i| i.has_touch_screen()));
         let before = settle(&mut window, &ctx);
         let by = egui::vec2(-30.0, -45.0);
-        drag(&mut window, &ctx, egui::PointerButton::Primary, by);
-        assert_eq!(
-            settle(&mut window, &ctx),
-            before,
-            "a plain left drag scrolled"
-        );
         drag(&mut window, &ctx, egui::PointerButton::Middle, by);
         let after = settle(&mut window, &ctx);
         assert!(
             (after.min - (before.min + by)).length() < 0.5,
             "{before:?} -> {after:?}"
+        );
+        drag(&mut window, &ctx, egui::PointerButton::Primary, by);
+        assert_eq!(
+            settle(&mut window, &ctx),
+            after,
+            "a plain left drag scrolled"
         );
     }
 
@@ -1315,8 +1442,6 @@ mod tests {
         let dock = window.sidebar.last_dock.unwrap();
         let bar = egui::pos2(dock.right() - 3.0, dock.center().y);
         pass(&mut window, &ctx, vec![space(true)]);
-        let hover = pass(&mut window, &ctx, vec![egui::Event::PointerMoved(bar)]);
-        assert_ne!(hover.platform_output.cursor_icon, egui::CursorIcon::Grab);
         let by = egui::vec2(0.0, 30.0);
         let cursors = drag_at(
             &mut window,
@@ -1326,13 +1451,15 @@ mod tests {
             by,
             false,
         );
+        let after = settle(&mut window, &ctx);
+        assert_eq!(after.left(), before.left());
+        assert!(after.top() < before.top(), "{before:?} -> {after:?}");
         assert!(
             !cursors.contains(&egui::CursorIcon::Grabbing),
             "{cursors:?}"
         );
-        let after = settle(&mut window, &ctx);
-        assert_eq!(after.left(), before.left());
-        assert!(after.top() < before.top(), "{before:?} -> {after:?}");
+        let hover = pass(&mut window, &ctx, vec![egui::Event::PointerMoved(bar)]);
+        assert_ne!(hover.platform_output.cursor_icon, egui::CursorIcon::Grab);
     }
 
     /// A maximized drawer reads every key even when nobody clicked it, so Space is its own there

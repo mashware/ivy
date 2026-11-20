@@ -9207,20 +9207,23 @@ for anything else.
   an axis where the image is smaller than the drawer: egui's scroll area keeps its offset between
   zero and the content's far edge, which pinned such an image to its top-left corner, so the zoom
   lays blank space before or after the image instead, and a drag may bring it back but never push it
-  further out. winit 0.30.13 emits `PinchGesture` only on macOS and iOS, so pinch zoom is a
-  macOS-only behaviour until F2.7 verifies it there. egui reports Ctrl+wheel as a zoom and not as a
-  scroll, so the drawer counts the zoom as pointer activity over it to keep the gesture. The drawer
-  stays not modal: nothing dims. With a mouse, Space + left drag and a middle-button drag move the
-  image, inside the drawer while it is smaller than it, with a grab hand while they do, and
-  Shift+wheel moves it sideways through egui's own horizontal scroll modifier. A plain left drag
-  does not pan, because the next step draws marks with it, and egui's own drag-to-scroll is off,
-  since after any touch it would add its travel to the pan's. Space + drag is Figma's convention and
-  the middle button needs no key. Whether a drag pans is decided when its button goes down, and a
-  drag that starts on a scroll bar is the bar's. Space is the drawer's only when it went down while
-  the drawer held the keys, so a Space typed into a console still reaches its program and does not
-  pan after the click that follows. On GNOME with "disable touchpad while typing" on, which is the
-  default, holding Space blocks touchpad clicks, so with a touchpad the image is moved with two
-  fingers and zoomed with Ctrl + two fingers.
+  further out. Over the blank beside the image the point kept is the image's nearest one, so a zoom
+  there grows the image from its near edge and never carries it out of sight; anchoring the empty
+  point under the pointer, as a canvas does, was discarded because under a fitted screenshot most of
+  the drawer is blank and four notches there pushed the image out. winit 0.30.13 emits
+  `PinchGesture` only on macOS and iOS, so pinch zoom is a macOS-only behaviour until F2.7 verifies
+  it there. egui reports Ctrl+wheel as a zoom and not as a scroll, so the drawer counts the zoom as
+  pointer activity over it to keep the gesture. The drawer stays not modal: nothing dims. With a
+  mouse, Space + left drag and a middle-button drag move the image, inside the drawer while it is
+  smaller than it, with a grab hand while they do, and Shift+wheel moves it sideways through egui's
+  own horizontal scroll modifier. A plain left drag does not pan, because the next step draws marks
+  with it, and egui's own drag-to-scroll is off, since after any touch it would add its travel to
+  the pan's. Space + drag is Figma's convention and the middle button needs no key. Whether a drag
+  pans is decided when its button goes down, and a drag that starts on a scroll bar is the bar's.
+  Space is the drawer's only when it went down while the drawer held the keys, so a Space typed into
+  a console still reaches its program and does not pan after the click that follows. On GNOME with
+  "disable touchpad while typing" on, which is the default, holding Space blocks touchpad clicks, so
+  with a touchpad the image is moved with two fingers and zoomed with Ctrl + two fingers.
 - **Cost.** Decoding runs on the worker. The texture is uploaded once per open, by the backend
   after the pass, on the first frame after the decode arrives, so that upload lands in the framework
   remainder, not in the viewer's span. No measurement batch opens an image, so no published figure changes.
