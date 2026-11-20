@@ -88,14 +88,16 @@ pub(super) struct Place {
 #[derive(Default)]
 pub(crate) struct CodeState {
     selection: Option<(Place, Place)>,
-    /// The widest line painted so far, in points.
-    widest_seen: f32,
+    /// The widest line painted so far of the file it names, in points. It outlives a new version
+    /// of that file, so an agent rewriting it does not pull the sideways scroll back under the
+    /// reader.
+    widest_seen: (PathBuf, f32),
 }
 
 impl CodeState {
     /// A new document, or a new version of the open one, starts with nothing marked.
     pub(super) fn reset(&mut self) {
-        *self = Self::default();
+        self.selection = None;
     }
 
     #[cfg(test)]
@@ -123,8 +125,11 @@ pub(super) fn show(
     let gutter = PAD + digits as f32 * glyph;
     let text_left = gutter + GUTTER_GAP;
     let mark = TRUNCATED.chars().count() as f32 * glyph + glyph;
+    if state.widest_seen.0 != document.path {
+        state.widest_seen = (document.path.clone(), 0.0);
+    }
     let width =
-        text_left + (document.widest as f32 * glyph).max(state.widest_seen) + mark + 2.0 * PAD;
+        text_left + (document.widest as f32 * glyph).max(state.widest_seen.1) + mark + 2.0 * PAD;
     let height = document.lines.len() as f32 * row + 2.0 * PAD;
     let select_all = ui.input(|i| {
         i.events.iter().any(|event| {
@@ -161,7 +166,7 @@ pub(super) fn show(
                 );
                 let galley = painter.layout_job(job(line, &font, palette));
                 let at = egui::pos2(origin.x + text_left, top);
-                state.widest_seen = state.widest_seen.max(galley.size().x);
+                state.widest_seen.1 = state.widest_seen.1.max(galley.size().x);
                 let shown = &line.text[..line.shown];
                 if let Some(range) = selected_in(state.selection, index, line.shown) {
                     let x = |byte: usize| galley.pos_from_cursor(char_cursor(shown, byte)).min.x;
@@ -187,20 +192,28 @@ pub(super) fn show(
             let place_at = |pos: egui::Pos2| {
                 let line = (((pos.y - origin.y) / row).floor().max(0.0) as usize)
                     .min(document.lines.len().saturating_sub(1));
-                let text = document.lines.get(line).map_or("", |l| &l.text[..l.shown]);
-                let byte = match galleys.iter().find(|(index, _, _)| *index == line) {
-                    Some((_, at, galley)) => {
-                        let chars = galley.cursor_from_pos(pos - *at).index.0;
-                        text.char_indices()
-                            .nth(chars)
-                            .map_or(text.len(), |(b, _)| b)
-                    }
+                let Some(whole) = document.lines.get(line) else {
+                    return Place { line, byte: 0 };
+                };
+                let text = &whole.text[..whole.shown];
+                let (chars, past_end) = match galleys.iter().find(|(index, _, _)| *index == line) {
+                    Some((_, at, galley)) => (
+                        galley.cursor_from_pos(pos - *at).index.0,
+                        pos.x - at.x >= galley.size().x,
+                    ),
                     None => {
                         let chars = ((pos.x - origin.x - text_left) / glyph).round().max(0.0);
-                        text.char_indices()
-                            .nth(chars as usize)
-                            .map_or(text.len(), |(b, _)| b)
+                        (chars as usize, chars as usize >= text.chars().count())
                     }
+                };
+                // What is not painted of a truncated line is still in the file: reaching past
+                // the painted end takes the line whole, as copying it does.
+                let byte = if whole.truncated() && past_end {
+                    whole.text.len()
+                } else {
+                    text.char_indices()
+                        .nth(chars)
+                        .map_or(text.len(), |(b, _)| b)
                 };
                 Place { line, byte }
             };

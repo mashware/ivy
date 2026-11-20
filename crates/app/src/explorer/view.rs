@@ -194,6 +194,8 @@ pub(super) fn activate(
                 state.message = "This path cannot be opened as Unicode text.".into();
                 None
             } else {
+                // An earlier refusal is about another row; it would be misread under this one.
+                state.message.clear();
                 Some((pane, entry.path.clone()))
             }
         }
@@ -468,7 +470,9 @@ pub(super) fn show(
                         response.clone().on_hover_text(display(&row.entry.path));
                         if response.clicked() {
                             selected = Some(row.entry.path.clone());
-                            if matches!(row.entry.kind, EntryKind::File | EntryKind::Link) {
+                            // A special file goes through activation too, which says why it
+                            // does not open.
+                            if row.entry.kind != EntryKind::Directory {
                                 action = Some(row.entry.clone());
                             }
                         }
@@ -799,6 +803,88 @@ mod tests {
                 output.drop_without_applying_deltas();
             }
         }
+    }
+
+    /// One click on a special file says why it does not open, and a click that opens a file takes
+    /// that sentence away.
+    #[test]
+    fn a_single_click_on_a_special_file_says_why_and_an_open_clears_it() {
+        const WHY: &str = "Only files and folders open here.";
+        let theme = crate::theme::Theme::default();
+        let ctx = egui::Context::default();
+        ctx.global_style_mut(|s| s.animation_time = 0.0);
+        let mut state = Explorer::default();
+        state.reconcile(&[(1, Some("/root".into()))]);
+        listing(
+            &mut state,
+            "/root",
+            vec![
+                entry("/root/fifo", EntryKind::Other),
+                entry("/root/a.rs", EntryKind::File),
+            ],
+        );
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 600.0));
+        let mut time = 0.0;
+        let mut pass = |state: &mut Explorer, events: Vec<egui::Event>| {
+            time += 0.1;
+            let mut opened = None;
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    time: Some(time),
+                    screen_rect: Some(area),
+                    events,
+                    ..Default::default()
+                },
+                |ui| opened = show(state, ui, area, Some(1), theme),
+            );
+            let texts: Vec<(String, egui::Pos2)> = output
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Text(t) => {
+                        Some((t.galley.text().to_owned(), t.pos + t.galley.size() / 2.0))
+                    }
+                    _ => None,
+                })
+                .collect();
+            output.drop_without_applying_deltas();
+            (texts, opened)
+        };
+        let click = |at: egui::Pos2| {
+            let button = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            vec![
+                vec![egui::Event::PointerMoved(at)],
+                vec![button(true)],
+                vec![button(false)],
+            ]
+        };
+        let at = |texts: &[(String, egui::Pos2)], name: &str| {
+            texts
+                .iter()
+                .find(|(t, _)| t == name)
+                .unwrap_or_else(|| panic!("{name} not painted: {texts:?}"))
+                .1
+        };
+        pass(&mut state, vec![]);
+        let (texts, _) = pass(&mut state, vec![]);
+        assert!(!texts.iter().any(|(t, _)| t == WHY));
+        for events in click(at(&texts, "fifo")) {
+            pass(&mut state, events);
+        }
+        let (texts, _) = pass(&mut state, vec![]);
+        assert!(texts.iter().any(|(t, _)| t == WHY), "{texts:?}");
+        let mut opened = None;
+        for events in click(at(&texts, "a.rs")) {
+            opened = opened.or(pass(&mut state, events).1);
+        }
+        assert_eq!(opened, Some((1, PathBuf::from("/root/a.rs"))));
+        let (texts, _) = pass(&mut state, vec![]);
+        assert!(!texts.iter().any(|(t, _)| t == WHY), "{texts:?}");
     }
 
     /// The tree shows what each row is: a folder by the caret alone, closed or open, with its name
