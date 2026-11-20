@@ -271,17 +271,17 @@ impl Viewer {
             *offset = viewport::clamp(zoomed, Some(zoomed), size * scale, room);
             *chosen = Some(scale);
         }
-        let (mut moved, hand) = ui.input(|i| viewport::pan(i, over_image, pressed, space, panning));
+        let (moved, hand) = ui.input(|i| viewport::pan(i, over_image, pressed, space, panning));
         let shown = size * scale;
+        *offset = viewport::clamp(*offset - moved, Some(*offset), shown, room);
         if over.is_some() {
-            // Only the axes applied are taken; the rest stays for whoever reads the wheel later.
-            moved += ui.input_mut(|i| {
-                let taken = viewport::wheel(i.smooth_scroll_delta, *offset, shown, room);
+            // Only what moved the image is taken; the rest stays for whoever reads the wheel later.
+            *offset = ui.input_mut(|i| {
+                let (to, taken) = viewport::wheel(i.smooth_scroll_delta, *offset, shown, room);
                 i.smooth_scroll_delta -= taken;
-                taken
+                to
             });
         }
-        *offset = viewport::clamp(*offset - moved, Some(*offset), shown, room);
         *seen = Some((room, scale));
         if let Some(hand) = hand {
             ui.ctx().set_cursor_icon(hand);
@@ -1883,7 +1883,7 @@ mod tests {
 
     /// A fitted screenshot shorter than the drawer, which a zoom around its centre carried across
     /// the drawer's top, comes back with the wheel; the wheel the other way never pushes it further
-    /// out.
+    /// out, and that turn, which moved nothing, is left for whoever reads the wheel later.
     #[test]
     fn the_wheel_brings_back_a_smaller_image_a_zoom_carried_across_an_edge() {
         let folder = Folder::new();
@@ -1909,8 +1909,15 @@ mod tests {
             zoomed.top() < top && zoomed.height() < dock.bottom() - top,
             "{zoomed:?} in {dock:?}"
         );
-        painted(&mut window, &ctx, plain_wheel(at, egui::vec2(0.0, -1.0)));
+        let mut left = egui::Vec2::ZERO;
+        let mut events = plain_wheel(at, egui::vec2(0.0, -1.0));
+        for _ in 0..30 {
+            pass_with(&mut window, &ctx, std::mem::take(&mut events), |ctx| {
+                left += ctx.input(|i| i.smooth_scroll_delta);
+            });
+        }
         assert_eq!(settle(&mut window, &ctx), zoomed, "pushed further out");
+        assert!(left.y < 0.0, "the cancelled turn was taken: {left:?}");
         painted(&mut window, &ctx, plain_wheel(at, egui::vec2(0.0, 1.0)));
         let back = settle(&mut window, &ctx);
         assert!(back.top() > zoomed.top(), "{zoomed:?} -> {back:?}");

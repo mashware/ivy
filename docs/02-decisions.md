@@ -9209,9 +9209,10 @@ for anything else.
   scroll. On an axis where it is smaller and whole inside, the wheel leaves it and only a drag or
   a zoom moves it there; where a zoom carried it across an edge, the wheel brings it back and,
   like a pan, never pushes it further out. The wheel is the image's only while the pointer is on it
-  with nothing of a higher layer above, and an axis it applies is taken, so a menu or popup open
-  over the drawer keeps its own wheel and nothing later in the frame scrolls with the same turn;
-  an axis it does not apply is left for whoever reads the wheel later. Over the blank beside the image
+  with nothing of a higher layer above, and the part of a turn that moved it is taken, so a menu or
+  popup open over the drawer keeps its own wheel and nothing later in the frame scrolls with the
+  same turn; an axis it does not apply, and the part of a turn an edge stopped, are left for whoever
+  reads the wheel later. Over the blank beside the image
   the point kept is the image's nearest one, so a zoom there grows the image from its near edge and
   never carries it out of sight; anchoring the empty point under the pointer, as a canvas does, was
   discarded because under a fitted screenshot most of the drawer is blank and four notches there

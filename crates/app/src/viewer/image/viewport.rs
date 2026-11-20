@@ -62,17 +62,17 @@ pub(super) fn clamp(
     )
 }
 
-/// The part of a wheel's `delta` that moves an image of `shown` size at `offset` in a `view`: an
-/// axis where it is larger than the view, and one where a zoom carried a smaller image across an
-/// edge, which the wheel may bring back. `clamp` with the offset before the wheel keeps it from
-/// pushing such an image further out.
+/// Where a wheel's `delta` moves an image of `shown` size at `offset` in a `view`, and the part of
+/// the delta that moved it. It applies on an axis where the image is larger than the view, and on
+/// one where a zoom carried a smaller image across an edge, which the wheel may bring back but,
+/// through `clamp`, never push further out. What an edge stopped is not part of what moved it.
 pub(super) fn wheel(
     delta: egui::Vec2,
     offset: egui::Vec2,
     shown: egui::Vec2,
     view: egui::Vec2,
-) -> egui::Vec2 {
-    let axis = |delta: f32, offset: f32, shown: f32, view: f32| {
+) -> (egui::Vec2, egui::Vec2) {
+    let applies = |delta: f32, offset: f32, shown: f32, view: f32| {
         let spare = shown - view;
         if spare > 0.0 || offset < spare || offset > 0.0 {
             delta
@@ -80,10 +80,24 @@ pub(super) fn wheel(
             0.0
         }
     };
-    egui::vec2(
-        axis(delta.x, offset.x, shown.x, view.x),
-        axis(delta.y, offset.y, shown.y, view.y),
-    )
+    let applied = egui::vec2(
+        applies(delta.x, offset.x, shown.x, view.x),
+        applies(delta.y, offset.y, shown.y, view.y),
+    );
+    let to = clamp(offset - applied, Some(offset), shown, view);
+    // Where the clamp let the axis through whole, the delta itself, so no rounding is left behind.
+    let taken = |applied: f32, from: f32, to: f32| {
+        if from - applied == to {
+            applied
+        } else {
+            from - to
+        }
+    };
+    let taken = egui::vec2(
+        taken(applied.x, offset.x, to.x),
+        taken(applied.y, offset.y, to.y),
+    );
+    (to, taken)
 }
 
 /// Where `wanted` last went down this frame. Read from the frame's own events rather than from the
@@ -263,6 +277,20 @@ mod tests {
         assert_eq!(clamp(offset, None, nan, SIZE), egui::Vec2::ZERO);
         assert_eq!(clamp(offset, Some(nan), SIZE, egui::Vec2::ZERO), offset);
         assert_eq!(clamp(offset, None, SIZE, egui::Vec2::ZERO), offset);
+    }
+
+    /// The wheel takes what moved the image: all of a turn the edge does not reach, only the part
+    /// before it of one that does, and nothing of one the edge stops entirely.
+    #[test]
+    fn the_wheel_takes_only_what_moved_the_image() {
+        let (shown, view) = (egui::vec2(1200.0, 900.0), egui::vec2(500.0, 400.0));
+        let offset = egui::vec2(690.0, 500.0);
+        let (to, taken) = wheel(egui::vec2(20.0, -30.0), offset, shown, view);
+        assert_eq!(to, egui::vec2(670.0, 500.0));
+        assert_eq!(taken, egui::vec2(20.0, 0.0));
+        let (to, taken) = wheel(egui::vec2(-30.0, 7.0), offset, shown, view);
+        assert_eq!(to, egui::vec2(700.0, 493.0));
+        assert_eq!(taken, egui::vec2(-10.0, 7.0));
     }
 
     #[test]
