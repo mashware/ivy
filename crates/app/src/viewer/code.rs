@@ -2,7 +2,12 @@
 //! colours of [`super::highlight`].
 use super::highlight::{self, Family, Line};
 use super::palette::Palette;
-use eframe::egui::{self, FontId, text::LayoutJob};
+
+mod rows;
+use eframe::egui::{
+    self, FontId,
+    text::{CharIndex, LayoutJob},
+};
 use std::path::{Path, PathBuf};
 
 const FONT_SIZE: f32 = 13.0;
@@ -95,12 +100,17 @@ pub(crate) struct CodeState {
     /// The Files folder of the source console when the file was opened: what the header's path
     /// and its relative copy are counted from.
     pub(super) root: Option<PathBuf>,
+    /// Long lines fold at the view's width instead of scrolling sideways. Off until asked for.
+    pub(super) wrap: bool,
+    heights: rows::Heights,
 }
 
 impl CodeState {
-    /// A new document, or a new version of the open one, starts with nothing marked.
+    /// A new document, or a new version of the open one, starts with nothing marked and its
+    /// lines measured again.
     pub(super) fn reset(&mut self) {
         self.selection = None;
+        self.heights = rows::Heights::default();
     }
 
     #[cfg(test)]
@@ -133,7 +143,13 @@ pub(super) fn show(
     }
     let width =
         text_left + (document.widest as f32 * glyph).max(state.widest_seen.1) + mark + 2.0 * PAD;
-    let height = document.lines.len() as f32 * row + 2.0 * PAD;
+    // Wrapped, the text takes what the view leaves after the gutter, never less than a few
+    // characters.
+    let wrap = state
+        .wrap
+        .then(|| (ui.available_width() - text_left - 2.0 * PAD).max(glyph * 8.0));
+    state.heights.prepare(&document.lines, wrap, row, glyph);
+    let height = state.heights.total() + 2.0 * PAD;
     let select_all = ui.input(|i| {
         i.events.iter().any(|event| {
             matches!(event, egui::Event::Key { key: egui::Key::A, pressed: true, modifiers, .. }
@@ -143,22 +159,23 @@ pub(super) fn show(
     if select_all {
         state.selection = Some((Place::default(), document.end()));
     }
-    egui::ScrollArea::both()
+    egui::ScrollArea::new([!state.wrap, true])
         .id_salt(("code-content", &document.path))
         .auto_shrink([false; 2])
         .show_viewport(ui, |ui, viewport| {
+            let wide = if state.wrap { 0.0 } else { width };
             let (content, response) = ui.allocate_exact_size(
-                egui::vec2(width.max(ui.available_width()), height),
+                egui::vec2(wide.max(ui.available_width()), height),
                 egui::Sense::click_and_drag(),
             );
             let origin = content.min + egui::vec2(0.0, PAD);
-            let first = ((viewport.min.y - PAD) / row).floor().max(0.0) as usize;
-            let end = (((viewport.max.y - PAD) / row).ceil().max(0.0) as usize + 1)
-                .min(document.lines.len());
+            let heights = &mut state.heights;
+            let first = heights.line_at(viewport.min.y - PAD);
+            let end = (heights.line_at(viewport.max.y - PAD) + 1).min(document.lines.len());
             let painter = ui.painter_at(ui.clip_rect());
             let mut galleys = Vec::with_capacity(end.saturating_sub(first));
             for index in first..end {
-                let top = origin.y + index as f32 * row;
+                let top = origin.y + heights.top(index);
                 let line = &document.lines[index];
                 painter.text(
                     egui::pos2(origin.x + gutter, top),
@@ -167,22 +184,27 @@ pub(super) fn show(
                     font.clone(),
                     palette.gutter,
                 );
-                let galley = painter.layout_job(job(line, &font, palette));
+                let mut laid = job(line, &font, palette);
+                if let Some(width) = wrap {
+                    laid.wrap.max_width = width;
+                }
+                let galley = painter.layout_job(laid);
+                heights.measured(index, galley.size().y.max(row));
                 let at = egui::pos2(origin.x + text_left, top);
-                state.widest_seen.1 = state.widest_seen.1.max(galley.size().x);
+                if !state.wrap {
+                    state.widest_seen.1 = state.widest_seen.1.max(galley.size().x);
+                }
                 let shown = &line.text[..line.shown];
                 if let Some(range) = selected_in(state.selection, index, line.shown) {
-                    let x = |byte: usize| galley.pos_from_cursor(char_cursor(shown, byte)).min.x;
-                    let (left, right) = (x(range.0), x(range.1).max(x(range.0) + glyph * 0.5));
-                    let marked = egui::Rect::from_min_max(
-                        egui::pos2(at.x + left, top),
-                        egui::pos2(at.x + right, top + row),
-                    );
-                    painter.rect_filled(marked, 0.0, palette.selection);
+                    let (from, to) = (char_cursor(shown, range.0), char_cursor(shown, range.1));
+                    for marked in marked_rows(&galley, from.index.0, to.index.0, glyph) {
+                        painter.rect_filled(marked.translate(at.to_vec2()), 0.0, palette.selection);
+                    }
                 }
                 if line.truncated() {
+                    let last = galley.rows.last().map_or(egui::Rect::ZERO, |r| r.rect());
                     painter.text(
-                        at + egui::vec2(galley.size().x + glyph, 0.0),
+                        at + egui::vec2(last.right() + glyph, last.top()),
                         egui::Align2::LEFT_TOP,
                         TRUNCATED,
                         font.clone(),
@@ -192,23 +214,24 @@ pub(super) fn show(
                 galleys.push((index, at, galley.clone()));
                 painter.galley(at, galley, palette.text);
             }
+            if heights.settle() {
+                ui.ctx().request_repaint();
+            }
+            let heights = &state.heights;
             let place_at = |pos: egui::Pos2| {
-                let line = (((pos.y - origin.y) / row).floor().max(0.0) as usize)
-                    .min(document.lines.len().saturating_sub(1));
+                let line = heights.line_at(pos.y - origin.y);
                 let Some(whole) = document.lines.get(line) else {
                     return Place { line, byte: 0 };
                 };
                 let text = &whole.text[..whole.shown];
-                let (chars, past_end) = match galleys.iter().find(|(index, _, _)| *index == line) {
-                    Some((_, at, galley)) => (
-                        galley.cursor_from_pos(pos - *at).index.0,
-                        pos.x - at.x >= galley.size().x,
-                    ),
+                let chars = match galleys.iter().find(|(index, _, _)| *index == line) {
+                    Some((_, at, galley)) => galley.cursor_from_pos(pos - *at).index.0,
                     None => {
                         let chars = ((pos.x - origin.x - text_left) / glyph).round().max(0.0);
-                        (chars as usize, chars as usize >= text.chars().count())
+                        chars as usize
                     }
                 };
+                let past_end = chars >= text.chars().count();
                 // What is not painted of a truncated line is still in the file: reaching past
                 // the painted end takes the line whole, as copying it does.
                 let byte = if whole.truncated() && past_end {
@@ -254,6 +277,33 @@ fn job(line: &Line, font: &FontId, palette: &Palette) -> LayoutJob {
         );
     }
     job
+}
+
+/// Where characters `from..to` of a laid-out line sit, one stretch per row they cross. A marked
+/// line with nothing of it marked (an empty line inside a selection) still shows half a character.
+fn marked_rows(galley: &egui::Galley, from: usize, to: usize, glyph: f32) -> Vec<egui::Rect> {
+    let mut out = Vec::new();
+    let mut first = 0;
+    let mut sliver = None;
+    for placed in &galley.rows {
+        let count = placed.char_count_excluding_newline().0;
+        let (a, b) = (from.max(first), to.min(first + count));
+        let x = |column: usize| placed.pos.x + placed.x_offset(CharIndex(column - first));
+        let rect = placed.rect();
+        if a < b {
+            out.push(egui::Rect::from_x_y_ranges(x(a)..=x(b), rect.y_range()));
+        } else if sliver.is_none() && (first..=first + count).contains(&from) {
+            sliver = Some(egui::Rect::from_x_y_ranges(
+                x(from)..=x(from) + glyph * 0.5,
+                rect.y_range(),
+            ));
+        }
+        first += count;
+    }
+    if out.is_empty() {
+        out.extend(sliver);
+    }
+    out
 }
 
 /// The bytes of line `index` the selection covers, if any.

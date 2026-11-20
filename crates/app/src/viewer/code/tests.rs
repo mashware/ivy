@@ -404,3 +404,82 @@ fn a_refresh_of_the_same_file_keeps_its_width_and_another_file_does_not() {
     let fresh = scroll_width(&ctx, &other, &mut state);
     assert!(fresh < before - 100.0, "{fresh} after {before}");
 }
+
+/// Wrap lines is off until asked for; on, a long line folds inside the 600-point view and the
+/// lines after it move down to make room; off again, it is one row that scrolls sideways.
+#[test]
+fn wrap_lines_folds_long_lines_to_the_view_and_off_restores_sideways_scrolling() {
+    // Words of fifty letters: one per row, so the rows are more than the length alone says.
+    let long = format!("{} ", "x".repeat(50)).repeat(12);
+    let text = format!("{}\nafter\n", long.trim_end());
+    let document = CodeDocument::parse(Path::new("/r/a.txt"), &text);
+    let ctx = egui::Context::default();
+    let mut state = CodeState::default();
+    let settled = |state: &mut CodeState| {
+        frame(&ctx, &document, state, vec![]);
+        let (texts, _) = frame(&ctx, &document, state, vec![]);
+        let rect = |wanted: &str| {
+            texts
+                .iter()
+                .find(|(t, _, _)| t == wanted)
+                .unwrap_or_else(|| panic!("{wanted:?} not painted: {texts:?}"))
+                .1
+        };
+        (rect(long.trim_end()), rect("after"))
+    };
+    let (line, after) = settled(&mut state);
+    assert!(line.right() > 600.0 && after.height() >= line.height() - 0.5);
+    assert!(scroll_width(&ctx, &document, &mut state) > 0.0);
+
+    state.wrap = true;
+    let (line, after) = settled(&mut state);
+    assert!(line.right() <= 600.0, "{line:?}");
+    assert!(line.height() > 3.0 * after.height(), "{line:?}");
+    assert!(
+        after.top() >= line.bottom() - 0.5,
+        "{after:?} overlaps {line:?}"
+    );
+
+    state.wrap = false;
+    let (line, after) = settled(&mut state);
+    assert!(line.right() > 600.0 && line.height() < 2.0 * after.height());
+    assert!(after.top() < line.bottom() + after.height());
+    assert!(scroll_width(&ctx, &document, &mut state) > 0.0);
+}
+
+/// Marking still works when a line is folded: a drag from the start of a wrapped line to its
+/// second row copies what it crossed, and the marked rows are painted on both.
+#[test]
+fn a_drag_across_a_wrapped_line_copies_what_it_crossed() {
+    let long = (0..120)
+        .map(|n| format!("w{n:03}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let document = CodeDocument::parse(Path::new("/r/a.txt"), &format!("{long}\n"));
+    let ctx = egui::Context::default();
+    let mut state = CodeState {
+        wrap: true,
+        ..CodeState::default()
+    };
+    frame(&ctx, &document, &mut state, vec![]);
+    let (texts, _) = frame(&ctx, &document, &mut state, vec![]);
+    let line = texts.iter().find(|(t, _, _)| *t == long).unwrap().1;
+    // The line number is one row tall.
+    let row = texts.iter().find(|(t, _, _)| t == "1").unwrap().1.height();
+    assert!(line.height() > 2.0 * row, "{line:?} is not wrapped");
+    // From the start of the first row to a little way into the second.
+    let from = egui::pos2(line.left() + 1.0, line.top() + row * 0.5);
+    let to = egui::pos2(line.left() + 12.0, line.top() + row * 1.5);
+    for events in press_drag_release(from, to) {
+        frame(&ctx, &document, &mut state, events);
+    }
+    let (_, copied) = frame(&ctx, &document, &mut state, vec![egui::Event::Copy]);
+    let copied = copied.first().cloned().unwrap_or_default();
+    assert!(copied.starts_with("w000 w001"), "{copied:?}");
+    assert!(copied.len() < long.len() / 2, "{copied:?}");
+    let marked = shapes(&document, &mut state, vec![])
+        .iter()
+        .filter(|shape| matches!(shape, egui::Shape::Rect(r) if r.fill == palette().selection))
+        .count();
+    assert!(marked >= 2, "{marked} marked rows");
+}
