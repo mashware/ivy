@@ -1623,7 +1623,22 @@ mod tests {
             .write_all(b"{\"tool\":\"split_open\",\"side\":\"right\"}\n")
             .expect("ask for a split");
 
-        pane.frames_for(Duration::from_millis(200));
+        let delivery = pane
+            .control
+            .inbox
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the listener admits the split request");
+        assert!(
+            matches!(&delivery.what, What::Open { .. }),
+            "the listener queued the wrong request: {:?}",
+            delivery.what
+        );
+        pane.control.enqueue_for_tests(delivery);
+        pane.control.apply(
+            &mut pane.state,
+            &mut crate::agent_signals::Signals::default(),
+            SystemTime::now(),
+        );
 
         let waiting = pane.control.take_waiting_on_the_window();
         assert_eq!(
