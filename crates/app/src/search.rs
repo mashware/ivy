@@ -150,22 +150,24 @@ pub(crate) struct Mode {
     pub(crate) painted: Option<floating::Painted>,
 }
 
-/// One of the three choices the options' list offers.
+/// One of the choices the options' list offers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Choice {
     MatchCase,
     WholeWord,
     Wrap,
+    Regex,
 }
 
 impl Choice {
-    pub(crate) const ALL: [Self; 3] = [Self::MatchCase, Self::WholeWord, Self::Wrap];
+    pub(crate) const ALL: [Self; 4] = [Self::MatchCase, Self::WholeWord, Self::Wrap, Self::Regex];
 
     pub(crate) fn label(self) -> &'static str {
         match self {
             Self::MatchCase => "Match case",
             Self::WholeWord => "Whole word only",
             Self::Wrap => "Wrap around",
+            Self::Regex => "Regular expression",
         }
     }
 
@@ -174,6 +176,7 @@ impl Choice {
             Self::MatchCase => options.match_case,
             Self::WholeWord => options.whole_word,
             Self::Wrap => options.wrap,
+            Self::Regex => options.regex,
         }
     }
 
@@ -182,13 +185,14 @@ impl Choice {
             Self::MatchCase => &mut options.match_case,
             Self::WholeWord => &mut options.whole_word,
             Self::Wrap => &mut options.wrap,
+            Self::Regex => &mut options.regex,
         };
         *field = !*field;
     }
 }
 
 /// What the box says about the last press.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 enum Outcome {
     /// Nothing pressed since the query last changed.
     #[default]
@@ -335,7 +339,7 @@ impl Mode {
         let query = &self.query;
         let cells = match self
             .compiled
-            .get_or_insert_with(|| Search::literal(query, options))
+            .get_or_insert_with(|| Search::new(query, options))
         {
             Ok(search) => screen.mark_matches(view, search),
             Err(_) => 0,
@@ -416,7 +420,7 @@ pub(crate) fn apply(console: &mut OnThisConsole, screen: &mut Screen, steps: Ste
                     });
                 let compiled = open
                     .compiled
-                    .get_or_insert_with(|| Search::literal(&open.query, *options));
+                    .get_or_insert_with(|| Search::new(&open.query, *options));
                 open.outcome = match compiled {
                     Ok(search) => {
                         let before = std::time::Instant::now();
@@ -429,7 +433,7 @@ pub(crate) fn apply(console: &mut OnThisConsole, screen: &mut Screen, steps: Ste
                             Found::NoMore => Outcome::NoMore,
                         }
                     }
-                    Err(refused) => Outcome::Refused(*refused),
+                    Err(refused) => Outcome::Refused(refused.clone()),
                 };
                 continue;
             }
@@ -453,19 +457,26 @@ impl Mode {
     }
 
     /// What the box says about the last press, beside the query: nothing while typing or after a
-    /// match, and why there is nothing to show otherwise.
-    pub(crate) fn status(&self) -> &'static str {
+    /// match, and why there is nothing to show otherwise — **never «no match» for a query that
+    /// was not searched with**.
+    pub(crate) fn status(&self) -> String {
         // A query the engine already refused while marking says so before anybody presses Enter:
-        // its matches are not lit, and the box is the only place that can say why.
-        let refused_while_typing = matches!(self.compiled, Some(Err(Refused::TooLarge)));
-        match self.outcome {
-            Outcome::Typing if refused_while_typing => "too long to search",
-            Outcome::Typing | Outcome::Found => "",
-            Outcome::NotFound => "no match",
-            Outcome::NoMore => "no more matches",
-            Outcome::Refused(Refused::Empty) => "type what to look for",
-            Outcome::Refused(Refused::TooLarge) => "too long to search",
-        }
+        // its matches are not lit, and the box is the only place that can say why. An empty one
+        // is just a box nobody has typed in yet.
+        let refused = match (&self.outcome, &self.compiled) {
+            (Outcome::Refused(refused), _) => Some(refused),
+            (Outcome::Typing, Some(Err(refused))) if *refused != Refused::Empty => Some(refused),
+            _ => None,
+        };
+        let said = match (refused, &self.outcome) {
+            (Some(Refused::Empty), _) => "type what to look for",
+            (Some(Refused::TooLarge), _) => "too complex to search",
+            (Some(Refused::Invalid(why)), _) => return format!("invalid pattern: {why}"),
+            (None, Outcome::NotFound) => "no match",
+            (None, Outcome::NoMore) => "no more matches",
+            (None, _) => "",
+        };
+        said.to_owned()
     }
 }
 

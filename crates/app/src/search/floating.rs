@@ -472,7 +472,7 @@ fn paint_the_field(
         .x
         + 6.0 * metrics.width()
         <= inner.width();
-    let status = if fits { wanted } else { "" };
+    let status = if fits { wanted.as_str() } else { "" };
     let said = clipped.layout_no_wrap(status.to_owned(), metrics.font(), roles.tx2);
     let status_left = inner.right() - said.size().x;
     clipped.galley(
@@ -540,7 +540,7 @@ mod tests {
                 screen.advance(b"\r\n");
             }
         }
-        let mut search = Search::literal("needle", Options::default()).unwrap();
+        let mut search = Search::new("needle", Options::default()).unwrap();
         assert_eq!(
             screen.find(&mut search, Toward::Older, term_core::KeepClear::NONE),
             term_core::Found::Match,
@@ -630,7 +630,7 @@ mod tests {
                     .iter()
                     .filter(|(target, _)| matches!(target, Target::Choice(_)))
                     .count(),
-                3
+                Choice::ALL.len()
             );
         }
     }
@@ -672,7 +672,7 @@ mod tests {
             cols: 80,
         });
         screen.advance(b"needle");
-        let mut search = Search::literal("needle", Options::default()).unwrap();
+        let mut search = Search::new("needle", Options::default()).unwrap();
         assert_eq!(
             screen.find(&mut search, Toward::Older, term_core::KeepClear::NONE),
             term_core::Found::Match
@@ -782,10 +782,10 @@ mod tests {
 
     #[test]
     fn a_list_that_falls_over_the_box_takes_the_presses_on_its_choices() {
-        // Five rows of twenty points and barely wider than the box: the list (three rows of
+        // Six rows of twenty points and barely wider than the box: the list (four rows of
         // choices) fits neither under the box nor to its left, so it falls over it.
-        let short = Rect::from_min_size(pos2(100.0, 50.0), vec2(400.0, 100.0));
-        let screen = Screen::new(Size { rows: 5, cols: 80 });
+        let short = Rect::from_min_size(pos2(100.0, 50.0), vec2(400.0, 120.0));
+        let screen = Screen::new(Size { rows: 6, cols: 80 });
         let layout = layout(short, &metrics(), &screen.view(), true, &[], true);
         let list = layout.list.expect("the list is laid out");
         assert!(
@@ -821,8 +821,8 @@ mod tests {
 
     #[test]
     fn a_list_with_no_room_under_the_box_unfolds_to_its_left() {
-        let short = Rect::from_min_size(pos2(100.0, 50.0), vec2(800.0, 100.0));
-        let screen = Screen::new(Size { rows: 5, cols: 80 });
+        let short = Rect::from_min_size(pos2(100.0, 50.0), vec2(800.0, 120.0));
+        let screen = Screen::new(Size { rows: 6, cols: 80 });
         let layout = layout(short, &metrics(), &screen.view(), true, &[], true);
         let list = layout.list.expect("the list is laid out");
         assert!(short.contains_rect(list));
@@ -944,12 +944,21 @@ mod tests {
     #[test]
     fn each_option_reads_and_shows_its_own_choice() {
         let labels: Vec<&str> = Choice::ALL.iter().map(|choice| choice.label()).collect();
-        assert_eq!(labels, vec!["Match case", "Whole word only", "Wrap around"]);
+        assert_eq!(
+            labels,
+            vec![
+                "Match case",
+                "Whole word only",
+                "Wrap around",
+                "Regular expression"
+            ]
+        );
         for choice in Choice::ALL {
             let mut options = Options {
                 match_case: false,
                 whole_word: false,
                 wrap: false,
+                regex: false,
             };
             choice.flip(&mut options);
             for other in Choice::ALL {
