@@ -548,9 +548,12 @@ mod tests {
         crate::viewer::open_diff_for_pane(&mut window, name);
         crate::viewer::open_image_target(&mut window, name, path.to_owned()).unwrap();
         let started = Instant::now();
+        // A guard against a decode that never ends, not a speed claim: an unoptimised 2400×1600
+        // decode took 1.45 s alone and up to 3.9 s beside this module's other decodes, so a 5 s
+        // bound failed 19 tests whenever the machine was busy, before and after the rebase alike.
         while image_rect(&painted(&mut window, &ctx, vec![])).is_none() {
             assert!(
-                started.elapsed() < Duration::from_secs(5),
+                started.elapsed() < Duration::from_secs(30),
                 "{:?}",
                 window.image.message()
             );
