@@ -119,6 +119,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/explorer/load.rs"),
     ),
     (
+        "app/src/explorer/pattern.rs",
+        include_str!("../src/explorer/pattern.rs"),
+    ),
+    (
         "app/src/explorer/view.rs",
         include_str!("../src/explorer/view.rs"),
     ),
@@ -975,6 +979,14 @@ const MODULES: &[(&str, &str)] = &[
     (
         "term-core/src/search.rs",
         include_str!("../../term-core/src/search.rs"),
+    ),
+    (
+        "term-core/src/search/line.rs",
+        include_str!("../../term-core/src/search/line.rs"),
+    ),
+    (
+        "term-core/src/search/walk.rs",
+        include_str!("../../term-core/src/search/walk.rs"),
     ),
     (
         "term-core/examples/search.rs",

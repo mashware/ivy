@@ -9,6 +9,7 @@
 //! rules.
 
 use eframe::egui::{self, Key};
+use std::borrow::Cow;
 use term_core::{Found, Options, Refused, Screen, Search, Toward, View};
 
 mod editing;
@@ -135,8 +136,9 @@ pub(crate) struct Mode {
     query: String,
     /// A byte offset on a UTF-8 boundary; painting converts it to a galley character index.
     caret: usize,
-    /// The query compiled, **kept between presses** so the engine's automata keep what they learnt
-    /// about this grid. Emptied whenever the query or an option changes.
+    /// The query compiled, **kept between presses and paintings**: marking reads it on every frame,
+    /// and building a pattern costs up to milliseconds. Emptied whenever the query or an option
+    /// changes.
     compiled: Option<Result<Search, Refused>>,
     outcome: Outcome,
     /// Whether the options' list is unfolded beside the box. Changed only by the steps.
@@ -150,22 +152,24 @@ pub(crate) struct Mode {
     pub(crate) painted: Option<floating::Painted>,
 }
 
-/// One of the three choices the options' list offers.
+/// One of the choices the options' list offers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Choice {
     MatchCase,
     WholeWord,
     Wrap,
+    Regex,
 }
 
 impl Choice {
-    pub(crate) const ALL: [Self; 3] = [Self::MatchCase, Self::WholeWord, Self::Wrap];
+    pub(crate) const ALL: [Self; 4] = [Self::MatchCase, Self::WholeWord, Self::Wrap, Self::Regex];
 
     pub(crate) fn label(self) -> &'static str {
         match self {
             Self::MatchCase => "Match case",
             Self::WholeWord => "Whole word only",
             Self::Wrap => "Wrap around",
+            Self::Regex => "Regular expression",
         }
     }
 
@@ -174,6 +178,7 @@ impl Choice {
             Self::MatchCase => options.match_case,
             Self::WholeWord => options.whole_word,
             Self::Wrap => options.wrap,
+            Self::Regex => options.regex,
         }
     }
 
@@ -182,13 +187,14 @@ impl Choice {
             Self::MatchCase => &mut options.match_case,
             Self::WholeWord => &mut options.whole_word,
             Self::Wrap => &mut options.wrap,
+            Self::Regex => &mut options.regex,
         };
         *field = !*field;
     }
 }
 
 /// What the box says about the last press.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 enum Outcome {
     /// Nothing pressed since the query last changed.
     #[default]
@@ -335,7 +341,7 @@ impl Mode {
         let query = &self.query;
         let cells = match self
             .compiled
-            .get_or_insert_with(|| Search::literal(query, options))
+            .get_or_insert_with(|| Search::new(query, options))
         {
             Ok(search) => screen.mark_matches(view, search),
             Err(_) => 0,
@@ -416,7 +422,7 @@ pub(crate) fn apply(console: &mut OnThisConsole, screen: &mut Screen, steps: Ste
                     });
                 let compiled = open
                     .compiled
-                    .get_or_insert_with(|| Search::literal(&open.query, *options));
+                    .get_or_insert_with(|| Search::new(&open.query, *options));
                 open.outcome = match compiled {
                     Ok(search) => {
                         let before = std::time::Instant::now();
@@ -429,7 +435,7 @@ pub(crate) fn apply(console: &mut OnThisConsole, screen: &mut Screen, steps: Ste
                             Found::NoMore => Outcome::NoMore,
                         }
                     }
-                    Err(refused) => Outcome::Refused(*refused),
+                    Err(refused) => Outcome::Refused(refused.clone()),
                 };
                 continue;
             }
@@ -453,18 +459,38 @@ impl Mode {
     }
 
     /// What the box says about the last press, beside the query: nothing while typing or after a
-    /// match, and why there is nothing to show otherwise.
-    pub(crate) fn status(&self) -> &'static str {
-        // A query the engine already refused while marking says so before anybody presses Enter:
-        // its matches are not lit, and the box is the only place that can say why.
-        let refused_while_typing = matches!(self.compiled, Some(Err(Refused::TooLarge)));
-        match self.outcome {
-            Outcome::Typing if refused_while_typing => "too long to search",
-            Outcome::Typing | Outcome::Found => "",
-            Outcome::NotFound => "no match",
-            Outcome::NoMore => "no more matches",
-            Outcome::Refused(Refused::Empty) => "type what to look for",
-            Outcome::Refused(Refused::TooLarge) => "too long to search",
+    /// match, and why there is nothing to show otherwise — **never «no match» for a query that
+    /// was not searched with**.
+    pub(crate) fn status(&self) -> Cow<'static, str> {
+        let said = match (self.refusal(), &self.outcome) {
+            (Some(Refused::Empty), _) => "type what to look for",
+            (Some(Refused::TooLarge), _) => "too complex to search",
+            (Some(Refused::Invalid(why)), _) => return format!("invalid pattern: {why}").into(),
+            (None, Outcome::NotFound) => "no match",
+            (None, Outcome::NoMore) => "no more matches",
+            (None, _) => "",
+        };
+        said.into()
+    }
+
+    /// The refusal in the fewest words, for a box too narrow for [`status`](Self::status): what
+    /// is wrong without the parser's why.
+    pub(crate) fn short_refusal(&self) -> Option<&'static str> {
+        self.refusal().map(|refused| match refused {
+            Refused::Empty => "type what to look for",
+            Refused::TooLarge => "too complex",
+            Refused::Invalid(_) => "invalid pattern",
+        })
+    }
+
+    /// Why the query cannot be searched with, if it cannot. **A query the engine already refused
+    /// while marking says so before anybody presses Enter**: its matches are not lit, and the box
+    /// is the only place that can say why. An empty one is just a box nobody has typed in yet.
+    fn refusal(&self) -> Option<&Refused> {
+        match (&self.outcome, &self.compiled) {
+            (Outcome::Refused(refused), _) => Some(refused),
+            (Outcome::Typing, Some(Err(refused))) if *refused != Refused::Empty => Some(refused),
+            _ => None,
         }
     }
 }
@@ -592,6 +618,58 @@ mod tests {
             ),
             ""
         );
+    }
+
+    #[test]
+    fn a_pattern_that_cannot_be_searched_with_says_why_and_never_no_match() {
+        let mut screen = a_screen("needle\r\n");
+        let regex = Options {
+            regex: true,
+            ..Options::default()
+        };
+        for (query, said) in [
+            ("(", "invalid pattern: unclosed"),
+            (r"\w{50}", "too complex to search"),
+        ] {
+            let mut console = OnThisConsole {
+                open: Some(Mode::default()),
+                options: regex,
+                ..OnThisConsole::default()
+            };
+            apply(
+                &mut console,
+                &mut screen,
+                steps(true, vec![Step::Type(query.into())]),
+            );
+            // While typing, the marking is what compiles the query, and the box says it already.
+            let mut view = screen.view();
+            let open = console.open.as_mut().expect("still open");
+            assert_eq!(open.mark(&screen, &mut view, regex).cells, 0);
+            assert!(
+                open.status().starts_with(said),
+                "{query}: {}",
+                open.status()
+            );
+
+            apply(
+                &mut console,
+                &mut screen,
+                steps(true, vec![Step::Go(Toward::Older)]),
+            );
+            let status = console.open.as_ref().expect("still open").status();
+            assert!(status.starts_with(said), "{query} after Enter: {status}");
+        }
+        // The same characters as text are found.
+        let mut console = OnThisConsole {
+            open: Some(Mode::default()),
+            ..OnThisConsole::default()
+        };
+        apply(
+            &mut console,
+            &mut screen,
+            steps(true, vec![Step::Type("(".into()), Step::Go(Toward::Older)]),
+        );
+        assert_eq!(console.open.as_ref().unwrap().status(), "no match");
     }
 
     #[test]

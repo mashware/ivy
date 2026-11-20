@@ -466,14 +466,23 @@ fn paint_the_field(
     // The status gives way to the query: it is left out where it would leave fewer than six
     // cells for what was typed.
     let wanted = mode.status();
+    let room_for_status = (inner.width() - 6.0 * metrics.width()).max(0.0);
     let fits = clipped
-        .layout_no_wrap(wanted.to_owned(), metrics.font(), roles.tx2)
+        .layout_no_wrap(wanted.to_string(), metrics.font(), roles.tx2)
         .size()
         .x
-        + 6.0 * metrics.width()
-        <= inner.width();
-    let status = if fits { wanted } else { "" };
-    let said = clipped.layout_no_wrap(status.to_owned(), metrics.font(), roles.tx2);
+        <= room_for_status;
+    // **A refusal is never left out**: a query that was not searched with, painted as nothing,
+    // reads as «no match». Where the whole of it does not fit, its short form does — cut with «…»
+    // only if even that does not; anything else gives way.
+    let status = match (fits, mode.short_refusal()) {
+        (true, _) => wanted.into_owned(),
+        (false, Some(short)) => short.to_owned(),
+        (false, None) => String::new(),
+    };
+    let mut job = egui::text::LayoutJob::simple_singleline(status, metrics.font(), roles.tx2);
+    job.wrap = egui::text::TextWrapping::truncate_at_width(room_for_status);
+    let said = clipped.layout_job(job);
     let status_left = inner.right() - said.size().x;
     clipped.galley(
         pos2(status_left, inner.center().y - said.size().y / 2.0),
@@ -540,9 +549,9 @@ mod tests {
                 screen.advance(b"\r\n");
             }
         }
-        let mut search = Search::literal("needle", Options::default()).unwrap();
+        let search = Search::new("needle", Options::default()).unwrap();
         assert_eq!(
-            screen.find(&mut search, Toward::Older, term_core::KeepClear::NONE),
+            screen.find(&search, Toward::Older, term_core::KeepClear::NONE),
             term_core::Found::Match,
             "the premise: the needle is found"
         );
@@ -630,7 +639,7 @@ mod tests {
                     .iter()
                     .filter(|(target, _)| matches!(target, Target::Choice(_)))
                     .count(),
-                3
+                Choice::ALL.len()
             );
         }
     }
@@ -672,9 +681,9 @@ mod tests {
             cols: 80,
         });
         screen.advance(b"needle");
-        let mut search = Search::literal("needle", Options::default()).unwrap();
+        let search = Search::new("needle", Options::default()).unwrap();
         assert_eq!(
-            screen.find(&mut search, Toward::Older, term_core::KeepClear::NONE),
+            screen.find(&search, Toward::Older, term_core::KeepClear::NONE),
             term_core::Found::Match
         );
         let layout = layout(console(), &metrics(), &screen.view(), false, &[], true);
@@ -782,10 +791,10 @@ mod tests {
 
     #[test]
     fn a_list_that_falls_over_the_box_takes_the_presses_on_its_choices() {
-        // Five rows of twenty points and barely wider than the box: the list (three rows of
+        // Six rows of twenty points and barely wider than the box: the list (four rows of
         // choices) fits neither under the box nor to its left, so it falls over it.
-        let short = Rect::from_min_size(pos2(100.0, 50.0), vec2(400.0, 100.0));
-        let screen = Screen::new(Size { rows: 5, cols: 80 });
+        let short = Rect::from_min_size(pos2(100.0, 50.0), vec2(400.0, 120.0));
+        let screen = Screen::new(Size { rows: 6, cols: 80 });
         let layout = layout(short, &metrics(), &screen.view(), true, &[], true);
         let list = layout.list.expect("the list is laid out");
         assert!(
@@ -821,8 +830,8 @@ mod tests {
 
     #[test]
     fn a_list_with_no_room_under_the_box_unfolds_to_its_left() {
-        let short = Rect::from_min_size(pos2(100.0, 50.0), vec2(800.0, 100.0));
-        let screen = Screen::new(Size { rows: 5, cols: 80 });
+        let short = Rect::from_min_size(pos2(100.0, 50.0), vec2(800.0, 120.0));
+        let screen = Screen::new(Size { rows: 6, cols: 80 });
         let layout = layout(short, &metrics(), &screen.view(), true, &[], true);
         let list = layout.list.expect("the list is laid out");
         assert!(short.contains_rect(list));
@@ -944,12 +953,21 @@ mod tests {
     #[test]
     fn each_option_reads_and_shows_its_own_choice() {
         let labels: Vec<&str> = Choice::ALL.iter().map(|choice| choice.label()).collect();
-        assert_eq!(labels, vec!["Match case", "Whole word only", "Wrap around"]);
+        assert_eq!(
+            labels,
+            vec![
+                "Match case",
+                "Whole word only",
+                "Wrap around",
+                "Regular expression"
+            ]
+        );
         for choice in Choice::ALL {
             let mut options = Options {
                 match_case: false,
                 whole_word: false,
                 wrap: false,
+                regex: false,
             };
             choice.flip(&mut options);
             for other in Choice::ALL {
@@ -991,6 +1009,45 @@ mod tests {
         });
         output.textures_delta.clear();
         (output.shapes, blinking)
+    }
+
+    #[test]
+    fn a_refusal_is_painted_in_a_field_of_the_box_s_own_width() {
+        let field = Rect::from_min_size(
+            pos2(10.0, 10.0),
+            vec2(FIELD_CELLS * metrics().width() + 2.0 * PAD, 30.0),
+        );
+        for (refused, said) in [
+            (
+                term_core::Refused::Invalid("unclosed group".into()),
+                "invalid pattern",
+            ),
+            (term_core::Refused::TooLarge, "too complex"),
+        ] {
+            let mut mode = Mode::default();
+            mode.insert("(");
+            mode.compiled = Some(Err(refused));
+            let ctx = egui::Context::default();
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let roles = crate::theme::Roles::of(&Theme::default());
+                paint_the_field(ui.painter(), &mode, field, &roles, &metrics(), None);
+            });
+            output.textures_delta.clear();
+            let painted: Vec<String> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                    _ => None,
+                })
+                .collect();
+            assert!(
+                painted
+                    .iter()
+                    .any(|text| text.starts_with(said) && !text.contains('…')),
+                "the refusal was not painted whole, in one form or the other: {painted:?}"
+            );
+        }
     }
 
     fn caret_in(shapes: &[egui::epaint::ClippedShape]) -> Option<Rect> {

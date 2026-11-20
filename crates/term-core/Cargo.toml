@@ -11,6 +11,10 @@ portable-pty = "0.9"
 # Already in the tree through the engine's own search; named here because escaping is the one
 # primitive that cannot miss a metacharacter.
 regex-syntax = "0.8"
+# The search's engine: its meta regex falls back from a lazy DFA to engines that never give up, where
+# the terminal engine's own search gives up on a large pattern and reports no match (D61).
+# Already in the tree through that engine, with the same features.
+regex-automata = "0.4"
 
 # Closing a console hangs up its program by pid instead of through `portable-pty`'s `kill`, whose
 # 50 ms grid was the whole cost of the close. Already in the tree through that crate.

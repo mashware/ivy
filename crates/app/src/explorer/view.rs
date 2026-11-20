@@ -126,6 +126,7 @@ fn rows(state: &mut Explorer, pane: usize) -> (Vec<Row>, Option<Request>, bool) 
             Visit::Directory(path, depth) => {
                 let mut key = state.request(pane, path.clone());
                 key.query.clear();
+                key.regex = false;
                 state.clock = state.clock.wrapping_add(1);
                 let root = state.navigation[&pane].root.as_ref() == Some(&path);
                 // A revealed match loads the folders on its way, wherever they fall.

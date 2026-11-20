@@ -75,6 +75,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/explorer/load.rs"),
     ),
     (
+        "src/explorer/pattern.rs",
+        include_str!("../src/explorer/pattern.rs"),
+    ),
+    (
         "src/explorer/view.rs",
         include_str!("../src/explorer/view.rs"),
     ),

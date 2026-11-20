@@ -109,6 +109,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         0,
     ),
     (
+        "src/explorer/pattern.rs",
+        include_str!("../src/explorer/pattern.rs"),
+        0,
+    ),
+    (
         "src/explorer/view.rs",
         include_str!("../src/explorer/view.rs"),
         0,

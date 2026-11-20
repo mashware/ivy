@@ -6,6 +6,8 @@ use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
+use super::pattern::Matcher;
+
 const ENTRY_LIMIT: usize = 4096;
 const PATH_BYTES_LIMIT: usize = 4 * 1024 * 1024;
 
@@ -106,8 +108,11 @@ fn reveal_path(path: &Path, cancelled: &dyn Fn() -> bool) -> Result<Listing, Str
     Ok(listing)
 }
 
-fn search_names(root: &Path, query: &str, cancelled: &dyn Fn() -> bool) -> Result<Listing, String> {
-    let needle = query.to_lowercase();
+fn search_names(
+    root: &Path,
+    matcher: &Matcher,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Listing, String> {
     let mut pending = std::collections::VecDeque::from([root.to_path_buf()]);
     let mut listing = Listing::default();
     let mut visited = 0usize;
@@ -169,7 +174,7 @@ fn search_names(root: &Path, query: &str, cancelled: &dyn Fn() -> bool) -> Resul
             if entry
                 .path
                 .file_name()
-                .is_some_and(|name| name.to_string_lossy().to_lowercase().contains(&needle))
+                .is_some_and(|name| matcher.matches(&name.to_string_lossy()))
             {
                 let bytes = path_payload_bytes(&entry.path);
                 if listing.entries.len() == ENTRY_LIMIT
@@ -219,6 +224,9 @@ pub(crate) struct Request {
     pub(crate) epoch: u64,
     pub(crate) path: PathBuf,
     pub(crate) query: String,
+    /// The query is a pattern: part of the key, so a list found as text is never shown for the
+    /// same query read as a pattern.
+    pub(crate) regex: bool,
     pub(crate) reveal: bool,
 }
 
@@ -230,6 +238,9 @@ pub(crate) struct Reply {
 
 struct Job {
     request: Request,
+    /// The name search's query, compiled once on the interface's side. Beside the request rather
+    /// than in it: the request is the cache's key, and a compiled pattern has no equality.
+    matcher: Option<Arc<Matcher>>,
     cancelled: Arc<AtomicBool>,
     ctx: egui::Context,
 }
@@ -278,6 +289,24 @@ impl Loader {
     }
 
     pub(crate) fn submit(&mut self, request: Request, ctx: &egui::Context) {
+        debug_assert!(
+            request.query.is_empty(),
+            "a name search goes through `search`, with its compiled query"
+        );
+        self.submit_with(request, None, ctx);
+    }
+
+    /// Submits a name search, which the worker runs with `matcher` instead of listing a folder.
+    pub(crate) fn search(&mut self, request: Request, matcher: Arc<Matcher>, ctx: &egui::Context) {
+        self.submit_with(request, Some(matcher), ctx);
+    }
+
+    fn submit_with(
+        &mut self,
+        request: Request,
+        matcher: Option<Arc<Matcher>>,
+        ctx: &egui::Context,
+    ) {
         if let Some(current) = self.current.take() {
             current.store(true, Ordering::Release);
         }
@@ -295,6 +324,7 @@ impl Loader {
         if let Ok(mut slot) = lock.lock() {
             if let Some(old) = slot.replace(Job {
                 request,
+                matcher,
                 cancelled,
                 ctx: ctx.clone(),
             }) {
@@ -367,8 +397,8 @@ fn spawn_worker(
                 let cancelled = || token.load(Ordering::Acquire);
                 let result = if job.request.reveal {
                     reveal_path(&job.request.path, &cancelled)
-                } else if !job.request.query.is_empty() {
-                    search_names(&job.request.path, &job.request.query, &cancelled)
+                } else if let Some(matcher) = &job.matcher {
+                    search_names(&job.request.path, matcher, &cancelled)
                 } else {
                     reader(&job.request.path, &cancelled)
                 };
@@ -428,6 +458,7 @@ mod tests {
             epoch: 11,
             path,
             query: String::new(),
+            regex: false,
             reveal: false,
         }
     }
@@ -689,6 +720,35 @@ mod tests {
         assert!(window.explorer.loading.is_some());
         release_tx.send(()).unwrap();
     }
+    fn text(query: &str) -> Matcher {
+        Matcher::new(query, false).unwrap()
+    }
+
+    #[test]
+    fn a_name_search_with_a_pattern_lists_only_the_names_it_matches() {
+        let temp = TempDir::new();
+        fs::create_dir_all(temp.0.join("src")).unwrap();
+        fs::write(temp.0.join("src/main.rs"), "").unwrap();
+        fs::write(temp.0.join("src/domain.rs"), "").unwrap();
+        fs::write(temp.0.join("main.rsx"), "").unwrap();
+        let pattern = Matcher::new(r"^main\.rs$", true).unwrap();
+        let found = search_names(&temp.0, &pattern, &|| false).unwrap();
+        assert_eq!(
+            found
+                .entries
+                .iter()
+                .map(|entry| entry.path.clone())
+                .collect::<Vec<_>>(),
+            vec![temp.0.join("src/main.rs")]
+        );
+        let as_text = search_names(&temp.0, &text("main.rs"), &|| false).unwrap();
+        assert_eq!(
+            as_text.entries.len(),
+            3,
+            "as text, «main.rs» is a piece of «domain.rs» and «main.rsx» too"
+        );
+    }
+
     #[test]
     fn name_search_walks_nested_folders_without_following_directory_links() {
         let temp = TempDir::new();
@@ -697,7 +757,7 @@ mod tests {
         fs::write(temp.0.join("unrelated.rs"), "needle").unwrap();
         #[cfg(unix)]
         std::os::unix::fs::symlink(&temp.0, temp.0.join("nested/loop")).unwrap();
-        let found = search_names(&temp.0, "nEeDlE", &|| false).unwrap();
+        let found = search_names(&temp.0, &text("nEeDlE"), &|| false).unwrap();
         assert_eq!(found.entries.len(), 2);
         assert_eq!(found.entries[0].kind, EntryKind::Directory);
         assert!(found.entries.iter().all(|entry| {
@@ -708,7 +768,7 @@ mod tests {
                 .to_string_lossy()
                 .contains("Needle")
         }));
-        assert!(search_names(&temp.0, "needle", &|| true).is_err());
+        assert!(search_names(&temp.0, &text("needle"), &|| true).is_err());
     }
 
     #[test]
@@ -717,7 +777,7 @@ mod tests {
         for index in 0..=ENTRY_LIMIT {
             fs::write(temp.0.join(format!("match-{index}")), "").unwrap();
         }
-        let found = search_names(&temp.0, "match", &|| false).unwrap();
+        let found = search_names(&temp.0, &text("match"), &|| false).unwrap();
         assert_eq!(found.entries.len(), ENTRY_LIMIT);
         assert!(found.notice.unwrap().contains("limit"));
     }

@@ -8305,6 +8305,88 @@ a general TextEdit would also change interrupt and global-shortcut ownership; an
 would duplicate the existing focus, idle and measurement gates. The earlier exclusions above
 remain historical rationale and are superseded only by this amendment.
 
+### Amended 20 November 2026 — regular expressions, in the console and in Files (#121)
+
+This supersedes, above: the «Regular expressions» row of the discarded table and «take regular
+expressions» among what the search does not do; the «Literal, not a pattern» paragraph's reason; in
+#120's amendment, case «set with an inline flag ahead of the escaped literal», the rejected candidate
+«skipped inside the engine's own walk», the rescanning and the spacer-stepping that explained, and
+the accepted miss of a whole word overlapping a rejected candidate; and the second half of the
+`\b` row of #120's discarded table — the meta engine does take a Unicode `\b`, and whole word stays
+a check on the match only so that a literal and a pattern follow the same rule.
+
+- **A fourth option, Regular expression**, in the console's options list, off by default and kept
+  with the other three. Off, the query is literal exactly as before. **The Files name search gets the
+  same choice** as a `.*` toggle beside its field, matched against each entry's name, case-insensitive
+  as that search always was; an inline `(?-i)` makes it sensitive. Both modes now go through the
+  same engine as the console, so Files' text search folds case the engine's way instead of
+  lowercasing: at the edges of Unicode a listing changes — `i` no longer finds `İzmir`, `σ` now
+  finds `ΟΔΟΣ`. A pattern's own spaces are part of it; text is still trimmed.
+- **The engine that gave up is no longer used.** `alacritty_terminal`'s search runs a lazy DFA that,
+  on a pattern whose states do not fit its cache, clears it three times and stops, and the crate
+  turns that into «no match» with only a log line — which made «not found» and «gave up»
+  indistinguishable. The search now extracts each **logical line** (rows joined through a wrap) into
+  text with a map back to its cells, and runs `regex-automata`'s meta engine on it, which falls back
+  from its lazy DFA to engines that never give up. **Literal and regex share this one path**; a literal
+  is the escaped query.
+- **What the person is told instead of «no matches»**: a pattern that does not parse shows the
+  parser's message; a pattern too complex to build says so. The box's field leaves about twenty
+  cells for that, so where the whole of it does not fit its short form is shown — «invalid
+  pattern», «too complex» — and a refusal is never the part that gives way to the query. The build limit is 2 MiB of automaton,
+  the same the old engine used, and it refuses short patterns with large Unicode counts — `\w{50}`
+  (2.8 MB) is refused.
+- **What stays as D61 decided**: the match is the selection, the step starts one cell past it, wraps
+  are followed and hard line breaks are never crossed, wide characters take their two cells, Whole
+  word keeps its rule, and marking walks only `marking_bounds()` — the screen and at most
+  `MARKING_REACH` lines beyond it, one logical line at a time.
+- **What changes, declared**: walking older, a match is now chosen left-to-right inside its line, as
+  marking always chose it — `aa` over `aaa` selects the first two cells where it used to select the
+  last two. The row's padding is still part of the text, so `$` matches after it, as before. **Case
+  is set on the engine's syntax**, so a pattern's own `(?i)` or `(?-i)` overrides the box. **A
+  candidate whole word rejects gives its characters back**: the search goes on one character past
+  where the candidate started, so `1.1` at the end of `v1.1.1` is now found walking either way and
+  marked, where #120 accepted missing it one way. Retrying past a rejected candidate skips the rest of a run of word
+  characters, so a long run is read once; a candidate rejected only at its end is retried one
+  character on, and a pattern built for that (`-+\w` over a long run of dashes) is quadratic — one
+  more hostile pattern, accepted as below. **Marking reads one row past each of its cuts**
+  as context it never marks, so a line cut by `MARKING_REACH` is not taken to start or end at the
+  cut by whole word, `^`, `$` or `\b`.
+- **A hostile pattern is accepted as a pause, by the user's decision — asked twice.** A pattern
+  with a large count over text that varies (`\p{L}.{170}~` over random letters, digits and a wide
+  character) is the engine's slowest case: **0.32–0.33 s a press** at the median over a full history of lines,
+  **3.2–3.4 s** (slowest 4.5 s) over one logical line wrapped across the whole history, and **3–13 ms
+  of marking per frame** over lines, **70–100 ms** over that one line (median to slowest, one run) — for as long as the search stays open, paid
+  while typing and while output streams, not only on `Enter`. The person was asked first with the
+  design's estimate (0.6 s, measured over a synthetic grid) and again with these figures, and kept
+  the answer: a pattern like that is not what this terminal is for. Over repeated text the same
+  pattern costs no more than an ordinary query, which is why the bench draws random text for it.
+  Discarded: a per-press deadline and cutting a huge line into chunks — chunks would bring back the
+  silent miss for a match across a cut, which is what this amendment removes; and a per-frame marking
+  budget, which would also need the huge line cut to bound it.
+- **Measured** with `cargo run --release --example search -p term-core` (3 549 rows of 180 columns,
+  twenty presses each way, three runs — the last after the review's fixes — 20 November 2026; ranges are
+  medians across runs). A press that finds nothing: **2.81–3.14 ms**
+  walking older, **3.48–3.90 ms** newer — down from 11.4–13.6 ms, because the engine reads each line
+  as text instead of a byte per cell through the grid. Whole word rejected on every line
+  **4.47–4.64 ms** older, **5.60–5.71 ms** newer; over one wrapped line **7.14–8.10 ms**. An ordinary
+  pattern that finds nothing (`absent\s+\d+`) **2.69–2.88 ms**. The hostile figures are above.
+- **Measured in the window** (batch `E` against its control `C`, 20 November 2026, runs interleaved
+  C·E·C·E, 1280×800, both consoles dumping 44 MiB, release; `compare` says each pair can be
+  averaged; a first `E` was thrown away by the script's own guard — no panel was published — and
+  the next run of the same binary was valid). Marking: **44.8–58.9 µs a painting** with a search
+  open, against **55.0 µs** for one run of `E` on `main` the same day and D61's 59.7–64.5 µs — no
+  measurable change. A press: **23.1–35.4 µs** at the mean, slowest 96–189 µs (`main`: 34.6 µs,
+  slowest 396 µs). The left console's enqueueing span reads 270–586 µs in `E` against 552.6 µs in
+  both `C` runs; `E` runs several times more frames, so — as D61 already warned — its per-frame means
+  do not compare with `C`'s.
+
+| Discarded (#121) | Why |
+|---|---|
+| Keeping the old engine and checking with the meta engine when it says «nothing» | Giving up stops the old walk midway, so a press can also return an earlier, wrapped match or mark half a screen — not only «nothing» |
+| The old engine for literals, the meta engine for patterns | Two walks with two sets of wide-character and wrap rules, so the same text could be found in one mode and not the other |
+| Removing the old engine's give-up limit | Trades a false «no match» for a window frozen for as long as the cache keeps thrashing |
+| Patching `alacritty_terminal` to expose the error | A fork carried until upstream takes it |
+
 ---
 
 ## D62 — Pane controls share the strip's geometry and own their entire gesture

@@ -10,12 +10,27 @@ pub(super) struct Navigation {
     pub(super) scroll: f32,
     pub(super) row_limit: usize,
     pub(super) query: String,
+    /// The name search reads the query as a pattern. **An option, not part of the query**: a new
+    /// folder or a cleared query keeps it.
+    pub(super) regex: bool,
+    /// The name search's query compiled, with what it was compiled from.
+    pub(super) compiled: Option<super::pattern::Compiled>,
     pub(super) reveal_selected: bool,
     pub(super) generation: u64,
     pub(super) epoch: u64,
 }
 
 impl Navigation {
+    /// The query the name search runs: as typed for a pattern, whose spaces are part of it, and
+    /// without the spaces around it for text, as Files always read it.
+    pub(super) fn search_query(&self) -> &str {
+        if self.regex {
+            &self.query
+        } else {
+            self.query.trim()
+        }
+    }
+
     pub(super) fn observe(&mut self, source: Option<PathBuf>) -> bool {
         if self.source == source {
             return false;
