@@ -1,0 +1,52 @@
+{
+  "ticket": "164",
+  "slug": "windows-private-control-pipe",
+  "type": "feat",
+  "title": "Windows: bind the control channel (MCP) on a user-only named pipe",
+  "branch": "164-windows-private-control-pipe",
+  "base": "main",
+  "stacked_on": null,
+  "worktree": null,
+  "size": "M",
+  "phase": "design",
+  "phases_done": [
+    "context"
+  ],
+  "draft_from_conversation": false,
+  "tracker_issue": null,
+  "related_repos": [],
+  "roadmap": null,
+  "started_at": "2026-11-20T19:18:21.084909+00:00",
+  "updated_at": "2026-11-20T19:23:50.559144+00:00",
+  "notes": "Recommended native Windows transport selected: explicit security and overlapped cancellation; preserve Unix protocol. Dependency #161 already on base at 8380c4e.",
+  "pending": {
+    "id": "164-windows-private-control-pipe:design:design_challenge:137fd34:ec05b26",
+    "gate": "design_challenge",
+    "phase": "design",
+    "resume": "feat:design",
+    "resume_at": "\u00a77 \u2014 after writing the response to high finding F1 and reopening the affected design as requested",
+    "head": "137fd348165866dcd3382608a811d0c594119f42",
+    "question_file": "ask-question.md",
+    "options_file": "ask-options.md",
+    "why": "study",
+    "free_text": true
+  },
+  "defaults_used": [
+    {
+      "key": "unattended:create-branch",
+      "default": "Created in place from explicit main; no tracking upstream",
+      "phase": "context"
+    },
+    {
+      "key": "unattended:size",
+      "default": "M: native transport, security, environment and consumers",
+      "phase": "context"
+    },
+    {
+      "key": "unattended:approach",
+      "default": "Native Windows adapter; parallel panel 3/3; one shared protocol",
+      "phase": "design"
+    }
+  ],
+  "ticket_deps": []
+}

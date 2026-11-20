@@ -1,0 +1,7 @@
+# Minimum approach
+
+Keep the wire protocol, `Channel` dispatch, and MCP consumers unchanged. Add a Windows named-pipe backend in `panel-control/src/endpoint.rs`, using native APIs for `CreateNamedPipeW`/overlapped `ConnectNamedPipe` and a private stop event. Create the first instance with `FILE_FLAG_FIRST_PIPE_INSTANCE`, reject remote clients, and set a protected DACL granting only the current user and SYSTEM. `Acceptor::wait` waits on accept completion and stop; `accept` returns the existing `Stream` shape or a small Windows `Read`/`Write` adapter. This preserves `listener.rs` framing, receive timeout, worker accounting, and drop/join behavior; verify all workers stop within the existing bound.
+
+Windows `private_to_this_user` must validate `PANEL_DIR` owner and DACL, failing closed. Extend `PanelDir`'s fixed environment contract with the app PID; `client.rs` requires it on Windows and checks the pipe server PID before sending. `app/src/control/channel.rs` already passes `PanelDir` to `Channel`; pane launch propagates `PanelDir::env()`.
+
+Update `BINDS` and `socket_present` (pipes have no socket file), with Windows tests for actual DACL, remote rejection, first-instance collision, PID mismatch, directory security, and bounded drop. Main risk is Win32 handle/overlapped cancellation lifetime; confine it to endpoint and run tests on Windows. `interprocess`'s generic listener cannot prove descriptor, first-instance, remote-client, or overlapped-stop requirements, so wrapping its default pipe is unsafe.
