@@ -10685,6 +10685,35 @@ down. It is the console's only search button now that the titlebar's is gone (D6
 of the base and not dropped before the title when narrow — the label-only threshold moves up by one
 25-point cell, and the splits still go first.
 
+**Amended 20 November 2026 — #157.** Controls nobody wants any more **linger, then fade**. The owner
+found it abrupt that they vanished on the very pass the console lost focus or the pointer left its
+header. Now they stay whole for 3 s and fade to nothing over 0.5 s; appearing is still immediate.
+
+- **The countdown starts on the first pass that finds them unwanted.** Not at the last pass that
+  wanted them: a window at rest paints nothing, so that stamp can be seconds old when a click on
+  another console finally arrives, and the controls would vanish on the spot. A design challenger
+  found this before any code existed.
+- **What shows answers.** The controls are recorded as painted — and so pressable, by the rule
+  above — through the wait and the fade until they drop below a quarter of their opacity; the
+  last stretch of the fade is painted but answers no press, because an icon that faint is one
+  nobody aims at, and a quick move-and-click could otherwise reach a close nobody saw. The review
+  found that case. Focus or the pointer coming back makes them wanted again, whole on that pass.
+  The double-click guard is untouched: it concerns controls that were not painted.
+- **Only what was seen leaving lingers.** A header that went unpainted (its tab in the background,
+  a sibling behind a maximized console) does not start a countdown when it comes back.
+- **Rest.** The wait asks to be woken once, at its end; the fade asks for every frame for half a
+  second; after it nothing is asked. The header span now also paints the headers that are
+  lingering or fading.
+- **Measured runs.** They paint integrated headers too, so the linger shares the focus green's gate
+  (`focus_fades`, off in every measured run and every test window): there the controls still go on
+  the pass that stops wanting them, and no published batch changes.
+
+| Discarded | Why |
+|---|---|
+| egui's `animate_value_with_time` for the fade | It has no delay, and it eases back up when focus returns mid-fade instead of being whole at once; calling it also asks for a repaint every pass |
+| A setting for the two durations | Not asked for; one more key to document for a feel the owner already chose |
+| A fade when they appear | The owner chose immediate: a control reached with the pointer must be there to press |
+
 ## D100 — Configurable font sizes use typographic points (version 2)
 
 Configurable font sizes are typographic points, converted once at the settings boundary using

@@ -603,6 +603,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         include_str!("../src/header/integrated.rs"),
         1,
     ),
+    (
+        "src/header/linger.rs",
+        include_str!("../src/header/linger.rs"),
+        1,
+    ),
     ("src/pane_view.rs", include_str!("../src/pane_view.rs"), 1),
     ("src/visibility.rs", include_str!("../src/visibility.rs"), 1),
     (

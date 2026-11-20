@@ -239,11 +239,12 @@ fn painted_id(name: usize) -> egui::Id {
 
 /// Whether the controls of console `name`'s header were painted in the pass before this one.
 ///
-/// **A frame number and not a flag**: a console that stops being painted — a hidden sibling, a tab
-/// in the background, or one the pointer left a moment ago — keeps its last number, which is then
-/// too old to count. A press in the same pass that brought the pointer onto the header finds the
-/// previous pass's number, not its own, because the pointer is handled before the panes are painted;
-/// `a_hidden_close_cannot_be_pressed_until_it_was_painted` fails if that order is ever reversed.
+/// **A frame number and not a flag**: a console whose controls stop being painted — a hidden
+/// sibling, a tab in the background, or controls whose fade has gone too faint (D99) — keeps its
+/// last number, which is then too old to count. A press in the same pass that brought the pointer
+/// onto the header finds the previous pass's number, not its own, because the pointer is handled
+/// before the panes are painted; `a_hidden_close_cannot_be_pressed_until_it_was_painted` fails if
+/// that order is ever reversed.
 pub(crate) fn revealed(ctx: &egui::Context, name: usize) -> bool {
     let now = ctx.cumulative_frame_nr();
     ctx.data(|data| data.get_temp::<u64>(painted_id(name)))
@@ -364,8 +365,11 @@ fn paint(ui: &egui::Ui, strip: egui::Rect, theme: &Theme, appearance: Appearance
     let layout = layout(strip, offer);
     // Only the focused console shows its controls all the time; another shows them while the
     // pointer is over its header. Hidden ones keep their cells, so the title never moves (D99).
-    let shown = focused || ui.rect_contains_pointer(strip);
-    if shown {
+    // Once unwanted they linger and fade, and answer until they are too faint to be aimed at.
+    let opacity =
+        super::linger::controls_opacity(ui.ctx(), name, focused || ui.rect_contains_pointer(strip));
+    let shown = opacity > 0.0;
+    if opacity >= super::linger::PRESSABLE {
         let frame = ui.ctx().cumulative_frame_nr();
         let previous = ui.ctx().data_mut(|data| {
             let previous = data.get_temp::<u64>(painted_id(name));
@@ -377,6 +381,8 @@ fn paint(ui: &egui::Ui, strip: egui::Rect, theme: &Theme, appearance: Appearance
         if previous.is_none_or(|painted| painted + 1 < frame) {
             ui.ctx().request_repaint();
         }
+    }
+    if shown {
         for x in &layout.separators {
             painter.line_segment(
                 [
@@ -385,7 +391,7 @@ fn paint(ui: &egui::Ui, strip: egui::Rect, theme: &Theme, appearance: Appearance
                 ],
                 // The ink of the title's own « / » separator: the border role the titlebar uses was
                 // reported barely visible on a header's tinted surface (18 November 2026).
-                egui::Stroke::new(1.0, colors.separator),
+                egui::Stroke::new(1.0, colors.separator.gamma_multiply(opacity)),
             );
         }
     }
@@ -431,6 +437,7 @@ fn paint(ui: &egui::Ui, strip: egui::Rect, theme: &Theme, appearance: Appearance
                 _ => roles.tx2,
             };
             let size = if target == Target::Review { 13.0 } else { 12.0 };
+            let icon = icon.gamma_multiply(opacity);
             paint_icon(&painter, rect.center(), target, zoomed, icon, size);
             continue;
         }

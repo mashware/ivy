@@ -405,6 +405,10 @@ const MODULES: &[(&str, &str)] = &[
         "src/header/integrated.rs",
         include_str!("../src/header/integrated.rs"),
     ),
+    (
+        "src/header/linger.rs",
+        include_str!("../src/header/linger.rs"),
+    ),
     ("src/pane_view.rs", include_str!("../src/pane_view.rs")),
     ("src/visibility.rs", include_str!("../src/visibility.rs")),
     (
