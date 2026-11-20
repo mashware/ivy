@@ -445,7 +445,12 @@ pub(crate) fn show(window: &mut Window, ui: &mut egui::Ui, area: egui::Rect) {
         }
         ui.ctx().input_mut(|input| input.events = filtered);
         if let Some((pane, path)) = open {
-            if crate::viewer::open_document_target(window, pane, path, None) {
+            let opened = if crate::viewer::is_image(&path) {
+                crate::viewer::open_image_target(window, pane, path)
+            } else {
+                crate::viewer::open_document_target(window, pane, path, None)
+            };
+            if opened {
                 ui.ctx().request_repaint();
             } else {
                 window.explorer.message =

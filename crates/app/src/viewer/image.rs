@@ -34,7 +34,7 @@ pub(crate) fn is_image(path: &Path) -> bool {
 pub(crate) struct Viewer {
     pub(super) document: Document,
     pub(super) origin: Option<Source>,
-    path: Option<PathBuf>,
+    pub(super) path: Option<PathBuf>,
     started: bool,
     job: Option<Job<Picture>>,
     picture: Option<Picture>,
@@ -71,6 +71,11 @@ impl Viewer {
             .as_ref()?
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
+    }
+
+    #[cfg(test)]
+    pub(super) fn loaded(&self) -> bool {
+        self.picture.is_some()
     }
 
     /// Starts the one decode this open gets, and takes its result when it arrives.

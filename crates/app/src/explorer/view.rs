@@ -664,7 +664,7 @@ mod tests {
     }
 
     #[test]
-    fn activation_opens_any_file_and_keeps_folders_in_the_tree() {
+    fn activation_opens_any_file_and_images_and_keeps_folders_in_the_tree() {
         let mut state = Explorer::default();
         state.reconcile(&[(1, Some("/root".into()))]);
         assert_eq!(
@@ -686,6 +686,12 @@ mod tests {
         assert!(activate(&mut state, 1, &entry("/root/fifo", EntryKind::Other)).is_none());
         assert_eq!(state.message, "Only files and folders open here.");
         state.message.clear();
+        for image in ["/root/shot.png", "/root/photo.JPEG"] {
+            assert_eq!(
+                activate(&mut state, 1, &entry(image, EntryKind::File)),
+                Some((1, image.into()))
+            );
+        }
         assert_eq!(
             activate(&mut state, 1, &entry("/root/README.MD", EntryKind::File)),
             Some((1, "/root/README.MD".into()))
