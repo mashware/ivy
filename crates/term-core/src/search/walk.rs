@@ -42,7 +42,7 @@ fn matches(search: &Search, logical: &Logical, span: Range<usize>) -> Vec<Range<
 /// Where the search goes on after a whole-word candidate starting at `start` was rejected: one
 /// character on, and then **past every position inside a run of word characters**, where a match
 /// would start with a word character touching another and be rejected the same way. Going on one
-/// character at a time instead made a long run quadratic: `\d+` over `x` and a scrollback of
+/// character at a time instead made a long run quadratic: `\d+` over «x» and a scrollback of
 /// digits finds and rejects one candidate per digit, each read to the end of the run.
 fn past_rejected(text: &str, start: usize) -> Option<usize> {
     let word = |c: char| c.is_alphanumeric() || c == '_';
