@@ -7,8 +7,8 @@ use eframe::egui;
 const LINGER: f64 = 3.0;
 /// Seconds they take to fade out after that.
 const FADE: f64 = 0.5;
-/// Below this opacity a fading control is painted but no longer answers: an icon a quarter
-/// opaque or less is one nobody aims at, and D99 keeps presses for controls that were seen.
+/// Below this opacity a fading control is painted but no longer answers: an icon less than a
+/// quarter opaque is one nobody aims at, and D99 keeps presses for controls that were seen.
 pub(crate) const PRESSABLE: f32 = 0.25;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -57,7 +57,8 @@ fn step(previous: Option<State>, wanted: bool, now: f64, frame: u64, fades: bool
         return GONE;
     }
     let left = match previous {
-        Some(State::Wanted(painted)) if painted + 1 == frame => now,
+        // The same number too: egui can run a frame in two passes, and both carry it.
+        Some(State::Wanted(painted)) if painted + 1 >= frame => now,
         Some(State::LeftAt(left)) => left,
         _ => return GONE,
     };
@@ -142,6 +143,14 @@ mod tests {
                 opacity: 1.0,
                 wake: Wake::After(LINGER)
             }
+        );
+    }
+
+    #[test]
+    fn the_second_pass_of_a_frame_starts_the_countdown_too() {
+        assert_eq!(
+            step(Some(State::Wanted(9)), false, 20.0, 9, true).keep,
+            Some(State::LeftAt(20.0))
         );
     }
 

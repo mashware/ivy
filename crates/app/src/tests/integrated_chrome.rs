@@ -4757,24 +4757,35 @@ mod tests {
     /// title's: it focuses the console and closes nothing.
     #[test]
     fn a_control_too_faint_to_see_does_not_answer() {
-        let (ctx, mut window, area) = lingering_pair(true);
-        let names = names_in_order(&window);
-        let close = control(&window, &ctx, area, 0, 12.5);
-        let other = pane_rect(&window, &ctx, area, names[1]).center();
-        let at = |window: &mut Window, time, events| {
-            timed_pass(window, &ctx, area, time, events);
-        };
-        at(&mut window, 10.0, click_at(other));
-        for time in [12.0, 13.0, 13.4, 13.44] {
-            at(&mut window, time, vec![]);
+        // The left console loses focus at 10.0; its close is pressed on the pass after one
+        // painted it at 27 % (answers) or at 23 % (the title's) — either side of a quarter.
+        for (painted_at, closes) in [(13.365, true), (13.385, false)] {
+            let (ctx, mut window, area) = lingering_pair(true);
+            let names = names_in_order(&window);
+            let close = control(&window, &ctx, area, 0, 12.5);
+            let other = pane_rect(&window, &ctx, area, names[1]).center();
+            let at = |window: &mut Window, time, events| {
+                timed_pass(window, &ctx, area, time, events);
+            };
+            at(&mut window, 10.0, click_at(other));
+            for time in [12.0, 13.0, painted_at] {
+                at(&mut window, time, vec![]);
+            }
+            at(&mut window, painted_at + 0.001, click_at(close));
+            at(&mut window, painted_at + 0.002, vec![]);
+            assert_eq!(
+                window.active().panes().len(),
+                if closes { 1 } else { 2 },
+                "painted at {painted_at}"
+            );
+            if !closes {
+                assert_eq!(
+                    window.active().focus,
+                    names[0],
+                    "the faint press did not go to the title"
+                );
+            }
         }
-        at(&mut window, 13.45, click_at(close));
-        at(&mut window, 13.46, vec![]);
-        assert_eq!(
-            window.active().panes().len(),
-            2,
-            "a close at a tenth of its opacity closed the console"
-        );
     }
 
     /// A console whose header was not painted for a while — its tab in the background — comes back

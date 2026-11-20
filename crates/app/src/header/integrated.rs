@@ -241,9 +241,10 @@ fn painted_id(name: usize) -> egui::Id {
 ///
 /// **A frame number and not a flag**: a console whose controls stop being painted — a hidden
 /// sibling, a tab in the background, or controls whose fade has gone too faint (D99) — keeps its
-/// last number, which is then too old to count. A press in the same pass that brought the pointer onto the header finds the
-/// previous pass's number, not its own, because the pointer is handled before the panes are painted;
-/// `a_hidden_close_cannot_be_pressed_until_it_was_painted` fails if that order is ever reversed.
+/// last number, which is then too old to count. A press in the same pass that brought the pointer
+/// onto the header finds the previous pass's number, not its own, because the pointer is handled
+/// before the panes are painted; `a_hidden_close_cannot_be_pressed_until_it_was_painted` fails if
+/// that order is ever reversed.
 pub(crate) fn revealed(ctx: &egui::Context, name: usize) -> bool {
     let now = ctx.cumulative_frame_nr();
     ctx.data(|data| data.get_temp::<u64>(painted_id(name)))
