@@ -151,13 +151,14 @@ arboard = { version = "3.6.1", default-features = false }
 # unsupported compositors can use arboard's X11/XWayland fallback.
 arboard = { version = "3.6.1", default-features = false, features = ["wayland-data-control"] }
 
-# Centring macOS's own window buttons in the integrated header (`chrome/traffic_lights.rs`). All
-# three are already in the tree through eframe at these versions; only their features are named.
-# The panel file's identity (volume serial number and file index) and a link's reparse tag, which
-# std's Windows `MetadataExt` keeps behind an unstable feature (D108). 0.61 is already in the lock.
+# A file's identity (volume serial number and file index), which std's Windows `MetadataExt` keeps
+# behind an unstable feature, and the flag that opens a link instead of its target (D108). 0.61 is
+# already in the lock.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
+# Centring macOS's own window buttons in the integrated header (`chrome/traffic_lights.rs`). All
+# three are already in the tree through eframe at these versions; only their features are named.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3.2", default-features = false, features = [
     "std",

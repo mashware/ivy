@@ -1,22 +1,20 @@
-//! The two facts about an open file that std's Windows `MetadataExt` keeps behind an unstable
-//! feature (windows_by_handle, D108). Self-contained on purpose: it depends on nothing in this
-//! crate, so it can be type-checked for Windows on its own where `app` cannot be cross-compiled.
+//! What Windows needs beyond std to tell files apart and to open one without following a link
+//! (D108). Self-contained on purpose: it depends on nothing in this crate, so it can be
+//! type-checked for Windows on its own where `app` cannot be cross-compiled.
 
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io;
+use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
 use std::os::windows::io::AsRawHandle as _;
+use std::path::Path;
 
 use windows_sys::Win32::Storage::FileSystem::{
-    BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_TAG_INFO, FileAttributeTagInfo,
-    GetFileInformationByHandle, GetFileInformationByHandleEx,
+    BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT,
+    GetFileInformationByHandle,
 };
 
-/// The bit a reparse tag carries when it names another file: symbolic links and junctions. The same
-/// rule std's is_symlink applies on Windows.
-const NAME_SURROGATE: u32 = 0x2000_0000;
-
-/// Which file this is: its volume serial number and its 64-bit file index, the pair Windows
-/// promises unique while the file is open — what `dev` and `ino` are on Unix.
+/// The volume serial number and the 64-bit file index: what `dev` and `ino` are on Unix. std keeps
+/// them behind an unstable feature. On ReFS the 64-bit index is not guaranteed unique (D108).
 pub(crate) fn identity(file: &File) -> io::Result<(u64, u64)> {
     let mut information = BY_HANDLE_FILE_INFORMATION::default();
     // SAFETY: the handle is owned by `file` and outlives the call; the out-pointer is a live local.
@@ -28,21 +26,33 @@ pub(crate) fn identity(file: &File) -> io::Result<(u64, u64)> {
     Ok((u64::from(information.dwVolumeSerialNumber), index))
 }
 
-/// Whether the file was opened on a link rather than through it: only meaningful for a handle
-/// opened with `FILE_FLAG_OPEN_REPARSE_POINT`, which leaves the link itself as the open file.
-pub(crate) fn is_name_surrogate(file: &File) -> io::Result<bool> {
-    let mut information = FILE_ATTRIBUTE_TAG_INFO::default();
-    // SAFETY: as above; the size passed is the size of the buffer the pointer names.
-    let answered = unsafe {
-        GetFileInformationByHandleEx(
-            file.as_raw_handle(),
-            FileAttributeTagInfo,
-            (&raw mut information).cast(),
-            std::mem::size_of::<FILE_ATTRIBUTE_TAG_INFO>() as u32,
-        )
-    };
-    if answered == 0 {
-        return Err(io::Error::last_os_error());
+/// Opens `path` for reading unless its last component is a symbolic link or a junction.
+///
+/// The first open lands on the link itself, so the refusal is about the file opened, not about a
+/// look taken before. Any other reparse point (deduplication, compression, a cloud placeholder)
+/// has to be opened through its owner for its content to be read, so it is opened again and kept
+/// only if that second open reached the same file.
+pub(crate) fn open_no_follow(path: &Path) -> io::Result<File> {
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)?;
+    let metadata = file.metadata()?;
+    if metadata.is_symlink() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "a link was not followed",
+        ));
     }
-    Ok(information.ReparseTag & NAME_SURROGATE != 0)
+    if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0 {
+        return Ok(file);
+    }
+    let through = File::open(path)?;
+    if identity(&through)? != identity(&file)? {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "the file was replaced while it was being opened",
+        ));
+    }
+    Ok(through)
 }

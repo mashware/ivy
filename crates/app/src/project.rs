@@ -259,7 +259,7 @@ fn resolve_with_git(
     directory: &std::path::Path,
     git: &std::ffi::OsStr,
 ) -> Result<Identity, String> {
-    // dunce: never `\\?\C:\…` in a project's key, name or path (D108).
+    // dunce: a project's key, name and path drop `\\?\` wherever that keeps their meaning (D108).
     let directory = dunce::canonicalize(directory)
         .map_err(|e| format!("Cannot resolve console directory: {e}"))?;
     if !directory.is_dir() {

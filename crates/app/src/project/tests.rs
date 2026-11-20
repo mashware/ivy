@@ -408,6 +408,5 @@ fn windows_paths_project_identity_has_no_verbatim_prefix() {
             assert!(!shown.starts_with(r"\\?\"), "{shown}");
             assert!(shown.as_bytes().get(1) == Some(&b':'), "{shown}");
         }
-        assert!(!identity.name.starts_with(r"\\?\"), "{}", identity.name);
     }
 }

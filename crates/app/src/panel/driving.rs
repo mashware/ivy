@@ -110,8 +110,8 @@ pub(super) enum FileGeneration {
     },
 }
 
-/// Left without identity on Windows by decision (D108): reading it there costs an open per probe,
-/// to save at most one [`RETIRED_CONTENT_PROBE`] before the whole generation is compared.
+/// Left without identity on Windows by decision (D108): a stamp that cannot tell two files apart
+/// costs at most one [`RETIRED_CONTENT_PROBE`] before the whole generation is compared.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum FileStamp {
     Missing,

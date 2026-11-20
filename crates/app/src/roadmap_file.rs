@@ -131,7 +131,7 @@ fn watch_aliases(config: &BTreeMap<String, PathBuf>) -> BTreeMap<PathBuf, BTreeS
             .or_default()
             .insert(name.clone());
         if let (Some(parent), Some(file)) = (absolute.parent(), absolute.file_name())
-            // dunce: a `\\?\` alias would never equal the plain paths the watcher reports (D108).
+            // dunce: the canonical alias in the same plain form as the configured one (D108).
             && let Ok(parent) = dunce::canonicalize(parent)
         {
             aliases
@@ -355,7 +355,8 @@ mod tests {
         let dir = TempDir::new();
         let config = BTreeMap::from([("plan".to_owned(), dir.0.join("ROADMAP.md"))]);
         let aliases = watch_aliases(&config);
-        assert!(!aliases.is_empty());
+        let canonical = dunce::canonicalize(&dir.0).unwrap().join("ROADMAP.md");
+        assert!(aliases.contains_key(&canonical), "{aliases:?}");
         for alias in aliases.keys() {
             let alias = alias.to_string_lossy();
             assert!(!alias.starts_with(r"\\?\"), "{alias}");

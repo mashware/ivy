@@ -10985,26 +10985,32 @@ installed app's launch is checked by hand until #162 adds a smoke test.
   file index, read with `GetFileInformationByHandle` from the handle the snapshot already holds, in
   the fields Unix fills with `dev` and `ino`. A producer that renames identical bytes with the same
   modification time over `panel.json` after a retirement publishes a new generation, as on Unix. The
-  cheap stamp the retired probe reads first stays without identity: the whole generation is compared
-  within 500 ms anyway.
+  cheap stamp the retired probe reads first stays without identity on Windows: a stamp that cannot
+  tell two files apart costs at most one 500 ms probe before the whole generation is compared.
 - **The viewer does not follow a link at the last component of an untracked file**: it opens with
-  `FILE_FLAG_OPEN_REPARSE_POINT` and refuses a name-surrogate reparse tag (symbolic link, junction) —
-  the rule std's `is_symlink` applies in the walk before it. Other reparse points, such as cloud
-  placeholders, open as files.
+  `FILE_FLAG_OPEN_REPARSE_POINT` and refuses what std's `is_symlink` calls a link on that handle — a
+  symbolic link or a junction. Any other reparse point (deduplication, compression, a cloud
+  placeholder) is opened again through its owner, so its content is what is read, and that second
+  handle is kept only if it reached the same file.
 - **A project's key, name and path, and a roadmap's watcher alias, come from `dunce::canonicalize`**,
-  so they read `C:\…` and not `\\?\C:\…`. The viewer's repository root keeps std's verbatim form.
-- **`~/` in a console link expands from `std::env::home_dir()`**, which is `%USERPROFILE%` on Windows.
+  so on a local drive they read `C:\…` and not `\\?\C:\…`. The viewer's repository root keeps std's
+  verbatim form.
+- **`~/` and `~\` in a console link expand from `std::env::home_dir()`**, which std reads from
+  `%USERPROFILE%` on Windows, not from `HOME`.
 
 **Why.** Without identity, a re-publication of the same bytes after a retirement is invisible on
 Windows. Without the flag, the Windows arm opens whatever a link swapped in after the walk points at.
-A verbatim path is what people saw as a project's name and path, and `cmd.exe` refuses it as a
-working directory. And a `~/README.md` link did not open on Windows, which has no `HOME`.
+A verbatim path is what people saw as a project's name and path, and `cmd.exe` given one as its
+working directory warns and falls back to `C:\Windows`. And a `~/README.md` link did not open on
+Windows, where std ignores `HOME`.
 
 **Discarded.**
 - **std's `MetadataExt::{volume_serial_number, file_index}`**: unstable on 1.97.1 (`windows_by_handle`).
-- **Identity in the probe's stamp**: one more open per probe for at most 500 ms of latency.
-- **Refusing any `FILE_ATTRIBUTE_REPARSE_POINT`**: OneDrive placeholders carry it, so every untracked
-  file under a redirected Documents folder would become unreadable.
+- **Identity in the probe's stamp**: it would turn the stamp from a path metadata call into an open of
+  our own, to save at most 500 ms.
+- **Refusing any `FILE_ATTRIBUTE_REPARSE_POINT`**, or **keeping the handle opened on a reparse point
+  that is not a link**: the first makes every untracked file under a redirected Documents folder
+  unreadable; the second reads a deduplicated or compressed file's stub instead of its content.
 - **Holding each intermediate directory open without share-delete**, or `NtCreateFile` relative to a
   directory handle: the race they close needs a live process of the same user, which can read the
   target itself; Git never writes junctions.
@@ -11013,10 +11019,13 @@ working directory. And a `~/README.md` link did not open on Windows, which has n
 - **Stripping `\\?\` by hand**: `dunce` keeps it exactly where stripping changes the meaning (reserved
   names, paths over `MAX_PATH`, a trailing dot or space).
 - **Code in the session file's exclusive create**: `create_new` already refuses any existing entry,
-  dangling links included, and `%APPDATA%\ivy` inherits a user-only ACL.
+  dangling links included, and `%APPDATA%\ivy` inherits an ACL that grants only that user, SYSTEM and
+  Administrators.
 
-**Open.** Nothing here ran on a Windows machine before the pull-request job `windows-lib-checks`: the
-author's Linux machine had no MSVC or LLVM tools, and `ring`'s build script needs them to cross-check
-`app`. A link swapped into an intermediate directory between the walk and the open is still
-followed. Codex route storage, which has the same missing no-follow flag, is not supported on Windows
-at all yet and is #173's.
+**Open.** Nothing here ran on a Windows machine before the pull-request job `windows-startup-checks`:
+the author's Linux machine had no MSVC or LLVM tools, and `ring`'s build script needs them to
+cross-check `app`. The reopen of a non-link reparse point is not covered by a test. A link swapped
+into an intermediate directory between the walk and the open is still followed. On ReFS (a Dev Drive)
+the 64-bit file index is not guaranteed unique; the 128-bit `FileIdInfo` would be. A project on a
+network share keeps its `\\?\UNC\` form, which `dunce` does not strip. Codex route storage, which has
+the same missing no-follow flag, is not supported on Windows at all yet and is #173's.
