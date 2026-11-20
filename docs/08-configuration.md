@@ -712,8 +712,9 @@ wheel or two-finger scroll moves the image along an axis where it is larger than
 Shift+wheel moves it sideways. A middle-button drag, or Space + left drag, moves it in any
 direction. Space must be pressed after the drawer has the keys, as after opening the image or
 clicking it; a maximized drawer takes Space without a click. A plain left drag never moves the
-image. A touch screen zooms it with two fingers and does not move it: a touch reaches the terminal
-as touches and never as a scroll, and a one-finger drag is the plain left drag. A wheel over a menu
+image. A touch screen zooms it with two fingers and does not move it: on Linux, macOS and Windows
+a touch reaches the terminal as touches and never as a scroll, and a one-finger drag is the plain
+left drag. A wheel over a menu
 open above the image belongs to that menu. On GNOME with "disable
 touchpad while typing" on, which is the default, holding Space blocks touchpad clicks, so with a
 touchpad the image is moved with two fingers and zoomed with Ctrl + two fingers. While one image is

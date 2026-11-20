@@ -113,7 +113,7 @@ pub(crate) fn open_document_target(
     if !pin(&mut window.viewer, source) {
         return false;
     }
-    replace_document(window, Keep::Markdown);
+    replace_document(window, Keep::Document);
     crate::sidebar::select(window, crate::sidebar::Tool::Document);
     // Files follows the focused console, so the folder a relative path is counted from is the
     // one Files showed when the file was opened, not whatever it shows later.
@@ -138,16 +138,16 @@ pub(crate) fn open_document_target(
 /// What stays in the document tab when [`replace_document`] empties it.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Keep {
-    Markdown,
+    Document,
     Image,
     Neither,
 }
 
 /// The document tab holds one document: whatever opens there, or closing it, forgets the other.
-/// Every entry goes through here, so the Markdown state and the image cannot both be shown.
+/// Every entry goes through here, so the document state and the image cannot both be shown.
 pub(super) fn replace_document(window: &mut Window, keep: Keep) {
     super::select_state(window, true);
-    if keep != Keep::Markdown {
+    if keep != Keep::Document {
         window.viewer.forget();
     }
     if keep != Keep::Image {

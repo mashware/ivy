@@ -277,23 +277,20 @@ impl Viewer {
         if !visible.is_positive() {
             return;
         }
+        // The body's own rounded shape, textured with the image and clipped to where the image is,
+        // takes the body's bottom corners wherever the image reaches them. The image's own rect
+        // with those corners would not: epaint caps a radius at half a rect's shortest side.
         let uv = egui::Rect::from_min_max(
-            ((visible.min - whole.min) / shown).to_pos2(),
-            ((visible.max - whole.min) / shown).to_pos2(),
+            ((view.min - whole.min) / shown).to_pos2(),
+            ((view.max - whole.min) / shown).to_pos2(),
         );
-        // Only the part in view is painted, so it can take the body's rounded bottom corners where
-        // it reaches them instead of painting past them.
-        let corner = |side: f32, edge: f32| {
-            let reaches = side == edge && visible.bottom() == view.bottom();
-            if reaches { super::view::BODY_CORNER } else { 0 }
-        };
         let corners = egui::CornerRadius {
-            sw: corner(visible.left(), view.left()),
-            se: corner(visible.right(), view.right()),
+            sw: super::view::BODY_CORNER,
+            se: super::view::BODY_CORNER,
             ..Default::default()
         };
-        ui.painter().add(
-            egui::epaint::RectShape::filled(visible, corners, egui::Color32::WHITE)
+        ui.painter().with_clip_rect(visible).add(
+            egui::epaint::RectShape::filled(view, corners, egui::Color32::WHITE)
                 .with_texture(texture.id(), uv),
         );
     }
@@ -1626,7 +1623,7 @@ mod tests {
         assert_eq!(crate::sidebar::active(&window), None);
         pass(&mut window, &ctx, vec![space(false)]);
         pass(&mut window, &ctx, vec![space(true)]);
-        crate::sidebar::toggle(&mut window, crate::sidebar::Tool::Markdown, &ctx);
+        crate::sidebar::toggle(&mut window, crate::sidebar::Tool::Document, &ctx);
         let before = settle(&mut window, &ctx);
         assert!(ctx.input(|i| i.key_down(egui::Key::Space)));
         let hover = pass(&mut window, &ctx, vec![egui::Event::PointerMoved(at)]);
@@ -1707,45 +1704,63 @@ mod tests {
         ]
     }
 
-    /// A popup of a higher layer open over the zoomed image, as the chrome's menus and Files'
-    /// search are: the wheel over it is left to the popup and the image stays where it is.
+    /// A popup open over the zoomed image, in the drawer's own order as the chrome's menus are and
+    /// above it as Files' search is: the wheel over it is left to the popup and the image stays
+    /// where it is. Over the image itself the wheel moves it and is taken, so nothing later in the
+    /// frame scrolls with the same turn.
     #[test]
     fn the_wheel_over_a_popup_on_the_image_is_the_popups() {
         let folder = Folder::new();
         let (mut window, ctx) = zoomed_window(&folder);
         let at = window.sidebar.last_dock.unwrap().center();
         let place = egui::Rect::from_center_size(at, egui::vec2(220.0, 140.0));
-        // What the popup was left of the wheel, after the drawer painted below it.
-        let mut received = egui::Vec2::ZERO;
-        let mut popup = |ctx: &egui::Context| {
-            egui::Area::new(egui::Id::new("test-popup"))
-                .order(egui::Order::Tooltip)
-                .fixed_pos(place.min)
-                .show(ctx, |ui| {
-                    ui.allocate_exact_size(place.size(), egui::Sense::hover());
-                    received += ui.input(|i| i.smooth_scroll_delta);
-                });
+        let turn = |window: &mut crate::Window, after: &mut dyn FnMut(&egui::Context)| {
+            let mut before = None;
+            for _ in 0..3 {
+                let output = pass_with(
+                    window,
+                    &ctx,
+                    vec![egui::Event::PointerMoved(at)],
+                    &mut *after,
+                );
+                before = image_rect(&output.shapes);
+            }
+            let mut events = plain_wheel(at, egui::vec2(0.0, -3.0));
+            let mut now = None;
+            for _ in 0..30 {
+                let output = pass_with(window, &ctx, std::mem::take(&mut events), &mut *after);
+                now = image_rect(&output.shapes);
+            }
+            (before.unwrap(), now.unwrap())
         };
-        let mut before = None;
-        for _ in 0..3 {
-            let output = pass_with(
-                &mut window,
-                &ctx,
-                vec![egui::Event::PointerMoved(at)],
-                &mut popup,
+        for order in [egui::Order::Foreground, egui::Order::Tooltip] {
+            // What the popup was left of the wheel, after the drawer painted below it.
+            let mut received = egui::Vec2::ZERO;
+            let mut popup = |ctx: &egui::Context| {
+                egui::Area::new(egui::Id::new(("test-popup", order)))
+                    .order(order)
+                    .fixed_pos(place.min)
+                    .show(ctx, |ui| {
+                        ui.allocate_exact_size(place.size(), egui::Sense::hover());
+                        received += ui.input(|i| i.smooth_scroll_delta);
+                    });
+            };
+            let (before, after) = turn(&mut window, &mut popup);
+            assert_eq!(
+                after, before,
+                "{order:?}: the wheel over the popup moved the image"
             );
-            before = image_rect(&output.shapes);
+            assert!(received.y < 0.0, "{order:?}: the popup was left no wheel");
         }
-        let mut events = plain_wheel(at, egui::vec2(0.0, -3.0));
-        let mut after = None;
-        for _ in 0..30 {
-            let output = pass_with(&mut window, &ctx, std::mem::take(&mut events), &mut popup);
-            after = image_rect(&output.shapes);
-        }
-        assert_eq!(after, before, "the wheel over the popup moved the image");
-        assert!(
-            received.y < 0.0,
-            "the popup was left no wheel: {received:?}"
+        let mut left = egui::Vec2::ZERO;
+        let (before, after) = turn(&mut window, &mut |ctx: &egui::Context| {
+            left += ctx.input(|i| i.smooth_scroll_delta);
+        });
+        assert!(after.top() < before.top(), "{before:?} -> {after:?}");
+        assert_eq!(
+            left,
+            egui::Vec2::ZERO,
+            "the image's wheel was left for later"
         );
     }
 
@@ -1766,7 +1781,7 @@ mod tests {
     }
 
     /// A pan whose button is still down does not resume after frames in which the view had no
-    /// room for the image, as when the drawer's width falls to its frame.
+    /// room for the image, as in a window so narrow that the drawer's frame leaves no width inside.
     #[test]
     fn a_pan_is_dropped_through_frames_with_no_room_for_the_image() {
         let ctx = egui::Context::default();
@@ -1842,14 +1857,14 @@ mod tests {
         );
     }
 
-    /// A zoomed image reaching the body's bottom corners is rounded there as the body is; a fitted
-    /// one that stops short of them keeps its own square corners.
+    /// The image takes the body's rounded bottom corners: it is painted as the body's own shape,
+    /// clipped to the body when it fills it and to the image itself when it is smaller.
     #[test]
-    fn a_zoomed_image_takes_the_body_rounded_corners() {
+    fn the_image_takes_the_body_rounded_corners() {
         let folder = Folder::new();
         let (mut window, ctx) = zoomed_window(&folder);
         let shapes = painted(&mut window, &ctx, vec![]);
-        let (_, rect, _) = image_shape(&shapes).unwrap();
+        let (_, rect, clip) = image_shape(&shapes).unwrap();
         let round = super::super::view::BODY_CORNER;
         assert!(round > 0);
         assert_eq!(
@@ -1857,9 +1872,13 @@ mod tests {
             (round, round)
         );
         assert_eq!((rect.corner_radius.nw, rect.corner_radius.ne), (0, 0));
+        assert_eq!(clip, rect.rect, "a zoomed image is clipped to the body");
         let (mut window, ctx, _, _) = small_window(&folder, |image| image.center());
         let shapes = painted(&mut window, &ctx, vec![]);
-        let (_, rect, _) = image_shape(&shapes).unwrap();
-        assert_eq!(rect.corner_radius, egui::CornerRadius::ZERO);
+        let (whole, _, clip) = image_shape(&shapes).unwrap();
+        assert!(
+            whole.expand(0.01).contains_rect(clip) && clip.expand(0.01).contains_rect(whole),
+            "{clip:?} is not the image {whole:?}"
+        );
     }
 }

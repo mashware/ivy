@@ -9219,8 +9219,10 @@ for anything else.
   image crosses the drawer's edge; a pan may only bring it back toward whole inside and never push
   it further out; a resize of the drawer puts it whole inside. While no zoom was chosen, a resize
   changes the fit's scale, and the offset is scaled with it before that rule, so the part being
-  read stays at the top of the view. Only the part in view is painted, as a textured rect that
-  takes the body's rounded bottom corners where it reaches them. When a zoom makes an axis larger
+  read stays at the top of the view. The image is painted as the body's own rounded shape,
+  textured with it and clipped to where the image is, so it takes the body's bottom corners
+  wherever it reaches them; the image's own rect with those corners was discarded because epaint
+  caps a radius at half a rect's shortest side. When a zoom makes an axis larger
   than the drawer, the first rule applies from that frame on. Pinning a smaller image inside on
   every change was discarded: a screenshot fitted to width and shorter than the drawer sits at its
   top, so every zoom pushed its top edge out, the pin brought it back, and the image grew downward
@@ -9237,9 +9239,11 @@ for anything else.
   takes it over, and a pan is forgotten when another image opens, when the image is closed, and
   after any frame the image was not painted, so a release that happened while it was hidden cannot
   leave a pan behind. On a touch screen the image zooms with two fingers and does not pan:
-  egui-winit turns a touch into touch events and never into a wheel event, so two fingers give
-  egui's multi-touch zoom, which the zoom reads, and no scroll; a one-finger touch drag arrives as
-  the primary button, which is the plain left drag the marks take. No touch-specific pan exists. Space is the drawer's only when it went down after the drawer held
+  egui-winit turns a touch into touch events, and the one gesture it turns into a wheel event is
+  winit's `PanGesture`, which winit 0.30.13 emits only on iOS. On Linux, macOS and Windows two
+  fingers therefore give egui's multi-touch zoom, which the zoom reads, and no scroll; a one-finger
+  touch drag arrives as the primary button, which is the plain left drag the marks take. No
+  touch-specific pan exists. Space is the drawer's only when it went down after the drawer held
   the keys, which is after opening the image or clicking the drawer, or at any time while the
   drawer is maximized, since a maximized drawer reads every key without a click. It is worked out
   again every frame and forgotten whenever the drawer does not take the keys, so a Space typed into
