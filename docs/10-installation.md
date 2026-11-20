@@ -310,12 +310,16 @@ $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS = "-C target-feature=+crt-sta
 cargo build --locked --release --target x86_64-pc-windows-msvc -p app -p panel-control --bins
 cargo metadata --locked --filter-platform x86_64-pc-windows-msvc --format-version 1 > target/release-metadata.json
 python scripts/release.py notices --metadata target/release-metadata.json --directory target/x86_64-pc-windows-msvc/release/notices
+python scripts/conpty.py --to target/conpty
 $Version = python scripts/release.py version
-python scripts/package-windows.py --binary-dir target/x86_64-pc-windows-msvc/release --output-dir dist --version $Version
+python scripts/package-windows.py --binary-dir target/x86_64-pc-windows-msvc/release --output-dir dist --version $Version --conpty-dir target/conpty
 ```
 
-The builder rejects non-PE or non-x64 inputs and missing notices. The disposable-runner lifecycle
-check compares installed executable and notice hashes, checks the Start menu shortcut, reinstalls
+`scripts/conpty.py` downloads Microsoft's console host pair (`conpty.dll`, `OpenConsole.exe`) and
+keeps it only when both files match the checksums pinned in `packaging/windows/conpty.json` (D112).
+The builder rejects non-PE or non-x64 inputs, a console host pair that is not the pinned one and
+missing notices. The disposable-runner lifecycle check compares installed executable, console host
+and notice hashes, checks the Start menu shortcut, reinstalls
 the same version, removes it, and verifies unchanged preference/layout fixtures. It changes the
 runner's per-user installation registry and must never run on a workstation. These checks do not
 prove ordinary-user desktop launch, shell input/output, clipboard, rendering, layout restoration or

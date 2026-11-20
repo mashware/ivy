@@ -44,6 +44,16 @@ The Phosphor icon font (Phosphor Regular), by Phosphor Icons, is embedded in the
 `egui-phosphor` 0.14.0 crate and draws every interface icon (D103). Both are under the MIT License;
 their notices are kept in [Phosphor-MIT.txt](resources/fonts/Phosphor-MIT.txt).
 
+## Windows console host
+
+The Windows installer carries `conpty.dll` and `OpenConsole.exe` from Microsoft's
+`Microsoft.Windows.Console.ConPTY` package (version and checksums pinned in
+[conpty.json](packaging/windows/conpty.json)), copied unmodified beside `Ivy.exe` so an installed
+Ivy runs its consoles on OpenConsole rather than the system's `conhost` (D112). They are under
+the MIT License from [microsoft/terminal](https://github.com/microsoft/terminal); the notice is
+kept in [conpty-MIT.txt](resources/licenses/windows/conpty-MIT.txt) and installed as
+`licenses/conpty/LICENSE`.
+
 ## Test font
 
 `crates/app/tests/fixtures/ligatures/JetBrainsMono-Regular.ttf` is distributed under the

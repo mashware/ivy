@@ -11247,3 +11247,49 @@ stay for the life of the process, and standard error says so.
 D108). That image is Windows Server 2025, built on the 24H2 codebase, so it may not show the
 synchronous close of Windows 10 and Windows 11 before 24H2. Nobody has watched a window close itself
 on a Windows desktop yet (F2.7).
+
+## D112 — On Windows an installed Ivy runs its consoles on OpenConsole, shipped beside `Ivy.exe`
+
+**Decided.** The Windows installer carries `conpty.dll` and `OpenConsole.exe` from Microsoft's
+`Microsoft.Windows.Console.ConPTY` package (microsoft/terminal), flat beside `Ivy.exe`. The
+package version and the SHA-256 of each of the two files are pinned in
+`packaging/windows/conpty.json`; `scripts/conpty.py` refuses any other file, and staging refuses a
+pair that is not the pinned one. No code selects it: `portable-pty` opens kernel32's pseudoconsole
+and then prefers a `conpty.dll` it finds by name, and that library is reported (a disassembly of
+1.25) to start the `OpenConsole.exe` it finds beside itself. The pull-request Windows job runs one
+test that writes a directory report (OSC 7) from Windows PowerShell and requires it to reach the
+screen, with the `OpenConsole.exe` beside the test binary hosting the console, and runs D111's
+close tests a second time on that host.
+
+**Why.** The system's host (`conhost`) re-renders a console from its own buffer instead of passing
+the program's output through. It is reported to swallow some OSC sequences (10/11), and nothing
+showed it keeps a directory report, which is what the PowerShell integration of #169 rests on. The
+owner chose on 20 November 2026 to ship Microsoft's newer host in that work rather than probe the
+system's first or assume it. It is also what Windows Terminal and WezTerm run. And a `LoadLibrary`
+by bare name with no file beside the executable goes on to the system directories, the current
+directory and the search path, so until now a planted `conpty.dll` there could be what Ivy loaded.
+Each file is pinned rather than the package, because nuget.org can re-sign a package, which changes
+the archive and not the binaries.
+
+**Discarded.**
+- **Probing the system's host first.** It would have told whether one build of Windows keeps OSC 7,
+  not every build an installer reaches.
+- **`PSEUDOCONSOLE_PASSTHROUGH_MODE` on the system's host.** `portable-pty` 0.9 defines it and never
+  passes it, and what it does varies by Windows build.
+- **Nesting `OpenConsole.exe` under `x64\`**, as the package's MSBuild targets do. The library is
+  reported to look there too, after beside itself; flat is the one layout with nothing to get wrong.
+- **The newest release.** It was eleven days old; the pin is the newest stable release older than a
+  month.
+
+**Open.**
+- Development runs (`cargo run`) keep the system's host, and with it the planted-`conpty.dll`
+  search above.
+- An `OpenConsole.exe` that is missing is reported to make the library fall back to the system's
+  host, which says nothing; one that is present and blocked (antivirus, application control) is reported to make
+  every console fail to open instead. Neither is detected at run time.
+- Which width rule the host measures text with is not passed: `portable-pty` hard-codes the
+  pseudoconsole flags. Where it differs from the engine's one cell per code point — a `☁️` or a
+  joined emoji — a line the host redraws could land a column off. Not measured.
+- The installer's contents are checked by the release job's install test, not by any pull-request
+  job.
+- None of the Windows tests has run yet; their first run is this pull request's Windows job.

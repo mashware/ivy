@@ -3536,4 +3536,144 @@ mod tests {
             "a look that failed was not taken as gone: there is no child of ours left to wait for"
         );
     }
+
+    /// **A directory report crosses Microsoft's console host and reaches the screen** (D112). The
+    /// system's host re-renders a console from its own buffer, and nothing showed it keeps this
+    /// sequence; this test is meant to show the pair Ivy ships does. Ignored by default: it needs
+    /// `conpty.dll` and `OpenConsole.exe` beside the test binary, which the pull-request Windows job
+    /// puts there with `scripts/conpty.py`.
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "needs the ConPTY pair beside the test binary (scripts/conpty.py)"]
+    fn windows_conpty_osc7_reaches_the_screen_through_the_bundled_host() {
+        let beside = std::env::current_exe()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        for name in ["conpty.dll", "OpenConsole.exe"] {
+            assert!(
+                beside.join(name).is_file(),
+                "{name} is not beside {beside:?}"
+            );
+        }
+        // Windows PowerShell, which every Windows has, rather than pwsh. A non-interactive one may
+        // write with VT processing off, so the script turns it on before writing.
+        let powershell = std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
+        // Escape and directory name are assembled at run time and the script travels encoded, so
+        // the report never appears whole in what was launched: neither a title nor an echo of the
+        // command line can satisfy the assertion.
+        let script = r#"
+            Add-Type -Name Mode -Namespace Ivy -MemberDefinition '
+                [DllImport("kernel32.dll")] public static extern System.IntPtr GetStdHandle(int h);
+                [DllImport("kernel32.dll")] public static extern bool GetConsoleMode(System.IntPtr h, out uint m);
+                [DllImport("kernel32.dll")] public static extern bool SetConsoleMode(System.IntPtr h, uint m);'
+            $out = [Ivy.Mode]::GetStdHandle(-11); $mode = 0
+            [void][Ivy.Mode]::GetConsoleMode($out, [ref]$mode)
+            [void][Ivy.Mode]::SetConsoleMode($out, $mode -bor 4)
+            $e = [char]27; $d = 'ivy-' + 'osc7'
+            [Console]::Out.Write($e + ']7;file:///C:/' + $d + $e + '\'); [Console]::Out.Flush()
+            Start-Sleep -Seconds 60"#;
+        let (mut pty, output) = Pty::spawn_with_env(
+            powershell.to_str().unwrap(),
+            &[
+                "-NoProfile",
+                "-NonInteractive",
+                "-EncodedCommand",
+                &encoded(script),
+            ],
+            Size::default(),
+            &[],
+        )
+        .unwrap();
+        // The output is read and answered first, from the start: `portable-pty` passes
+        // `PSEUDOCONSOLE_INHERIT_CURSOR`, so the host asks where the cursor is before the program
+        // runs, and a reply that came after its wait would land as typed input instead.
+        let mut screen = Screen::new(Size::default());
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let mut seen = Vec::new();
+        let reported = loop {
+            if screen
+                .working_directory()
+                .and_then(std::path::Path::file_name)
+                .is_some_and(|name| name == "ivy-osc7")
+            {
+                break true;
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            match output.recv_timeout(left) {
+                Ok(bytes) => {
+                    screen
+                        .advance_with_replies(&bytes, |reply| pty.write(reply))
+                        .unwrap();
+                    seen.extend_from_slice(&bytes);
+                }
+                Err(_) => break false,
+            }
+        };
+        // Then whose host carried it, while the program still sleeps: the library is reported to
+        // fall back to the system's when it finds no `OpenConsole.exe`, and a report that arrived,
+        // or did not, says nothing about which host it crossed.
+        let (hosts, query) = open_console_children(&powershell, &beside.join("OpenConsole.exe"));
+        assert!(
+            hosts >= 1,
+            "no OpenConsole.exe beside the test binary hosts the console (report arrived: \
+             {reported}): {query}"
+        );
+        assert!(
+            reported,
+            "no directory report reached the screen; the console sent {:?}",
+            String::from_utf8_lossy(&seen)
+        );
+    }
+
+    /// How many `OpenConsole.exe` at `host` this test process started, and everything the query
+    /// printed, for the failure message.
+    #[cfg(windows)]
+    fn open_console_children(
+        powershell: &std::path::Path,
+        host: &std::path::Path,
+    ) -> (u32, String) {
+        let query = format!(
+            "@(Get-CimInstance Win32_Process -Filter \"Name='OpenConsole.exe' AND ParentProcessId={}\" | \
+             Where-Object {{ $_.ExecutablePath -eq '{}' }}).Count",
+            std::process::id(),
+            host.display()
+        );
+        let answer = std::process::Command::new(powershell)
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-EncodedCommand",
+                &encoded(&query),
+            ])
+            .output()
+            .unwrap();
+        let printed = String::from_utf8_lossy(&answer.stdout);
+        let everything = format!("{printed:?} {:?}", String::from_utf8_lossy(&answer.stderr));
+        (printed.trim().parse().unwrap_or(0), everything)
+    }
+
+    /// PowerShell's `-EncodedCommand`: base64 of the script in UTF-16LE.
+    #[cfg(windows)]
+    fn encoded(script: &str) -> String {
+        const ALPHABET: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        let mut text = String::new();
+        for chunk in bytes.chunks(3) {
+            let word = chunk.iter().enumerate().fold(0u32, |word, (i, byte)| {
+                word | u32::from(*byte) << (16 - 8 * i)
+            });
+            for i in 0..4 {
+                text.push(if i <= chunk.len() {
+                    ALPHABET[(word >> (18 - 6 * i) & 63) as usize] as char
+                } else {
+                    '='
+                });
+            }
+        }
+        text
+    }
 }
