@@ -185,9 +185,10 @@ fn a_translocated_mac_launch_offers_no_bridge_path() {
 #[test]
 fn a_translocated_recovery_section_offers_no_path_either() {
     let ctx = egui::Context::default();
-    let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+    let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
         recovery::show(recovery::Status::default(), true, &mut None, ui);
     });
+    output.textures_delta.clear();
     let texts = painted(&output);
     assert!(texts.iter().any(|text| text == translocation::NOTICE));
     for absent in ["Copy recovery helper path", "Copy recovery adapters path"] {

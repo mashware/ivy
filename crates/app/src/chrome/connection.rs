@@ -390,7 +390,7 @@ fn manual(published: Published, copied: &mut Option<&'static str>, ui: &mut egui
     if !bridge.translocated && ui.button("Check bridge again").clicked() {
         bridge = Bridge::check();
         ui.ctx()
-            .data_mut(|data| data.insert_temp(egui::Id::new(BRIDGE_KEY), bridge));
+            .data_mut(|data| data.insert_temp(egui::Id::new(BRIDGE_KEY), bridge.clone()));
     }
     ui.label(
         "When building from source, run this in the Ivy repository to build both executables:",
