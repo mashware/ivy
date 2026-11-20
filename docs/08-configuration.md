@@ -708,8 +708,9 @@ Files with one click or by Ctrl-clicking its path in a console. A relative path 
 console's directory. The image is read once when it is opened: a program that later overwrites the
 file does not change what is shown. It fits the drawer's width without being enlarged; Ctrl+wheel,
 or Ctrl + two-finger scroll on a touchpad, zooms around the pointer. There are no scroll bars: the
-wheel or two-finger scroll moves the image along an axis where it is larger than the drawer, and
-Shift+wheel moves it sideways. A middle-button drag, or Space + left drag, moves it in any
+wheel or two-finger scroll moves the image along an axis where it is larger than the drawer, or
+back into the drawer where a zoom carried a smaller image past its edge, and Shift+wheel moves it
+sideways. A middle-button drag, or Space + left drag, moves it in any
 direction. Space must be pressed after the drawer has the keys, as after opening the image or
 clicking it; a maximized drawer takes Space without a click. A plain left drag never moves the
 image. A touch screen zooms it with two fingers and does not move it: on Linux, macOS and Windows

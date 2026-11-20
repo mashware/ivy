@@ -62,6 +62,30 @@ pub(super) fn clamp(
     )
 }
 
+/// The part of a wheel's `delta` that moves an image of `shown` size at `offset` in a `view`: an
+/// axis where it is larger than the view, and one where a zoom carried a smaller image across an
+/// edge, which the wheel may bring back. `clamp` with the offset before the wheel keeps it from
+/// pushing such an image further out.
+pub(super) fn wheel(
+    delta: egui::Vec2,
+    offset: egui::Vec2,
+    shown: egui::Vec2,
+    view: egui::Vec2,
+) -> egui::Vec2 {
+    let axis = |delta: f32, offset: f32, shown: f32, view: f32| {
+        let spare = shown - view;
+        if spare > 0.0 || offset < spare || offset > 0.0 {
+            delta
+        } else {
+            0.0
+        }
+    };
+    egui::vec2(
+        axis(delta.x, offset.x, shown.x, view.x),
+        axis(delta.y, offset.y, shown.y, view.y),
+    )
+}
+
 /// How far a pan drag moved the pointer this frame, and the hand the cursor shows. A plain left
 /// drag never pans: marks are drawn with it. Space + left drag is Figma's convention, and the
 /// middle button pans with no key for a mouse that has one. The button that started a pan is

@@ -264,12 +264,8 @@ impl Viewer {
         let (mut moved, hand) = ui.input(|i| viewport::pan(i, over_image, view, space, panning));
         let shown = size * scale;
         if over.is_some() {
-            // An axis the image fits on has nothing to scroll to; a drag or a zoom still moves it.
             let wheel = ui.input_mut(|i| std::mem::take(&mut i.smooth_scroll_delta));
-            moved += egui::vec2(
-                if shown.x > room.x { wheel.x } else { 0.0 },
-                if shown.y > room.y { wheel.y } else { 0.0 },
-            );
+            moved += viewport::wheel(wheel, *offset, shown, room);
         }
         *offset = viewport::clamp(*offset - moved, Some(*offset), shown, room);
         *seen = Some((room, scale));
@@ -1861,6 +1857,42 @@ mod tests {
         // Fitted, 600 points wide: an 800-point view does not enlarge it.
         let first = run(&mut viewer, vec![egui::Event::Zoom(2.0)]).unwrap();
         assert!(first.width() > 900.0, "{first:?}");
+    }
+
+    /// A fitted screenshot shorter than the drawer, which a zoom around its centre carried across
+    /// the drawer's top, comes back with the wheel; the wheel the other way never pushes it further
+    /// out.
+    #[test]
+    fn the_wheel_brings_back_a_smaller_image_a_zoom_carried_across_an_edge() {
+        let folder = Folder::new();
+        let (mut window, ctx, _, at) = small_window(&folder, |image| image.center());
+        painted(
+            &mut window,
+            &ctx,
+            vec![ctrl_wheel(
+                egui::MouseWheelUnit::Line,
+                1.0,
+                egui::TouchPhase::Move,
+            )],
+        );
+        painted(
+            &mut window,
+            &ctx,
+            vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)],
+        );
+        let zoomed = settle(&mut window, &ctx);
+        let dock = window.sidebar.last_dock.unwrap();
+        let top = body_top(&window, dock);
+        assert!(
+            zoomed.top() < top && zoomed.height() < dock.bottom() - top,
+            "{zoomed:?} in {dock:?}"
+        );
+        painted(&mut window, &ctx, plain_wheel(at, egui::vec2(0.0, -1.0)));
+        assert_eq!(settle(&mut window, &ctx), zoomed, "pushed further out");
+        painted(&mut window, &ctx, plain_wheel(at, egui::vec2(0.0, 1.0)));
+        let back = settle(&mut window, &ctx);
+        assert!(back.top() > zoomed.top(), "{zoomed:?} -> {back:?}");
+        assert_eq!(back.size(), zoomed.size());
     }
 
     /// The wheel does not slide an image smaller than the drawer on either axis.

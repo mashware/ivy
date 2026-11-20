@@ -9206,8 +9206,9 @@ for anything else.
   keeps, painted clipped to the drawer's body with no scroll bars: Ctrl+wheel, or Ctrl + two-finger
   scroll on a touchpad, zooms around the pointer; the wheel and two-finger scroll pan it on each
   axis where it is larger than the drawer, and Shift+wheel arrives from egui as a horizontal
-  scroll. On an axis where it is smaller there is nothing to scroll to, so the wheel leaves it and
-  only a drag or a zoom moves it there. The wheel is the image's only while the pointer is on it
+  scroll. On an axis where it is smaller and whole inside, the wheel leaves it and only a drag or
+  a zoom moves it there; where a zoom carried it across an edge, the wheel brings it back and,
+  like a pan, never pushes it further out. The wheel is the image's only while the pointer is on it
   with nothing of a higher layer above, and once applied it is taken, so a menu or popup open over
   the drawer keeps its own wheel and nothing later in the frame scrolls with the same turn. Over the blank beside the image
   the point kept is the image's nearest one, so a zoom there grows the image from its near edge and
