@@ -240,7 +240,7 @@ mod tests {
     }
 
     /// The panel body's ok and done green (slot 2) stays a meaning when a configuration sets the
-    /// focus elsewhere: slot 2 on the turquoise removes turquoise even with a violet focus.
+    /// focus elsewhere: slot 2 on the turquoise removes turquoise even with a grey focus.
     #[test]
     fn the_body_green_stays_a_meaning_when_the_focus_is_set_apart() {
         let mut palette = [None; 16];
