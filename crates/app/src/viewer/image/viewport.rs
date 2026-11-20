@@ -67,10 +67,12 @@ pub(super) fn clamp(
 /// middle button pans with no key for a mouse that has one. The button that started a pan is
 /// latched in `panning` until it is released, so letting Space go halfway through, or a stray
 /// press of another button, does not turn the rest into something else. `over` is whether the
-/// pointer is on the image with nothing of a higher layer above it.
+/// pointer is on the image with nothing of a higher layer above it, and a pan starts only from a
+/// press inside `view`: a press beside it and a move onto it can arrive in the same frame.
 pub(super) fn pan(
     input: &egui::InputState,
     over: bool,
+    view: egui::Rect,
     space: bool,
     panning: &mut Option<egui::PointerButton>,
 ) -> (egui::Vec2, Option<egui::CursorIcon>) {
@@ -87,7 +89,7 @@ pub(super) fn pan(
         }
         *panning = None;
     }
-    if over {
+    if over && pointer.press_origin().is_some_and(|at| view.contains(at)) {
         *panning = if pointer.button_pressed(Middle) {
             Some(Middle)
         } else if space && pointer.button_pressed(Primary) {

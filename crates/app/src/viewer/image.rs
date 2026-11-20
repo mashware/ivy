@@ -261,7 +261,7 @@ impl Viewer {
             *offset = viewport::clamp(zoomed, Some(zoomed), size * scale, room);
             *chosen = Some(scale);
         }
-        let (mut moved, hand) = ui.input(|i| viewport::pan(i, over_image, space, panning));
+        let (mut moved, hand) = ui.input(|i| viewport::pan(i, over_image, view, space, panning));
         let shown = size * scale;
         if over.is_some() {
             // An axis the image fits on has nothing to scroll to; a drag or a zoom still moves it.
@@ -1925,6 +1925,54 @@ mod tests {
             screen,
         );
         assert_eq!(after, Some(before), "the pan resumed");
+    }
+
+    /// A middle press beside the image and a move onto it, delivered in the same frame, start no
+    /// pan: the drag that follows leaves the image where it is.
+    #[test]
+    fn a_press_beside_the_image_starts_no_pan_when_the_move_on_comes_with_it() {
+        let ctx = egui::Context::default();
+        let mut viewer = ready(image::RgbaImage::new(2000, 2000));
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 400.0));
+        let view = egui::Rect::from_min_max(egui::pos2(100.0, 0.0), screen.max);
+        let run = |viewer: &mut Viewer, events| {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(view));
+                    viewer.show(&mut ui, crate::theme::Theme::default(), false);
+                },
+            );
+            let rect = image_rect(&output.shapes);
+            output.drop_without_applying_deltas();
+            rect
+        };
+        let beside = egui::pos2(50.0, 200.0);
+        let before = run(&mut viewer, vec![egui::Event::PointerMoved(beside)]).unwrap();
+        let on = view.center();
+        run(
+            &mut viewer,
+            vec![
+                egui::Event::PointerButton {
+                    pos: beside,
+                    button: egui::PointerButton::Middle,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerMoved(on),
+            ],
+        );
+        assert_eq!(viewer.panning, None);
+        let mut after = None;
+        for step in 1..=3 {
+            let at = on - egui::vec2(0.0, 20.0 * step as f32);
+            after = run(&mut viewer, vec![egui::Event::PointerMoved(at)]);
+        }
+        assert_eq!(after, Some(before), "the press beside the image panned it");
     }
 
     /// A fitted image scrolled down keeps the part at the top of the view there when the drawer
