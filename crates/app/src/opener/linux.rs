@@ -44,6 +44,8 @@ pub(super) fn fallback(
 
 /// Run `command` and wait for it, so it is reaped; a launcher that exits unhappy says so.
 fn wait(mut command: Command) -> Result<(), String> {
+    // Abandoned on purpose: nothing joins the click's thread, so a launcher that never exits
+    // keeps only that thread, never the window.
     let status = command.status().map_err(|why| why.to_string())?;
     if status.success() {
         Ok(())

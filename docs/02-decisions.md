@@ -11089,3 +11089,69 @@ work). The owner asked for a read-only viewer with simple colouring (#159).
   declared «document viewers» span, but it has no published figure.
 - A selection is made by dragging within the visible rows. Dragging past the edge does not scroll.
 - The header with the breadcrumb, Open and its menu comes with #159's second pull request.
+
+## D109 — Open hands the desktop only documents, judged where the link leads, and never through a shell
+
+**Decided.** The code view has a header row above the file:
+
+- **The path**, from the Files folder the file was opened from down to the file, with the file's
+  type icon. Each folder in it shows that folder in Files. A file outside that folder shows its
+  whole path instead.
+- **Open**, which hands the file to the desktop's default application.
+- **A menu beside Open**: Open in File Manager (the file shown selected), Copy absolute path, Copy
+  relative path, and Wrap lines.
+
+Opening a file runs whatever the desktop associates with its type, and the files come from a
+cloned repository or an agent's output. So Open follows six rules:
+
+- **An allow-list, not a deny-list.** Open launches only these last extensions, in any case: `txt
+  log md json yaml yml toml ini csv xml css rs c h cpp go java kt swift cs ts tsx pdf png jpg jpeg
+  gif webp`. Anything else, a file without an extension included, is shown in the file manager
+  instead, and Open's tooltip says so before the click. A script is revealed, never run.
+- **Judged on the canonical path.** Every link is followed first, and the decision and the launch
+  use that same path. A `notes.txt` link to `run.sh` is judged as `run.sh`.
+- **A name must show as itself.** A name with a line break, a direction override or another
+  character `panel_contract::is_shown_as_itself` refuses is revealed. On Windows a name ending in a
+  dot or a space is revealed too, because Win32 drops that character and another file would open.
+  Both Copy items refuse such a path and say why, judged on the whole string copied. What they copy
+  is the literal path, with no quoting.
+- **No shell, one argument.**
+  - Linux: `xdg-open` with the absolute path as its only argument.
+  - macOS: `open`, and `open -R` to reveal.
+  - Windows: `ShellExecuteExW` on the shell item of the path, and `SHOpenFolderAndSelectItems` to
+    reveal, with COM started on the click's thread and the `\\?\` prefix of a canonical path
+    removed.
+- **A thread per click, and the child reaped.** The window never waits on a launcher. The thread
+  waits for the process it started, so none is left as a zombie. A failure prints one line on
+  standard error with the path escaped.
+- **Linux reveals over D-Bus, with a deadline.** `FileManager1.ShowItems` is called with the file's
+  `file://` address and given five seconds. With no answer, the parent folder opens instead. A
+  reveal never falls back to opening the file.
+
+Copy relative path counts from the Files folder of the source console **when the file was
+opened**. Files follows the focused console, so reading that folder later would change the answer
+under an open file. Outside that folder the item is off and says why.
+
+**Why.** Associations differ per machine and installers add new ones: `.py`, `.jar` or `.js` on
+Windows, `.desktop` on Linux. A list of what must not run would always lag behind what does. The
+owner decided on 20 November 2026 that Open shows a script or an executable instead of running it.
+
+**Discarded.**
+- **A deny-list** (an exec bit, `PATHEXT`, known script extensions). It misses what an installer
+  registers. And on a WSL `/mnt/c` drive every file has the exec bit.
+- **`cmd /c start`.** `cmd` reads `& ^ % !` in names, and all four are legal on Windows.
+- **`explorer /select,<path>`.** It splits its argument on commas, and a misparse may open the file
+  instead of selecting it.
+- **A `dbus-send` process.** It is one more process and one more argument to quote. `zbus` is
+  already compiled for scope placement (D104).
+- **A WSL gate.** It had no confirmed launch path, and it would have revealed `report (1).pdf` for
+  its brackets.
+- **A network-share check on Windows.** The loader and Files have already read that share before
+  Open is offered.
+- **`html` and `svg` in the allow-list.** The default browser runs their scripts.
+
+**Open.**
+- The macOS and Windows openers are compiled per platform, but no one has run them yet (F2.7).
+- Under WSL with `wslu`, `xdg-open` may be `wslview`, which hands the path to PowerShell or `cmd`.
+  Nothing mitigates that.
+- No measured batch opens the header's menu or wraps a file.

@@ -688,7 +688,16 @@ existing Ctrl-click behavior; ordinary mouse gestures still select terminal text
 
 Open a file from Files with one click. The **File** tab shows Markdown formatted and any other file
 as read-only, coloured code; select text with the mouse or `Ctrl+A` and copy it without the line
-numbers. The viewer retains its source console and updates saved content. Console path gestures reveal files in Files
+numbers. The viewer retains its source console and updates saved content.
+
+Above code, a header shows the path from the Files folder it was opened from down to the file; a
+folder in it shows that folder in Files. **Open** hands a document (`txt log md json yaml yml toml
+ini csv xml css rs c h cpp go java kt swift cs ts tsx pdf png jpg jpeg gif webp`) to the system's
+default application, judged where any link leads; anything else, or a name with a line break or a
+direction mark, is shown in the file manager instead. The arrow beside Open offers **Open in File
+Manager**, **Copy absolute path**, **Copy relative path** (off outside that Files folder) and **Wrap
+lines**, which is off until you tick it. Neither Copy item copies a path that would not paste as
+itself. Console path gestures reveal files in Files
 as described above. Only empty authorities, localhost and the verified local hostname are accepted
 as local file links.
 
