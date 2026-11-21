@@ -21,7 +21,7 @@ use std::time::SystemTime;
 
 use eframe::egui;
 use panel_contract::PanelDir;
-use panel_control::{Answer, Channel, Delivery, ReadDocument, Side as WireSide, What};
+use panel_control::{Answer, Channel, Delivery, Side as WireSide, What};
 
 use crate::measure::Control;
 use crate::painter::CellMetrics;
@@ -242,7 +242,10 @@ impl WindowActivity {
 
 // Windows reads the committed snapshot instead (`windows_services`), so only the socket uses it.
 #[cfg(not(windows))]
-fn measured_reader(reader: crate::panel::DocumentReader, reads: ReadActivity) -> ReadDocument {
+fn measured_reader(
+    reader: crate::panel::DocumentReader,
+    reads: ReadActivity,
+) -> panel_control::ReadDocument {
     Arc::new(move || {
         let Some(active) = reads.begin() else {
             return Err("this pane is gone".to_owned());
@@ -1091,7 +1094,7 @@ mod tests {
     #[test]
     #[ignore = "manual release-mode latency measurement"]
     fn measure_off_frame_document_reads() {
-        fn reader_for(document: &str) -> (PanelState, ReadDocument, usize) {
+        fn reader_for(document: &str) -> (PanelState, panel_control::ReadDocument, usize) {
             let mut state = PanelState::default();
             let panel =
                 panel_contract::parse_document(document).expect("the measured panel parses");
@@ -1103,7 +1106,7 @@ mod tests {
             (state, reader, bytes)
         }
 
-        fn serial(rounds: u32, reader: &ReadDocument) -> Duration {
+        fn serial(rounds: u32, reader: &panel_control::ReadDocument) -> Duration {
             let started = Instant::now();
             for _ in 0..rounds {
                 std::hint::black_box(reader().expect("the measured read succeeds"));
