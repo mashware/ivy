@@ -1512,6 +1512,9 @@ fn typing_a_search_keeps_the_tree_loaded_and_the_keys_in_files() {
     fs::create_dir_all(directory.0.join("docs")).unwrap();
     fs::write(directory.0.join("docs/plan.md"), "# Plan").unwrap();
     fs::write(directory.0.join("docs/notes.txt"), "notes").unwrap();
+    image::RgbaImage::new(8, 8)
+        .save_with_format(directory.0.join("docs/shot.png"), image::ImageFormat::Png)
+        .unwrap();
     let command = format!("cd '{}' && exec sleep 30", directory.0.display());
     let mut window = window_of_tabs([[command.as_str(), "sleep 30"]]);
     crate::project_view::configure(&mut window, crate::settings::Entry::Normal, None);
@@ -1572,7 +1575,7 @@ fn typing_a_search_keeps_the_tree_loaded_and_the_keys_in_files() {
         repeat: false,
         modifiers: egui::Modifiers::COMMAND,
     };
-    frame(&mut window, &ctx, area, vec![open]);
+    frame(&mut window, &ctx, area, vec![open.clone()]);
     frame(&mut window, &ctx, area, vec![]);
     assert_eq!(
         crate::sidebar::active(&window),
@@ -1586,6 +1589,19 @@ fn typing_a_search_keeps_the_tree_loaded_and_the_keys_in_files() {
         window.explorer.navigation[&pane].selected,
         Some(directory.0.join("docs/notes.txt"))
     );
+    // An image opens in the drawer's document tab, pinned to the console Files reads.
+    // Opening one closed the search; it is opened again to find the image.
+    let shot = directory.0.join("docs/shot.png");
+    click_icon(&mut window, &ctx, area, view::Icon::Search);
+    type_text(&mut window, &ctx, area, "shot");
+    wait_for_text(&mut window, &ctx, area, "shot.png");
+    assert_eq!(crate::viewer::shown_image(&window), None);
+    frame(&mut window, &ctx, area, vec![open]);
+    assert_eq!(
+        crate::sidebar::active(&window),
+        Some(crate::sidebar::Tool::Document)
+    );
+    assert_eq!(crate::viewer::shown_image(&window), Some((pane, shot)));
 }
 
 #[test]

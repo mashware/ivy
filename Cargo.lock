@@ -1590,6 +1590,8 @@ dependencies = [
  "num-traits",
  "png",
  "tiff",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -3286,6 +3288,7 @@ dependencies = [
  "portable-pty",
  "regex-automata",
  "regex-syntax",
+ "windows-sys 0.61.2",
  "zbus",
 ]
 

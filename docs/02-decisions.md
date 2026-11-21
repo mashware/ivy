@@ -5079,6 +5079,14 @@ on a dump the two now run close. No frame batch was run to see whether that ever
 | **`poll` for room before a write that still blocks** | «There is room» means *some* room: a larger write still parks in the kernel, and if the program dies in the meantime it is the same leak, narrower |
 | **Closing another copy of the master from `Drop`** | Measured: it does not wake the writer. The blocked write holds its own |
 
+### Amended on 20 November 2026: on Windows the close ends the writer ([#163](https://github.com/mashware/ivy/issues/163))
+
+**Windows keeps the blocking write, and loses the leak.** The writer still parks in `write_all` when
+the program reads nothing. But closing the console now closes its pseudoconsole, and the
+pseudoconsole's host then closes the pipe the writer waits on, so the write fails with a broken pipe
+and the thread ends (D111). Overlapped writes with `CancelIoEx` were not an option: `portable-pty`'s
+pipes are anonymous pipes, which do not support overlapped I/O. **macOS keeps the leak** until F2.7.
+
 ---
 
 ## D30 — A test that needs a terminal mode proves it has one, and no control character can prove it
@@ -7868,6 +7876,14 @@ case.
 | **Waiting with no bound and relying on the kill** | That is the defect. A kill accepted by the system is not a program gone |
 | **A longer bound** | Only time the window is frozen for. A program that is not reapable a tenth of a second after a kill is not going to become reapable by waiting more |
 
+**Amended on 20 November 2026** ([#163](https://github.com/mashware/ivy/issues/163)): **on Windows a
+refusal is seen, and nothing is left waiting on the interface pass.** `portable-pty`'s `kill` read
+`TerminateProcess`'s result the wrong way round and discarded it, so the refused path above was never
+taken on Windows. This crate now calls `TerminateProcess` itself and writes this decision's line when
+it fails. Windows takes neither the 100 ms bound nor the `left-running` thread: there is no zombie to
+reap, and the thread that watches the program's exit (D111) already waits on it. The line is
+written by the thread that closes the console, after its grace.
+
 ## D57 — Every blocking wait in production code is bounded or declared abandoned, and a test enforces it
 
 **Decided on 25 September 2026** ([#190](https://github.com/mashware/ivy-history-private/issues/190)).
@@ -8959,7 +8975,8 @@ viewport icon alone proves.
 
 ## D72 — Document viewers share a transient sidebar and never become consoles
 
-**8 November 2026 — #337; amended for #73 on 15 November 2026 and for #93 on 17 November 2026.**
+**8 November 2026 — #337; amended for #73 on 15 November 2026, for #93 on 17 November 2026 and for
+#178 on 20 November 2026.**
 Markdown and Git changes open in a transient surface beside the consoles, together with Files and
 the global Board; since #93 that surface is Files on the left and a drawer below (see the last
 section). The
@@ -9056,7 +9073,8 @@ existing single cancellable worker, with generation/epoch-tagged replies. Querie
 rejects old replies; Escape clears search before closing Files. Matching directories expand within the results, without replacing the search root. Clearing an ordinary query restores that console's tree.
 
 Ctrl+click on a local console path reveals it in Files: directories open directly and files open
-their parent with the file selected and scrolled into view. It uses the clicked console's explicit
+their parent with the file selected and scrolled into view (PNG and JPEG files open in the drawer
+instead; see «Images in the document tab» below). It uses the clicked console's explicit
 local context, never the app's directory or a remote file host. The clicked console becomes the
 active source for its Files state. Metadata and directory reading run on the same worker; missing
 paths remain visible errors, not shell commands. Web links and ordinary selection retain their
@@ -9169,6 +9187,107 @@ for what it did not cause). No frame-cost figure is claimed: the host, viewer an
 keep their named spans, and `scripts/measure-frame.sh` has not been re-run on this geometry. Its
 dock regime is versioned `dock-v2-4-closed/open`; `dock-v1-*` measured the rail, a different
 console grid and a width drag, and the script refuses it rather than relabel it.
+
+### Images in the document tab — 20 November 2026, #178
+
+Agents print the paths of the screenshots they take, and reading one meant leaving the terminal.
+A `.png`, `.jpg` or `.jpeg` path (any letter case) now opens in the drawer's document tab: Ctrl+click
+on it in a console, or activating it in Files. Ctrl+click on an image no longer reveals it in Files,
+which would show a name and not the picture; every other local path is revealed as before. A
+relative path is joined onto that console's directory, as its review is, and refused with a reason
+only when the console has none. Files says «Only Markdown, PNG and JPEG files open in the drawer.»
+for anything else.
+
+- **One document tab, as before.** The image and a Markdown file replace each other there: opening
+  one forgets the other, and closing the tab forgets both, through one replacement every entry
+  uses. The image is pinned to the console it was printed in, not to the focused one, and the strip
+  shows that console's project or folder.
+- **Decoded once.** The file is read and decoded on the viewer's worker when it is opened and
+  never again: switching to Changes and back, or closing and reopening the drawer, shows the same
+  picture, and a program that overwrites the same screenshot name does not change what is on
+  screen. Markdown's one-second refresh does not apply.
+- **One read at a time.** A read stuck on an unresponsive filesystem cannot be cancelled, so
+  replacing or closing an image whose decode has not finished keeps its handle, and another open
+  while it runs is refused with «Still reading <path>…» in the drawer. Repeated opens cannot pile
+  up readers, the rule the Markdown state already keeps. Errors name the path they are about.
+- **Bounded before it is decoded.** The path is opened nonblocking on Unix and refused unless it is
+  a regular file, as Markdown's is; at most 32 MiB is read; the format comes from the bytes, and only
+  PNG and JPEG are decoded; the decode may allocate at most 256 MiB (`image::Limits::max_alloc`),
+  counting the RGBA copy the viewer keeps when the file is not already RGBA. Each refusal is a
+  visible message. The GPU gets a copy no side of which exceeds its `max_texture_side`, made after
+  the decode and outside that cap; the original is kept at full resolution.
+- **Seen as a person reads a screenshot.** It fits the drawer's width and is never enlarged past one
+  physical pixel per pixel, so on a display of two pixels per point it is shown at half a point per
+  pixel rather than blurred. The image has a viewport of its own, a scale and an offset the viewer
+  keeps, painted clipped to the drawer's body with no scroll bars: Ctrl+wheel, or Ctrl + two-finger
+  scroll on a touchpad, zooms around the pointer; the wheel and two-finger scroll pan it on each
+  axis where it is larger than the drawer, and Shift+wheel arrives from egui as a horizontal
+  scroll. On an axis where it is smaller and whole inside, the wheel leaves it and only a drag or
+  a zoom moves it there; where a zoom carried it across an edge, the wheel brings it back and,
+  like a pan, never pushes it further out. The wheel is the image's only while the pointer is on it
+  with nothing of a higher layer above, and the part of a turn that moved it is taken, so a menu or
+  popup open over the drawer keeps its own wheel and nothing later in the frame scrolls with the
+  same turn; an axis it does not apply, and the part of a turn an edge stopped, are left for whoever
+  reads the wheel later. Over the blank beside the image
+  the point kept is the image's nearest one, so a zoom there grows the image from its near edge and
+  never carries it out of sight; anchoring the empty point under the pointer, as a canvas does, was
+  discarded because under a fitted screenshot most of the drawer is blank and four notches there
+  pushed the image out. Where the image may sit is one rule per axis. Where it is larger than the
+  drawer, no gap opens between its edge and the drawer's, after a zoom, a pan or a resize. Where it
+  is smaller, a zoom never moves it, so the point under the pointer stays there even when the
+  image crosses the drawer's edge; a pan may only bring it back toward whole inside and never push
+  it further out; a resize of the drawer puts it whole inside. While no zoom was chosen, a resize
+  changes the fit's scale, and the offset is scaled with it before that rule, so the part being
+  read stays at the top of the view. The image is painted as the body's own rounded shape,
+  textured with it and clipped to where the image is, so it takes the body's bottom corners
+  wherever it reaches them; the image's own rect with those corners was discarded because epaint
+  caps a radius at half a rect's shortest side. When a zoom makes an axis larger
+  than the drawer, the first rule applies from that frame on. Pinning a smaller image inside on
+  every change was discarded: a screenshot fitted to width and shorter than the drawer sits at its
+  top, so every zoom pushed its top edge out, the pin brought it back, and the image grew downward
+  from its top edge instead of around the pointer, the symptom the owner reported. Centring a
+  smaller image on open was discarded too: it moves the screenshot away from where a person starts
+  reading and still pins it once a zoom reaches an edge. winit 0.30.13 emits `PinchGesture` only on
+  macOS and iOS, so pinch zoom is a macOS-only behaviour until F2.7 verifies it there. egui reports
+  Ctrl+wheel as a zoom and not as a scroll, so the drawer counts the zoom as pointer activity over
+  it to keep the gesture. The drawer stays not modal: nothing dims. With a mouse, Space + left drag
+  and a middle-button drag move the image, with a grab hand while they do. A plain left drag does
+  not pan, because the next step draws marks with it. Space + drag is Figma's convention and the
+  middle button needs no key. Whether a drag pans is decided when its button goes down, by where
+  it went down: on the image with nothing of a higher layer above that point, wherever the pointer
+  is by the end of that frame. It lasts until that button is released: a press of another button meanwhile neither stops the pan nor
+  takes it over, and a pan is forgotten when another image opens, when the image is closed, and
+  after any frame the image was not painted, so a release that happened while it was hidden cannot
+  leave a pan behind. On a touch screen the image zooms with two fingers and does not pan:
+  egui-winit turns a touch into touch events, and the one gesture it turns into a wheel event is
+  winit's `PanGesture`, which winit 0.30.13 emits only on iOS. On Linux, macOS and Windows two
+  fingers therefore give egui's multi-touch zoom, which the zoom reads, and no scroll; a one-finger
+  touch drag arrives as the primary button, which is the plain left drag the marks take. No
+  touch-specific pan exists. Space is the drawer's only when it went down after the drawer held
+  the keys, which is after opening the image or clicking the drawer, or at any time while the
+  drawer is maximized, since a maximized drawer reads every key without a click. It is worked out
+  again every frame and forgotten whenever the drawer does not take the keys, so a Space typed into
+  a console still reaches its program and never pans, also when the drawer comes back with that
+  Space still held. On GNOME with "disable touchpad while typing" on, which is the default, holding
+  Space blocks touchpad clicks, so with a touchpad the image is moved with two fingers and zoomed
+  with Ctrl + two fingers.
+- **Cost.** Decoding runs on the worker. The texture is uploaded once per open, by the backend
+  after the pass, on the first frame after the decode arrives, so that upload lands in the framework
+  remainder, not in the viewer's span. No measurement batch opens an image, so no published figure changes.
+
+Discarded: an image `Kind` inside the existing viewer state, because the document tab's click
+forces the Markdown kind and a kind change clears that state, which would erase the image on the
+way back from Changes; a third `viewer::State`, because the two that exist are swapped with a
+single boolean (the image keeps a state of its own instead); a separate image surface beside the drawer, because it would bring a second geometry and a
+second set of input rules for what D72 already gives one place; refreshing the image from disk,
+because what was opened would change under the person reading it; a separate side limit, because
+the allocation cap already refuses the headers that would need one; GIF, WebP and SVG, because
+screenshots are PNG or JPEG; driving the image through an egui `ScrollArea`, which was the first
+version: its offset only runs from zero to the content's far edge, so holding a zoom around the
+pointer meant laying blank space before and after the image, and that broke it four ways — a
+trailing blank left stale when the drawer grew, scroll-bar drags remapped against content that
+shrank every frame so the thumb ran ahead and jumped, guessing where egui puts its bars to keep a
+pan off them, and its own drag-to-scroll joining the pan after a touch.
 
 ## D73 — Connection help is global and reports observed publication
 
@@ -11167,3 +11286,116 @@ owner decided on 20 November 2026 that Open shows a script or an executable inst
 - Under WSL with `wslu`, `xdg-open` may be `wslview`, which hands the path to PowerShell or `cmd`.
   Nothing mitigates that.
 - No measured batch opens the header's menu or wraps a file.
+
+## D111 — On Windows a console closes its pseudoconsole when its program ends and when it is closed, never on the interface pass
+
+**Decided on 20 November 2026** ([#163](https://github.com/mashware/ivy/issues/163)). On Windows a
+console's master lives in a shared slot, and **taking it out and dropping it is closing the
+pseudoconsole** (`ClosePseudoConsole`):
+
+- **When the program ends.** A thread started with the console waits on a handle of the program's
+  process and, when it ends, closes the pseudoconsole. The output pipe breaks, the reader reads end of
+  file, and the console reports an ordinary ending (`Ending::EndedWell`, D38): typing `exit` closes
+  the pane, and the last pane closes the window, through the path Linux and macOS already take.
+- **When the console is closed.** `Drop for Pty` hands the master to a thread that drops it and,
+  on a second thread, gives the program 200 ms — the grace D55 gives on Unix — and ends it with `TerminateProcess` if it
+  is still there, reading the result. Closing first is what tells the program: Windows sends the
+  programs attached to the pseudoconsole a close event. The reader then ends with end of file instead
+  of being abandoned at `READER_GIVE_UP` (D32), and a writer parked on a program that reads nothing
+  fails with a broken pipe and ends (D29).
+- **The reader drains to end of file.** After a close or after its host is gone, it keeps reading and
+  discarding instead of returning. The reason is recorded and the output channel is let go first, so
+  the host learns at once that the console is over.
+
+**Why.** Three symptoms had one cause. `portable-pty` keeps the pseudoconsole in a value shared by the
+master and the slave, and closes it only when the last of them goes. It also hands both pipe ends it
+creates to the pseudoconsole's host and keeps neither. So nothing this crate held could produce an end
+of file while the `Pty` lived: an exited program left a dead pane, the window never closed after its
+last shell, and the «stopped receiving» notices never fired. The close itself ran last in `Drop`, on
+the interface pass, after the reader had been told to stop. Microsoft documents that
+`ClosePseudoConsole` can wait indefinitely for its last frame to be read, and before Windows 11 24H2
+the call is synchronous.
+
+**A refusal is seen now.** `portable-pty`'s `kill` reads `TerminateProcess`'s result the wrong way
+round and then discards it. This crate calls `TerminateProcess` itself. A refusal writes D56's line,
+and the pseudoconsole is closed anyway. **Whether the program ended is asked of its handle, never of
+its exit code**: a program that exits with 259 reports the same code Windows uses for «still
+running». The console's status reads it the same way, or such a pane would never close.
+
+**On Windows, `exit` also ends programs still attached to that console.** `ClosePseudoConsole` sends
+them Windows' close event and then ends them. On Linux a survivor holding the terminal keeps the pane
+open (D32). Whether closing should end a console's background programs everywhere is #193's
+question; this decision does not answer it beyond what the platform's own close does.
+
+| Discarded | Why |
+|---|---|
+| **Overlapped writes and `CancelIoEx` for the writer**, the ticket's proposal | `portable-pty`'s pipes are anonymous pipes, which do not support overlapped I/O. It would mean replacing `openpty`. Closing the pseudoconsole already breaks the pipe the writer waits on |
+| **A Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`** | It decides that closing a console ends its whole process tree, which is #193's open product question |
+| **Terminating first and closing after**, the order the first version of this change had | The program is then killed with no close event and no grace, where Unix gives it 200 ms to save its state (D55). The review caught it |
+| **A Job Object's own grace timer** | The close event plus this crate's 200 ms is the same grace without a Job Object |
+| **Only the exit watcher, leaving `Drop` as it was** | Every close would still wait out the reader deadline, abandon the reader, and close on the interface pass with nobody draining |
+| **A drain thread on a second reader on the close path** | It needed the watcher to check the stop flag. That opened a race: the watcher closing while `Drop` stopped the reader, with nobody draining. A reader that drains until end of file removes the race and the second reader |
+| **`reaped_within` and `left-running` on Windows** | Windows has no zombies to reap, and the exit watcher already waits on the process |
+
+**What it costs, declared.** Each console has one more thread, parked on its process handle, for as
+long as its program lives, and a closed one has two short-lived threads, the close and the grace —
+two because before 24H2 the close may never return, and the program must still be ended. A program
+that survives both the close and `TerminateProcess` keeps the watcher and the reader for as long as
+it lives, the same trade D56 makes. If the grace thread cannot be created, the program is ended at
+once. If the closing thread cannot, the master is leaked rather than closed on the interface pass,
+where a reader that is not draining could freeze the window for good; the reader and the writer then
+stay for the life of the process, and standard error says so.
+
+**Not verified.** The tests run only in the prerelease workflow's Windows job (prefix `windows_exit`,
+D108). That image is Windows Server 2025, built on the 24H2 codebase, so it may not show the
+synchronous close of Windows 10 and Windows 11 before 24H2. Nobody has watched a window close itself
+on a Windows desktop yet (F2.7).
+
+## D112 — On Windows an installed Ivy runs its consoles on OpenConsole, shipped beside `Ivy.exe`
+
+**Decided.** The Windows installer carries `conpty.dll` and `OpenConsole.exe` from Microsoft's
+`Microsoft.Windows.Console.ConPTY` package (microsoft/terminal), flat beside `Ivy.exe`. The
+package version and the SHA-256 of each of the two files are pinned in
+`packaging/windows/conpty.json`; `scripts/conpty.py` refuses any other file, and staging refuses a
+pair that is not the pinned one. No code selects it: `portable-pty` opens kernel32's pseudoconsole
+and then prefers a `conpty.dll` it finds by name, and that library is reported (a disassembly of
+1.25) to start the `OpenConsole.exe` it finds beside itself. The pull-request Windows job runs one
+test that writes a directory report (OSC 7) from Windows PowerShell and requires it to reach the
+screen, with the `OpenConsole.exe` beside the test binary hosting the console, and runs D111's
+close tests a second time on that host.
+
+**Why.** The system's host (`conhost`) re-renders a console from its own buffer instead of passing
+the program's output through. It is reported to swallow some OSC sequences (10/11), and nothing
+showed it keeps a directory report, which is what the PowerShell integration of #169 rests on. The
+owner chose on 20 November 2026 to ship Microsoft's newer host in that work rather than probe the
+system's first or assume it. It is also what Windows Terminal and WezTerm run. And a `LoadLibrary`
+by bare name with no file beside the executable goes on to the system directories, the current
+directory and the search path, so until now a planted `conpty.dll` there could be what Ivy loaded.
+Each file is pinned rather than the package, because nuget.org can re-sign a package, which changes
+the archive and not the binaries.
+
+**Measured.** On the pull-request Windows job (Windows Server 2025, 10.0.26100, 20 November 2026)
+the OSC 7 test passed in 1.19 s with the bundled `OpenConsole.exe` hosting the console, and D111's
+four close tests passed on that host as well as on the system's.
+
+**Discarded.**
+- **Probing the system's host first.** It would have told whether one build of Windows keeps OSC 7,
+  not every build an installer reaches.
+- **`PSEUDOCONSOLE_PASSTHROUGH_MODE` on the system's host.** `portable-pty` 0.9 defines it and never
+  passes it, and what it does varies by Windows build.
+- **Nesting `OpenConsole.exe` under `x64\`**, as the package's MSBuild targets do. The library is
+  reported to look there too, after beside itself; flat is the one layout with nothing to get wrong.
+- **The newest release.** It was eleven days old; the pin is the newest stable release older than a
+  month.
+
+**Open.**
+- Development runs (`cargo run`) keep the system's host, and with it the planted-`conpty.dll`
+  search above.
+- An `OpenConsole.exe` that is missing is reported to make the library fall back to the system's
+  host, which says nothing; one that is present and blocked (antivirus, application control) is reported to make
+  every console fail to open instead. Neither is detected at run time.
+- Which width rule the host measures text with is not passed: `portable-pty` hard-codes the
+  pseudoconsole flags. Where it differs from the engine's one cell per code point — a `☁️` or a
+  joined emoji — a line the host redraws could land a column off. Not measured.
+- The installer's contents are checked by the release job's install test, not by any pull-request
+  job.

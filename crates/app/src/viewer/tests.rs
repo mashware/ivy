@@ -131,6 +131,7 @@ fn background_refresh_does_not_move_or_hide_the_markdown() {
                             folder: "docs".into(),
                             unavailable: false,
                         },
+                        None,
                     ),
                 );
             },
@@ -556,6 +557,7 @@ fn the_file_tab_paints_a_code_document() {
                             folder: "r".into(),
                             unavailable: false,
                         },
+                        None,
                     ),
                 );
             },

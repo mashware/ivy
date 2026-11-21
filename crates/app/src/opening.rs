@@ -18,12 +18,8 @@ use eframe::egui;
 mod codex_tests;
 
 #[cfg(all(test, windows))]
-mod codex_tests {
-    crate::windows_unix_omission!(
-        launched_shells_keep_their_own_pane_identity_and_survive_repeated_codex_runs,
-        "unix-only: launches POSIX shell wrapper scripts and relies on Unix executable permissions"
-    );
-}
+#[path = "opening/codex_tests_windows.rs"]
+mod codex_tests;
 
 pub(crate) fn native_window(
     cc: &eframe::CreationContext<'_>,
@@ -336,6 +332,7 @@ fn initial_window(
         sidebar: crate::sidebar::Sidebar::default(),
         viewer_other: crate::viewer::State::default(),
         viewer: crate::viewer::State::default(),
+        image: crate::viewer::image::Viewer::default(),
         explorer: crate::explorer::Explorer::default(),
         projects: crate::project_view::State::default(),
         restoration: crate::restoration::State::default(),

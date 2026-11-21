@@ -124,6 +124,8 @@ const GLOSSARY_CLEAN_FILES: &[&str] = &[
     "app/src/project_view/tests.rs",
     "app/src/viewer/diff.rs",
     "app/src/viewer/drawer.rs",
+    "app/src/viewer/image.rs",
+    "app/src/viewer/image/viewport.rs",
     "app/src/viewer/review.rs",
     "app/src/viewer/review/paint.rs",
     "app/src/viewer/review/message.rs",
@@ -184,6 +186,7 @@ const GLOSSARY_CLEAN_FILES: &[&str] = &[
     "app/src/mouse.rs",
     "app/src/opening.rs",
     "app/src/opening/codex_tests.rs",
+    "app/src/opening/codex_tests_windows.rs",
     "app/src/shell_integration.rs",
     "app/src/keyboard.rs",
     "app/src/painter.rs",
@@ -429,6 +432,8 @@ const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/src/project_view/tests.rs", "app"),
     ("app/src/viewer/diff.rs", "app"),
     ("app/src/viewer/drawer.rs", "app"),
+    ("app/src/viewer/image.rs", "app"),
+    ("app/src/viewer/image/viewport.rs", "app"),
     ("app/src/viewer/review.rs", "app"),
     ("app/src/viewer/review/paint.rs", "app"),
     ("app/src/viewer/review/message.rs", "app"),
@@ -598,6 +603,7 @@ const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/src/mouse.rs", "app"),
     ("app/src/opening.rs", "app"),
     ("app/src/opening/codex_tests.rs", "app"),
+    ("app/src/opening/codex_tests_windows.rs", "app"),
     ("app/src/shell_integration.rs", "app"),
     ("app/src/session.rs", "app"),
     ("app/src/keyboard.rs", "app"),
@@ -1599,6 +1605,10 @@ const NOT_OURS: &[&str] = &[
     "Cc",
     "Cf",
     "DEL",
+    // **The Windows call that closes a pseudoconsole.** `portable-pty` makes it when its value is
+    // dropped; `term-core`'s ConPTY module cites it where it explains why dropping the master is the
+    // close and why the reader drains first.
+    "ClosePseudoConsole",
     // Other programs, and what the operating system gives them.
     "bash",
     // The one that writes for ever in two-byte lines, which is why the leak bench uses it.

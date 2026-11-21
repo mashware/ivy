@@ -309,7 +309,7 @@ pub(crate) fn capture_on_exit(window: &mut Window) {
         let directory = pane
             .pty
             .working_directory()
-            .or_else(|| pane.screen.working_directory().map(local_directory));
+            .or_else(|| pane.screen.working_directory().map(Path::to_path_buf));
         observe_directory(&mut pane.restoration, directory.as_deref(), unusable);
         if capture_sessions
             && pane.restoration.resuming
@@ -321,18 +321,6 @@ pub(crate) fn capture_on_exit(window: &mut Window) {
         {
             pane.restoration.resume = None;
         }
-    }
-}
-
-fn local_directory(path: &Path) -> PathBuf {
-    #[cfg(windows)]
-    {
-        let text = path.to_string_lossy();
-        PathBuf::from(text.strip_prefix('/').unwrap_or(&text))
-    }
-    #[cfg(not(windows))]
-    {
-        path.to_path_buf()
     }
 }
 

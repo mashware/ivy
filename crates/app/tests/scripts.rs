@@ -459,6 +459,14 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/viewer/drawer.rs"),
     ),
     (
+        "app/src/viewer/image.rs",
+        include_str!("../src/viewer/image.rs"),
+    ),
+    (
+        "app/src/viewer/image/viewport.rs",
+        include_str!("../src/viewer/image/viewport.rs"),
+    ),
+    (
         "app/src/viewer/review.rs",
         include_str!("../src/viewer/review.rs"),
     ),
@@ -924,6 +932,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/opening/codex_tests.rs"),
     ),
     (
+        "app/src/opening/codex_tests_windows.rs",
+        include_str!("../src/opening/codex_tests_windows.rs"),
+    ),
+    (
         "app/src/shell_integration.rs",
         include_str!("../src/shell_integration.rs"),
     ),
@@ -1012,6 +1024,10 @@ const MODULES: &[(&str, &str)] = &[
     (
         "term-core/src/nonblocking.rs",
         include_str!("../../term-core/src/nonblocking.rs"),
+    ),
+    (
+        "term-core/src/conpty.rs",
+        include_str!("../../term-core/src/conpty.rs"),
     ),
     (
         "term-core/examples/closing.rs",

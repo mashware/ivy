@@ -128,13 +128,21 @@ harfrust = "0.12"
 # glyphs come inside the font as **palette-indexed PNG** of 136×128 — checked by running it — so they
 # have to be expanded to RGBA and rescaled; `skrifa` hands the bytes over as they are and does neither.
 #
-# **It adds neither a package nor a feature to the tree, and that is worth saying because intuition
-# says the opposite.** `image` with the `png` feature **is already compiled here**, pulled in by the
+# **For this, it adds neither a package nor a feature to the tree, and that is worth saying because
+# intuition says the opposite.** `image` with the `png` feature **is already compiled here**, pulled in by the
 # clipboard — checked with `cargo tree -e features -i image`, which gives
 # `image/png → arboard → egui-winit → eframe → app`. It is the same argument that justifies `serde`
 # with `derive` above: the root manifest's policy reasons about **what enters the tree**, not about
 # how many lines the manifest has.
-image = { version = "0.25", default-features = false, features = ["png"] }
+#
+# **And to decode the screenshots a console's program prints**, which arrive as PNG or JPEG. `jpeg`
+# is the one feature this adds, and it compiles two packages on Linux and Windows: `zune-jpeg` and
+# `zune-core`, pure Rust with no system library. On macOS they were already compiled, because the
+# clipboard's `image/tiff` pulls them in there — checked with
+# `cargo tree -p app --target aarch64-apple-darwin -e normal -i tiff`, which gives
+# `tiff → image → arboard`; on `x86_64-pc-windows-msvc` the same command prints nothing, because
+# `tiff` is absent there.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
 # The interface's icons: Phosphor Regular and its codepoints (D103). Only the face and the constants
 # are used — never `add_to_fonts`, which puts the face in the proportional chain where its blank

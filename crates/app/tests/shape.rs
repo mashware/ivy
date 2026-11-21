@@ -275,6 +275,14 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/viewer/drawer.rs"),
     ),
     (
+        "src/viewer/image.rs",
+        include_str!("../src/viewer/image.rs"),
+    ),
+    (
+        "src/viewer/image/viewport.rs",
+        include_str!("../src/viewer/image/viewport.rs"),
+    ),
+    (
         "src/viewer/review.rs",
         include_str!("../src/viewer/review.rs"),
     ),
@@ -733,6 +741,10 @@ const MODULES: &[(&str, &str)] = &[
     (
         "src/opening/codex_tests.rs",
         include_str!("../src/opening/codex_tests.rs"),
+    ),
+    (
+        "src/opening/codex_tests_windows.rs",
+        include_str!("../src/opening/codex_tests_windows.rs"),
     ),
     (
         "src/shell_integration.rs",

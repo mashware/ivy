@@ -109,7 +109,7 @@ pub(crate) fn split(
             pane.pty.working_directory().or_else(|| {
                 pane.screen
                     .working_directory()
-                    .and_then(published_directory)
+                    .map(std::path::Path::to_path_buf)
             })
         });
     if directory.is_none() {
@@ -186,21 +186,6 @@ fn graft(
     // been born and its panel would stay frozen with nothing saying so. It is the same as
     // opening a tab does.
     window.rearm_the_watcher(ctx);
-}
-
-/// OSC 7 uses a URI path; Windows drive paths arrive with a leading slash.
-fn published_directory(path: &std::path::Path) -> Option<std::path::PathBuf> {
-    #[cfg(windows)]
-    {
-        let path = path.to_str()?;
-        Some(std::path::PathBuf::from(
-            path.strip_prefix('/').unwrap_or(path),
-        ))
-    }
-    #[cfg(not(windows))]
-    {
-        Some(path.to_path_buf())
-    }
 }
 
 #[cfg(all(test, unix))]
@@ -460,17 +445,6 @@ mod tests {
         let actual = fs::read_to_string(&output).unwrap();
         assert_ne!(actual.trim_end(), source.to_string_lossy());
         assert_ne!(actual.trim_end(), "/some/project");
-    }
-}
-
-#[cfg(all(test, windows))]
-mod windows_tests {
-    #[test]
-    fn drive_uri_directory_becomes_an_absolute_native_path() {
-        let path =
-            super::published_directory(std::path::Path::new("/C:/work/project one")).unwrap();
-        assert_eq!(path, std::path::PathBuf::from("C:/work/project one"));
-        assert!(path.is_absolute());
     }
 }
 

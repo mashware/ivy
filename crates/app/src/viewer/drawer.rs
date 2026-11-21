@@ -154,11 +154,15 @@ pub(super) fn tabs(window: &crate::Window) -> Tabs {
                 .and_then(|loaded| loaded.diff.as_ref())
                 .map(|diff| diff.files.len())
         }),
-        document: document
-            .and_then(|s| s.requested.as_ref().map(|(path, _)| path))
-            .and_then(|path| path.file_name())
-            .map(|name| name.to_string_lossy().into_owned())
-            .or_else(|| markdown.then(|| "File".to_owned())),
+        document: if window.image.shown() {
+            window.image.file_name()
+        } else {
+            document
+                .and_then(|s| s.requested.as_ref().map(|(path, _)| path))
+                .and_then(|path| path.file_name())
+                .map(|name| name.to_string_lossy().into_owned())
+                .or_else(|| markdown.then(|| "File".to_owned()))
+        },
         markdown,
         side_by_side: git.is_some_and(|s| s.review.side_by_side()),
     }

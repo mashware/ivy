@@ -382,6 +382,16 @@ const SOURCES: &[(&str, &str, usize)] = &[
         0,
     ),
     (
+        "src/viewer/image.rs",
+        include_str!("../src/viewer/image.rs"),
+        0,
+    ),
+    (
+        "src/viewer/image/viewport.rs",
+        include_str!("../src/viewer/image/viewport.rs"),
+        0,
+    ),
+    (
         "src/viewer/review.rs",
         include_str!("../src/viewer/review.rs"),
         0,
@@ -1023,6 +1033,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
     (
         "src/opening/codex_tests.rs",
         include_str!("../src/opening/codex_tests.rs"),
+        0,
+    ),
+    (
+        "src/opening/codex_tests_windows.rs",
+        include_str!("../src/opening/codex_tests_windows.rs"),
         0,
     ),
     (

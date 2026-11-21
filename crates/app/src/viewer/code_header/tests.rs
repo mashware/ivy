@@ -136,6 +136,7 @@ impl Drawer {
                             folder: "the source console".into(),
                             unavailable: false,
                         },
+                        None,
                     ),
                 );
             },
