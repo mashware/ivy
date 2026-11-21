@@ -1967,10 +1967,10 @@ mod tests {
         // texture's size: a texture of the correct size painted in a stretched rectangle comes out just
         // as badly.
         //
-        // **The slot is taller than wide (20 × 25) on purpose.** Its proportion is then one no emoji
-        // face draws in, so a drawing stretched to fill it cannot pass for one that kept its own. A
-        // square slot let a face whose box is square — the shape `Segoe UI Emoji`'s could take —
-        // fill it exactly and look stretched.
+        // **The slot is taller than wide (20 × 25) on purpose.** A square slot would let a face whose
+        // box is square fill it exactly and look stretched. Its proportion, 0.8, is far from Noto's
+        // bitmap (1.06), so a drawing stretched to fill it cannot pass for one that kept its own.
+        // Segoe's box after the extent change has not been measured.
         if !there_is_color_on_this_machine() {
             return;
         }

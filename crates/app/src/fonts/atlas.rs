@@ -739,9 +739,11 @@ mod tests {
     }
 
     /// The font Windows asks for emoji, which no Linux host carries: drawn on its line alone, its
-    /// emoji came out cut at the top or the bottom of their box. A drawing that reaches any edge of
-    /// its box is taken as cut. The message carries the face's numbers, because Windows CI is the
-    /// only place they can be read.
+    /// emoji came out cut at the top or the bottom of their box. **Whole is judged in font units,
+    /// not in pixels**: the box can legitimately end where the ink does, so ink in its edge row says
+    /// nothing. Instead, the outlines its layers are clipped to must lie inside the advance and the
+    /// [`extent`]. The message carries the face's numbers, because Windows CI is the only place they
+    /// can be read.
     #[cfg(windows)]
     #[test]
     fn segoe_ui_emoji_is_drawn_whole_inside_its_box() {
@@ -757,16 +759,79 @@ mod tests {
             drawn.from_outlines,
             "Segoe UI Emoji was expected to draw from outlines"
         );
-        let [width, height] = drawn.image.size;
-        let inked = |x: usize, y: usize| drawn.image.pixels[y * width + x].a() > 0;
-        let rows: Vec<usize> = (0..height)
-            .filter(|&y| (0..width).any(|x| inked(x, y)))
-            .collect();
-        let columns: Vec<usize> = (0..width)
-            .filter(|&x| (0..height).any(|y| inked(x, y)))
-            .collect();
-        assert!(!rows.is_empty(), "nothing was drawn");
+        assert!(
+            drawn.image.pixels.iter().any(|pixel| pixel.a() > 0),
+            "nothing was drawn"
+        );
+
+        /// The glyphs a colour graph clips its fills to, and whether it moves any of them.
+        #[derive(Default)]
+        struct Layers {
+            glyphs: Vec<skrifa::GlyphId>,
+            transforms: usize,
+        }
+        impl skrifa::color::ColorPainter for Layers {
+            fn push_transform(&mut self, _: skrifa::color::Transform) {
+                self.transforms += 1;
+            }
+            fn pop_transform(&mut self) {}
+            fn push_clip_glyph(&mut self, glyph: skrifa::GlyphId) {
+                self.glyphs.push(glyph);
+            }
+            fn push_clip_box(&mut self, _: skrifa::raw::types::BoundingBox<f32>) {}
+            fn pop_clip(&mut self) {}
+            fn fill(&mut self, _: skrifa::color::Brush<'_>) {}
+            fn push_layer(&mut self, _: skrifa::color::CompositeMode) {}
+        }
+        /// The control points' bounds: never smaller than the ink's.
+        struct Bounds([f32; 4]);
+        impl Bounds {
+            fn take(&mut self, x: f32, y: f32) {
+                let [x0, y0, x1, y1] = &mut self.0;
+                (*x0, *y0, *x1, *y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+            }
+        }
+        impl skrifa::outline::OutlinePen for Bounds {
+            fn move_to(&mut self, x: f32, y: f32) {
+                self.take(x, y);
+            }
+            fn line_to(&mut self, x: f32, y: f32) {
+                self.take(x, y);
+            }
+            fn quad_to(&mut self, cx: f32, cy: f32, x: f32, y: f32) {
+                self.take(cx, cy);
+                self.take(x, y);
+            }
+            fn curve_to(&mut self, cx0: f32, cy0: f32, cx1: f32, cy1: f32, x: f32, y: f32) {
+                self.take(cx0, cy0);
+                self.take(cx1, cy1);
+                self.take(x, y);
+            }
+            fn close(&mut self) {}
+        }
+
         let location = skrifa::instance::LocationRef::default();
+        let mut layers = Layers::default();
+        font.color_glyphs()
+            .get(glyph)
+            .expect("😀 has a COLR record")
+            .paint(location, &mut layers)
+            .expect("its paint graph walks");
+        let outlines = font.outline_glyphs();
+        let mut ink = Bounds([f32::MAX, f32::MAX, f32::MIN, f32::MIN]);
+        for layer in &layers.glyphs {
+            outlines
+                .get(*layer)
+                .expect("a layer glyph has an outline")
+                .draw(
+                    skrifa::outline::DrawSettings::unhinted(
+                        skrifa::instance::Size::unscaled(),
+                        location,
+                    ),
+                    &mut ink,
+                )
+                .expect("a layer outline draws");
+        }
         let metrics = font.metrics(skrifa::instance::Size::unscaled(), location);
         let advance = font
             .glyph_metrics(skrifa::instance::Size::unscaled(), location)
@@ -783,23 +848,30 @@ mod tests {
         let head = font
             .head()
             .map(|t| (t.units_per_em(), t.x_min(), t.y_min(), t.x_max(), t.y_max()));
+        let (ascent, descent) = extent(&font, &metrics);
+        let [x0, y0, x1, y1] = ink.0;
         let numbers = format!(
-            "box {width}x{height}, ink rows {:?}..={:?}, ink columns {:?}..={:?}; line {} / {}, \
-             advance {advance:?}, hhea {hhea:?}, OS/2 typo and win {os2:?}, head {head:?}",
-            rows.first(),
-            rows.last(),
-            columns.first(),
-            columns.last(),
+            "{} layers, {} transforms, ink x {x0}..{x1} y {y0}..{y1}; box x 0..{advance:?} y \
+             {descent}..{ascent}; line {} / {}, hhea {hhea:?}, OS/2 typo and win {os2:?}, head {head:?}, \
+             image {:?}",
+            layers.glyphs.len(),
+            layers.transforms,
             metrics.ascent,
             metrics.descent,
+            drawn.image.size,
         );
         assert!(
-            !rows.contains(&0) && !rows.contains(&(height - 1)),
-            "the drawing touches the top or the bottom of its box: it is cut, not placed. {numbers}"
+            !layers.glyphs.is_empty() && layers.transforms == 0,
+            "the layers' outlines do not say where the ink is: {numbers}"
         );
         assert!(
-            !columns.contains(&0) && !columns.contains(&(width - 1)),
-            "the drawing touches the left or the right of its box: it is cut, not placed. {numbers}"
+            y0 >= descent && y1 <= ascent,
+            "the ink reaches past the top or the bottom of the box: it is cut. {numbers}"
+        );
+        let advance = advance.expect("😀 has an advance");
+        assert!(
+            x0 >= 0.0 && x1 <= advance,
+            "the ink reaches past the left or the right of the box: it is cut. {numbers}"
         );
     }
 }

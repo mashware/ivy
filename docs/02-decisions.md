@@ -3248,9 +3248,14 @@ letters with, unhinted, which a colour glyph never is. Not the same *path*: epai
 would draw its outline — that would be a white silhouette winning over the next face, the defect
 **D24** fixed. A graph the library cannot walk is not drawn either: it drops the error and hands back
 a blank, which remembered as a success would stand where the emoji is for the whole session. The
-glyph is placed on its advance and the face's line (ascent to descent), never on its ink, so every
-emoji of a face shares one scale and one baseline, and it is drawn directly at the size it will
-occupy instead of drawn large and shrunk. A layer drawn «in the text colour» is drawn white: the
+glyph is placed on its advance, never on its ink, so every emoji of a face shares one scale and one
+baseline. It is drawn directly at the size it will occupy instead of drawn large and shrunk.
+Vertically, the box runs between the face's line (ascent to descent) and its `OS/2` Windows extent,
+whichever reaches further, because a face promises to keep its ink inside that extent. **The line
+alone cut `Segoe UI Emoji`.** Its line is flatter than its emoji (its advance is 1.43 times its
+line), so Windows CI drew 😀 touching the top or the bottom of its box. In `Noto Color Emoji`'s
+`COLR` form the line and the extent are both 950 up and 250 down, so its box is the same either
+way. The figures below were measured before this change and still hold for that reason. A layer drawn «in the text colour» is drawn white: the
 atlas is not keyed by colour, and the Windows suite checks four of `Segoe UI Emoji`'s emoji — a
 face, a hand, a cloud and a keycap — for a layer drawn that way.
 
