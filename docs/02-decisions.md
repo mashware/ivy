@@ -3207,16 +3207,54 @@ it from the first emoji.
 
 ### What is left out, said with its reason
 
-**The color outlines —`COLR`— are not painted.** Doing it requires rasterizing outlines by hand,
-which is the rasterizer of our own that this milestone discarded **on purpose** because it
-invalidates the whole measurement history. On Linux it does not show, because the system's emoji
-fonts are bitmap ones; **on Windows it does**, because `Segoe UI Emoji` is `COLR`. It is declared as
-what **F2.7** is missing, not as something that works here.
+**The color outlines —`COLR`— were left out here, and #176 brought them in** (next section). The
+reason given was that painting them required a rasterizer of our own, which this milestone discarded
+because it invalidates the whole measurement history.
 
 **The skin-tone modifiers do not either.** They are **wide** characters, so the terminal engine
 gives them a cell of their own instead of attaching them to the base emoji's, and the presentation
 rule cannot look at the next cell: it does not have it in its signature. The base comes out in color
 and the modifier comes out on its own.
+
+### Colour outlines, painted by a library (#176)
+
+**`Segoe UI Emoji`, the font Windows asks for emoji, is `COLR`**: layers of outlines with a palette,
+no bitmap. Discovery already reached it — fontique names it as the emoji family on Windows — and the
+bitmap-only rasterizer answered nothing, so on Windows every emoji came out monochrome or blank, and
+the colour tests that guard this path skipped themselves there.
+
+**Decision.** A face that has no colour bitmap for the glyph but has a `COLR` record for it is drawn
+with `vello_cpu` and its `text` feature, whose glyph painter (`glifo`) understands `COLR` versions 0
+and 1 — gradients, composites, clip boxes. The image goes into the same atlas, under the same key,
+timed by the same span. **The bitmap path keeps answering first**: no emoji face on the supported
+machines carries both tables, so Linux and macOS draw exactly what they drew, and the blast radius is
+the one new branch.
+
+**It is not the rasterizer this decision refused.** What was refused was code of our own drawing
+outlines, which would have taken over the letters and so every published frame. This draws only
+colour glyphs, on an atlas miss, with a library — the same `vello_cpu` epaint already rasterizes its
+letters with. Not the same *path*: epaint builds `vello_cpu` without `text`, so turning it on adds
+`glifo` to the build. Saying «epaint already does this» would be false.
+
+**The rules it draws by.** A glyph with no `COLR` record is not drawn here even though the library
+would draw its outline — that would be a white silhouette winning over the next face, the defect
+**D24** fixed. The glyph is placed on its em box (advance × ascender to descender), never on its ink,
+so every emoji of a face shares one scale and one baseline, and it is drawn directly at the size it
+will occupy instead of drawn large and shrunk. A layer drawn «in the text colour» is drawn white:
+the atlas is not keyed by colour, and the Windows suite checks that `Segoe UI Emoji` draws none of
+its emoji that way.
+
+**Discarded.** Walking the paint graph with `skrifa` onto `tiny-skia`: our own painter, and
+`tiny-skia` has no sweep gradient, which `COLR` version 1 needs. DirectWrite's
+`TranslateColorGlyphRun`: Windows-only code for a problem a cross-platform library solves (**D1**),
+and a `COLR` font on Linux or macOS would still be blank. Shipping a bitmap emoji font for Windows:
+about ten megabytes, another emoji set than the system's, and every `COLR` face still blank.
+
+**Measured** with batch `colr`, which points the machine's emoji family at a pinned
+`Noto Color Emoji` in its `COLR` version 1 form; its control is `C`. The figures are that font's —
+heavy in gradients — not `Segoe UI Emoji`'s, which no script here can run.
+
+<!-- annex filled at validate -->
 
 ### The status panel, by another route to the same glyphs (#178)
 
