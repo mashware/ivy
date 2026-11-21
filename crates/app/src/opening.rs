@@ -682,6 +682,7 @@ fn launch(
         pty,
         pty_output,
         _shell_integration: integration,
+        annotated: Default::default(),
         panel,
         control,
         panel_state,

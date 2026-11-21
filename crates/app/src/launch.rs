@@ -87,6 +87,29 @@ impl From<Pty> for Process {
     }
 }
 
+#[cfg(test)]
+impl Process {
+    /// A console whose launch failed with what was typed still owed: its writer has given up for
+    /// good, which is what a test needs that cannot wait for a real writer to fail.
+    pub(crate) fn deaf() -> Self {
+        Self {
+            live: None,
+            terminal: term_core::Termination::Pending,
+            cost: std::time::Duration::ZERO,
+            context: None,
+            pending: None,
+            input: b"typed".to_vec(),
+            startup: 0,
+            input_since: Some(std::time::Instant::now()),
+            refused: false,
+            refusals: 0,
+            failure: Some("the program could not be started".into()),
+            delivery_failed: false,
+            dismissed: false,
+        }
+    }
+}
+
 pub(crate) struct Request<'a> {
     pub program: &'a str,
     pub args: &'a [&'a str],

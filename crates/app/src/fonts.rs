@@ -27,6 +27,7 @@ use fontique::{Collection, CollectionOptions, GenericFamily, SourceCache};
 use skrifa::MetadataProvider as _;
 mod atlas;
 mod bundled;
+pub(crate) use bundled::FACES;
 #[cfg(test)]
 pub(crate) use bundled::UI_ICONS;
 #[cfg(test)]
