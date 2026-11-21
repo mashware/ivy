@@ -222,7 +222,7 @@ pub struct Channel {
     /// **The count is production's — the acceptor reads its own handle to cap connections — and the
     /// field is the tests'**, which otherwise could only assert that a thread was asked to end and
     /// never that it did. That is the whole of why it is allowed to look unused from here.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg_attr(any(not(test), windows), allow(dead_code))]
     alive: Arc<AtomicUsize>,
     acceptor: Option<JoinHandle<()>>,
     /// Interrupts this pane's listener to wake the acceptor out of `accept`.
@@ -365,6 +365,7 @@ impl Channel {
 
     /// How many of this channel's threads are still running.
     #[cfg(test)]
+    #[cfg_attr(windows, allow(dead_code))]
     pub(crate) fn alive(&self) -> usize {
         self.alive.load(Ordering::Relaxed)
     }
@@ -396,7 +397,7 @@ impl Drop for Channel {
         // **Closing the private wake descriptor comes before the handle is dropped**, and it is what
         // ends the acceptor: it cannot fail, resolve a filesystem name another field may already
         // have removed, or wait for room in the endpoint's connection backlog.
-        drop(self.stopper.take());
+        self.stopper = None;
         drop(self.acceptor.take());
     }
 }
@@ -1118,12 +1119,17 @@ fn ask_the_window(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(windows))]
     use panel_contract::PanelDir;
+    #[cfg(not(windows))]
     use std::io::Write;
+    #[cfg(not(windows))]
     use std::sync::mpsc::Receiver;
+    #[cfg(not(windows))]
     use std::time::Instant;
 
     /// A pane with its channel open, plus what the window would hold.
+    #[cfg(not(windows))]
     struct Pane {
         dir: PanelDir,
         channel: Option<Channel>,
@@ -1131,6 +1137,7 @@ mod tests {
         woken: Arc<AtomicUsize>,
     }
 
+    #[cfg(not(windows))]
     fn a_pane() -> Pane {
         let dir = PanelDir::create().expect("create the panel directory");
         let (sender, inbox) = sync_channel(8);
@@ -1155,6 +1162,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(windows))]
     impl Pane {
         fn connect(&self) -> Stream {
             // The acceptor may not have reached its first look yet; a connect against a bound
@@ -1170,10 +1178,12 @@ mod tests {
         }
     }
 
+    #[cfg(not(windows))]
     fn publication(source: &str, document: &str) -> String {
         format!("{{\"tool\":\"panel_set\",\"source\":\"{source}\",\"document\":{document}}}\n")
     }
 
+    #[cfg(not(windows))]
     fn read_reply(stream: &mut Stream) -> String {
         let mut reply = Vec::new();
         let mut byte = [0_u8; 1];
@@ -1196,6 +1206,11 @@ mod tests {
         String::from_utf8(reply).expect("the reply is text")
     }
 
+    crate::windows_unix_omission!(
+        agent_signal_crosses_the_socket_and_disconnect_is_reported,
+        "unix-only: requires Unix-domain socket transport for agent-signal delivery and disconnect notification"
+    );
+    #[cfg(not(windows))]
     #[test]
     fn agent_signal_crosses_the_socket_and_disconnect_is_reported() {
         let pane = a_pane();
@@ -1226,8 +1241,14 @@ mod tests {
         assert!(matches!(closed.what, What::Closed));
     }
 
+    crate::windows_unix_omission!(
+        diagnostic_peer_is_the_connected_process,
+        "unix-only: requires Unix socket peer credentials"
+    );
+
     #[cfg(unix)]
     #[test]
+
     fn diagnostic_peer_is_the_connected_process() {
         let pane = a_pane();
         let stream = pane.connect();
@@ -1236,8 +1257,14 @@ mod tests {
         assert!(peer.is_alive());
     }
 
+    crate::windows_unix_omission!(
+        inspector_runs_once_and_its_observation_reaches_each_delivery,
+        "unix-only: requires Unix socket peer credentials"
+    );
+
     #[cfg(unix)]
     #[test]
+
     fn inspector_runs_once_and_its_observation_reaches_each_delivery() {
         let dir = PanelDir::create().unwrap();
         let (sender, inbox) = sync_channel(8);
@@ -1274,6 +1301,11 @@ mod tests {
         drop(client);
         drop(channel);
     }
+
+    crate::windows_unix_omission!(
+        panel_publish_is_admitted_off_frame_and_publisher_disconnect_is_silent,
+        "unix-only: requires Linux pidfd-backed peer lifetime"
+    );
 
     #[cfg(target_os = "linux")]
     #[test]
@@ -1318,6 +1350,11 @@ mod tests {
         drop(channel);
     }
 
+    crate::windows_unix_omission!(
+        agent_signal_queue_full_replies_retryable_over_the_socket_but_panel_does_not,
+        "unix-only: requires Unix-domain socket transport for retryable and legacy replies"
+    );
+    #[cfg(not(windows))]
     #[test]
     fn agent_signal_queue_full_replies_retryable_over_the_socket_but_panel_does_not() {
         let dir = PanelDir::create().unwrap();
@@ -1368,8 +1405,13 @@ mod tests {
         ));
     }
 
+    crate::windows_unix_omission!(
+        what_is_published_over_the_channel_reaches_the_window_and_no_file_is_written,
+        "unix-only: requires Unix-domain socket transport from producer to window inbox"
+    );
     /// The whole of what this delivery promises, end to end: a producer publishes over the channel
     /// and the window is handed the document, with **no file written anywhere**.
+    #[cfg(not(windows))]
     #[test]
     fn what_is_published_over_the_channel_reaches_the_window_and_no_file_is_written() {
         let pane = a_pane();
@@ -1431,7 +1473,12 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_document_is_read_while_the_window_queue_is_full_and_nobody_is_woken,
+        "unix-only: requires Unix-domain socket transport for panel_get while the inbox is full"
+    );
     /// A read is available precisely when the bounded write queue cannot make progress.
+    #[cfg(not(windows))]
     #[test]
     fn a_document_is_read_while_the_window_queue_is_full_and_nobody_is_woken() {
         let dir = PanelDir::create().expect("create the panel directory");
@@ -1477,12 +1524,17 @@ mod tests {
         assert_eq!(woken.load(Ordering::Relaxed), 0, "reading woke the window");
     }
 
+    crate::windows_unix_omission!(
+        one_read_is_answered_after_the_pane_closes_and_no_more,
+        "unix-only: requires Unix-domain socket transport and close-time buffered request semantics"
+    );
     /// **The closing-read exception, through the connection's own loop and not only its
     /// predicate.** Three reads arrive in one write — on Linux a write this small is taken by one
     /// read, which is what lets the socket close with nothing left unread and the last reply be a
     /// clean end instead of a reset. The pane closes while the first is being answered. The second
     /// is answered once, here with the refusal a closed pane gives; the third, another read, is not,
     /// because the exception admits one and no more.
+    #[cfg(not(windows))]
     #[test]
     fn one_read_is_answered_after_the_pane_closes_and_no_more() {
         use std::sync::Mutex;
@@ -1573,7 +1625,12 @@ mod tests {
         assert!(!is_the_one_closing_read(&write, false));
     }
 
+    crate::windows_unix_omission!(
+        the_original_channel_api_still_hands_panel_get_to_its_owner,
+        "unix-only: requires Unix-domain socket transport for the legacy Channel API"
+    );
     /// The original Rust constructor and delivery variants remain a source-compatible fallback.
+    #[cfg(not(windows))]
     #[test]
     fn the_original_channel_api_still_hands_panel_get_to_its_owner() {
         let dir = PanelDir::create().expect("create the panel directory");
@@ -1600,8 +1657,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        the_window_s_answer_is_what_the_caller_reads,
+        "unix-only: requires Unix-domain socket transport for window replies"
+    );
     /// The window's answer is what the caller reads, and the two refusals are told apart. Without
     /// this the channel could answer `ok` to everything and every test above would still pass.
+    #[cfg(not(windows))]
     #[test]
     fn the_window_s_answer_is_what_the_caller_reads() {
         let pane = a_pane();
@@ -1629,10 +1691,15 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_taken_publication_names_what_it_dropped_and_a_refused_one_does_not,
+        "unix-only: requires Unix-domain socket transport for publication and refusal replies"
+    );
     /// **What fell away reaches the producer on a taken reply and on no other**, and the window is
     /// handed the same panel it always was. Through the socket, because the note is read on the
     /// connection's thread and attached after the window answers — a test of the helper alone would
     /// pass with nothing calling it.
+    #[cfg(not(windows))]
     #[test]
     fn a_taken_publication_names_what_it_dropped_and_a_refused_one_does_not() {
         let pane = a_pane();
@@ -1669,6 +1736,11 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_taken_patch_names_what_its_lines_dropped_and_a_refused_one_does_not,
+        "unix-only: requires Unix-domain socket transport for patch delivery and refusal replies"
+    );
+    #[cfg(not(windows))]
     #[test]
     fn a_taken_patch_names_what_its_lines_dropped_and_a_refused_one_does_not() {
         let pane = a_pane();
@@ -1704,8 +1776,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        two_connections_are_heard_at_the_same_time,
+        "unix-only: requires concurrent Unix-domain socket connections"
+    );
     /// Two connections at once, which is what the holder rule needs to exist at all: served
     /// serially, the second caller could never be heard and the refusal could never happen.
+    #[cfg(not(windows))]
     #[test]
     fn two_connections_are_heard_at_the_same_time() {
         let pane = a_pane();
@@ -1727,9 +1804,14 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_connection_that_dies_releases_what_it_held,
+        "unix-only: requires Unix-domain socket peer-disconnect handling"
+    );
     /// **The release is what stops a crashed agent freezing its pane's panel for ever.** It is
     /// asserted on the closing of the socket and not on a tidy goodbye, because a crash does not
     /// send one.
+    #[cfg(not(windows))]
     #[test]
     fn a_connection_that_dies_releases_what_it_held() {
         let pane = a_pane();
@@ -1747,9 +1829,14 @@ mod tests {
         assert_eq!(closing.connection, published.connection);
     }
 
+    crate::windows_unix_omission!(
+        closing_the_pane_ends_every_thread_it_had,
+        "unix-only: requires Unix-domain socket acceptor and shutdown lifecycle"
+    );
     /// **A pane that closes takes its threads with it.** Asserted by watching them end, because
     /// «the flag was raised» is exactly the claim that was true of the pseudoterminal's reader while
     /// it hung the window for a month (**D32**).
+    #[cfg(not(windows))]
     #[test]
     fn closing_the_pane_ends_every_thread_it_had() {
         let mut pane = a_pane();
@@ -1776,8 +1863,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        closing_after_the_endpoint_path_is_removed_still_ends_the_acceptor,
+        "unix-only: requires Unix socket endpoint removal while the acceptor is active"
+    );
     /// The endpoint's path is an address, not the acceptor's lifetime. A pane removes that path as
     /// part of closing, and the channel must still be able to stop the listener it already owns.
+    #[cfg(not(windows))]
     #[test]
     fn closing_after_the_endpoint_path_is_removed_still_ends_the_acceptor() {
         let mut pane = a_pane();
@@ -1815,8 +1907,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_document_that_is_not_a_panel_never_reaches_the_window,
+        "unix-only: requires Unix-domain socket request parsing and refusal delivery"
+    );
     /// A document that is not a panel is refused **without reaching the window**: tolerance is per
     /// field inside a document, never per document.
+    #[cfg(not(windows))]
     #[test]
     fn a_document_that_is_not_a_panel_never_reaches_the_window() {
         let pane = a_pane();
@@ -1834,8 +1931,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        an_unknown_tool_is_refused_by_name_and_the_connection_lives_on,
+        "unix-only: requires Unix-domain socket request routing and replies"
+    );
     /// The verbs of the frozen format that nobody serves are refused by name without reaching the
     /// window, and the connection survives to be used for what it does serve.
+    #[cfg(not(windows))]
     #[test]
     fn an_unknown_tool_is_refused_by_name_and_the_connection_lives_on() {
         let pane = a_pane();
@@ -1853,10 +1955,15 @@ mod tests {
         assert!(matches!(pane.next_delivery().what, What::Publish { .. }));
     }
 
+    crate::windows_unix_omission!(
+        the_split_verbs_travel_to_the_window_and_its_answer_returns,
+        "unix-only: requires Unix-domain socket split-request delivery and replies"
+    );
     /// **The three `split_*` verbs travel to the window and its answer comes back to the caller.**
     /// The window here is the test: it takes each delivery, checks what it was asked, and answers —
     /// which is what pins that these no longer take the refusal path of an unknown tool, and that
     /// each verb's reply shape is the one the wire declared.
+    #[cfg(not(windows))]
     #[test]
     fn the_split_verbs_travel_to_the_window_and_its_answer_returns() {
         let pane = a_pane();
@@ -1918,6 +2025,11 @@ mod tests {
         assert_eq!(read_reply(&mut client), "{\"ok\":true}");
     }
 
+    crate::windows_unix_omission!(
+        plan_verbs_parse_off_the_frame_and_forward_project_scope_operations,
+        "unix-only: requires Unix-domain socket plan-request delivery and replies"
+    );
+    #[cfg(not(windows))]
     #[test]
     fn plan_verbs_parse_off_the_frame_and_forward_project_scope_operations() {
         let pane = a_pane();
@@ -1974,7 +2086,12 @@ mod tests {
         assert!(read_reply(&mut client).contains("retired for Demo"));
     }
 
+    crate::windows_unix_omission!(
+        retirement_travels_to_the_window_and_its_counts_return,
+        "unix-only: requires Unix-domain socket retirement delivery and replies"
+    );
     /// Retirement keeps the connection identity and returns the window's exact outcome counts.
+    #[cfg(not(windows))]
     #[test]
     fn retirement_travels_to_the_window_and_its_counts_return() {
         let pane = a_pane();
@@ -1999,6 +2116,10 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_patch_travels_to_the_pane_with_its_ops_already_read,
+        "unix-only: requires Unix-domain socket patch delivery and replies"
+    );
     /// **A patch is the pane's, like a publication and unlike the three verbs above**, and its ops
     /// reach it already read.
     ///
@@ -2007,6 +2128,7 @@ mod tests {
     /// travels is the read op list and not the text it arrived as, and that an empty `ok` is the
     /// shape the wire declared for it — a reply wanting any other shape turns the pane's answer into
     /// a refusal the producer cannot act on.
+    #[cfg(not(windows))]
     #[test]
     fn a_patch_travels_to_the_pane_with_its_ops_already_read() {
         let pane = a_pane();
@@ -2042,10 +2164,15 @@ mod tests {
         assert_eq!(read_reply(&mut client), "{\"ok\":true}");
     }
 
+    crate::windows_unix_omission!(
+        a_mismatched_answer_is_refused_rather_than_reshaped,
+        "unix-only: requires Unix-domain socket request/reply identity checks"
+    );
     /// **A window that answers the wrong shape is refused rather than handed over as a success**, and
     /// only the shape's name travels: a `Taken` reaching a read would otherwise come back as
     /// `{"ok":true}` carrying no text — the silent failure this crate's reply path exists to avoid —
     /// and a read reaching a close would echo a console's screen into an error line.
+    #[cfg(not(windows))]
     #[test]
     fn a_mismatched_answer_is_refused_rather_than_reshaped() {
         let pane = a_pane();
@@ -2068,9 +2195,14 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        publishing_wakes_the_window,
+        "unix-only: requires Unix-domain socket publication and window wakeup"
+    );
     /// The window is told there is something to pick up. Without it a publication would sit in the
     /// inbox until something else happened to wake the window — which, in a window at rest, is
     /// never.
+    #[cfg(not(windows))]
     #[test]
     fn publishing_wakes_the_window() {
         let pane = a_pane();
@@ -2088,9 +2220,14 @@ mod tests {
         assert!(pane.woken.load(Ordering::Relaxed) > 0, "nobody was woken");
     }
 
+    crate::windows_unix_omission!(
+        a_pane_serves_as_many_connections_as_it_serves_and_no_more,
+        "unix-only: requires Unix-domain socket multi-connection routing"
+    );
     /// **A client looping on `connect` does not make unbounded threads inside the window.** The
     /// assertion is on the thread count and not only on the refusal: a cap that answered «no» and
     /// spawned anyway would pass a test that only read the reply.
+    #[cfg(not(windows))]
     #[test]
     fn a_pane_serves_as_many_connections_as_it_serves_and_no_more() {
         let pane = a_pane();

@@ -96,6 +96,10 @@ fn window_click(
     }
     copied
 }
+crate::windows_unix_omission!(
+    a_folder_of_the_path_shows_in_files_and_the_menu_keeps_its_clicks,
+    "unix-only: tests filesystem symlink path resolution in the Linux file tree"
+);
 
 /// In the whole window: a folder of the path shows that folder in Files, and the menu, which
 /// floats over the drawer, keeps its clicks — the item acts and no console is focused by it.
@@ -189,6 +193,10 @@ fn a_folder_of_the_path_shows_in_files_and_the_menu_keeps_its_clicks() {
         .expect("the drawer is still placed");
     painted.at_in("a.ts", dock);
 }
+crate::windows_unix_omission!(
+    a_folder_of_the_path_under_a_linked_root_shows_inside_the_tree,
+    "unix-only: tests filesystem symlink path resolution in the Linux file tree"
+);
 
 /// A Files root reached through a link: the relative path still counts from it, a folder of the
 /// path shows inside the tree Files already has, keeping that root, and once Files has moved

@@ -8,6 +8,16 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
+#[cfg(windows)]
+#[test]
+#[ignore = "unix-only: requires Unix socket-type inspection"]
+fn conditional_instructions_neither_probe_nor_promise_a_socket() {}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "unix-only: requires Unix socket transport fixtures"]
+fn an_early_bridge_keeps_publication_guidance_when_the_channel_binds_later() {}
+
 /// Starts the bridge with `env` as its pane identity (see [`exchange`]), sends it one «initialize»
 /// request and returns the reply.
 fn handshake(env: &[(&str, &str)]) -> serde_json::Value {

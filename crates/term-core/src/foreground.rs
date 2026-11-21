@@ -10,6 +10,42 @@ mod macos;
 #[cfg(all(test, target_os = "linux"))]
 mod tests;
 
+#[cfg(all(test, windows))]
+mod tests {
+    crate::windows_unix_omission!(
+        ancestry_diagnostic_is_tristate_and_ignores_foreground_rules,
+        "unix-only: requires Linux process ancestry inspection"
+    );
+    crate::windows_unix_omission!(
+        native_process_directory_checks_birth_executable_and_live_process,
+        "unix-only: requires Linux procfs inspection"
+    );
+    crate::windows_unix_omission!(
+        child_exit_status_distinguishes_success_from_failed_resume,
+        "unix-only: requires Unix shell process semantics"
+    );
+    crate::windows_unix_omission!(
+        foreground_scope_is_owned_send_and_ends_with_its_console,
+        "unix-only: requires Linux pidfd support"
+    );
+    crate::windows_unix_omission!(
+        foreground_scope_rejects_the_other_console_and_background_groups,
+        "unix-only: requires Linux process group inspection"
+    );
+    crate::windows_unix_omission!(
+        nested_descendants_are_exposed_and_root_exit_is_native,
+        "unix-only: requires Linux procfs inspection"
+    );
+    crate::windows_unix_omission!(
+        detached_helper_is_attested_only_as_a_descendant_of_the_live_foreground_pane,
+        "unix-only: requires Linux procfs inspection"
+    );
+    crate::windows_unix_omission!(
+        detached_helpers_do_not_make_a_background_ancestor_foreground,
+        "unix-only: requires Linux procfs inspection"
+    );
+}
+
 /// Any process's current directory, unattested: nothing here checks that `pid` is still the process
 /// the caller meant, unlike [`NativeProcess::working_directory`].
 #[cfg(target_os = "macos")]
@@ -116,6 +152,7 @@ pub enum Ancestry {
     Unknown,
 }
 
+#[cfg_attr(windows, allow(dead_code))]
 fn classify_snapshots<B: Copy + Eq>(
     peer: u32,
     root: (u32, u32, B),

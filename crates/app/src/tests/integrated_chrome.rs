@@ -600,6 +600,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn connection_guide_and_its_closing_frame_deliver_no_keys_or_paste_to_the_program() {
         let ctx = egui::Context::default();
         let received = term_core::received::Received::new("connection-guide");
@@ -684,7 +685,13 @@ mod tests {
         assert_eq!(received.wait_for(5, Duration::from_secs(5)), b"AFTER");
     }
 
+    crate::windows_unix_omission!(
+        connection_guide_and_its_closing_frame_deliver_no_keys_or_paste_to_the_program,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn reconnect_help_copies_only_the_command_and_never_types_into_the_console() {
         let ctx = egui::Context::default();
         chrome::prepare(&ctx);
@@ -744,7 +751,13 @@ mod tests {
         assert_eq!(received.wait_for(4, Duration::from_secs(5)), b"SAFE");
     }
 
+    crate::windows_unix_omission!(
+        reconnect_help_copies_only_the_command_and_never_types_into_the_console,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn connection_guide_copies_setup_prompt_with_local_path_without_typing_it() {
         fn button_fill(shapes: &[egui::epaint::ClippedShape], at: egui::Pos2) -> egui::Color32 {
             shapes
@@ -944,6 +957,11 @@ mod tests {
         );
         assert_eq!(received.wait_for(4, Duration::from_secs(5)), b"SAFE");
     }
+
+    crate::windows_unix_omission!(
+        connection_guide_copies_setup_prompt_with_local_path_without_typing_it,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
 
     #[test]
     fn ivy_logo_opens_the_bar_before_files_and_the_tabs() {
@@ -2011,6 +2029,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn narrow_tab_labels_select_without_invisible_close_targets() {
         for width in [240.0, 200.0] {
             let ctx = egui::Context::default();
@@ -2035,6 +2054,11 @@ mod tests {
             assert_eq!(window.active, 1, "a narrow tab could not be selected");
         }
     }
+
+    crate::windows_unix_omission!(
+        narrow_tab_labels_select_without_invisible_close_targets,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
 
     #[test]
     fn integrated_partition_gaps_use_the_app_background_and_headers_rename_by_right_click() {
@@ -2774,6 +2798,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn update_notes_close_and_pointer_release_do_not_type_or_resize_consoles() {
         let ctx = egui::Context::default();
         let received = term_core::received::Received::new("updates-input");
@@ -2862,7 +2887,13 @@ mod tests {
         assert_eq!(received.wait_for(5, Duration::from_secs(5)), b"AFTER");
     }
 
+    crate::windows_unix_omission!(
+        update_notes_close_and_pointer_release_do_not_type_or_resize_consoles,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn short_window_menu_scroll_keeps_existing_commands_reachable_without_console_input() {
         for width in [1400.0, 240.0] {
             let ctx = egui::Context::default();
@@ -2917,6 +2948,11 @@ mod tests {
             assert_eq!(received.wait_for(5, Duration::from_secs(5)), b"AFTER");
         }
     }
+
+    crate::windows_unix_omission!(
+        short_window_menu_scroll_keeps_existing_commands_reachable_without_console_input,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
     fn pointer_button(pos: egui::Pos2, pressed: bool) -> egui::Event {
         egui::Event::PointerButton {
             pos,
@@ -3138,6 +3174,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn board_menu_owns_keyboard_dismissal_and_cross_surface_releases() {
         for board_open in [false, true] {
             let ctx = egui::Context::default();
@@ -3239,6 +3276,11 @@ mod tests {
             assert_eq!(received.wait_for(5, Duration::from_secs(5)), b"AFTER");
         }
     }
+
+    crate::windows_unix_omission!(
+        board_menu_owns_keyboard_dismissal_and_cross_surface_releases,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
     #[test]
     fn compact_menu_window_controls_emit_commands_with_board_open_or_closed() {
         for board_open in [false, true] {
@@ -4247,10 +4289,10 @@ mod tests {
     /// The search box keeps clear of a held paste's question: it is laid out around the notices
     /// the painter actually drew, so it neither hides them nor takes their presses.
     #[test]
+    #[cfg(target_os = "linux")]
     fn the_search_box_keeps_clear_of_a_held_paste_s_question() {
-        let Some(boundary) = keyboard::the_longest_line_a_reader_keeps() else {
-            return;
-        };
+        let boundary = keyboard::the_longest_line_a_reader_keeps()
+            .expect("Linux declares the canonical-input boundary");
         let ctx = egui::Context::default();
         crate::fonts::install_icons_only(&ctx);
         let mut window = integrated_pair();
@@ -4285,7 +4327,13 @@ mod tests {
             painted.layout.frame
         );
     }
+
+    crate::windows_unix_omission!(
+        the_search_box_keeps_clear_of_a_held_paste_s_question,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
     #[test]
+    #[cfg(unix)]
     fn search_navigation_edits_the_query_without_reaching_the_program() {
         let ctx = egui::Context::default();
         crate::fonts::install_icons_only(&ctx);
@@ -4358,6 +4406,11 @@ mod tests {
             "navigation/editing leaked to the program before the sentinel"
         );
     }
+
+    crate::windows_unix_omission!(
+        search_navigation_edits_the_query_without_reaching_the_program,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
     fn search_blink_fixture() -> (Window, egui::Context) {
         let ctx = egui::Context::default();
         crate::fonts::install_icons_only(&ctx);

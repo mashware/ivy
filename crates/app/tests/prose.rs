@@ -134,6 +134,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         1,
     ),
     (
+        "src/client_attestation_windows_tests.rs",
+        include_str!("../src/client_attestation_windows_tests.rs"),
+        0,
+    ),
+    (
         "src/client_attestation/mod.rs",
         include_str!("../src/client_attestation/mod.rs"),
         0,

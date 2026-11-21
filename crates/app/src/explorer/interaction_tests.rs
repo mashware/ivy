@@ -1246,8 +1246,14 @@ fn files_selects_and_refreshes_markdown_without_leaving_maximized_reading() {
     assert!(window.sidebar.maximized);
 }
 
+crate::windows_unix_omission!(
+    maximized_files_input_and_document_handoff_never_reach_covered_programs,
+    "unix-only: uses stty raw mode and cat to verify pointer actions do not reach a PTY program"
+);
+
 #[cfg(unix)]
 #[test]
+
 fn maximized_files_input_and_document_handoff_never_reach_covered_programs() {
     use std::time::Duration;
 
@@ -1406,8 +1412,14 @@ fn maximized_files_input_and_document_handoff_never_reach_covered_programs() {
     }
 }
 
+crate::windows_unix_omission!(
+    a_press_on_the_floating_list_over_a_console_never_reaches_its_program,
+    "unix-only: uses POSIX stty and a child input recorder to verify the floating-list press is swallowed"
+);
+
 #[cfg(unix)]
 #[test]
+
 fn a_press_on_the_floating_list_over_a_console_never_reaches_its_program() {
     use std::time::Duration;
     let ctx = egui::Context::default();

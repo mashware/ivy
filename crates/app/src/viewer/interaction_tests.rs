@@ -341,6 +341,11 @@ fn control_click_reveals_markdown_in_files_before_opening_its_viewer() {
     }
 }
 
+crate::windows_unix_omission!(
+    non_repository_console_paints_a_clear_message_after_review_click,
+    "unix-only: verifies a real shell process and Linux repository state after a viewer interaction"
+);
+
 #[cfg(target_os = "linux")]
 #[test]
 fn non_repository_console_paints_a_clear_message_after_review_click() {

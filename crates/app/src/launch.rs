@@ -4,7 +4,9 @@ use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
+#[cfg(any(target_os = "linux", test))]
+use std::sync::mpsc::channel;
+use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use term_core::{Backlog, Ending, ForegroundScope, Pty, Size};
 
 static LAUNCHER: OnceLock<PathBuf> = OnceLock::new();

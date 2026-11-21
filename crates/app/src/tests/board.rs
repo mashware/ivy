@@ -82,6 +82,12 @@ mod tests {
         arrange(window, ctx, "By milestone");
     }
 
+    crate::windows_unix_omission!(
+        board_open_and_escape_preserve_consoles_and_swallow_the_closing_frames_input,
+        "unix-only: requires POSIX raw-mode child byte capture to assert keyboard and mouse routing"
+    );
+
+    #[cfg(unix)]
     #[test]
     fn board_open_and_escape_preserve_consoles_and_swallow_the_closing_frames_input() {
         let received = term_core::received::Received::new("board-escape");
@@ -149,6 +155,12 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        clicking_the_covered_console_does_not_forward_keyboard_input,
+        "unix-only: requires POSIX raw-mode child byte capture to assert keyboard and mouse routing"
+    );
+
+    #[cfg(unix)]
     #[test]
     fn clicking_the_covered_console_does_not_forward_keyboard_input() {
         let received = term_core::received::Received::new("board-console-focus");
@@ -172,6 +184,12 @@ mod tests {
         assert_eq!(received.wait_for(5, Duration::from_secs(5)), b"after");
     }
 
+    crate::windows_unix_omission!(
+        clicking_a_board_card_closes_the_dock_and_never_sends_its_gesture,
+        "unix-only: requires POSIX raw-mode child byte capture to assert keyboard and mouse routing"
+    );
+
+    #[cfg(unix)]
     #[test]
     fn clicking_a_board_card_closes_the_dock_and_never_sends_its_gesture() {
         let received = term_core::received::Received::new("board-card-activation");
@@ -246,6 +264,12 @@ mod tests {
             );
         }
     }
+    crate::windows_unix_omission!(
+        configurable_board_binding_returns_the_disabled_chord_to_the_program,
+        "unix-only: requires POSIX raw-mode child byte capture to assert keyboard and mouse routing"
+    );
+
+    #[cfg(unix)]
     #[test]
     fn configurable_board_binding_returns_the_disabled_chord_to_the_program() {
         for (config, opening) in [
@@ -544,6 +568,12 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        enter_restores_a_hidden_target_and_does_not_deliver_trailing_text_or_paste,
+        "unix-only: requires POSIX raw-mode child byte capture to assert keyboard and mouse routing"
+    );
+
+    #[cfg(unix)]
     #[test]
     fn enter_restores_a_hidden_target_and_does_not_deliver_trailing_text_or_paste() {
         let received = term_core::received::Received::new("board-enter");
@@ -586,6 +616,12 @@ mod tests {
         assert_eq!(received.wait_for(5, Duration::from_secs(5)), b"after");
     }
 
+    crate::windows_unix_omission!(
+        repeated_egui_closing_passes_cannot_send_the_frames_input_to_a_program,
+        "unix-only: requires POSIX raw-mode child byte capture to assert keyboard and mouse routing"
+    );
+
+    #[cfg(unix)]
     #[test]
     fn repeated_egui_closing_passes_cannot_send_the_frames_input_to_a_program() {
         let received = term_core::received::Received::new("board-repeat");
@@ -1069,7 +1105,14 @@ mod tests {
         assert_eq!(window.active().panes().len(), 1);
     }
 
+    crate::windows_unix_omission!(
+        project_plan_calls_refuse_unknown_and_folder_projects_without_changing_a_plan,
+        "unix-only: exercises the Unix panel-control endpoint"
+    );
+
+    #[cfg(unix)]
     #[test]
+
     fn project_plan_calls_refuse_unknown_and_folder_projects_without_changing_a_plan() {
         let mut window = window_with("sleep 30", "sleep 30");
         let ctx = egui::Context::default();
@@ -1099,7 +1142,14 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        project_plan_is_shared_by_panes_and_painted_with_source_and_progress,
+        "unix-only: exercises the Unix panel-control endpoint"
+    );
+
+    #[cfg(unix)]
     #[test]
+
     fn project_plan_is_shared_by_panes_and_painted_with_source_and_progress() {
         let mut window = window_with("sleep 30", "sleep 30");
         integrated(&mut window);
@@ -1209,7 +1259,14 @@ mod tests {
         assert!(report.contains("board plan paint enqueue:"));
     }
 
+    crate::windows_unix_omission!(
+        published_project_plan_hides_roadmap_file_until_retired,
+        "unix-only: exercises the Unix panel-control endpoint"
+    );
+
+    #[cfg(unix)]
     #[test]
+
     fn published_project_plan_hides_roadmap_file_until_retired() {
         use std::{fs, process::Command, time::Instant};
         let root = std::env::temp_dir().join(format!(
@@ -1391,7 +1448,14 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    crate::windows_unix_omission!(
+        by_milestone_places_each_card_under_its_declared_deliverable_and_the_rest_off_the_plan,
+        "unix-only: exercises the Unix panel-control endpoint"
+    );
+
+    #[cfg(unix)]
     #[test]
+
     fn by_milestone_places_each_card_under_its_declared_deliverable_and_the_rest_off_the_plan() {
         let mut window = window_with("sleep 30", "sleep 30");
         integrated(&mut window);
@@ -1516,7 +1580,14 @@ mod tests {
         assert_eq!(window.board.selected(), Some(origins[1]));
     }
 
+    crate::windows_unix_omission!(
+        the_filter_field_takes_typing_and_escape_leaves_it_before_closing_the_board,
+        "unix-only: exercises the Unix panel-control endpoint"
+    );
+
+    #[cfg(unix)]
     #[test]
+
     fn the_filter_field_takes_typing_and_escape_leaves_it_before_closing_the_board() {
         let mut window = window_with("sleep 30", "sleep 30");
         integrated(&mut window);
@@ -1775,8 +1846,14 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_refused_choice_stays_on_screen_and_is_said_on_the_board,
+        "unix-only: requires Unix symlink or permission semantics"
+    );
+
     #[cfg(unix)]
     #[test]
+
     fn a_refused_choice_stays_on_screen_and_is_said_on_the_board() {
         let mut window = window_with("sleep 30", "sleep 30");
         integrated(&mut window);

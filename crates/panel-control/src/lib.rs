@@ -24,7 +24,7 @@
 //! OpenCode may also send a strict `agent_signal` v1 snapshot on its pane endpoint.
 //! This independent connection does not claim the panel and is not an MCP tool; its
 //! connection identity and disconnect are delivered to the application for arbitration.
-//!
+
 //! # What this build serves
 //!
 //! The six verbs of the frozen wire format: `panel_set`, `panel_get`, `panel_patch`, and the three
@@ -33,6 +33,17 @@
 //! to the window, which is the only party with a tree: a console is named by an opaque
 //! handle scoped to the connection that opened it, and the person's first byte into it revokes the
 //! handle (**D44**). All six are advertised, because all six are answered.
+
+#[cfg(test)]
+#[macro_export]
+macro_rules! windows_unix_omission {
+    ($name:ident, $reason:literal) => {
+        #[cfg(windows)]
+        #[test]
+        #[ignore = $reason]
+        fn $name() {}
+    };
+}
 
 pub mod client;
 pub mod codex_relay;

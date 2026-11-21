@@ -168,6 +168,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/tests/board_parity.rs"),
     ),
     (
+        "app/src/client_attestation_windows_tests.rs",
+        include_str!("../src/client_attestation_windows_tests.rs"),
+    ),
+    (
         "app/src/client_attestation/mod.rs",
         include_str!("../src/client_attestation/mod.rs"),
     ),

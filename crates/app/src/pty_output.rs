@@ -658,9 +658,68 @@ pub(crate) fn hold_next_bridge() -> (Receiver<()>, std::sync::mpsc::Sender<()>) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{Duration, Instant};
+    #[cfg(unix)]
     use term_core::{Pty, Size};
+
+    crate::windows_unix_omission!(
+        what_the_program_writes_reaches_the_queue,
+        "unix-only: POSIX shell fixtures and Unix PTY output lifetime"
+    );
+    crate::windows_unix_omission!(
+        the_death_of_the_program_survives_having_handed_off_the_channel,
+        "unix-only: POSIX shell fixtures and Unix PTY output lifetime"
+    );
+    crate::windows_unix_omission!(
+        when_the_final_notification_arrives_the_death_is_already_published,
+        "unix-only: POSIX shell fixtures and Unix PTY output lifetime"
+    );
+    crate::windows_unix_omission!(
+        while_the_program_lives_the_bridge_says_so,
+        "unix-only: POSIX shell fixtures and Unix PTY output lifetime"
+    );
+    crate::windows_unix_omission!(
+        the_arrival_of_bytes_wakes_the_window,
+        "unix-only: POSIX shell fixtures and Unix PTY output lifetime"
+    );
+    crate::windows_unix_omission!(
+        picking_up_leaves_the_queue_empty,
+        "unix-only: POSIX shell fixtures and Unix PTY output lifetime"
+    );
+    crate::windows_unix_omission!(
+        the_maximum_is_respected_and_what_is_left_over_stays_for_next_time,
+        "unix-only: POSIX shell fixtures and Unix PTY output lifetime"
+    );
+    crate::windows_unix_omission!(
+        what_is_picked_up_says_since_when_it_was_waiting,
+        "unix-only: POSIX shell fixtures and Unix PTY output lifetime"
+    );
+    crate::windows_unix_omission!(
+        a_pickup_on_empty_does_not_invent_a_wait_of_zero,
+        "unix-only: POSIX shell fixtures and Unix PTY output lifetime"
+    );
+    crate::windows_unix_omission!(
+        the_destination_keeps_what_it_already_had,
+        "unix-only: uses Unix permission bits to test an unwritable destination"
+    );
+    crate::windows_unix_omission!(
+        the_bridge_queue_does_not_grow_without_limit,
+        "unix-only: POSIX shell fixtures and Unix PTY output lifetime"
+    );
+    crate::windows_unix_omission!(
+        destroying_the_bridge_with_the_queue_full_ends_its_thread,
+        "unix-only: POSIX shell fixtures and Unix PTY output lifetime"
+    );
+    crate::windows_unix_omission!(
+        what_the_frame_hands_over_is_read_off_the_pseudoterminal_and_not_invented,
+        "unix-only: POSIX shell fixtures and Unix PTY output lifetime"
+    );
+    crate::windows_unix_omission!(
+        a_bridge_whose_thread_lets_go_of_the_receiver_records_nobody_listening,
+        "unix-only: POSIX shell fixtures and Unix PTY output lifetime"
+    );
 
     thread_local! {
         pub(crate) static BEFORE_BRIDGE: std::cell::RefCell<Option<Box<dyn FnOnce() + Send>>> = const { std::cell::RefCell::new(None) };
@@ -749,6 +808,7 @@ mod tests {
         false
     }
 
+    #[cfg(unix)]
     #[test]
     fn what_the_program_writes_reaches_the_queue() {
         let (_pty, output) = Pty::spawn("sh", &["-c", "printf hello"], Size { rows: 24, cols: 80 })
@@ -767,6 +827,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_death_of_the_program_survives_having_handed_off_the_channel() {
         // This is the contract that breaks in silence months later: handing the channel to another
@@ -782,6 +843,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn when_the_final_notification_arrives_the_death_is_already_published() {
         // The order between publishing the death and giving the final notification decides whether
@@ -811,6 +873,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn while_the_program_lives_the_bridge_says_so() {
         let (_pty, output) = Pty::spawn("sh", &["-c", "sleep 30"], Size { rows: 24, cols: 80 })
@@ -823,6 +886,7 @@ mod tests {
         assert!(pty_output.is_alive(), "the program is still running");
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_arrival_of_bytes_wakes_the_window() {
         // It is the piece that makes it possible to see an agent working without touching the
@@ -856,6 +920,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn picking_up_leaves_the_queue_empty() {
         let (_pty, output) = Pty::spawn("sh", &["-c", "printf one"], Size { rows: 24, cols: 80 })
@@ -878,6 +943,7 @@ mod tests {
         assert!(second.is_empty(), "the queue returned the same thing twice");
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_maximum_is_respected_and_what_is_left_over_stays_for_next_time() {
         // Without the maximum, whoever picks up takes the whole queue: in a dump that is
@@ -1031,6 +1097,7 @@ mod tests {
         assert_eq!(rest, b"89");
     }
 
+    #[cfg(unix)]
     #[test]
     fn what_is_picked_up_says_since_when_it_was_waiting() {
         // It is the stamp from which hangs the number this milestone publishes as visual delay.
@@ -1055,6 +1122,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_pickup_on_empty_does_not_invent_a_wait_of_zero() {
         // A frame with no output is not an instantaneous wait: it is that there was nothing to wait
@@ -1100,6 +1168,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_destination_keeps_what_it_already_had() {
         // The frame reuses its buffer and may call with remnants of the previous pass still
@@ -1119,6 +1188,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_bridge_queue_does_not_grow_without_limit() {
         // Before the fix, a program that writes non-stop and that no one picks up made this queue
@@ -1194,6 +1264,7 @@ mod tests {
     /// waker is destroyed **with** the thread, so its reference count dropping to one proves that
     /// the thread finished for real. Counting the process's threads would measure, by rebound,
     /// those of the rest of the suite.
+    #[cfg(unix)]
     #[test]
     fn destroying_the_bridge_with_the_queue_full_ends_its_thread() {
         let witness = Arc::new(());
@@ -1353,6 +1424,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn what_the_frame_hands_over_is_read_off_the_pseudoterminal_and_not_invented() {
         // The seam between the two halves. Without this, replacing either field of `Silences::of`
@@ -1385,6 +1457,7 @@ mod tests {
         // scenario and has no test in this crate at all.
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_bridge_whose_thread_lets_go_of_the_receiver_records_nobody_listening() {
         // **The order that must not happen, made to happen on purpose.** The crate below says,

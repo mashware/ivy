@@ -214,6 +214,11 @@ mod tests {
         assert_eq!(state.published_by, PublicationOrigin::Unknown);
     }
 
+    crate::windows_unix_omission!(
+        opened_pane_labels_outside_socket_and_accepts_its_shell_descendant_without_session_capture,
+        "unix-only: authenticates a shell descendant through Linux process ancestry and Unix sockets"
+    );
+
     #[cfg(target_os = "linux")]
     #[test]
     fn opened_pane_labels_outside_socket_and_accepts_its_shell_descendant_without_session_capture()

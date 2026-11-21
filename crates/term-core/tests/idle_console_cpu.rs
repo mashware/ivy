@@ -10,21 +10,25 @@
 //! own process, so the process's processor clock counts this test's consoles and nobody else's — and
 //! with a single test, not even a sibling running in parallel. The two measurements go one after the
 //! other for that reason.
-#![cfg(target_os = "linux")]
-
+#[cfg(target_os = "linux")]
 use std::sync::mpsc::Receiver;
+#[cfg(target_os = "linux")]
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "linux")]
 use term_core::{Pty, Size};
 
 /// How long a console is left waiting while its cost is measured.
+#[cfg(target_os = "linux")]
 const IDLE: Duration = Duration::from_millis(500);
 
 /// What that wait may cost at most. A spinning thread spends the whole of [`IDLE`], ten times this;
 /// a waiting one spends a small fraction of it.
+#[cfg(target_os = "linux")]
 const AT_MOST: Duration = Duration::from_millis(50);
 
 /// The processor time this whole process has used, every thread included.
+#[cfg(target_os = "linux")]
 fn processor_time() -> Duration {
     let mut now = libc::timespec {
         tv_sec: 0,
@@ -36,6 +40,7 @@ fn processor_time() -> Duration {
     Duration::new(now.tv_sec as u64, now.tv_nsec as u32)
 }
 
+#[cfg(target_os = "linux")]
 fn launch(script: &str, marker: &str) -> (Pty, Receiver<Vec<u8>>) {
     let (pty, output) = Pty::spawn("sh", &["-c", script], Size::default()).expect("launch sh");
     let mut seen = Vec::new();
@@ -49,6 +54,7 @@ fn launch(script: &str, marker: &str) -> (Pty, Receiver<Vec<u8>>) {
     (pty, output)
 }
 
+#[cfg(target_os = "linux")]
 fn spent_over_idle() -> Duration {
     let before = processor_time();
     std::thread::sleep(IDLE);
@@ -56,6 +62,7 @@ fn spent_over_idle() -> Duration {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn a_waiting_console_costs_no_processor_time() {
     // The reader, waiting for a program that says nothing more.
     let (pty, output) = launch(
@@ -92,3 +99,8 @@ fn a_waiting_console_costs_no_processor_time() {
     drop(pty);
     drop(output);
 }
+
+#[cfg(windows)]
+#[test]
+#[ignore = "unix-only: requires Linux process CPU accounting and nonblocking PTY behavior"]
+fn a_waiting_console_costs_no_processor_time() {}

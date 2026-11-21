@@ -7,7 +7,7 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 use std::time::Duration;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use std::time::Instant;
 
 const MARKDOWN_LIMIT: usize = 1024 * 1024;
@@ -718,6 +718,11 @@ mod tests {
         assert!(Kind::Code.is_document() && Kind::Markdown.is_document());
         assert!(!Kind::Local.is_document() && !Kind::AgainstBase.is_document());
     }
+
+    crate::windows_unix_omission!(
+        git_timeout_does_not_wait_for_child,
+        "unix-only: sends a Unix signal to stop a timed out Git child"
+    );
 
     #[cfg(unix)]
     #[test]

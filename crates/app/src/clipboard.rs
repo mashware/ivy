@@ -450,6 +450,11 @@ mod tests {
         )
     }
 
+    crate::windows_unix_omission!(
+        first_primary_operation_selects_primary_without_a_clipboard_fallback,
+        "unix-only: exercises Linux primary-selection clipboard API semantics"
+    );
+
     #[cfg(target_os = "linux")]
     #[test]
     fn first_primary_operation_selects_primary_without_a_clipboard_fallback() {
@@ -570,6 +575,11 @@ mod tests {
         assert!(service.poll(now).is_none());
         assert!(service.request(5, Source::Primary, now));
     }
+
+    crate::windows_unix_omission!(
+        primary_publication_coalesces_without_issuing_an_ordinary_clipboard_command,
+        "unix-only: exercises Linux primary-selection clipboard API semantics"
+    );
 
     #[cfg(target_os = "linux")]
     #[test]

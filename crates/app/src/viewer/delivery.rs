@@ -129,3 +129,11 @@ mod tests {
         assert!(second.so_far().is_empty());
     }
 }
+
+#[cfg(all(test, windows))]
+mod tests {
+    crate::windows_unix_omission!(
+        delivers_once_to_pinned_pane_and_refuses_closed_or_unwrapped_multiline,
+        "unix-only: uses POSIX shell fixtures and Unix PTY byte-delivery assertions"
+    );
+}
