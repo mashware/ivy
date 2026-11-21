@@ -381,10 +381,6 @@ pub(super) fn notes(
         });
         (false, inner.inner)
     });
-    // A Send on its way takes the notes as they were at its click; only its Cancel answers.
-    if sending.busy() {
-        column.disable();
-    }
     let rest = column.available_size();
     column.allocate_ui_with_layout(rest, egui::Layout::top_down(egui::Align::Min), |ui| {
         // Nothing here is painted over the button under it.
@@ -394,6 +390,11 @@ pub(super) fn notes(
             // A notice cut to one line is elided, and egui's label then shows it whole on hover.
             ui.add(egui::Label::new(Arc::clone(notice)).show_tooltip_when_elided(true));
             ui.add_space(NOTICE_GAP);
+        }
+        // A Send on its way takes the notes as they were at its click; only its Cancel answers.
+        // After the notice: a disabled label shows no tooltip, and the cut one needs its own.
+        if sending.busy() {
+            ui.disable();
         }
         egui::ScrollArea::vertical()
             .id_salt("image-notes")
@@ -409,7 +410,7 @@ pub(super) fn notes(
         None => Err("Nothing can be sent from here.".to_owned()),
     };
     if let Some(rect) = layout.footer {
-        footer(ui, rect, &line, refused, &roles);
+        footer(ui, rect, &line, sending.busy(), (refused, &roles));
     }
     if cancelled {
         return Some(Asked::Cancel);
@@ -491,19 +492,23 @@ fn list(ui: &mut egui::Ui, marks: &mut Marks, document: u64, roles: &Roles) {
     );
 }
 
-/// Under image and column, the line Send types, muted and wrapped, or why nothing can be sent.
+/// Under image and column, the line Send types, muted and wrapped, or why nothing can be sent;
+/// greyed out with the notes while a Send is `busy`.
 fn footer(
     ui: &mut egui::Ui,
     rect: egui::Rect,
     line: &Result<(String, &std::path::PathBuf), String>,
-    refused: egui::Color32,
-    roles: &Roles,
+    busy: bool,
+    (refused, roles): (egui::Color32, &Roles),
 ) {
     let mut ui = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(rect.shrink2(egui::vec2(8.0, 4.0)))
             .layout(egui::Layout::top_down(egui::Align::Min)),
     );
+    if busy {
+        ui.disable();
+    }
     // A scroll area is never laid out shorter than its own minimum, which a short drawer's band
     // is: without this clip its text ran past the drawer's bottom.
     ui.set_clip_rect(rect.intersect(ui.clip_rect()));

@@ -333,7 +333,10 @@ fn forsake(window: &mut crate::Window, request: &Request, written: Result<PathBu
             // Send is greyed out while the worker is parked, and the drawer says why: once it
             // ends cleanly, that is no longer true.
             let notice = &mut window.image.notice;
-            if notice.as_deref().is_some_and(|n| n.contains(STILL_FINISHING)) {
+            if notice
+                .as_deref()
+                .is_some_and(|n| n.contains(STILL_FINISHING))
+            {
                 *notice = Some(format!("{CANCELLED} Its copy is gone; Send is ready."));
             }
             return;

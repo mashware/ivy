@@ -2922,6 +2922,61 @@ mod tests {
         }
     }
 
+    /// While a Send is on its way the line under the notes greys out with them, and a refusal cut
+    /// to one line still shows whole on hover: the notes' column is disabled under it, not over it.
+    #[test]
+    fn a_send_on_its_way_greys_the_line_and_keeps_the_cut_refusal_readable() {
+        let notice = "This image has marks that were not sent: send them or clear them before \
+                      opening another image or document.";
+        let asked = |height: f32| {
+            let mut viewer = ready(image::RgbaImage::new(400, 300));
+            viewer.document.as_mut().unwrap().marks.general = "the header overlaps".into();
+            viewer.notice = Some(notice.into());
+            let request = send::Request {
+                document: viewer.document().unwrap(),
+                pane: 0,
+                path: PathBuf::from("/a/annotated-1.png"),
+                line: "x".into(),
+            };
+            // Nothing polls a viewer alone, so the Send stays asked.
+            viewer.send.ask(request);
+            let view = egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(300.0, height));
+            (viewer, view)
+        };
+        let ctx = egui::Context::default();
+        let (mut viewer, view) = asked(230.0);
+        let shapes = shown_in(&ctx, &mut viewer, view, vec![]);
+        let faded = shapes.iter().find_map(|clipped| match &clipped.shape {
+            // A disabled painter fades the glyphs' own vertex colours, not the shape's factor.
+            egui::Shape::Text(text) if text.galley.text() == "Nothing can be sent from here." => {
+                Some(text.galley.rows[0].visuals.mesh.vertices[0].color.a())
+            }
+            _ => None,
+        });
+        let alpha = faded.expect("the line under the notes is painted");
+        assert!(alpha < 255, "the line is not greyed out: alpha {alpha}");
+
+        let ctx = egui::Context::default();
+        let (mut viewer, view) = asked(118.0);
+        let shapes = shown_in(&ctx, &mut viewer, view, vec![]);
+        let said = visible_texts(&shapes, |t| t == notice);
+        let [(galley, shown)] = &said[..] else {
+            panic!("the refusal is not painted once");
+        };
+        assert!(galley.elided, "the refusal is not cut");
+        let mut hover = vec![egui::Event::PointerMoved(shown.center())];
+        let whole = (0..60).any(|_| {
+            let shapes = shown_in(&ctx, &mut viewer, view, std::mem::take(&mut hover));
+            visible_texts(&shapes, |t| t == notice)
+                .iter()
+                .any(|(galley, _)| !galley.elided)
+        });
+        assert!(
+            whole,
+            "hovering the cut refusal during a Send does not show it whole"
+        );
+    }
+
     /// Beside the image, a refusal is laid out at the column's width and painted inside the
     /// column and its clip, wrapped rather than cut: the drawer has the height for it.
     #[test]
