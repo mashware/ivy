@@ -68,6 +68,20 @@ if ($SoftwareOpenGL) {
         }
     }
 }
+# DIAGNOSTIC, removed before merge: the same launch with the bundled console host moved aside, so
+# Ivy falls back to the system's ConPTY. Its outcome is printed and never fails the job; it only
+# separates the bundled host from the software OpenGL as the cause of a start-up exit.
+$Aside = Join-Path $Root 'console-host-aside'
+New-Item -ItemType Directory $Aside | Out-Null
+foreach ($Name in $ConsoleHost) { Move-Item (Join-Path $Destination $Name) $Aside }
+try {
+    & $Launch -Executable $Installed -EvidenceDir (Join-Path $Evidence 'diagnostic-system-conpty')
+    Write-Output 'DIAGNOSTIC system ConPTY launch: passed'
+} catch {
+    Write-Output "DIAGNOSTIC system ConPTY launch: failed: $($_.Exception.Message)"
+} finally {
+    foreach ($Name in $ConsoleHost) { Move-Item (Join-Path $Aside $Name) $Destination }
+}
 # The ordinary launch goes first: a control that fails for an unexpected reason would otherwise stop
 # the run before anyone learns whether Ivy starts at all.
 & $Launch -Executable $Installed -EvidenceDir (Join-Path $Evidence 'normal')
