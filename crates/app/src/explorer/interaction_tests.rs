@@ -1594,7 +1594,20 @@ fn typing_a_search_keeps_the_tree_loaded_and_the_keys_in_files() {
     let shot = directory.0.join("docs/shot.png");
     click_icon(&mut window, &ctx, area, view::Icon::Search);
     type_text(&mut window, &ctx, area, "shot");
-    wait_for_text(&mut window, &ctx, area, "shot.png");
+    let deadline = Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        frame(&mut window, &ctx, area, vec![]);
+        // The tree can already paint this filename while the new search is still pending.
+        if search::matches(&mut window.explorer, pane)
+            .entries
+            .iter()
+            .any(|entry| entry.path == shot)
+        {
+            break;
+        }
+        assert!(Instant::now() < deadline, "image search did not finish");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     assert_eq!(crate::viewer::shown_image(&window), None);
     frame(&mut window, &ctx, area, vec![open]);
     assert_eq!(
