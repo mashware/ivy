@@ -311,18 +311,7 @@ impl Viewer {
             origin,
             sending,
         };
-        match tools::notes(ui, &layout, marks, panel) {
-            Some(tools::Asked::Send(request)) => {
-                sending.ask(request);
-                self.notice = None;
-            }
-            Some(tools::Asked::Cancel) => {
-                if sending.cancel() {
-                    self.notice = Some("Send cancelled; nothing was sent.".into());
-                }
-            }
-            None => {}
-        }
+        sending.answer(tools::notes(ui, &layout, marks, panel), &mut self.notice);
         // Undo, Clear or a note's first or last letter changed whether there is something to
         // send after the split was made: the next frame lays the button and its line out again.
         if marks.is_empty() == something_to_send {

@@ -2,6 +2,7 @@
 //! line naming the copy, with the notes, typed into that console and submitted with Enter.
 use super::super::delivery::{self, Enter, Refusal};
 use super::flatten;
+use super::tools::Asked;
 use crate::viewer::load::{Job, take};
 use eframe::egui;
 use std::path::{Path, PathBuf};
@@ -87,9 +88,23 @@ impl Sending {
         self.in_flight().is_some()
     }
 
+    /// Takes up what a click in the notes asked, saying in `notice` what became of it.
+    pub(super) fn answer(&mut self, asked: Option<Asked>, notice: &mut Option<String>) {
+        match asked {
+            Some(Asked::Send(request)) => {
+                self.ask(request);
+                *notice = None;
+            }
+            Some(Asked::Cancel) if self.cancel() => {
+                *notice = Some("Send cancelled; nothing was sent.".into());
+            }
+            _ => {}
+        }
+    }
+
     /// Takes back the Send whose line is not typed yet, parking its worker if it has one.
     /// Answers whether there was one.
-    pub(super) fn cancel(&mut self) -> bool {
+    fn cancel(&mut self) -> bool {
         match std::mem::take(&mut self.phase) {
             Phase::Asked(_) => true,
             Phase::Writing(request, job) => {
