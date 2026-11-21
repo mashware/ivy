@@ -11484,3 +11484,74 @@ store's card «the contract removes what the contract puts there» argues for it
 here because the copies are the app's, not the contract's); escaping the notes for a shell; and
 refusing characters that are not shown as themselves in notes, since the person typing them is the
 person sending them, and control characters become spaces so the line shown is the line sent.
+
+## D114 — The window keeps its own standard error in a log file, and records a panic there itself
+
+**Decided.** Before the window opens, Ivy replaces its own standard error with a pipe it owns. One
+thread reads that pipe, writes every chunk to `ivy.log` and hands it to a second thread that writes
+it to the standard error Ivy was started with; when that one falls 256 chunks behind, the terminal
+loses chunks and the file does not, and the terminal is told how many bytes it missed and which file
+has them as soon as it takes lines again. The file lives in the platform's log directory:
+`~/Library/Logs/Ivy/` on macOS, `~/.local/state/ivy/` on Linux, `%LOCALAPPDATA%\Ivy\logs\` on
+Windows. An absolute `$XDG_STATE_HOME` rules on every platform and the file goes in its `ivy/`, as
+`$XDG_CONFIG_HOME` does for the configuration, so an isolated run writes its own log. Once it holds
+4 MiB it becomes `ivy.log.1`, replacing the previous one; the size is checked before each write, so
+the write that crosses the cap lands whole. Every window is a process of its own and they share the
+name, so before each write a window compares the file it holds with the file at the name, and one
+whose file was moved aside by another window, or deleted, follows the name. A file that cannot be
+moved aside is emptied and says why on its first line, so the cap still holds. On Unix both files are
+created readable by their owner only. A panic writes one record — time, thread, message, location
+and backtrace — straight to the file, replacing Rust's default report, and hands it to the
+terminal's thread without waiting for it. Settings shows the path and a button that shows it in the file manager. A measured run
+captures nothing. When the file cannot be opened, standard error stays exactly as it was and one
+line says why.
+
+**Why.** Opened from the Dock, a desktop launcher or the Start menu, nobody reads Ivy's standard
+error: launchd sends it to `/dev/null`, a launcher outside a systemd user unit drops it, and on
+Windows it goes to a console window nobody keeps. Every failure line this project decided to write
+there (D38, D41, D51, D56) was lost for the people who most need it, and a crash left no trace at
+all. Taking the stream at the process level captures all of them, and anything a dependency writes,
+without touching a single call site. The second copy keeps what a shell launch shows, and the cap
+holds while the window runs: a console that keeps failing cannot fill the disk.
+
+**How it ends.** `main`, not `run`, holds the capture: a window that cannot open is reported after
+`run` returns, so `main` prints that line itself while the capture still stands. Closing the
+capture puts the original standard error back first, which takes the pipe's writer away; the
+threads then read its end and finish. The wait for them is bounded at 100 ms (D57): a program the
+window started with an inherited standard error also holds the pipe, and is not waited for.
+
+**Not measured.** The threads never run on the frame, and a measured run does not start them, so
+there is no frame cost to declare (D13).
+
+**Discarded.**
+- **Pointing standard error at the file and nowhere else.** No running cap — rotation only at the
+  next start — and a shell launch would lose what it shows today.
+- **A logging macro at every call site.** About 120 sites in three crates, every new one able to
+  forget it, and nothing a dependency writes would arrive.
+- **Leaving it to the operating system.** No facility covers the three platforms, none records a
+  panic that unwinds, and none tells the person where to look.
+- **Chaining Rust's default panic report.** The file would hold every panic twice.
+- **Writing the original from the copying thread.** A terminal that stops reading (Ctrl+S, a
+  parent that never drains its pipe) would stop the file after one chunk and then the window.
+- **One file per window.** A report would have to say which of several files to attach.
+- **A new About dialog for the path.** Ivy has none; one row in Settings is enough to find the file.
+
+**Open.**
+- **What the runtime writes as it aborts is lost from both copies.** A stack overflow, a failed
+  allocation, or the abort line after a panic inside a panic is written into the pipe and ends the
+  process before the thread can copy it; the panic records themselves still reach the file. Before
+  this decision a shell launch showed it.
+- **Two windows crossing the cap in the same instant** can both move the file aside, and the second
+  then replaces the first one's copy. It takes two processes within a few microseconds.
+- **At closing, lines written after standard error is put back** can reach a terminal before lines
+  still queued for it.
+- **A panic record can come before the lines that led to it.** It is written straight to the file
+  while earlier lines may still be in the pipe.
+- **On Windows it is read, not run.** Rust's standard error asks for the process's handle on every
+  write — `library/std/src/sys/stdio/windows.rs`: «Don't cache handles but get them fresh for every
+  read/write» — which is what makes `SetStdHandle` take effect, and a process born with no handle
+  discards the write as written instead of failing. A console is written as UTF-16, as Rust's own
+  standard error does. No Windows machine has run the capture yet, and the Windows pull-request job
+  runs only the tests it names.
+- Helper programs (`panel-mcp`, `ivy-session`, `ivy-codex`) keep their standard error with whoever
+  launched them.

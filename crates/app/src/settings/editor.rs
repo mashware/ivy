@@ -36,6 +36,10 @@ pub(crate) struct Editor {
     timing: Timing,
     application: runtime::Application,
     pub(super) saved_startup_restore: Option<super::StartupRestore>,
+    /// The log file this window keeps, read when the dialog opens (D114).
+    pub(super) log_file: Option<PathBuf>,
+    /// Where «Show in folder» sends it.
+    pub(super) desktop: crate::opener::Desktop,
 }
 
 impl Editor {
@@ -80,6 +84,7 @@ impl Editor {
         self.picker_filter = 0;
         self.fonts = None;
         self.store = None;
+        self.log_file = crate::diagnostics_log::path().map(ToOwned::to_owned);
         match path
             .ok_or_else(|| "The configuration directory is unavailable.".to_owned())
             .and_then(Store::open)

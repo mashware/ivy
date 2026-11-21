@@ -172,16 +172,18 @@ zbus = { version = "5.13", default-features = false, features = ["async-io"] }
 async-io = "2"
 futures-lite = "2"
 
-# Two uses, one table. A file's identity (volume serial number and file index), which std's Windows
+# Three uses, one table. A file's identity (volume serial number and file index), which std's Windows
 # `MetadataExt` keeps behind an unstable feature, and the flag that opens a link instead of its
 # target (D108). And opening a file with its default application and showing it in Explorer,
-# through the shell's own calls rather than a command line `cmd` would read (D110). 0.61 is already
-# in the lock; only its features are named.
+# through the shell's own calls rather than a command line `cmd` would read (D110). And putting a
+# pipe where the process's standard error is, so the log file keeps it (D114). 0.61 is already in
+# the lock; only its features are named.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
     "Win32_System_Com",
+    "Win32_System_Console",
     "Win32_System_Registry",
     "Win32_UI_Shell",
     "Win32_UI_Shell_Common",
