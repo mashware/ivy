@@ -15,6 +15,11 @@
 //! was a key and reached the program as `0x18`. The copy excludes Shift there. Every close test in
 //! this crate seeds `Key::X` with Ctrl+Shift; before that change the desktop never delivered it.
 //!
+//! **The third change (D115)** is Windows-only and lives in the three clipboard predicates:
+//! `is_cut_command` loses its Shift+Delete arm, `is_copy_command` its Ctrl+Insert arm, and
+//! `is_paste_command`'s Shift+Insert arm requires Shift without Ctrl or Alt. Those three functions
+//! are cut out of the residual hash and pinned whole, line by line, below.
+//!
 //! **No test in this repository, or any that could be added to it, can exercise that fix
 //! behaviourally.** `winit::event::KeyEvent` carries `pub(crate) platform_specific`
 //! (`winit-0.30.13/src/event.rs:655`), private to the `winit` crate itself — not to `egui-winit`,
@@ -36,9 +41,10 @@
 //!
 //! a) the workspace manifest still patches `egui-winit` to the vendored copy;
 //! b) the vendored copy's paste branch still gates its `return` on having pushed a paste, instead
-//!    of upstream's unconditional one — and its `is_cut_command` still leaves Shift out of Ctrl+X;
+//!    of upstream's unconditional one — and its three clipboard predicates hold exactly D33's and
+//!    D115's arms;
 //! c) nothing else in the vendored copy has been *edited* — every file but `src/lib.rs` is locked by
-//!    a content hash, and `src/lib.rs` is locked **outside** its two patched places, so a change
+//!    a content hash, and `src/lib.rs` is locked **outside** its patched places, so a change
 //!    anywhere else in the crate is caught even though this test never re-reads the crates.io copy;
 //! d) and no file has been *added to* or *removed from* it. Hashing a list of known files is silent
 //!    about a file that was not on the list, which a review confirmed by adding one and watching all
@@ -132,12 +138,38 @@ fn paste_branch(lib_rs: &str) -> &str {
     brace_block(lib_rs, "is_paste_command(self.modifiers, active_key) {")
 }
 
-/// The whole `fn is_cut_command(…) { … }`, comments included — the copy's second change (D33).
+/// The whole `fn is_cut_command(…) { … }`, comments included — the copy's second change (D33) and
+/// part of its third (D115).
 fn cut_command(lib_rs: &str) -> &str {
     brace_block(
         lib_rs,
         "fn is_cut_command(modifiers: egui::Modifiers, keycode: egui::Key) -> bool {",
     )
+}
+
+/// The whole `fn is_copy_command(…) { … }`, comments included — part of the third change (D115).
+fn copy_command(lib_rs: &str) -> &str {
+    brace_block(
+        lib_rs,
+        "fn is_copy_command(modifiers: egui::Modifiers, keycode: egui::Key) -> bool {",
+    )
+}
+
+/// The whole `fn is_paste_command(…) { … }`, comments included — part of the third change (D115).
+fn paste_command(lib_rs: &str) -> &str {
+    brace_block(
+        lib_rs,
+        "fn is_paste_command(modifiers: egui::Modifiers, keycode: egui::Key) -> bool {",
+    )
+}
+
+/// A function's code lines, trimmed, comments and blank lines left out.
+fn code_lines(function: &str) -> Vec<&str> {
+    function
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with("//"))
+        .collect()
 }
 
 /// The first non-blank, trimmed line of `text` after skipping `skip` leading lines.
@@ -204,15 +236,16 @@ const LOCKED_FILES: &[(&str, u64, usize)] = &[
     ("src/window_settings.rs", 0xb35505c8f99ec593, 7753),
 ];
 
-/// FNV-1a-64 of `vendor/egui-winit/src/lib.rs` with the paste branch and `is_cut_command` cut out.
+/// FNV-1a-64 of `vendor/egui-winit/src/lib.rs` with the paste branch and the three clipboard
+/// predicates (`is_cut_command`, `is_copy_command`, `is_paste_command`) cut out.
 ///
 /// The first cut was recorded by diffing its residual against the same cut made in the published
-/// crate's own `src/lib.rs` — the two were byte-for-byte identical. The second cut was added with the
-/// second change, and its residual computed from the tree **before** that change was made, by a script
-/// that first reproduced the old constant exactly — so what it removes is upstream's function and
-/// nothing else. See the module doc comment for why the comparison lives here as a number.
-const LIB_RS_RESIDUAL_HASH: u64 = 0xf753be09fca5207c;
-const LIB_RS_RESIDUAL_LEN: usize = 93_531;
+/// crate's own `src/lib.rs` — the two were byte-for-byte identical. Each later cut was added with its
+/// change, and its residual computed from the tree **before** that change was made, by a script that
+/// first reproduced the old constant exactly — so what it removes is upstream's functions and nothing
+/// else. See the module doc comment for why the comparison lives here as a number.
+const LIB_RS_RESIDUAL_HASH: u64 = 0xeb37e04499eefa4a;
+const LIB_RS_RESIDUAL_LEN: usize = 93_012;
 
 #[test]
 fn nothing_else_in_the_vendored_copy_has_drifted_from_the_published_crate() {
@@ -243,12 +276,15 @@ fn nothing_else_in_the_vendored_copy_has_drifted_from_the_published_crate() {
         .unwrap_or_else(|e| panic!("{}: {e}", lib_rs_path.display()));
     let residual = lib_rs.replacen(paste_branch(&lib_rs), "", 1);
     let residual = residual.replacen(cut_command(&residual), "", 1);
+    let residual = residual.replacen(copy_command(&residual), "", 1);
+    let residual = residual.replacen(paste_command(&residual), "", 1);
 
     assert_eq!(
         residual.len(),
         LIB_RS_RESIDUAL_LEN,
-        "`src/lib.rs` changed outside its two patched places: its length without the \
-         `is_paste_command` branch and `is_cut_command` moved from {LIB_RS_RESIDUAL_LEN} to {}. The \
+        "`src/lib.rs` changed outside its patched places: its length without the \
+         `is_paste_command` branch and the three clipboard predicates moved from \
+         {LIB_RS_RESIDUAL_LEN} to {}. The \
          published crate's `src/lib.rs`, cut the same way, matches this residual — a change here \
          means the vendored copy differs from crates.io somewhere nobody is watching",
         residual.len()
@@ -256,7 +292,7 @@ fn nothing_else_in_the_vendored_copy_has_drifted_from_the_published_crate() {
     assert_eq!(
         fnv1a64(residual.as_bytes()),
         LIB_RS_RESIDUAL_HASH,
-        "`src/lib.rs` changed outside its two patched places: same length as recorded, different \
+        "`src/lib.rs` changed outside its patched places: same length as recorded, different \
          content"
     );
 
@@ -374,12 +410,7 @@ fn the_vendored_return_is_gated_on_having_actually_pushed_a_paste() {
 fn the_vendored_cut_command_leaves_ctrl_shift_x_to_be_a_key() {
     let path = repo().join("vendor/egui-winit/src/lib.rs");
     let lib_rs = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    let function = cut_command(&lib_rs);
-    let arms: Vec<&str> = function
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with("//"))
-        .collect();
+    let arms = code_lines(cut_command(&lib_rs));
 
     // **The second change, and what it is for (#274).** Upstream's `command && X` ignores Shift, so
     // `Ctrl+Shift+X` — this terminal's close chord — became a cut before it was a key, the key was
@@ -392,34 +423,65 @@ fn the_vendored_cut_command_leaves_ctrl_shift_x_to_be_a_key() {
          `0x18` instead of the console closing. Found instead:\n{}",
         arms.join("\n")
     );
-    // **And the other two arms are upstream's, untouched.** A bare `Ctrl+X` stays a cut — the byte
-    // `nano` exits on — and Windows keeps its Shift+Delete, left alone on purpose until F2.7 decides
-    // it (D33's amendment). Without these the change above could widen into dropping cut altogether
-    // and this guard would still pass.
-    for arm in [
-        "keycode == egui::Key::Cut",
-        "|| (cfg!(target_os = \"windows\") && modifiers.shift && keycode == egui::Key::Delete)",
-    ] {
-        assert!(
-            arms.contains(&arm),
-            "`is_cut_command` no longer contains upstream's `{arm}`: the patch excludes Shift from \
-             one arm and changes nothing else in this function"
-        );
-    }
-    // **And nothing else.** This function is cut out of the residual hash, so an arm added here is
-    // watched by nobody else — and the likeliest one is upstream's own `command && X` coming back
-    // beside the patched arm on a rebase, which passes every check above and makes `Ctrl+Shift+X`
-    // a cut again.
+    // **And exactly that.** This function is cut out of the residual hash, so an arm added here is
+    // watched by nobody else. Two are likely on a rebase: upstream's own `command && X` coming back
+    // beside the patched arm, which makes `Ctrl+Shift+X` a cut again, and upstream's Windows
+    // Shift+Delete arm, which D115 removed because the cut reached the program as `0x18` and
+    // `nano` exited.
     let expected = [
         "fn is_cut_command(modifiers: egui::Modifiers, keycode: egui::Key) -> bool {",
         "keycode == egui::Key::Cut",
         "|| (modifiers.command && !modifiers.shift && keycode == egui::Key::X)",
-        "|| (cfg!(target_os = \"windows\") && modifiers.shift && keycode == egui::Key::Delete)",
         "}",
     ];
     assert_eq!(
         arms, expected,
-        "`is_cut_command` holds code beyond its signature and three arms: whatever was added is \
+        "`is_cut_command` holds code beyond its signature and two arms: whatever was added is \
          outside every hash in this file"
+    );
+}
+
+#[test]
+fn the_vendored_copy_command_leaves_ctrl_insert_to_be_a_key() {
+    let path = repo().join("vendor/egui-winit/src/lib.rs");
+    let lib_rs = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    // **D115.** A copy request carries no key, so with upstream's Windows `ctrl && Insert` arm back
+    // the application cannot tell Ctrl+Insert from Ctrl+C, and Ctrl+Insert interrupts the program
+    // with `0x03` instead of copying. The two arms left are upstream's, untouched.
+    let expected = [
+        "fn is_copy_command(modifiers: egui::Modifiers, keycode: egui::Key) -> bool {",
+        "keycode == egui::Key::Copy || (modifiers.command && keycode == egui::Key::C)",
+        "}",
+    ];
+    assert_eq!(
+        code_lines(copy_command(&lib_rs)),
+        expected,
+        "`is_copy_command` is not upstream's minus its Windows Ctrl+Insert arm (D115)"
+    );
+}
+
+#[test]
+fn the_vendored_paste_command_takes_shift_insert_only_with_shift_alone() {
+    let path = repo().join("vendor/egui-winit/src/lib.rs");
+    let lib_rs = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    // **D115.** Upstream's Windows arm reads Shift and ignores the rest, so `Ctrl+Shift+Insert` and
+    // `Alt+Shift+Insert` were pastes; with the copy arm gone the first would paste instead of copying.
+    // Shift without Ctrl or Alt is the one chord that pastes.
+    let expected = [
+        "fn is_paste_command(modifiers: egui::Modifiers, keycode: egui::Key) -> bool {",
+        "keycode == egui::Key::Paste",
+        "|| (modifiers.command && keycode == egui::Key::V)",
+        "|| (cfg!(target_os = \"windows\")",
+        "&& modifiers.shift",
+        "&& !modifiers.ctrl",
+        "&& !modifiers.alt",
+        "&& keycode == egui::Key::Insert)",
+        "}",
+    ];
+    assert_eq!(
+        code_lines(paste_command(&lib_rs)),
+        expected,
+        "`is_paste_command` is not upstream's with its Windows Shift+Insert arm narrowed to Shift \
+         alone (D115)"
     );
 }
