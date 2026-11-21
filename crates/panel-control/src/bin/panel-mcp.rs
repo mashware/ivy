@@ -1045,6 +1045,11 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"]
+    fn idle_revocation_disconnects_the_producer_without_another_tool_call() {}
+
     #[cfg(unix)]
     #[test]
     fn idle_revocation_disconnects_the_producer_without_another_tool_call() {
@@ -1161,6 +1166,11 @@ mod tests {
             None
         );
     }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"]
+    fn route_reassociation_moves_an_existing_bridge_between_real_panes() {}
 
     #[cfg(unix)]
     #[test]

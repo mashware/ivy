@@ -7,150 +7,6 @@
   },
   {
     "binary": "app/app:lib",
-    "name": "control::tests::a_console_with_nothing_published_says_so_rather_than_answering_an_empty_document",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "control::tests::a_delivered_document_ages_from_the_moment_it_arrived",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "control::tests::a_document_read_back_is_counted_with_the_size_it_was_paid_at",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "control::tests::a_document_that_arrived_by_file_is_read_back_by_a_producer_that_never_published",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "control::tests::a_file_written_while_the_panel_was_held_is_read_when_the_hold_ends",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "control::tests::a_key_that_names_nothing_refuses_the_patch_and_the_document_a_producer_sees_is_unchanged",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "control::tests::a_patch_is_counted_apart_from_a_publication_and_with_the_size_it_left_behind",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "control::tests::a_patch_near_the_ceiling_applies_and_is_counted_at_that_size",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "control::tests::a_patch_needs_the_hold_a_publication_takes",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "control::tests::a_patch_reaching_a_panel_whose_holder_let_go_is_told_to_publish_first",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "control::tests::a_patch_whose_result_is_over_the_ceiling_is_refused_and_changes_nothing",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "control::tests::a_producer_that_addresses_nothing_can_still_reach_the_ends_and_nothing_else",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "control::tests::a_publication_after_patches_leaves_nothing_of_the_patched_state",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "control::tests::a_publication_wakes_the_window",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "control::tests::a_read_while_no_pass_runs_sees_the_last_commit_not_the_queued_write",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "control::tests::a_request_that_waits_for_the_window_wakes_it",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "control::tests::a_second_source_is_refused_by_the_name_of_the_one_holding_it",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "control::tests::a_split_request_waits_for_the_window_instead_of_being_applied",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "control::tests::the_three_numbers_the_report_publishes_count_what_they_say_they_count",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "control::tests::three_edits_in_one_request_land_and_leave_the_rest_of_the_panel_alone",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "control::tests::what_an_agent_publishes_is_on_the_panel_and_the_file_was_never_written",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "control::tests::what_is_read_back_carries_nothing_the_application_added",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "control::tests::when_the_connection_closes_the_hold_ends_and_what_it_said_stays",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "control::tests::while_it_is_held_a_file_publication_is_not_read",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "app/app:lib",
     "name": "explorer::interaction_tests::a_press_on_the_list_over_the_files_divider_picks_the_row_and_resizes_nothing",
     "reason": "the test fixture assumes Unix file times or shell commands",
     "issue": "https://github.com/mashware/ivy/issues/189"
@@ -335,12 +191,6 @@
     "name": "panel::driving::tests::retirement_remains_authorized_after_done_and_after_file_takeover",
     "reason": "the test fixture assumes Unix file times or shell commands",
     "issue": "https://github.com/mashware/ivy/issues/189"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "panel::overlay::tests::apply_refuses_stale_or_revoked_authority_and_reports_each_once",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
   },
   {
     "binary": "app/app:lib",
@@ -624,12 +474,6 @@
   },
   {
     "binary": "app/app:lib",
-    "name": "tests::integrated_chrome::tests::search_blink_deadline_covers_both_halves_and_disarms_when_closed",
-    "reason": "selection, clipboard, ligature or emoji painting differs on Windows",
-    "issue": "https://github.com/mashware/ivy/issues/188"
-  },
-  {
-    "binary": "app/app:lib",
     "name": "tests::integrated_chrome::tests::search_blink_deadlines_follow_focus_enabled_state_and_the_measurement_ceiling",
     "reason": "the unfocused search box is sometimes still counted as blinking",
     "issue": "https://github.com/mashware/ivy/issues/188",
@@ -757,90 +601,6 @@
     "issue": "https://github.com/mashware/ivy/issues/190"
   },
   {
-    "binary": "panel-control/panel-mcp:bin",
-    "name": "tests::idle_revocation_disconnects_the_producer_without_another_tool_call",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "panel-control/panel-mcp:bin",
-    "name": "tests::route_reassociation_moves_an_existing_bridge_between_real_panes",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
-    "name": "client::tests::a_document_comes_back_in_the_order_the_pane_sent_it",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
-    "name": "client::tests::a_document_that_is_not_json_never_leaves_the_producer",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
-    "name": "client::tests::a_document_written_across_several_lines_still_arrives_as_one_request",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
-    "name": "client::tests::a_producer_is_told_what_fell_away_and_nothing_when_nothing_did",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
-    "name": "client::tests::a_producer_publishes_and_reads_what_the_window_decided",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
-    "name": "client::tests::a_producer_retires_and_reads_the_auxiliary_console_outcome",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
-    "name": "client::tests::a_source_carrying_quotes_does_not_break_the_request",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
-    "name": "client::tests::an_open_with_no_addressable_identity_comes_back_as_an_open",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
-    "name": "client::tests::ops_that_are_not_json_never_leave_the_producer",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "panel-control/panel_control:lib",
-    "name": "client::tests::the_split_verbs_travel_and_their_payloads_come_back",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "panel-control/session_helper:test",
-    "name": "publish_cli_rejects_invalid_identity_and_bad_input_before_connect",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
-    "binary": "panel-control/session_helper:test",
-    "name": "publish_cli_rejects_oversized_stdin_before_endpoint_connect",
-    "reason": "the agent control channel, MCP and Codex routes have no Windows implementation",
-    "issue": "https://github.com/mashware/ivy/issues/185"
-  },
-  {
     "binary": "term-core/term_core:lib",
     "name": "tests::a_console_that_is_still_reading_has_no_ending_to_report",
     "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
@@ -899,5 +659,11 @@
     "name": "tests::without_passing_anything_the_variable_is_not_defined",
     "reason": "ConPTY cursor query and end-of-output differ from a Unix pseudoterminal",
     "issue": "https://github.com/mashware/ivy/issues/187"
+  },
+  {
+    "binary": "app/app:lib",
+    "name": "diagnostics_log::sink::tests::a_file_that_cannot_be_moved_aside_starts_again_and_says_why",
+    "reason": "a full log that cannot be moved aside keeps its old content on Windows",
+    "issue": "https://github.com/mashware/ivy/issues/203"
   }
 ]

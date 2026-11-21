@@ -540,6 +540,10 @@ mod tests {
         (dir, listening, inbox)
     }
 
+    crate::windows_unix_omission!(
+        a_producer_publishes_and_reads_what_the_window_decided,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
     /// The two halves of this crate speak to each other, which is the only thing that proves the
     /// wire format is one format and not two written from the same paragraph.
     #[cfg(unix)]
@@ -572,6 +576,10 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_producer_is_told_what_fell_away_and_nothing_when_nothing_did,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
     /// **A lossy publication reads as lossy, and a clean one as plain success**, both over a real
     /// listener. The assertion is on the variant and its sentence and never on «it is ok»: the decode
     /// falls through to `Answered::Ok` when it recognises no field, which is exactly what reading the
@@ -606,6 +614,10 @@ mod tests {
         assert_eq!(clean, Answered::Ok);
     }
 
+    crate::windows_unix_omission!(
+        a_document_comes_back_in_the_order_the_pane_sent_it,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
     /// **What comes back is the bytes the pane sent, not a re-serialisation of them.**
     ///
     /// The assertion is on the **order of the keys**, and that is the whole point: any reading that
@@ -625,6 +637,10 @@ mod tests {
         assert_eq!(answered, Answered::Document(sent.to_owned()));
     }
 
+    crate::windows_unix_omission!(
+        a_document_written_across_several_lines_still_arrives_as_one_request,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
     /// **A document written the way a person writes JSON — over several lines — must still arrive as
     /// one request.** Interpolating it raw split the request across frames, so the pane read a first
     /// line that was not valid JSON and then a tail of nothing, and the producer got a puzzling
@@ -661,6 +677,10 @@ mod tests {
         assert_eq!(panel.phase.as_deref(), Some("build"));
     }
 
+    crate::windows_unix_omission!(
+        a_producer_retires_and_reads_the_auxiliary_console_outcome,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
     /// The producer sends the zero-argument request and retains both result counts.
     #[cfg(unix)]
     #[test]
@@ -688,6 +708,10 @@ mod tests {
         window.join().expect("the window thread finished");
     }
 
+    crate::windows_unix_omission!(
+        the_split_verbs_travel_and_their_payloads_come_back,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
     /// **The three `split_*` verbs have a client half too, and their payloads survive the round trip.**
     /// The window here answers by hand: what is asserted is that each request arrives as the right
     /// `What`, and that a handle and a read come back to the caller that asked.
@@ -745,6 +769,10 @@ mod tests {
         window.join().expect("the window thread finished");
     }
 
+    crate::windows_unix_omission!(
+        an_open_with_no_addressable_identity_comes_back_as_an_open,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
     /// **An open whose console has no addressable identity reads as an open, not as a publication.**
     /// The wire carries it as `"pane":null`, and a field read through `Option`'s own `Deserialize`
     /// takes a JSON null for an absent one — so the reply used to fall all the way through to
@@ -773,6 +801,10 @@ mod tests {
         assert_eq!(answered, Answered::Opened(None));
     }
 
+    crate::windows_unix_omission!(
+        a_document_that_is_not_json_never_leaves_the_producer,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
     /// A document that is not JSON is refused **to its author, here**, instead of travelling to the
     /// window and coming back as an answer nobody can act on.
     #[cfg(unix)]
@@ -793,6 +825,10 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        ops_that_are_not_json_never_leave_the_producer,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
     /// Ops that are not JSON are refused **to their author, here**, exactly as a document that is not
     /// JSON is: a list nobody can read must not travel to the window and come back as a refusal its
     /// sender has to guess the origin of.
@@ -825,6 +861,10 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_source_carrying_quotes_does_not_break_the_request,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
     /// A source with a quote in it cannot break the request it travels in, which is the same hazard
     /// the reply's escaping answers on the other side.
     #[cfg(unix)]

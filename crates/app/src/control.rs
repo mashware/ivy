@@ -2236,3 +2236,121 @@ mod tests {
         );
     }
 }
+
+// The same tests, declared on Windows so its test report accounts for each one.
+#[cfg(test)]
+#[cfg(windows)]
+mod tests {
+    crate::windows_unix_omission!(
+        a_document_that_arrived_by_file_is_read_back_by_a_producer_that_never_published,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        what_is_read_back_carries_nothing_the_application_added,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_console_with_nothing_published_says_so_rather_than_answering_an_empty_document,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_document_read_back_is_counted_with_the_size_it_was_paid_at,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        the_window_accumulator_keeps_a_completion_and_refusal_after_pane_close,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        finishing_the_report_waits_for_admitted_callbacks_and_closes_admission,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_read_while_no_pass_runs_sees_the_last_commit_not_the_queued_write,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        what_an_agent_publishes_is_on_the_panel_and_the_file_was_never_written,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_second_source_is_refused_by_the_name_of_the_one_holding_it,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_file_written_while_the_panel_was_held_is_read_when_the_hold_ends,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        when_the_connection_closes_the_hold_ends_and_what_it_said_stays,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        while_it_is_held_a_file_publication_is_not_read,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_publication_wakes_the_window,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        the_three_numbers_the_report_publishes_count_what_they_say_they_count,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_delivered_document_ages_from_the_moment_it_arrived,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_split_request_waits_for_the_window_instead_of_being_applied,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_request_that_waits_for_the_window_wakes_it,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        three_edits_in_one_request_land_and_leave_the_rest_of_the_panel_alone,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_key_that_names_nothing_refuses_the_patch_and_the_document_a_producer_sees_is_unchanged,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_publication_after_patches_leaves_nothing_of_the_patched_state,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_patch_whose_result_is_over_the_ceiling_is_refused_and_changes_nothing,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_patch_near_the_ceiling_applies_and_is_counted_at_that_size,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_patch_needs_the_hold_a_publication_takes,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_patch_reaching_a_panel_whose_holder_let_go_is_told_to_publish_first,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_patch_is_counted_apart_from_a_publication_and_with_the_size_it_left_behind,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+    crate::windows_unix_omission!(
+        a_producer_that_addresses_nothing_can_still_reach_the_ends_and_nothing_else,
+        "unix-only: drives the Unix socket channel; the Windows pipe has its own witnesses"
+    );
+
+    #[test]
+    #[ignore = "manual release-mode latency measurement"]
+    fn measure_off_frame_document_reads() {}
+
+    #[test]
+    #[ignore = "manual release-mode latency measurement"]
+    fn measure_a_patch_at_the_ceiling() {}
+}
