@@ -258,7 +258,7 @@ impl Marks {
 
     /// Adds a finished shape, giving a marker the next serial. Given here and not in `finish`,
     /// which also draws the shape being dragged, every frame.
-    fn keep(&mut self, mut shape: Shape) {
+    pub(super) fn keep(&mut self, mut shape: Shape) {
         if let Shape::Marker { serial, .. } = &mut shape {
             self.placed += 1;
             *serial = self.placed;

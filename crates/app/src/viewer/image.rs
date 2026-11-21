@@ -532,6 +532,23 @@ mod tests {
         assert_eq!(now.dimensions(), (40, 20));
     }
 
+    /// The first marker on the next image opened goes on from the serials the last one gave.
+    #[test]
+    fn the_next_image_goes_on_from_the_last_ones_serials() {
+        let mut viewer = Viewer::default();
+        let placed = |viewer: &mut Viewer| {
+            viewer.open(source(), PathBuf::from("/a/shot.png"));
+            let marks = &mut viewer.document.as_mut().unwrap().marks;
+            marks.keep(marks::Shape::Marker {
+                serial: 0,
+                at: egui::Pos2::ZERO,
+                note: String::new(),
+            });
+            marks.numbered().last().unwrap().2
+        };
+        assert_eq!([placed(&mut viewer), placed(&mut viewer)], [1, 2]);
+    }
+
     /// The largest texture the test GPU takes, smaller than the wide fixtures' 2400 pixels.
     const MAX_SIDE: usize = 2048;
 
