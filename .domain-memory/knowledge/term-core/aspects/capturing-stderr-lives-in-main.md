@@ -31,7 +31,7 @@ feature_id: feat_term-core_nx0g1r
 `main` returns `eframe::Result`, so a window that cannot open is printed by std's
 `Termination` as `Error: ...` AFTER `app::run()` returns. A capture scoped to `run()` is
 already gone by then; if fd 2 were still a pipe whose reader had ended, that line would be
-lost from the log and from the terminal. D113 keeps the capture in `main` and has `main`
+lost from the log and from the terminal. D114 keeps the capture in `main` and has `main`
 print the error itself while the capture stands (`diagnostics_log::finish`).
 
 Second trap of the same piece: `std::io::pipe()` ends are close-on-exec on both platforms,

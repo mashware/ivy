@@ -11400,7 +11400,7 @@ four close tests passed on that host as well as on the system's.
 - The installer's contents are checked by the release job's install test, not by any pull-request
   job.
 
-## D113 — The window keeps its own standard error in a log file, and records a panic there itself
+## D114 — The window keeps its own standard error in a log file, and records a panic there itself
 
 **Decided.** Before the window opens, Ivy replaces its own standard error with a pipe it owns. One
 thread reads that pipe, writes every chunk to `ivy.log` and hands it to a second thread that writes

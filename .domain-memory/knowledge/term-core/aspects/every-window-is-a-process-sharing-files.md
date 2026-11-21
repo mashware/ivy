@@ -29,7 +29,7 @@ feature_id: feat_term-core_nx0g1r
 ## What it does
 
 Each window holds its own lease (crates/app/src/session/ownership.rs) and runs as a
-separate process, so any shared file — the D113 log — has several writers at once. A
+separate process, so any shared file — the D114 log — has several writers at once. A
 per-process counter of that file's state is wrong by construction. #139's first rotation
 counted its own bytes: the log grew to N x cap, and one window renamed another's freshly
 rotated file over the copy that held its own lines. Reading the size alone was not enough
@@ -39,7 +39,7 @@ nobody looks.
 What holds: before each write compare the identity of the held file with the file at the
 name (dev+ino on Unix, `windows_fs::identity` on Windows) and reopen the name when they
 differ; rotate only a file you hold under the name. The same-instant race (two processes
-crossing the cap within microseconds) is accepted in D113.
+crossing the cap within microseconds) is accepted in D114.
 
 Evidence: review rounds 1 and 2 of #139 (built-in); tests
 `two_windows_sharing_one_file_rotate_it_once_and_lose_nothing` and

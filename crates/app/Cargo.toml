@@ -169,7 +169,7 @@ futures-lite = "2"
 # `MetadataExt` keeps behind an unstable feature, and the flag that opens a link instead of its
 # target (D108). And opening a file with its default application and showing it in Explorer,
 # through the shell's own calls rather than a command line `cmd` would read (D110). And putting a
-# pipe where the process's standard error is, so the log file keeps it (D113). 0.61 is already in
+# pipe where the process's standard error is, so the log file keeps it (D114). 0.61 is already in
 # the lock; only its features are named.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [

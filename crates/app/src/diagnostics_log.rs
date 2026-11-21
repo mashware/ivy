@@ -1,4 +1,4 @@
-//! The window's own standard error, kept in a file as well, and a panic recorded there (D113).
+//! The window's own standard error, kept in a file as well, and a panic recorded there (D114).
 
 mod sink;
 mod swap;
@@ -109,7 +109,7 @@ pub fn finish(outcome: eframe::Result, capture: Capture) -> std::process::ExitCo
 }
 
 /// Starts keeping the log where this platform keeps logs, unless a measured run asked for the
-/// window (D113: a measured run captures nothing).
+/// window (D114: a measured run captures nothing).
 pub fn start() -> Capture {
     if crate::any_measurement_variable(|which| std::env::var_os(which).is_some()) {
         return Capture { live: None };
