@@ -445,18 +445,6 @@
   },
   {
     "binary": "app/app:lib",
-    "name": "tests::the_real_window_declares_the_emojis_it_painted_in_its_pass",
-    "reason": "selection, clipboard, ligature or emoji painting differs on Windows",
-    "issue": "https://github.com/mashware/ivy/issues/188"
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "tests::what_painting_a_color_emoji_costs_comes_out_of_the_paintings_span_and_is_declared",
-    "reason": "selection, clipboard, ligature or emoji painting differs on Windows",
-    "issue": "https://github.com/mashware/ivy/issues/188"
-  },
-  {
-    "binary": "app/app:lib",
     "name": "tests::with_the_flag_raised_the_frame_reads_again",
     "reason": "a changed panel file is sometimes not read again in the same frame",
     "issue": "https://github.com/mashware/ivy/issues/189",

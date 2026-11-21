@@ -1599,11 +1599,7 @@ impl eframe::App for Window {
             // own.
             if pane_outcome.color.rasterized + pane_outcome.color.failed > 0 {
                 self.timed_separately += pane_outcome.color.spent;
-                self.color.record(
-                    pane_outcome.color.spent,
-                    pane_outcome.color.rasterized,
-                    pane_outcome.color.failed,
-                );
+                self.color.record(&pane_outcome.color);
             }
             // **Noting and subtracting are the same decision, so they are taken together** — the
             // rule the tab bar's own accumulation states: without subtracting, the strip is
@@ -16747,11 +16743,7 @@ mod tests {
                 },
             );
             if outcome.color.rasterized + outcome.color.failed > 0 {
-                color.record(
-                    outcome.color.spent,
-                    outcome.color.rasterized,
-                    outcome.color.failed,
-                );
+                color.record(&outcome.color);
             }
         });
         output.drop_without_applying_deltas();

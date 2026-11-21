@@ -3207,16 +3207,80 @@ it from the first emoji.
 
 ### What is left out, said with its reason
 
-**The color outlines —`COLR`— are not painted.** Doing it requires rasterizing outlines by hand,
-which is the rasterizer of our own that this milestone discarded **on purpose** because it
-invalidates the whole measurement history. On Linux it does not show, because the system's emoji
-fonts are bitmap ones; **on Windows it does**, because `Segoe UI Emoji` is `COLR`. It is declared as
-what **F2.7** is missing, not as something that works here.
+**The color outlines —`COLR`— were left out here, and #176 brought them in** (next section). The
+reason given was that painting them required a rasterizer of our own, which this milestone discarded
+because it invalidates the whole measurement history.
 
 **The skin-tone modifiers do not either.** They are **wide** characters, so the terminal engine
 gives them a cell of their own instead of attaching them to the base emoji's, and the presentation
 rule cannot look at the next cell: it does not have it in its signature. The base comes out in color
 and the modifier comes out on its own.
+
+### Colour outlines, painted by a library (#176)
+
+**`Segoe UI Emoji`, the font Windows asks for emoji, is `COLR`**: layers of outlines with a palette,
+no bitmap. Discovery already reached it — fontique names it as the emoji family on Windows — and the
+bitmap-only rasterizer answered nothing, so on Windows every emoji came out monochrome or blank. Two
+of the colour tests failed there and were listed as known failures (#188); the others skipped
+themselves for want of a colour font, and now run.
+
+**Decision.** A face that has no colour bitmap for the glyph but has a `COLR` record for it is drawn
+with `vello_cpu` and its `text` feature, whose glyph painter (`glifo`) understands `COLR` versions 0
+and 1 — gradients, composites, clip boxes. The image goes into the same atlas, under the same key,
+timed by the same span, and the report says how many of its glyphs came from outlines, so a batch
+cannot publish one path's cost under the other's name. **The bitmap is asked first**: a face that
+has one for the glyph never reaches the outlines, and the emoji fonts Linux and macOS ship —
+`Noto Color Emoji`, `Apple Color Emoji` — are bitmap ones. A machine whose emoji font is drawn in
+outlines does change: its emoji go from monochrome to colour.
+
+**What turning `text` on reaches beyond that branch**: Cargo builds one `vello_cpu` for both crates,
+so epaint's letters are drawn by a `vello_cpu` that carries the glyph painter's cache and its hooks
+too, idle for them. That is why the control `C` is taken again with this build, not borrowed from an
+earlier one.
+
+**It is not the rasterizer this decision refused.** What was refused was code of our own drawing
+outlines, which would have taken over the letters and so every published frame. This draws only
+colour glyphs, on an atlas miss, with a library — the same `vello_cpu` epaint already rasterizes its
+letters with, unhinted, which a colour glyph never is. Not the same *path*: epaint builds `vello_cpu` without `text`, so turning it on adds
+`glifo` to the build. Saying «epaint already does this» would be false.
+
+**The rules it draws by.** A glyph with no `COLR` record is not drawn here even though the library
+would draw its outline — that would be a white silhouette winning over the next face, the defect
+**D24** fixed. A graph the library cannot walk is not drawn either: it drops the error and hands back
+a blank, which remembered as a success would stand where the emoji is for the whole session. The
+glyph is placed on its advance, never on its ink, so every emoji of a face shares one scale and one
+baseline. It is drawn directly at the size it will occupy instead of drawn large and shrunk.
+Vertically, the box runs between the face's line (ascent to descent) and its `OS/2` Windows extent,
+whichever reaches further, because a face promises to keep its ink inside that extent. **The line
+alone cut `Segoe UI Emoji`.** Its line is flatter than its emoji (its advance is 1.43 times its
+line), so Windows CI drew 😀 touching the top or the bottom of its box. In `Noto Color Emoji`'s
+`COLR` form the line and the extent are both 950 up and 250 down, so its box is the same either
+way. The figures below were measured before this change and still hold for that reason. A layer drawn «in the text colour» is drawn white: the
+atlas is not keyed by colour, and the Windows suite checks four of `Segoe UI Emoji`'s emoji — a
+face, a hand, a cloud and a keycap — for a layer drawn that way.
+
+**Discarded.** Walking the paint graph with `skrifa` onto `tiny-skia`: our own painter, and
+`tiny-skia` has no sweep gradient, which `COLR` version 1 needs. DirectWrite's
+`TranslateColorGlyphRun`: Windows-only code for a problem a cross-platform library solves (**D1**),
+and a `COLR` font on Linux or macOS would still be blank. Shipping a bitmap emoji font for Windows:
+about ten megabytes, another emoji set than the system's, and every `COLR` face still blank.
+
+**Measured** with batch `colr`, which points the machine's emoji family at a pinned
+`Noto Color Emoji` in its `COLR` version 1 form; its control is `C`. The figures are that font's —
+heavy in gradients — not `Segoe UI Emoji`'s, which no script here can run. Both measured on
+21 November 2026 on the same machine, one tab of two consoles, 43×38 each.
+
+- **Drawing the outlines is paid once, and it is a millisecond.** In both `colr` runs one frame drew
+  **14 glyphs, all 14 from colour outlines**, in **1.273 ms and 1.282 ms**: about 91 µs a glyph at the
+  cell's size. Bitmap emoji are not comparable from these runs, because batch `Q` was not run with them.
+- **A screen with no emoji pays nothing measurable.** Batch `C` was run five times on this branch and
+  five times on its base, alternating. The rest of the frame came out at **230–404 µs** here and
+  **186–429 µs** on the base. Enqueueing the left console's paint came out at **212–336 µs** here and
+  **189–338 µs** on the base. The ranges overlap, so the honest reading is no measurable change.
+  **The medians are not equal, though**: 275 µs here against 215 µs on the base for the rest of
+  the frame. No code that runs without an emoji was changed. The only candidate is the build itself,
+  because the `text` feature is now compiled into the `vello_cpu` that epaint uses for its letters.
+  That candidate was not isolated. A later batch that finds the same gap should start there.
 
 ### The status panel, by another route to the same glyphs (#178)
 

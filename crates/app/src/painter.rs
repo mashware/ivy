@@ -1966,12 +1966,17 @@ mod tests {
         // **The assertion is on the rectangle that was enqueued**, which is what is seen, and not on the
         // texture's size: a texture of the correct size painted in a stretched rectangle comes out just
         // as badly.
+        //
+        // **The slot is taller than wide (20 × 25) on purpose.** A square slot would let a face whose
+        // box is square fill it exactly and look stretched. Its proportion, 0.8, is far from Noto's
+        // bitmap (1.06), so a drawing stretched to fill it cannot pass for one that kept its own.
+        // Segoe's box after the extent change has not been measured.
         if !there_is_color_on_this_machine() {
             return;
         }
         let screen = of_text("\u{1F600}");
         let view = screen.view();
-        let metrics = metrics(10.0, 20.0);
+        let metrics = metrics(10.0, 25.0);
         assert_eq!(
             view.cell(0, 0).map(|cell| cell.width),
             Some(CellWidth::WideHead),
@@ -2001,11 +2006,15 @@ mod tests {
             if let eframe::egui::Shape::Mesh(mesh) = &shape.shape
                 && mesh.texture_id != eframe::egui::TextureId::default()
             {
-                drawing = Some(mesh.calc_bounds());
+                // The texels it samples: the atlas is square, so their proportion is the image's.
+                let texels = mesh.vertices.iter().fold(Rect::NOTHING, |rect, vertex| {
+                    rect.union(Rect::from_min_max(vertex.uv, vertex.uv))
+                });
+                drawing = Some((mesh.calc_bounds(), texels.width() / texels.height()));
             }
         }
         output.drop_without_applying_deltas();
-        let drawing = drawing.expect("the emoji was not painted as an image");
+        let (drawing, its_image) = drawing.expect("the emoji was not painted as an image");
 
         // The two columns its width declares, and not a point more.
         let its_own = Rect::from_min_size(Pos2::ZERO, vec2(metrics.width * 2.0, metrics.height));
@@ -2013,14 +2022,16 @@ mod tests {
             its_own.contains_rect(drawing),
             "the emoji occupies {drawing:?} and its two columns are {its_own:?}: it spills over the neighboring cell"
         );
-        // **And that it has not been deformed to fill them.** The margin is tight on purpose: with one of
-        // a tenth, stretching the emoji to the whole slot —ratio 1.000 against its own, 1.062— passed this
-        // test. It was verified by mutating it, and it is the disguise this project has on file: a margin
-        // chosen with which the defect and the fix give the same result.
+        // **And that it has not been deformed to fill them.** The proportion compared against is the
+        // drawn image's own, not a number of one machine's face: `Noto Color Emoji`'s bitmap is
+        // 136 × 128, `Segoe UI Emoji`'s box is another, and a literal of the first failed on the second.
+        // The margin is tight on purpose: with one of a tenth, stretching the emoji to the whole slot
+        // passed this test. It was verified by mutating it, and it is the disguise this project has on
+        // file: a margin chosen with which the defect and the fix give the same result.
         let ratio = drawing.width() / drawing.height();
         assert!(
-            (ratio - 136.0 / 128.0).abs() < 0.03,
-            "the emoji was painted with ratio {ratio:.3} instead of its own (1.062): it is stretched"
+            (ratio - its_image).abs() < 0.03,
+            "the emoji was painted with ratio {ratio:.3} instead of its image's own ({its_image:.3}): it is stretched"
         );
         // **And the other face of the same thing, which is the one that is seen**: keeping the proportion
         // inside a slot that does not have it forces room to be left on one of the two axes. A drawing

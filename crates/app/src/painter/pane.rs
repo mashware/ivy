@@ -347,6 +347,7 @@ pub(crate) fn paint_pane(
         spent: in_the_console.spent + in_the_panel.spent,
         rasterized: in_the_console.rasterized + in_the_panel.rasterized,
         failed: in_the_console.failed + in_the_panel.failed,
+        outlines: in_the_console.outlines + in_the_panel.outlines,
     };
 
     // **The strip is painted last of the pane's own painting and timed on its own** (**D13**): the
