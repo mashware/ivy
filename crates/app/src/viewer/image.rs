@@ -262,6 +262,10 @@ impl Viewer {
                 });
             return;
         };
+        // Taken up only by a frame that lays the column out, where the notice is painted.
+        if let Some(said) = self.send.unshown.take() {
+            self.notice = Some(said);
+        }
         let panning = &mut self.panning;
         let notice = self.notice.as_deref();
         let sending = &mut self.send;
@@ -3525,15 +3529,19 @@ mod tests {
     }
 
     /// A cancelled Send whose worker then fails says what the worker reported, which is where a
-    /// half-written copy it could not remove is named.
+    /// half-written copy it could not remove is named. Said while the image is closed, it waits
+    /// for the next image the drawer lays out instead of being cleared by that opening, and is
+    /// shown there once.
     #[cfg(unix)]
     #[test]
     fn a_cancelled_send_whose_worker_fails_says_what_it_reported() {
+        use crate::viewer::StripAction;
         let received = term_core::received::Received::new("annotated-cancel-failed");
         let folder = Folder::new();
         let path = folder.0.join("shot.png");
         write_png(&path, 640, 400);
         let (mut window, ctx, _dir) = window_to_send(&path, &received);
+        let name = window.image.origin().unwrap().pane;
         click_send(&mut window, &ctx);
         painted(&mut window, &ctx, vec![]);
         let (_, sender) = window
@@ -3543,18 +3551,30 @@ mod tests {
             .expect("the copy is being written");
         let cancel = place_of(&mut window, &ctx, "Cancel");
         press(&mut window, &ctx, cancel);
-        sender
-            .send(Err(
-                "the half-written copy could not be removed: busy".into()
-            ))
-            .unwrap();
+        marks_mut(&mut window).clear();
+        crate::viewer::apply_strip_action(&mut window, StripAction::CloseDocument, &ctx);
+        assert!(!window.image.shown(), "the image did not close");
+        let reported = "the half-written copy could not be removed: busy";
+        sender.send(Err(reported.into())).unwrap();
         painted(&mut window, &ctx, vec![]);
         assert!(!window.image.send.parked());
-        let notice = window.image.notice.clone().unwrap_or_default();
-        assert!(
-            notice.contains("the half-written copy could not be removed: busy"),
-            "{notice}"
-        );
+        let said = |shapes: &[egui::epaint::ClippedShape]| {
+            texts(shapes, area()).iter().any(|t| t.contains(reported))
+        };
+        let reopen = |window: &mut crate::Window| {
+            crate::viewer::open_image_target(window, name, path.clone()).unwrap();
+            let started = Instant::now();
+            loop {
+                let shapes = painted(window, &ctx, vec![]);
+                if image_rect(&shapes).is_some() {
+                    break shapes;
+                }
+                assert!(started.elapsed() < Duration::from_secs(30));
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        assert!(said(&reopen(&mut window)), "the worker's failure was lost");
+        assert!(!said(&reopen(&mut window)), "the failure is said again");
         assert!(received.so_far().is_empty());
     }
 

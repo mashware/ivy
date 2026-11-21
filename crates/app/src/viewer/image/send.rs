@@ -69,6 +69,9 @@ pub(crate) struct Sending {
     /// starts meanwhile, as the decoder's abandoned slot keeps a second decode from starting, so
     /// two workers never race for one copy name (#197).
     parked: Option<(Request, Job<PathBuf>)>,
+    /// What a parked worker's end left to say, until a drawer lays it out: the image it was for
+    /// may be closed by then, and the next one opened clears the notice it would have gone to.
+    pub(super) unshown: Option<String>,
 }
 
 impl Sending {
@@ -319,13 +322,14 @@ fn forsake(window: &mut crate::Window, request: &Request, written: Result<PathBu
         Err(why) => Some(format!("The cancelled copy's worker reported: {why}")),
     };
     let left = forsaken_folder(window, request);
-    match stays {
-        Some(stays) => window.image.say(format!("{stays}{left}.")),
-        None if !left.is_empty() => window
-            .image
-            .say(format!("The cancelled copy is gone{left}.")),
-        None => {}
-    }
+    let said = match stays {
+        Some(stays) => format!("{stays}{left}."),
+        None if !left.is_empty() => format!("The cancelled copy is gone{left}."),
+        None => return,
+    };
+    // Standard error too: whoever ran the binary keeps it whatever becomes of the drawer.
+    eprintln!("{said}");
+    window.image.send.unshown = Some(said);
 }
 
 /// A console that closed while its copy was being written could not remove its directory, which
