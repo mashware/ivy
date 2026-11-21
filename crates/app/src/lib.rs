@@ -12803,14 +12803,16 @@ mod tests {
                 },
             ],
         );
-        pane.send_keys_on(
+        pane.send_keys(
             &ctx,
             Instant::now(),
             &mut modifiers,
             1,
             keymap,
-            copy_enabled,
-            windows,
+            keyboard::Clipboard {
+                copy: copy_enabled,
+                windows,
+            },
         );
         let output = ctx.run_ui(egui::RawInput::default(), |_| {});
         let copied = output
@@ -12933,8 +12935,17 @@ mod tests {
                 },
             ],
         );
-        let requests =
-            pane.send_keys_on(&ctx, Instant::now(), &mut modifiers, 1, &keymap, true, true);
+        let requests = pane.send_keys(
+            &ctx,
+            Instant::now(),
+            &mut modifiers,
+            1,
+            &keymap,
+            keyboard::Clipboard {
+                copy: true,
+                windows: true,
+            },
+        );
         assert_eq!(
             requests,
             vec![WindowRequest::NewTab],

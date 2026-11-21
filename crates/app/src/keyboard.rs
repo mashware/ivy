@@ -144,33 +144,64 @@ pub fn bytes(event: &Event, cursor_keys: CursorKeys) -> Option<Cow<'static, [u8]
     }
 }
 
-/// What Windows makes of a chord over Insert that the terminal keeps for itself (**D115**).
-#[derive(Debug, PartialEq, Eq)]
-enum InsertChord {
-    /// Exactly Ctrl+Insert, with copying switched on: the marked text goes to the clipboard.
-    Copy,
-    /// Exactly Shift+Insert arriving as a key, which the desktop does only when the clipboard holds
-    /// no text: the application's paste chord, so the program gets nothing.
-    Silence,
+/// What the keyboard pass may do with the clipboard chords it keeps for the terminal.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Clipboard {
+    /// Whether copying is switched on (`key.copy`, **D26**).
+    pub(crate) copy: bool,
+    /// Whether the Insert chords are Windows' (**D115**). A field and not a `cfg!` at the door, so
+    /// the suite runs the Windows answer on the platform it runs on.
+    pub(crate) windows: bool,
 }
 
-/// Which of the two, if any, `event` is under `chord`. Any other modifier set over Insert is left
-/// to `bytes`, which sends it in D52's form; Ctrl+Insert with copying off goes there too, as
-/// `CSI 2;5~`, the way Ctrl+Shift+C switched off reaches the program.
-fn insert_chord(event: &Event, chord: Modifiers, copy_enabled: bool) -> Option<InsertChord> {
-    let Event::Key {
-        key: Key::Insert,
-        pressed: true,
-        ..
-    } = event
-    else {
-        return None;
-    };
-    match (chord.ctrl, chord.shift, chord.alt) {
-        (true, false, false) if copy_enabled => Some(InsertChord::Copy),
-        (false, true, false) => Some(InsertChord::Silence),
-        _ => None,
+/// Copying as `key.copy` says, on the platform this binary was built for — the only form the real
+/// window ever passes.
+impl From<bool> for Clipboard {
+    fn from(copy: bool) -> Self {
+        Self {
+            copy,
+            windows: cfg!(target_os = "windows"),
+        }
     }
+}
+
+/// The pass's copy doors, and whether `event` went through one of them — consumed, so it never
+/// reaches the program.
+///
+/// **The copy request with Shift** is Ctrl+Shift+C, which the desktop resolves before it is a key
+/// (see the walk). It is swallowed **whether or not there is anything marked**: giving it back would
+/// let it fall into the table, and asking to copy with nothing marked would interrupt the program.
+///
+/// **On Windows, two chords over Insert (D115).** Exactly Ctrl+Insert arrives as a key since the
+/// vendored desktop layer stopped turning it into a copy request — that request would be Ctrl+C's
+/// too — and copies here. Exactly Shift+Insert arrives as a key only when the clipboard holds no
+/// text, and then it is the application's paste chord, which never reaches the program, like
+/// Ctrl+Shift+V. Any other modifier set over Insert is left to `bytes`, in D52's form, and so is
+/// Ctrl+Insert with copying off, the way Ctrl+Shift+C switched off reaches the program.
+fn clipboard_door(
+    event: &Event,
+    chord: Modifiers,
+    clipboard: Clipboard,
+    screen: &term_core::Screen,
+    to_copy: &mut Option<String>,
+) -> bool {
+    let copies = match event {
+        Event::Copy => chord.shift && clipboard.copy,
+        Event::Key {
+            key: Key::Insert,
+            pressed: true,
+            ..
+        } if clipboard.windows => match (chord.ctrl, chord.shift, chord.alt) {
+            (true, false, false) if clipboard.copy => true,
+            (false, true, false) => return true,
+            _ => return false,
+        },
+        _ => false,
+    };
+    if copies {
+        *to_copy = screen.selected_text();
+    }
+    copies
 }
 
 /// What is sent to the program when text is really pasted.
@@ -758,6 +789,8 @@ impl crate::Pane {
     /// only be decided **inside** this walk. Filtering it afterwards, in the window, would arrive
     /// late: the key would already have been swallowed. Inside, the count is kept up to date event
     /// by event, because the batch itself creates and closes tabs.
+    ///
+    /// `clipboard` is `key.copy` as a `bool` everywhere but the tests that name the platform.
     pub(crate) fn send_keys(
         &mut self,
         ctx: &egui::Context,
@@ -765,32 +798,9 @@ impl crate::Pane {
         modifiers: &mut egui::Modifiers,
         open_tabs: usize,
         keymap: &Keymap,
-        copy_enabled: bool,
+        clipboard: impl Into<Clipboard>,
     ) -> Vec<WindowRequest> {
-        self.send_keys_on(
-            ctx,
-            frame_started,
-            modifiers,
-            open_tabs,
-            keymap,
-            copy_enabled,
-            cfg!(target_os = "windows"),
-        )
-    }
-
-    /// [`Self::send_keys`] with the platform named, so the suite runs Windows' Insert chords
-    /// (**D115**) on the platform it runs on.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn send_keys_on(
-        &mut self,
-        ctx: &egui::Context,
-        frame_started: Instant,
-        modifiers: &mut egui::Modifiers,
-        open_tabs: usize,
-        keymap: &Keymap,
-        copy_enabled: bool,
-        windows: bool,
-    ) -> Vec<WindowRequest> {
+        let clipboard = clipboard.into();
         // It is asked once and not per event because **the mode cannot change halfway through a
         // pass**: it is set by the program inside with what it writes, and what it writes is
         // interpreted in the other half of the frame. (Asking it inside the closure would compile
@@ -867,30 +877,6 @@ impl crate::Pane {
                 if matches!(event, egui::Event::WindowFocused(false)) {
                     chord = egui::Modifiers::NONE;
                     return true;
-                }
-
-                // **Copying comes in through the same door as pasting, and for the same reason.**
-                // The desktop keeps `Ctrl+Shift+C` **before** it is a key and emits a copy event
-                // without saying whether there was Shift — its check is «command and the letter C»,
-                // and it does not look at it. So a terminal's copy chord **never arrives as a
-                // key**, and until now it ended up translated to `\x03`: asking to copy
-                // **interrupted the program**.
-                //
-                // The project itself left it written in `bytes` —«whoever brings the
-                // clipboard will have to decide it earlier, in the loop, where the state of the
-                // modifiers is available»— and nobody did it until a review checked it by running
-                // it.
-                //
-                // **With Shift it copies; without it, `Ctrl+C` goes on interrupting**, which is
-                // what it has to do. And **switched off the event is not touched**: it falls
-                // through to the table and leaves as `\x03`, which is just what `vim` or `tmux`
-                // expect when somebody hands them back the chord.
-                if matches!(event, egui::Event::Copy) && chord.shift && copy_enabled {
-                    // The event is swallowed **whether or not there is anything marked**: giving it
-                    // back would let it fall into the table, and asking to copy with nothing marked
-                    // would interrupt the program.
-                    to_copy = self.screen.selected_text();
-                    return false;
                 }
 
                 // **The desktop sends the same event for Ctrl+V and for Ctrl+Shift+V**, without
@@ -1023,19 +1009,26 @@ impl crate::Pane {
                     }
                 }
 
-                // **After the keymap, so a chord somebody bound wins.** On Windows Ctrl+Insert
-                // arrives as a key (D115) and copies here; a bare Shift+Insert that arrives as a
-                // key is the paste chord over a clipboard with no text, and like Ctrl+Shift+V it
-                // never reaches the program.
-                if windows {
-                    match insert_chord(event, chord, copy_enabled) {
-                        Some(InsertChord::Copy) => {
-                            to_copy = self.screen.selected_text();
-                            return false;
-                        }
-                        Some(InsertChord::Silence) => return false,
-                        None => {}
-                    }
+                // **Copying comes in through the same door as pasting, and for the same reason.**
+                // The desktop keeps `Ctrl+Shift+C` **before** it is a key and emits a copy event
+                // without saying whether there was Shift — its check is «command and the letter C»,
+                // and it does not look at it. So a terminal's copy chord **never arrives as a
+                // key**, and until now it ended up translated to `\x03`: asking to copy
+                // **interrupted the program**.
+                //
+                // The project itself left it written in `bytes` —«whoever brings the
+                // clipboard will have to decide it earlier, in the loop, where the state of the
+                // modifiers is available»— and nobody did it until a review checked it by running
+                // it.
+                //
+                // **With Shift it copies; without it, `Ctrl+C` goes on interrupting**, which is
+                // what it has to do. And **switched off the event is not touched**: it falls
+                // through to the table and leaves as `\x03`, which is just what `vim` or `tmux`
+                // expect when somebody hands them back the chord. **It sits after the keymap**,
+                // which only ever answers keys, so that Windows' Insert chords (D115), which do
+                // arrive as keys, lose to a chord somebody bound.
+                if clipboard_door(event, chord, clipboard, &self.screen, &mut to_copy) {
+                    return false;
                 }
 
                 if search.took(event, chord) {
