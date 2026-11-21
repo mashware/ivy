@@ -16,6 +16,17 @@
 //! framework changes would force it to be rewritten along with it for no reason at all. And *where*
 //! the state is published is part of the contract, just as much as *what* is published.
 
+#[cfg(test)]
+#[macro_export]
+macro_rules! windows_unix_omission {
+    ($name:ident, $reason:literal) => {
+        #[cfg(windows)]
+        #[test]
+        #[ignore = $reason]
+        fn $name() {}
+    };
+}
+
 use std::ffi::OsStr;
 #[cfg(not(windows))]
 use std::fs::DirBuilder;
@@ -180,8 +191,10 @@ fn create_dir(path: &Path) -> io::Result<()> {
     #[cfg(not(windows))]
     {
         let mut builder = DirBuilder::new();
-        // Without this the mode comes from the session's umask, and a file with user state is
-        // going to live here. The fallback may be a temporary shared by everyone.
+        // Without this the mode comes from the session's umask —measured: `0775` with this
+        // machine's—, and a file that tells what the user is up to is going to live there. Under the
+        // user's runtime directory it would not be reachable, because it is already theirs and theirs
+        // alone; but the fallback can be a temporary shared by everyone.
         #[cfg(unix)]
         {
             use std::os::unix::fs::DirBuilderExt;
@@ -420,8 +433,14 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        the_directory_cannot_be_read_by_anyone_else,
+        "unix-only: requires Unix permission modes"
+    );
+
     #[cfg(unix)]
     #[test]
+
     fn the_directory_cannot_be_read_by_anyone_else() {
         use std::os::unix::fs::PermissionsExt;
 
@@ -525,6 +544,10 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_relative_system_temporary_falls_back_to_tmp,
+        "unix-only: requires Unix temporary-directory environment semantics"
+    );
     /// **The fallback is held to the same rule.** TMPDIR reaches `temp_dir` as written on Unix,
     /// and a relative or empty one would land every console in the working directory all the same
     /// — whether the runtime variable was absent, empty or relative.

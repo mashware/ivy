@@ -115,10 +115,12 @@ impl Acceptor {
     pub(crate) fn accept(&self) -> io::Result<Stream> {
         #[cfg(windows)]
         {
-            return self.inner.accept();
+            self.inner.accept()
         }
         #[cfg(unix)]
-        self.listener.accept()
+        {
+            self.listener.accept()
+        }
     }
 
     #[cfg(windows)]
@@ -192,7 +194,7 @@ pub fn bind(dir: &Path, id: &str) -> io::Result<Listener> {
     // `binding_is_what_binds_says` ties the two together.
     #[cfg(windows)]
     {
-        return windows::bind(dir, id);
+        windows::bind(dir, id)
     }
     #[cfg(not(windows))]
     {
@@ -260,10 +262,12 @@ fn private_to_uid(dir: &Path, uid: u32) -> io::Result<()> {
 pub fn connect(dir: &Path, id: &str) -> io::Result<Stream> {
     #[cfg(windows)]
     {
-        return connect_authenticated(dir, id, crate::client::inherited_server_pid()?);
+        connect_authenticated(dir, id, crate::client::inherited_server_pid()?)
     }
     #[cfg(unix)]
-    Stream::connect(name_of(dir, id)?)
+    {
+        Stream::connect(name_of(dir, id)?)
+    }
 }
 
 /// Connects only after the pipe server process matches the inherited app PID.
@@ -279,8 +283,27 @@ mod tests {
     use super::*;
     use panel_contract::PanelDir;
 
+    crate::windows_unix_omission!(
+        the_endpoint_lives_inside_the_panes_own_directory,
+        "unix-only: requires Unix socket path placement"
+    );
+    crate::windows_unix_omission!(
+        what_was_bound_is_what_gets_connected_to,
+        "unix-only: requires Unix stream socket connection semantics"
+    );
+    crate::windows_unix_omission!(
+        a_pane_cannot_be_reached_through_another_panes_endpoint,
+        "unix-only: requires Unix stream socket routing"
+    );
+
+    crate::windows_unix_omission!(
+        inherited_directory_requires_private_mode_type_and_effective_owner,
+        "unix-only: requires Unix permission bits and ownership metadata"
+    );
+
     #[cfg(unix)]
     #[test]
+
     fn inherited_directory_requires_private_mode_type_and_effective_owner() {
         use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
         let panel = PanelDir::create().unwrap();
@@ -339,6 +362,10 @@ mod tests {
         assert!(socket.exists(), "nothing was bound at {}", socket.display());
     }
 
+    crate::windows_unix_omission!(
+        nothing_outside_this_user_can_reach_the_endpoint,
+        "unix-only: requires Unix socket permissions and ownership metadata"
+    );
     /// The mode is the directory's and is inherited rather than set: this is what fails if somebody
     /// ever moves the endpoint out of the directory, which is the change that would quietly widen it.
     ///

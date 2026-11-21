@@ -719,7 +719,20 @@ left drag. A wheel over a menu
 open above the image, and a drag begun on it, belong to that menu. On GNOME with "disable
 touchpad while typing" on, which is the default, holding Space blocks touchpad clicks, so with a
 touchpad the image is moved with two fingers and zoomed with Ctrl + two fingers. While one image is
-still being read, opening another says so instead of starting a second read. Only empty authorities,
+still being read, opening another says so instead of starting a second read.
+
+A plain left drag on the image draws with the tool chosen above it — Arrow, Ellipse, Rectangle or
+Marker, where a click places a numbered marker. Each marker has a note in the column beside the
+image, after the same numbered disc, and the image a general note; a drawer too narrow for both
+puts that column under the image. Undo (or Ctrl+Z, Cmd+Z on macOS, while no note is being
+written), the × beside a marker's note and Clear take marks back. **Send to <console> and press
+Enter**, at the foot of the column, writes a copy of the image with the marks into that console's
+own folder (`PANEL_DIR`) under the first free name `annotated-<n>.png`, then types the line shown
+under the image into that console and presses Enter: the copy's path and the notes. In a plain shell that line runs as a command, so read it
+before sending. From the click on Send until the line is typed, the marks and notes cannot be
+changed. The original file is never changed, and the copies are removed when that console
+closes. While marks are not sent, the image stays: opening another image or document, or closing
+its tab, says so. Only empty authorities,
 localhost and the verified local hostname are accepted as local file links.
 
 Each console header has a **Review changes** control beside its information-panel and maximize

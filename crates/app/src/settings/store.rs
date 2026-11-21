@@ -192,6 +192,10 @@ mod tests {
         }
         fs::remove_dir_all(dir).unwrap();
     }
+    crate::windows_unix_omission!(
+        symbolic_link_save_is_refused_and_permissions_survive,
+        "unix-only: requires Unix symlink or permission semantics"
+    );
     #[cfg(unix)]
     #[test]
     fn symbolic_link_save_is_refused_and_permissions_survive() {

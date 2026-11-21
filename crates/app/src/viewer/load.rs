@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 use std::time::Duration;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use std::time::Instant;
 
 const MARKDOWN_LIMIT: usize = 1024 * 1024;
@@ -128,21 +128,21 @@ impl Job<Picture> {
     pub(super) fn poll(&self) -> Option<Result<Picture, String>> {
         take(self)
     }
-
-    /// A decode that has not finished, for as long as the returned sender lives and says nothing:
-    /// what a read stuck on an unresponsive filesystem looks like to the viewer.
-    #[cfg(test)]
-    pub(super) fn stalled() -> (Self, mpsc::Sender<Result<Picture, String>>) {
-        let (sender, receiver) = mpsc::channel();
-        let job = Job {
-            receiver,
-            finished: Cell::new(false),
-        };
-        (job, sender)
-    }
 }
 
-fn take<T>(job: &Job<T>) -> Option<Result<T, String>> {
+/// A job that has not finished, for as long as the returned sender lives and says nothing: what a
+/// read stuck on an unresponsive filesystem looks like to the viewer.
+#[cfg(test)]
+pub(super) fn stalled<T>() -> (Job<T>, mpsc::Sender<Result<T, String>>) {
+    let (sender, receiver) = mpsc::channel();
+    let job = Job {
+        receiver,
+        finished: Cell::new(false),
+    };
+    (job, sender)
+}
+
+pub(super) fn take<T>(job: &Job<T>) -> Option<Result<T, String>> {
     if job.finished.get() {
         return None;
     }
@@ -155,7 +155,7 @@ fn take<T>(job: &Job<T>) -> Option<Result<T, String>> {
     Some(result)
 }
 
-fn spawn<T: Send + 'static>(
+pub(super) fn spawn<T: Send + 'static>(
     ctx: egui::Context,
     work: impl FnOnce() -> Result<T, String> + Send + std::panic::UnwindSafe + 'static,
 ) -> Result<Job<T>, String> {
@@ -831,6 +831,11 @@ mod tests {
         assert!(Kind::Code.is_document() && Kind::Markdown.is_document());
         assert!(!Kind::Local.is_document() && !Kind::AgainstBase.is_document());
     }
+
+    crate::windows_unix_omission!(
+        git_timeout_does_not_wait_for_child,
+        "unix-only: sends a Unix signal to stop a timed out Git child"
+    );
 
     /// A PNG that is its header and a truncated first data chunk: enough for the decoder to learn
     /// its size, and nothing a decode could finish.

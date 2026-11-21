@@ -134,6 +134,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         1,
     ),
     (
+        "src/client_attestation_windows_tests.rs",
+        include_str!("../src/client_attestation_windows_tests.rs"),
+        0,
+    ),
+    (
         "src/client_attestation/mod.rs",
         include_str!("../src/client_attestation/mod.rs"),
         0,
@@ -387,6 +392,26 @@ const SOURCES: &[(&str, &str, usize)] = &[
         0,
     ),
     (
+        "src/viewer/image/send.rs",
+        include_str!("../src/viewer/image/send.rs"),
+        0,
+    ),
+    (
+        "src/viewer/image/flatten.rs",
+        include_str!("../src/viewer/image/flatten.rs"),
+        0,
+    ),
+    (
+        "src/viewer/image/marks.rs",
+        include_str!("../src/viewer/image/marks.rs"),
+        0,
+    ),
+    (
+        "src/viewer/image/tools.rs",
+        include_str!("../src/viewer/image/tools.rs"),
+        0,
+    ),
+    (
         "src/viewer/review.rs",
         include_str!("../src/viewer/review.rs"),
         0,
@@ -455,6 +480,26 @@ const SOURCES: &[(&str, &str, usize)] = &[
     (
         "src/viewer/code_header/tests/window.rs",
         include_str!("../src/viewer/code_header/tests/window.rs"),
+        0,
+    ),
+    (
+        "src/diagnostics_log.rs",
+        include_str!("../src/diagnostics_log.rs"),
+        0,
+    ),
+    (
+        "src/diagnostics_log/sink.rs",
+        include_str!("../src/diagnostics_log/sink.rs"),
+        0,
+    ),
+    (
+        "src/diagnostics_log/swap.rs",
+        include_str!("../src/diagnostics_log/swap.rs"),
+        0,
+    ),
+    (
+        "src/diagnostics_log/tests.rs",
+        include_str!("../src/diagnostics_log/tests.rs"),
         0,
     ),
     ("src/opener.rs", include_str!("../src/opener.rs"), 0),
@@ -1028,6 +1073,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
     (
         "src/opening/codex_tests.rs",
         include_str!("../src/opening/codex_tests.rs"),
+        0,
+    ),
+    (
+        "src/opening/codex_tests_windows.rs",
+        include_str!("../src/opening/codex_tests_windows.rs"),
         0,
     ),
     (

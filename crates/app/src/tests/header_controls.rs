@@ -283,6 +283,12 @@ mod tests {
         assert_eq!(window.active().focus, names_in_order(&window)[2]);
     }
 
+    crate::windows_unix_omission!(
+        compact_menu_navigation_never_reaches_the_program,
+        "unix-only: requires POSIX raw-mode child byte capture to verify keyboard and mouse routing"
+    );
+
+    #[cfg(unix)]
     #[test]
     fn compact_menu_navigation_never_reaches_the_program() {
         let received = term_core::received::Received::new("header-menu-keys");
@@ -338,6 +344,12 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        toggling_the_panel_sends_no_mouse_report_to_a_program_that_requested_clicks,
+        "unix-only: requires POSIX stty and shell printf to enable xterm mouse reporting in the PTY fixture"
+    );
+
+    #[cfg(unix)]
     #[test]
     fn toggling_the_panel_sends_no_mouse_report_to_a_program_that_requested_clicks() {
         let received = term_core::received::Received::new("header-toggle-input");
@@ -371,6 +383,12 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        modifier_changes_inside_a_menu_still_make_copy_copy_after_dismissal,
+        "unix-only: requires POSIX raw-mode child byte capture to verify keyboard and mouse routing"
+    );
+
+    #[cfg(unix)]
     #[test]
     fn modifier_changes_inside_a_menu_still_make_copy_copy_after_dismissal() {
         let received = term_core::received::Received::new("header-menu-modifiers");
@@ -413,6 +431,12 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        losing_window_focus_while_a_menu_is_open_does_not_leave_shift_stuck,
+        "unix-only: requires POSIX raw-mode child byte capture to verify keyboard and mouse routing"
+    );
+
+    #[cfg(unix)]
     #[test]
     fn losing_window_focus_while_a_menu_is_open_does_not_leave_shift_stuck() {
         let received = term_core::received::Received::new("header-menu-focus");
@@ -617,9 +641,14 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_hidden_panel_keeps_its_live_producer_and_shows_its_next_publication,
+        "unix-only: launches a shell fixture to publish a panel over a Unix-domain socket"
+    );
+
     #[cfg(unix)]
     #[test]
-    #[cfg(unix)]
+
     fn a_hidden_panel_keeps_its_live_producer_and_shows_its_next_publication() {
         let ctx = egui::Context::default();
         let mut window = window_with("sleep 30", "sleep 30");

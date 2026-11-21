@@ -3,6 +3,18 @@ use super::*;
 
 const UUID: &str = "11111111-1111-4111-8111-111111111111";
 
+#[cfg(windows)]
+mod sockets {
+    crate::windows_unix_omission!(
+        real_session_socket_bypasses_full_ui_inbox_and_cannot_spoof_peer,
+        "unix-only: requires Unix socket peer credentials"
+    );
+    crate::windows_unix_omission!(
+        session_helper_cannot_release_or_replace_existing_panel_connection,
+        "unix-only: requires Unix socket peer credentials"
+    );
+}
+
 #[test]
 fn exact_ids_are_client_typed_and_never_shell_text() {
     for client in [Client::Codex, Client::Claude] {
@@ -32,6 +44,10 @@ fn exact_ids_are_client_typed_and_never_shell_text() {
 
 // Unix only: these fixtures carry Unix session directories (`/tmp`), which are not absolute on
 // Windows. Restoring Claude/Codex sessions after Ivy restarts is not ported to Windows (#164 scope).
+crate::windows_unix_omission!(
+    literal_requests_round_trip_and_unknown_authority_is_refused,
+    "unix-only: fixtures carry Unix session directories, which are not absolute on Windows"
+);
 #[cfg(unix)]
 #[test]
 fn literal_requests_round_trip_and_unknown_authority_is_refused() {
@@ -85,6 +101,10 @@ fn literal_requests_round_trip_and_unknown_authority_is_refused() {
 
 // Unix only: these fixtures carry Unix session directories (`/tmp`), which are not absolute on
 // Windows. Restoring Claude/Codex sessions after Ivy restarts is not ported to Windows (#164 scope).
+crate::windows_unix_omission!(
+    metadata_fields_and_complete_request_are_bounded,
+    "unix-only: fixtures carry Unix session directories, which are not absolute on Windows"
+);
 #[cfg(unix)]
 #[test]
 fn metadata_fields_and_complete_request_are_bounded() {
@@ -116,6 +136,10 @@ fn metadata_fields_and_complete_request_are_bounded() {
 
 // Unix only: these fixtures carry Unix session directories (`/tmp`), which are not absolute on
 // Windows. Restoring Claude/Codex sessions after Ivy restarts is not ported to Windows (#164 scope).
+crate::windows_unix_omission!(
+    hook_discards_content_and_update_refuses_it,
+    "unix-only: fixtures carry Unix session directories, which are not absolute on Windows"
+);
 #[cfg(unix)]
 #[test]
 fn hook_discards_content_and_update_refuses_it() {

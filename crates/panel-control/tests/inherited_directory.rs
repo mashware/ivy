@@ -1,13 +1,26 @@
 //! Inherited clients refuse a planted directory before opening its socket.
-#![cfg(unix)]
-
+#[cfg(windows)]
+macro_rules! windows_unix_omission {
+    ($name:ident, $reason:literal) => {
+        #[test]
+        #[ignore = $reason]
+        fn $name() {}
+    };
+}
+#[cfg(unix)]
 use panel_contract::PanelDir;
+#[cfg(unix)]
 use std::io::Write;
+#[cfg(unix)]
 use std::os::unix::fs::{PermissionsExt, symlink};
+#[cfg(unix)]
 use std::os::unix::net::UnixListener;
+#[cfg(unix)]
 use std::path::Path;
+#[cfg(unix)]
 use std::process::{Command, Stdio};
 
+#[cfg(unix)]
 fn refused(dir: &Path, privacy: bool) {
     let path = dir.to_str().unwrap();
     let input = b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}\n{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"panel_get\",\"arguments\":{}}}\n";
@@ -74,6 +87,7 @@ fn refused(dir: &Path, privacy: bool) {
 }
 
 #[test]
+#[cfg(unix)]
 fn unsafe_inherited_directories_never_reach_a_listening_socket() {
     let panel = PanelDir::create().unwrap();
     let listener = UnixListener::bind(panel.path().join(panel_contract::CONTROL_SOCKET)).unwrap();
@@ -102,6 +116,7 @@ fn unsafe_inherited_directories_never_reach_a_listening_socket() {
 }
 
 #[test]
+#[cfg(unix)]
 fn genuine_inherited_directory_returns_the_document() {
     use std::io::{BufRead, BufReader};
     use std::time::{Duration, Instant};
@@ -153,3 +168,15 @@ fn genuine_inherited_directory_returns_the_document() {
         serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(document["title"], "genuine console");
 }
+
+#[cfg(windows)]
+windows_unix_omission!(
+    unsafe_inherited_directories_never_reach_a_listening_socket,
+    "unix-only: requires Unix socket paths, permission bits, and symlink semantics"
+);
+
+#[cfg(windows)]
+windows_unix_omission!(
+    genuine_inherited_directory_returns_the_document,
+    "unix-only: requires Unix domain socket transport"
+);

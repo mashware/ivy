@@ -118,6 +118,11 @@ fn open_launches_an_allowed_document_and_reveals_anything_else() {
     );
 }
 
+crate::windows_unix_omission!(
+    a_link_is_judged_by_where_it_leads,
+    "unix-only: creates symlinks to distinguish a script link from a regular document"
+);
+
 /// A link is judged by the file it leads to: a `.txt` name pointing at a script is revealed, and
 /// one pointing at a document opens that document.
 #[cfg(unix)]
@@ -176,8 +181,7 @@ fn a_failure_says_what_the_click_actually_tried() {
     assert!(line.unwrap_err().starts_with("ivy: could not open"));
 }
 
-/// Only a regular file opens: a folder or a pipe named like a document is shown instead.
-#[cfg(unix)]
+/// Only a regular file opens: a folder named like a document is shown instead.
 #[test]
 fn only_a_regular_file_is_launched() {
     let folder = Folder::new();
@@ -187,6 +191,11 @@ fn only_a_regular_file_is_launched() {
     assert_eq!(acted(&named, true, Ok(())).0, [Call::Reveal(named)]);
     assert_eq!(acted(&document, true, Ok(())).0, [Call::Open(document)]);
 }
+
+crate::windows_unix_omission!(
+    a_file_swapped_for_a_link_after_the_judgement_is_not_launched,
+    "unix-only: requires Unix symlink or permission semantics"
+);
 
 /// Right before the launch, the judged file is read again: once swapped for a link, it is not
 /// handed over.
@@ -304,4 +313,28 @@ mod linux {
             "{failed}"
         );
     }
+}
+
+#[cfg(all(test, windows))]
+mod linux {
+    crate::windows_unix_omission!(
+        the_opener_gets_the_path_as_its_one_argument,
+        "unix-only: invokes the Linux xdg-open resolver"
+    );
+    crate::windows_unix_omission!(
+        an_open_runs_the_file_and_asks_no_bus,
+        "unix-only: exercises Linux desktop portal fallback for xdg-open"
+    );
+    crate::windows_unix_omission!(
+        a_reveal_nobody_answers_opens_the_folder_and_never_the_file,
+        "unix-only: exercises Linux desktop portal fallback and xdg-open"
+    );
+    crate::windows_unix_omission!(
+        a_folder_swapped_for_a_link_is_not_opened,
+        "unix-only: uses Linux symlink semantics in the xdg-open resolver"
+    );
+    crate::windows_unix_omission!(
+        a_launcher_that_exits_unhappy_says_so,
+        "unix-only: invokes Linux xdg-open and inspects its process exit"
+    );
 }

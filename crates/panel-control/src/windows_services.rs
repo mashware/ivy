@@ -104,6 +104,8 @@ pub(crate) enum DocumentValue {
 /// Bounded committed document snapshot shared between UI publisher and channel worker.
 pub struct DocumentSnapshot;
 impl DocumentSnapshot {
+    // The type names the pair; it is never a value of its own.
+    #[allow(clippy::new_ret_no_self)]
     pub fn new() -> (DocumentReader, DocumentPublisher) {
         let cell = Cell {
             value: Arc::new(Mutex::new(None)),
@@ -171,6 +173,8 @@ impl DocumentReader {
 /// Bounded committed plan snapshot shared between UI publisher and channel worker.
 pub struct PlanSnapshot;
 impl PlanSnapshot {
+    // The type names the pair; it is never a value of its own.
+    #[allow(clippy::new_ret_no_self)]
     pub fn new() -> (PlanReader, PlanPublisher) {
         let cell = Cell {
             value: Arc::new(Mutex::new(None)),

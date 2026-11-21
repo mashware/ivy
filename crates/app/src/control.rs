@@ -37,7 +37,6 @@ pub(crate) use channel::open_with_authority;
 #[cfg(test)]
 #[cfg(unix)]
 pub(crate) use channel::open_with_sessions;
-#[cfg(windows)]
 pub(crate) use channel::remember_native_window;
 
 /// How many deliveries a pane's inbox may hold before a publication is refused.

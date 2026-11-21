@@ -171,21 +171,26 @@ impl PaneControl {
     }
 }
 
-#[cfg(windows)]
+/// Only Windows wakes the window through its native handle; elsewhere there is nothing to keep.
 pub(crate) fn remember_native_window(cc: &eframe::CreationContext<'_>) {
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    let hwnd = cc
-        .window_handle()
-        .ok()
-        .and_then(|handle| match handle.as_raw() {
-            RawWindowHandle::Win32(handle) => Some(handle.hwnd.get()),
-            _ => None,
-        });
-    if let Some(hwnd) = hwnd {
-        cc.egui_ctx.data_mut(|data| {
-            data.insert_temp(egui::Id::new("ivy-panel-control-hwnd"), hwnd);
-        });
+    #[cfg(windows)]
+    {
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        let hwnd = cc
+            .window_handle()
+            .ok()
+            .and_then(|handle| match handle.as_raw() {
+                RawWindowHandle::Win32(handle) => Some(handle.hwnd.get()),
+                _ => None,
+            });
+        if let Some(hwnd) = hwnd {
+            cc.egui_ctx.data_mut(|data| {
+                data.insert_temp(egui::Id::new("ivy-panel-control-hwnd"), hwnd);
+            });
+        }
     }
+    #[cfg(not(windows))]
+    let _ = cc;
 }
 
 pub(crate) fn control_hwnd(ctx: &egui::Context) -> Option<isize> {

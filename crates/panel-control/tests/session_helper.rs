@@ -1,15 +1,34 @@
 //! Runs the shipped helper so inherited routing, content filtering and kernel lifetime meet.
 
-#![cfg(target_os = "linux")]
-
 use panel_contract::PanelDir;
-use panel_control::{Channel, Reply, session};
+use panel_control::session;
+#[cfg(not(windows))]
+use panel_control::{Channel, Reply};
 use std::io::Write;
 use std::process::{Command, Stdio};
+#[cfg(not(windows))]
 use std::sync::Arc;
+#[cfg(not(windows))]
 use std::sync::mpsc::sync_channel;
+#[cfg(not(windows))]
 use std::time::Duration;
 
+#[cfg(windows)]
+#[test]
+#[ignore = "unix-only: requires Unix non-text environment values"]
+fn invalid_whole_identity_exits_before_reading_stdin_or_connecting() {}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "unix-only: requires Unix socket routing and non-text environment values"]
+fn session_exchange_rejects_invalid_identity_before_connecting() {}
+
+#[test]
+#[cfg(windows)]
+#[ignore = "unix-only: requires a Unix-domain channel and kernel socket peer identity"]
+fn helper_reports_only_allowed_metadata_with_its_actual_kernel_identity() {}
+
+#[cfg(not(windows))]
 #[test]
 fn helper_reports_only_allowed_metadata_with_its_actual_kernel_identity() {
     let dir = PanelDir::create().unwrap();
@@ -228,6 +247,12 @@ fn publish_cli_rejects_invalid_identity_and_bad_input_before_connect() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("must be a JSON object"));
 }
 
+#[cfg(windows)]
+#[test]
+#[ignore = "unix-only: requires Unix-domain channel transport for authorization replies"]
+fn publish_cli_maps_unheld_and_policy_refusal_to_the_declared_output() {}
+
+#[cfg(not(windows))]
 #[test]
 fn publish_cli_maps_unheld_and_policy_refusal_to_the_declared_output() {
     let dir = PanelDir::create().unwrap();

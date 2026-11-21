@@ -15,8 +15,14 @@ fn deferred_capability_reply_is_one_value_and_disable_withdraws_it() {
     assert!(!pane.signals.take_capability_reply(false, true));
 }
 
+crate::windows_unix_omission!(
+    automatic_capability_does_not_refuse_human_input_when_writer_is_backpressured,
+    "unix-only: requires stty raw mode and sleep to hold a PTY writer backlog"
+);
+
 #[cfg(unix)]
 #[test]
+
 fn automatic_capability_does_not_refuse_human_input_when_writer_is_backpressured() {
     let mut pane = pane_with("stty raw -echo && printf ready && exec sleep 8", 0);
     let deadline = Instant::now() + Duration::from_secs(2);
@@ -48,8 +54,14 @@ fn automatic_capability_does_not_refuse_human_input_when_writer_is_backpressured
     assert!(!backlog.refused);
 }
 
+crate::windows_unix_omission!(
+    healthy_native_client_receives_the_exact_capability_response,
+    "unix-only: requires stty raw mode and dd to capture PTY input bytes"
+);
+
 #[cfg(unix)]
 #[test]
+
 fn healthy_native_client_receives_the_exact_capability_response() {
     let path = std::env::temp_dir().join(format!(
         "ivy-capability-{}-{}",

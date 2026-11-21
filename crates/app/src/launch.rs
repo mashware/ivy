@@ -4,7 +4,9 @@ use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
+#[cfg(any(target_os = "linux", test))]
+use std::sync::mpsc::channel;
+use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use term_core::{Backlog, Ending, ForegroundScope, Pty, Size};
 
 static LAUNCHER: OnceLock<PathBuf> = OnceLock::new();
@@ -81,6 +83,29 @@ impl From<Pty> for Process {
             refused: false,
             refusals: 0,
             failure: None,
+            delivery_failed: false,
+            dismissed: false,
+        }
+    }
+}
+
+#[cfg(test)]
+impl Process {
+    /// A console whose launch failed with what was typed still owed: its writer has given up for
+    /// good, which is what a test needs that cannot wait for a real writer to fail.
+    pub(crate) fn deaf() -> Self {
+        Self {
+            live: None,
+            terminal: term_core::Termination::Pending,
+            cost: std::time::Duration::ZERO,
+            context: None,
+            pending: None,
+            input: b"typed".to_vec(),
+            startup: 0,
+            input_since: Some(std::time::Instant::now()),
+            refused: false,
+            refusals: 0,
+            failure: Some("the program could not be started".into()),
             delivery_failed: false,
             dismissed: false,
         }

@@ -53,7 +53,7 @@ use std::path::{Path, PathBuf};
 /// stops matching anything at all.
 // Six native declarations cover stop-aware accept, public blocking accept, three owned joins,
 // and the channel-local registration test barrier. Each call carries its own reason.
-const DECLARED_WAITS: usize = 21;
+const DECLARED_WAITS: usize = 22;
 
 /// The crates, files and production lines the walk must reach. A walk that examined nothing finds
 /// no undeclared wait, and would pass.

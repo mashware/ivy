@@ -632,6 +632,31 @@ impl RestOfFrame {
 mod tests {
     use super::*;
 
+    crate::windows_unix_omission!(
+        two_consoles_of_the_script_take_different_turns_without_clobbering_each_other,
+        "unix-only: Linux measurement script requires sh and coreutils"
+    );
+    crate::windows_unix_omission!(
+        the_scripts_compare_mode_admits_the_fraction_and_rejects_another_window,
+        "unix-only: Linux measurement script requires sh and coreutils"
+    );
+    crate::windows_unix_omission!(
+        every_letter_the_script_offers_goes_through_its_batch_allocation,
+        "unix-only: Linux measurement script requires sh and coreutils"
+    );
+    crate::windows_unix_omission!(
+        project_report_guard_rejects_bad_or_duplicate_records_and_accepts_legacy_comparison,
+        "unix-only: Linux measurement script requires sh and coreutils"
+    );
+    crate::windows_unix_omission!(
+        sidebar_report_guard_rejects_zero_frames_for_open_and_closed_docks,
+        "unix-only: Linux measurement script requires sh and coreutils"
+    );
+    crate::windows_unix_omission!(
+        every_pattern_the_script_looks_for_in_the_report_still_extracts_something,
+        "unix-only: report patterns execute sed and grep"
+    );
+
     fn ms(n: u64) -> Duration {
         Duration::from_millis(n)
     }
@@ -1751,6 +1776,7 @@ mod tests {
     const SCRIPT: &str = include_str!("../../../scripts/measure-frame.sh");
 
     /// A pattern the script applies to the report, with the line where it is so it can be pointed at.
+    #[cfg(unix)]
     struct ScriptPattern {
         line: usize,
         order: &'static str,
@@ -1768,6 +1794,7 @@ mod tests {
     /// It carries neither anchor nor keyword, so this criterion does not see it. **It invalidates no
     /// run** —it only feeds a message— and that is why it is left out instead of widening the criterion
     /// until it starts picking up noise; if some day it comes to decide something, it goes in.
+    #[cfg(unix)]
     fn script_patterns() -> Vec<ScriptPattern> {
         let mut encontrados = Vec::new();
         // **The command is carried across lines on purpose.** The script splits its long `sed`s with a
@@ -1847,6 +1874,7 @@ mod tests {
     /// exits with 0 and is **indistinguishable** from "the report changed". Against that the only thing
     /// there is is the minimum-count guard down below: if the extractor really breaks, it finds fewer
     /// patterns and the test says so. Checked with the two mutations.
+    #[cfg(unix)]
     enum Salida {
         /// The pattern was applied and extracted something.
         Extrajo,
@@ -1864,10 +1892,9 @@ mod tests {
     ///
     /// **The price, declared: this makes `cargo test` depend on `sed` and `grep`.** It is accepted here
     /// because what this test protects is a shell script, so where there is no `sed` there is nothing to
-    /// protect either. If they are not there, it blows up with its message instead of skipping itself — a
-    /// `#[cfg(unix)]` would make it disappear silently, which is worse. **F2.7 brings Windows**, and
-    /// there a decision will have to be made: gate it to the system or accept that the bench does not run
-    /// on that platform.
+    /// protect either. On Unix a missing command fails the test; Windows reports an explicit ignored
+    /// counterpart because this benchmark remains a Unix shell script.
+    #[cfg(unix)]
     fn extract(p: &ScriptPattern, informe: &str) -> Salida {
         use std::io::Write as _;
         use std::process::{Command, Stdio};
@@ -1924,6 +1951,7 @@ mod tests {
     /// **They are several and not one because the three configuration states are mutually exclusive**: a
     /// report cannot say at the same time that the configuration is vetoed and that the user's was read.
     /// Each pattern has to extract from **some**; none has to extract from all.
+    #[cfg(unix)]
     fn reference_reports() -> Vec<(&'static str, String)> {
         let grids = vec![
             (0, vec![(0, grid(49, 39)), (1, grid(49, 21))]),
@@ -2458,6 +2486,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn every_pattern_the_script_looks_for_in_the_report_still_extracts_something() {
         let patrones = script_patterns();

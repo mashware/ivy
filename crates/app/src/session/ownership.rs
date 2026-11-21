@@ -171,8 +171,14 @@ mod tests {
         io::stdin().read_exact(&mut gate).unwrap();
     }
 
+    crate::windows_unix_omission!(
+        fork_owner_child,
+        "unix-only: forks a child process to verify owner lease lifetime"
+    );
+
     #[cfg(unix)]
     #[test]
+
     fn fork_owner_child() {
         let Ok(directory) = std::env::var("IVY_FORK_TEST_DIRECTORY") else {
             return;
@@ -194,8 +200,14 @@ mod tests {
         let _ = io::stdin().read_exact(&mut gate);
     }
 
+    crate::windows_unix_omission!(
+        crashed_owner_releases_lease_while_fork_child_lives,
+        "unix-only: forks a child and signals its parent to test owner lease release"
+    );
+
     #[cfg(unix)]
     #[test]
+
     fn crashed_owner_releases_lease_while_fork_child_lives() {
         let mut random = [0u8; 16];
         getrandom::fill(&mut random).unwrap();

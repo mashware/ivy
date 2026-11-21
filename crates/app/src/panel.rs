@@ -2523,8 +2523,14 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        an_atomic_republication_of_identical_bytes_is_a_new_file_generation,
+        "unix-only: uses Unix atomic rename to replace a published panel file"
+    );
+
     #[cfg(unix)]
     #[test]
+
     fn an_atomic_republication_of_identical_bytes_is_a_new_file_generation() {
         let dir = PanelDir::create().expect("create the directory");
         let document = r#"{"lines":["the same file"]}"#;
@@ -2567,8 +2573,14 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        retirement_rejects_a_named_pipe_without_blocking_the_interface,
+        "unix-only: creates a FIFO to exercise nonblocking panel retirement"
+    );
+
     #[cfg(unix)]
     #[test]
+
     fn retirement_rejects_a_named_pipe_without_blocking_the_interface() {
         let dir = PanelDir::create().expect("create the directory");
         let path = dir.path().join(PANEL_FILE);

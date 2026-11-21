@@ -180,6 +180,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/tests/board_parity.rs"),
     ),
     (
+        "app/src/client_attestation_windows_tests.rs",
+        include_str!("../src/client_attestation_windows_tests.rs"),
+    ),
+    (
         "app/src/client_attestation/mod.rs",
         include_str!("../src/client_attestation/mod.rs"),
     ),
@@ -475,6 +479,22 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/viewer/image/viewport.rs"),
     ),
     (
+        "app/src/viewer/image/send.rs",
+        include_str!("../src/viewer/image/send.rs"),
+    ),
+    (
+        "app/src/viewer/image/flatten.rs",
+        include_str!("../src/viewer/image/flatten.rs"),
+    ),
+    (
+        "app/src/viewer/image/marks.rs",
+        include_str!("../src/viewer/image/marks.rs"),
+    ),
+    (
+        "app/src/viewer/image/tools.rs",
+        include_str!("../src/viewer/image/tools.rs"),
+    ),
+    (
         "app/src/viewer/review.rs",
         include_str!("../src/viewer/review.rs"),
     ),
@@ -542,6 +562,22 @@ const MODULES: &[(&str, &str)] = &[
     (
         "app/src/viewer/code_header/tests/window.rs",
         include_str!("../src/viewer/code_header/tests/window.rs"),
+    ),
+    (
+        "app/src/diagnostics_log.rs",
+        include_str!("../src/diagnostics_log.rs"),
+    ),
+    (
+        "app/src/diagnostics_log/sink.rs",
+        include_str!("../src/diagnostics_log/sink.rs"),
+    ),
+    (
+        "app/src/diagnostics_log/swap.rs",
+        include_str!("../src/diagnostics_log/swap.rs"),
+    ),
+    (
+        "app/src/diagnostics_log/tests.rs",
+        include_str!("../src/diagnostics_log/tests.rs"),
     ),
     ("app/src/opener.rs", include_str!("../src/opener.rs")),
     (
@@ -938,6 +974,10 @@ const MODULES: &[(&str, &str)] = &[
     (
         "app/src/opening/codex_tests.rs",
         include_str!("../src/opening/codex_tests.rs"),
+    ),
+    (
+        "app/src/opening/codex_tests_windows.rs",
+        include_str!("../src/opening/codex_tests_windows.rs"),
     ),
     (
         "app/src/shell_integration.rs",

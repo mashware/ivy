@@ -18,6 +18,10 @@ use eframe::egui;
 #[cfg(unix)]
 mod codex_tests;
 
+#[cfg(all(test, windows))]
+#[path = "opening/codex_tests_windows.rs"]
+mod codex_tests;
+
 pub(crate) fn native_window(
     cc: &eframe::CreationContext<'_>,
     with_what: OpenWith,
@@ -25,7 +29,6 @@ pub(crate) fn native_window(
     persistence: session::Persistence,
     measuring: bool,
 ) -> term_core::Result<Window> {
-    #[cfg(windows)]
     control::remember_native_window(cc);
     chrome::prepare(&cc.egui_ctx);
     let mut window = Window::opening(
@@ -612,9 +615,7 @@ fn launch(
     let args = integration
         .as_ref()
         .map_or(args, |prepared| prepared.args());
-    let mut identity: Vec<_> = identity_of(panel.as_ref()).into_iter().collect();
-    #[cfg(windows)]
-    identity.push(crate::panel::pane::server_pid_env(panel.as_ref()));
+    let mut identity = crate::panel::pane::launch_identity(panel.as_ref());
     let helper = crate::resume::helper_path();
     identity.push((
         "IVY_SESSION_HELPER",
@@ -687,6 +688,7 @@ fn launch(
         pty,
         pty_output,
         _shell_integration: integration,
+        annotated: Default::default(),
         panel,
         control,
         panel_state,

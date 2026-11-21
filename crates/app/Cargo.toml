@@ -144,6 +144,13 @@ harfrust = "0.12"
 # `tiff` is absent there.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
+# **To draw the marks into the copy of a screenshot that is sent to a console**, antialiased and at
+# the original's resolution, without a rasteriser of this crate's own. On Linux it adds no package:
+# `sctk-adwaita` already compiles it, with `std` and `simd` — checked with
+# `cargo tree -p app -e features -i tiny-skia`. On macOS and Windows it is new, pure Rust and with no
+# system library. Its own PNG writer stays off: `image` above encodes the copy.
+tiny-skia = { version = "0.11", default-features = false, features = ["std"] }
+
 # The interface's icons: Phosphor Regular and its codepoints (D103). Only the face and the constants
 # are used — never `add_to_fonts`, which puts the face in the proportional chain where its blank
 # lowercase letters and its private-use codepoints would meet the interface's and the terminal's text. Pinned
@@ -165,16 +172,18 @@ zbus = { version = "5.13", default-features = false, features = ["async-io"] }
 async-io = "2"
 futures-lite = "2"
 
-# Two uses, one table. A file's identity (volume serial number and file index), which std's Windows
+# Three uses, one table. A file's identity (volume serial number and file index), which std's Windows
 # `MetadataExt` keeps behind an unstable feature, and the flag that opens a link instead of its
 # target (D108). And opening a file with its default application and showing it in Explorer,
-# through the shell's own calls rather than a command line `cmd` would read (D110). 0.61 is already
-# in the lock; only its features are named.
+# through the shell's own calls rather than a command line `cmd` would read (D110). And putting a
+# pipe where the process's standard error is, so the log file keeps it (D114). 0.61 is already in
+# the lock; only its features are named.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
     "Win32_System_Com",
+    "Win32_System_Console",
     "Win32_System_Registry",
     "Win32_UI_Shell",
     "Win32_UI_Shell_Common",

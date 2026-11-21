@@ -96,6 +96,17 @@ pub(crate) fn identity_of(
     }
 }
 
+/// What a launched program receives: the panel's two variables and, on Windows, the server witness.
+pub(crate) fn launch_identity(
+    panel: Option<&PanelDir>,
+) -> Vec<(&'static str, Option<&std::ffi::OsStr>)> {
+    #[cfg_attr(not(windows), allow(unused_mut))]
+    let mut identity: Vec<_> = identity_of(panel).into_iter().collect();
+    #[cfg(windows)]
+    identity.push(server_pid_env(panel));
+    identity
+}
+
 /// The server process witness is a separate Windows launch variable, not part of the stable
 /// two-entry panel identity contract. Sending `None` explicitly clears an inherited parent value.
 /// The value is borrowed for `'static` because a process's own PID never changes, so every launch

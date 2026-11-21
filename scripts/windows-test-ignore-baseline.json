@@ -1,0 +1,80 @@
+[
+  {
+    "platform": "linux",
+    "binary": "app/app:lib",
+    "name": "control::tests::measure_off_frame_document_reads",
+    "reason": "manual release-mode latency measurement"
+  },
+  {
+    "platform": "linux",
+    "binary": "app/app:lib",
+    "name": "control::tests::measure_a_patch_at_the_ceiling",
+    "reason": "manual release-mode latency measurement"
+  },
+  {
+    "platform": "windows",
+    "binary": "app/app:lib",
+    "name": "control::tests::measure_off_frame_document_reads",
+    "reason": "manual release-mode latency measurement"
+  },
+  {
+    "platform": "windows",
+    "binary": "app/app:lib",
+    "name": "control::tests::measure_a_patch_at_the_ceiling",
+    "reason": "manual release-mode latency measurement"
+  },
+  {
+    "platform": "windows",
+    "binary": "term-core/term_core:lib",
+    "name": "tests::windows_conpty_osc7_reaches_the_screen_through_the_bundled_host",
+    "reason": "needs the ConPTY pair beside the test binary (scripts/conpty.py)"
+  },
+  {
+    "platform": "linux",
+    "binary": "app/app:lib",
+    "name": "diagnostics_log::tests::child_fails_to_open_the_window",
+    "reason": "run by its parent in a process of its own"
+  },
+  {
+    "platform": "linux",
+    "binary": "app/app:lib",
+    "name": "diagnostics_log::tests::child_panics_on_a_named_thread",
+    "reason": "run by its parent in a process of its own"
+  },
+  {
+    "platform": "linux",
+    "binary": "app/app:lib",
+    "name": "diagnostics_log::tests::child_starts_from_its_environment",
+    "reason": "run by its parent in a process of its own"
+  },
+  {
+    "platform": "linux",
+    "binary": "app/app:lib",
+    "name": "diagnostics_log::tests::child_writes_one_line",
+    "reason": "run by its parent in a process of its own"
+  },
+  {
+    "platform": "windows",
+    "binary": "app/app:lib",
+    "name": "diagnostics_log::tests::child_fails_to_open_the_window",
+    "reason": "run by its parent in a process of its own"
+  },
+  {
+    "platform": "windows",
+    "binary": "app/app:lib",
+    "name": "diagnostics_log::tests::child_panics_on_a_named_thread",
+    "reason": "run by its parent in a process of its own"
+  },
+  {
+    "platform": "windows",
+    "binary": "app/app:lib",
+    "name": "diagnostics_log::tests::child_starts_from_its_environment",
+    "reason": "run by its parent in a process of its own"
+  },
+  {
+    "platform": "windows",
+    "binary": "app/app:lib",
+    "name": "diagnostics_log::tests::child_writes_one_line",
+    "reason": "run by its parent in a process of its own"
+  }
+]

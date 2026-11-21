@@ -1,4 +1,8 @@
 #![deny(rustdoc::broken_intra_doc_links)]
+// Test fixtures that only the Unix tests use — omitted on Windows by name in
+// `scripts/windows-test-omissions.json` — would each need their own gate there. Dead code stays an
+// error in every production build and in the Unix test builds, which still use all of them.
+#![cfg_attr(all(test, not(unix)), allow(dead_code, unused_imports))]
 // **A broken rustdoc link is invisible to the compiler, and half the repository is rustdoc.** When
 // this was put in, the tree had **three** of them pointing at names that earlier renames had left
 // behind: nobody noticed because `cargo doc` warns and does not fail. With the `deny` it fails, and
@@ -33,6 +37,17 @@
 //! window hidden, the input `logic` sees is the one of the last shown pass, so reading the keyboard
 //! there would resend the last key pressed thousands of times per second during a dump.
 
+#[cfg(test)]
+#[macro_export]
+macro_rules! windows_unix_omission {
+    ($name:ident, $reason:literal) => {
+        #[cfg(windows)]
+        #[test]
+        #[ignore = $reason]
+        fn $name() {}
+    };
+}
+
 mod agent_setup;
 mod agent_signals;
 mod ai_sessions;
@@ -40,13 +55,17 @@ mod alarms;
 mod chrome;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod client_attestation;
+#[cfg(all(test, windows))]
+#[path = "client_attestation_windows_tests.rs"]
+mod client_attestation;
 mod clipboard;
 mod closing;
 mod console_input;
 pub(crate) mod control;
+pub mod diagnostics_log;
 mod pane_view;
 mod resume;
-use panel::pane::{identity_of, panel_or_none};
+use panel::pane::panel_or_none;
 mod board;
 pub mod fonts;
 mod git_process;
@@ -581,6 +600,11 @@ struct Pane {
     pty_output: PtyOutput,
     /// Startup assets stay alive until the console's shell no longer needs them.
     _shell_integration: Option<shell_integration::Prepared>,
+    /// The annotated screenshots Send wrote into [`Self::panel`]'s directory, removed when the
+    /// console closes. **Declared before `panel` on purpose**: fields drop in declaration order, and
+    /// the directory is removed without recursion, so the copies have to be gone first or every
+    /// such close leaves the directory behind and says so.
+    annotated: viewer::image::send::Written,
     /// The directory where this console's program publishes its state, and the identifier it is
     /// known by. It is deleted when the console is dropped, because the type deletes it when it
     /// dies.
@@ -1932,6 +1956,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
     fn a_console_holding_a_paste_paints_the_question_over_it() {
         // **The user-visible half, and without this test there is none.** Deleting the line that
         // paints the notice leaves the whole suite green and turns the product into something worse
@@ -1941,9 +1966,8 @@ mod tests {
         // **It counts what the painter enqueues**, the way this crate's other painting tests do.
         // Asserting that the field is set would pass with the painting deleted, which is the exact
         // shape this project calls a test that covers nothing.
-        let Some(boundary) = keyboard::the_longest_line_a_reader_keeps() else {
-            return;
-        };
+        let boundary = keyboard::the_longest_line_a_reader_keeps()
+            .expect("Linux declares the canonical-input boundary");
         let mut pane = pane_with("sleep 30", 0);
         let theme = theme::Theme::default();
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 400.0));
@@ -1968,11 +1992,17 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_console_holding_a_paste_paints_the_question_over_it,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     /// How many shapes the painter enqueues for that console, painted onto a layer of its own.
     ///
     /// **It lends the console mutably because painting a question records where its notice landed**,
     /// which is what a click is judged against. A helper that could not do that would be measuring
     /// a painter that does not exist.
+    #[cfg(unix)]
     fn shapes_painting(pane: &mut Pane, theme: &theme::Theme, rect: egui::Rect) -> usize {
         let ctx = egui::Context::default();
         // An empty pass first: the text engine does not exist until there has been one.
@@ -2014,6 +2044,7 @@ mod tests {
     /// not shrink with that list. The third one is held to never being the tallest, so dropping it
     /// from the painter's list changes no box and nothing here goes red — which is the point of that
     /// rule, not a gap in this one.
+    #[cfg(unix)]
     fn every_way_to_answer() -> [&'static str; 3] {
         [
             painter::notices::ANSWERED_BY_HAND,
@@ -2027,6 +2058,7 @@ mod tests {
     /// **It is not the promise any more and it is still the measurement**, which is why deleting it
     /// with the promise was premature: what a roomy console must show is a box the size of its
     /// question, and the only way to say «the size of its question» is to lay the question out.
+    #[cfg(unix)]
     fn the_sentence_laid_out(
         pane: &Pane,
         theme: &theme::Theme,
@@ -2067,6 +2099,7 @@ mod tests {
     /// ceiling that is a different question from whether the whole sentence fits: on a narrow
     /// console it does not, and the promise kept instead is this one. It is the first thing in the
     /// galley, so it is also the part a clip reaches last.
+    #[cfg(unix)]
     fn the_answer_laid_out(
         theme: &theme::Theme,
         metrics: &CellMetrics,
@@ -2097,6 +2130,7 @@ mod tests {
     /// Where that console's notice goes, asked of **the same function the painter and the mouse pass
     /// both call** — so where a button fits under it, this is the shortened question that ships, and
     /// a press at its centre can never be one that lands on the button instead.
+    #[cfg(unix)]
     fn the_notice_box(
         pane: &Pane,
         theme: &theme::Theme,
@@ -2114,22 +2148,23 @@ mod tests {
         found.expect("that console has a question with a box worth pressing")
     }
 
-    /// Holds a paste on that console, and says so if the platform has no boundary to exceed.
+    /// Holds a paste on a Linux console and asserts the premise every notice test relies on.
     ///
-    /// **The `false` return is not a pass.** Every caller turns it into an early `return`, which on
-    /// a platform without a boundary makes the test a silent no-op — said here because **F2.7** is
-    /// the next milestone and that is where it will happen.
-    fn hold_a_paste_on(pane: &mut Pane) -> bool {
-        let Some(boundary) = keyboard::the_longest_line_a_reader_keeps() else {
-            return false;
-        };
+    /// Callers must reach their assertions when paste holding regresses. Returning a boolean here
+    /// previously let them return early with a passing result when nothing was held.
+    /// Linux declares the boundary, so its absence is a broken premise as well.
+    /// Windows counterparts are explicitly ignored; they never call this Linux-only helper.
+    #[cfg(target_os = "linux")]
+    fn hold_a_paste_on(pane: &mut Pane) {
+        let boundary = keyboard::the_longest_line_a_reader_keeps()
+            .expect("Linux declares the canonical-input boundary");
         keyboard::paste_or_hold(
             &"x".repeat(boundary + 1),
             false,
             &mut Vec::new(),
             &mut pane.held,
         );
-        pane.held.is_some()
+        assert!(pane.held.is_some(), "the oversized paste was not held");
     }
 
     /// Runs the mouse pass twice over that input: egui resolves an interaction against what was
@@ -2169,14 +2204,13 @@ mod tests {
     /// test of it, `a_click_moves_the_filled_cursor_in_the_same_frame_that_moves_the_focus`, since
     /// both marks are painted from the one value.
     #[test]
+    #[cfg(target_os = "linux")]
     fn the_notice_names_the_keys_only_where_they_would_arrive() {
         let ctx = egui::Context::default();
         let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
         let mut window = window_with("sleep 30", "sleep 30");
-        if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
-            return;
-        }
+        hold_a_paste_on(window.active_mut().panes_mut()[0]);
         let area = area_of(800.0 + DIVIDER_THICKNESS);
         let painted = egui::Context::default();
         // The text engine does not exist until there has been a pass.
@@ -2217,18 +2251,22 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        the_notice_names_the_keys_only_where_they_would_arrive,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     /// **A press inside the console but outside the notice leaves the question standing**, and
     /// without this the box is load-bearing in no assertion at all: a review measured that hard-wiring
     /// the hit test to «yes» left every other test of this fix green.
     #[test]
+    #[cfg(target_os = "linux")]
     fn a_press_next_to_the_notice_does_not_answer_it() {
         let ctx = egui::Context::default();
         let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
         let mut window = window_with("sleep 30", "sleep 30");
-        if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
-            return;
-        }
+        hold_a_paste_on(window.active_mut().panes_mut()[0]);
         let theme = window.theme;
         let notice = the_notice_box(window.active().panes()[0], &theme, &metrics, rects[0]);
         // The far corner of the same console: inside the pane, outside the box. Asserted, so that a
@@ -2248,19 +2286,23 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_press_next_to_the_notice_does_not_answer_it,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     /// **The other gap of the report: there was nothing to click.** A click on the notice of a
     /// console that does not have the focus discards its question — the only way a hand on the mouse
     /// could get rid of a question it did not ask for.
     #[test]
+    #[cfg(target_os = "linux")]
     fn a_click_on_its_notice_discards_the_question_of_an_unfocused_console() {
         let ctx = egui::Context::default();
         let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
         let mut window = window_with("sleep 30", "sleep 30");
         focus_on(window.active_mut(), 1);
-        if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
-            return;
-        }
+        hold_a_paste_on(window.active_mut().panes_mut()[0]);
         let theme = window.theme;
         let notice = the_notice_box(window.active().panes()[0], &theme, &metrics, rects[0]);
 
@@ -2278,8 +2320,14 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_click_on_its_notice_discards_the_question_of_an_unfocused_console,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     /// Where the three things over that console go — the question, the button that sends it and the
     /// silence — asked of **the one function the painter and the mouse pass both call**.
+    #[cfg(unix)]
     fn the_notices_on(
         pane: &Pane,
         theme: &theme::Theme,
@@ -2300,6 +2348,7 @@ mod tests {
 
     /// The question as it is laid out **with no button in mind**, which is what a console gets when
     /// the button has no room.
+    #[cfg(unix)]
     fn the_question_alone(
         pane: &Pane,
         theme: &theme::Theme,
@@ -2343,6 +2392,7 @@ mod tests {
     /// as `Ctrl+Enter` would. And the view is scrolled back first: the paste must bring it to where the
     /// program writes, as a keystroke does.
     #[test]
+    #[cfg(target_os = "linux")]
     fn the_send_button_sends_the_paste_composed_for_the_mode_at_the_click() {
         for turned_on_before_the_click in [true, false] {
             let ctx = egui::Context::default();
@@ -2351,9 +2401,7 @@ mod tests {
             let received = term_core::received::Received::new("send-held");
             let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
             focus_on(window.active_mut(), 1);
-            if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
-                return;
-            }
+            hold_a_paste_on(window.active_mut().panes_mut()[0]);
             let held_bytes =
                 keyboard::the_longest_line_a_reader_keeps().expect("a paste was held") + 1;
             received.wait_until_ready(Duration::from_secs(5));
@@ -2421,6 +2469,11 @@ mod tests {
         }
     }
 
+    crate::windows_unix_omission!(
+        the_send_button_sends_the_paste_composed_for_the_mode_at_the_click,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     /// **A click on the question discards the paste and the program receives none of it.** The
     /// discard test above runs over `sleep 30` and asserts only that nothing is held any more — which
     /// a press that landed on the send button would satisfy just as well, so it could not tell a
@@ -2432,6 +2485,7 @@ mod tests {
     /// the program reads in order, so a first paste that had gone out would be in front of it. The
     /// console is in raw mode for the reason the send test gives.
     #[test]
+    #[cfg(target_os = "linux")]
     fn a_click_on_the_question_discards_the_paste_and_the_program_receives_none_of_it() {
         let ctx = egui::Context::default();
         let rects = two_wide_panes();
@@ -2439,9 +2493,7 @@ mod tests {
         let received = term_core::received::Received::new("discard-held");
         let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
         focus_on(window.active_mut(), 1);
-        if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
-            return;
-        }
+        hold_a_paste_on(window.active_mut().panes_mut()[0]);
         let boundary = keyboard::the_longest_line_a_reader_keeps().expect("a paste was held");
         received.wait_until_ready(Duration::from_secs(5));
         let headers = window.headers;
@@ -2504,10 +2556,16 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_click_on_the_question_discards_the_paste_and_the_program_receives_none_of_it,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     /// **A press on the button carrying a chord sends nothing**, for the reason a chorded press on
     /// the question discards nothing: `Ctrl+Shift` moves the console, and Shift on its own is the
     /// escape hatch that takes the selection back.
     #[test]
+    #[cfg(target_os = "linux")]
     fn a_chorded_press_on_the_send_button_does_not_send_the_paste() {
         let ctx = egui::Context::default();
         let rects = two_wide_panes();
@@ -2515,9 +2573,7 @@ mod tests {
 
         for chord in [MOVE_CHORD, egui::Modifiers::SHIFT] {
             let mut window = window_with("sleep 30", "sleep 30");
-            if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
-                return;
-            }
+            hold_a_paste_on(window.active_mut().panes_mut()[0]);
             let headers = window.headers;
             let theme = window.theme;
             let console = window.active_mut().panes_mut()[0].console_within(
@@ -2555,6 +2611,11 @@ mod tests {
         }
     }
 
+    crate::windows_unix_omission!(
+        a_chorded_press_on_the_send_button_does_not_send_the_paste,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     /// **Where the button goes, over every height a console can have at the narrowest width.**
     ///
     /// Four things, and the sweep is what makes each of them mean something: the button is under the
@@ -2563,13 +2624,12 @@ mod tests {
     /// what it was before the button existed. **Both kinds of console are asserted to occur**, so a
     /// button that never appears, or always does, cannot pass by leaving one branch unwalked.
     #[test]
+    #[cfg(target_os = "linux")]
     fn the_send_button_sits_under_the_question_inside_the_top_half_or_not_at_all() {
         let metrics = with_metrics(|metrics| metrics.clone());
         let theme = theme::Theme::default();
         let mut pane = pane_with("sleep 30", 0);
-        if !hold_a_paste_on(&mut pane) {
-            return;
-        }
+        hold_a_paste_on(&mut pane);
         let mut with_a_button = 0;
         let mut shortened = 0;
         let mut without_one = 0;
@@ -2658,19 +2718,23 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        the_send_button_sits_under_the_question_inside_the_top_half_or_not_at_all,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     /// **The console saying it went quiet moves nothing above it.** The sentence goes under the
     /// button's place, so the question and the button are where they are with it standing and after
     /// it is dismissed — which is what keeps a second press on a sentence just dismissed from landing
     /// on a button that was not under it a moment before.
     #[test]
+    #[cfg(target_os = "linux")]
     fn the_console_saying_it_went_quiet_moves_neither_the_question_nor_its_button() {
         let metrics = with_metrics(|metrics| metrics.clone());
         let theme = theme::Theme::default();
         // A program that writes, because a listener that is gone is only noticed on a delivery.
         let mut pane = pane_with("yes", 0);
-        if !hold_a_paste_on(&mut pane) {
-            return;
-        }
+        hold_a_paste_on(&mut pane);
         make_it_go_quiet(&mut pane);
         let tall = egui::Rect::from_min_size(
             egui::pos2(41.0, metrics.height() * 1.5),
@@ -2700,6 +2764,11 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        the_console_saying_it_went_quiet_moves_neither_the_question_nor_its_button,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     /// **The box fits whichever sentence is shown**, and without that the two passes can judge
     /// different rectangles on the frame the focus moves — the mouse pass hit-testing one box while
     /// the painter draws another.
@@ -2725,13 +2794,12 @@ mod tests {
     /// that counts bytes. The equality of the two boxes across the focus moving is unchanged and is
     /// still the reason this test exists.
     #[test]
+    #[cfg(target_os = "linux")]
     fn the_notice_box_does_not_shrink_when_the_keyboard_leaves() {
         let metrics = with_metrics(|metrics| metrics.clone());
         let theme = theme::Theme::default();
         let mut pane = pane_with("sleep 30", 0);
-        if !hold_a_paste_on(&mut pane) {
-            return;
-        }
+        hold_a_paste_on(&mut pane);
         for cells in [20.0, 26.0] {
             let narrow = egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -2765,6 +2833,11 @@ mod tests {
         }
     }
 
+    crate::windows_unix_omission!(
+        the_notice_box_does_not_shrink_when_the_keyboard_leaves,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     /// **The border of the notice could be deleted outright and every test stayed green**, which is
     /// the whole of why this exists.
     ///
@@ -2777,11 +2850,10 @@ mod tests {
     /// rectangle, and cannot be seen. A console holding a paste would show the question floating
     /// over whatever the program had written underneath, with nothing separating the two.
     #[test]
+    #[cfg(target_os = "linux")]
     fn the_box_of_a_held_paste_is_stroked_over_the_console_holding_it() {
         let mut window = window_with("sleep 30", "sleep 30");
-        if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
-            return;
-        }
+        hold_a_paste_on(window.active_mut().panes_mut()[0]);
         // **The console holding the paste is asked for the keyboard on purpose, not left to a
         // default.** It is what puts both marks in the same frame in the same colour, and that is
         // the only scenario in which either lookup's square / rounded discriminator does any work.
@@ -2906,18 +2978,22 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        the_box_of_a_held_paste_is_stroked_over_the_console_holding_it,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     /// **A console too small has no notice to press.** The box is clamped to the console, and a
     /// three-row pane flattens it to something whose text is entirely clipped — a rectangle that
     /// still answers `contains` on its edge, so a press there would discard a paste while showing
     /// nothing that could be read as a question.
     #[test]
+    #[cfg(target_os = "linux")]
     fn a_console_too_small_for_the_notice_has_no_box_to_press() {
         let metrics = with_metrics(|metrics| metrics.clone());
         let theme = theme::Theme::default();
         let mut pane = pane_with("sleep 30", 0);
-        if !hold_a_paste_on(&mut pane) {
-            return;
-        }
+        hold_a_paste_on(&mut pane);
         let sliver = egui::Rect::from_min_size(
             egui::Pos2::ZERO,
             egui::vec2(metrics.width() * 20.0, metrics.height() * 1.2),
@@ -2944,6 +3020,11 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_console_too_small_for_the_notice_has_no_box_to_press,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     /// **The shape where «a line fits» was not enough, which is the one a review named.**
     ///
     /// At this application's narrowest console the line saying how to get out wraps to about three,
@@ -2956,13 +3037,12 @@ mod tests {
     /// **The silence is the price and it is recorded, not hidden**: such a console holds a paste with
     /// nothing on screen saying so. Choosing that over an unreadable rectangle was the user's call.
     #[test]
+    #[cfg(target_os = "linux")]
     fn a_console_with_room_for_a_line_but_not_the_answer_has_no_box() {
         let metrics = with_metrics(|metrics| metrics.clone());
         let theme = theme::Theme::default();
         let mut pane = pane_with("sleep 30", 0);
-        if !hold_a_paste_on(&mut pane) {
-            return;
-        }
+        hold_a_paste_on(&mut pane);
         let ctx = egui::Context::default();
         ctx.run_ui(egui::RawInput::default(), |_| {})
             .drop_without_applying_deltas();
@@ -3016,6 +3096,11 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_console_with_room_for_a_line_but_not_the_answer_has_no_box,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     /// **The wording for a window that lost the desktop's focus never lays out taller than the other
     /// two**, with the built-in font, at every width from 4 to 120 cells.
     ///
@@ -3026,13 +3111,12 @@ mod tests {
     /// console — in a focused window too, where it is never shown — and a console that used to hold
     /// the question holds its paste in silence instead. The first wording written for it did that.
     #[test]
+    #[cfg(target_os = "linux")]
     fn the_wording_for_an_absent_window_costs_no_console_its_notice() {
         let metrics = with_metrics(|metrics| metrics.clone());
         let theme = theme::Theme::default();
         let mut pane = pane_with("sleep 30", 0);
-        if !hold_a_paste_on(&mut pane) {
-            return;
-        }
+        hold_a_paste_on(&mut pane);
         let [by_hand, by_click, once_back] = every_way_to_answer();
         for cells in 4..=120 {
             let area = egui::Rect::from_min_size(
@@ -3047,6 +3131,11 @@ mod tests {
             );
         }
     }
+
+    crate::windows_unix_omission!(
+        the_wording_for_an_absent_window_costs_no_console_its_notice,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
 
     /// **The way out that fits has to be the one that will be shown, and which one that is depends on
     /// where the keyboard is** — so a floor measured against either sentence on its own promises
@@ -3063,13 +3152,12 @@ mod tests {
     /// widths where the two wrap apart are a property of a font and a string, so a single pair of
     /// numbers here would rot into a test that passes because it stopped discriminating.
     #[test]
+    #[cfg(target_os = "linux")]
     fn no_console_gets_a_box_that_clips_the_way_out_it_will_show() {
         let metrics = with_metrics(|metrics| metrics.clone());
         let theme = theme::Theme::default();
         let mut pane = pane_with("sleep 30", 0);
-        if !hold_a_paste_on(&mut pane) {
-            return;
-        }
+        hold_a_paste_on(&mut pane);
         let margin = metrics.width();
         let ctx = egui::Context::default();
         ctx.run_ui(egui::RawInput::default(), |_| {})
@@ -3140,6 +3228,11 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        no_console_gets_a_box_that_clips_the_way_out_it_will_show,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     /// **The sentence is clipped to its own box, and nothing said so until a review did.**
     ///
     /// The ceiling shortens the box; nothing shortens the text. The only clip in force is the
@@ -3153,13 +3246,12 @@ mod tests {
     /// is clipped to. A test that read the text's position saw nothing wrong, which is why nothing
     /// caught it.
     #[test]
+    #[cfg(target_os = "linux")]
     fn the_question_is_clipped_to_its_own_box() {
         let metrics = with_metrics(|metrics| metrics.clone());
         let theme = theme::Theme::default();
         let mut pane = pane_with("sleep 30", 0);
-        if !hold_a_paste_on(&mut pane) {
-            return;
-        }
+        hold_a_paste_on(&mut pane);
         // The shape the ceiling bites on: narrow enough that the sentence wraps long, short enough
         // that half of it is less than the sentence needs. The diff's own measurement.
         let narrow = egui::Rect::from_min_size(
@@ -3235,6 +3327,11 @@ mod tests {
         output.drop_without_applying_deltas();
     }
 
+    crate::windows_unix_omission!(
+        the_question_is_clipped_to_its_own_box,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     /// **A guard was written here, found to have no scenario, and removed — and this is the test that
     /// keeps that true.**
     ///
@@ -3250,13 +3347,12 @@ mod tests {
     /// reopened instead of quietly becoming false — the same answer given to the reader loop's own
     /// unreachable guard, and what the store's card on unreachable guards prescribes.
     #[test]
+    #[cfg(target_os = "linux")]
     fn a_console_under_one_row_has_no_box_either() {
         let metrics = with_metrics(|metrics| metrics.clone());
         let theme = theme::Theme::default();
         let mut pane = pane_with("sleep 30", 0);
-        if !hold_a_paste_on(&mut pane) {
-            return;
-        }
+        hold_a_paste_on(&mut pane);
         // Under one row the ceiling's own arithmetic goes negative, which is the only scenario a
         // guard there would have. This is the probe that says whether the guard changes the answer.
         let hair = egui::Rect::from_min_size(
@@ -3282,6 +3378,11 @@ mod tests {
         assert!(found.is_none(), "a console under one row offered {found:?}");
     }
 
+    crate::windows_unix_omission!(
+        a_console_under_one_row_has_no_box_either,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     /// **The console the ceiling makes dangerous, and it is not a sliver.** Three rows is a shape the
     /// tiling allows and the old floor accepted: the box grew to fit its text, was clamped to the
     /// console, and came out a whole row tall, so «at least one row» read as «there is something
@@ -3296,13 +3397,12 @@ mod tests {
     /// So this asserts the **absence** of a box on a console that a naive ceiling would have given
     /// one, and it is the test that fails if the two are ever reordered.
     #[test]
+    #[cfg(target_os = "linux")]
     fn a_console_whose_ceiling_leaves_no_room_for_a_line_has_no_box() {
         let metrics = with_metrics(|metrics| metrics.clone());
         let theme = theme::Theme::default();
         let mut pane = pane_with("sleep 30", 0);
-        if !hold_a_paste_on(&mut pane) {
-            return;
-        }
+        hold_a_paste_on(&mut pane);
         let three_rows = egui::Rect::from_min_size(
             egui::Pos2::ZERO,
             egui::vec2(metrics.width() * 40.0, metrics.height() * 3.0),
@@ -3330,6 +3430,11 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_console_whose_ceiling_leaves_no_room_for_a_line_has_no_box,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     /// **The ceiling is a ceiling and not a size**: a console with room to spare gets the box its
     /// sentence needs, not half the console.
     ///
@@ -3337,13 +3442,12 @@ mod tests {
     /// be inside the console, under the ceiling, and tall enough for a line — while drawing a
     /// rectangle far larger than the question in it, over output somebody wants to read.
     #[test]
+    #[cfg(target_os = "linux")]
     fn a_tall_console_gets_the_box_its_question_needs_and_not_half_the_screen() {
         let metrics = with_metrics(|metrics| metrics.clone());
         let theme = theme::Theme::default();
         let mut pane = pane_with("sleep 30", 0);
-        if !hold_a_paste_on(&mut pane) {
-            return;
-        }
+        hold_a_paste_on(&mut pane);
         // Wide enough that the sentence wraps to few lines, tall enough that half of it is far more
         // than those lines need.
         let roomy = egui::Rect::from_min_size(
@@ -3385,6 +3489,11 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_tall_console_gets_the_box_its_question_needs_and_not_half_the_screen,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     /// **A notice with more to say than it has room for ends exactly at the middle of its console —
     /// neither past it nor short of it**, and it is one equality because the half is a bound on the
     /// box's bottom EDGE rather than on its height.
@@ -3406,13 +3515,12 @@ mod tests {
     /// window's top instead of the console's. A pane under a tab bar, or the lower half of a split,
     /// is the shape a person actually gets.
     #[test]
+    #[cfg(target_os = "linux")]
     fn a_capped_notice_ends_at_the_middle_of_its_console_and_not_past_it() {
         let metrics = with_metrics(|metrics| metrics.clone());
         let theme = theme::Theme::default();
         let mut pane = pane_with("sleep 30", 0);
-        if !hold_a_paste_on(&mut pane) {
-            return;
-        }
+        hold_a_paste_on(&mut pane);
         // Twenty cells is this application's floor for a console and the width two panes get, which
         // is where the sentence wraps long enough to be capped at all.
         let narrow = egui::Rect::from_min_size(
@@ -3455,6 +3563,11 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_capped_notice_ends_at_the_middle_of_its_console_and_not_past_it,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     /// Makes that console's reading end in a way that is **not** an ordinary ending, and waits for
     /// the reason to be recorded.
     ///
@@ -3490,6 +3603,7 @@ mod tests {
     /// same `stty raw -echo; …; exec sleep N` shape those tests use — or these bytes are either
     /// echoed back and drained by the line discipline, or land on a program that actually reads
     /// them, and the premise below never holds.
+    #[cfg(unix)]
     fn make_it_refuse_a_write(pane: &mut Pane) {
         // Comfortably past term-core's own ceiling (256 KiB) without this crate hard-coding the
         // exact figure it has no business knowing — the margin is the point, not the number. The
@@ -3526,6 +3640,7 @@ mod tests {
     }
 
     /// How much room this console's silence sentence needs, laid out the way the notice lays it out.
+    #[cfg(unix)]
     fn the_sentence_laid_out_over(
         pane: &Pane,
         theme: &theme::Theme,
@@ -3678,6 +3793,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn the_press_that_dismisses_the_silence_is_not_also_given_to_the_program() {
         // **A review found this surviving: the branch answered the notice and returned the queue
         // with the press still in it.** The click dismissed the sentence *and* went on to the
@@ -3742,6 +3858,11 @@ mod tests {
             "the press that dismissed the sentence was handed to the program as well"
         );
     }
+
+    crate::windows_unix_omission!(
+        the_press_that_dismisses_the_silence_is_not_also_given_to_the_program,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
 
     #[test]
     fn a_click_beside_the_silence_is_not_answered_by_it() {
@@ -3876,6 +3997,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn a_console_that_ended_well_says_nothing_over_its_grid() {
         // AC4's other half: the arm every ordinary console takes must stay silent, and a notice is
         // measured by there being no box at all.
@@ -3896,6 +4018,11 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_console_that_ended_well_says_nothing_over_its_grid,
+        "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+    );
+
     #[test]
     fn a_console_still_reading_says_nothing_over_its_grid() {
         let metrics = with_metrics(|metrics| metrics.clone());
@@ -3909,6 +4036,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn a_refused_write_says_so_without_claiming_the_output_stopped() {
         // #161, AC5. A refusal is an input-side fact; the output can be — and here is —
         // perfectly fine, so this must never reuse the sentence that opens by claiming the output
@@ -3944,6 +4072,11 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_refused_write_says_so_without_claiming_the_output_stopped,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     #[test]
     fn a_console_still_reading_and_never_refused_says_nothing_about_a_refusal() {
         // The negative this delivery adds to the one just above `a_refused_write_says_so…`: a
@@ -3959,6 +4092,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
     fn a_held_paste_the_full_queue_refuses_stays_held_and_keeps_its_send_button() {
         // #161: the one call site whose failure changes state rather than only printing. A
         // refusal is a stall that may clear, unlike a writer that gave up, so the paste must
@@ -3976,9 +4110,7 @@ mod tests {
         {
             let left = &mut window.active_mut().panes_mut()[0];
             wait_for_the_program_to_start(left);
-            if !hold_a_paste_on(left) {
-                return;
-            }
+            hold_a_paste_on(left);
             make_it_refuse_a_write(left);
         }
         let headers = window.headers;
@@ -4005,7 +4137,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_held_paste_the_full_queue_refuses_stays_held_and_keeps_its_send_button,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn a_retry_refused_after_the_sentence_was_dismissed_brings_the_sentence_back() {
         // #161, the case the delta review found: the person dismisses «the input queue is full»,
         // then types again into a queue that is still full. The flag never came down between the
@@ -4069,7 +4207,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_retry_refused_after_the_sentence_was_dismissed_brings_the_sentence_back,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn a_click_on_the_refusal_takes_it_off_the_glass_through_the_mouse_pass() {
         // #161, mirrors `a_click_on_the_silence_takes_it_off_the_glass_through_the_mouse_pass`:
         // the press has to find the box in the same geometry the painter drew it with, in a pass
@@ -4120,7 +4264,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_click_on_the_refusal_takes_it_off_the_glass_through_the_mouse_pass,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn dismissing_the_ended_output_notice_does_not_silence_a_separate_refusal() {
         // The regression for a bug the built-in code review found: the dispatch used to
         // dismiss both reasons unconditionally on any click on the silence box. When the
@@ -4181,7 +4331,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        dismissing_the_ended_output_notice_does_not_silence_a_separate_refusal,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     #[test]
+    #[cfg(target_os = "linux")]
     fn the_silence_stands_under_the_held_paste_and_gives_way_to_it() {
         // The precedence, and the reason it is not alphabetical: the paste's notice is a question
         // with bytes waiting on an answer, and this one is a statement about something already
@@ -4189,9 +4345,7 @@ mod tests {
         let metrics = with_metrics(|metrics| metrics.clone());
         let theme = theme::Theme::default();
         let mut pane = pane_with("yes", 0);
-        if !hold_a_paste_on(&mut pane) {
-            return;
-        }
+        hold_a_paste_on(&mut pane);
         make_it_go_quiet(&mut pane);
         let area = a_roomy_console(&metrics);
 
@@ -4208,7 +4362,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        the_silence_stands_under_the_held_paste_and_gives_way_to_it,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     #[test]
+    #[cfg(target_os = "linux")]
     fn both_notices_together_stay_out_of_the_bottom_half_of_their_console() {
         // AC6 over the pair, which is the case the ceiling was asked for: the bottom half is where a
         // console's last output is, it is the first thing somebody marks, and marking begins with a
@@ -4222,9 +4382,7 @@ mod tests {
         let metrics = with_metrics(|metrics| metrics.clone());
         let theme = theme::Theme::default();
         let mut pane = pane_with("yes", 0);
-        if !hold_a_paste_on(&mut pane) {
-            return;
-        }
+        hold_a_paste_on(&mut pane);
         make_it_go_quiet(&mut pane);
         let mut refused = 0;
         let mut allowed = 0;
@@ -4277,16 +4435,20 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        both_notices_together_stay_out_of_the_bottom_half_of_their_console,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     #[test]
+    #[cfg(target_os = "linux")]
     fn a_console_with_room_for_only_one_notice_keeps_the_question_and_drops_the_silence() {
         // AC7's precedence, and the shape is measured rather than picked: the console is as tall as
         // the paste's own notice needs plus what the ceiling costs, so the second one cannot fit.
         let metrics = with_metrics(|metrics| metrics.clone());
         let theme = theme::Theme::default();
         let mut pane = pane_with("yes", 0);
-        if !hold_a_paste_on(&mut pane) {
-            return;
-        }
+        hold_a_paste_on(&mut pane);
         make_it_go_quiet(&mut pane);
         let narrow = egui::Rect::from_min_size(
             egui::pos2(41.0, metrics.height() * 1.5),
@@ -4310,6 +4472,11 @@ mod tests {
              a sentence"
         );
     }
+
+    crate::windows_unix_omission!(
+        a_console_with_room_for_only_one_notice_keeps_the_question_and_drops_the_silence,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
 
     #[test]
     fn a_console_too_short_for_the_whole_sentence_says_nothing_at_all() {
@@ -4427,6 +4594,7 @@ mod tests {
     /// the same unrefreshed state it was written for. That frame is accepted with its reason, in
     /// `answer_a_clicked_question`.
     #[test]
+    #[cfg(target_os = "linux")]
     fn a_press_on_the_panel_beside_it_does_not_answer_the_question() {
         let ctx = egui::Context::default();
         let rects = two_wide_panes();
@@ -4436,9 +4604,7 @@ mod tests {
             &metrics,
             "a_press_on_the_panel_beside_it_does_not_answer_the_question",
         );
-        if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
-            return;
-        }
+        hold_a_paste_on(window.active_mut().panes_mut()[0]);
         // The strip the panel occupies: inside the pane, outside the console. Asserted, so that a
         // pane whose panel stopped taking columns turns this test red instead of vacuous.
         let console = window.active_mut().panes_mut()[0].console_within(
@@ -4466,6 +4632,11 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_press_on_the_panel_beside_it_does_not_answer_the_question,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     /// **Answering a question takes one press out of the queue and leaves the rest**, and the event
     /// that proves it is a **release**.
     ///
@@ -4476,6 +4647,7 @@ mod tests {
     /// program is left believing the button is still down — for ever, per the routing's own comment,
     /// and it then steals the next release.
     #[test]
+    #[cfg(target_os = "linux")]
     fn answering_a_question_does_not_swallow_the_rest_of_the_queue() {
         let ctx = egui::Context::default();
         let metrics = with_metrics(|metrics| metrics.clone());
@@ -4494,9 +4666,7 @@ mod tests {
             &metrics,
             "answering_a_question_does_not_swallow_the_rest_of_the_queue",
         );
-        if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
-            return;
-        }
+        hold_a_paste_on(window.active_mut().panes_mut()[0]);
         let theme = window.theme;
         let console = window.active_mut().panes_mut()[0].console_within(
             rects[0],
@@ -4581,18 +4751,22 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        answering_a_question_does_not_swallow_the_rest_of_the_queue,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     /// A console whose program asked for the mouse and holds a paste, beside room to press that is
     /// not the notice — the staging of the test above — with where the notice is and where the
     /// program can be pressed.
+    #[cfg(target_os = "linux")]
     fn a_question_beside_a_program_that_asks_for_the_mouse(
         rects: &[egui::Rect],
         metrics: &CellMetrics,
         case: &str,
     ) -> Option<(Window, egui::Rect, egui::Rect, egui::Pos2)> {
         let mut window = a_pane_that_asks_for_the_mouse(rects, metrics, case);
-        if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
-            return None;
-        }
+        hold_a_paste_on(window.active_mut().panes_mut()[0]);
         let theme = window.theme;
         let console = window.active_mut().panes_mut()[0].console_within(
             rects[0],
@@ -4620,6 +4794,7 @@ mod tests {
     }
 
     /// The report a press on that point sends, as `cat -v` shows it.
+    #[cfg(unix)]
     fn the_press_report_at(
         window: &Window,
         console: egui::Rect,
@@ -4633,6 +4808,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
     fn a_press_that_answers_the_question_is_not_handed_to_the_program_on_a_repeated_pass() {
         // **The answer takes the press out of the batch; a mouse pass that read the same batch
         // again would put it back.** egui 0.36 hands a frame's events to its first pass only (see
@@ -4731,7 +4907,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_press_that_answers_the_question_is_not_handed_to_the_program_on_a_repeated_pass,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     #[test]
+    #[cfg(target_os = "linux")]
     fn a_drag_from_a_press_that_answered_the_question_marks_text() {
         // **The drag latch is read on a later frame than the press that set it.** A press that
         // reached the program leaves it saying «the program's»; a press that answers the question
@@ -4782,18 +4964,22 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_drag_from_a_press_that_answered_the_question_marks_text,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     /// **Only the primary button answers, and nothing pinned that.** Accepting any button leaves the
     /// whole suite green, and the middle one is X11's paste — this file's own comment calls that
     /// button «not theoretical». A middle press on a notice would have destroyed the held paste.
     #[test]
+    #[cfg(target_os = "linux")]
     fn only_the_primary_button_answers_the_question() {
         let ctx = egui::Context::default();
         let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
         let mut window = window_with("sleep 30", "sleep 30");
-        if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
-            return;
-        }
+        hold_a_paste_on(window.active_mut().panes_mut()[0]);
         let theme = window.theme;
         let at = the_notice_box(window.active().panes()[0], &theme, &metrics, rects[0]).center();
 
@@ -4820,22 +5006,23 @@ mod tests {
         }
     }
 
+    crate::windows_unix_omission!(
+        only_the_primary_button_answers_the_question,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     /// **One click answers one question, not every standing one.** Every other test of this fix holds
     /// a paste on a single console, so two questions never stand at once and a loop that cleared them
     /// all would pass — measured.
     #[test]
+    #[cfg(target_os = "linux")]
     fn a_click_answers_only_the_question_it_landed_on() {
         let ctx = egui::Context::default();
         let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
         let mut window = window_with("sleep 30", "sleep 30");
-        if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
-            return;
-        }
-        assert!(
-            hold_a_paste_on(window.active_mut().panes_mut()[1]),
-            "the premise failed: the second console did not hold its paste"
-        );
+        hold_a_paste_on(window.active_mut().panes_mut()[0]);
+        hold_a_paste_on(window.active_mut().panes_mut()[1]);
         let theme = window.theme;
         let at = the_notice_box(window.active().panes()[0], &theme, &metrics, rects[0]).center();
 
@@ -4851,6 +5038,11 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_click_answers_only_the_question_it_landed_on,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     /// **A console too narrow for the notice has no box to press either**, and the width half of that
     /// floor was untested while the height half was.
     ///
@@ -4862,13 +5054,12 @@ mod tests {
     /// the answer's own measurement instead of picked, and the width is the only thing left to
     /// refuse the box.
     #[test]
+    #[cfg(target_os = "linux")]
     fn a_console_too_narrow_for_the_notice_has_no_box_to_press() {
         let metrics = with_metrics(|metrics| metrics.clone());
         let theme = theme::Theme::default();
         let mut pane = pane_with("sleep 30", 0);
-        if !hold_a_paste_on(&mut pane) {
-            return;
-        }
+        hold_a_paste_on(&mut pane);
         // Only the width reaches the wrapping, so the answer can be measured before the console it
         // will be shown on exists.
         let three_cells = metrics.width() * 3.0;
@@ -4915,6 +5106,11 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_console_too_narrow_for_the_notice_has_no_box_to_press,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     /// **The press is judged where the button went down, not where the pointer ended up.** egui's
     /// «interact position» is the *latest* one in the batch, and a batch that carries the press and
     /// then a move — a flicked click, or any frame that batches, and this window can freeze for a
@@ -4923,14 +5119,13 @@ mod tests {
     ///
     /// The move that follows the press here is what no other test of this fix delivers.
     #[test]
+    #[cfg(target_os = "linux")]
     fn the_press_is_judged_where_the_button_went_down() {
         let ctx = egui::Context::default();
         let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
         let mut window = window_with("sleep 30", "sleep 30");
-        if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
-            return;
-        }
+        hold_a_paste_on(window.active_mut().panes_mut()[0]);
         let theme = window.theme;
         let notice = the_notice_box(window.active().panes()[0], &theme, &metrics, rects[0]);
         let on_the_notice = notice.center();
@@ -4962,11 +5157,17 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        the_press_is_judged_where_the_button_went_down,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     /// **`Ctrl+Shift` on a notice must not answer it**, because that chord moves the console
     /// (**D20**): letting it through would move a pane **and destroy the held paste in silence**,
     /// which is the precise failure this whole feature exists to stop. The bare escape hatch that
     /// takes the selection back (**D23**) must not answer either.
     #[test]
+    #[cfg(target_os = "linux")]
     fn a_chorded_press_on_the_notice_does_not_destroy_the_paste() {
         let ctx = egui::Context::default();
         let rects = two_wide_panes();
@@ -4975,9 +5176,7 @@ mod tests {
 
         for chord in [MOVE_CHORD, egui::Modifiers::SHIFT] {
             let mut window = window_with("sleep 30", "sleep 30");
-            if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
-                return;
-            }
+            hold_a_paste_on(window.active_mut().panes_mut()[0]);
             let notice = the_notice_box(window.active().panes()[0], &theme, &metrics, rects[0]);
             let at = notice.center();
 
@@ -5004,6 +5203,11 @@ mod tests {
         }
     }
 
+    crate::windows_unix_omission!(
+        a_chorded_press_on_the_notice_does_not_destroy_the_paste,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     /// **The half of the click that no assertion about the notice can see**: it is answered and
     /// **does not reach the program underneath**. It needs a console whose program really asked for
     /// the mouse — with a `sleep 30` inside, no report would be sent either way, so every assertion
@@ -5015,6 +5219,7 @@ mod tests {
     /// does arrive proves the round trip works *and* names its own cell — and the cell of the click
     /// that answered the question is asserted absent from a screen that already carries the other.
     #[test]
+    #[cfg(target_os = "linux")]
     fn a_click_on_the_notice_does_not_reach_the_program_that_asked_for_the_mouse() {
         let ctx = egui::Context::default();
         let rects = two_wide_panes();
@@ -5024,9 +5229,7 @@ mod tests {
             &metrics,
             "a_click_on_the_notice_does_not_reach_the_program_that_asked_for_the_mouse",
         );
-        if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
-            return;
-        }
+        hold_a_paste_on(window.active_mut().panes_mut()[0]);
 
         // The notice goes over the **console**, which is not the whole pane here: this one has a
         // panel published beside it.
@@ -5085,16 +5288,21 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_click_on_the_notice_does_not_reach_the_program_that_asked_for_the_mouse,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
+
     #[test]
+    #[cfg(target_os = "linux")]
     fn a_pasted_line_that_does_not_fit_reaches_the_program_as_nothing_at_all() {
         // **The wiring, and without this test there is none.** Every other paste test here uses
         // short text, so reverting `send_keys` to the composition it had before this fix restores the
         // bug in full and nothing goes red: all the holding coverage calls the module directly. What
         // this pins is the thing the user meets — the bytes do not reach the program — and not that
         // some field was set.
-        let Some(boundary) = keyboard::the_longest_line_a_reader_keeps() else {
-            return;
-        };
+        let boundary = keyboard::the_longest_line_a_reader_keeps()
+            .expect("Linux declares the canonical-input boundary");
         let ctx = egui::Context::default();
         let mut pane = pane_with("sleep 30", 0);
         let mut modifiers = egui::Modifiers::NONE;
@@ -5125,6 +5333,11 @@ mod tests {
             "nothing was written and nothing is being asked about either: the paste just vanished"
         );
     }
+
+    crate::windows_unix_omission!(
+        a_pasted_line_that_does_not_fit_reaches_the_program_as_nothing_at_all,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
 
     #[test]
     fn with_shift_the_text_is_pasted_and_without_it_the_control_byte_goes() {
@@ -5517,6 +5730,11 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_file_published_while_the_channel_holds_the_panel_is_read_when_the_hold_ends,
+        "unix-only: exercises the Unix panel-control endpoint"
+    );
+
     #[test]
     fn done_probes_the_file_after_a_watcher_notice_was_consumed() {
         let ctx = egui::Context::default();
@@ -5607,6 +5825,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn reads_from_two_real_panes_survive_one_closing_in_the_final_report() {
         let ctx = egui::Context::default();
         let mut window = Window::with_tabs(&ctx, 1, OpeningLayout::DEFAULT, None)
@@ -5670,6 +5889,11 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        reads_from_two_real_panes_survive_one_closing_in_the_final_report,
+        "unix-only: exercises the Unix panel-control endpoint"
+    );
+
     #[test]
     fn a_control_requested_pane_close_retires_its_old_watcher_before_the_directory() {
         let ctx = egui::Context::default();
@@ -5720,6 +5944,7 @@ mod tests {
     /// **By hand and not over a socket**, because what these tests are about is what the window does
     /// with a request: that a line on a socket becomes one, and that the answer goes back, is
     /// covered beside the listener.
+    #[cfg(unix)]
     fn ask_the_window(
         window: &mut Window,
         ctx: &egui::Context,
@@ -5735,6 +5960,7 @@ mod tests {
 
     /// The same, with the window's rectangle said, **which is what the refusal of a split that does
     /// not fit needs**: the geometry is the whole of that answer.
+    #[cfg(unix)]
     fn ask_the_window_at(
         window: &mut Window,
         ctx: &egui::Context,
@@ -5798,6 +6024,11 @@ mod tests {
             "a name was spent on a split that did not happen"
         );
     }
+
+    crate::windows_unix_omission!(
+        a_split_that_does_not_fit_is_refused_and_spends_nothing,
+        "unix-only: exercises the Unix panel-control endpoint"
+    );
 
     /// **AC15's doors, and the assertion is on the write happening through the real door** — not on
     /// a flag set by hand. Without this, deleting the call in `keyboard.rs` or in `mouse.rs` leaves
@@ -5975,6 +6206,11 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        an_agent_opens_a_console_without_moving_the_focus_and_loses_it_when_somebody_types,
+        "unix-only: exercises the Unix panel-control endpoint"
+    );
+
     /// An intentional session reset removes exactly that producer's work: its panel disappears,
     /// untouched auxiliary consoles close, a console the person took over survives, and repeating
     /// the same request reports the same transition without closing anything else. A later
@@ -5985,12 +6221,22 @@ mod tests {
         check_session_retirement(None);
     }
 
+    crate::windows_unix_omission!(
+        retiring_a_session_clears_its_panel_and_only_its_untouched_consoles,
+        "unix-only: exercises the Unix panel-control endpoint"
+    );
+
     #[test]
     #[cfg(unix)]
     fn a_done_holder_can_retire_its_auxiliaries_even_after_a_file_takes_the_document() {
         check_session_retirement(Some(false));
         check_session_retirement(Some(true));
     }
+
+    crate::windows_unix_omission!(
+        a_done_holder_can_retire_its_auxiliaries_even_after_a_file_takes_the_document,
+        "unix-only: exercises the Unix panel-control endpoint"
+    );
 
     #[cfg(unix)]
     fn check_session_retirement(file_takeover: Option<bool>) {
@@ -6330,6 +6576,11 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_disconnect_after_an_admitted_retirement_does_not_release_its_authority_early,
+        "unix-only: exercises the Unix panel-control endpoint"
+    );
+
     #[test]
     #[cfg(unix)]
     fn a_publication_after_a_queued_retirement_cannot_overtake_it() {
@@ -6429,6 +6680,11 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_publication_after_a_queued_retirement_cannot_overtake_it,
+        "unix-only: exercises the Unix panel-control endpoint"
+    );
+
     #[test]
     #[cfg(unix)]
     fn an_ordinary_disconnect_preserves_the_panel_and_every_auxiliary_console() {
@@ -6519,6 +6775,11 @@ mod tests {
             "not the refusal: {why}"
         );
     }
+
+    crate::windows_unix_omission!(
+        an_ordinary_disconnect_preserves_the_panel_and_every_auxiliary_console,
+        "unix-only: exercises the Unix panel-control endpoint"
+    );
 
     #[test]
     fn retirement_validation_refuses_every_incomplete_tree_change_atomically() {
@@ -6628,6 +6889,11 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        only_a_console_an_agent_opened_says_on_its_panel_that_it_went_back,
+        "unix-only: exercises the Unix panel-control endpoint"
+    );
+
     /// **AC16, the half that is reachable**: a console the agent opened is closed by its handle, the
     /// tree loses it, and the handle is forgotten with it. Without this, a build that refused *every*
     /// close would pass the refusal tests and close nothing.
@@ -6690,6 +6956,11 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_console_the_agent_opened_is_closed_by_its_handle_and_the_handle_is_forgotten,
+        "unix-only: exercises the Unix panel-control endpoint"
+    );
+
     /// **AC16**: a handle nobody issued is refused, **and a handle that belongs to another connection
     /// too** — the scope is the connection and not the name, which is the whole of what the handle is
     /// for.
@@ -6745,14 +7016,58 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_close_is_refused_for_a_handle_this_connection_does_not_own,
+        "unix-only: exercises the Unix panel-control endpoint"
+    );
+
     /// Builds a pane with a program inside, with no interface framework in the way.
     ///
     /// The two halves of the frame tested here —pumping and resizing— do not touch the desktop
     /// window, so there is no need to open one: the struct is armed by hand with the same pieces as
     /// [`Pane::new_counting_reads`].
     fn pane_with(program: &str, name: usize) -> Pane {
+        #[cfg(unix)]
         let (pty, output) = Pty::spawn("sh", &["-c", program], INITIAL_GRID)
             .expect("could not open the pseudoterminal");
+        #[cfg(windows)]
+        let (pty, output) = {
+            let command = if let Some(seconds) = program.strip_prefix("sleep ") {
+                assert!(
+                    seconds.parse::<f64>().is_ok(),
+                    "invalid sleep fixture: {program}"
+                );
+                format!("Start-Sleep -Seconds {seconds}")
+            } else if program == "yes" {
+                "while ($true) { [Console]::WriteLine('y') }".to_owned()
+            } else if program == "true" {
+                "exit 0".to_owned()
+            } else if let Some(text) = program.strip_prefix("printf ") {
+                let text = text
+                    .strip_prefix('\'')
+                    .and_then(|t| t.strip_suffix('\''))
+                    .unwrap_or(text);
+                let text = text
+                    .replace("\\n", "\n")
+                    .replace("\\r", "\r")
+                    .replace('\'', "''");
+                format!("[Console]::Write('{text}')")
+            } else {
+                panic!("unsupported Windows test fixture: {program}");
+            };
+            Pty::spawn(
+                "powershell.exe",
+                &[
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    &command,
+                ],
+                INITIAL_GRID,
+            )
+            .expect("could not open the pseudoterminal")
+        };
 
         Pane {
             name,
@@ -6764,6 +7079,7 @@ mod tests {
             pty: pty.into(),
             pty_output: PtyOutput::new(output, || {}),
             _shell_integration: None,
+            annotated: Default::default(),
             panel: None,
             control: None,
             panel_state: panel::PanelState::default(),
@@ -6819,6 +7135,11 @@ mod tests {
         assert_eq!(other_received.so_far(), other_expected);
         assert_eq!(pane.screen.size(), INITIAL_GRID);
     }
+
+    crate::windows_unix_omission!(
+        terminal_query_replies_reach_the_program_through_the_console_pump,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
 
     /// Builds a window with two consoles, each one with its program, without opening any real
     /// window.
@@ -6970,6 +7291,7 @@ mod tests {
     /// death after having delivered the last chunk. Without this wait, how much has been collected
     /// depends on which chunks the pseudoterminal splits the output into, and the test would give a
     /// different number every time.
+    #[cfg(unix)]
     fn wait_for_it_to_die(pane: &Pane) {
         let deadline = Instant::now() + Duration::from_secs(5);
         while pane.pty_output.is_alive() {
@@ -6979,6 +7301,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn what_the_program_writes_ends_up_in_the_grid_only_once() {
         let mut pane = pane_with("printf hello", 0);
         wait_for_it_to_die(&pane);
@@ -7003,7 +7326,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        what_the_program_writes_ends_up_in_the_grid_only_once,
+        "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn a_dump_bigger_than_the_budget_takes_several_frames_and_arrives_whole() {
         // Three budgets and a bit: enough that no frame can take it all, and little enough that the
         // test still takes milliseconds.
@@ -7051,6 +7380,11 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_dump_bigger_than_the_budget_takes_several_frames_and_arrives_whole,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     #[test]
     fn the_grid_takes_the_size_the_previous_pass_measured() {
         let mut pane = pane_with("sleep 30", 0);
@@ -7063,6 +7397,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn on_resizing_the_program_inside_finds_out_about_the_new_size() {
         // The **other** half of AC5, and the one that was not tested: the test above only checks
         // the grid, so replacing `Pty::resize` with an `Ok(())` left the whole suite green. And
@@ -7087,6 +7422,11 @@ mod tests {
 
         wait_for_the_screen_to_say(&mut pane, &format!("{} {}", new.rows, new.cols));
     }
+
+    crate::windows_unix_omission!(
+        on_resizing_the_program_inside_finds_out_about_the_new_size,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
 
     /// Pumps until the program inside has written **something**, which is the only sign from
     /// outside that it has already taken over the pseudoterminal.
@@ -7185,6 +7525,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn the_window_opens_two_consoles_each_with_its_own_program_alive() {
         // AC1. Two different programs at once, and each grid with its own: it is the check that
         // they share neither pseudoterminal nor screen, which is what «without treading on each
@@ -7212,6 +7553,11 @@ mod tests {
             "what one console wrote appeared in the other"
         );
     }
+
+    crate::windows_unix_omission!(
+        the_window_opens_two_consoles_each_with_its_own_program_alive,
+        "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+    );
 
     #[test]
     fn the_focus_starts_on_the_left_in_a_freshly_opened_window() {
@@ -7363,6 +7709,7 @@ mod tests {
     /// redirects some other way —nushell, PowerShell— this test would fail because of the
     /// configuration of whoever runs it instead of because of the code.
     #[test]
+    #[cfg(unix)]
     fn the_program_inside_publishes_in_the_directory_it_was_told() {
         let mut pane = Pane::launching(&egui::Context::default(), "sh", 0)
             .expect("could not open the console");
@@ -7396,6 +7743,11 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        the_program_inside_publishes_in_the_directory_it_was_told,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     /// The complete list of what the application puts into the environment of a user's program,
     /// **looking at what the program really sees** and not at the constants that are chained
     /// together to build it. The difference is not theoretical: with the version that compared
@@ -7411,11 +7763,16 @@ mod tests {
     /// and the difference would stop being the application's. `SHELL` is discounted because
     /// `portable-pty` sets it on its own, read from the user database, not this application.
     #[test]
+    #[cfg(unix)]
     fn the_program_sees_no_variable_that_is_not_declared() {
         let panel = PanelDir::create().expect("create a panel directory");
-        let (_pty, channel) =
-            Pty::spawn_with_env("env", &[], INITIAL_GRID, &identity_of(Some(&panel)))
-                .expect("launch env");
+        let (_pty, channel) = Pty::spawn_with_env(
+            "env",
+            &[],
+            INITIAL_GRID,
+            &panel::pane::identity_of(Some(&panel)),
+        )
+        .expect("launch env");
 
         let output = drain_until_closed(&channel);
         let of_the_child: std::collections::HashMap<&str, &str> = output
@@ -7484,7 +7841,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        the_program_sees_no_variable_that_is_not_declared,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     /// Collects the output of a program until it dies and returns it as text.
+    #[cfg(unix)]
     fn drain_until_closed(channel: &std::sync::mpsc::Receiver<Vec<u8>>) -> String {
         let mut bytes = Vec::new();
         while let Ok(chunk) = channel.recv_timeout(Duration::from_secs(10)) {
@@ -7499,7 +7862,7 @@ mod tests {
     /// console with the identity of the mother.
     #[test]
     fn a_console_with_no_directory_orders_both_variables_removed() {
-        let identity = identity_of(None);
+        let identity = panel::pane::identity_of(None);
 
         assert_eq!(
             identity,
@@ -7527,6 +7890,7 @@ mod tests {
     /// assertion over the grid the test stayed green, because the two names had gone off the
     /// screen.
     #[test]
+    #[cfg(unix)]
     fn a_console_with_no_directory_starts_the_same_and_its_program_does_not_see_the_identity() {
         let mut pane = Pane::with_panel(&egui::Context::default(), "env", &[], None, 0)
             .expect("a console with no panel has to open just the same");
@@ -7549,6 +7913,11 @@ mod tests {
             );
         }
     }
+
+    crate::windows_unix_omission!(
+        a_console_with_no_directory_starts_the_same_and_its_program_does_not_see_the_identity,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
 
     #[test]
     fn when_the_window_closes_no_panel_directories_are_left() {
@@ -8157,6 +8526,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn closing_a_tab_by_hand_does_not_close_the_window_with_what_was_left_to_read() {
         // The case shows up exactly when closing becomes possible: a tab whose two programs have
         // already finished —and whose last content is being read— next to another one with a live
@@ -8187,6 +8557,11 @@ mod tests {
             "the window closed on its own after a close by hand, with what was left to read"
         );
     }
+
+    crate::windows_unix_omission!(
+        closing_a_tab_by_hand_does_not_close_the_window_with_what_was_left_to_read,
+        "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+    );
 
     #[test]
     fn after_creating_and_closing_the_watcher_still_sees_what_is_left() {
@@ -8388,6 +8763,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn one_console_dying_does_not_close_the_window() {
         // AC8, and it is the criterion that gives the milestone its point: with two agents
         // working, one of them finishing cannot take down the other one's window. The naive
@@ -8407,7 +8783,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        one_console_dying_does_not_close_the_window,
+        "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn the_window_closes_when_both_have_died_and_no_queue_is_left() {
         // AC9. And the «with no queue» is not an ornament: dying does not erase what the program
         // wrote before doing so, and closing with output pending would eat the ending, which is
@@ -8433,7 +8815,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        the_window_closes_when_both_have_died_and_no_queue_is_left,
+        "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn the_console_of_a_tab_that_is_not_seen_goes_on_being_drained() {
         // **This is what the milestone promises**, and what sets this terminal apart from opening
         // two windows: an agent working in another tab does not stop because you are not looking
@@ -8466,7 +8854,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        the_console_of_a_tab_that_is_not_seen_goes_on_being_drained,
+        "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn a_live_console_in_a_background_tab_does_not_let_the_window_close() {
         // The same criterion that already holds for the two consoles of one tab, stretched to all
         // of them: closing with something live behind would take down work that nobody has seen
@@ -8485,7 +8879,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_live_console_in_a_background_tab_does_not_let_the_window_close,
+        "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn the_window_closes_when_those_of_every_tab_have_died() {
         // **The positive half of the same criterion, and without it the one above is met on its
         // own.** «With more than one tab, never close» passes the test next door and leaves a
@@ -8522,6 +8922,11 @@ mod tests {
             "a background console was given up for finished with its output not yet in the grid"
         );
     }
+
+    crate::windows_unix_omission!(
+        the_window_closes_when_those_of_every_tab_have_died,
+        "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+    );
 
     #[test]
     fn the_alarm_does_not_get_up_early_for_a_panel_that_is_not_seen() {
@@ -8624,6 +9029,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn what_an_unpainted_console_interprets_is_declared_all_the_same() {
         // **The real path, not the helper.** That `Timings` can close a round trip with no painting
         // is already tied down by a unit test; what is checked here is that **somebody calls it**
@@ -8698,7 +9104,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        what_an_unpainted_console_interprets_is_declared_all_the_same,
+        "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn the_unpainted_console_declares_what_it_interpreted_and_not_one_span_more() {
         // That it declares **something** is already tied down by the test above; what is missing is
         // that that something be **exactly what it interpreted**. Putting anything else where the
@@ -8743,7 +9155,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        the_unpainted_console_declares_what_it_interpreted_and_not_one_span_more,
+        "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn the_sweep_of_the_unpainted_goes_after_the_painting_and_not_before() {
         // **The order inside the interface pass, which is not indifferent.** Sweeping what is
         // pending before painting —freshly pumped, which is where it looks like it goes— takes down
@@ -8774,6 +9192,11 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        the_sweep_of_the_unpainted_goes_after_the_painting_and_not_before,
+        "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+    );
+
     /// The session's report, exactly as the application writes it when it closes.
     fn report_of(window: &Window) -> String {
         let mut output = Vec::new();
@@ -8801,6 +9224,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn the_report_says_how_many_tabs_there_were_and_which_one_was_visible() {
         // **Without this, two different measurement batches produce indistinguishable reports.**
         // The spans below are taken with every tab pumping, so a two-tab batch and a one-tab batch
@@ -8840,7 +9264,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        the_report_says_how_many_tabs_there_were_and_which_one_was_visible,
+        "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn the_report_publishes_the_size_the_window_had() {
         // **It is the only header line that can be asked for again**, and without it a measurement
         // annex cannot be reproduced: the grid in cells comes out of the size **and** of the font's
@@ -8878,7 +9308,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        the_report_publishes_the_size_the_window_had,
+        "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn the_report_publishes_the_font_the_window_was_really_opened_with() {
         // **Asking for a family by name is the only thing that enumerates the machine at start-up**
         // —between 17.3 and 23.2 ms, **D24**— and it does **not** go through the discovery counters,
@@ -8929,7 +9365,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        the_report_publishes_the_font_the_window_was_really_opened_with,
+        "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn the_report_publishes_the_spans_of_the_consoles_of_every_tab() {
         // **What this milestone makes measurable would be lost right at the moment of publishing
         // it.** A background console times its interpreting just like the visible ones —that is
@@ -8980,7 +9422,13 @@ mod tests {
         }
     }
 
+    crate::windows_unix_omission!(
+        the_report_publishes_the_spans_of_the_consoles_of_every_tab,
+        "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn a_dump_in_one_console_neither_stalls_nor_dirties_the_other() {
         // AC10. The terminal's brake is **per console**: while one dumps, the one beside it goes on
         // delivering its own in the same frame. If the budget were shared, the second one would be
@@ -9040,6 +9488,11 @@ mod tests {
             );
         }
     }
+
+    crate::windows_unix_omission!(
+        a_dump_in_one_console_neither_stalls_nor_dirties_the_other,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
 
     /// Runs the body with the metric the window really uses, so that what these tests call «the
     /// bar's height» is the same number that gets painted.
@@ -9706,6 +10159,7 @@ mod tests {
     /// bare click lands elsewhere in the same console; the pseudoterminal keeps order, so once the
     /// control's report is on screen a report for the link's press would already be there too.
     #[test]
+    #[cfg(unix)]
     fn a_ctrl_click_on_a_bracketed_url_opens_it_once_and_the_program_hears_nothing() {
         let ctx = egui::Context::default();
         let rects = [
@@ -9780,6 +10234,11 @@ mod tests {
             "the program received a report for the press the link took: {heard:?}"
         );
     }
+
+    crate::windows_unix_omission!(
+        a_ctrl_click_on_a_bracketed_url_opens_it_once_and_the_program_hears_nothing,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
 
     /// **AC2**, with the design's literal label.
     #[test]
@@ -10164,6 +10623,7 @@ mod tests {
     /// With `repeating` set to `true` it asks for a discard on the first pass, which is the way to
     /// provoke the two-pass frame. It returns how many there were, so that whoever uses it can
     /// assert that it really did repeat instead of taking for granted that egui obeyed.
+    #[cfg(unix)]
     fn one_frame_like_eframe(window: &mut Window, ctx: &egui::Context, repeating: bool) -> usize {
         let mut frame = eframe::Frame::_new_kittest();
         let input = egui::RawInput {
@@ -10187,6 +10647,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn closing_a_tab_does_not_rename_the_ones_that_are_left_in_the_report() {
         // **The report is published on exit, with the whole session's numbers, and the labels used
         // to be written with the position in the list.** When a tab is closed the ones to its right
@@ -10229,6 +10690,11 @@ mod tests {
             "the tab that was left was published as tab 0, which is the one that was closed:\n{report}"
         );
     }
+
+    crate::windows_unix_omission!(
+        closing_a_tab_does_not_rename_the_ones_that_are_left_in_the_report,
+        "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+    );
 
     #[test]
     fn two_tabs_opened_one_after_the_other_are_not_called_the_same() {
@@ -10359,6 +10825,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn closing_a_tab_does_not_take_away_what_its_consoles_had_already_declared() {
         // When a tab is closed its panes are dropped **with their `Timings` inside**, and there may
         // be a round trip recorded there from this very frame: bytes interpreted an instant ago. If
@@ -10418,7 +10885,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        closing_a_tab_does_not_take_away_what_its_consoles_had_already_declared,
+        "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn what_is_declared_apart_is_discounted_from_the_rest_and_not_carried_to_the_next_frame() {
         // **The two tests above are not enough, and a mutation proved it:** noting the cost down in
         // the field and not subtracting it from the total left all 272 green. Checking that
@@ -10472,7 +10945,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        what_is_declared_apart_is_discounted_from_the_rest_and_not_carried_to_the_next_frame,
+        "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn a_two_pass_frame_does_not_lose_what_the_console_interpreted() {
         // **The bias, in one sentence:** the second pass pumps again, finds nothing —the queue was
         // emptied on the first one— and notes down a round with what it interpreted at almost zero.
@@ -10520,6 +10999,11 @@ mod tests {
              left without a single sample from this console"
         );
     }
+
+    crate::windows_unix_omission!(
+        a_two_pass_frame_does_not_lose_what_the_console_interpreted,
+        "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+    );
 
     /// The three events of a mouse click at a point.
     fn click_at(at: egui::Pos2) -> Vec<egui::Event> {
@@ -10973,6 +11457,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn the_program_of_a_background_tab_learns_the_size_measured_for_it() {
         // The last clause of the criterion this change covers: that the size **reaches the program
         // inside**. The other tests reach as far as `Screen`, which is this same application
@@ -11008,6 +11493,11 @@ mod tests {
         );
         wait_for_the_screen_to_say(in_the_background, &its_size);
     }
+
+    crate::windows_unix_omission!(
+        the_program_of_a_background_tab_learns_the_size_measured_for_it,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
 
     #[test]
     fn going_backwards_from_the_first_reaches_the_last() {
@@ -19767,6 +20257,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn closing_a_console_by_hand_does_not_close_the_window_with_what_was_left_to_read() {
         // **The same gesture protected the window or not depending on how many siblings the console
         // had**, and that asymmetry was visible in the code itself: closing the only console of a
@@ -19805,6 +20296,11 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        closing_a_console_by_hand_does_not_close_the_window_with_what_was_left_to_read,
+        "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+    );
+
     #[test]
     fn the_name_of_the_pane_being_closed_is_not_given_to_the_next_one() {
         // AC12 by the path this PR opens, and that until now could only be exercised by closing a
@@ -19832,6 +20328,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn with_a_single_console_the_report_does_not_say_there_are_spare_sides() {
         // **What breaks is not closing: it is what closing makes reachable.** Until this PR a tab
         // always had two consoles or more —it was born with two and splitting only added—, so «with
@@ -19874,6 +20371,11 @@ mod tests {
              is no side cannot be checked: {line}"
         );
     }
+
+    crate::windows_unix_omission!(
+        with_a_single_console_the_report_does_not_say_there_are_spare_sides,
+        "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+    );
 
     #[test]
     fn closing_leaves_no_two_branches_of_the_same_direction_nested() {
@@ -20236,6 +20738,7 @@ mod tests {
     // its retained pane costs are covered below independently of wall-clock magnitudes.
 
     #[test]
+    #[cfg(unix)]
     fn the_report_distinguishes_a_dead_focus_from_a_pane_with_no_side() {
         // **Two very different things that came out with the same text.** That there are three
         // panes and «left» no longer describes anything is normal ever since splitting became
@@ -20263,7 +20766,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        the_report_distinguishes_a_dead_focus_from_a_pane_with_no_side,
+        "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn the_report_publishes_the_dividers_in_the_order_in_which_they_are_dragged() {
         // **A badly labelled number is worse than no number**, and here the risk is exactly that:
         // the report publishes one fraction per divider, and whoever reads it matches them with the
@@ -20323,7 +20832,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        the_report_publishes_the_dividers_in_the_order_in_which_they_are_dragged,
+        "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn with_three_panes_the_report_invents_no_sides_and_calls_no_single_divider_the_divider() {
         // **The report is published on exit, and ever since splitting became possible three panes
         // are one gesture away.** Two things broke there, and neither is visible reading the tree's
@@ -20370,6 +20885,11 @@ mod tests {
             );
         }
     }
+
+    crate::windows_unix_omission!(
+        with_three_panes_the_report_invents_no_sides_and_calls_no_single_divider_the_divider,
+        "unix-only: asserts PTY reader EOF while the master is alive; ConPTY retains its pipe write end until master drop"
+    );
 
     #[test]
     fn a_background_tab_with_its_own_tree_receives_the_grid_it_is_owed() {
@@ -20899,6 +21419,7 @@ mod tests {
     }
 
     /// The border around the question a console asks about a paste it is holding.
+    #[cfg(unix)]
     fn the_held_pastes_box(
         shapes: &[egui::epaint::ClippedShape],
         outline: egui::Color32,
@@ -20926,6 +21447,7 @@ mod tests {
     }
 
     /// Where the send button's label was painted, if it was.
+    #[cfg(unix)]
     fn where_the_send_label_is(shapes: &[egui::epaint::ClippedShape]) -> Option<egui::Pos2> {
         shapes.iter().find_map(|clipped| match &clipped.shape {
             egui::Shape::Text(text) if text.galley.text() == "Send it anyway" => {
@@ -21532,6 +22054,7 @@ mod tests {
     /// **Through the window's own frame and not through a console's painter**, because what is under
     /// test is what the window hands that painter: the desktop's focus only exists at the window.
     /// Attributed by clip, for the reason [`maybe_cursors_of_the_two_consoles`] gives.
+    #[cfg(unix)]
     fn text_of_the_two_consoles(
         window: &mut Window,
         ctx: &egui::Context,
@@ -21556,6 +22079,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
     fn a_window_that_lost_the_desktops_focus_tells_its_focused_console_to_come_back() {
         // **The cursor and the notice answer the same question, and they used to answer it apart**:
         // with the window alt-tabbed away the focused console outlined its cursor — nobody is typing
@@ -21563,9 +22087,7 @@ mod tests {
         let area = area_of(800.0 + DIVIDER_THICKNESS);
         let mut window = window_with("sleep 30", "sleep 30");
         for pane in window.active_mut().panes_mut() {
-            if !hold_a_paste_on(pane) {
-                return;
-            }
+            hold_a_paste_on(pane);
         }
         focus_on(window.active_mut(), 1);
         let ctx = egui::Context::default();
@@ -21604,6 +22126,11 @@ mod tests {
             back[0]
         );
     }
+
+    crate::windows_unix_omission!(
+        a_window_that_lost_the_desktops_focus_tells_its_focused_console_to_come_back,
+        "unix-only: asserts the Linux canonical-input boundary used by held-paste handling"
+    );
 
     #[test]
     fn a_click_moves_the_filled_cursor_in_the_same_frame_that_moves_the_focus() {
@@ -23662,6 +24189,7 @@ mod tests {
     /// clips the *fraction*, so what it leaves is a part of what the two neighbors add up to — and
     /// that sum shrinks pass by pass. With a single pass it does not get there; the number of
     /// passes **is** the mechanism.
+    #[cfg(unix)]
     fn drag_every_divider_to_the_stop(window: &mut Window, passes: usize) {
         let how_many = weights_of_the_root(window).len() - 1;
         for _ in 0..passes {
@@ -23672,6 +24200,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn a_window_dragged_to_the_stops_can_still_be_saved_and_read_back() {
         // **AC11, and it is the test that was missing: nobody tied down that what the window
         // describes can be read back.** The other round trips start from trees written by hand with
@@ -23716,6 +24245,11 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_window_dragged_to_the_stops_can_still_be_saved_and_read_back,
+        "unix-only: launches the POSIX cat fixture for saved-window restoration"
+    );
+
     #[test]
     fn a_drag_that_grows_a_weight_does_not_leave_the_layout_unsaved() {
         // **The other side of the same defect, and an adversarial review exposed it.** What a drag
@@ -23742,6 +24276,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn dragging_a_long_row_without_stopping_leaves_no_weight_below_the_floor() {
         // **The other half of AC11: the drag is what PUSHES the weights down, and it has no brake
         // of its own.** The fixed point leaves each weight at the ninety-ninth part of the next, so
@@ -23788,6 +24323,11 @@ mod tests {
             "splitting the console at the floor left weights the tiling can take to zero: {after:?}"
         );
     }
+
+    crate::windows_unix_omission!(
+        dragging_a_long_row_without_stopping_leaves_no_weight_below_the_floor,
+        "unix-only: launches the POSIX cat fixture for saved-window restoration"
+    );
 
     #[test]
     fn closing_a_pane_of_tiny_weights_leaves_no_sibling_without_a_weight() {
@@ -24080,6 +24620,7 @@ mod tests {
     /// console left it green. That belongs to AC11 and to the pane tests, and saying so here is what
     /// stops the next reader treating this as the guard for it.
     #[test]
+    #[cfg(unix)]
     fn a_saved_window_comes_back_with_the_same_tree_and_the_strip_reaches_no_file() {
         let ctx = egui::Context::default();
         let area = area_of(800.0);
@@ -24119,6 +24660,11 @@ mod tests {
             "what a console's strip takes off its pane reached the layout file"
         );
     }
+
+    crate::windows_unix_omission!(
+        a_saved_window_comes_back_with_the_same_tree_and_the_strip_reaches_no_file,
+        "unix-only: launches the POSIX cat fixture for saved-window restoration"
+    );
 
     /// A valid document of two tabs: the first with two consoles of different widths and one
     /// folded, the second with a single one.
@@ -24550,6 +25096,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn a_freshly_opened_window_has_nothing_to_save() {
         // **On the production path and not on the helper**, which is what the review asked for: the
         // test helper duplicates the line that seeds the mirror, so deleting it from the real
@@ -24575,6 +25122,11 @@ mod tests {
             "a freshly opened window arms a deadline without anybody having touched anything"
         );
     }
+
+    crate::windows_unix_omission!(
+        a_freshly_opened_window_has_nothing_to_save,
+        "unix-only: launches the POSIX cat fixture for saved-window restoration"
+    );
 
     #[test]
     fn the_writing_span_is_subtracted_from_the_rest_of_the_frame() {
@@ -24690,6 +25242,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn the_window_opens_with_the_saved_layout() {
         // **The whole milestone's test seen from outside**: opening with a file in front gives back
         // the tabs, the shape of the tree and **each console's panel**. The three widths are
@@ -24736,7 +25289,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        the_window_opens_with_the_saved_layout,
+        "unix-only: launches the POSIX cat fixture for saved-window restoration"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn only_the_restored_window_declares_where_its_consoles_came_from() {
         // **Without this, the report's row is covered only by whoever calls it by hand.** The
         // report publishes `restored:` out of this field, and the measurement script **invalidates
@@ -24793,7 +25352,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        only_the_restored_window_declares_where_its_consoles_came_from,
+        "unix-only: launches the POSIX cat fixture for saved-window restoration"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn the_window_that_came_from_a_real_file_publishes_what_reading_it_cost() {
         // **The other half of the number, and the one no test touched.** The one next door opens
         // with a persistence that **never read the disk**, so it can only assert that the report
@@ -24854,7 +25419,13 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
+    crate::windows_unix_omission!(
+        the_window_that_came_from_a_real_file_publishes_what_reading_it_cost,
+        "unix-only: launches the POSIX cat fixture for saved-window restoration"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn a_panel_width_no_gesture_could_leave_comes_back_grabbable() {
         // **A zero is what a file can bring and a gesture cannot**: asking for less than the drag's
         // floor means **folding**, so the gesture never stores a width below it. Restored as it
@@ -24895,7 +25466,13 @@ mod tests {
         assert!(!restored[0].folded, "the folding was not what was saved");
     }
 
+    crate::windows_unix_omission!(
+        a_panel_width_no_gesture_could_leave_comes_back_grabbable,
+        "unix-only: launches the POSIX cat fixture for saved-window restoration"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn the_restored_window_arms_its_counters_from_what_it_opened() {
         // **The counters come out of the list that was built and not out of whatever the file
         // said**, and this ties it down: with three restored consoles, the next one to be opened
@@ -24916,7 +25493,13 @@ mod tests {
         assert_eq!(window.next_name, 2);
     }
 
+    crate::windows_unix_omission!(
+        the_restored_window_arms_its_counters_from_what_it_opened,
+        "unix-only: launches the POSIX cat fixture for saved-window restoration"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn with_nothing_saved_the_window_opens_factory_fresh() {
         let ctx = egui::Context::default();
 
@@ -24935,6 +25518,11 @@ mod tests {
         assert_eq!(window.tabs.len(), 1);
         assert_eq!(window.tabs[0].panes().len(), 2);
     }
+
+    crate::windows_unix_omission!(
+        with_nothing_saved_the_window_opens_factory_fresh,
+        "unix-only: launches the POSIX cat fixture for saved-window restoration"
+    );
 
     #[test]
     fn what_a_measurement_batch_asks_for_beats_what_was_saved() {
@@ -26149,6 +26737,7 @@ mod tests {
     /// of on the counter where it is recorded that something was sent to it: checked by mutating, a
     /// test that looked at the measurement's series stays green with the bytes going to the wrong
     /// console.
+    #[cfg(unix)]
     fn a_pane_that_asks_for_the_mouse(
         rects: &[egui::Rect],
         metrics: &CellMetrics,
@@ -26204,6 +26793,7 @@ mod tests {
     }
 
     /// Pumps the console until it shows that, or gives up saying what there is.
+    #[cfg(unix)]
     fn wait_for_the_pane_to_say(window: &mut Window, which: usize, text: &str) {
         wait_for_this_console_to_say(window.active_mut().panes_mut()[which], text);
     }
@@ -26214,6 +26804,7 @@ mod tests {
     /// starts by replacing the `Screen`, which throws away everything already parsed into it —the
     /// mouse modes among it—, so waiting with it after the program has asked for the mouse would
     /// take the answer away along with the question.
+    #[cfg(unix)]
     fn wait_for_this_console_to_say(pane: &mut Pane, text: &str) {
         let deadline = Instant::now() + Duration::from_secs(5);
         while !pane.screen.to_text().contains(text) {
@@ -26251,6 +26842,7 @@ mod tests {
     /// the tests below expect. Two columns of residue are not cosmetic here: the screen wraps, and
     /// a report split across two rows stops matching what the test looks for — measured, it broke
     /// two of them.
+    #[cfg(unix)]
     fn confirm_the_console_is_in_the_mode_it_asked_for(pane: &mut Pane) {
         pane.pty
             .write(&[0x80])
@@ -26262,6 +26854,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn the_navigation_keys_and_the_arrows_reach_a_real_program_in_the_form_it_asked_for() {
         // The program itself turns application cursor keys on, so the mode Home and End are
         // translated against is the one the screen parsed from it — not one the test set by hand.
@@ -26308,10 +26901,16 @@ mod tests {
         wait_for_this_console_to_say(&mut pane, "^[[2~^[[3~^[[5~^[[6~^[OH^[OF^[OA^[[3;5~^[[1;5D");
     }
 
+    crate::windows_unix_omission!(
+        the_navigation_keys_and_the_arrows_reach_a_real_program_in_the_form_it_asked_for,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     /// Turns the wheel over that console, with whatever chord it is told.
     ///
     /// **The pointer moves first**: the wheel goes to the console under the pointer, and without
     /// that movement egui has no position to give.
+    #[cfg(unix)]
     fn turn_the_wheel(
         window: &mut Window,
         ctx: &egui::Context,
@@ -26347,6 +26946,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn the_wheel_reaches_the_program_that_asked_for_it_and_does_not_move_the_scrollback() {
         // **D23's first branch after «Shift».** It is what makes `htop`'s list go up and down with
         // the wheel; and the scrollback does **not** move, because both things at once would leave
@@ -26393,7 +26993,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        the_wheel_reaches_the_program_that_asked_for_it_and_does_not_move_the_scrollback,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn a_page_of_wheel_reaches_the_program_as_one_notch_per_row() {
         // **A program does not understand «one page»**: what it expects are notches, and the page
         // is measured by the grid it has in front of it. Without this count, a touchpad that sends
@@ -26468,7 +27074,13 @@ mod tests {
         }
     }
 
+    crate::windows_unix_omission!(
+        a_page_of_wheel_reaches_the_program_as_one_notch_per_row,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn with_shift_the_wheel_belongs_to_the_scrollback_even_if_the_program_asks_for_it() {
         // **The escape hatch that guarantees the console's scrollback is always reachable.** What a
         // pager shows is not what went off the top of the console, so without this branch there are
@@ -26504,7 +27116,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        with_shift_the_wheel_belongs_to_the_scrollback_even_if_the_program_asks_for_it,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn on_the_alternate_screen_without_mouse_the_wheel_arrives_as_arrows() {
         // **The branch that makes `less` and `man` scroll with the wheel without asking for the
         // mouse.** It is the only one of the four where what comes out is not a report but keys,
@@ -26556,7 +27174,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        on_the_alternate_screen_without_mouse_the_wheel_arrives_as_arrows,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn under_application_cursor_keys_the_wheel_sends_the_arrows_the_program_asked_for() {
         // `less` and `vim` send `smkx` on start, so on the alternate screen the wheel almost always
         // meets DECCKM set: the arrows it sends have to be the keyboard's, in that mode.
@@ -26591,7 +27215,13 @@ mod tests {
         wait_for_the_pane_to_say(&mut window, 0, "^[OB^[OB");
     }
 
+    crate::windows_unix_omission!(
+        under_application_cursor_keys_the_wheel_sends_the_arrows_the_program_asked_for,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn a_click_reaches_the_program_that_asked_for_it_and_with_its_cell() {
         // **AC7.** It is what makes clicking inside `vim` put the cursor where it was clicked, and
         // the cell matters as much as the click: one column too many opens the menu entry next
@@ -26616,7 +27246,13 @@ mod tests {
         wait_for_the_pane_to_say(&mut window, 0, "^[[<0;4;3M");
     }
 
+    crate::windows_unix_omission!(
+        a_click_reaches_the_program_that_asked_for_it_and_with_its_cell,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn dragging_inside_a_program_that_asks_for_the_mouse_does_not_mark_text() {
         // **Both gestures come in through the same button and only one can win.** Marking as well
         // as reporting would leave the program painting its own selection with ours highlighted on
@@ -26649,7 +27285,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        dragging_inside_a_program_that_asks_for_the_mouse_does_not_mark_text,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn a_press_on_the_strip_is_not_reported_to_the_program_that_asked_for_the_mouse() {
         // **AC12: the strip belongs to the window, whatever is running underneath.** The console's
         // grid starts below it, so a press there has no cell to report — and reporting it as row 0
@@ -26728,7 +27370,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_press_on_the_strip_is_not_reported_to_the_program_that_asked_for_the_mouse,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn a_repeated_pass_does_not_send_the_click_twice_to_the_program() {
         // **A defence, pinned by hand**: egui 0.36 hands a repeated pass no events, but these
         // events cannot be consumed — the press is what egui needs to start the drag — so if an
@@ -26797,7 +27445,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_repeated_pass_does_not_send_the_click_twice_to_the_program,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn pressing_on_the_panel_does_not_hand_the_drag_to_the_program() {
         // **The status panel's columns are inside the pane's rectangle but they do not belong to
         // the console.** Recording that press as «the program's», dragging from the panel inwards
@@ -26882,7 +27536,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        pressing_on_the_panel_does_not_hand_the_drag_to_the_program,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn a_button_that_is_not_the_primary_gets_its_press_and_its_release_too() {
         // **The drag's latch belongs to the primary alone, because only the primary drags**; the
         // release's has to belong to each button. With a single one for all of them, the right
@@ -26928,7 +27588,13 @@ mod tests {
         wait_for_the_pane_to_say(&mut window, 0, "^[[<2;1;1M^[[<2;1;1m");
     }
 
+    crate::windows_unix_omission!(
+        a_button_that_is_not_the_primary_gets_its_press_and_its_release_too,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn the_chord_does_not_vanish_midway_through_the_drag() {
         // **A key held down during the gesture has to travel in EVERY report.** With the chord
         // fixed to «none» in the movement ones, the key went in the press and in the release but in
@@ -26962,7 +27628,13 @@ mod tests {
         wait_for_the_pane_to_say(&mut window, 0, "^[[<48;");
     }
 
+    crate::windows_unix_omission!(
+        the_chord_does_not_vanish_midway_through_the_drag,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn releasing_over_another_console_reports_it_to_the_one_that_got_the_press() {
         // **The defect this is after leaves the program believing the button is pressed FOREVER.**
         // Ending a drag outside the console where it started is the normal thing; resolving the
@@ -27017,7 +27689,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        releasing_over_another_console_reports_it_to_the_one_that_got_the_press,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn a_mouse_gesture_is_three_reports_and_a_single_effect() {
         // **Three things that are counted wrong separately and this test ties down together**,
         // because all three live in the same gesture:
@@ -27122,7 +27800,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_mouse_gesture_is_three_reports_and_a_single_effect,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn the_drag_does_not_repeat_the_report_of_the_cell_it_is_already_on() {
         // **A slow drag spends dozens of frames over the same cell**, and counting them all sends
         // the program sixty messages a second saying what it already knew — with its own trip to
@@ -27202,7 +27886,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        the_drag_does_not_repeat_the_report_of_the_cell_it_is_already_on,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn with_shift_text_is_marked_even_if_the_program_asks_for_the_mouse() {
         // **AC7, the other half, and it is the one that guarantees a line can always be got off the
         // screen.** Without this escape hatch, inside `htop` or `vim` there would be NO way of
@@ -27239,7 +27929,13 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        with_shift_text_is_marked_even_if_the_program_asks_for_the_mouse,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     #[test]
+    #[cfg(unix)]
     fn moving_the_pane_beats_the_program_that_asks_for_the_mouse() {
         // **The window's chord cannot be kept by a program.** If it could, opening `vim` in a
         // console would leave that console nailed where it is: there would be no way of rearranging
@@ -27268,6 +27964,11 @@ mod tests {
             "the program kept the move chord and the console did not move anywhere"
         );
     }
+
+    crate::windows_unix_omission!(
+        moving_the_pane_beats_the_program_that_asks_for_the_mouse,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
 
     /// The top left cell: the one the pointer gives when the test does not bother with it.
     fn top_left() -> Cell {
@@ -27813,6 +28514,7 @@ mod tests {
     /// It goes through the snapshot and not through `to_text`, which always returns the active
     /// area: with the scrollback scrolled up the two are different, and the one to look at is the
     /// one that is seen.
+    #[cfg(unix)]
     fn visible_text(pane: &Pane) -> String {
         let view = pane.screen.view();
         (0..view.size().rows)
@@ -27844,6 +28546,7 @@ mod tests {
     /// is what tells «the view did not move» from «the counter ended up at something other than
     /// zero».
     #[test]
+    #[cfg(unix)]
     fn pumping_the_console_does_not_return_the_scrollback_to_where_the_program_writes() {
         let mut pane = pane_with("printf 'JUST WRITTEN\\n'; sleep 30", 0);
         for n in 0..80 {
@@ -27881,6 +28584,11 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        pumping_the_console_does_not_return_the_scrollback_to_where_the_program_writes,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     /// **A press on a button makes the program receive its command**, and the evidence is a file.
     ///
     /// **The program's output goes to a file and not to the screen, and that is the whole design of
@@ -27895,6 +28603,7 @@ mod tests {
     /// on by default, so the line discipline turns it into `\n` before the program sees it. Asserting
     /// the byte we wrote would be asserting against the wrong side of the boundary.
     #[test]
+    #[cfg(unix)]
     fn a_press_on_a_button_makes_the_program_receive_its_command() {
         let ctx = egui::Context::default();
         let rects = two_wide_panes();
@@ -27972,7 +28681,13 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    crate::windows_unix_omission!(
+        a_press_on_a_button_makes_the_program_receive_its_command,
+        "unix-only: uses POSIX shell commands or Unix PTY input fixtures"
+    );
+
     /// Paints that pane's panel, which is what records what a press may reach.
+    #[cfg(unix)]
     fn paint_the_panel_of(window: &mut Window, panel_rect: egui::Rect, metrics: &CellMetrics) {
         let ctx = egui::Context::default();
         let theme = window.theme;

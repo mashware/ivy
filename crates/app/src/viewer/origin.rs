@@ -106,6 +106,9 @@ pub(crate) fn open_document_target(
     path: PathBuf,
     _line: Option<u32>,
 ) -> bool {
+    if keeps_marks(window) {
+        return false;
+    }
     super::select_state(window, true);
     let Some(source) = source(window, pane) else {
         return false;
@@ -156,6 +159,29 @@ pub(super) fn show_image(window: &mut Window) {
     }
 }
 
+/// Whether the shown image carries marks or notes not yet sent, which would be lost: if so it is
+/// shown, says so, and keeps them, as unsent review comments keep their review.
+pub(super) fn keeps_marks(window: &mut Window) -> bool {
+    if !window.image.has_marks() {
+        return false;
+    }
+    window.image.say(UNSENT_MARKS);
+    show_image(window);
+    true
+}
+
+const UNSENT_MARKS: &str =
+    "Send or clear the marks on the image before closing it or opening another image or document.";
+
+/// Why a document did not open: the image's unsent marks, or the review's unsent comments.
+pub(crate) fn kept_document(window: &Window) -> &'static str {
+    if window.image.has_marks() {
+        UNSENT_MARKS
+    } else {
+        "Send or clear the review comments before opening another document."
+    }
+}
+
 /// Whether the drawer is on its document tab and that tab holds the image.
 pub(super) fn showing_image(window: &Window) -> bool {
     window.image.shown() && crate::sidebar::active(window) == Some(crate::sidebar::Tool::Document)
@@ -190,17 +216,39 @@ pub(super) fn replace_document(window: &mut Window, keep: Keep) {
     }
 }
 
+/// Why an image was not opened.
+#[derive(Debug, PartialEq)]
+pub(crate) enum NotOpened {
+    /// The console it was printed in is gone.
+    Gone,
+    /// The image shown has marks not yet sent; the drawer shows it and says so.
+    Marks,
+}
+
+impl std::fmt::Display for NotOpened {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Gone => "The console this image belongs to has closed.",
+            Self::Marks => UNSENT_MARKS,
+        })
+    }
+}
+
 /// Opens an image in the drawer's document tab, pinned to the console it was printed in. A
 /// relative path is read from that console's directory, as the review reads its repository.
-/// Refused only when that console is gone; every other refusal is painted in the drawer.
+/// Refused when that console is gone or the image shown keeps unsent marks; the refusals of the
+/// image itself, a file that does not decode among them, are painted in the drawer.
 pub(crate) fn open_image_target(
     window: &mut Window,
     pane: usize,
     path: PathBuf,
-) -> Result<(), String> {
+) -> Result<(), NotOpened> {
     let Some(source) = source(window, pane) else {
-        return Err("The console this image belongs to has closed.".into());
+        return Err(NotOpened::Gone);
     };
+    if keeps_marks(window) {
+        return Err(NotOpened::Marks);
+    }
     let path = match &source.cwd {
         Some(cwd) if path.is_relative() => cwd.join(path),
         _ => path,
@@ -260,6 +308,11 @@ mod tests {
             let _ = std::fs::remove_dir_all(&self.0);
         }
     }
+
+    crate::windows_unix_omission!(
+        review_uses_live_worktree_changes_after_a_stale_local_directory_report,
+        "unix-only: exercises live Linux worktree state and shell directory reports"
+    );
 
     #[cfg(target_os = "linux")]
     #[test]
@@ -348,6 +401,11 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
     }
+
+    crate::windows_unix_omission!(
+        review_opens_live_console_repository_without_shell_directory_reports,
+        "unix-only: exercises live Linux worktree state and shell directory reports"
+    );
 
     #[cfg(target_os = "linux")]
     #[test]
@@ -448,7 +506,7 @@ mod tests {
         assert!(!window.image.shown() && window.image.origin().is_none());
         assert_eq!(
             open_image_target(&mut window, 9999, PathBuf::from("/x.png")),
-            Err("The console this image belongs to has closed.".to_owned())
+            Err(NotOpened::Gone)
         );
         assert!(!window.image.shown());
     }

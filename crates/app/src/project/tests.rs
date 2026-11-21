@@ -338,8 +338,14 @@ fn busy_worker_keeps_latest_request_and_does_not_publish_closed_panes() {
     release_tx.send(()).unwrap();
 }
 
+crate::windows_unix_omission!(
+    non_utf8_repository_paths_group_checkout_subdirectory_and_worktree,
+    "unix-only: constructs non-UTF-8 paths with Unix OsStr encoding"
+);
+
 #[cfg(unix)]
 #[test]
+
 fn non_utf8_repository_paths_group_checkout_subdirectory_and_worktree() {
     use std::os::unix::ffi::OsStringExt;
     let temp = Temp::new();

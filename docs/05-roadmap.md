@@ -144,7 +144,8 @@ bar. Their space is reserved from the consoles'.
 
 **What you can do:** browse files, read a Markdown file with formatting while an agent works beside
 it and see its saved changes without reopening, look at a PNG or JPEG screenshot a console printed
-(fitted to the drawer, zoomed with Ctrl+wheel), inspect Git changes, or open the global Board.
+(fitted to the drawer, zoomed with Ctrl+wheel), mark it and send a copy with the marks back to that
+console, inspect Git changes, or open the global Board.
 Markdown and Git sources are chosen explicitly and both views are read-only. Switching tools retains
 their state. Resize, maximize or close the drawer, and resize or close Files, without restarting any console;
 a surface that would leave a console under its floor is suppressed until the window grows, and its
@@ -562,8 +563,9 @@ console.
   with Markdown and Git review viewers from [#337](https://github.com/mashware/ivy-history-private/issues/337)).
   Files on the left and a transient drawer below open explicit paths, including local Markdown paths
   clicked in a console, which Files reveals. A PNG or JPEG path clicked in a console, or activated
-  in Files, opens in the document tab instead, pinned to that console, decoded once and bounded
-  ([#178](https://github.com/mashware/ivy/issues/178)).
+  in Files, opens in the document tab instead, pinned to that console, decoded once and bounded;
+  arrows, ellipses, rectangles and numbered markers drawn on it go back to that console as a copy in
+  its own folder plus one submitted line (D113, [#178](https://github.com/mashware/ivy/issues/178)).
   Markdown refreshes on save. Git presents files and hunks in unified or split form, with local and
   base comparisons. Review comments are previewed before insertion into the pinned origin console.
   Files uses #72's pane-keyed explorer; Board remains global. D72 records input isolation, bounded

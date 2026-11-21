@@ -54,6 +54,10 @@ impl Drop for Handle {
 }
 
 struct Security(*mut std::ffi::c_void);
+// SAFETY: the descriptor is owned, freed once on drop, and only read after it is built, so sharing
+// the pointer between threads cannot race.
+unsafe impl Send for Security {}
+unsafe impl Sync for Security {}
 impl Security {
     fn pipe() -> io::Result<Self> {
         descriptor(false)
@@ -150,8 +154,6 @@ struct ListenerInner {
 pub struct Listener {
     inner: Arc<Mutex<ListenerInner>>,
 }
-unsafe impl Send for Listener {}
-unsafe impl Sync for Listener {}
 
 fn new_pipe(name: &[u16], security: &Security, first: bool) -> io::Result<Handle> {
     let attributes = SECURITY_ATTRIBUTES {
@@ -337,14 +339,14 @@ impl Acceptor {
 }
 impl Drop for Acceptor {
     fn drop(&mut self) {
-        if let Ok(pending) = self.pending.get_mut() {
-            if let Some((pipe, overlapped, _event)) = pending.take() {
-                self.pending_ready.store(false, Ordering::Release);
-                let mut transferred = 0;
-                unsafe {
-                    CancelIoEx(pipe, &*overlapped);
-                    GetOverlappedResult(pipe, &*overlapped, &mut transferred, 1);
-                }
+        if let Ok(pending) = self.pending.get_mut()
+            && let Some((pipe, overlapped, _event)) = pending.take()
+        {
+            self.pending_ready.store(false, Ordering::Release);
+            let mut transferred = 0;
+            unsafe {
+                CancelIoEx(pipe, &*overlapped);
+                GetOverlappedResult(pipe, &*overlapped, &mut transferred, 1);
             }
         }
     }
