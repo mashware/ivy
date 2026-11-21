@@ -13,6 +13,10 @@ New-Item -ItemType Directory $EvidenceDir | Out-Null
 $Profile = Join-Path $EvidenceDir 'roaming'
 New-Item -ItemType Directory $Profile | Out-Null
 $Layout = Join-Path $Profile 'ivy/layout.json'
+# A fresh install restores nothing and therefore saves nothing (`startup.restore = none`), so the
+# trial opts into the layout the way a person would, in the settings file beside it.
+New-Item -ItemType Directory (Join-Path $Profile 'ivy') | Out-Null
+Set-Content -Path (Join-Path $Profile 'ivy/config') -Value 'startup.restore = layout' -Encoding utf8NoBOM
 $Witness = Join-Path $EvidenceDir 'shell-witness.txt'
 $Token = [guid]::NewGuid().ToString('N')
 if (-not ('IvyLaunchNative' -as [type])) {
