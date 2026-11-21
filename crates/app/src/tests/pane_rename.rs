@@ -207,6 +207,12 @@ mod tests {
         assert!(!the_text_queued_up(&shapes, "OC | Feature"));
     }
 
+    crate::windows_unix_omission!(
+        terminal_title_override_and_return_action_own_input_and_preserve_manual_names_only,
+        "unix-only: requires a POSIX raw-mode child byte recorder for terminal input behavior"
+    );
+
+    #[cfg(unix)]
     #[test]
     fn terminal_title_override_and_return_action_own_input_and_preserve_manual_names_only() {
         let received = term_core::received::Received::new("terminal-title-rename");

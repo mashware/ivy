@@ -35,6 +35,10 @@ jobs:
         run: cargo doc-check --locked
       - name: Test portable packaging logic
         run: python3 -m unittest scripts/test_release.py scripts/test_macos.py scripts/test_windows.py -v
+      - name: Check compiled Windows omission inventory on Linux
+        run: python3 scripts/windows-test-report.py --platform linux
+      - name: Test omission reporter fixtures
+        run: python3 -m unittest scripts/test_windows_test_report.py scripts/test_windows_known_failures.py -v
 
   macos-panel-checks:
     if: ${{ github.event_name == 'pull_request' }}
@@ -49,19 +53,45 @@ jobs:
       - name: Test native panel routing and Codex launcher
         run: cargo test --locked -p panel-control
 
-  # The app's Windows-only code is tested nowhere else before a release (D108). Each step runs the
-  # Windows tests of one ticket by name prefix.
+  # Keep this job name for branch protection. The full workspace suite now exercises Windows cfgs.
   windows-startup-checks:
-    if: ${{ github.event_name == 'pull_request' }}
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
     runs-on: windows-2025
-    timeout-minutes: 45
+    timeout-minutes: 60
+    env:
+      # The reports print test names and reasons that are not all ASCII; the runner's console code
+      # page would make Python fail on them.
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-      - name: Test the Windows console program and configuration directory
+      - name: Check Windows launch helper contracts
+        shell: pwsh
+        run: ./packaging/windows/test-launch-contract.ps1
+      - name: Lint all Windows workspace targets
         shell: pwsh
         run: |
-          cargo test --locked -p app --lib -- windows_startup
+          cargo clippy --locked --workspace --all-targets -- -D warnings
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Test the Windows workspace against its known failures
+        shell: pwsh
+        run: |
+          python scripts/windows-known-failures.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Check compiler-listed Unix-only omissions
+        shell: pwsh
+        run: |
+          python scripts/windows-test-report.py --platform windows
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Keep named Windows startup witnesses
+        shell: pwsh
+        run: |
+          cargo test --locked -p app --lib -- windows_startup 2>&1 | Tee-Object -Variable printed
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($name in 'windows_startup_keeps_the_configuration_in_appdata',
+                            'windows_startup_finds_a_configuration_directory',
+                            'windows_startup_default_and_fallback_run_a_command') {
+            if (-not ($printed -match "$name \.\.\. ok$")) { throw "$name did not run and pass" }
+          }
       - name: Test the Windows path arms
         shell: pwsh
         # A filter exits 0 when it matches nothing, and a cfg typo compiles a test out in silence, so
@@ -283,7 +313,8 @@ jobs:
           if-no-files-found: error
 
   windows:
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    needs: windows-startup-checks
+    if: ${{ always() && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && needs.windows-startup-checks.result == 'success' }}
     runs-on: windows-2025
     timeout-minutes: 40
     env:
@@ -307,13 +338,36 @@ jobs:
           $Version = python scripts/release.py version
           python scripts/package-windows.py --binary-dir target/x86_64-pc-windows-msvc/release --output-dir dist --version $Version --conpty-dir target/conpty
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Check installed payload, replacement and removal
+      - name: Fetch a pinned software OpenGL for the launch trials
+        # Hosted runners have no GPU and Windows' own OpenGL 1.1 is below what egui_glow needs, so
+        # the installed app cannot open a window there. Mesa's llvmpipe stands in, for the trials only.
+        shell: pwsh
+        run: |
+          $Archive = Join-Path $env:RUNNER_TEMP 'mesa.7z'
+          Invoke-WebRequest 'https://github.com/pal1000/mesa-dist-win/releases/download/25.3.6/mesa3d-25.3.6-release-msvc.7z' -OutFile $Archive
+          if ((Get-FileHash $Archive -Algorithm SHA256).Hash -ne 'CA56D92BB2254A9A25557C95CFE27F02071A77B26DAFF4CBF9BC125ED3347FB5') { throw 'Mesa archive hash mismatch' }
+          7z x $Archive "-o$env:RUNNER_TEMP\mesa" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $Found = @(Get-ChildItem "$env:RUNNER_TEMP\mesa" -Recurse -Filter opengl32.dll | Where-Object { $_.DirectoryName -match '(^|\\)x64$' })
+          if ($Found.Count -ne 1) {
+            Get-ChildItem "$env:RUNNER_TEMP\mesa" -Recurse -Filter *.dll | ForEach-Object { $_.FullName }
+            throw "Expected one 64-bit opengl32.dll in the Mesa archive, found $($Found.Count)"
+          }
+          "MESA_X64=$($Found[0].DirectoryName)" >> $env:GITHUB_ENV
+      - name: Check installed payload, launch, replacement and removal
         shell: pwsh
         env:
           IVY_DISPOSABLE_RUNNER: 'yes'
         run: |
           $Installer = (Get-ChildItem dist/*-setup.exe).FullName
-          ./packaging/windows/test-install.ps1 -Installer $Installer -BinaryDir target/x86_64-pc-windows-msvc/release -ConptyDir target/conpty
+          ./packaging/windows/test-install.ps1 -Installer $Installer -BinaryDir target/x86_64-pc-windows-msvc/release -ConptyDir target/conpty -SoftwareOpenGL $env:MESA_X64
+      - name: Upload Windows launch evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: windows-launch-evidence
+          path: windows-launch-evidence/
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: ivy-windows-x86_64
@@ -322,7 +376,7 @@ jobs:
 
   publish:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
-    needs: [build, install, arch, macos, windows]
+    needs: [build, install, arch, macos, windows, windows-startup-checks]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

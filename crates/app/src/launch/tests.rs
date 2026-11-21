@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use super::*;
 use std::time::{Duration, Instant};
 
@@ -28,6 +30,11 @@ fn pending() -> (Process, Sender<term_core::Result<Ready>>) {
     )
 }
 
+crate::windows_unix_omission!(
+    pending_input_and_latest_geometry_reach_the_real_program_in_order,
+    "unix-only: runs /bin/sh and stty to verify queued input and PTY geometry"
+);
+#[cfg(unix)]
 #[test]
 fn pending_input_and_latest_geometry_reach_the_real_program_in_order() {
     let (mut process, complete) = pending();
@@ -65,6 +72,10 @@ fn pending_input_and_latest_geometry_reach_the_real_program_in_order() {
 }
 
 // Probes the child with a Unix signal; the Windows suite is #162.
+crate::windows_unix_omission!(
+    closing_a_pending_launch_drops_the_late_child_without_resurrecting_the_console,
+    "unix-only: requires Unix process signals"
+);
 #[cfg(unix)]
 #[test]
 fn closing_a_pending_launch_drops_the_late_child_without_resurrecting_the_console() {
@@ -111,6 +122,11 @@ fn many_stalled_launches_accept_input_without_waiting_for_the_workers() {
     }
 }
 
+crate::windows_unix_omission!(
+    a_real_signal_retains_output_and_has_a_dismissible_truthful_notice,
+    "unix-only: sends a Unix signal to a POSIX shell and checks signal termination"
+);
+#[cfg(unix)]
 #[test]
 fn a_real_signal_retains_output_and_has_a_dismissible_truthful_notice() {
     let mut pane = crate::Pane::with_panel(
@@ -203,7 +219,11 @@ fn the_real_window_accepts_a_new_tab_while_existing_launches_are_stalled() {
             Default::default(),
             move || {
                 held.recv_timeout(Duration::from_secs(2))?;
-                Pty::spawn("/bin/cat", &[], Size::default())
+                Pty::spawn(
+                    crate::shell_integration::fallback_shell(),
+                    &[],
+                    Size::default(),
+                )
             },
         )
         .unwrap();
@@ -246,7 +266,14 @@ fn the_real_window_accepts_a_new_tab_while_existing_launches_are_stalled() {
 #[test]
 fn a_failed_launch_stays_idle_after_its_notice_is_dismissed() {
     let ctx = eframe::egui::Context::default();
-    let mut pane = crate::Pane::with_panel(&Default::default(), "/bin/cat", &[], None, 0).unwrap();
+    let mut pane = crate::Pane::with_panel(
+        &Default::default(),
+        crate::shell_integration::fallback_shell(),
+        &[],
+        None,
+        0,
+    )
+    .unwrap();
     let (mut process, done) = pending();
     process.context = Some(ctx.clone());
     done.send(Err("fixture launch failure".into())).unwrap();
@@ -272,6 +299,11 @@ fn a_failed_launch_stays_idle_after_its_notice_is_dismissed() {
     }
 }
 
+crate::windows_unix_omission!(
+    startup_prefix_is_interpreted_before_resize_even_with_the_bridge_parked,
+    "unix-only: uses /bin/sh, stty and cat to test startup input ordering"
+);
+#[cfg(unix)]
 #[test]
 fn startup_prefix_is_interpreted_before_resize_even_with_the_bridge_parked() {
     for padding in [0, crate::PUMP_BUDGET + 7] {
@@ -323,8 +355,14 @@ fn startup_prefix_is_interpreted_before_resize_even_with_the_bridge_parked() {
             process.write(b"first second\n").unwrap();
         }
         ready.recv_timeout(Duration::from_secs(3)).unwrap();
-        let mut pane =
-            crate::Pane::with_panel(&Default::default(), "/bin/cat", &[], None, 0).unwrap();
+        let mut pane = crate::Pane::with_panel(
+            &Default::default(),
+            crate::shell_integration::fallback_shell(),
+            &[],
+            None,
+            0,
+        )
+        .unwrap();
         pane.pty = process;
         pane.pty_output = crate::pty_output::PtyOutput::new(held, || {});
         pane.measured = narrow;
@@ -394,7 +432,12 @@ fn startup_prefix_is_interpreted_before_resize_even_with_the_bridge_parked() {
 
 #[test]
 fn startup_snapshot_has_a_finite_chunk_bound_and_preserves_the_remaining_stream() {
-    let (pty, _output) = Pty::spawn("/bin/cat", &[], Size::default()).unwrap();
+    let (pty, _output) = Pty::spawn(
+        crate::shell_integration::fallback_shell(),
+        &[],
+        Size::default(),
+    )
+    .unwrap();
     let (source, output) = channel();
     for value in 0..9 {
         source.send(vec![value; 8192]).unwrap();
@@ -580,3 +623,13 @@ fn a_real_scoped_exit_keeps_repainting_until_the_observer_finishes() {
         .collect();
     assert!(text.contains("retained"), "observer discarded output");
 }
+
+#[cfg(windows)]
+#[test]
+#[ignore = "unix-only: requires the built target/debug/app and a real systemd user manager"]
+fn normal_restored_fallback_and_takeover_paths_use_the_explicit_ivy_launcher() {}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "unix-only: requires the built target/debug/app and a real systemd user manager"]
+fn a_real_scoped_exit_keeps_repainting_until_the_observer_finishes() {}

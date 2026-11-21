@@ -91,6 +91,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/explorer/interaction_tests.rs"),
     ),
     (
+        "src/client_attestation_windows_tests.rs",
+        include_str!("../src/client_attestation_windows_tests.rs"),
+    ),
+    (
         "src/client_attestation/mod.rs",
         include_str!("../src/client_attestation/mod.rs"),
     ),
@@ -753,6 +757,10 @@ const MODULES: &[(&str, &str)] = &[
     (
         "src/opening/codex_tests.rs",
         include_str!("../src/opening/codex_tests.rs"),
+    ),
+    (
+        "src/opening/codex_tests_windows.rs",
+        include_str!("../src/opening/codex_tests_windows.rs"),
     ),
     (
         "src/shell_integration.rs",

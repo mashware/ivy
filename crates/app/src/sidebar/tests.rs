@@ -104,8 +104,14 @@ fn files_and_the_drawer_keep_their_minimums_or_step_aside_for_the_consoles() {
     assert!(layout(short, None, None, true, floors).dock.is_none());
 }
 
+crate::windows_unix_omission!(
+    board_blocks_all_mouse_buttons_and_motion_to_covered_programs,
+    "unix-only: uses stty raw mode and cat to verify input never reaches the child"
+);
+
 #[cfg(unix)]
 #[test]
+
 fn board_blocks_all_mouse_buttons_and_motion_to_covered_programs() {
     let received = term_core::received::Received::new("board-covered-mouse");
     let script = received.script("stty raw -echo");
@@ -295,8 +301,14 @@ fn title_bar_buttons_open_and_close_each_tool_without_forwarding_the_gesture() {
     }
 }
 
+crate::windows_unix_omission!(
+    divider_drags_retain_consoles_and_cannot_reach_their_mouse_protocol,
+    "unix-only: uses stty raw mode and cat to inspect child PTY input"
+);
+
 #[cfg(unix)]
 #[test]
+
 fn divider_drags_retain_consoles_and_cannot_reach_their_mouse_protocol() {
     let received = term_core::received::Received::new("sidebar-divider");
     let script = received.script("stty raw -echo && printf '\\033[?1000h\\033[?1006h'");
@@ -400,8 +412,14 @@ fn sidebar_state_is_transient_and_each_new_window_starts_closed_at_default_sizes
     }
 }
 
+crate::windows_unix_omission!(
+    console_mouse_release_crossing_into_files_or_the_drawer_reaches_its_program,
+    "unix-only: uses stty raw mode and cat to inspect child PTY input"
+);
+
 #[cfg(unix)]
 #[test]
+
 fn console_mouse_release_crossing_into_files_or_the_drawer_reaches_its_program() {
     for (tool, maximized) in [
         (Tool::Files, false),

@@ -11,12 +11,15 @@
 // **Unix only, and the docblock above is why.** `MasterPty`'s termios accessors are all
 // `#[cfg(unix)]` in `portable-pty`, so on Windows this file would not build — and F2.7 is Windows.
 // An example that breaks the workspace build on the platform it explains is worse than no example.
-#![cfg(unix)]
+#[cfg(unix)]
 use std::io::Read;
+#[cfg(unix)]
 use std::time::{Duration, Instant};
 
+#[cfg(unix)]
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
+#[cfg(unix)]
 fn probe(label: &str, script: &str) {
     let pty = native_pty_system();
     let pair = pty
@@ -75,6 +78,7 @@ fn probe(label: &str, script: &str) {
     let _ = child.wait();
 }
 
+#[cfg(unix)]
 fn main() {
     probe("default   ", "printf ready; exec cat");
     probe(
@@ -82,3 +86,6 @@ fn main() {
         "stty raw -echo && printf ready || printf failed; exec cat",
     );
 }
+
+#[cfg(windows)]
+fn main() {}

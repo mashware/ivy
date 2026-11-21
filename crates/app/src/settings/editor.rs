@@ -472,9 +472,14 @@ mod tests {
                 None,
                 None,
             );
-            let mut window =
-                crate::Window::opening(&Default::default(), opening, "/bin/sh", None, persistence)
-                    .unwrap();
+            let mut window = crate::Window::opening(
+                &Default::default(),
+                opening,
+                crate::shell_integration::fallback_shell(),
+                None,
+                persistence,
+            )
+            .unwrap();
             window.restoration = state;
             window
         }
@@ -538,6 +543,11 @@ mod tests {
         assert!(window.active().panes()[0].restoration.resume.is_none());
     }
 
+    crate::windows_unix_omission!(
+        lowering_recovery_after_a_wrong_live_session_still_replaces_it_before_input,
+        "unix-only: uses /bin/cat and a POSIX shell to verify keyboard and clipboard input after recovery"
+    );
+    #[cfg(unix)]
     #[test]
     fn lowering_recovery_after_a_wrong_live_session_still_replaces_it_before_input() {
         let _shell = crate::shell_integration::TestShell::use_program("/bin/sh");

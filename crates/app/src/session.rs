@@ -1966,8 +1966,14 @@ mod file_tests {
         assert_eq!(read_back.tabs(), test_document().tabs.as_slice());
     }
 
+    crate::windows_unix_omission!(
+        the_destination_is_replaced_whole_and_never_written_over,
+        "unix-only: uses Unix atomic file replacement semantics"
+    );
+
     #[cfg(unix)]
     #[test]
+
     fn the_destination_is_replaced_whole_and_never_written_over() {
         use std::os::unix::fs::MetadataExt;
 
@@ -2009,8 +2015,14 @@ mod file_tests {
         assert_eq!(inside, vec![std::ffi::OsString::from(FILE)]);
     }
 
+    crate::windows_unix_omission!(
+        the_directory_and_the_file_are_born_only_for_the_user,
+        "unix-only: asserts Unix owner and permission bits on the settings directory and file"
+    );
+
     #[cfg(unix)]
     #[test]
+
     fn the_directory_and_the_file_are_born_only_for_the_user() {
         use std::os::unix::fs::PermissionsExt;
 
@@ -2482,8 +2494,14 @@ mod file_tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_named_pipe_is_rejected_without_waiting,
+        "unix-only: creates a FIFO to test nonblocking rejection of special files"
+    );
+
     #[cfg(unix)]
     #[test]
+
     fn a_named_pipe_is_rejected_without_waiting() {
         // **It is the case the «is it a file» check exists to avoid, and the only one a planted directory
         // does not show**: opening a pipe with no one at the other end does not fail, it **waits**, and
@@ -2511,8 +2529,14 @@ mod file_tests {
         }
     }
 
+    crate::windows_unix_omission!(
+        a_file_that_cannot_be_read_neither_prevents_startup_nor_vetoes_writing,
+        "unix-only: uses Unix permission bits to make an existing file unreadable"
+    );
+
     #[cfg(unix)]
     #[test]
+
     fn a_file_that_cannot_be_read_neither_prevents_startup_nor_vetoes_writing() {
         use std::os::unix::fs::PermissionsExt;
 
@@ -2640,8 +2664,14 @@ mod file_tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_link_planted_at_the_destination_is_not_written_through,
+        "unix-only: plants a Unix symlink at the persistence destination to verify it is never followed"
+    );
+
     #[cfg(unix)]
     #[test]
+
     fn a_link_planted_at_the_destination_is_not_written_through() {
         // The destination is protected by **never opening it for writing**, and this is what that buys: a
         // link with its name does not take the write to where it points. That the destination changes

@@ -17,6 +17,10 @@ use eframe::egui;
 #[cfg(all(test, unix))]
 mod codex_tests;
 
+#[cfg(all(test, windows))]
+#[path = "opening/codex_tests_windows.rs"]
+mod codex_tests;
+
 pub(crate) fn native_window(
     cc: &eframe::CreationContext<'_>,
     with_what: OpenWith,

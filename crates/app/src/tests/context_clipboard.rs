@@ -240,6 +240,12 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        dismissing_menu_with_escape_or_outside_click_never_reaches_program,
+        "unix-only: requires POSIX raw-mode child byte capture to verify clipboard and keyboard delivery"
+    );
+
+    #[cfg(unix)]
     #[test]
     fn dismissing_menu_with_escape_or_outside_click_never_reaches_program() {
         for outside in [false, true] {
@@ -558,6 +564,12 @@ mod tests {
         }
     }
 
+    crate::windows_unix_omission!(
+        menu_paste_reply_targets_original_console_after_focus_changes,
+        "unix-only: requires POSIX raw-mode child byte capture to verify clipboard and keyboard delivery"
+    );
+
+    #[cfg(unix)]
     #[test]
     fn menu_paste_reply_targets_original_console_after_focus_changes() {
         let first = term_core::received::Received::new("menu-paste-first");
@@ -608,6 +620,11 @@ mod tests {
         assert_eq!(second.wait_for(8, Duration::from_secs(5)), b"original");
         assert_eq!(first.wait_for(8, Duration::from_secs(5)), b"sentinel");
     }
+
+    crate::windows_unix_omission!(
+        dragging_console_selection_publishes_primary,
+        "unix-only: publishes through the Linux primary-selection clipboard"
+    );
 
     #[cfg(target_os = "linux")]
     #[test]
@@ -686,6 +703,12 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        delayed_paste_to_closed_console_is_discarded,
+        "unix-only: requires POSIX raw-mode child byte capture to verify clipboard and keyboard delivery"
+    );
+
+    #[cfg(unix)]
     #[test]
     fn delayed_paste_to_closed_console_is_discarded() {
         let received = term_core::received::Received::new("menu-paste-closed");
@@ -719,6 +742,12 @@ mod tests {
         assert_eq!(received.wait_for(8, Duration::from_secs(5)), b"sentinel");
     }
 
+    crate::windows_unix_omission!(
+        reporting_program_keeps_context_buttons_until_shift_overrides_them,
+        "unix-only: requires POSIX raw-mode child byte capture to verify clipboard and keyboard delivery"
+    );
+
+    #[cfg(unix)]
     #[test]
     fn reporting_program_keeps_context_buttons_until_shift_overrides_them() {
         let buttons = if cfg!(target_os = "linux") {
@@ -818,6 +847,12 @@ mod tests {
         }
     }
 
+    crate::windows_unix_omission!(
+        blocked_clipboard_owner_leaves_frames_and_program_input_available,
+        "unix-only: requires POSIX raw-mode child byte capture to verify clipboard and keyboard delivery"
+    );
+
+    #[cfg(unix)]
     #[test]
     fn blocked_clipboard_owner_leaves_frames_and_program_input_available() {
         let received = term_core::received::Received::new("clipboard-busy-frame");
@@ -862,21 +897,23 @@ mod tests {
             .expect("worker finished after release");
     }
 
+    crate::windows_unix_omission!(
+        menu_paste_uses_current_bracketed_mode_and_holds_overlong_lines,
+        "unix-only: requires POSIX raw-mode child byte capture to verify clipboard and keyboard delivery"
+    );
+
+    // Linux only: the held-paste premise needs the canonical-input boundary, which only Linux
+    // declares (D31).
+    #[cfg(target_os = "linux")]
     #[test]
     fn menu_paste_uses_current_bracketed_mode_and_holds_overlong_lines() {
-        let sources = if cfg!(target_os = "linux") {
-            vec![
-                crate::clipboard::Source::Clipboard,
-                crate::clipboard::Source::Primary,
-            ]
-        } else {
-            vec![crate::clipboard::Source::Clipboard]
-        };
-        for source in sources {
+        for source in [
+            crate::clipboard::Source::Clipboard,
+            crate::clipboard::Source::Primary,
+        ] {
             for bracketed in [false, true] {
-                let Some(ceiling) = keyboard::the_longest_line_a_reader_keeps() else {
-                    return;
-                };
+                let ceiling = keyboard::the_longest_line_a_reader_keeps()
+                    .expect("Linux declares the canonical-input boundary");
                 let received = term_core::received::Received::new("context-paste-protection");
                 let mut window = window_with(&received.script("stty raw -echo"), "sleep 30");
                 window.chrome.enable();

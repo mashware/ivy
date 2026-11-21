@@ -1584,6 +1584,10 @@ mod tests {
         assert!(matches!(failure, Problem::Missing), "was {failure:?}");
     }
 
+    crate::windows_unix_omission!(
+        without_permission_to_read_it_it_is_not_confused_with_not_having_published,
+        "unix-only: requires Unix permission bits"
+    );
     /// "It has not published yet" and "there is something there I cannot read" are two different things
     /// to tell whoever looks, and only the first is normal. No permissions is the only thing that
     /// separates the two failure branches, and there are **two** branches: the one that looks at what
@@ -1918,6 +1922,10 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_named_pipe_is_rejected_instead_of_hanging_the_window,
+        "unix-only: requires Unix FIFO semantics"
+    );
     /// **The case the mechanism exists for, and until now was not tested.** The test above uses a
     /// directory, which is precisely the one that does **not** block: opening it fails and that is
     /// that. A named pipe does stay waiting for someone to write on the other side, and since reading
@@ -1945,6 +1953,10 @@ mod tests {
         );
     }
 
+    crate::windows_unix_omission!(
+        a_link_to_a_normal_file_is_read_as_the_file_it_points_to,
+        "unix-only: requires Unix symlink semantics"
+    );
     /// **The flip side of requiring a file: a link to a normal file does work.** What is rejected is
     /// what would block the open, and a link blocks nothing. And it is not a contrived case: the
     /// producer that exists today publishes in its work directory, so linking the contract file there

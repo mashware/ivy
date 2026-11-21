@@ -82,6 +82,10 @@ mod tests {
         );
         fs::remove_dir_all(dir).unwrap();
     }
+    crate::windows_unix_omission!(
+        refuses_symlink_destination,
+        "unix-only: requires Unix symlinks to plant a competing destination"
+    );
     #[cfg(unix)]
     #[test]
     fn refuses_symlink_destination() {

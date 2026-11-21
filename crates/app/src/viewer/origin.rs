@@ -309,6 +309,11 @@ mod tests {
         }
     }
 
+    crate::windows_unix_omission!(
+        review_uses_live_worktree_changes_after_a_stale_local_directory_report,
+        "unix-only: exercises live Linux worktree state and shell directory reports"
+    );
+
     #[cfg(target_os = "linux")]
     #[test]
     fn review_uses_live_worktree_changes_after_a_stale_local_directory_report() {
@@ -396,6 +401,11 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
     }
+
+    crate::windows_unix_omission!(
+        review_opens_live_console_repository_without_shell_directory_reports,
+        "unix-only: exercises live Linux worktree state and shell directory reports"
+    );
 
     #[cfg(target_os = "linux")]
     #[test]

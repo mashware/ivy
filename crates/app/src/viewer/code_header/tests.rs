@@ -298,6 +298,11 @@ fn outside_the_files_folder_there_is_no_relative_path_and_it_says_why() {
     assert_eq!(absolute.copied, [tree.at("r/src/a.ts").to_str().unwrap()]);
 }
 
+crate::windows_unix_omission!(
+    a_name_that_does_not_show_as_itself_is_never_copied_or_launched,
+    "unix-only: constructs a non-UTF-8 path with Unix OsStr encoding"
+);
+
 /// A name with a line break or a direction override is never copied, and Open shows it in the
 /// file manager instead of launching it, though its last extension is a document's.
 #[cfg(unix)]
@@ -331,6 +336,11 @@ fn a_name_that_does_not_show_as_itself_is_never_copied_or_launched() {
         }
     }
 }
+
+crate::windows_unix_omission!(
+    a_folder_that_does_not_show_as_itself_is_never_copied,
+    "unix-only: constructs a non-UTF-8 path with Unix OsStr encoding"
+);
 
 /// The path is judged whole: a line break in a folder's name refuses both Copy items, and a
 /// plain path beside it copies.

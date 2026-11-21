@@ -449,8 +449,14 @@ mod tests {
             persistence.load_time().is_none(),
             "disabled startup must not read the saved document"
         );
-        let mut window =
-            Window::opening(&Default::default(), opening, "/bin/sh", None, persistence).unwrap();
+        let mut window = Window::opening(
+            &Default::default(),
+            opening,
+            crate::shell_integration::fallback_shell(),
+            None,
+            persistence,
+        )
+        .unwrap();
         window.restoration = state;
         window.active_mut().panes_mut()[0].label = Some("A change in the fresh window".into());
         window.check_whether_the_layout_moved();
@@ -465,8 +471,14 @@ mod tests {
         let fixture = Fixture::new();
         fixture.seed(Some(fixture.directory.clone()));
         let (opening, state, persistence) = fixture.prepare(StartupRestore::Layout);
-        let mut window =
-            Window::opening(&Default::default(), opening, "/bin/sh", None, persistence).unwrap();
+        let mut window = Window::opening(
+            &Default::default(),
+            opening,
+            crate::shell_integration::fallback_shell(),
+            None,
+            persistence,
+        )
+        .unwrap();
         window.restoration = state;
         assert_eq!(window.tabs.len(), 2);
         for pane in window.all_panes() {
@@ -481,6 +493,11 @@ mod tests {
             .collect();
         assert_eq!(ids.len(), 2);
     }
+
+    crate::windows_unix_omission!(
+        directory_restore_sets_the_real_child_cwd_without_console_input,
+        "unix-only: verifies child working directory through Linux process inspection"
+    );
 
     #[cfg(target_os = "linux")]
     #[test]
@@ -511,8 +528,14 @@ mod tests {
         let missing = fixture.directory.join("removed");
         fixture.seed(Some(missing.clone()));
         let (opening, state, persistence) = fixture.prepare(StartupRestore::Directories);
-        let mut window =
-            Window::opening(&Default::default(), opening, "/bin/sh", None, persistence).unwrap();
+        let mut window = Window::opening(
+            &Default::default(),
+            opening,
+            crate::shell_integration::fallback_shell(),
+            None,
+            persistence,
+        )
+        .unwrap();
         window.restoration = state;
         assert!(matches!(
             crate::painter::notices::what_the_silence_is(window.active().panes()[0]),
@@ -723,7 +746,14 @@ mod tests {
             label: None,
             cwd: Some(path.clone()),
         };
-        let pane = open_leaf(&ctx, &leaf, "/bin/sh", 0, Default::default()).unwrap();
+        let pane = open_leaf(
+            &ctx,
+            &leaf,
+            crate::shell_integration::fallback_shell(),
+            0,
+            Default::default(),
+        )
+        .unwrap();
         assert!(pane.restoration.failed);
         ctx.run_ui(Default::default(), |ui| {
             let metrics = crate::painter::CellMetrics::measure(
@@ -758,8 +788,14 @@ mod tests {
     fn repeated_capture_passes_close_one_actual_frame_sample() {
         let fixture = Fixture::new();
         let (opening, state, persistence) = fixture.prepare(StartupRestore::Directories);
-        let mut window =
-            Window::opening(&Default::default(), opening, "/bin/sh", None, persistence).unwrap();
+        let mut window = Window::opening(
+            &Default::default(),
+            opening,
+            crate::shell_integration::fallback_shell(),
+            None,
+            persistence,
+        )
+        .unwrap();
         window.restoration = state;
         refresh(&mut window);
         refresh(&mut window);

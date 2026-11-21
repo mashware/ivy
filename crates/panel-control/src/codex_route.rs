@@ -85,10 +85,10 @@ fn atomic_write(path: &Path, data: &[u8]) -> io::Result<()> {
     #[cfg(windows)]
     {
         let _ = (path, data);
-        return Err(io::Error::new(
+        Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "Codex routes require atomic replacement support",
-        ));
+        ))
     }
     #[cfg(not(windows))]
     {
@@ -702,6 +702,10 @@ mod tests {
         assert_eq!(lock_route(&route).unwrap().identity.epoch, "new");
         fs::remove_dir_all(home).unwrap();
     }
+    crate::windows_unix_omission!(
+        symlink_and_missing_routes_are_rejected,
+        "unix-only: requires Unix symlink semantics"
+    );
     #[cfg(unix)]
     #[test]
     fn symlink_and_missing_routes_are_rejected() {
