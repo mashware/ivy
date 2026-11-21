@@ -68,19 +68,45 @@ if ($SoftwareOpenGL) {
         }
     }
 }
-# DIAGNOSTIC, removed before merge: the same launch with the bundled console host moved aside, so
-# Ivy falls back to the system's ConPTY. Its outcome is printed and never fails the job; it only
-# separates the bundled host from the software OpenGL as the cause of a start-up exit.
-$Aside = Join-Path $Root 'console-host-aside'
-New-Item -ItemType Directory $Aside | Out-Null
-foreach ($Name in $ConsoleHost) { Move-Item (Join-Path $Destination $Name) $Aside }
-try {
-    & $Launch -Executable $Installed -EvidenceDir (Join-Path $Evidence 'diagnostic-system-conpty')
-    Write-Output 'DIAGNOSTIC system ConPTY launch: passed'
-} catch {
-    Write-Output "DIAGNOSTIC system ConPTY launch: failed: $($_.Exception.Message)"
-} finally {
-    foreach ($Name in $ConsoleHost) { Move-Item (Join-Path $Aside $Name) $Destination }
+# DIAGNOSTIC, removed before merge: the installed app exits with 0x80070057 right after its shell
+# starts, with the bundled and the system ConPTY alike. One launch under the runner's debugger prints
+# every first-chance exception and the stack at each process-exit call, naming the module that ends
+# it. It never fails the job.
+$Debugger = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\Debuggers\x64\cdb.exe'
+$Trace = Join-Path $Evidence 'diagnostic-cdb'
+New-Item -ItemType Directory $Trace | Out-Null
+if (Test-Path $Debugger -PathType Leaf) {
+    $Script = Join-Path $Trace 'commands.txt'
+    @(
+        'sxn *'
+        'bp ntdll!RtlExitUserProcess "kb 60; g"'
+        'bp ntdll!NtTerminateProcess "kb 60; g"'
+        'bp KERNELBASE!TerminateProcess "kb 60; g"'
+        'g'
+    ) | Set-Content $Script
+    $Log = Join-Path $Trace 'cdb.log'
+    $Profile = Join-Path $Trace 'roaming'
+    New-Item -ItemType Directory $Profile | Out-Null
+    $Start = [Diagnostics.ProcessStartInfo]::new($Debugger)
+    foreach ($Argument in '-G', '-y', 'srv*C:\symbols*https://msdl.microsoft.com/download/symbols', '-logo', $Log, '-cf', $Script, $Installed) {
+        $Start.ArgumentList.Add($Argument)
+    }
+    $Start.UseShellExecute = $false
+    $Start.WorkingDirectory = $Trace
+    foreach ($Name in @($Start.Environment.Keys)) {
+        if ($Name -match '^(XDG_|MEASURE_|IVY_)' -or $Name -in @('SHELL', 'PANEL_ID', 'PANEL_DIR')) { [void]$Start.Environment.Remove($Name) }
+    }
+    $Start.Environment['APPDATA'] = $Profile
+    $Session = [Diagnostics.Process]::Start($Start)
+    if (-not $Session.WaitForExit(120000)) {
+        Write-Output 'DIAGNOSTIC cdb: Ivy still running after 120 s'
+        $Session.Kill($true)
+    }
+    Write-Output '----- DIAGNOSTIC cdb log -----'
+    Get-Content $Log -ErrorAction SilentlyContinue | Select-Object -Last 400
+    Write-Output '----- end of DIAGNOSTIC cdb log -----'
+} else {
+    Write-Output "DIAGNOSTIC cdb: no debugger at $Debugger"
 }
 # The ordinary launch goes first: a control that fails for an unexpected reason would otherwise stop
 # the run before anyone learns whether Ivy starts at all.
