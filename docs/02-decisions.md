@@ -11442,8 +11442,10 @@ it.
 - **A new About dialog for the path.** Ivy has none; one row in Settings is enough to find the file.
 
 **Open.**
-- That Rust's standard error on Windows reads the process's handle on every write, which is what
-  makes `SetStdHandle` take effect, is read from no source here: the Windows CI (#162) is what
-  proves it.
+- On Windows it is read, not run. Rust's standard error asks for the process's handle on every
+  write — `library/std/src/sys/stdio/windows.rs`: «Don't cache handles but get them fresh for every
+  read/write» — which is what makes `SetStdHandle` take effect, and a process born with no handle
+  discards the write as written instead of failing. No Windows machine has run the capture yet; the
+  Windows CI (#162) is what proves it.
 - Helper programs (`panel-mcp`, `ivy-session`, `ivy-codex`) keep their standard error with whoever
   launched them.
