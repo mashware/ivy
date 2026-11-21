@@ -3,6 +3,7 @@
 use std::io::{self, Read, Write};
 use std::time::{Duration, Instant};
 
+#[cfg(not(windows))]
 use interprocess::local_socket::prelude::*;
 use serde::Deserialize;
 
@@ -91,15 +92,50 @@ pub fn publish_document(bytes: &[u8]) -> Result<String, String> {
 
 /// Opens only the endpoint inherited by this pane. No arbitrary endpoint or pane selector exists.
 pub fn exchange(request: &Request) -> io::Result<serde_json::Value> {
-    let endpoint = inherited_endpoint()?;
-    exchange_at(&request.line().map_err(io::Error::other)?, endpoint)
+    #[cfg(not(windows))]
+    {
+        let endpoint = inherited_endpoint()?;
+        exchange_at(&request.line().map_err(io::Error::other)?, endpoint)
+    }
+    #[cfg(windows)]
+    {
+        let stream = inherited_stream()?;
+        exchange_stream(
+            &request.line().map_err(io::Error::other)?,
+            stream,
+            Instant::now() + Duration::from_secs(2),
+        )
+    }
 }
 
 /// Exchanges a prebuilt, bounded newline JSON request over this pane's inherited endpoint.
 pub fn exchange_line(line: &[u8]) -> io::Result<serde_json::Value> {
-    exchange_at(line, inherited_endpoint()?)
+    #[cfg(not(windows))]
+    {
+        exchange_at(line, inherited_endpoint()?)
+    }
+    #[cfg(windows)]
+    {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        exchange_stream(line, inherited_stream()?, deadline)
+    }
 }
 
+#[cfg(windows)]
+fn inherited_stream() -> io::Result<crate::endpoint::Stream> {
+    let [id, dir] = panel_contract::ENV_NAMES.map(std::env::var_os);
+    let (id, dir) =
+        crate::client::whole_identity(id.as_deref(), dir.as_deref()).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                "this helper is not running inside an Ivy pane",
+            )
+        })?;
+    crate::endpoint::private_to_this_user(dir)?;
+    crate::endpoint::connect_authenticated(dir, id, crate::client::inherited_server_pid()?)
+}
+
+#[cfg(not(windows))]
 fn inherited_endpoint() -> io::Result<interprocess::local_socket::Name<'static>> {
     let outside = || {
         io::Error::new(
@@ -114,15 +150,24 @@ fn inherited_endpoint() -> io::Result<interprocess::local_socket::Name<'static>>
     crate::endpoint::name_of(dir, id)
 }
 
+#[cfg(not(windows))]
 fn exchange_at(
     line: &[u8],
     endpoint: interprocess::local_socket::Name<'static>,
 ) -> io::Result<serde_json::Value> {
     let deadline = Instant::now() + Duration::from_secs(2);
-    let mut stream = interprocess::local_socket::ConnectOptions::new()
+    let stream = interprocess::local_socket::ConnectOptions::new()
         .name(endpoint)
         .wait_mode(interprocess::ConnectWaitMode::Timeout(remaining(deadline)?))
         .connect_sync()?;
+    exchange_stream(line, stream, deadline)
+}
+
+fn exchange_stream(
+    line: &[u8],
+    mut stream: crate::endpoint::Stream,
+    deadline: Instant,
+) -> io::Result<serde_json::Value> {
     let mut unwritten = line;
     while !unwritten.is_empty() {
         stream.set_send_timeout(Some(remaining(deadline)?))?;
@@ -206,6 +251,8 @@ mod publish_tests {
         assert!(whole_identity(None, None).is_none());
         assert!(whole_identity(Some(OsStr::new("pane")), None).is_none());
         assert!(whole_identity(Some(OsStr::new("pane")), Some(OsStr::new("relative"))).is_none());
-        assert!(whole_identity(Some(OsStr::new("pane")), Some(OsStr::new("/tmp/panel"))).is_some());
+        // An absolute path in this platform's own spelling: `/tmp/panel` is relative on Windows.
+        let panel = std::env::temp_dir().join("panel");
+        assert!(whole_identity(Some(OsStr::new("pane")), Some(panel.as_os_str())).is_some());
     }
 }

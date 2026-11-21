@@ -862,7 +862,7 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
     ),
     (
         "impl Pane",
-        525,
+        523,
         "a console with its panel, its keys and its mouse. On the day it was recorded it was six \
          blocks in six files: the keyboard and mouse passes (157 each), how a pane is opened (112) \
          and how it gets its panel (120), and 45 more in `lib.rs` and `control.rs`. **The search \
@@ -870,14 +870,14 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
          leftovers became a free function of `closing.rs`, 10 lines out, and the keyboard pass \
          spent ten — nine asking the search about each key, one seeding a new pane's search \
          record — with the rules themselves in `search.rs`, outside the type. **591 - 10 + 10 \
-         leaves 591.** Session takeover now delegates to a free function, leaving 538. Delegating the shared signal-aware pump and geometry work leaves534 after integrating startup recovery and clipboard changes. Sharing effective input modes with recovery leaves533. Ordinary shell startup now uses the shared module route; removing the obsolete test-only launch wrapper leaves525.",
+         leaves 591.** Session takeover now delegates to a free function, leaving 538. Delegating the shared signal-aware pump and geometry work leaves534 after integrating startup recovery and clipboard changes. Sharing effective input modes with recovery leaves533. Ordinary shell startup now uses the shared module route; removing the obsolete test-only launch wrapper leaves525. D115's Windows clipboard chords put what the walk drops behind a key and what a clipboard chord does into free types of `keyboard.rs`, leaving 523.",
     ),
     (
         "impl PanelState",
-        356,
+        353,
         "what a pane holds of its panel. On the day it was recorded it was split over `panel.rs` \
          and its child modules for the document, links, driving and the pane, to pay the block \
-         ceiling. Cache construction belongs to the resolved-colour cache. Pure warning and hook-refusal presentation now belong to their policy functions, keeping363 after hook state transitions and provenance revocation. File arbitration now lives in the driving policy function, leaving360 after done-yield ownership transitions. Retirement document/provenance clearing is now shared in document.rs, leaving358. The layout cache key now travels as one value, leaving356.",
+         ceiling. Cache construction belongs to the resolved-colour cache. Pure warning and hook-refusal presentation now belong to their policy functions, keeping363 after hook state transitions and provenance revocation. File arbitration now lives in the driving policy function, leaving360 after done-yield ownership transitions. Retirement document/provenance clearing is now shared in document.rs, leaving358. The layout cache key now travels as one value, leaving356. Document commit and native snapshot publication share the document policy functions, leaving353.",
     ),
     (
         "impl InjectedDrags",

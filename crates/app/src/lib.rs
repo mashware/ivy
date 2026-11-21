@@ -65,7 +65,7 @@ pub(crate) mod control;
 pub mod diagnostics_log;
 mod pane_view;
 mod resume;
-use panel::pane::{identity_of, panel_or_none};
+use panel::pane::panel_or_none;
 mod board;
 pub mod fonts;
 mod git_process;
@@ -1219,12 +1219,12 @@ impl eframe::App for Window {
     /// veil and the tiling that is redone on release. Calling the tree's operation directly would
     /// measure a function, and the annex compares frames.
     ///
-    /// **With no drags asked for it does absolutely nothing**, it does not even look at the clock:
-    /// it is the path of whoever uses the application.
+    /// **With no drags asked for the drag half does nothing**, it does not even look at the clock:
+    /// it is the path of whoever uses the application. What runs first for every batch is
+    /// [`console_input::before_egui`], which on Windows puts a clipboard request behind two keys
+    /// (D115).
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
-        settings::editor::inject(self, raw_input);
-        board::probe::inject(self, raw_input, ctx);
-        sidebar::probe::inject(self, raw_input, ctx);
+        console_input::before_egui(self, raw_input, ctx);
         let Some(injected_drags) = self.injected_drags.as_mut() else {
             return;
         };
@@ -5320,7 +5320,7 @@ mod tests {
             &mut modifiers,
             2,
             &keyboard::Keymap::default(),
-            true,
+            keyboard::Clipboard::native(true),
         );
 
         assert!(
@@ -5363,7 +5363,7 @@ mod tests {
             &mut modifiers,
             2,
             &keyboard::Keymap::default(),
-            true,
+            keyboard::Clipboard::native(true),
         );
         assert_eq!(pane.keystrokes, b"hello", "with Shift it did not paste");
 
@@ -5380,7 +5380,7 @@ mod tests {
             &mut modifiers,
             2,
             &keyboard::Keymap::default(),
-            true,
+            keyboard::Clipboard::native(true),
         );
         assert_eq!(
             pane.keystrokes, b"\x16",
@@ -5413,7 +5413,7 @@ mod tests {
             &mut modifiers,
             2,
             &keyboard::Keymap::default(),
-            true,
+            keyboard::Clipboard::native(true),
         );
         assert_eq!(pane.keystrokes, b"ls\r", "it arrived marked without asking");
 
@@ -5432,7 +5432,7 @@ mod tests {
             &mut modifiers,
             2,
             &keyboard::Keymap::default(),
-            true,
+            keyboard::Clipboard::native(true),
         );
         assert_eq!(
             pane.keystrokes, b"\x1b[200~ls\n\x1b[201~",
@@ -5470,7 +5470,7 @@ mod tests {
             &mut modifiers,
             2,
             &keyboard::Keymap::default(),
-            true,
+            keyboard::Clipboard::native(true),
         );
         assert_eq!(
             pane.keystrokes, b"good",
@@ -5493,7 +5493,7 @@ mod tests {
             &mut modifiers,
             2,
             &keyboard::Keymap::default(),
-            true,
+            keyboard::Clipboard::native(true),
         );
         assert_eq!(
             pane.keystrokes, b"\x16",
@@ -5528,7 +5528,7 @@ mod tests {
             &mut modifiers,
             2,
             &keyboard::Keymap::default(),
-            true,
+            keyboard::Clipboard::native(true),
         );
 
         enqueue(
@@ -5541,7 +5541,7 @@ mod tests {
             &mut modifiers,
             2,
             &keyboard::Keymap::default(),
-            true,
+            keyboard::Clipboard::native(true),
         );
         assert_eq!(
             pane.keystrokes, b"\x16",
@@ -5567,7 +5567,7 @@ mod tests {
             &mut modifiers,
             2,
             &keyboard::Keymap::default(),
-            true,
+            keyboard::Clipboard::native(true),
         );
 
         // **Emptying the queue is what turns this into two real frames.** egui rebuilds the event
@@ -5583,7 +5583,7 @@ mod tests {
             &mut modifiers,
             2,
             &keyboard::Keymap::default(),
-            true,
+            keyboard::Clipboard::native(true),
         );
         assert_eq!(
             pane.keystrokes, b"late",
@@ -5602,7 +5602,8 @@ mod tests {
         // screen is not an editor to take text out of. A cut that arrives belongs to the program,
         // with Shift or without it. Since D33's second change `Ctrl+Shift+X` is not one of them — it
         // arrives as a key and closes the console — so the cut seen here with Shift held is what a
-        // dedicated Cut key, or Windows' Shift+Delete, still produces.
+        // dedicated Cut key produces. (Windows' Shift+Delete produced one too until D115; it is a
+        // key now, and the cut behind it is the text fields'.)
         let ctx = egui::Context::default();
         let mut pane = pane_with("sleep 30", 0);
         // The window keeps this between frames; here the variable does it, which is the same thing.
@@ -5621,7 +5622,7 @@ mod tests {
             &mut modifiers,
             2,
             &keyboard::Keymap::default(),
-            true,
+            keyboard::Clipboard::native(true),
         );
         assert_eq!(pane.keystrokes, b"\x03", "it stopped interrupting");
 
@@ -5636,7 +5637,7 @@ mod tests {
                 &mut modifiers,
                 2,
                 &keyboard::Keymap::default(),
-                true,
+                keyboard::Clipboard::native(true),
             );
             assert_eq!(pane.keystrokes, b"\x18", "cutting changed its byte");
         }
@@ -5980,6 +5981,8 @@ mod tests {
                 connection,
                 what,
                 answer: answering,
+                #[cfg(windows)]
+                release: None,
             });
         with_metrics(|metrics| window.answer_the_windows_requests(ctx, whole_window, metrics));
         answer
@@ -6049,7 +6052,7 @@ mod tests {
             &mut modifiers,
             2,
             &keyboard::Keymap::default(),
-            true,
+            keyboard::Clipboard::native(true),
         );
         assert!(
             !pane.keystrokes.is_empty(),
@@ -6513,12 +6516,16 @@ mod tests {
             connection,
             what: panel_control::What::Retire,
             answer: retiring,
+            #[cfg(windows)]
+            release: None,
         });
         control.enqueue_for_tests(panel_control::Delivery {
             origin: panel_control::PublicationOrigin::Unknown,
             connection,
             what: panel_control::What::Closed,
             answer: closing,
+            #[cfg(windows)]
+            release: None,
         });
         control.apply(
             &mut origin.panel_state,
@@ -6603,6 +6610,8 @@ mod tests {
             connection,
             what: panel_control::What::Retire,
             answer: retiring,
+            #[cfg(windows)]
+            release: None,
         });
         control.enqueue_for_tests(panel_control::Delivery {
             origin: panel_control::PublicationOrigin::Unknown,
@@ -6613,6 +6622,8 @@ mod tests {
                     .expect("the new panel"),
             },
             answer: publishing,
+            #[cfg(windows)]
+            release: None,
         });
         control.apply(
             &mut origin.panel_state,
@@ -6720,6 +6731,8 @@ mod tests {
             connection,
             what: panel_control::What::Closed,
             answer: closing,
+            #[cfg(windows)]
+            release: None,
         });
         control.apply(
             &mut origin.panel_state,
@@ -6859,7 +6872,7 @@ mod tests {
                 &mut modifiers,
                 2,
                 &keyboard::Keymap::default(),
-                true,
+                keyboard::Clipboard::native(true),
             );
             assert!(
                 pane.taken_over.is_some(),
@@ -7484,7 +7497,7 @@ mod tests {
             &mut modifiers,
             2,
             &keyboard::Keymap::default(),
-            true,
+            keyboard::Clipboard::native(true),
         );
         assert_eq!(pane.keystrokes, b"a", "what was typed was not sent");
 
@@ -7494,7 +7507,7 @@ mod tests {
             &mut modifiers,
             2,
             &keyboard::Keymap::default(),
-            true,
+            keyboard::Clipboard::native(true),
         );
         assert!(
             pane.keystrokes.is_empty(),
@@ -7754,9 +7767,13 @@ mod tests {
     #[cfg(unix)]
     fn the_program_sees_no_variable_that_is_not_declared() {
         let panel = PanelDir::create().expect("create a panel directory");
-        let (_pty, channel) =
-            Pty::spawn_with_env("env", &[], INITIAL_GRID, &identity_of(Some(&panel)))
-                .expect("launch env");
+        let (_pty, channel) = Pty::spawn_with_env(
+            "env",
+            &[],
+            INITIAL_GRID,
+            &panel::pane::identity_of(Some(&panel)),
+        )
+        .expect("launch env");
 
         let output = drain_until_closed(&channel);
         let of_the_child: std::collections::HashMap<&str, &str> = output
@@ -7846,7 +7863,7 @@ mod tests {
     /// console with the identity of the mother.
     #[test]
     fn a_console_with_no_directory_orders_both_variables_removed() {
-        let identity = identity_of(None);
+        let identity = panel::pane::identity_of(None);
 
         assert_eq!(
             identity,
@@ -8239,7 +8256,14 @@ mod tests {
         );
 
         enqueue(&ctx, chord_with(egui::Key::E));
-        let requests = pane.send_keys(&ctx, Instant::now(), &mut modifiers, 1, &keymap, true);
+        let requests = pane.send_keys(
+            &ctx,
+            Instant::now(),
+            &mut modifiers,
+            1,
+            &keymap,
+            keyboard::Clipboard::native(true),
+        );
         assert_eq!(
             requests,
             vec![WindowRequest::Split(Orientation::Columns)],
@@ -8252,7 +8276,14 @@ mod tests {
         );
 
         enqueue(&ctx, chord_with(egui::Key::D));
-        let requests = pane.send_keys(&ctx, Instant::now(), &mut modifiers, 1, &keymap, true);
+        let requests = pane.send_keys(
+            &ctx,
+            Instant::now(),
+            &mut modifiers,
+            1,
+            &keymap,
+            keyboard::Clipboard::native(true),
+        );
         assert!(requests.is_empty(), "the old chord went on splitting");
         assert_eq!(
             pane.keystrokes,
@@ -8305,7 +8336,14 @@ mod tests {
                 egui::Event::Text("E".to_owned()),
             ],
         );
-        let requests = pane.send_keys(&ctx, Instant::now(), &mut modifiers, 1, &keymap, true);
+        let requests = pane.send_keys(
+            &ctx,
+            Instant::now(),
+            &mut modifiers,
+            1,
+            &keymap,
+            keyboard::Clipboard::native(true),
+        );
 
         assert_eq!(
             requests,
@@ -8342,7 +8380,7 @@ mod tests {
             &mut modifiers,
             1,
             &keyboard::Keymap::default(),
-            true,
+            keyboard::Clipboard::native(true),
         );
 
         assert_eq!(
@@ -8380,7 +8418,7 @@ mod tests {
             &mut modifiers,
             1,
             &keyboard::Keymap::default(),
-            true,
+            keyboard::Clipboard::native(true),
         );
 
         assert_eq!(
@@ -8426,7 +8464,7 @@ mod tests {
             &mut modifiers,
             4,
             &keyboard::Keymap::default(),
-            true,
+            keyboard::Clipboard::native(true),
         );
 
         assert_eq!(
@@ -8460,7 +8498,7 @@ mod tests {
             &mut modifiers,
             1,
             &keyboard::Keymap::default(),
-            true,
+            keyboard::Clipboard::native(true),
         );
 
         assert_eq!(
@@ -8495,7 +8533,7 @@ mod tests {
             &mut modifiers,
             2,
             &keyboard::Keymap::default(),
-            true,
+            keyboard::Clipboard::native(true),
         );
 
         assert_eq!(
@@ -12608,7 +12646,7 @@ mod tests {
             &mut modifiers,
             1,
             &keyboard::Keymap::default(),
-            true,
+            keyboard::Clipboard::native(true),
         );
         let output = ctx.run_ui(egui::RawInput::default(), |_| {});
         let copied = output
@@ -12683,7 +12721,7 @@ mod tests {
             &mut modifiers,
             1,
             &keyboard::Keymap::default(),
-            false,
+            keyboard::Clipboard::native(false),
         );
         let output = ctx.run_ui(egui::RawInput::default(), |_| {});
         let copied_anything = output
@@ -12754,7 +12792,7 @@ mod tests {
             &mut modifiers,
             1,
             &keyboard::Keymap::default(),
-            true,
+            keyboard::Clipboard::native(true),
         );
 
         assert_eq!(
@@ -12762,6 +12800,266 @@ mod tests {
             b"\x03",
             "plain Ctrl+C stopped interrupting the program"
         );
+    }
+
+    /// What one chord over `key` does in a console with «good» marked: what was left on the
+    /// clipboard, read from the context's output as [`copy_at`] does, and what the program
+    /// received.
+    ///
+    /// **The batch is the one the window hands the console.** With `insert_chords` on, it goes
+    /// through [`keyboard::add_requests_behind`] first, as `console_input::before_egui` does on
+    /// Windows, so an exact Ctrl+Insert or Shift+Delete arrives with its copy or cut request right
+    /// behind it — seeding the key alone would test a batch the real window never delivers.
+    fn chord_at(
+        key: egui::Key,
+        modifiers_held: egui::Modifiers,
+        keymap: &keyboard::Keymap,
+        clipboard: keyboard::Clipboard,
+    ) -> (Option<String>, Vec<u8>, Vec<WindowRequest>) {
+        let ctx = egui::Context::default();
+        let mut pane = pane_with("sleep 30", 0);
+        pane.screen.advance(b"good night");
+        pane.screen.start_selection(Cell {
+            row: 0,
+            col: 0,
+            half: Half::Left,
+        });
+        pane.screen.extend_selection(Cell {
+            row: 0,
+            col: 3,
+            half: Half::Right,
+        });
+        let mut modifiers = egui::Modifiers::NONE;
+        let mut batch = vec![
+            egui::Event::ModifiersChanged(modifiers_held),
+            egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: modifiers_held,
+            },
+        ];
+        if clipboard.insert_chords {
+            keyboard::add_requests_behind(&mut batch);
+        }
+        enqueue(&ctx, batch);
+        let requests = pane.send_keys(&ctx, Instant::now(), &mut modifiers, 1, keymap, clipboard);
+        let output = ctx.run_ui(egui::RawInput::default(), |_| {});
+        let copied = output
+            .platform_output
+            .commands
+            .iter()
+            .find_map(|request| match request {
+                egui::OutputCommand::CopyText(text) => Some(text.clone()),
+                _ => None,
+            });
+        output.drop_without_applying_deltas();
+        (copied, pane.keystrokes.clone(), requests)
+    }
+
+    const CTRL: egui::Modifiers = egui::Modifiers {
+        alt: false,
+        ctrl: true,
+        shift: false,
+        mac_cmd: false,
+        command: true,
+    };
+    const SHIFT: egui::Modifiers = egui::Modifiers {
+        alt: false,
+        ctrl: false,
+        shift: true,
+        mac_cmd: false,
+        command: false,
+    };
+    const ALT: egui::Modifiers = egui::Modifiers {
+        alt: true,
+        ctrl: false,
+        shift: false,
+        mac_cmd: false,
+        command: false,
+    };
+    const WINDOWS: keyboard::Clipboard = keyboard::Clipboard {
+        copy: true,
+        insert_chords: true,
+    };
+    const ELSEWHERE: keyboard::Clipboard = keyboard::Clipboard {
+        copy: true,
+        insert_chords: false,
+    };
+
+    /// `a` and `b` held at once.
+    fn and(a: egui::Modifiers, b: egui::Modifiers) -> egui::Modifiers {
+        a | b
+    }
+
+    #[test]
+    fn on_windows_ctrl_insert_copies_and_neither_the_key_nor_its_request_reaches_the_program() {
+        // **D115.** The key copies, and the copy request behind it — there for the text fields —
+        // is dropped: let through, it would be `0x03`, an interrupt. Both halves, because copying
+        // with the interrupt still sent is the defect half-fixed.
+        let (copied, sent, _) = chord_at(
+            egui::Key::Insert,
+            CTRL,
+            &keyboard::Keymap::default(),
+            WINDOWS,
+        );
+        assert_eq!(copied.as_deref(), Some("good"), "Ctrl+Insert did not copy");
+        assert!(
+            sent.is_empty(),
+            "Ctrl+Insert copied and also sent {:?} to the program",
+            String::from_utf8_lossy(&sent)
+        );
+    }
+
+    #[test]
+    fn on_windows_shift_delete_reaches_the_program_as_its_key_and_not_as_a_cut() {
+        // **D115, the ticket's own case.** The cut request behind the key is the text fields'; in a
+        // console it would be `0x18`, which is what `nano` exits on.
+        let (copied, sent, _) = chord_at(
+            egui::Key::Delete,
+            SHIFT,
+            &keyboard::Keymap::default(),
+            WINDOWS,
+        );
+        assert_eq!(copied, None, "Shift+Delete copied");
+        assert_eq!(sent, b"\x1b[3;2~", "Shift+Delete is not D52's key alone");
+    }
+
+    #[test]
+    fn off_windows_and_with_copying_off_ctrl_insert_belongs_to_the_program() {
+        // **The same chord where D115 does not apply.** On Linux and macOS it is D52's key, and on
+        // Windows with `key.copy = none` it is given back the way Ctrl+Shift+C is — with its copy
+        // request still dropped.
+        let copy_off = keyboard::Clipboard {
+            copy: false,
+            ..WINDOWS
+        };
+        for clipboard in [ELSEWHERE, copy_off] {
+            let (copied, sent, _) = chord_at(
+                egui::Key::Insert,
+                CTRL,
+                &keyboard::Keymap::default(),
+                clipboard,
+            );
+            assert_eq!(copied, None, "copied with {clipboard:?}");
+            assert_eq!(
+                sent, b"\x1b[2;5~",
+                "{clipboard:?}: Ctrl+Insert did not reach the program as D52's key alone"
+            );
+        }
+    }
+
+    #[test]
+    fn on_windows_only_the_exact_chords_are_the_clipboard_s() {
+        // Ctrl+Shift+Insert, Ctrl+Alt+Insert and Alt+Shift+Insert copy nothing and are D52's keys,
+        // and so is Ctrl+Shift+Delete: the table of D115, row by row.
+        for (key, held, expected) in [
+            (egui::Key::Insert, and(CTRL, SHIFT), &b"\x1b[2;6~"[..]),
+            (egui::Key::Insert, and(CTRL, ALT), b"\x1b[2;7~"),
+            (egui::Key::Insert, and(ALT, SHIFT), b"\x1b[2;4~"),
+            (egui::Key::Delete, and(CTRL, SHIFT), b"\x1b[3;6~"),
+        ] {
+            let (copied, sent, _) = chord_at(key, held, &keyboard::Keymap::default(), WINDOWS);
+            assert_eq!(copied, None, "{key:?} with {held:?} copied");
+            assert_eq!(sent, expected, "{key:?} with {held:?} is not D52's key");
+        }
+    }
+
+    #[test]
+    fn on_windows_shift_insert_as_a_key_reaches_the_program_as_nothing_and_elsewhere_as_its_key() {
+        // **D115.** On Windows a bare Shift+Insert arrives as a key only when the clipboard holds
+        // no text, and then it is the application's paste chord, which never reaches the program —
+        // the rule `bytes` applies to Ctrl+Shift+V. On Linux it is D52's key, untouched.
+        let (_, on_windows, _) = chord_at(
+            egui::Key::Insert,
+            SHIFT,
+            &keyboard::Keymap::default(),
+            WINDOWS,
+        );
+        assert!(
+            on_windows.is_empty(),
+            "on Windows the paste chord reached the program as {:?}",
+            String::from_utf8_lossy(&on_windows)
+        );
+        let (_, elsewhere, _) = chord_at(
+            egui::Key::Insert,
+            SHIFT,
+            &keyboard::Keymap::default(),
+            ELSEWHERE,
+        );
+        assert_eq!(
+            elsewhere, b"\x1b[2;2~",
+            "off Windows Shift+Insert stopped being D52's key"
+        );
+    }
+
+    #[test]
+    fn a_chord_somebody_bound_to_ctrl_insert_wins_and_its_request_still_does_not_interrupt() {
+        // **The clipboard door sits after the keymap**, so a `key.new-tab = ctrl+insert` written
+        // in the file does what it says on Windows. And the copy request behind the key is dropped
+        // even though the keymap took the key first: armed anywhere later, it would reach the
+        // program as `0x03`.
+        let mut keymap = keyboard::Keymap::default();
+        keymap.bind(
+            keyboard::Action::NewTab,
+            Some(keyboard::Chord {
+                ctrl: true,
+                shift: false,
+                alt: false,
+                key: egui::Key::Insert,
+            }),
+        );
+        let (copied, sent, requests) = chord_at(egui::Key::Insert, CTRL, &keymap, WINDOWS);
+        assert_eq!(
+            requests,
+            vec![WindowRequest::NewTab],
+            "the bound chord was taken by the Windows copy"
+        );
+        assert_eq!(copied, None, "the bound chord also copied");
+        assert!(
+            sent.is_empty(),
+            "the bound chord's request reached the program as {:?}",
+            String::from_utf8_lossy(&sent)
+        );
+    }
+
+    #[test]
+    fn the_window_puts_the_requests_behind_the_keys_only_where_it_was_built_for_windows() {
+        // **The wiring, not the function**: every other D115 test calls `add_requests_behind`
+        // itself, so dropping it from the window's input hook would leave them all green while
+        // Windows' text fields stopped copying and cutting. This goes through the hook the desktop
+        // calls. Off Windows the batch must come out untouched — and the console's switch has to
+        // agree with the hook, or Shift+Insert would be swallowed on Linux.
+        let mut window = window_with("sleep 30", "sleep 30");
+        let ctx = egui::Context::default();
+        let press = |key, modifiers| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        let ctrl_insert = press(egui::Key::Insert, egui::Modifiers::CTRL);
+        let shift_delete = press(egui::Key::Delete, egui::Modifiers::SHIFT);
+        let mut input = egui::RawInput {
+            events: vec![ctrl_insert.clone(), shift_delete.clone()],
+            ..Default::default()
+        };
+        eframe::App::raw_input_hook(&mut window, &ctx, &mut input);
+        let windows = cfg!(target_os = "windows");
+        let expected = if windows {
+            vec![
+                ctrl_insert,
+                egui::Event::Copy,
+                shift_delete,
+                egui::Event::Cut,
+            ]
+        } else {
+            vec![ctrl_insert, shift_delete]
+        };
+        assert_eq!(input.events, expected);
+        assert_eq!(keyboard::Clipboard::native(true).insert_chords, windows);
     }
 
     /// A whole drag **to mark text**: the plain left button, which is what **D20** decides.
@@ -26385,7 +26683,7 @@ mod tests {
             &mut modifiers,
             2,
             &keyboard::Keymap::default(),
-            true,
+            keyboard::Clipboard::native(true),
         );
 
         assert!(
@@ -26423,7 +26721,7 @@ mod tests {
             &mut modifiers,
             2,
             &keyboard::Keymap::default(),
-            true,
+            keyboard::Clipboard::native(true),
         );
 
         assert_eq!(
@@ -26442,7 +26740,14 @@ mod tests {
     ) {
         let mut modifiers = egui::Modifiers::NONE;
         enqueue(ctx, events);
-        pane.send_keys(ctx, Instant::now(), &mut modifiers, 1, keymap, true);
+        pane.send_keys(
+            ctx,
+            Instant::now(),
+            &mut modifiers,
+            1,
+            keymap,
+            keyboard::Clipboard::native(true),
+        );
     }
 
     fn search_chord() -> Vec<egui::Event> {
@@ -26879,7 +27184,7 @@ mod tests {
             &mut modifiers,
             1,
             &keyboard::Keymap::default(),
-            true,
+            keyboard::Clipboard::native(true),
         );
 
         wait_for_this_console_to_say(&mut pane, "^[[2~^[[3~^[[5~^[[6~^[OH^[OF^[OA^[[3;5~^[[1;5D");
@@ -28165,7 +28470,7 @@ mod tests {
                 &mut modifiers,
                 2,
                 &keyboard::Keymap::default(),
-                true,
+                keyboard::Clipboard::native(true),
             );
             let after = pane.screen.view().scroll();
 
@@ -28231,7 +28536,7 @@ mod tests {
                 &mut modifiers,
                 2,
                 &keyboard::Keymap::default(),
-                true,
+                keyboard::Clipboard::native(true),
             );
 
             assert_eq!(
@@ -28273,7 +28578,7 @@ mod tests {
             &mut modifiers,
             2,
             &keyboard::Keymap::default(),
-            true,
+            keyboard::Clipboard::native(true),
         );
 
         let remaining = ctx.input(|input| input.events.clone());
@@ -28308,7 +28613,14 @@ mod tests {
                 key_press(egui::Key::PageUp, egui::Modifiers::SHIFT),
             ],
         );
-        pane.send_keys(&ctx, Instant::now(), &mut modifiers, 2, &keymap, true);
+        pane.send_keys(
+            &ctx,
+            Instant::now(),
+            &mut modifiers,
+            2,
+            &keymap,
+            keyboard::Clipboard::native(true),
+        );
 
         assert_eq!(
             String::from_utf8_lossy(&pane.keystrokes),
@@ -28335,7 +28647,14 @@ mod tests {
             &ctx,
             vec![key_press(egui::Key::Home, egui::Modifiers::NONE)],
         );
-        pane.send_keys(&ctx, Instant::now(), &mut modifiers, 1, &keymap, true);
+        pane.send_keys(
+            &ctx,
+            Instant::now(),
+            &mut modifiers,
+            1,
+            &keymap,
+            keyboard::Clipboard::native(true),
+        );
         assert_eq!(
             String::from_utf8_lossy(&pane.keystrokes),
             "\x1bOH",
@@ -28348,7 +28667,14 @@ mod tests {
             &ctx,
             vec![key_press(egui::Key::Home, egui::Modifiers::NONE)],
         );
-        pane.send_keys(&ctx, Instant::now(), &mut modifiers, 1, &keymap, true);
+        pane.send_keys(
+            &ctx,
+            Instant::now(),
+            &mut modifiers,
+            1,
+            &keymap,
+            keyboard::Clipboard::native(true),
+        );
         assert_eq!(
             String::from_utf8_lossy(&pane.keystrokes),
             "\x1b[H",

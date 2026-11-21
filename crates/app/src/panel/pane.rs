@@ -26,14 +26,23 @@ pub(crate) fn state_and_control_with_authority(
     authority: Option<std::sync::Arc<panel::overlay::Authority>>,
     inspector: panel_control::PublicationInspector,
 ) -> (panel::PanelState, Option<crate::control::PaneControl>) {
-    let state = panel::PanelState::default();
+    #[allow(unused_mut)]
+    let mut state = panel::PanelState::default();
+    #[cfg(windows)]
+    let hwnd = crate::control::control_hwnd(ctx);
+    #[cfg(not(windows))]
+    let hwnd = None;
     let control = dir.and_then(|dir| {
         let waker = ctx.clone();
         let wake = move || waker.request_repaint();
         crate::control::open_with_authority(
-            dir, &state, reads, sessions, authority, inspector, wake,
+            dir, &state, reads, sessions, authority, inspector, wake, hwnd,
         )
     });
+    #[cfg(windows)]
+    if let Some(control) = &control {
+        control.install_windows_document(&mut state);
+    }
     (state, control)
 }
 
@@ -84,6 +93,58 @@ pub(crate) fn identity_of(
     match panel {
         Some(panel) => panel.env().map(|(name, value)| (name, Some(value))),
         None => panel_contract::ENV_NAMES.map(|name| (name, None)),
+    }
+}
+
+/// What a launched program receives: the panel's two variables and, on Windows, the server witness.
+pub(crate) fn launch_identity(
+    panel: Option<&PanelDir>,
+) -> Vec<(&'static str, Option<&std::ffi::OsStr>)> {
+    #[cfg_attr(not(windows), allow(unused_mut))]
+    let mut identity: Vec<_> = identity_of(panel).into_iter().collect();
+    #[cfg(windows)]
+    identity.push(server_pid_env(panel));
+    identity
+}
+
+/// The server process witness is a separate Windows launch variable, not part of the stable
+/// two-entry panel identity contract. Sending `None` explicitly clears an inherited parent value.
+/// The value is borrowed for `'static` because a process's own PID never changes, so every launch
+/// site can push the entry straight into its borrowed environment list.
+#[cfg(windows)]
+pub(crate) fn server_pid_env(
+    panel: Option<&PanelDir>,
+) -> (&'static str, Option<&'static std::ffi::OsStr>) {
+    static PID: std::sync::OnceLock<std::ffi::OsString> = std::sync::OnceLock::new();
+    let pid = || PID.get_or_init(|| std::process::id().to_string().into());
+    ("PANEL_SERVER_PID", panel.map(|_| pid().as_os_str()))
+}
+
+#[cfg(test)]
+#[cfg(windows)]
+mod windows_control_tests {
+    use super::*;
+
+    #[test]
+    fn windows_control_server_pid_is_separate_and_cleared_without_a_panel() {
+        let dir = PanelDir::create().expect("private panel directory");
+        let (name, pid) = server_pid_env(Some(&dir));
+        let expected = std::process::id().to_string();
+        assert_eq!(name, "PANEL_SERVER_PID");
+        assert_eq!(
+            pid.and_then(std::ffi::OsStr::to_str),
+            Some(expected.as_str())
+        );
+        let (name, pid) = server_pid_env(None);
+        assert_eq!(name, "PANEL_SERVER_PID");
+        assert!(
+            pid.is_none(),
+            "a no-panel launch clears an inherited server PID"
+        );
+        assert_eq!(
+            identity_of(None).map(|(name, _)| name),
+            panel_contract::ENV_NAMES
+        );
     }
 }
 

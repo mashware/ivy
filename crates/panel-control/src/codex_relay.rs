@@ -200,6 +200,7 @@ fn output(exe: &OsStr, args: &[&str], timeout: Duration) -> io::Result<String> {
         for name in panel_contract::ENV_NAMES {
             command.env_remove(name);
         }
+        command.env_remove("PANEL_SERVER_PID");
     }
     let mut child = command.spawn()?;
     let stdout = child
@@ -1344,6 +1345,13 @@ mod tests {
         }
     }
 
+    // Unix only: binding a Codex route needs atomic replacement, which Windows does not have yet.
+    // Restoring Claude/Codex sessions after Ivy restarts is not ported to Windows (#164 scope).
+    crate::windows_unix_omission!(
+        loaded_resume_success_is_held_until_the_running_mcp_proves_its_route,
+        "unix-only: binding a Codex route needs atomic replacement, which is not ported to Windows"
+    );
+    #[cfg(unix)]
     #[test]
     fn loaded_resume_success_is_held_until_the_running_mcp_proves_its_route() {
         let home = std::env::temp_dir().join(format!("ivy-proof-state-{}", nonce().unwrap()));
@@ -1475,6 +1483,13 @@ mod tests {
         drop(state);
         std::fs::remove_dir_all(home).unwrap();
     }
+    // Unix only: binding a Codex route needs atomic replacement, which Windows does not have yet.
+    // Restoring Claude/Codex sessions after Ivy restarts is not ported to Windows (#164 scope).
+    crate::windows_unix_omission!(
+        empty_config_requires_complete_inventory_before_accepting_resume,
+        "unix-only: binding a Codex route needs atomic replacement, which is not ported to Windows"
+    );
+    #[cfg(unix)]
     #[test]
     fn empty_config_requires_complete_inventory_before_accepting_resume() {
         let home = std::env::temp_dir().join(format!("ivy-inventory-{}", nonce().unwrap()));
@@ -1583,6 +1598,13 @@ mod tests {
         )));
     }
 
+    // Unix only: binding a Codex route needs atomic replacement, which Windows does not have yet.
+    // Restoring Claude/Codex sessions after Ivy restarts is not ported to Windows (#164 scope).
+    crate::windows_unix_omission!(
+        exit_cancels_epoch_without_waiting_for_a_held_route,
+        "unix-only: binding a Codex route needs atomic replacement, which is not ported to Windows"
+    );
+    #[cfg(unix)]
     #[test]
     fn exit_cancels_epoch_without_waiting_for_a_held_route() {
         let home = std::env::temp_dir().join(format!("ivy-cancel-exit-{}", nonce().unwrap()));

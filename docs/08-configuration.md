@@ -138,7 +138,7 @@ is in the README. These settings belong to Codex, not Ivy's configuration file.
 
 If an Ivy bridge entry already exists under another name, update that table and preserve its
 command and other settings instead of adding a duplicate. `env_vars` forwards **variable names**
-from the launching environment; never save a console's actual `PANEL_ID` or `PANEL_DIR` in `env`.
+from the launching environment; on Windows also forward `PANEL_SERVER_PID`. Never save a console's actual `PANEL_ID` or `PANEL_DIR` in `env`.
 See the [official Codex MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
 
 In a newly opened ordinary Bash, Zsh or Fish console, type `codex`, `codex resume <session-id>`
@@ -491,6 +491,13 @@ would never work:
 ```
 ivy: line 3: the chord for 'key.copy' is the desktop's and cannot be changed; the only thing you can do is turn it off with 'none'
 ```
+
+**On Windows two more chords are the terminal's** (D115): `Ctrl+Insert` copies the marked text and
+`Shift+Insert` pastes, as in Windows Terminal. `key.copy = none` switches off `Ctrl+Insert` as well,
+and the program then receives it as `CSI 2;5~`. `Shift+Delete` is not a cut there: it reaches the
+program, as on Linux and macOS. A shortcut you bind to `ctrl+insert` wins over the copy; one bound to
+`shift+insert` only fires when the clipboard holds no text, because with text the desktop turns that
+chord into a paste before it is a key.
 
 ## What happens if you get it wrong
 

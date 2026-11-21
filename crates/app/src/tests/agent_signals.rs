@@ -81,6 +81,8 @@ fn delivered(pane: &mut Pane, connection: u64, what: panel_control::What) -> pan
             connection,
             what,
             answer,
+            #[cfg(windows)]
+            release: None,
         });
     pane.refresh_its_panel(&egui::Context::default());
     reply
@@ -312,6 +314,8 @@ fn unexpected_opencode_close_retains_unconfirmed_wait_until_complete_replacement
             connection: 81,
             what: panel_control::What::Closed,
             answer,
+            #[cfg(windows)]
+            release: None,
         });
     pane.refresh_its_panel(&egui::Context::default());
     let view = pane.signals.view(Instant::now()).unwrap();
