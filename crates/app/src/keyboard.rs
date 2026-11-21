@@ -232,11 +232,14 @@ fn clipboard_chord(
 ) -> Option<ClipboardChord> {
     match event {
         Event::Copy if chord.shift && clipboard.copy => Some(ClipboardChord::Copy),
+        // The key's own modifiers, as `request_behind` reads them: the request behind it and the
+        // copy have to agree, and the rebuilt chord goes blank when the window loses the focus.
         Event::Key {
             key: Key::Insert,
             pressed: true,
+            modifiers: held,
             ..
-        } if clipboard.insert_chords => match (chord.ctrl, chord.shift, chord.alt) {
+        } if clipboard.insert_chords => match (held.ctrl, held.shift, held.alt) {
             (true, false, false) if clipboard.copy => Some(ClipboardChord::Copy),
             (false, true, false) => Some(ClipboardChord::Swallow),
             _ => None,

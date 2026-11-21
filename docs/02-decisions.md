@@ -11612,8 +11612,12 @@ Windows precisely because it expects the cut, and has nothing for Insert — and
 A console acts on the key and drops the request behind it, armed from the key itself before the
 keymap, so a chord somebody bound does not leave its request to reach the program as `0x03` or
 `0x18`. The pair is this project's own translation, so unlike the desktop layer it is tested.
-What the fields lose is Ctrl+Shift+Insert and Alt+Shift+Insert as pastes, which upstream gave them
-and the narrowed arm no longer does.
+What the fields lose is every chord over the two keys **but the exact one**: upstream copied on any
+Ctrl+Insert, cut on any Shift+Delete and pasted on any Shift+Insert, so Ctrl+Shift+Insert and
+Ctrl+Alt+Insert no longer copy there, Ctrl+Shift+Delete and Alt+Shift+Delete no longer cut — egui's
+field ignores Shift+Delete on Windows whatever else is held — and Ctrl+Shift+Insert and
+Alt+Shift+Insert no longer paste. Each of those is a D52 key for a console, and a request for one of
+them would be a second answer the console would have to drop as well.
 
 **A shortcut bound to `shift+insert` is half a shortcut on Windows**: with text on the clipboard
 the desktop layer still turns that chord into a paste before it is a key, so the binding fires only

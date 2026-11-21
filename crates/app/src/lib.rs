@@ -5602,7 +5602,8 @@ mod tests {
         // screen is not an editor to take text out of. A cut that arrives belongs to the program,
         // with Shift or without it. Since D33's second change `Ctrl+Shift+X` is not one of them — it
         // arrives as a key and closes the console — so the cut seen here with Shift held is what a
-        // dedicated Cut key, or Windows' Shift+Delete, still produces.
+        // dedicated Cut key produces. (Windows' Shift+Delete produced one too until D115; it is a
+        // key now, and the cut behind it is the text fields'.)
         let ctx = egui::Context::default();
         let mut pane = pane_with("sleep 30", 0);
         // The window keeps this between frames; here the variable does it, which is the same thing.
@@ -13005,6 +13006,44 @@ mod tests {
             "the bound chord's request reached the program as {:?}",
             String::from_utf8_lossy(&sent)
         );
+    }
+
+    #[test]
+    fn the_window_puts_the_requests_behind_the_keys_only_where_it_was_built_for_windows() {
+        // **The wiring, not the function**: every other D115 test calls `add_requests_behind`
+        // itself, so dropping it from the window's input hook would leave them all green while
+        // Windows' text fields stopped copying and cutting. This goes through the hook the desktop
+        // calls. Off Windows the batch must come out untouched — and the console's switch has to
+        // agree with the hook, or Shift+Insert would be swallowed on Linux.
+        let mut window = window_with("sleep 30", "sleep 30");
+        let ctx = egui::Context::default();
+        let press = |key, modifiers| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        let ctrl_insert = press(egui::Key::Insert, egui::Modifiers::CTRL);
+        let shift_delete = press(egui::Key::Delete, egui::Modifiers::SHIFT);
+        let mut input = egui::RawInput {
+            events: vec![ctrl_insert.clone(), shift_delete.clone()],
+            ..Default::default()
+        };
+        eframe::App::raw_input_hook(&mut window, &ctx, &mut input);
+        let windows = cfg!(target_os = "windows");
+        let expected = if windows {
+            vec![
+                ctrl_insert,
+                egui::Event::Copy,
+                shift_delete,
+                egui::Event::Cut,
+            ]
+        } else {
+            vec![ctrl_insert, shift_delete]
+        };
+        assert_eq!(input.events, expected);
+        assert_eq!(keyboard::Clipboard::native(true).insert_chords, windows);
     }
 
     /// A whole drag **to mark text**: the plain left button, which is what **D20** decides.

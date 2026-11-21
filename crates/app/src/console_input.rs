@@ -47,7 +47,7 @@ pub(crate) fn send_keys(window: &mut Window, ctx: &egui::Context) -> Vec<WindowR
     // borrows of the same owner— and here it is solved the same way, without leaving the table
     // somewhere nobody would look for it.
     let keymap = window.keymap.clone();
-    let to_copy = keyboard::Clipboard::native(window.copy_enabled);
+    let clipboard = keyboard::Clipboard::native(window.copy_enabled);
     let tab = window.active_mut();
     // **The focused one is looked up by its name**, and if it does not turn up nobody is typed
     // to: writing into «the first one there is» would send the keys to a program the user is
@@ -55,7 +55,14 @@ pub(crate) fn send_keys(window: &mut Window, ctx: &egui::Context) -> Vec<WindowR
     let at = tab.where_the_focus_is();
     let requests = at
         .map(|at| {
-            tab.panes_mut()[at].send_keys(ctx, started, &mut modifiers, tabs_open, &keymap, to_copy)
+            tab.panes_mut()[at].send_keys(
+                ctx,
+                started,
+                &mut modifiers,
+                tabs_open,
+                &keymap,
+                clipboard,
+            )
         })
         .unwrap_or_default();
     // Declared on a pass somebody typed in, and only then: see this function's docblock.
