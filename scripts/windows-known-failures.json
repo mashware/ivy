@@ -432,13 +432,6 @@
     "issue": "https://github.com/mashware/ivy/issues/189"
   },
   {
-    "binary": "app/app:lib",
-    "name": "viewer::interaction_tests::control_click_on_an_image_path_opens_it_pinned_to_its_console",
-    "reason": "drive letters and backslashes break path handling",
-    "issue": "https://github.com/mashware/ivy/issues/186",
-    "intermittent": true
-  },
-  {
     "binary": "app/batches:test",
     "name": "the_batch_with_emoji_in_its_panels_is_held_to_the_colour_guard",
     "reason": "the repository guard reads the checkout in Unix form",
@@ -534,11 +527,5 @@
     "reason": "selection, clipboard, ligature or emoji painting differs on Windows",
     "issue": "https://github.com/mashware/ivy/issues/188",
     "intermittent": true
-  },
-  {
-    "binary": "app/app:lib",
-    "name": "settings::editor::view::tests::the_startup_page_names_the_log_file_and_shows_it_in_its_folder",
-    "reason": "the log folder is revealed with a verbatim \\\\?\\ prefix the test does not expect",
-    "issue": "https://github.com/mashware/ivy/issues/186"
   }
 ]
