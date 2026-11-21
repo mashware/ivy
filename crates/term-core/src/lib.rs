@@ -18,10 +18,16 @@ use std::sync::mpsc::{
 };
 use std::sync::{Arc, OnceLock};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(unix)]
+use std::time::Instant;
 
-use portable_pty::{Child, CommandBuilder, MasterPty, native_pty_system};
+#[cfg(not(windows))]
+use portable_pty::MasterPty;
+use portable_pty::{Child, CommandBuilder, native_pty_system};
 
+#[cfg(windows)]
+mod conpty;
 mod foreground;
 mod locale;
 mod termination;
@@ -162,7 +168,12 @@ pub struct Pty {
     /// Always there until closing takes it: a child that refused the hang-up is handed to a thread
     /// of its own to be waited for (**D56**), so closing has to be able to give it away.
     child: Option<Box<dyn Child + Send + Sync>>,
+    #[cfg(not(windows))]
     master: Box<dyn MasterPty + Send>,
+    /// On Windows dropping the master is what closes the pseudoconsole, so it lives where the exit
+    /// watcher can take it too (**D111**).
+    #[cfg(windows)]
+    master: conpty::Slot,
     /// What is waiting to be written, on its way to the writer thread.
     ///
     /// **The write does not happen on the caller's thread, and that is the whole of it.**
@@ -428,7 +439,9 @@ const HANGUP_CHECK_EVERY: Duration = Duration::from_millis(1);
 /// for good — the most probable reason being the kernel draining its terminal's unread output at
 /// exit, with no timeout, while this console no longer reads it — and waiting without a bound froze
 /// the window for good. The same tenth of a second as [`READER_GIVE_UP`], for the same reason: plainly
-/// a delay, plainly not a threshold anybody measured.
+/// a delay, plainly not a threshold anybody measured. Unix only: on Windows the close waits for no
+/// program (D111).
+#[cfg_attr(windows, allow(dead_code))]
 const REAP_GIVE_UP: Duration = Duration::from_millis(100);
 
 /// How many reads fit in the channel before the reader thread stops reading.
@@ -717,6 +730,11 @@ impl Pty {
             // buffer makes that write fail at once instead of waiting for room for ever.
         });
 
+        #[cfg(windows)]
+        let master = conpty::Slot::new(pair.master);
+        #[cfg(not(windows))]
+        let master = pair.master;
+
         let (tx, output) = sync_channel(READS_IN_FLIGHT);
         let stop_for_thread = Arc::clone(&stop);
         let (ended, reader_ended) = channel::<()>();
@@ -725,8 +743,32 @@ impl Pty {
         let reader = thread::spawn(move || {
             // Moved in and never used: what closing reads is this being dropped when the thread ends.
             let _ended = ended;
-            feed_and_record(reader, &tx, &stop_for_thread, &ending_for_thread);
+            #[cfg_attr(not(windows), allow(unused_variables, unused_mut))]
+            let mut reader = feed_and_record(reader, &tx, &stop_for_thread, &ending_for_thread);
+            // **The channel is let go before any draining**, so the host learns at once that this
+            // console is over: dropping it is what tells it.
+            drop(tx);
+            // **On Windows the pipe is then read and discarded to end of file**: the pseudoconsole's
+            // close can wait for its last frame to be read (see the `conpty` module), and after a
+            // close or a vanished host nobody else reads. A reader that panicked is the exception —
+            // its source is in no known state to read again.
+            #[cfg(windows)]
+            if ending_for_thread.get() != Some(&Ending::Panicked) {
+                drain(&mut reader);
+            }
         });
+
+        // After the reader exists, so the output is being drained by the time a quick program's
+        // exit closes the pseudoconsole.
+        #[cfg(windows)]
+        conpty::watch_exit(
+            // SAFETY: the handle belongs to the child just spawned, which `cached_child` keeps
+            // open for the length of the call; the watcher duplicates it before it returns.
+            cached_child
+                .as_raw_handle()
+                .map(|raw| unsafe { std::os::windows::io::BorrowedHandle::borrow_raw(raw) }),
+            master.clone(),
+        );
 
         Ok((
             Self {
@@ -743,7 +785,7 @@ impl Pty {
                 // which is what a shell is for. That survivor inherits the slave's descriptors, so
                 // there is no end of file while it lives, and see [`Pty::drop`] for what closing does
                 // about it.
-                master: pair.master,
+                master,
                 to_write: Some(to_write),
                 input,
                 writer: Some(writer),
@@ -829,13 +871,20 @@ impl Pty {
     /// It is the half that makes the program inside find out and repaint. The other half —reflowing
     /// the grid— is done by [`Screen::resize`], and **both are needed**: with only this one, the grid
     /// stays at the old size; with only the other, `vim` keeps painting as if nothing had happened.
+    ///
+    /// On Windows a console whose program has ended has no pseudoconsole left to resize, and that
+    /// is not an error: there is nothing in it that could repaint.
     pub fn resize(&mut self, size: Size) -> Result<()> {
-        self.master.resize(portable_pty::PtySize {
+        let size = portable_pty::PtySize {
             rows: size.rows,
             cols: size.cols,
             pixel_width: 0,
             pixel_height: 0,
-        })?;
+        };
+        #[cfg(windows)]
+        self.master.resize(size)?;
+        #[cfg(not(windows))]
+        self.master.resize(size)?;
         Ok(())
     }
 
@@ -939,23 +988,37 @@ impl Pty {
 /// the observer only looks once a blocking receive has already returned. The same disorder with a
 /// wait in it turns that test red. So what is guarded is a gap somebody could open by putting work
 /// between the two — the way this gets broken in practice — and not the instruction order itself.
-fn feed_and_record(
-    reader: impl Read,
+///
+/// **The source is handed back** so that whoever called can drain it on Windows once the channel is
+/// let go.
+fn feed_and_record<R: Read>(
+    mut reader: R,
     channel: &SyncSender<Vec<u8>>,
     stop: &AtomicBool,
     ending: &OnceLock<Ending>,
-) {
+) -> R {
     // **`AssertUnwindSafe` is required and is not a formality.** The reader is a
     // `Box<dyn Read + Send>`, and a boxed trait object carries no unwind-safety bound, so this does
     // not compile without the assertion — while the flag and the channel are unwind-safe on their
     // own. What is claimed is that a channel and a reader which a panic may have left half-used are
     // still sound to observe afterwards: the standard library's channels do not poison, and the
-    // reader is dropped immediately below. Whoever widens this closure inherits that claim, which is
+    // reader is only ever read again on Windows, to be drained, and never after a panic. Whoever widens this closure inherits that claim, which is
     // why it is written here and not at the call site.
-    let how =
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| feed(reader, channel, stop)))
-            .unwrap_or(Ending::Panicked);
+    let how = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        feed(&mut reader, channel, stop)
+    }))
+    .unwrap_or(Ending::Panicked);
     let _ = ending.set(how);
+    reader
+}
+
+/// Reads and discards until end of file or any failed read, an interrupted one included: nothing
+/// is left to deliver, so nothing is worth retrying for. Bounded by the pseudoconsole closing,
+/// which every path of a Windows console reaches (D111).
+#[cfg(windows)]
+fn drain(reader: &mut impl Read) {
+    let mut buf = [0u8; READ_SIZE];
+    while let Ok(1..) = reader.read(&mut buf) {}
 }
 
 /// Reads the pseudoterminal into the channel until there is nothing more to read, and answers how
@@ -1207,19 +1270,9 @@ fn send_signal(pid: libc::pid_t, number: libc::c_int) -> std::io::Result<()> {
     }
 }
 
-/// Elsewhere the library's `kill` has no grid to pay: on Windows it is `TerminateProcess`, at once.
-/// Whether it can be refused there — an elevated program — and what that leaves is not known yet:
-/// its failure is not looked at, so a refusal goes down the waitable path, which waits at most
-/// [`REAP_GIVE_UP`] before leaving the program running (D56, amended). Type-checked for Windows,
-/// never run on it.
-#[cfg(not(unix))]
-fn hang_up(child: &mut (dyn Child + Send + Sync)) -> HangUp {
-    let _ = child.kill();
-    HangUp::Waitable
-}
-
 /// Whether the program became reapable within `bound`, looking every millisecond. An error from
 /// `try_wait` counts as gone, as in `hang_up`: there is no child of ours left to wait for.
+#[cfg(unix)]
 fn reaped_within(child: &mut (dyn Child + Send + Sync), bound: Duration) -> bool {
     let deadline = Instant::now() + bound;
     loop {
@@ -1232,7 +1285,9 @@ fn reaped_within(child: &mut (dyn Child + Send + Sync), bound: Duration) -> bool
 }
 
 /// Hands a closed console's program to a thread that waits for it, so it is reaped whenever it ends
-/// and the close does not wait with it (D56).
+/// and the close does not wait with it (D56). Unix only: Windows has nothing to reap, and its exit
+/// watcher is already the thread that waits (D111).
+#[cfg(unix)]
 fn leave_running(mut child: Box<dyn Child + Send + Sync>) {
     // Named so a leak audit can tell these apart; `wait` needs no stack to speak of.
     let _ = thread::Builder::new()
@@ -1246,13 +1301,13 @@ fn leave_running(mut child: Box<dyn Child + Send + Sync>) {
 }
 
 /// What hanging a program up left behind.
+#[cfg(unix)]
 enum HangUp {
     /// Gone, signalled with the system's consent, or a refusal this crate cannot see (the library's
-    /// `kill`, and Windows). The close waits for it at most [`REAP_GIVE_UP`], then leaves it running.
+    /// `kill`). On Unix the close waits for it at most [`REAP_GIVE_UP`], then leaves it running.
     Waitable,
     /// The system refused the signal and the program is still running. Nothing this process can
     /// send will end it, so waiting for it is waiting for as long as it chooses to live.
-    #[cfg_attr(not(unix), allow(dead_code))]
     Refused(std::io::Error),
 }
 
@@ -1292,11 +1347,25 @@ impl Drop for Pty {
         // And then the usual order: killing the child is what closes its end of the
         // pseudoterminal and triggers the end of file in the reader thread. Waiting for the thread
         // before that would hang it, because it would still be blocked inside `read`.
+        //
+        // **On Windows the pseudoconsole is closed first, and the program ended after a grace, on a
+        // thread that is not this one** (D111): the close tells the program, gives the reader its
+        // end of file and the writer its broken pipe, and it can wait for the host. Nothing is
+        // waited for here but the reader below; the program needs no reaping.
+        #[cfg(windows)]
+        if let Some(child) = self.child.take() {
+            conpty::close(
+                &self.master,
+                // SAFETY: `child` owns the handle and outlives the call, which duplicates it.
+                child
+                    .as_raw_handle()
+                    .map(|raw| unsafe { std::os::windows::io::BorrowedHandle::borrow_raw(raw) }),
+                child.process_id(),
+            );
+        }
+        #[cfg(unix)]
         if let Some(mut child) = self.child.take() {
-            #[cfg(unix)]
             let left = hang_up(child.as_mut(), self.send_signal);
-            #[cfg(not(unix))]
-            let left = hang_up(child.as_mut());
             match left {
                 // **Waited for with a bound, never without one** (D56, amended): a signal the system
                 // accepted does not make the program reapable on every platform — on macOS a shell
@@ -3419,8 +3488,10 @@ mod tests {
     }
 
     /// A child that becomes reapable on a given look, never on a `wait`; `0` makes every look fail.
+    #[cfg(unix)]
     #[derive(Debug)]
     struct ReapableOnLook(usize);
+    #[cfg(unix)]
     impl portable_pty::ChildKiller for ReapableOnLook {
         fn kill(&mut self) -> std::io::Result<()> {
             Ok(())
@@ -3429,6 +3500,7 @@ mod tests {
             Box::new(ReapableOnLook(self.0))
         }
     }
+    #[cfg(unix)]
     impl Child for ReapableOnLook {
         fn try_wait(&mut self) -> std::io::Result<Option<portable_pty::ExitStatus>> {
             if self.0 == 0 {
@@ -3446,15 +3518,12 @@ mod tests {
         fn process_id(&self) -> Option<u32> {
             None
         }
-        #[cfg(windows)]
-        fn as_raw_handle(&self) -> Option<std::os::windows::io::RawHandle> {
-            None
-        }
     }
 
     /// **A program that becomes reapable a few looks after its kill is reaped inline.** That is a
     /// killed program on Linux, about a millisecond later (D55): it must not be handed to a thread
     /// with a line saying it had not finished. Without this, a bound of zero passed every other test.
+    #[cfg(unix)]
     #[test]
     fn a_program_reapable_a_few_looks_later_is_reaped_inside_the_bound() {
         assert!(reaped_within(&mut ReapableOnLook(5), REAP_GIVE_UP));

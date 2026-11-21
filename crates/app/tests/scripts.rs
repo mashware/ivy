@@ -1010,6 +1010,10 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../../term-core/src/nonblocking.rs"),
     ),
     (
+        "term-core/src/conpty.rs",
+        include_str!("../../term-core/src/conpty.rs"),
+    ),
+    (
         "term-core/examples/closing.rs",
         include_str!("../../term-core/examples/closing.rs"),
     ),
