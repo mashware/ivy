@@ -691,7 +691,7 @@ RESTORES=0
 # batch, and the guards read the same variable, so they judge the leaked load as the batch's own. A
 # `PATCHES=1` in the environment runs X as Y and publishes it under X's name; a `LARGE=1` pads S and
 # the file batches to the ceiling, and hides U and V from the leak guard that only fires without it.
-LIGATURES= ACTIONS= CONTROL= HEADER= READS= PATCHES= LINKS= SEARCH= LARGE= CJK= EMOJI= PANEL_EMOJI= SETTINGS= INTEGRATED_CHROME= BOARD= BOARD_RICH= DOCK=
+LIGATURES= ACTIONS= CONTROL= HEADER= READS= PATCHES= LINKS= SEARCH= LARGE= CJK= EMOJI= PANEL_EMOJI= SETTINGS= INTEGRATED_CHROME= BOARD= BOARD_RICH= DOCK= COLR=
 case "$BATCH" in
     ligatures-on|ligatures-off) TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; LIGATURES=${BATCH#ligatures-} ;;
     dock-v2-4-closed|dock-v2-4-open) TABS=2; PANES=2x1; DUMPING=4; DRAGS=0; GESTURE=console; HEADER=1; INTEGRATED_CHROME=1; BOARD=${BATCH##*-}; DOCK=${BATCH##*-} ;;
@@ -713,6 +713,7 @@ case "$BATCH" in
     O)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=100000; GESTURE=mouse ;;           # two, and the SAME walk, but the left program asked for the mouse
     P)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; CJK=1 ;;       # two, and both dumping in JAPANESE: the only one that discovers fonts
     Q)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; EMOJI=1 ;;     # two, and both dumping EMOJI: the only one whose CONSOLES rasterise colour glyphs (Z does it from its panels)
+    colr)    TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; EMOJI=1; COLR=1 ;; # Q, with the emoji family pointed at a COLR font: the only one that draws colour OUTLINES; its control is C (D25, #176)
     R)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=100000; GESTURE=button; ACTIONS=1 ;;   # two, and pressing a button on a panel: its control is C
     S)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; CONTROL=1 ;;       # two, and both published over the CHANNEL instead of by file: its control is C
     T)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; HEADER=1 ;;        # two, and the only one that PAINTS THE STRIP over each console: its control is C
@@ -1203,8 +1204,56 @@ seed() {
 case "$BATCH" in
     A) : ;;                       # no panel: nobody publishes anything
     B) seed quiet & ;;
-    projects|ligatures-on|ligatures-off|dock-v2-4-closed|dock-v2-4-open|board-rich-closed|board-rich-open|board-4-closed|board-4-open|board-16-closed|board-16-open|chrome|chrome-zoom|settings-apply|settings-closed|settings-open|settings-fonts|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
+    projects|ligatures-on|ligatures-off|dock-v2-4-closed|dock-v2-4-open|board-rich-closed|board-rich-open|board-4-closed|board-4-open|board-16-closed|board-16-open|chrome|chrome-zoom|settings-apply|settings-closed|settings-open|settings-fonts|colr|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z) seed talkative & ;;
 esac
+
+# **Batch colr: the machine's emoji family, pointed at a font drawn in coloured outlines.** The emoji
+# font this machine ships is a bitmap one, so batch Q never reaches the `COLR` path — the one Windows
+# takes with `Segoe UI Emoji` — and publishing Q as its cost would be a number with the wrong label.
+# The font is Noto Color Emoji in its `COLR` version 1 form, **pinned by tag and by hash**: two runs
+# of a «latest» could measure two fonts and `compare` would average them as one series. It is kept
+# outside the run's directory so it is fetched once, and checked every run. The figures are that
+# font's — heavy in gradients — not Segoe's.
+#
+# **The path is proved before the window opens**, by asking fontconfig itself what `emoji` is under
+# the override: the report counts glyphs, not faces, so a machine whose fontconfig ignored the
+# override would rasterise its bitmap font and pass the colour guard under this batch's name.
+if [ "${COLR:-}" = 1 ]; then
+    COLR_URL="https://raw.githubusercontent.com/googlefonts/noto-emoji/v2.047/fonts/Noto-COLRv1.ttf"
+    COLR_SHA256="23549f29b5ad741fcb4c025b8dc44652ff0f459892467ebcccec1e6bbe839b44"
+    COLR_DIR="$OUTPUT/.colr-font"
+    COLR_FONT="$COLR_DIR/Noto-COLRv1.ttf"
+    mkdir -p "$COLR_DIR"
+    if [ ! -f "$COLR_FONT" ]; then
+        curl -fsSL -o "$COLR_FONT.part" "$COLR_URL" && mv "$COLR_FONT.part" "$COLR_FONT"
+    fi
+    if ! echo "$COLR_SHA256  $COLR_FONT" | sha256sum -c --status; then
+        rm -f "$COLR_FONT"
+        echo "batch colr: $COLR_FONT is not the pinned font (sha256 $COLR_SHA256); it was removed, run again to fetch it" >&2
+        exit 1
+    fi
+    cat > "$CONFIG/fonts.conf" <<FONTS
+<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
+<fontconfig>
+  <include ignore_missing="yes">/etc/fonts/fonts.conf</include>
+  <dir>$COLR_DIR</dir>
+  <cachedir>$CONFIG/fontconfig</cachedir>
+  <selectfont>
+    <rejectfont>
+      <glob>/usr/share/fonts/*/NotoColorEmoji.ttf</glob>
+      <glob>/usr/share/fonts/*/*/NotoColorEmoji.ttf</glob>
+    </rejectfont>
+  </selectfont>
+</fontconfig>
+FONTS
+    export FONTCONFIG_FILE="$CONFIG/fonts.conf"
+    ANSWERED=$(fc-match -f "%{file}" emoji)
+    if [ "$ANSWERED" != "$COLR_FONT" ]; then
+        echo "batch colr: fontconfig answers «emoji» with $ANSWERED, not with $COLR_FONT; the run would measure another font" >&2
+        exit 1
+    fi
+fi
 
 echo "batch $BATCH · $TABS tab(s) of $PANES · $DUMPING of $DIRECTORIES consoles dumping $MIB MiB · window $WINDOW_SIZE · do not touch the machine until it closes" >&2
 

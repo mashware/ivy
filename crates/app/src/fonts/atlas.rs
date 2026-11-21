@@ -457,15 +457,35 @@ mod tests {
         fontique::Blob::new(std::sync::Arc::new(bytes.to_vec()))
     }
 
-    fn drawn(blob: &fontique::Blob<u8>, glyph: u32, height: u32, max_width: u32) -> Option<egui::ColorImage> {
+    fn drawn(
+        blob: &fontique::Blob<u8>,
+        glyph: u32,
+        height: u32,
+        max_width: u32,
+    ) -> Option<egui::ColorImage> {
         let font = skrifa::FontRef::from_index(blob.data(), 0).expect("the fixture opens");
-        rasterize(&font, blob, 0, skrifa::GlyphId::new(glyph), height, max_width)
+        rasterize(
+            &font,
+            blob,
+            0,
+            skrifa::GlyphId::new(glyph),
+            height,
+            max_width,
+        )
     }
 
-    fn assert_near(image: &egui::ColorImage, (x, y): (usize, usize), expected: [u8; 4], what: &str) {
+    fn assert_near(
+        image: &egui::ColorImage,
+        (x, y): (usize, usize),
+        expected: [u8; 4],
+        what: &str,
+    ) {
         let got = image.pixels[y * image.size[0] + x].to_array();
         let close = got.iter().zip(expected).all(|(g, e)| g.abs_diff(e) <= 2);
-        assert!(close, "{what}: pixel ({x},{y}) is {got:?}, expected about {expected:?}");
+        assert!(
+            close,
+            "{what}: pixel ({x},{y}) is {got:?}, expected about {expected:?}"
+        );
     }
 
     #[test]
@@ -478,9 +498,23 @@ mod tests {
         // when it is handed a glyph and no colour.
         let blob = colr_fixture();
         let image = drawn(&blob, 84, 100, 100).expect("a COLR glyph with no bitmap gave no image");
-        assert_eq!(image.size, [100, 95], "not fitted on the em box (advance 1000, ascender 950)");
-        assert_near(&image, (50, 10), [178, 115, 0, 178], "the orange layer alone");
-        assert_near(&image, (50, 50), [89, 58, 127, 217], "the blue layer over the orange one");
+        assert_eq!(
+            image.size,
+            [100, 95],
+            "not fitted on the em box (advance 1000, ascender 950)"
+        );
+        assert_near(
+            &image,
+            (50, 10),
+            [178, 115, 0, 178],
+            "the orange layer alone",
+        );
+        assert_near(
+            &image,
+            (50, 50),
+            [89, 58, 127, 217],
+            "the blue layer over the orange one",
+        );
         assert_near(&image, (10, 50), [0, 0, 0, 0], "outside both layers");
     }
 
@@ -512,8 +546,8 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn segoe_ui_emoji_draws_no_emoji_in_the_text_colour() {
-        use skrifa::color::{Brush, ColorPainter, CompositeMode, Transform};
         use skrifa::MetadataProvider as _;
+        use skrifa::color::{Brush, ColorPainter, CompositeMode, Transform};
 
         #[derive(Default)]
         struct Fills {
@@ -550,7 +584,9 @@ mod tests {
         }
 
         let windows = std::env::var("WINDIR").expect("WINDIR is set on Windows");
-        let path = std::path::Path::new(&windows).join("Fonts").join("seguiemj.ttf");
+        let path = std::path::Path::new(&windows)
+            .join("Fonts")
+            .join("seguiemj.ttf");
         let bytes = std::fs::read(&path).expect("Segoe UI Emoji is installed with Windows");
         let font = skrifa::FontRef::new(&bytes).expect("Segoe UI Emoji opens");
         for emoji in ['\u{1F600}', '\u{1F44D}', '\u{2601}'] {
@@ -563,7 +599,10 @@ mod tests {
             colour
                 .paint(skrifa::instance::LocationRef::default(), &mut fills)
                 .expect("its paint graph walks");
-            assert!(fills.seen > 0, "{emoji:?}: the walk saw no fill, so it proved nothing");
+            assert!(
+                fills.seen > 0,
+                "{emoji:?}: the walk saw no fill, so it proved nothing"
+            );
             assert_eq!(
                 fills.in_text_colour, 0,
                 "{emoji:?} draws {} of its {} fills in the text colour, which the atlas paints white",
