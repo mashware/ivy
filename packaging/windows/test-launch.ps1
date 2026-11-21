@@ -72,6 +72,15 @@ public static class IvyLaunchNative {
             events.Add(Key(0, c, 4)); events.Add(Key(0, c, 6));
         }
         events.Add(Key(13, 0, 0)); events.Add(Key(13, 0, 2));
+        Send(events);
+    }
+    public static void Chord(params ushort[] keys) {
+        var events = new List<INPUT>();
+        foreach (ushort key in keys) events.Add(Key(key, 0, 0));
+        for (int i = keys.Length - 1; i >= 0; i--) events.Add(Key(keys[i], 0, 2));
+        Send(events);
+    }
+    static void Send(List<INPUT> events) {
         INPUT[] input = events.ToArray();
         if (SendInput((uint)input.Length, input, Marshal.SizeOf<INPUT>()) != input.Length)
             throw new Exception("SendInput failed: " + Marshal.GetLastWin32Error());
@@ -205,6 +214,16 @@ try {
         }
         Start-Sleep -Milliseconds 50
     }
+    # A window nobody rearranged writes no layout (opening.rs records the first mirror as seen), so
+    # the trial splits the console the way a person would and waits for the second shell.
+    $Stage = 'split'
+    [IvyLaunchNative]::Chord(0x11, 0x10, 0x44)
+    while ($true) {
+        Check-Alive
+        $Children = @(Descendants $Process.Id)
+        if (@($Children | Where-Object { $_.ExecutablePath -ieq $Expected }).Count -ge 2) { break }
+        Start-Sleep -Milliseconds 250
+    }
     $Stage = 'close'
     if ($Control -ne 'deadline') {
         if (-not [IvyLaunchNative]::PostMessage($Window.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)) { throw 'close: WM_CLOSE failed' }
@@ -226,7 +245,7 @@ try {
     if ($Document.v -ne 2 -or @($Document.tabs).Count -eq 0) { throw 'layout: empty or unsupported document' }
     $Leaves = 0
     foreach ($Tab in $Document.tabs) { $Leaves += Saved-Leaves $Tab.root }
-    if ($Leaves -eq 0 -or $Leaves -gt 128) { throw 'layout: invalid saved console count' }
+    if ($Leaves -ne 2) { throw "layout: saved $Leaves console(s), expected the two of the split" }
     Write-Output "Installed launch passed: native window, $Expected, real console input, $Leaves saved console(s), normal exit 0."
 } catch {
     $_ | Out-String | Set-Content (Join-Path $EvidenceDir 'failure.txt')
