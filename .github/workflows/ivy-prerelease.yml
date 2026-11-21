@@ -119,6 +119,15 @@ jobs:
                             'windows_exit_an_exit_code_of_259_is_an_ended_program') {
             if (-not ($printed -match "$name \.\.\. ok$")) { throw "$name did not run and pass on the bundled host" }
           }
+      - name: Test that a reported Windows directory is stored as a Windows path
+        shell: pwsh
+        run: |
+          cargo test --locked -p term-core --lib -- windows_paths 2>&1 | Tee-Object -Variable printed
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($name in 'windows_paths_a_drive_report_is_stored_in_the_platform_s_own_form',
+                            'windows_paths_accepts_the_session_hostname_but_not_a_different_host') {
+            if (-not ($printed -match "$name \.\.\. ok$")) { throw "$name did not run and pass" }
+          }
 
   build:
     if: ${{ github.event_name == 'workflow_dispatch' }}

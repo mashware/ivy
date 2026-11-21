@@ -144,7 +144,7 @@ pub(crate) fn refresh(window: &mut Window, ctx: &egui::Context) {
             let published = pane
                 .screen
                 .working_directory()
-                .and_then(published_directory);
+                .map(std::path::Path::to_path_buf);
             let generation = pane.screen.working_directory_generation();
             if state.reports.get(&pane.name) != Some(&generation) {
                 state.reports.insert(pane.name, generation);
@@ -250,18 +250,6 @@ pub(crate) fn next_ink(
     match candidates.len() {
         0 => fallback,
         n => candidates[used.count() % n],
-    }
-}
-
-fn published_directory(path: &std::path::Path) -> Option<PathBuf> {
-    #[cfg(windows)]
-    {
-        let path = path.to_str()?;
-        Some(PathBuf::from(path.strip_prefix('/').unwrap_or(path)))
-    }
-    #[cfg(not(windows))]
-    {
-        Some(path.to_path_buf())
     }
 }
 
