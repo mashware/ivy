@@ -147,12 +147,17 @@ pub(crate) struct Marks {
 }
 
 impl Marks {
-    /// Empty marks for another image, going on from the serials `previous` gave.
-    pub(crate) fn after(previous: Option<&Marks>) -> Self {
+    /// Empty marks for another image, going on from the last serial given, `placed`.
+    pub(crate) fn after(placed: u64) -> Self {
         Self {
-            placed: previous.map_or(0, |marks| marks.placed),
+            placed,
             ..Self::default()
         }
+    }
+
+    /// The last serial a marker was given.
+    pub(crate) fn placed(&self) -> u64 {
+        self.placed
     }
 
     /// Whether there is nothing to send and nothing that would be lost.
@@ -415,10 +420,10 @@ mod tests {
         seen.push(placed(&mut marks));
         marks.clear();
         seen.push(placed(&mut marks));
-        let mut next = Marks::after(Some(&marks));
+        let mut next = Marks::after(marks.placed());
         seen.push(placed(&mut next));
         assert_eq!(seen, [1, 2, 3, 4, 5]);
-        assert_eq!(placed(&mut Marks::after(None)), 1);
+        assert_eq!(placed(&mut Marks::after(0)), 1);
     }
 
     /// Each tool leaves its own shape from the pixels pressed and let go; a marker goes where the

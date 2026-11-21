@@ -41,6 +41,9 @@ pub(crate) struct Viewer {
     send: send::Sending,
     /// How many images were opened, which names each opening: see [`send::Request::document`].
     opened: u64,
+    /// The last marker serial an image forgotten here gave, which the next image's marks go on
+    /// from: see `Marks::placed`.
+    placed: u64,
 }
 
 struct Opened {
@@ -78,8 +81,8 @@ impl Viewer {
     /// Replaces whatever image was shown with `path`, read from `origin`'s console. A relative
     /// path is one whose console's directory is unknown: it is refused and says so.
     pub(super) fn open(&mut self, origin: Source, path: PathBuf) {
-        let marks = marks::Marks::after(self.document.as_ref().map(|d| &d.marks));
         self.clear();
+        let marks = marks::Marks::after(self.placed);
         self.notice = None;
         let load = if path.is_relative() {
             Load::Failed("This console has not published its working directory. Open an absolute image path or enable OSC 7 in the shell.".into())
@@ -102,6 +105,10 @@ impl Viewer {
     /// Forgets the image, keeping an unfinished decode's handle.
     pub(super) fn clear(&mut self) {
         self.panning = None;
+        self.placed = self
+            .document
+            .as_ref()
+            .map_or(self.placed, |d| d.marks.placed());
         if let Some(Opened {
             path,
             load: Load::Decoding(job),
@@ -535,7 +542,8 @@ mod tests {
         assert_eq!(now.dimensions(), (40, 20));
     }
 
-    /// The first marker on the next image opened goes on from the serials the last one gave.
+    /// The first marker on the next image opened goes on from the serials the last one gave,
+    /// whether it was opened over that image or after it was closed.
     #[test]
     fn the_next_image_goes_on_from_the_last_ones_serials() {
         let mut viewer = Viewer::default();
@@ -550,6 +558,12 @@ mod tests {
             marks.numbered().last().unwrap().2
         };
         assert_eq!([placed(&mut viewer), placed(&mut viewer)], [1, 2]);
+        viewer.clear();
+        assert_eq!(
+            placed(&mut viewer),
+            3,
+            "closing the image wound the serial back"
+        );
     }
 
     /// The largest texture the test GPU takes, smaller than the wide fixtures' 2400 pixels.
@@ -3540,6 +3554,40 @@ mod tests {
             line.as_bytes()
         );
         let _ = std::fs::remove_file(&copy);
+    }
+
+    /// A cancelled Send whose worker then fails says what the worker reported, which is where a
+    /// half-written copy it could not remove is named.
+    #[cfg(unix)]
+    #[test]
+    fn a_cancelled_send_whose_worker_fails_says_what_it_reported() {
+        let received = term_core::received::Received::new("annotated-cancel-failed");
+        let folder = Folder::new();
+        let path = folder.0.join("shot.png");
+        write_png(&path, 640, 400);
+        let (mut window, ctx, _dir) = window_to_send(&path, &received);
+        click_send(&mut window, &ctx);
+        painted(&mut window, &ctx, vec![]);
+        let (_, sender) = window
+            .image
+            .send
+            .stall()
+            .expect("the copy is being written");
+        let cancel = place_of(&mut window, &ctx, "Cancel");
+        press(&mut window, &ctx, cancel);
+        sender
+            .send(Err(
+                "the half-written copy could not be removed: busy".into()
+            ))
+            .unwrap();
+        painted(&mut window, &ctx, vec![]);
+        assert!(!window.image.send.parked());
+        let notice = window.image.notice.clone().unwrap_or_default();
+        assert!(
+            notice.contains("the half-written copy could not be removed: busy"),
+            "{notice}"
+        );
+        assert!(received.so_far().is_empty());
     }
 
     /// Clicks Send, takes the copy's write over once it `started`, and replaces the image, as the

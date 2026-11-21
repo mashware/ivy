@@ -250,14 +250,13 @@ pub(crate) fn aim(window: &mut crate::Window) {
 
 /// Takes a Send from the click to the Enter, a step per frame, from the window's input pass.
 pub(crate) fn poll(window: &mut crate::Window, ctx: &egui::Context) {
-    if let Some((_, job)) = &window.image.send.parked {
-        match take(job) {
-            None => ctx.request_repaint_after(Duration::from_millis(50)),
-            Some(written) => {
-                let (request, _) = window.image.send.parked.take().expect("a parked worker");
-                forsake(window, &request, written);
-            }
-        }
+    // No timer while it runs: its worker wakes the window when it ends, and one that never ends
+    // must not wake it for the life of the app.
+    if let Some((_, job)) = &window.image.send.parked
+        && let Some(written) = take(job)
+    {
+        let (request, _) = window.image.send.parked.take().expect("a parked worker");
+        forsake(window, &request, written);
     }
     let frame = ctx.cumulative_frame_nr();
     let phase = match std::mem::take(&mut window.image.send.phase) {
@@ -305,18 +304,20 @@ fn failed(window: &mut crate::Window, request: &Request, why: String) {
 }
 
 /// A cancelled Send's worker ended: the copy it wrote is removed, and with it the folder of a
-/// console that closed meanwhile. Only what could not be removed is said: the person already
-/// knows nothing was sent. A worker that failed removed its half-written copy itself.
+/// console that closed meanwhile. What could not be removed is said, and so is a worker's failure
+/// in its own words, which name a half-written copy it could not remove; a copy it did not write
+/// is not touched, because a refused `create_new` means the file is somebody else's.
 fn forsake(window: &mut crate::Window, request: &Request, written: Result<PathBuf, String>) {
-    let stays = written
-        .ok()
-        .and_then(|path| match std::fs::remove_file(&path) {
+    let stays = match written {
+        Ok(path) => match std::fs::remove_file(&path) {
             Err(error) if error.kind() != std::io::ErrorKind::NotFound => Some(format!(
                 "The cancelled copy at {} could not be removed: {error}",
                 path.display()
             )),
             _ => None,
-        });
+        },
+        Err(why) => Some(format!("The cancelled copy's worker reported: {why}")),
+    };
     let left = forsaken_folder(window, request);
     match stays {
         Some(stays) => window.image.say(format!("{stays}{left}.")),
