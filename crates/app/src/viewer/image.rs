@@ -2977,8 +2977,49 @@ mod tests {
         );
     }
 
+    /// A Cancel clicked before the copy's worker started takes the Send back with no worker to
+    /// park: Send is ready again at once, and the notes can be edited.
+    #[test]
+    fn cancel_before_the_copy_started_parks_nothing() {
+        let ctx = egui::Context::default();
+        let mut viewer = ready(image::RgbaImage::new(400, 300));
+        viewer.document.as_mut().unwrap().marks.general = "the header overlaps".into();
+        viewer.send.ask(send::Request {
+            document: viewer.document().unwrap(),
+            pane: 0,
+            path: PathBuf::from("/a/annotated-1.png"),
+            line: "x".into(),
+        });
+        let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(700.0, 400.0));
+        let shapes = shown_in(&ctx, &mut viewer, view, vec![]);
+        let (_, cancel) = text_rect(&shapes, |t| t == "Cancel").expect("Cancel is offered");
+        let at = cancel.center();
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let events = vec![egui::Event::PointerMoved(at), button(true), button(false)];
+        shown_in(&ctx, &mut viewer, view, events);
+        assert!(!viewer.sending(), "the Send was not taken back");
+        assert!(
+            !viewer.send.parked(),
+            "a worker that never started was parked"
+        );
+        assert_eq!(
+            viewer.notice.as_deref(),
+            Some("Send cancelled; nothing was sent.")
+        );
+        assert_eq!(
+            viewer.document.as_ref().unwrap().marks.general,
+            "the header overlaps"
+        );
+    }
+
     /// Beside the image, a refusal is laid out at the column's width and painted inside the
-    /// column and its clip, wrapped rather than cut: the drawer has the height for it.
+    /// column and its clip, which itself stays inside the column, wrapped rather than cut: the
+    /// drawer has the height for it.
     #[test]
     fn beside_the_image_a_refusal_wraps_at_the_columns_width() {
         let ctx = egui::Context::default();
@@ -3001,6 +3042,10 @@ mod tests {
         assert!(
             clip.expand(0.5).contains_rect(said),
             "{said:?} clipped by {clip:?}"
+        );
+        assert!(
+            column.expand(0.5).contains_rect(clip),
+            "{clip:?} reaches outside {column:?}"
         );
         assert!(said.height() > 30.0, "{said:?} is not wrapped");
     }
@@ -3594,14 +3639,13 @@ mod tests {
             notice.ends_with("Send is ready.") && !notice.contains("Still finishing"),
             "{notice}"
         );
-        std::thread::sleep(Duration::from_millis(200));
-        assert!(received.so_far().is_empty(), "a cancelled Send typed");
+        nothing_typed_before(&mut window, &received);
 
         let line = click_send(&mut window, &ctx);
         until_written(&mut window, &ctx);
         assert_eq!(
-            received.wait_for(line.len(), Duration::from_secs(5)),
-            line.as_bytes()
+            received.wait_for(1 + line.len(), Duration::from_secs(5)),
+            [&SENTINEL[..], line.as_bytes()].concat()
         );
         let _ = std::fs::remove_file(&copy);
     }
@@ -3653,7 +3697,24 @@ mod tests {
         };
         assert!(said(&reopen(&mut window)), "the worker's failure was lost");
         assert!(!said(&reopen(&mut window)), "the failure is said again");
-        assert!(received.so_far().is_empty());
+        nothing_typed_before(&mut window, &received);
+    }
+
+    /// What `nothing_typed_before` writes.
+    #[cfg(unix)]
+    const SENTINEL: &[u8; 1] = b"#";
+
+    /// Writes a byte of its own to the image's console and waits for it: the writes reach the
+    /// program in order, so a byte arriving first means nothing was typed before it, without
+    /// guessing how long a typed line would take to arrive.
+    #[cfg(unix)]
+    fn nothing_typed_before(window: &mut crate::Window, received: &term_core::received::Received) {
+        origin_pane(window).pty.write(SENTINEL).unwrap();
+        assert_eq!(
+            received.wait_for(SENTINEL.len(), Duration::from_secs(5)),
+            SENTINEL,
+            "something was typed before"
+        );
     }
 
     /// A cancelled Send whose worker fails after its console closed says the console closed
