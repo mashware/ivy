@@ -6,22 +6,32 @@ mod swap;
 use sink::RotatingSink;
 use std::{
     ffi::OsStr,
-    fs::File,
     io::{Read, Write},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, OnceLock, PoisonError, TryLockError, mpsc},
+    sync::{
+        Arc, Mutex, OnceLock, PoisonError, TryLockError,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     time::{Duration, Instant, SystemTime},
 };
 
-/// Past this many bytes the file becomes `ivy.log.1`, so the two never hold more than twice this.
+/// Past this many bytes the file becomes `ivy.log.1`. The rotation happens between writes, so
+/// each of the two can pass it by the write that reached it.
 const CAP: u64 = 4 * 1024 * 1024;
 const FILE: &str = "ivy.log";
 /// How long closing waits for the last lines to reach the file (D57: every wait is bounded).
 const SHUTDOWN: Duration = Duration::from_millis(100);
 /// How long a panic waits for the file's lock before writing through a handle of its own.
 const RECORD_PATIENCE: Duration = Duration::from_millis(50);
+/// Chunks waiting for the original standard error. Past this they are dropped from it, never
+/// from the file: a terminal that stopped reading must not stop the log or the window.
+const ORIGINAL_BACKLOG: usize = 256;
 
 static PATH: OnceLock<PathBuf> = OnceLock::new();
+/// Standard error and the panic hook belong to the whole process: a second capture would save
+/// the first one's pipe as «the original».
+static TAKEN: AtomicBool = AtomicBool::new(false);
 
 /// The file this window keeps, when it keeps one.
 pub(crate) fn path() -> Option<&'static Path> {
@@ -36,22 +46,42 @@ pub struct Capture {
 }
 
 struct Live {
-    swapped: Option<swap::Swapped>,
+    swapped: swap::Swapped,
     done: mpsc::Receiver<()>,
-    // Held for the life of the capture, outside the thread, so no panic can close the read end:
-    // with it closed every `eprintln!` would fail, and `eprintln!` panics when it fails.
+    /// How many threads signal on `done` when they have copied everything.
+    copiers: usize,
+    // Held for the life of the capture, outside the thread, so that a copying thread that ends
+    // early leaves writers blocked rather than failing — and `eprintln!` panics when it fails.
     _reader: std::io::PipeReader,
+}
+
+impl Capture {
+    /// Ends the capture; true when every copying thread finished inside the deadline.
+    fn close(&mut self) -> bool {
+        let Some(live) = self.live.take() else {
+            return true;
+        };
+        let Live {
+            swapped,
+            done,
+            copiers,
+            _reader,
+        } = live;
+        // Putting the original back removes the pipe's writer, which is what ends the copying.
+        drop(swapped);
+        let deadline = Instant::now() + SHUTDOWN;
+        // Abandoned past the deadline: a program started with an inherited standard error keeps the
+        // pipe open, and its threads have nothing left to say that the window is waiting for.
+        (0..copiers).all(|_| {
+            done.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .is_ok()
+        })
+    }
 }
 
 impl Drop for Capture {
     fn drop(&mut self) {
-        let Some(live) = &mut self.live else { return };
-        if let Some(swapped) = live.swapped.take() {
-            // Restoring removes the pipe's last writer, which is what lets the thread read its end.
-            swapped.restore();
-        }
-        // Abandoned past the deadline: a child that inherited standard error keeps the pipe open.
-        let _ = live.done.recv_timeout(SHUTDOWN);
+        self.close();
     }
 }
 
@@ -81,7 +111,7 @@ pub fn start() -> Capture {
 
 /// Starts keeping the log in `directory`. Anything that fails leaves standard error as it was
 /// and says why on it, once.
-pub fn start_in(directory: Option<PathBuf>) -> Capture {
+fn start_in(directory: Option<PathBuf>) -> Capture {
     match capture(directory) {
         Ok(live) => Capture { live: Some(live) },
         Err(why) => {
@@ -92,37 +122,64 @@ pub fn start_in(directory: Option<PathBuf>) -> Capture {
 }
 
 fn capture(directory: Option<PathBuf>) -> Result<Live, String> {
+    if TAKEN.swap(true, Ordering::AcqRel) {
+        return Err("this process already keeps one".into());
+    }
     let directory = directory.ok_or("no directory to keep it in")?;
     create_directory(&directory).map_err(|e| format!("{}: {e}", directory.display()))?;
     let path = directory.join(FILE);
     let sink =
         RotatingSink::open(path.clone(), CAP).map_err(|e| format!("{}: {e}", path.display()))?;
+    // From here every early return drops `swapped`, which puts standard error back before the
+    // line saying why is written.
     let (reader, swapped) = swap::swap().map_err(|e| format!("standard error: {e}"))?;
     let sink = Arc::new(Mutex::new(sink));
-    let original = swapped.original();
     let (finished, done) = mpsc::channel();
-    // Nobody reads the pipe until the thread runs, so any failure up to then puts standard error
-    // back before saying so: said into the pipe, it would be the line that fills it.
-    let spawned = reader.try_clone().and_then(|from| {
-        let sink = Arc::clone(&sink);
-        std::thread::Builder::new()
-            .name("log file".into())
-            .spawn(move || {
-                pump(from, &sink, original);
-                let _ = finished.send(());
-            })
-    });
-    if let Err(why) = spawned {
-        swapped.restore();
-        return Err(format!("no thread to write it: {why}"));
-    }
+    let mut copiers = 1;
+    let forward = match swapped.original() {
+        Some(original) => {
+            copiers += 1;
+            Some(forwarder(original, finished.clone()).map_err(|e| format!("no thread: {e}"))?)
+        }
+        None => None,
+    };
+    let from = reader
+        .try_clone()
+        .map_err(|e| format!("standard error: {e}"))?;
+    let copied = Arc::clone(&sink);
+    std::thread::Builder::new()
+        .name("log file".into())
+        .spawn(move || {
+            pump(from, &copied, forward);
+            let _ = finished.send(());
+        })
+        .map_err(|e| format!("no thread: {e}"))?;
     install_hook(sink, path.clone(), swapped.original());
     let _ = PATH.set(path);
     Ok(Live {
-        swapped: Some(swapped),
+        swapped,
         done,
+        copiers,
         _reader: reader,
     })
+}
+
+/// The thread that writes to the original standard error, so that one which stops reading — a
+/// terminal paused with Ctrl+S, a parent that never drains its pipe — holds up only itself.
+fn forwarder(
+    mut original: Box<dyn Write + Send>,
+    finished: mpsc::Sender<()>,
+) -> std::io::Result<mpsc::SyncSender<Vec<u8>>> {
+    let (to, chunks) = mpsc::sync_channel::<Vec<u8>>(ORIGINAL_BACKLOG);
+    std::thread::Builder::new()
+        .name("log file: terminal".into())
+        .spawn(move || {
+            for chunk in chunks {
+                let _ = original.write_all(&chunk);
+            }
+            let _ = finished.send(());
+        })?;
+    Ok(to)
 }
 
 #[cfg(unix)]
@@ -139,11 +196,14 @@ fn create_directory(directory: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(directory)
 }
 
-/// Copies every byte read into the file first and the original standard error second, until the
-/// pipe has no writer left. The file goes first so an original that stops reading — a parent
-/// that never drains its pipe — cannot starve it. This thread must never write to standard error
-/// itself: it is the only reader of that pipe.
-fn pump(mut from: impl Read, sink: &Mutex<RotatingSink>, mut original: Option<impl Write>) {
+/// Copies every byte read into the file, and hands it on to the original standard error without
+/// waiting for it, until the pipe has no writer left. This thread must never write to standard
+/// error itself: it is the only reader of that pipe.
+fn pump(
+    mut from: impl Read,
+    sink: &Mutex<RotatingSink>,
+    forward: Option<mpsc::SyncSender<Vec<u8>>>,
+) {
     let mut buffer = vec![0; 8192];
     loop {
         let read = match from.read(&mut buffer) {
@@ -158,14 +218,19 @@ fn pump(mut from: impl Read, sink: &Mutex<RotatingSink>, mut original: Option<im
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .write(chunk);
-            if let Some(original) = &mut original {
-                let _ = original.write_all(chunk);
-            }
         }));
+        if let Some(forward) = &forward {
+            let _ = forward.try_send(chunk.to_vec());
+        }
     }
 }
 
-fn install_hook(sink: Arc<Mutex<RotatingSink>>, path: PathBuf, original: Option<File>) {
+fn install_hook(
+    sink: Arc<Mutex<RotatingSink>>,
+    path: PathBuf,
+    original: Option<Box<dyn Write + Send>>,
+) {
+    let original = Mutex::new(original);
     std::panic::set_hook(Box::new(move |info| {
         let thread = std::thread::current();
         let text = record(
@@ -176,17 +241,21 @@ fn install_hook(sink: Arc<Mutex<RotatingSink>>, path: PathBuf, original: Option<
                 .map(|at| format!("{}:{}:{}", at.file(), at.line(), at.column())),
             &std::backtrace::Backtrace::force_capture().to_string(),
         );
-        // Written here, not through the pipe: a panic on the main thread ends the process before
-        // the thread could copy it.
+        // Written here and not through the pipe: this replaces Rust's own report, and a panic in
+        // the copying thread could not copy its own record.
         write_record(&sink, &path, text.as_bytes());
-        if let Some(mut original) = original.as_ref() {
+        if let Some(original) = original
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_mut()
+        {
             let _ = original.write_all(text.as_bytes());
         }
     }));
 }
 
-/// The lock is the thread's too, and a panic inside that thread holds it: waiting for it there
-/// would never end, so past a short patience the record goes through a handle of its own.
+/// The lock is the copying thread's too, and a panic inside that thread holds it: waiting for it
+/// there would never end, so past a short patience the record goes through a handle of its own.
 fn write_record(sink: &Mutex<RotatingSink>, path: &Path, text: &[u8]) {
     let started = Instant::now();
     loop {
@@ -289,8 +358,8 @@ fn directory(
         return Some(state.join("ivy"));
     }
     match os {
-        Os::Linux => Some(absolute(home)?.join(".local/state/ivy")),
-        Os::Mac => Some(absolute(home)?.join("Library/Logs/Ivy")),
+        Os::Linux => Some(absolute(home)?.join(".local").join("state").join("ivy")),
+        Os::Mac => Some(absolute(home)?.join("Library").join("Logs").join("Ivy")),
         Os::Windows => Some(absolute(local)?.join("Ivy").join("logs")),
     }
 }

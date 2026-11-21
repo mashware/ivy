@@ -1,84 +1,102 @@
 //! Putting a pipe where the process's standard error is, and the original back.
 //!
-//! The pipe comes from `std::io::pipe`, whose two ends are not inherited by the programs the
-//! window starts — git among them — so none of them can keep the pipe open past the capture.
+//! The pipe's own two ends, and the copy of the original kept for putting it back, are not handed
+//! to the programs the window starts. Standard error itself is: a program started with an inherited
+//! standard error writes into the pipe and holds it open, which is why closing the capture waits
+//! for the copying thread only up to a deadline.
 
-use std::{fs::File, io::PipeReader};
+use std::io::{PipeReader, Write};
 
-/// The pipe standing in for standard error, and what to put back.
-pub(super) struct Swapped(platform::State);
+/// The pipe standing in for standard error. Dropping it puts the original back, so no path can
+/// leave standard error pointing at a pipe nobody reads.
+pub(super) struct Swapped(Option<platform::State>);
 
 /// Makes a fresh pipe the process's standard error and hands back its read end.
 pub(super) fn swap() -> std::io::Result<(PipeReader, Swapped)> {
     let (reader, writer) = std::io::pipe()?;
     let state = platform::swap(writer)?;
-    Ok((reader, Swapped(state)))
+    Ok((reader, Swapped(Some(state))))
 }
 
 impl Swapped {
-    /// A handle on the original standard error, for writing to it directly; nothing when the
-    /// process was born without one.
-    pub(super) fn original(&self) -> Option<File> {
-        platform::original(&self.0)
+    /// Something that writes to the original standard error directly; nothing when the process was
+    /// born without one.
+    pub(super) fn original(&self) -> Option<Box<dyn Write + Send>> {
+        platform::original(self.0.as_ref()?)
     }
+}
 
-    /// Puts the original back. The pipe loses its last writer, so its reader sees the end.
-    pub(super) fn restore(self) {
-        platform::restore(self.0);
+impl Drop for Swapped {
+    /// The pipe loses its writer here, so its reader sees the end.
+    fn drop(&mut self) {
+        if let Some(state) = self.0.take() {
+            platform::restore(state);
+        }
     }
 }
 
 #[cfg(unix)]
 mod platform {
-    use super::File;
     use std::{
-        io::PipeWriter,
+        fs::File,
+        io::{PipeWriter, Write},
         os::fd::{AsRawFd, FromRawFd, OwnedFd},
     };
 
     const STDERR: libc::c_int = 2;
 
-    /// A copy of what descriptor 2 was, or nothing when it was closed. Not inherited either.
-    pub(super) struct State(Option<OwnedFd>);
+    /// A copy of what descriptor 2 was, kept to put it back.
+    pub(super) struct State(OwnedFd);
 
     pub(super) fn swap(writer: PipeWriter) -> std::io::Result<State> {
-        // SAFETY: `fcntl` only reads descriptor 2; a closed one returns -1, handled below.
+        // SAFETY: `fcntl` only reads descriptor 2. Rust's runtime opens it on `/dev/null` before
+        // `main` when the process was started without it, so a failure here is a real one
+        // (no descriptors left) and the capture does not go ahead.
         let copy = unsafe { libc::fcntl(STDERR, libc::F_DUPFD_CLOEXEC, 3) };
-        // SAFETY: a non-negative result is a fresh descriptor nobody else owns.
-        let saved = (copy >= 0).then(|| unsafe { OwnedFd::from_raw_fd(copy) });
-        // SAFETY: both are open descriptors; `dup2` replaces 2 atomically and leaves it inheritable,
-        // which is what standard error has to be for the programs that should share it.
-        if unsafe { libc::dup2(writer.as_raw_fd(), STDERR) } < 0 {
+        if copy < 0 {
             return Err(std::io::Error::last_os_error());
         }
+        // SAFETY: a non-negative result is a fresh descriptor nobody else owns.
+        let saved = unsafe { OwnedFd::from_raw_fd(copy) };
+        duplicate_onto_stderr(writer.as_raw_fd())?;
         Ok(State(saved))
     }
 
-    pub(super) fn original(state: &State) -> Option<File> {
-        let copy = state.0.as_ref()?.try_clone().ok()?;
-        Some(File::from(copy))
+    pub(super) fn original(state: &State) -> Option<Box<dyn Write + Send>> {
+        let copy = state.0.try_clone().ok()?;
+        Some(Box::new(File::from(copy)))
     }
 
     pub(super) fn restore(state: State) {
-        match &state.0 {
-            // SAFETY: both are open; this closes the pipe's writer at 2 in the same call.
-            Some(saved) => unsafe { libc::dup2(saved.as_raw_fd(), STDERR) },
-            // SAFETY: 2 holds the pipe's writer, which the capture put there.
-            None => unsafe { libc::close(STDERR) },
-        };
+        // Nothing to do with a failure: standard error is the one place it could be said.
+        let _ = duplicate_onto_stderr(state.0.as_raw_fd());
+    }
+
+    fn duplicate_onto_stderr(fd: libc::c_int) -> std::io::Result<()> {
+        loop {
+            // SAFETY: `fd` is open for as long as the caller holds it; `dup2` replaces 2 in one
+            // step and leaves it inheritable, as standard error is.
+            if unsafe { libc::dup2(fd, STDERR) } >= 0 {
+                return Ok(());
+            }
+            let error = std::io::Error::last_os_error();
+            if error.kind() != std::io::ErrorKind::Interrupted {
+                return Err(error);
+            }
+        }
     }
 }
 
 #[cfg(windows)]
 mod platform {
-    use super::File;
     use std::{
-        io::PipeWriter,
+        fs::File,
+        io::{PipeWriter, Write},
         os::windows::io::{AsRawHandle, BorrowedHandle, RawHandle},
     };
     use windows_sys::Win32::{
         Foundation::INVALID_HANDLE_VALUE,
-        System::Console::{GetStdHandle, STD_ERROR_HANDLE, SetStdHandle},
+        System::Console::{GetConsoleMode, GetStdHandle, STD_ERROR_HANDLE, SetStdHandle},
     };
 
     /// What the process's standard error handle was — not owned: the process got it at birth —
@@ -96,20 +114,79 @@ mod platform {
         Ok(State(original, writer))
     }
 
-    /// Nothing when the process was born without one: a windowed program started from the Start
-    /// menu.
-    pub(super) fn original(state: &State) -> Option<File> {
+    /// A console is written as UTF-16 text, as Rust's own standard error does: the same bytes
+    /// written raw would be read in the console's code page and garble anything outside ASCII.
+    pub(super) fn original(state: &State) -> Option<Box<dyn Write + Send>> {
         if state.0.is_null() || state.0 == INVALID_HANDLE_VALUE {
             return None;
         }
         // SAFETY: the process's own standard error handle stays open for its whole life.
         let borrowed = unsafe { BorrowedHandle::borrow_raw(state.0) };
-        borrowed.try_clone_to_owned().ok().map(File::from)
+        let handle = borrowed.try_clone_to_owned().ok()?;
+        let mut mode = 0;
+        // SAFETY: `handle` is open; the call only fills `mode`.
+        if unsafe { GetConsoleMode(handle.as_raw_handle(), &mut mode) } != 0 {
+            Some(Box::new(super::Console {
+                handle,
+                pending: Vec::new(),
+            }))
+        } else {
+            Some(Box::new(File::from(handle)))
+        }
     }
 
     pub(super) fn restore(state: State) {
         // SAFETY: the original is what the process had; the writer is dropped after.
         unsafe { SetStdHandle(STD_ERROR_HANDLE, state.0) };
         drop(state.1);
+    }
+}
+
+/// A console, written as UTF-16 text.
+#[cfg(windows)]
+struct Console {
+    handle: std::os::windows::io::OwnedHandle,
+    /// The start of a character whose last bytes are still in the pipe.
+    pending: Vec<u8>,
+}
+
+#[cfg(windows)]
+impl Write for Console {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.pending.extend_from_slice(bytes);
+        let whole = match std::str::from_utf8(&self.pending) {
+            Ok(_) => self.pending.len(),
+            Err(error) if error.error_len().is_none() => error.valid_up_to(),
+            Err(_) => self.pending.len(),
+        };
+        let text: Vec<u16> = String::from_utf8_lossy(&self.pending[..whole])
+            .encode_utf16()
+            .collect();
+        self.pending.drain(..whole);
+        let mut sent = 0;
+        while sent < text.len() {
+            let mut written = 0;
+            let rest = &text[sent..];
+            // SAFETY: the buffer and its length come from the same slice, and `written` is
+            // filled by the call.
+            let ok = unsafe {
+                windows_sys::Win32::System::Console::WriteConsoleW(
+                    std::os::windows::io::AsRawHandle::as_raw_handle(&self.handle),
+                    rest.as_ptr().cast(),
+                    rest.len().min(u32::MAX as usize) as u32,
+                    &mut written,
+                    std::ptr::null(),
+                )
+            };
+            if ok == 0 || written == 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            sent += written as usize;
+        }
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
     }
 }
