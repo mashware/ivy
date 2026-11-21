@@ -22,5 +22,11 @@
     "binary": "app/app:lib",
     "name": "control::tests::measure_a_patch_at_the_ceiling",
     "reason": "manual release-mode latency measurement"
+  },
+  {
+    "platform": "windows",
+    "binary": "term-core/term_core:lib",
+    "name": "tests::windows_conpty_osc7_reaches_the_screen_through_the_bundled_host",
+    "reason": "needs the ConPTY pair beside the test binary (scripts/conpty.py)"
   }
 ]
