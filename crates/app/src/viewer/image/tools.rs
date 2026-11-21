@@ -7,7 +7,7 @@ use crate::ui::icons::{self, Icon};
 use eframe::egui;
 use std::sync::Arc;
 
-const TOOLBAR: f32 = 36.0;
+pub(super) const TOOLBAR: f32 = 36.0;
 const ROW: f32 = 28.0;
 /// The side of an icon button: the toolbar's tools, Undo and a note's delete.
 const ICON: f32 = 22.0;
@@ -63,7 +63,8 @@ fn side_by_side(body: egui::Rect) -> bool {
 /// `rows` need, up to half of what is left, scrolling past that. Either way the column keeps
 /// `kept`, the height of what it shows outside its scrolling list (`Fixed::height`), before the
 /// line Send types and the image get theirs: a refusal clipped away, or a button reaching into the
-/// image where a press starts a stroke, would cost more than a shorter image.
+/// image where a press starts a stroke, would cost more than a shorter image. The column never
+/// grows past the body, so on a drawer too short even for `kept`, `Fixed` gives first (#197).
 pub(super) fn split(body: egui::Rect, rows: usize, kept: f32, something_to_send: bool) -> Layout {
     let top = (body.top() + TOOLBAR).min(body.bottom());
     let kept = kept + 2.0 * MARGIN.y;
@@ -115,9 +116,14 @@ pub(super) fn rows(marks: &Marks) -> usize {
 
 /// What the column keeps whole, outside the list that scrolls: the notice at its head and the
 /// Send button at its foot. Laid out before the drawer is split and painted as laid out, so the
-/// room `split` keeps for them is the room they take, however many lines they wrap into.
+/// room `split` keeps for them is the room they take. The notice wraps whole while the column can
+/// hold it beside the button; where the drawer is too short for that, it is cut to one line with
+/// the whole of it on hover, because the button keeps its full height: a button squeezed to a
+/// sliver, or painted up over the toolbar, was the defect (#197).
 pub(super) struct Fixed {
     notice: Option<Arc<egui::Galley>>,
+    /// The whole notice, when the one painted is cut to a line.
+    cut: Option<String>,
     send: Option<Arc<egui::Galley>>,
     padding: egui::Vec2,
     spacing: f32,
@@ -141,28 +147,33 @@ impl Fixed {
         };
         let width = (column - 2.0 * MARGIN.x).max(0.0);
         let padding = style.spacing.button_padding;
-        let lay = |text: egui::WidgetText, width: f32, font: egui::FontSelection| {
-            let wrap = egui::text::TextWrapping::wrap_at_width(width.max(1.0));
+        let lay = |text: egui::WidgetText, wrap: egui::text::TextWrapping, font| {
             text.into_galley_impl(ctx, style, wrap, font, egui::Align::Min)
         };
-        let notice = notice.map(|notice| {
-            let text = egui::RichText::new(notice).color(refused);
-            lay(text.into(), width, egui::FontSelection::Default)
-        });
+        let wrapped = |width: f32| egui::text::TextWrapping::wrap_at_width(width.max(1.0));
+        let said =
+            |notice: &str| egui::WidgetText::from(egui::RichText::new(notice).color(refused));
         let send = send.map(|(console, busy)| {
             let font = egui::TextStyle::Button.into();
-            lay(
-                send_label(console, busy).into(),
-                width - 2.0 * padding.x,
-                font,
-            )
+            let label = send_label(console, busy).into();
+            lay(label, wrapped(width - 2.0 * padding.x), font)
         });
-        Self {
-            notice,
+        let mut fixed = Self {
+            notice: notice.map(|n| lay(said(n), wrapped(width), egui::FontSelection::Default)),
+            cut: None,
             send,
             padding,
             spacing: style.spacing.item_spacing.y,
+        };
+        let room = body.height() - TOOLBAR - 2.0 * MARGIN.y;
+        if let Some(notice) = notice
+            && fixed.height() > room
+        {
+            let line = egui::text::TextWrapping::truncate_at_width(width.max(1.0));
+            fixed.notice = Some(lay(said(notice), line, egui::FontSelection::Default));
+            fixed.cut = Some(notice.to_owned());
         }
+        fixed
     }
 
     /// The height the notice and the button take together, with the space each leaves after it.
@@ -307,14 +318,16 @@ pub(super) fn notes(
         origin,
         sending,
     } = panel;
-    let mut ui = ui.new_child(
+    let mut column = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(layout.column.shrink2(MARGIN))
             .layout(egui::Layout::bottom_up(egui::Align::Min)),
     );
+    // On a drawer too short for the button, its top is cut rather than laid over the toolbar.
+    column.set_clip_rect(layout.column.intersect(column.clip_rect()));
     // A Send on its way takes the notes as they were at its click.
     if sending.busy() {
-        ui.disable();
+        column.disable();
     }
     // The button is laid out first so it keeps the column's foot however many notes there are;
     // what it asks for is composed after the notes, from what they hold at the end of this pass.
@@ -323,13 +336,16 @@ pub(super) fn notes(
     let ready = matches!(sending.target, Some(Ok(_))) && !sending.busy();
     let clicked = fixed.send.as_ref().is_some_and(|label| {
         let height = fixed.button_height(label);
-        send_button(&mut ui, ready, Arc::clone(label), height, &roles)
+        send_button(&mut column, ready, Arc::clone(label), height, &roles)
     });
-    let rest = ui.available_size();
-    ui.allocate_ui_with_layout(rest, egui::Layout::top_down(egui::Align::Min), |ui| {
+    let rest = column.available_size();
+    column.allocate_ui_with_layout(rest, egui::Layout::top_down(egui::Align::Min), |ui| {
         // Outside the list that scrolls: a refusal is read without scrolling up to it.
         if let Some(notice) = &fixed.notice {
-            ui.add(egui::Label::new(Arc::clone(notice)));
+            let said = ui.add(egui::Label::new(Arc::clone(notice)));
+            if let Some(whole) = &fixed.cut {
+                said.on_hover_text(whole);
+            }
             ui.add_space(NOTICE_GAP);
         }
         egui::ScrollArea::vertical()
@@ -346,7 +362,7 @@ pub(super) fn notes(
         None => Err("Nothing can be sent from here.".to_owned()),
     };
     if let Some(rect) = layout.footer {
-        footer(&mut ui, rect, &line, refused, &roles);
+        footer(ui, rect, &line, refused, &roles);
     }
     let (line, path) = line.ok().filter(|_| clicked)?;
     Some(Request {
@@ -438,6 +454,9 @@ fn footer(
             .max_rect(rect.shrink2(egui::vec2(8.0, 4.0)))
             .layout(egui::Layout::top_down(egui::Align::Min)),
     );
+    // A scroll area is never laid out shorter than its own minimum, which a short drawer's band
+    // is: without this clip its text ran past the drawer's bottom.
+    ui.set_clip_rect(rect.intersect(ui.clip_rect()));
     egui::ScrollArea::vertical()
         .id_salt("image-send-line")
         .auto_shrink(false)

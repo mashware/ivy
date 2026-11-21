@@ -2807,6 +2807,116 @@ mod tests {
         assert!(view.contains_rect(button), "{button:?} outside {view:?}");
     }
 
+    /// Three passes of `viewer` alone, laid out in `view`, with `events` in the last; what it
+    /// painted then.
+    fn shown_in(
+        ctx: &egui::Context,
+        viewer: &mut Viewer,
+        view: egui::Rect,
+        events: Vec<egui::Event>,
+    ) -> Vec<egui::epaint::ClippedShape> {
+        let mut shapes = Vec::new();
+        for pass in 0..3 {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(SCREEN),
+                    events: if pass == 2 { events.clone() } else { vec![] },
+                    ..Default::default()
+                },
+                |ui| {
+                    let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(view));
+                    viewer.show(&mut ui, crate::theme::Theme::default(), false);
+                },
+            );
+            output.textures_delta.clear();
+            shapes = output.shapes;
+        }
+        shapes
+    }
+
+    /// Each text painted that `wanted` accepts: its galley, and the part of it its clip shows.
+    fn visible_texts(
+        shapes: &[egui::epaint::ClippedShape],
+        wanted: impl Fn(&str) -> bool,
+    ) -> Vec<(Arc<egui::Galley>, egui::Rect)> {
+        shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) if wanted(text.galley.text()) => {
+                    let rect = text.galley.rect.translate(text.pos.to_vec2());
+                    Some((Arc::clone(&text.galley), rect.intersect(clipped.clip_rect)))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// On a drawer too short for the toolbar, a wrapped refusal and the Send button, nothing of
+    /// the column or the line under it shows outside the drawer or over the toolbar: the refusal
+    /// is cut to one line, with the whole of it on hover, and the button keeps its full height.
+    /// Shorter still, with no room for even that line, the column's own clip keeps it off the
+    /// toolbar.
+    #[test]
+    fn a_drawer_too_short_cuts_the_refusal_and_never_paints_over_the_toolbar() {
+        let notice = "This image has marks that were not sent: send them or clear them before \
+                      opening another image or document.";
+        let footer = |t: &str| {
+            t == notice || t.starts_with("Send to ") || t == "Nothing can be sent from here."
+        };
+        for height in [118.0, 84.0] {
+            let ctx = egui::Context::default();
+            let mut viewer = ready(image::RgbaImage::new(400, 300));
+            viewer.document.as_mut().unwrap().marks.general = "the header overlaps".into();
+            viewer.notice = Some(notice.into());
+            let view = egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(300.0, height));
+            let below_bar = egui::Rect::from_min_max(
+                egui::pos2(view.left(), view.top() + tools::TOOLBAR),
+                view.max,
+            );
+            let shapes = shown_in(&ctx, &mut viewer, view, vec![]);
+            let painted = visible_texts(&shapes, footer);
+            assert!(
+                !painted.is_empty(),
+                "nothing of the column painted at {height}"
+            );
+            for (galley, shown) in &painted {
+                assert!(
+                    !shown.is_positive() || below_bar.contains_rect(*shown),
+                    "{:?} shows at {shown:?}, outside {below_bar:?}",
+                    galley.text()
+                );
+            }
+            if height < 100.0 {
+                continue;
+            }
+            let [(said, shown)] = &visible_texts(&shapes, |t| t == notice)[..] else {
+                panic!("the refusal is not painted once");
+            };
+            assert!(
+                said.elided && said.rows.len() == 1,
+                "{} rows",
+                said.rows.len()
+            );
+            let (button, _) = clipped_text(&shapes, |t| t.starts_with("Send to ")).unwrap();
+            let frame = shapes.iter().find_map(|clipped| match &clipped.shape {
+                egui::Shape::Rect(rect) if rect.rect.contains_rect(button) => Some(rect.rect),
+                _ => None,
+            });
+            let frame = frame.expect("the button has a frame");
+            assert!(frame.height() >= 32.0, "{frame:?}");
+            assert!(below_bar.contains_rect(frame), "{frame:?}");
+            // Moved once, then held still: egui shows a tooltip only to a pointer at rest.
+            let mut hover = vec![egui::Event::PointerMoved(shown.center())];
+            let whole = (0..60).any(|_| {
+                let shapes = shown_in(&ctx, &mut viewer, view, std::mem::take(&mut hover));
+                visible_texts(&shapes, |t| t == notice)
+                    .iter()
+                    .any(|(galley, _)| !galley.elided)
+            });
+            assert!(whole, "hovering the cut refusal does not show it whole");
+        }
+    }
+
     /// Unsent marks keep the image: opening another document or image over it, or closing its
     /// tab, is refused with a message, the image and its marks stay, and once the marks are
     /// cleared the same open goes through.
