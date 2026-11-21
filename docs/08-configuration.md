@@ -730,9 +730,13 @@ Enter**, at the foot of the column, writes a copy of the image with the marks in
 own folder (`PANEL_DIR`) under the first free name `annotated-<n>.png`, then types the line shown
 under the image into that console and presses Enter: the copy's path and the notes. In a plain shell that line runs as a command, so read it
 before sending. From the click on Send until the line is typed, the marks and notes cannot be
-changed. The original file is never changed, and the copies are removed when that console
-closes. While marks are not sent, the image stays: opening another image or document, or closing
-its tab, says so. Only empty authorities,
+changed, but **Cancel**, beside «Sending…» while the copy is written, takes the Send back: the
+marks and notes stay and can be changed again, nothing is typed, and the copy is removed once it
+is finished. Until then another Send says «Still finishing the previous copy». On a drawer too
+short for the column, a notice there is cut to one line and shown whole on hover; the Send
+button keeps its height. The original file is never changed, and the copies are removed when
+that console closes. While marks are not sent, the image stays: opening another image or
+document, or closing its tab, says so. Only empty authorities,
 localhost and the verified local hostname are accepted as local file links.
 
 Each console header has a **Review changes** control beside its information-panel and maximize
