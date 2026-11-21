@@ -393,8 +393,8 @@ fn rasterize(
 ///
 /// **A graph the library cannot walk is not drawn.** It drops a painting error and hands back
 /// whatever it got to draw, often nothing; remembered as a success, that blank would stand where the
-/// emoji is, for the rest of the session. So the graph is walked first, and a failure is said once —
-/// the atlas remembers it — and the next face is asked.
+/// emoji is, for the rest of the session. So the graph is walked first, and a failure is said once per
+/// character and cell height — what the atlas remembers — and the next face is asked.
 ///
 /// A layer drawn «in the text color» is drawn white: the atlas is not keyed by color.
 fn colr_of(

@@ -1846,7 +1846,8 @@ mod tests {
                     // list of exceptions, so it keeps holding when the script grows.
                     let describes_the_report = (dentro.contains('^')
                         || dentro.contains("characters searched")
-                        || dentro.contains("glyphs rasterized"))
+                        || dentro.contains("glyphs rasterized")
+                        || dentro.contains("colour outlines"))
                         && dentro.chars().any(|c| c.is_alphabetic());
                     if describes_the_report {
                         encontrados.push(ScriptPattern {
