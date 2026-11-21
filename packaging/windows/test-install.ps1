@@ -63,8 +63,16 @@ foreach ($Control in 'crash', 'shell', 'layout', 'deadline') {
     try {
         & $Launch -Executable $Installed -EvidenceDir (Join-Path $Evidence $Control) -Control $Control -TimeoutSeconds 20
     } catch {
-        $ExpectedStage = @{ crash = 'startup'; shell = 'shell'; layout = 'layout'; deadline = 'deadline' }[$Control]
-        if ($_.Exception.Message -notmatch "^${ExpectedStage}:") { throw }
+        if ($Control -eq 'shell') {
+            # Ivy may give up before or after its window appears; either way the refusal has to be
+            # the shell's own: the missing interpreter the trial planted, named on standard error.
+            if ($_.Exception.Message -notmatch '^(startup|shell):') { throw }
+            $Said = Get-Content (Join-Path (Join-Path $Evidence $Control) 'stderr.txt') -Raw -ErrorAction SilentlyContinue
+            if ($Said -notmatch 'missing-cmd\.exe') { throw "Launch control 'shell' failed for another reason: $($_.Exception.Message)" }
+        } else {
+            $ExpectedStage = @{ crash = 'startup'; layout = 'layout'; deadline = 'deadline' }[$Control]
+            if ($_.Exception.Message -notmatch "^${ExpectedStage}:") { throw }
+        }
         Write-Output "Launch control '$Control' rejected as expected: $($_.Exception.Message)"
         $Rejected = $true
     }
