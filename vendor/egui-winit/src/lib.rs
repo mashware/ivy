@@ -1455,7 +1455,8 @@ fn is_copy_command(modifiers: egui::Modifiers, keycode: egui::Key) -> bool {
 
 fn is_paste_command(modifiers: egui::Modifiers, keycode: egui::Key) -> bool {
     // **D115 narrows upstream's Windows arm to Shift alone.** Upstream looks at Shift and ignores the
-    // rest, so Ctrl+Shift+Insert and Alt+Shift+Insert were pastes too; they are keys now.
+    // rest, so Alt+Shift+Insert was a paste too (Ctrl+Shift+Insert was caught by the copy arm
+    // first); both are keys now.
     keycode == egui::Key::Paste
         || (modifiers.command && keycode == egui::Key::V)
         || (cfg!(target_os = "windows")

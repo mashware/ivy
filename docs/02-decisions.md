@@ -11615,8 +11615,8 @@ keymap, so a chord somebody bound does not leave its request to reach the progra
 What the fields lose is every chord over the two keys **but the exact one**: upstream copied on any
 Ctrl+Insert, cut on any Shift+Delete and pasted on any Shift+Insert, so Ctrl+Shift+Insert and
 Ctrl+Alt+Insert no longer copy there, Ctrl+Shift+Delete and Alt+Shift+Delete no longer cut — egui's
-field ignores Shift+Delete on Windows whatever else is held — and Ctrl+Shift+Insert and
-Alt+Shift+Insert no longer paste. Each of those is a D52 key for a console, and a request for one of
+field ignores Shift+Delete on Windows whatever else is held — and Alt+Shift+Insert no longer
+pastes (Ctrl+Shift+Insert never pasted: upstream's copy arm caught it first). Each of those is a D52 key for a console, and a request for one of
 them would be a second answer the console would have to drop as well.
 
 **A shortcut bound to `shift+insert` is half a shortcut on Windows**: with text on the clipboard

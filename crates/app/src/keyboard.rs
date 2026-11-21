@@ -214,7 +214,8 @@ impl Behind {
     }
 }
 
-/// Which clipboard chord `event` is under `chord`, if any.
+/// Which clipboard chord `event` is, if any: a copy request judged under the rebuilt `chord`
+/// (it carries no modifiers of its own), an Insert key under the modifiers it carries.
 ///
 /// **The copy request with Shift** is Ctrl+Shift+C, which the desktop resolves before it is a key
 /// (see the walk). It copies **whether or not there is anything marked**: giving it back would let
