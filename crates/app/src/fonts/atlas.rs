@@ -241,7 +241,7 @@ pub(super) fn color_glyph_of(
             // most are monochrome. Without this check the first the system enumerates would win,
             // which is the defect this project has documented since **D24** and the one
             // Alacritty carries.
-            if let Some(image) = rasterize(&font, glyph, height, max_width) {
+            if let Some(image) = rasterize(&font, &blob, face.index(), glyph, height, max_width) {
                 return Some(image);
             }
         }
@@ -330,18 +330,87 @@ pub(super) fn pixels_of(
     }
 }
 
-/// The color bitmap of a glyph, rescaled to fit in the slot it is given.
+/// The color drawing of a glyph, fitted to the slot it is given: the face's color bitmap if it has
+/// one for the glyph, else its color outlines (`COLR`), else nothing.
 ///
-/// Returns `None` when that face does **not** bring the glyph in color: either it has no bitmap table, or it
-/// has one and for that glyph it stores an **alpha mask**, which is a monochrome drawing and therefore not
+/// Returns `None` when that face does **not** bring the glyph in color: no bitmap and no `COLR`
+/// record, or a bitmap that is an **alpha mask**, which is a monochrome drawing and therefore not
 /// this. The caller falls to the text path.
 ///
-/// **The color outlines —`COLR`— are left out, and not by oversight.** Painting them demands rasterizing
-/// outlines by hand, which is the custom rasterizer this milestone discarded on purpose for invalidating the
-/// whole measurement history. On Linux it is not noticed —the system emoji fonts are bitmap—
-/// but on Windows it is, because `Segoe UI Emoji` is `COLR`: it is declared as what
-/// **F2.7** lacks, not as something that works here.
+/// **The bitmap answers first** so that the faces Linux and macOS use — bitmap only — never reach the
+/// second path (D25, #176).
 pub(super) fn rasterize(
+    font: &skrifa::FontRef<'_>,
+    data: &fontique::Blob<u8>,
+    index: u32,
+    glyph: skrifa::GlyphId,
+    height: u32,
+    max_width: u32,
+) -> Option<egui::ColorImage> {
+    bitmap_of(font, glyph, height, max_width)
+        .or_else(|| colr_of(font, data, index, glyph, height, max_width))
+}
+
+/// The color outlines of a glyph, drawn at the size the slot gives them.
+///
+/// **Only a glyph with a `COLR` record is drawn here.** The library draws whatever it is handed —
+/// color outlines, else a bitmap, else the plain outline in the paint color — so a glyph without the
+/// record would come out as a white silhouette, and in a monochrome symbol face (most of the families
+/// the system calls emoji) it would win over the color face behind it: the defect **D24** closed.
+///
+/// **It is placed on the em box, never on its ink**: the advance across, ascender to descender down.
+/// Fitted by its ink, every emoji of a face would get a scale and a baseline of its own. And it is
+/// drawn directly at that size, which `glyph_run` does with its glyph cache off — its default.
+///
+/// A layer drawn «in the text color» is drawn white: the atlas is not keyed by color.
+fn colr_of(
+    font: &skrifa::FontRef<'_>,
+    data: &fontique::Blob<u8>,
+    index: u32,
+    glyph: skrifa::GlyphId,
+    height: u32,
+    max_width: u32,
+) -> Option<egui::ColorImage> {
+    use skrifa::MetadataProvider as _;
+    font.color_glyphs().get(glyph)?;
+    let location = skrifa::instance::LocationRef::default();
+    let metrics = font.metrics(skrifa::instance::Size::unscaled(), location);
+    let advance = font
+        .glyph_metrics(skrifa::instance::Size::unscaled(), location)
+        .advance_width(glyph)?;
+    let em_height = metrics.ascent - metrics.descent;
+    if advance <= 0.0 || em_height <= 0.0 {
+        return None;
+    }
+    // Pixels per font unit — the same rule the bitmap path fits by.
+    let factor = (height as f32 / em_height).min(max_width as f32 / advance);
+    let width = ((advance * factor).round() as u32).clamp(1, max_width);
+    let tall = ((em_height * factor).round() as u32).clamp(1, height);
+    let (width_px, tall_px) = (u16::try_from(width).ok()?, u16::try_from(tall).ok()?);
+
+    let mut context = vello_cpu::RenderContext::new(width_px, tall_px);
+    let mut resources = vello_cpu::Resources::new();
+    context.set_paint(vello_cpu::color::palette::css::WHITE);
+    let font_data = vello_cpu::peniko::FontData::new(data.clone(), index);
+    context
+        .glyph_run(&mut resources, &font_data)
+        .font_size(f32::from(metrics.units_per_em) * factor)
+        .fill_glyphs(std::iter::once(vello_cpu::Glyph {
+            id: glyph.to_u32(),
+            x: 0.0,
+            y: metrics.ascent * factor,
+        }));
+    context.flush();
+    let mut pixmap = vello_cpu::Pixmap::new(width_px, tall_px);
+    context.render(&mut pixmap, &mut resources);
+    Some(egui::ColorImage::from_rgba_premultiplied(
+        [width as usize, tall as usize],
+        pixmap.data_as_u8_slice(),
+    ))
+}
+
+/// The color bitmap of a glyph, rescaled to fit in the slot it is given.
+fn bitmap_of(
     font: &skrifa::FontRef<'_>,
     glyph: skrifa::GlyphId,
     height: u32,
@@ -375,4 +444,64 @@ pub(super) fn rasterize(
         [final_width as usize, final_height as usize],
         shrunk.as_raw(),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Google's `COLR` version 1 test glyphs: outlines and a `COLR` table, no colour bitmap — the shape
+    /// of `Segoe UI Emoji`, on a machine whose own emoji font is a bitmap one.
+    fn colr_fixture() -> fontique::Blob<u8> {
+        let bytes = include_bytes!("../../tests/fixtures/colr/colr_1.ttf");
+        fontique::Blob::new(std::sync::Arc::new(bytes.to_vec()))
+    }
+
+    fn drawn(blob: &fontique::Blob<u8>, glyph: u32, height: u32, max_width: u32) -> Option<egui::ColorImage> {
+        let font = skrifa::FontRef::from_index(blob.data(), 0).expect("the fixture opens");
+        rasterize(&font, blob, 0, skrifa::GlyphId::new(glyph), height, max_width)
+    }
+
+    fn assert_near(image: &egui::ColorImage, (x, y): (usize, usize), expected: [u8; 4], what: &str) {
+        let got = image.pixels[y * image.size[0] + x].to_array();
+        let close = got.iter().zip(expected).all(|(g, e)| g.abs_diff(e) <= 2);
+        assert!(close, "{what}: pixel ({x},{y}) is {got:?}, expected about {expected:?}");
+    }
+
+    #[test]
+    fn a_colr_glyph_is_drawn_in_its_palette_colours_premultiplied() {
+        // Glyph 84 is a cross filled blue at alpha 127, with a narrower, taller cross behind it
+        // filled orange (255, 165, 0) at alpha 178 — read from the paint graph `ttf-parser`'s own
+        // test spells out. Premultiplied, the orange alone is (178, 115, 0, 178); where the blue
+        // lies over it, blue + orange × (1 − 127/255) = (89, 58, 127, 217). A drawing that only
+        // asserted «not empty» would pass a white silhouette, which is what the library draws
+        // when it is handed a glyph and no colour.
+        let blob = colr_fixture();
+        let image = drawn(&blob, 84, 100, 100).expect("a COLR glyph with no bitmap gave no image");
+        assert_eq!(image.size, [100, 95], "not fitted on the em box (advance 1000, ascender 950)");
+        assert_near(&image, (50, 10), [178, 115, 0, 178], "the orange layer alone");
+        assert_near(&image, (50, 50), [89, 58, 127, 217], "the blue layer over the orange one");
+        assert_near(&image, (10, 50), [0, 0, 0, 0], "outside both layers");
+    }
+
+    #[test]
+    fn a_colr_glyph_takes_its_em_box_fitted_to_the_slot_and_not_its_ink() {
+        // The em box is 1000 × 950 units; a 17-pixel cell two columns of 9 wide fits it at
+        // 17/950 per unit, so 18 × 17. Fitted by its ink — a cross far narrower than its advance —
+        // it would come out another size, and every emoji of the face a size of its own.
+        let blob = colr_fixture();
+        let image = drawn(&blob, 84, 17, 18).expect("a COLR glyph with no bitmap gave no image");
+        assert_eq!(image.size, [18, 17]);
+    }
+
+    #[test]
+    fn a_glyph_with_no_colour_outlines_is_not_drawn() {
+        // Glyph 3 has an outline and no `COLR` record. The library would draw its outline in the
+        // paint colour — a white silhouette that would win over the colour face behind it.
+        let blob = colr_fixture();
+        assert!(
+            drawn(&blob, 3, 17, 18).is_none(),
+            "a glyph with no colour drawing came out as an image"
+        );
+    }
 }

@@ -151,6 +151,14 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 # system library. Its own PNG writer stays off: `image` above encodes the copy.
 tiny-skia = { version = "0.11", default-features = false, features = ["std"] }
 
+# **To paint an emoji whose font draws it as coloured outlines (`COLR`)** — `Segoe UI Emoji`, the
+# font Windows asks for emoji — and not as a bitmap (D25, #176). It is the rasteriser epaint already
+# draws its letters with, at the version epaint pins; `text` is what adds the glyph painter (`glifo`),
+# which epaint builds without: checked with `cargo tree -e features -i glifo`, which printed nothing
+# before this line. `tiny-skia` above cannot do it: it has no sweep gradient, which `COLR` version 1
+# needs.
+vello_cpu = { version = "0.1.0", default-features = false, features = ["std", "u8_pipeline", "text"] }
+
 # The interface's icons: Phosphor Regular and its codepoints (D103). Only the face and the constants
 # are used — never `add_to_fonts`, which puts the face in the proportional chain where its blank
 # lowercase letters and its private-use codepoints would meet the interface's and the terminal's text. Pinned

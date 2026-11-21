@@ -144,6 +144,7 @@ dependencies = [
  "unicode-segmentation",
  "ureq",
  "url",
+ "vello_cpu",
  "webbrowser",
  "windows-sys 0.61.2",
  "winit",
