@@ -11436,9 +11436,9 @@ starts its serials again, since the opening already tells its fields apart.
   paints outside the drawer's body: on a drawer too short for the toolbar, a wrapped notice and
   the button, the image gives up its height first, then the notice is cut to one line, shown whole
   on hover, above a button that keeps its full height; where not even that line fits above the
-  button, the line takes the column's head and the button is cut under it, never laid over the
-  toolbar: a refusal clipped away says nothing at all, a button cut short still names what it
-  does (#197).
+  button, the line takes the column's head and the button is cut under it, or cut away entirely
+  on the shortest drawer, and never laid over the toolbar: a refusal clipped away says nothing at
+  all, while a taller drawer gives the button back (#197).
 - **presses Enter in a write of its own, on a later frame.** People driving Claude Code from tmux
   report that text and Enter sent together are read as part of the paste; a
   separate write a frame later is what a person's Enter is, for an agent and a shell alike. A
@@ -11464,8 +11464,9 @@ is typed, a Cancel beside «Sending…» takes the Send back** (#197): the marks
 unfreeze, nothing is typed, and a worker already writing is parked — a write cannot be
 interrupted — and polled from the window's input pass until it ends, when its copy is removed, and
 with it the folder of a console that closed meanwhile. While a worker is parked, Send is greyed
-out and the drawer says «Still finishing the previous copy» until the worker ends cleanly, and a
-Send asked anyway is refused with it before any other check, so two workers never race for one
+out and reads «Still finishing the previous copy…» — on the button, because any other notice can
+replace Cancel's — and a Send asked anyway is refused with it before any other check, so two
+workers never race for one
 name; the decoder's abandoned read is the same pattern. What a parked worker leaves to say — a
 failure, a copy or folder it could not remove — goes to standard error as well, and waits for the
 next drawer that lays the notes out, because the image it was for may be closed by then. **While the copy is

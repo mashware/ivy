@@ -79,6 +79,11 @@ impl Sending {
         !matches!(self.phase, Phase::Idle)
     }
 
+    /// Whether a cancelled Send's worker is still writing its copy.
+    pub(super) fn parked(&self) -> bool {
+        self.parked.is_some()
+    }
+
     /// Whether `poll` has anything to do: a Send on its way, or a cancelled one's worker.
     pub(super) fn pending(&self) -> bool {
         self.busy() || self.parked.is_some()
@@ -158,10 +163,6 @@ impl Sending {
 
     pub(super) fn writing(&self) -> bool {
         matches!(self.phase, Phase::Writing(..))
-    }
-
-    pub(super) fn parked(&self) -> bool {
-        self.parked.is_some()
     }
 
     /// Makes the copy being written one that has not finished, for as long as the returned sender

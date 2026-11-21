@@ -298,7 +298,8 @@ impl Viewer {
         let something_to_send = !marks.is_empty();
         let body = ui.available_rect_before_wrap();
         let refused = theme.panel_color(Some(panel_contract::Mark::Block), None);
-        let send = something_to_send.then(|| (origin.label.as_str(), sending.busy()));
+        let send =
+            something_to_send.then(|| (origin.label.as_str(), sending.busy(), sending.parked()));
         let fixed = tools::Fixed::new(ui.ctx(), ui.style(), body, notice, refused, send);
         let layout = tools::split(body, tools::rows(marks), fixed.height(), something_to_send);
         let view = layout.view;
@@ -1628,7 +1629,8 @@ mod tests {
         let marks = &window.image.document.as_ref().unwrap().marks;
         let something_to_send = !marks.is_empty();
         let label = window.image.origin().unwrap().label.as_str();
-        let send = something_to_send.then(|| (label, window.image.send.busy()));
+        let sending = &window.image.send;
+        let send = something_to_send.then(|| (label, sending.busy(), sending.parked()));
         let notice = window.image.notice.as_deref();
         let style = ctx.global_style();
         let refused = egui::Color32::RED;
@@ -3582,9 +3584,9 @@ mod tests {
 
     /// While the copy is written, a Cancel beside «Sending…» takes the Send back: the marks and
     /// notes stay and can be edited again, and nothing is typed. While the cancelled worker is
-    /// still writing, Send is greyed out and the drawer says why, and a Send asked anyway is
-    /// refused with it; once that worker ends its copy is removed, the drawer says Send is ready,
-    /// and the next Send goes through.
+    /// still writing, Send is greyed out and says why, whatever notice comes, and a Send asked
+    /// anyway is refused with it; once that worker ends its copy is removed, the drawer says Send
+    /// is ready, and the next Send goes through.
     #[cfg(unix)]
     #[test]
     fn cancel_takes_a_send_back_while_its_copy_is_written() {
@@ -3612,9 +3614,27 @@ mod tests {
         let parked = "Send cancelled; nothing was sent. Still finishing the previous copy.";
         assert_eq!(window.image.notice.as_deref(), Some(parked));
 
-        click_send(&mut window, &ctx);
+        let finishing = "Still finishing the previous copy…";
+        let shapes = painted(&mut window, &ctx, vec![]);
+        let (_, button) = text_rect(&shapes, |t| t == finishing).expect("Send says why it waits");
+        painted(
+            &mut window,
+            &ctx,
+            vec![egui::Event::PointerMoved(button.center())],
+        );
+        click(&mut window, &ctx, button.center());
         assert!(!window.image.sending(), "a greyed-out Send was taken up");
         assert_eq!(window.image.notice.as_deref(), Some(parked));
+        // Another notice takes the cancel's place; the button still says why it waits.
+        let other = folder.0.join("other.png");
+        let name = window.image.origin().unwrap().pane;
+        assert!(crate::viewer::open_image_target(&mut window, name, other).is_err());
+        assert_ne!(window.image.notice.as_deref(), Some(parked));
+        let shapes = painted(&mut window, &ctx, vec![]);
+        assert!(
+            text_rect(&shapes, |t| t == finishing).is_some(),
+            "the reason went"
+        );
         window.image.send.ask(send::Request {
             document: window.image.document().unwrap(),
             pane: window.image.origin().unwrap().pane,

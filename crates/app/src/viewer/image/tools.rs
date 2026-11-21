@@ -129,15 +129,15 @@ pub(super) struct Fixed {
 }
 
 impl Fixed {
-    /// `send` is the console Send names and whether a Send is on its way, once there is
-    /// something to send.
+    /// `send` is the console Send names, whether a Send is on its way and whether a cancelled
+    /// one's worker is still writing, once there is something to send.
     pub(super) fn new(
         ctx: &egui::Context,
         style: &egui::Style,
         body: egui::Rect,
         notice: Option<&str>,
         refused: egui::Color32,
-        send: Option<(&str, bool)>,
+        send: Option<(&str, bool, bool)>,
     ) -> Self {
         let column = if side_by_side(body) {
             COLUMN
@@ -152,9 +152,9 @@ impl Fixed {
         let wrapped = |width: f32| egui::text::TextWrapping::wrap_at_width(width.max(1.0));
         let said =
             |notice: &str| egui::WidgetText::from(egui::RichText::new(notice).color(refused));
-        let send = send.map(|(console, busy)| {
+        let send = send.map(|(console, busy, parked)| {
             let font = egui::TextStyle::Button.into();
-            let label = send_label(console, busy).into();
+            let label = send_label(console, busy, parked).into();
             lay(label, wrapped(width - 2.0 * padding.x), font)
         });
         let mut fixed = Self {
@@ -197,11 +197,14 @@ impl Fixed {
     }
 }
 
-/// What the Send button says: the console it types into, or that a Send is on its way, which
-/// is why the notes cannot be changed until it is done.
-fn send_label(console: &str, busy: bool) -> String {
+/// What the Send button says: the console it types into, that a Send is on its way, which is
+/// why the notes cannot be changed until it is done, or, while it is greyed out for a cancelled
+/// Send's worker, why: on the button, because a notice can be replaced by any other.
+fn send_label(console: &str, busy: bool, parked: bool) -> String {
     if busy {
         "Sending…".to_owned()
+    } else if parked {
+        "Still finishing the previous copy…".to_owned()
     } else {
         format!("Send to {console} and press Enter")
     }
