@@ -11478,8 +11478,9 @@ written, just before the line would be typed: what was typed while the copy was 
 asked about too, with the copy kept for the answer. Once answered, a Send is not asked again — what
 is typed after «Send anyway» goes with the line, as the person chose. Closing the image or its
 console while the question waits drops the Send, a closed console said where the image is still
-shown, and a copy it had written is removed with the folder of a closed console; a window that
-closes takes it too. On a drawer too short for the Send button the answers are not laid out either,
+shown, and a copy it had written is removed with the folder of a closed console. A window that
+closes over the question removes the copy after its consoles are gone, so their folders, which held
+it, stay and say so — accepted for a window quit with a question unanswered. On a drawer too short for the Send button the answers are not laid out either,
 and the notice says on hover to enlarge it. **The bit is a guess about a line editor, and its misses
 are accepted:** Shift+Enter is a `\r` here and counts as an Enter, though Claude Code reads it as a
 new line in the same draft; Ctrl+J submits in a shell and does not count; and a line cleared with
