@@ -340,6 +340,9 @@ pub(super) fn notes(
     });
     let rest = column.available_size();
     column.allocate_ui_with_layout(rest, egui::Layout::top_down(egui::Align::Min), |ui| {
+        // Where not even the notice's one line fits above the button, it is cut at the button's
+        // top rather than painted over it; its whole text is still on hover.
+        ui.set_clip_rect(ui.max_rect().intersect(ui.clip_rect()));
         // Outside the list that scrolls: a refusal is read without scrolling up to it.
         if let Some(notice) = &fixed.notice {
             let said = ui.add(egui::Label::new(Arc::clone(notice)));

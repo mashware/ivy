@@ -2854,7 +2854,8 @@ mod tests {
     /// On a drawer too short for the toolbar, a wrapped refusal and the Send button, nothing of
     /// the column or the line under it shows outside the drawer or over the toolbar: the refusal
     /// is cut to one line, with the whole of it on hover, and the button keeps its full height.
-    /// Shorter still, with no room for even that line, the column's own clip keeps it off the
+    /// Shorter, with no room for that line above the button, the line is cut at the button's top
+    /// rather than painted over it; shorter still, the column's own clip keeps the button off the
     /// toolbar.
     #[test]
     fn a_drawer_too_short_cuts_the_refusal_and_never_paints_over_the_toolbar() {
@@ -2863,7 +2864,7 @@ mod tests {
         let footer = |t: &str| {
             t == notice || t.starts_with("Send to ") || t == "Nothing can be sent from here."
         };
-        for height in [118.0, 84.0] {
+        for height in [118.0, 84.0, 64.0] {
             let ctx = egui::Context::default();
             let mut viewer = ready(image::RgbaImage::new(400, 300));
             viewer.document.as_mut().unwrap().marks.general = "the header overlaps".into();
@@ -2886,17 +2887,9 @@ mod tests {
                     galley.text()
                 );
             }
-            if height < 100.0 {
+            if height < 80.0 {
                 continue;
             }
-            let [(said, shown)] = &visible_texts(&shapes, |t| t == notice)[..] else {
-                panic!("the refusal is not painted once");
-            };
-            assert!(
-                said.elided && said.rows.len() == 1,
-                "{} rows",
-                said.rows.len()
-            );
             let (button, _) = clipped_text(&shapes, |t| t.starts_with("Send to ")).unwrap();
             let frame = shapes.iter().find_map(|clipped| match &clipped.shape {
                 egui::Shape::Rect(rect) if rect.rect.contains_rect(button) => Some(rect.rect),
@@ -2905,6 +2898,22 @@ mod tests {
             let frame = frame.expect("the button has a frame");
             assert!(frame.height() >= 32.0, "{frame:?}");
             assert!(below_bar.contains_rect(frame), "{frame:?}");
+            let said = visible_texts(&shapes, |t| t == notice);
+            let [(said, shown)] = &said[..] else {
+                panic!("the refusal is not painted once at {height}");
+            };
+            assert!(
+                said.elided && said.rows.len() == 1,
+                "{} rows",
+                said.rows.len()
+            );
+            assert!(
+                !shown.intersect(frame).is_positive(),
+                "{shown:?} over the button {frame:?} at {height}"
+            );
+            if height < 100.0 {
+                continue;
+            }
             // Moved once, then held still: egui shows a tooltip only to a pointer at rest.
             let mut hover = vec![egui::Event::PointerMoved(shown.center())];
             let whole = (0..60).any(|_| {
