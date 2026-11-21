@@ -291,8 +291,8 @@ jobs:
         shell: pwsh
         run: |
           $Archive = Join-Path $env:RUNNER_TEMP 'mesa.7z'
-          Invoke-WebRequest 'https://github.com/pal1000/mesa-dist-win/releases/download/26.2.6/mesa3d-26.2.6-release-msvc.7z' -OutFile $Archive
-          if ((Get-FileHash $Archive -Algorithm SHA256).Hash -ne 'B2E00615FEABA45942343C265CC8C5F576142CA682C1AC6661922D4B72492877') { throw 'Mesa archive hash mismatch' }
+          Invoke-WebRequest 'https://github.com/pal1000/mesa-dist-win/releases/download/25.3.6/mesa3d-25.3.6-release-msvc.7z' -OutFile $Archive
+          if ((Get-FileHash $Archive -Algorithm SHA256).Hash -ne 'CA56D92BB2254A9A25557C95CFE27F02071A77B26DAFF4CBF9BC125ED3347FB5') { throw 'Mesa archive hash mismatch' }
           7z x $Archive "-o$env:RUNNER_TEMP\mesa" -y | Out-Null
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $Found = @(Get-ChildItem "$env:RUNNER_TEMP\mesa" -Recurse -Filter opengl32.dll | Where-Object { $_.DirectoryName -match '(^|\\)x64$' })
