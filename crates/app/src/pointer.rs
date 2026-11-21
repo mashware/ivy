@@ -899,7 +899,11 @@ impl Window {
             }
             if let Some(action) = pane.panel_state.button_at(bare.at) {
                 let bytes = crate::keyboard::what_a_button_sends(action.send());
-                match pane.pty.write(&bytes) {
+                let written = pane.pty.write(&bytes);
+                if written.is_ok() {
+                    crate::resume::wrote(pane, &bytes);
+                }
+                match written {
                     // **Counted only when the bytes went**, and the report's line says «pressed»
                     // meaning «reached a program». Counting a failed write would publish a number
                     // that is false in the direction that matters: a run where every write failed

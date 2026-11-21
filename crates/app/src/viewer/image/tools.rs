@@ -1,7 +1,7 @@
 //! What frames the drawer's image while it is marked: the tools above it, a column of notes beside
 //! it (under it where the drawer is too narrow for both), and under them the line Send will type.
 use super::marks::{self, Marks, Tool};
-use super::send::{self, Request, Sending};
+use super::send::{self, Button, Request, Sending};
 use crate::theme::{Roles, metrics};
 use crate::ui::icons::{self, Icon};
 use eframe::egui;
@@ -14,6 +14,8 @@ const ICON: f32 = 22.0;
 /// The notes' column beside the image: a marker's disc, a note a few words long and its delete.
 /// Fixed, so the image does not change size as notes are written.
 pub(super) const COLUMN: f32 = 260.0;
+/// The height of the row under «Send anyway» that holds «Type without Enter» and «Cancel».
+const ANSWER_ROW: f32 = ROW + 4.0;
 /// The narrowest image the column may leave beside it. Narrower, the column goes under the image,
 /// which keeps the image's width and gives up height instead of being squeezed to nothing.
 pub(super) const NARROWEST: f32 = 320.0;
@@ -128,20 +130,23 @@ pub(super) fn rows(marks: &Marks) -> usize {
 pub(super) struct Fixed {
     notice: Option<Arc<egui::Galley>>,
     send: Option<Arc<egui::Galley>>,
+    /// Whether the button is the question's «Send anyway», with a second row under it holding
+    /// «Type without Enter» and «Cancel».
+    answers: bool,
     padding: egui::Vec2,
     spacing: f32,
 }
 
 impl Fixed {
-    /// `send` is the console Send names, whether a Send is on its way and whether a cancelled
-    /// one's worker is still writing, once there is something to send.
+    /// `send` is the console Send names and what its button shows, once there is something to
+    /// send.
     pub(super) fn new(
         ctx: &egui::Context,
         style: &egui::Style,
         body: egui::Rect,
         notice: Option<&str>,
         refused: egui::Color32,
-        send: Option<(&str, bool, bool)>,
+        send: Option<(&str, Button)>,
     ) -> Self {
         let column = if side_by_side(body) {
             COLUMN
@@ -156,14 +161,16 @@ impl Fixed {
         let wrapped = |width: f32| egui::text::TextWrapping::wrap_at_width(width.max(1.0));
         let said =
             |notice: &str| egui::WidgetText::from(egui::RichText::new(notice).color(refused));
-        let send = send.map(|(console, busy, parked)| {
+        let answers = send.is_some_and(|(_, button)| button == Button::Confirm);
+        let send = send.map(|(console, button)| {
             let font = egui::TextStyle::Button.into();
-            let label = send_label(console, busy, parked).into();
+            let label = send_label(console, button).into();
             lay(label, wrapped(width - 2.0 * padding.x), font)
         });
         let mut fixed = Self {
             notice: notice.map(|n| lay(said(n), wrapped(width), egui::FontSelection::Default)),
             send,
+            answers,
             padding,
             spacing: style.spacing.item_spacing.y,
         };
@@ -186,7 +193,12 @@ impl Fixed {
             .send
             .as_ref()
             .map_or(0.0, |send| self.button_height(send) + self.spacing);
-        notice + send
+        let answers = if self.answers && self.send.is_some() {
+            ANSWER_ROW + self.spacing
+        } else {
+            0.0
+        };
+        notice + send + answers
     }
 
     /// Whether the notice and the button together are taller than `room`, the column's height
@@ -203,14 +215,14 @@ impl Fixed {
 
 /// What the Send button says: the console it types into, that a Send is on its way, which is
 /// why the notes cannot be changed until it is done, or, while it is greyed out for a cancelled
-/// Send's worker, why: on the button, because a notice can be replaced by any other.
-fn send_label(console: &str, busy: bool, parked: bool) -> String {
-    if busy {
-        "Sending…".to_owned()
-    } else if parked {
-        "Still finishing the previous copy…".to_owned()
-    } else {
-        format!("Send to {console} and press Enter")
+/// Send's worker, why: on the button, because a notice can be replaced by any other. While Send
+/// asks about a draft at the prompt, it is the answer that sends as a Send always has.
+fn send_label(console: &str, button: Button) -> String {
+    match button {
+        Button::Sending => "Sending…".to_owned(),
+        Button::Parked => "Still finishing the previous copy…".to_owned(),
+        Button::Confirm => "Send anyway".to_owned(),
+        Button::Ready => format!("Send to {console} and press Enter"),
     }
 }
 
@@ -302,6 +314,9 @@ pub(super) enum Asked {
     Send(Request),
     /// Take back the Send whose line is not typed yet.
     Cancel,
+    /// The answer to the question about a draft at the prompt: send the line, with Enter
+    /// («Send anyway») or without («Type without Enter»).
+    Answer { submit: bool },
 }
 
 /// What the notes show besides the marks.
@@ -389,9 +404,17 @@ pub(super) fn notes(
     // Not while a cancelled Send's worker may yet create the copy this one would name.
     let ready = matches!(sending.target, Some(Ok(_))) && !sending.pending();
     let foot = fixed.send.as_ref().filter(|_| !squeezed);
+    let mut answered = None;
     let (clicked, cancelled) = foot.map_or((false, false), |label| {
         let height = fixed.button_height(label);
         let label = Arc::clone(label);
+        if sending.confirming() {
+            let (anyway, without, cancelled) = answers(&mut column, label, height, &roles);
+            if anyway || without {
+                answered = Some(Asked::Answer { submit: anyway });
+            }
+            return (false, cancelled);
+        }
         if !sending.cancellable() {
             return (
                 send_button(&mut column, ready, label, height, &roles),
@@ -431,6 +454,9 @@ pub(super) fn notes(
     if marks.is_empty() {
         return cancelled.then_some(Asked::Cancel);
     }
+    if answered.is_some() {
+        return answered;
+    }
     let line = match &sending.target {
         Some(Ok(path)) => Ok((compose(path, marks), path)),
         Some(Err(why)) => Err(format!("{why}; nothing can be sent.")),
@@ -448,7 +474,35 @@ pub(super) fn notes(
         pane: origin.pane,
         path: path.clone(),
         line,
+        answer: None,
     }))
+}
+
+/// The question's three answers, from the column's foot up: «Type without Enter» and «Cancel» on
+/// one row, «Send anyway» over them as the primary action, laid out with `label`. They carry ids
+/// of their own, as the Cancel beside «Sending…» does, so the notes' fields keep theirs. Answers
+/// which was clicked: Send anyway, Type without Enter, Cancel.
+fn answers(
+    ui: &mut egui::Ui,
+    label: Arc<egui::Galley>,
+    height: f32,
+    roles: &Roles,
+) -> (bool, bool, bool) {
+    let size = egui::vec2(ui.available_width(), ANSWER_ROW);
+    let row = egui::Layout::right_to_left(egui::Align::Center);
+    let (without, cancelled) = ui
+        .allocate_ui_with_layout(size, row, |ui| {
+            let cancel = egui::Button::new("Cancel").min_size(egui::vec2(0.0, ANSWER_ROW));
+            let cancelled = ui.push_id("image-send-cancel", |ui| ui.add(cancel)).inner;
+            let plain = egui::Button::new("Type without Enter").min_size(egui::vec2(0.0, ANSWER_ROW));
+            let without = ui.push_id("image-send-without-enter", |ui| ui.add(plain)).inner;
+            (without.clicked(), cancelled.clicked())
+        })
+        .inner;
+    let anyway = ui
+        .push_id("image-send-anyway", |ui| send_button(ui, true, label, height, roles))
+        .inner;
+    (anyway, without, cancelled)
 }
 
 /// The primary action: filled with the accent, the column's width, its `label` laid out wrapped

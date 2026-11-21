@@ -653,6 +653,10 @@ struct Pane {
     /// nothing reaches the program until somebody answers. Holding rather than warning is the whole
     /// point — once the line closes, the shell has already run the truncated command.
     held: Option<keyboard::HeldPaste>,
+    /// Whether the person sent bytes here since their last Enter, from the app's own writes and
+    /// never from the screen (D6, D113): Send asks before joining its line to them. See
+    /// [`resume::wrote`].
+    typed: bool,
     /// The search open on this console, and what searching it cost. See [`search::OnThisConsole`].
     search: search::OnThisConsole,
     /// The size the last UI pass measured.
@@ -7099,6 +7103,7 @@ mod tests {
             received: Vec::new(),
             keystrokes: Vec::new(),
             held: None,
+            typed: false,
             search: search::OnThisConsole::default(),
             measured: INITIAL_GRID,
         }
@@ -28967,6 +28972,9 @@ mod tests {
             .expect("the painting recorded a button")
             .center();
 
+        // A draft the person left at the prompt: the button's command ends in Enter, which
+        // submits it, so Send has nothing left to ask about (#196).
+        window.active_mut().panes_mut()[0].typed = true;
         deliver_to_the_mouse(&mut window, &ctx, &rects, &metrics, click_at(at));
 
         // The write goes to a thread of its own (**D29**), and `cat` has to be scheduled on top of
@@ -28978,6 +28986,10 @@ mod tests {
             got, "npm test\n",
             "the program did not receive the command the button painted; the file it writes to \
              holds {got:?}"
+        );
+        assert!(
+            !window.active().panes()[0].typed,
+            "the button's Enter left the draft recorded"
         );
         // **A press on a button does not hand the console back to the person** (**AC15**): that door
         // is the application writing on their behalf — a remote control they were shown and pressed —

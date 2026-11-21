@@ -302,6 +302,8 @@ pub(crate) fn take_over(pane: &mut crate::Pane) -> term_core::Result<()> {
         pane.received.clear();
         pane.search = Default::default();
         pane.pending_wheel = Default::default();
+        // A fresh shell has an empty prompt, whatever was typed into the one it replaced.
+        pane.typed = false;
     }
     pane.restoration.take_over();
     Ok(())
@@ -329,7 +331,7 @@ pub(crate) fn write_report(pane: &mut crate::Pane, bytes: &[u8]) -> term_core::R
     if pane.restoration.failed && pane.restoration.fresh_shell_required {
         take_over(pane)
     } else {
-        write(pane, bytes)
+        put(pane, bytes)
     }
 }
 
@@ -337,19 +339,95 @@ pub(crate) fn write_keys(pane: &mut crate::Pane) -> term_core::Result<()> {
     if pane.restoration.failed {
         take_over(pane)?;
     }
-    pane.pty.write(&pane.keystrokes)
+    pane.pty.write(&pane.keystrokes)?;
+    pane.typed = typed_after(pane.typed, &pane.keystrokes);
+    Ok(())
 }
 
+/// Writes what the person sent: keys, a paste, a held paste they let through.
 pub(crate) fn write(pane: &mut crate::Pane, bytes: &[u8]) -> term_core::Result<()> {
+    put(pane, bytes)?;
+    wrote(pane, bytes);
+    Ok(())
+}
+
+/// Writes bytes that are not the person's typing, a mouse report, leaving [`wrote`]'s record alone.
+fn put(pane: &mut crate::Pane, bytes: &[u8]) -> term_core::Result<()> {
     if pane.restoration.failed {
         take_over(pane)?;
     }
     pane.pty.write(bytes)
 }
 
+/// Records that `bytes` reached the console on the person's behalf, for Send to ask before joining
+/// its line to a draft (#196). Every write the app makes for the person comes through here or
+/// [`write_keys`]; the program's output, the terminal's replies and mouse reports never do. A
+/// guess about a line editor, and its misses are accepted in D113: Shift+Enter is a `\r` here and
+/// counts as an Enter, and a line cleared with Ctrl+U or Esc still counts as typed.
+pub(crate) fn wrote(pane: &mut crate::Pane, bytes: &[u8]) {
+    pane.typed = typed_after(pane.typed, bytes);
+}
+
+/// Whether something is left at the prompt after `bytes`, given whether something was before: an
+/// Enter (`\r`) or a Ctrl+C (`0x03`) ends the line, and only what follows the last of them stays.
+fn typed_after(before: bool, bytes: &[u8]) -> bool {
+    match bytes.iter().rposition(|&b| b == b'\r' || b == 0x03) {
+        Some(last) => last + 1 < bytes.len(),
+        None => before || !bytes.is_empty(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One rule for every write: an Enter or a Ctrl+C ends the line and only what follows the last
+    /// of them stays at the prompt; anything else adds to it.
+    #[test]
+    fn what_stays_at_the_prompt_is_what_follows_the_last_enter_or_ctrl_c() {
+        for (before, bytes, after) in [
+            (false, &b"abc"[..], true),
+            (true, b"", true),
+            (false, b"", false),
+            (true, b"\r", false),
+            (true, b"abc\r", false),
+            (false, b"x\x03", false),
+            (true, b"\x03y", true),
+            (false, b"one\rtwo", true),
+            (true, b"\x1b[200~a\rb\x1b[201~", true),
+        ] {
+            assert_eq!(
+                typed_after(before, bytes),
+                after,
+                "{before} then {bytes:?}"
+            );
+        }
+    }
+
+    /// The person's keys and pastes move the record; a mouse report never does, and a fresh shell
+    /// started over a failed client starts with an empty prompt.
+    #[cfg(unix)]
+    #[test]
+    fn keys_and_pastes_move_the_record_and_mouse_reports_and_takeovers_do_not_keep_it() {
+        let mut pane = crate::Pane::launching(&Default::default(), "/bin/cat", 0).unwrap();
+        pane.keystrokes = b"ls".to_vec();
+        write_keys(&mut pane).unwrap();
+        assert!(pane.typed, "keys left nothing recorded");
+        pane.keystrokes = b"\r".to_vec();
+        write_keys(&mut pane).unwrap();
+        assert!(!pane.typed, "Enter left the draft recorded");
+        write(&mut pane, b"pasted").unwrap();
+        assert!(pane.typed, "a paste left nothing recorded");
+        write(&mut pane, b"\x03").unwrap();
+        assert!(!pane.typed, "Ctrl+C left the draft recorded");
+        write_report(&mut pane, b"\x1b[<0;1;1M").unwrap();
+        assert!(!pane.typed, "a mouse report was recorded as typing");
+        pane.typed = true;
+        pane.restoration.failed = true;
+        pane.restoration.fresh_shell_required = true;
+        take_over(&mut pane).unwrap();
+        assert!(!pane.typed, "the fresh shell kept the old one's draft");
+    }
     use std::path::PathBuf;
     #[cfg(unix)]
     use std::sync::atomic::{AtomicUsize, Ordering};

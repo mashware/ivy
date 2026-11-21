@@ -127,6 +127,7 @@ pub(super) fn send(
     pane.pty
         .write(&bytes)
         .map_err(|e| Refusal::Failed(e.to_string()))?;
+    crate::resume::wrote(pane, &bytes);
     pane.screen.scroll_by(term_core::Scroll::ToBottom);
     pane.hand_it_back_to_the_person();
     tab.focus = name;
@@ -142,7 +143,9 @@ pub(super) fn press(window: &mut crate::Window, Enter(name): Enter) -> Result<()
         .ok_or(Refusal::Closed)?;
     pane.pty
         .write(b"\r")
-        .map_err(|e| Refusal::Failed(e.to_string()))
+        .map_err(|e| Refusal::Failed(e.to_string()))?;
+    crate::resume::wrote(pane, b"\r");
+    Ok(())
 }
 
 #[cfg(all(test, unix))]
@@ -185,8 +188,19 @@ mod tests {
         );
         assert!(second.so_far().is_empty());
         assert_eq!(window.active, 0);
+        // The review's draft sits at the prompt with no Enter: Send would be joined to it (#196).
+        assert!(window.tabs[0].pane_called(name).unwrap().typed);
+        press(&mut window, Enter(name)).unwrap();
+        assert!(
+            !window.tabs[0].pane_called(name).unwrap().typed,
+            "an Enter left the draft recorded"
+        );
+        assert_eq!(
+            first.wait_for(20, Duration::from_secs(5)),
+            b"\x1b[200~one\ntwo\x1b[201~\r"
+        );
         deliver(&mut window, &ctx);
-        assert_eq!(first.so_far(), b"\x1b[200~one\ntwo\x1b[201~");
+        assert_eq!(first.so_far(), b"\x1b[200~one\ntwo\x1b[201~\r");
         window.tabs[0]
             .pane_called(name)
             .unwrap()
@@ -195,7 +209,7 @@ mod tests {
         window.viewer.pending_send = Some("another\nline".into());
         deliver(&mut window, &ctx);
         assert!(window.viewer.message.contains("multiline"));
-        assert_eq!(first.so_far(), b"\x1b[200~one\ntwo\x1b[201~");
+        assert_eq!(first.so_far(), b"\x1b[200~one\ntwo\x1b[201~\r");
         window.viewer.origin.as_mut().unwrap().pane = usize::MAX;
         window.viewer.pending_send = Some("never".into());
         deliver(&mut window, &ctx);

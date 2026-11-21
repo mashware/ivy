@@ -3,7 +3,7 @@
 use super::super::delivery::{self, Enter, Refusal};
 use super::flatten;
 use super::tools::Asked;
-use crate::viewer::load::{Job, take};
+use crate::viewer::load::{Job, done, take};
 use eframe::egui;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -45,6 +45,10 @@ pub(super) struct Request {
     pub(super) pane: usize,
     pub(super) path: PathBuf,
     pub(super) line: String,
+    /// What the person answered when Send asked about a draft at the console's prompt: `None`
+    /// until asked; then whether the line is submitted with Enter («Send anyway») or not («Type
+    /// without Enter»). An answered Send is not asked again (#196).
+    pub(super) answer: Option<bool>,
 }
 
 /// Where a Send is, from the click to the Enter; one at a time.
@@ -54,6 +58,9 @@ enum Phase {
     Idle,
     /// Clicked; the copy starts on the next frame's input pass.
     Asked(Request),
+    /// Something was typed at the console's prompt since its last Enter: nothing is typed until
+    /// the person answers. Holds the copy when it was already written, as a job that has ended.
+    Confirm(Request, Option<Job<PathBuf>>),
     Writing(Request, Job<PathBuf>),
     /// The Enter owed for a line written in the frame named here; it is pressed in a later one.
     Enter(Enter, u64),
@@ -79,11 +86,6 @@ impl Sending {
         !matches!(self.phase, Phase::Idle)
     }
 
-    /// Whether a cancelled Send's worker is still writing its copy.
-    pub(super) fn parked(&self) -> bool {
-        self.parked.is_some()
-    }
-
     /// Whether `poll` has anything to do: a Send on its way, or a cancelled one's worker.
     pub(super) fn pending(&self) -> bool {
         self.busy() || self.parked.is_some()
@@ -96,11 +98,37 @@ impl Sending {
         self.in_flight().is_some()
     }
 
+    /// Whether Send is waiting for the person to answer about a draft at the prompt.
+    pub(super) fn confirming(&self) -> bool {
+        matches!(self.phase, Phase::Confirm(..))
+    }
+
+    /// What the Send button shows.
+    pub(super) fn button(&self) -> Button {
+        match self.phase {
+            Phase::Confirm(..) => Button::Confirm,
+            Phase::Idle if self.parked.is_some() => Button::Parked,
+            Phase::Idle => Button::Ready,
+            _ => Button::Sending,
+        }
+    }
+
     /// Takes up what a click in the notes asked, saying in `notice` what became of it.
     pub(super) fn answer(&mut self, asked: Option<Asked>, notice: &mut Option<String>) {
         match asked {
             Some(Asked::Send(request)) => {
                 self.ask(request);
+                *notice = None;
+            }
+            Some(Asked::Answer { submit }) if self.confirming() => {
+                let Phase::Confirm(mut request, copy) = std::mem::take(&mut self.phase) else {
+                    unreachable!("confirming");
+                };
+                request.answer = Some(submit);
+                self.phase = match copy {
+                    Some(job) => Phase::Writing(request, job),
+                    None => Phase::Asked(request),
+                };
                 *notice = None;
             }
             Some(Asked::Cancel) if self.cancel() => {
@@ -118,8 +146,8 @@ impl Sending {
     /// Answers whether there was one.
     fn cancel(&mut self) -> bool {
         match std::mem::take(&mut self.phase) {
-            Phase::Asked(_) => true,
-            Phase::Writing(request, job) => {
+            Phase::Asked(_) | Phase::Confirm(_, None) => true,
+            Phase::Writing(request, job) | Phase::Confirm(request, Some(job)) => {
                 // `start` refuses while a worker is parked, so there is never a second one here.
                 debug_assert!(self.parked.is_none(), "a second worker parked");
                 self.parked = Some((request, job));
@@ -144,14 +172,31 @@ impl Sending {
     /// The Send whose line is not typed yet.
     fn in_flight(&self) -> Option<&Request> {
         match &self.phase {
-            Phase::Asked(request) | Phase::Writing(request, _) => Some(request),
+            Phase::Asked(request) | Phase::Confirm(request, _) | Phase::Writing(request, _) => {
+                Some(request)
+            }
             _ => None,
         }
     }
 }
 
+/// What the Send button shows: ready, a Send on its way, greyed out for a cancelled Send's
+/// worker, or the question about a draft at the prompt with its three answers.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Button {
+    Ready,
+    Sending,
+    Parked,
+    Confirm,
+}
+
 #[cfg(test)]
 impl Sending {
+    /// Whether a cancelled Send's worker is still writing its copy.
+    pub(super) fn parked(&self) -> bool {
+        self.parked.is_some()
+    }
+
     /// Whether the Send has yet to write its line: asked, or writing its copy.
     pub(super) fn before_the_line(&self) -> bool {
         matches!(self.phase, Phase::Asked(_) | Phase::Writing(..))
@@ -278,6 +323,17 @@ pub(crate) fn poll(window: &mut crate::Window, ctx: &egui::Context) {
             }
             Phase::Idle
         }
+        // The image the question was about is gone: nobody is left to answer it, and a copy it
+        // wrote is removed as a cancelled one's is.
+        Phase::Confirm(request, copy) if window.image.document() != Some(request.document) => {
+            if let Some(job) = copy {
+                window.image.send.parked = Some((request, job));
+            }
+            Phase::Idle
+        }
+        Phase::Asked(request) if drafted(window, &request) => {
+            confirm(window, request, None)
+        }
         Phase::Asked(request) => start(window, request, ctx).unwrap_or_else(|why| {
             window.image.say(format!("{why}; nothing was sent."));
             Phase::Idle
@@ -294,10 +350,36 @@ pub(crate) fn poll(window: &mut crate::Window, ctx: &egui::Context) {
                 failed(window, &request, why);
                 Phase::Idle
             }
+            Some(Ok(path)) if drafted(window, &request) => {
+                confirm(window, request, Some(done(Ok(path))))
+            }
             Some(Ok(path)) => deliver(window, request, &path, ctx),
         },
         phase => phase,
     };
+}
+
+/// Whether the person typed at the request's console since its last Enter and has not been asked
+/// about it yet: the line would be joined to their draft and submitted with it (#196).
+fn drafted(window: &crate::Window, request: &Request) -> bool {
+    request.answer.is_none()
+        && window
+            .all_panes()
+            .any(|pane| pane.name == request.pane && pane.typed)
+}
+
+/// Holds the Send until the person answers, saying why in the drawer. Checked at the click and
+/// again once the copy is written, just before the line would be typed: what was typed while the
+/// copy was being written would be joined to it as well.
+fn confirm(window: &mut crate::Window, request: Request, copy: Option<Job<PathBuf>>) -> Phase {
+    let console = window
+        .image
+        .origin()
+        .map_or_else(|| "the console".to_owned(), |o| o.label.clone());
+    window.image.say(format!(
+        "Something is typed at {console}'s prompt; it will be sent with this line."
+    ));
+    Phase::Confirm(request, copy)
 }
 
 /// The worker could not write the copy; its error says whether what it had written of it stayed.
@@ -440,7 +522,7 @@ fn deliver(
     let sent = if window.image.document() == Some(request.document) {
         let send = delivery::Send {
             text: &request.line,
-            submit: true,
+            submit: request.answer.unwrap_or(true),
         };
         delivery::send(window, request.pane, send).map_err(|r| r.to_string())
     } else {
