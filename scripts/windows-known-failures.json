@@ -593,8 +593,9 @@
   {
     "binary": "app/app:lib",
     "name": "tests::context_clipboard::tests::console_menu_copy_preserves_selection_and_copies_it",
-    "reason": "selection, clipboard, ligature or emoji painting differs on Windows",
-    "issue": "https://github.com/mashware/ivy/issues/188"
+    "reason": "the menu's Copy sometimes publishes no text",
+    "issue": "https://github.com/mashware/ivy/issues/188",
+    "intermittent": true
   },
   {
     "binary": "app/app:lib",
